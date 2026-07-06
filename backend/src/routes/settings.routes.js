@@ -1109,6 +1109,136 @@ router.delete(
   }),
 );
 
+// --------------------------------------------------- ticket ops (enterprise)
+// SLA policies (TP-born due-date clocks), macros (quick-action bundles) and
+// custom field definitions. Admin-only, per-workspace.
+
+router.get(
+  '/sla-policies',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { default: slaPolicyService } = await import('../services/slaPolicyService.js');
+    res.json({ success: true, data: await slaPolicyService.list(req.workspaceId) });
+  }),
+);
+
+router.put(
+  '/sla-policies',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { default: slaPolicyService } = await import('../services/slaPolicyService.js');
+    const policy = await slaPolicyService.upsert(req.workspaceId, req.body || {}, req.session?.user || null);
+    res.json({ success: true, data: policy });
+  }),
+);
+
+router.delete(
+  '/sla-policies/:priority',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { default: slaPolicyService } = await import('../services/slaPolicyService.js');
+    res.json({ success: true, data: await slaPolicyService.remove(req.workspaceId, req.params.priority) });
+  }),
+);
+
+router.get(
+  '/macros',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { default: ticketMacroService } = await import('../services/ticketMacroService.js');
+    res.json({ success: true, data: await ticketMacroService.list(req.workspaceId, { includeInactive: true }) });
+  }),
+);
+
+router.post(
+  '/macros',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { default: ticketMacroService } = await import('../services/ticketMacroService.js');
+    const macro = await ticketMacroService.create(req.workspaceId, req.body || {}, req.session?.user || null);
+    res.status(201).json({ success: true, data: macro });
+  }),
+);
+
+router.patch(
+  '/macros/:id',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { default: ticketMacroService } = await import('../services/ticketMacroService.js');
+    const macro = await ticketMacroService.update(req.workspaceId, req.params.id, req.body || {}, req.session?.user || null);
+    res.json({ success: true, data: macro });
+  }),
+);
+
+router.delete(
+  '/macros/:id',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { default: ticketMacroService } = await import('../services/ticketMacroService.js');
+    res.json({ success: true, data: await ticketMacroService.remove(req.workspaceId, req.params.id) });
+  }),
+);
+
+router.get(
+  '/custom-fields',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { default: customFieldService } = await import('../services/customFieldService.js');
+    res.json({ success: true, data: await customFieldService.listDefinitions(req.workspaceId, { includeInactive: true }) });
+  }),
+);
+
+router.post(
+  '/custom-fields',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { default: customFieldService } = await import('../services/customFieldService.js');
+    const definition = await customFieldService.createDefinition(req.workspaceId, req.body || {});
+    res.status(201).json({ success: true, data: definition });
+  }),
+);
+
+router.patch(
+  '/custom-fields/:id',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { default: customFieldService } = await import('../services/customFieldService.js');
+    const definition = await customFieldService.updateDefinition(req.workspaceId, req.params.id, req.body || {});
+    res.json({ success: true, data: definition });
+  }),
+);
+
+router.delete(
+  '/custom-fields/:id',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { default: customFieldService } = await import('../services/customFieldService.js');
+    res.json({ success: true, data: await customFieldService.removeDefinition(req.workspaceId, req.params.id) });
+  }),
+);
+
 /**
  * GET /api/settings/technicians/:id/workspaces
  * List workspaces where a technician (same freshserviceId) is active.

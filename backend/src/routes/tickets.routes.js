@@ -567,6 +567,19 @@ router.post('/mailboxes/:mailboxId/test', requireTicketingAdmin, asyncHandler(as
   res.json({ success: true, data: result });
 }));
 
+// Static collection routes — MUST stay above /:id or Express eats them.
+router.get('/macros', asyncHandler(async (req, res) => {
+  const { default: ticketMacroService } = await import('../services/ticketMacroService.js');
+  const macros = await ticketMacroService.list(req.workspaceId);
+  res.json({ success: true, data: macros });
+}));
+
+router.get('/custom-fields/definitions', asyncHandler(async (req, res) => {
+  const { default: customFieldService } = await import('../services/customFieldService.js');
+  const definitions = await customFieldService.listDefinitions(req.workspaceId);
+  res.json({ success: true, data: definitions });
+}));
+
 router.get('/:id', asyncHandler(async (req, res) => {
   // The peek preview passes ?reconcile=0 to skip the live FreshService check
   // (which otherwise fires a FS API call on every rapid step through tickets).
@@ -643,6 +656,55 @@ router.post('/:id/triage', asyncHandler(async (req, res) => {
 router.get('/:id/related', asyncHandler(async (req, res) => {
   const related = await ticketService.relatedTickets(parseTicketId(req), req.workspaceId);
   res.json({ success: true, data: related });
+}));
+
+// Explicit ticket links (duplicate_of / related_to / parent_of) + duplicate-close.
+router.get('/:id/links', asyncHandler(async (req, res) => {
+  const { default: ticketLinkService } = await import('../services/ticketLinkService.js');
+  const links = await ticketLinkService.listForTicket(parseTicketId(req), req.workspaceId);
+  res.json({ success: true, data: links });
+}));
+
+router.post('/:id/links', asyncHandler(async (req, res) => {
+  const { default: ticketLinkService } = await import('../services/ticketLinkService.js');
+  const link = await ticketLinkService.link(
+    parseTicketId(req), req.workspaceId,
+    { relatedTicketId: req.body?.relatedTicketId, kind: req.body?.kind || 'related_to' },
+    req.ticketActor,
+  );
+  res.status(201).json({ success: true, data: link });
+}));
+
+router.delete('/:id/links/:linkId', asyncHandler(async (req, res) => {
+  const { default: ticketLinkService } = await import('../services/ticketLinkService.js');
+  const result = await ticketLinkService.unlink(parseTicketId(req), req.workspaceId, req.params.linkId);
+  res.json({ success: true, data: result });
+}));
+
+router.post('/:id/duplicate-of/:targetId', asyncHandler(async (req, res) => {
+  const { default: ticketLinkService } = await import('../services/ticketLinkService.js');
+  const result = await ticketLinkService.markDuplicate(
+    parseTicketId(req), req.workspaceId, req.params.targetId, req.ticketActor,
+  );
+  res.json({ success: true, data: result });
+}));
+
+// Apply a macro (quick-action bundle) to this ticket.
+router.post('/:id/macros/:macroId/apply', asyncHandler(async (req, res) => {
+  const { default: ticketMacroService } = await import('../services/ticketMacroService.js');
+  const result = await ticketMacroService.apply(
+    parseTicketId(req), req.workspaceId, req.params.macroId, req.ticketActor,
+  );
+  res.json({ success: true, data: result });
+}));
+
+// Set custom-field values on a ticket (definitions are listed pre-/:id above).
+router.patch('/:id/custom-fields', asyncHandler(async (req, res) => {
+  const { default: customFieldService } = await import('../services/customFieldService.js');
+  const result = await customFieldService.setValues(
+    parseTicketId(req), req.workspaceId, req.body?.values || {}, req.ticketActor,
+  );
+  res.json({ success: true, data: result });
 }));
 
 // AI-proposed replies (draft→approve): list open proposals, approve & send

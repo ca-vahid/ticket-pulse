@@ -1851,6 +1851,35 @@ async function executeNode({
     });
   }
 
+  if (node.type === 'run_workflow') {
+    const childId = Number(node.data?.workflowId);
+    if (!Number.isFinite(childId) || childId <= 0) return { skipped: true, reason: 'No workflow configured' };
+    if (childId === workflow.id) return { skipped: true, reason: 'A workflow cannot run itself' };
+    const depth = Number(eventContext.event?.subWorkflowDepth) || 0;
+    if (depth >= 1) return { skipped: true, reason: 'Sub-workflows cannot nest further (one level only)' };
+
+    const child = await prisma.notificationWorkflow.findFirst({
+      where: { id: childId, workspaceId: workflow.workspaceId, archivedAt: null },
+    });
+    if (!child) return { skipped: true, reason: 'Referenced workflow not found in this workspace' };
+    if (!child.publishedDefinition) return { skipped: true, reason: 'Referenced workflow has never been published' };
+    if (dryRun || executionMode === 'mock' || executionMode === 'preview') {
+      return { dryRun: true, wouldRun: { workflowId: child.id, name: child.name } };
+    }
+
+    const childContext = {
+      ...eventContext,
+      event: { ...(eventContext.event || {}), subWorkflowDepth: depth + 1 },
+    };
+    try {
+      const result = await executeWorkflow(child, childContext, { triggerSource: 'sub_workflow' });
+      return { ranWorkflowId: child.id, name: child.name, status: result?.status || 'completed', runId: result?.runId || null };
+    } catch (error) {
+      if (node.data?.onError === 'fail') throw error;
+      return { ranWorkflowId: child.id, failed: true, error: error.message };
+    }
+  }
+
   if (node.type === 'propose_reply') {
     const ticketId = Number(eventContext.ticket?.id);
     const llmEmail = state.llm?.email || {};
@@ -2847,12 +2876,16 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false } = 
   const setInternalCategoryId = node.data?.setInternalCategoryId ? Number(node.data.setInternalCategoryId) : null;
   const setInternalSubcategoryId = node.data?.setInternalSubcategoryId ? Number(node.data.setInternalSubcategoryId) : null;
   const setInternalGroupId = node.data?.setInternalGroupId ? Number(node.data.setInternalGroupId) : null;
+  const setCustomFields = node.data?.setCustomFields && typeof node.data.setCustomFields === 'object'
+    && Object.keys(node.data.setCustomFields).length > 0
+    ? node.data.setCustomFields
+    : null;
   const assignTo = node.data?.assignTo && node.data.assignTo.mode && node.data.assignTo.mode !== 'none'
     ? node.data.assignTo
     : null;
 
   if (!Number.isFinite(ticketId) || ticketId <= 0) return { skipped: true, reason: 'No ticket in event context' };
-  if (!setStatus && !setPriority && !setInternalCategoryId && !setInternalGroupId && !assignTo) {
+  if (!setStatus && !setPriority && !setInternalCategoryId && !setInternalGroupId && !assignTo && !setCustomFields) {
     return { skipped: true, reason: 'update_ticket node has no changes configured' };
   }
   if (setStatus && !UPDATE_TICKET_STATUSES.includes(setStatus)) {
@@ -2896,9 +2929,30 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false } = 
     }
   }
 
+  // Custom fields are Ticket Pulse's OWN annotation layer — never written to
+  // FreshService — so they apply to both origins.
+  let customFieldResult = null;
+  if (setCustomFields) {
+    try {
+      const { default: customFieldService } = await import('./customFieldService.js');
+      customFieldResult = await customFieldService.setValues(
+        ticket.id, ticket.workspaceId, setCustomFields, { name: 'Notification workflow' },
+      );
+    } catch (error) {
+      customFieldResult = { skipped: true, reason: error.message };
+    }
+  }
+
   // Field mutations remain TP-born only (FreshService owns FS-born fields).
   if (ticket.origin !== 'ticketpulse') {
-    if (assignment) return { assignment, skipped: true, reason: 'Field updates only apply to tickets born in Ticket Pulse (assignment write-back applied)' };
+    if (assignment || customFieldResult) {
+      return {
+        ...(assignment ? { assignment } : {}),
+        ...(customFieldResult ? { customFields: customFieldResult } : {}),
+        skipped: true,
+        reason: 'FS-born ticket: only assignment write-back and TP custom fields applied',
+      };
+    }
     return { skipped: true, reason: 'Workflow ticket updates only apply to tickets born in Ticket Pulse' };
   }
 
@@ -2966,7 +3020,12 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false } = 
   }
 
   if (Object.keys(patch).length === 0) {
-    if (assignment) return { assignment };
+    if (assignment || customFieldResult) {
+      return {
+        ...(assignment ? { assignment } : {}),
+        ...(customFieldResult ? { customFields: customFieldResult } : {}),
+      };
+    }
     return { skipped: true, reason: 'No effective changes' };
   }
   patch.mirrorState = 'pending';
@@ -2999,7 +3058,11 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false } = 
   } catch { /* non-fatal */ }
 
   logger.info('Workflow update_ticket applied', { ticketId: ticket.id, changes });
-  return { updated: changes, ...(assignment ? { assignment } : {}) };
+  return {
+    updated: changes,
+    ...(assignment ? { assignment } : {}),
+    ...(customFieldResult ? { customFields: customFieldResult } : {}),
+  };
 }
 
 export async function executeForEvent(eventContext, options = {}) {

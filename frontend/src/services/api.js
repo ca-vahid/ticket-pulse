@@ -374,6 +374,18 @@ export const settingsAPI = {
   createApprovalCategory: (data) => api.post('/settings/approval-categories', data),
   updateApprovalCategory: (id, data) => api.patch(`/settings/approval-categories/${id}`, data),
   deleteApprovalCategory: (id) => api.delete(`/settings/approval-categories/${id}`),
+  // Ticket ops (enterprise): SLA policies, macros, custom field definitions
+  getSlaPolicies: () => api.get('/settings/sla-policies'),
+  upsertSlaPolicy: (data) => api.put('/settings/sla-policies', data),
+  deleteSlaPolicy: (priority) => api.delete(`/settings/sla-policies/${priority}`),
+  getMacros: () => api.get('/settings/macros'),
+  createMacro: (data) => api.post('/settings/macros', data),
+  updateMacro: (id, data) => api.patch(`/settings/macros/${id}`, data),
+  deleteMacro: (id) => api.delete(`/settings/macros/${id}`),
+  getCustomFields: () => api.get('/settings/custom-fields'),
+  createCustomField: (data) => api.post('/settings/custom-fields', data),
+  updateCustomField: (id, data) => api.patch(`/settings/custom-fields/${id}`, data),
+  deleteCustomField: (id) => api.delete(`/settings/custom-fields/${id}`),
   getPublicTicketStatusSettings: (config = {}) => api.get('/settings/public-ticket-status', config),
   updatePublicTicketStatusSettings: (data, config = {}) => api.put('/settings/public-ticket-status', data, config),
   getFeedbackSettings: (config = {}) => api.get('/settings/feedback-settings', config),
@@ -590,6 +602,20 @@ export const ticketsAPI = {
   proposedReplies: async (id) => {
     return await api.get(`/tickets/${id}/proposed-replies`);
   },
+
+  // Explicit ticket links + duplicate-close
+  links: async (id) => await api.get(`/tickets/${id}/links`),
+  addLink: async (id, relatedTicketId, kind = 'related_to') => await api.post(`/tickets/${id}/links`, { relatedTicketId, kind }),
+  removeLink: async (id, linkId) => await api.delete(`/tickets/${id}/links/${linkId}`),
+  markDuplicateOf: async (id, targetId) => await api.post(`/tickets/${id}/duplicate-of/${targetId}`),
+
+  // Macros (quick-action bundles)
+  macros: async () => await api.get('/tickets/macros'),
+  applyMacro: async (id, macroId) => await api.post(`/tickets/${id}/macros/${macroId}/apply`),
+
+  // Custom fields
+  customFieldDefinitions: async () => await api.get('/tickets/custom-fields/definitions'),
+  setCustomFields: async (id, values) => await api.patch(`/tickets/${id}/custom-fields`, { values }),
 
   sendProposedReply: async (id, proposalId, body = {}) => {
     return await api.post(`/tickets/${id}/proposed-replies/${proposalId}/send`, body);

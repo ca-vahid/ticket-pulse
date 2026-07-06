@@ -307,6 +307,15 @@ export const NOTIFICATION_NODE_REGISTRY = Object.freeze({
     inputHandles: ['default'],
     outputHandles: ['default'],
   },
+  // Invoke another PUBLISHED workflow inline (one level deep, no recursion).
+  // The child may be disabled — disabled only stops its own trigger firing,
+  // which is exactly what a reusable "subflow" wants.
+  run_workflow: {
+    label: 'Run workflow',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['default'],
+  },
   send_email: {
     label: 'Send email',
     terminal: true,
@@ -579,6 +588,13 @@ function validateGraph(definition, triggerType) {
       const minutes = Number(node.data?.minutes);
       if (!Number.isFinite(minutes) || minutes < 1 || minutes > 7 * 24 * 60) {
         errors.push(`Delay node ${node.id} must wait between 1 minute and 7 days`);
+      }
+    }
+
+    if (node.type === 'run_workflow' && reachable.has(node.id)) {
+      const workflowId = Number(node.data?.workflowId);
+      if (!Number.isFinite(workflowId) || workflowId <= 0) {
+        errors.push(`Run-workflow node ${node.id} must reference a workflow`);
       }
     }
   }

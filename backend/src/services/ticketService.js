@@ -1177,6 +1177,14 @@ class TicketService {
     const now = new Date();
     const isSelfPicked = Boolean(assignee && actor?.technicianId && actor.technicianId === assignee.id);
 
+    // TP-born tickets get Ticket Pulse's own SLA clocks (per-priority policy,
+    // if the workspace configured one). FS-born tickets keep FS's SLA fields.
+    let slaDueDates = { frDueBy: null, dueBy: null };
+    try {
+      const { default: slaPolicyService } = await import('./slaPolicyService.js');
+      slaDueDates = await slaPolicyService.dueDatesFor(workspaceId, data.priority, now);
+    } catch { /* no policy — no clocks */ }
+
     const ticket = await prisma.ticket.create({
       data: {
         origin: TICKET_ORIGIN.TICKETPULSE,
@@ -1204,6 +1212,8 @@ class TicketService {
         noiseRuleMatched: ruleId,
         lastIngestSource: 'ticketpulse_native',
         lastIngestedAt: now,
+        ...(slaDueDates.frDueBy ? { frDueBy: slaDueDates.frDueBy } : {}),
+        ...(slaDueDates.dueBy ? { dueBy: slaDueDates.dueBy } : {}),
         ...(assignee ? {
           assignedTechId: assignee.id,
           assignedAt: now,

@@ -8,7 +8,7 @@ import { jest } from '@jest/globals';
 const prismaMock = {
   notificationWorkflowRun: { create: jest.fn(), update: jest.fn(), findMany: jest.fn() },
   notificationWorkflowStepRun: { create: jest.fn(), update: jest.fn() },
-  notificationWorkflow: { findUnique: jest.fn() },
+  notificationWorkflow: { findUnique: jest.fn(), findFirst: jest.fn() },
   notificationWorkflowVersion: { findUnique: jest.fn() },
   notificationLlmToolPolicy: { findUnique: jest.fn() },
   notificationEmailSignature: { findUnique: jest.fn() },
@@ -425,6 +425,82 @@ describe('auto-send safety gates on send_email', () => {
     const sendStep = result.steps.find((s) => s.nodeId === 'send');
     expect(sendStep.output.downgradedToProposal).toBeUndefined();
     expect(proposedReplyCreateMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('run_workflow sub-workflow node', () => {
+  const childDefinition = {
+    version: 2,
+    metadata: {},
+    nodes: [
+      { id: 'trigger', type: 'trigger', data: { triggerType: 'ticket.created' } },
+      { id: 'bump', type: 'update_ticket', data: { setPriority: 4 } },
+      { id: 'end', type: 'stop', data: {} },
+    ],
+    edges: [
+      { id: 'e1', source: 'trigger', target: 'bump' },
+      { id: 'e2', source: 'bump', target: 'end' },
+    ],
+  };
+  const parentDefinition = {
+    version: 2,
+    metadata: {},
+    nodes: [
+      { id: 'trigger', type: 'trigger', data: { triggerType: 'ticket.created' } },
+      { id: 'sub', type: 'run_workflow', data: { workflowId: 61 } },
+      // run_workflow isn't in the action list requirement? it is not — include an action.
+      { id: 'note', type: 'update_ticket', data: { setPriority: 3 } },
+      { id: 'end', type: 'stop', data: {} },
+    ],
+    edges: [
+      { id: 'e1', source: 'trigger', target: 'sub' },
+      { id: 'e2', source: 'sub', target: 'note' },
+      { id: 'e3', source: 'note', target: 'end' },
+    ],
+  };
+
+  test('validation requires a referenced workflow', () => {
+    const bad = JSON.parse(JSON.stringify(parentDefinition));
+    bad.nodes.find((n) => n.id === 'sub').data = {};
+    expect(validateWorkflowDefinition(bad, { triggerType: 'ticket.created' }).errors.join(' '))
+      .toMatch(/must reference a workflow/i);
+  });
+
+  test('live execution runs the child inline and blocks further nesting', async () => {
+    prismaMock.notificationWorkflow.findFirst.mockResolvedValue({
+      id: 61, workspaceId: 1, triggerType: 'ticket.created',
+      publishedVersion: 2, publishedDefinition: childDefinition,
+      mockModeEnabled: false, versions: [],
+    });
+    prismaMock.ticket.findUnique.mockResolvedValue({
+      id: 100, workspaceId: 1, origin: 'ticketpulse', status: 'Open', priority: 2, createdAt: new Date(),
+    });
+
+    const workflow = { id: 60, workspaceId: 1, triggerType: 'ticket.created', publishedVersion: 1, versions: [] };
+    const result = await executeDefinition({
+      workflow,
+      definition: parentDefinition,
+      eventContext: eventContext(),
+      executionMode: 'live',
+    });
+
+    expect(result.status).toBe('completed');
+    const subStep = result.steps.find((s) => s.nodeId === 'sub');
+    expect(subStep.output.ranWorkflowId).toBe(61);
+    // The child's update_ticket really executed (priority bumped to 4).
+    const childUpdate = prismaMock.ticket.update.mock.calls.find((c) => c[0].data?.priority === 4);
+    expect(childUpdate).toBeTruthy();
+
+    // Depth guard: an event context already inside a sub-workflow is refused.
+    const nested = await executeDefinition({
+      workflow,
+      definition: parentDefinition,
+      eventContext: { ...eventContext(), event: { ...eventContext().event, subWorkflowDepth: 1 } },
+      executionMode: 'live',
+    });
+    const nestedStep = nested.steps.find((s) => s.nodeId === 'sub');
+    expect(nestedStep.output.skipped).toBe(true);
+    expect(nestedStep.output.reason).toMatch(/cannot nest/i);
   });
 });
 

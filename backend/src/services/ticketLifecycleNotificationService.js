@@ -293,6 +293,7 @@ function buildEventContext({ event, ticket, previousAgent, source }) {
       } : null,
       isNoise: ticket.isNoise === true,
       origin: ticket.origin || 'freshservice',
+      customFields: ticket.customFields || {},
       createdAt: dateIso(ticket.createdAt),
       assignedAt: dateIso(ticket.assignedAt),
       resolvedAt: dateIso(ticket.resolvedAt),

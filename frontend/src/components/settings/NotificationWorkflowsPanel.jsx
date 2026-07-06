@@ -215,6 +215,15 @@ const WORKFLOW_NODE_REGISTRY = {
     outputHandles: ['default'],
     addable: true,
   },
+  run_workflow: {
+    label: 'Run workflow',
+    icon: Repeat,
+    color: '#0e7490',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['default'],
+    addable: true,
+  },
   send_email: {
     label: 'Send email',
     icon: UploadCloud,
@@ -1597,6 +1606,9 @@ function defaultNodeData(type, triggerType = 'ticket.created') {
   }
   if (type === 'propose_reply') {
     return { label: 'Stage for approval' };
+  }
+  if (type === 'run_workflow') {
+    return { label: 'Run workflow', workflowId: null, onError: 'continue' };
   }
   return {};
 }
@@ -8533,6 +8545,41 @@ export default function NotificationWorkflowsPanel({
         <div className="space-y-3">
           <p className="text-sm text-gray-600">Stages the upstream LLM draft on the ticket as an <strong>AI proposed reply</strong>. An agent approves &amp; sends, edits it in the composer, or dismisses it — nothing is emailed automatically.</p>
           <p className="text-[11px] text-gray-400">Requires an LLM Generate node earlier in the flow. A newer proposal supersedes an older open one on the same ticket.</p>
+        </div>
+      );
+    }
+
+    if (selectedNode.type === 'run_workflow') {
+      const candidates = (workflows || []).filter((w) => w.id !== selected?.id && !w.archivedAt);
+      return (
+        <div className="space-y-3">
+          <label className="block text-xs font-medium uppercase text-gray-500">
+            Workflow to run
+            <select
+              value={selectedNode.data?.workflowId || ''}
+              onChange={(event) => updateNodeData({ workflowId: Number(event.target.value) || null })}
+              className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+            >
+              <option value="">Choose a workflow…</option>
+              {candidates.map((w) => (
+                <option key={w.id} value={w.id}>
+                  {workflowDisplayName(w)} {w.publishedVersion ? `(v${w.publishedVersion})` : '(never published)'}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block text-xs font-medium uppercase text-gray-500">
+            On error
+            <select
+              value={selectedNode.data?.onError || 'continue'}
+              onChange={(event) => updateNodeData({ onError: event.target.value })}
+              className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+            >
+              <option value="continue">Continue this workflow</option>
+              <option value="fail">Fail this workflow</option>
+            </select>
+          </label>
+          <p className="text-[11px] text-gray-400">Runs the referenced workflow&apos;s <strong>published</strong> version with this event&apos;s context. One level only — sub-workflows can&apos;t call further sub-workflows. The child may be disabled (disabled only stops its own trigger), making it a reusable subflow.</p>
         </div>
       );
     }

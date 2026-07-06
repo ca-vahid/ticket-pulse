@@ -17,6 +17,7 @@ import MailboxConnectionsPanel from '../components/settings/MailboxConnectionsPa
 import MembersPanel from '../components/settings/MembersPanel';
 import GroupsPanel from '../components/settings/GroupsPanel';
 import ApprovalCategoriesPanel from '../components/settings/ApprovalCategoriesPanel';
+import TicketOpsPanel from '../components/settings/TicketOpsPanel';
 import AdminManagementPanel from '../components/settings/AdminManagementPanel';
 import VacationTrackerPanel from '../components/settings/VacationTrackerPanel';
 import CalendarLeavePanel from '../components/settings/CalendarLeavePanel';
@@ -65,6 +66,7 @@ import {
   Inbox,
   Users2,
   Stamp,
+  Wand2,
 } from 'lucide-react';
 
 export default function Settings() {
@@ -145,6 +147,7 @@ export default function Settings() {
     { id: 'agents', label: 'Members', Icon: Users, minRole: 'admin' },
     { id: 'groups', label: 'Groups', Icon: Users2, minRole: 'admin' },
     { id: 'approval-categories', label: 'Approval Categories', Icon: Stamp, minRole: 'admin' },
+    { id: 'ticket-ops', label: 'Ticket Ops', Icon: Wand2, minRole: 'admin' },
     { id: 'notification-providers', label: 'Notifications', Icon: Bell, minRole: 'global' },
     { id: 'notification-workflows', label: 'Mail Workflows', Icon: Send, minRole: 'admin' },
     { id: 'public-ticket-status', label: 'Public Status', Icon: ExternalLink, minRole: 'admin' },
@@ -1184,6 +1187,13 @@ export default function Settings() {
               {activeSection === 'approval-categories' && (
                 <div className="p-6">
                   <ApprovalCategoriesPanel />
+                </div>
+              )}
+
+              {/* Ticket ops: SLA policies, macros, custom fields */}
+              {activeSection === 'ticket-ops' && (
+                <div className="p-6">
+                  <TicketOpsPanel />
                 </div>
               )}
 

@@ -65,7 +65,14 @@ function isGroup(entry) {
 }
 
 function fieldSpec(fieldKey) {
-  return CONDITION_FIELDS[fieldKey] || null;
+  const key = String(fieldKey || '');
+  // Dynamic user-defined ticket fields: `custom:<key>` resolves to the value
+  // stored in Ticket.customFields (treated as string for operator purposes).
+  const customMatch = key.match(/^custom:([a-z][a-z0-9_]{1,59})$/);
+  if (customMatch) {
+    return { label: `Custom: ${customMatch[1]}`, type: 'string', path: `ticket.customFields.${customMatch[1]}` };
+  }
+  return CONDITION_FIELDS[key] || null;
 }
 
 function compileRow(row) {

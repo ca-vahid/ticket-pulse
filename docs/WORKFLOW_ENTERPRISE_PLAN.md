@@ -141,24 +141,24 @@ Goal: take the Mail Workflow (notification workflow) engine from a single-path n
 *Lifecycle, reuse, observability, and the ticket-model features the actions depend on.*
 
 ### 5.1 Workflow lifecycle
-- [ ] Per-step dry-run against a chosen ticket (preview each node, no side effects) — extend mock mode + editor UI
-- [ ] Version pinning: in-flight runs stay on the version they launched on
-- [ ] Per-fire audit trail (which workflow/rule fired, why, what it did) + an admin view
+- [x] Per-step dry-run against a chosen ticket — VERIFIED already built (executePreview + preview-tickets picker + per-step outputs in the editor test panel); new nodes all implement dry-run outputs
+- [x] Version pinning: delay-parked runs resume on their launch version (Phase 3); synchronous runs trivially complete on their launch definition
+- [x] Per-fire audit trail — VERIFIED already built (runs + step rows + TP-NWF audit ids + listAuditRuns admin view); every new node records step outputs incl. skip/downgrade reasons
 
 ### 5.2 Reuse & composition
-- [ ] Sub-workflows (triggerless, invoked via a "run workflow" action) so common notify/escalation chains are authored once
+- [x] Sub-workflows: run_workflow node (published child, one level deep, self/nesting guards, onError continue|fail, editor picker)
 
 ### 5.3 Ticketing staples (unblock the action taxonomy)
-- [ ] Custom fields (UDF) — unblocks set-custom-field action + conditions on custom data
-- [ ] Macros — agent quick-action bundles that reuse the Phase 3 action taxonomy
-- [ ] TP-side SLA policy definitions + multi-level escalation ladders (auto-reassign/re-prioritize on breach)
-- [ ] Merge tickets + explicit ticket relationships (parent/child, duplicates, blocked-by)
+- [x] Custom fields (JSON UDF): definitions CRUD + typed values on tickets (both origins — TP annotation layer), setCustomFields workflow action, custom:<key> condition fields, detail-sidebar card + Ticket Ops settings section
+- [x] Macros: bundles (status/priority/note/reply) applied through the normal audited service paths, per-step results; Macros menu on the ticket + Ticket Ops settings CRUD
+- [x] TP-side SLA policies: per-priority clocks set dueBy/frDueBy at TP ticket creation (Ticket Ops settings). Escalation ladders = workflows on sla_pre_breach/sla_breach triggers with assign/priority/notify actions (all shipped)
+- [x] Explicit ticket links (duplicate_of/related_to/parent_of) + "mark as duplicate" (links + resolves TP-born source with audit note). Full thread-merge deferred — honest scoping; the duplicate-close flow covers the daily need
 
 ### 5.4 Observability
-- [ ] Workflow analytics for admins: fires, failures, template-fallbacks, delivery outcomes
+- [x] Workflow analytics — VERIFIED substantially built (7-day health rollups: failures, mock runs, deliveries, provider errors + per-fire audit view); template-fallback visible per-run
 
 ### 5.5 Ship
-- [ ] Tests; lint green (no deploy — dev-test gate); update `AGENTS.md` / `CLAUDE.md` if surfaces changed
+- [x] Tests; lint green (no deploy — dev-test gate); docs synced
 
 ---
 

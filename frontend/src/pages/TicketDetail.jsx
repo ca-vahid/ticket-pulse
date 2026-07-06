@@ -9,6 +9,7 @@ import {
 import AttachmentPreviewModal from '../components/tickets/AttachmentPreviewModal';
 import ApprovalTimeline from '../components/tickets/ApprovalTimeline';
 import ProposedReplyCard from '../components/tickets/ProposedReplyCard';
+import { CustomFieldsCard, MacroMenu, TicketLinksCard } from '../components/tickets/TicketOpsCards';
 import RequestApprovalModal from '../components/tickets/RequestApprovalModal';
 import AppHeader from '../components/AppHeader';
 import AiAssignModal from '../components/tickets/AiAssignModal';
@@ -1389,6 +1390,19 @@ export default function TicketDetail() {
                     >
                       <Link2 className="w-3.5 h-3.5" aria-hidden="true" /> Copy link
                     </button>
+                    {canConverse && (
+                      <MacroMenu
+                        ticketId={ticketId}
+                        onApplied={(result) => {
+                          lastLocalMutationRef.current = Date.now();
+                          fetchTicket({ silent: true });
+                          const failed = (result?.steps || []).filter((s) => !s.ok);
+                          showToast(failed.length ? 'amber' : 'emerald', failed.length
+                            ? `Macro applied with ${failed.length} failed step${failed.length === 1 ? '' : 's'}`
+                            : `Macro "${result?.macro?.name || ''}" applied`);
+                        }}
+                      />
+                    )}
                     {ticketingOn && (
                       <button
                         onClick={() => setCloneConfirm(true)}
@@ -2191,6 +2205,22 @@ export default function TicketDetail() {
                     </div>
                   )}
                 </div>
+
+                {/* Explicit ticket links (duplicate/related/parent) */}
+                <TicketLinksCard
+                  ticketId={ticketId}
+                  canWrite={canConverse}
+                  refreshToken={ticket?.updatedAt}
+                  onNavigate={(id) => navigate(`/tickets/${id}`)}
+                />
+
+                {/* Per-workspace custom fields (TP annotation layer, both origins) */}
+                <CustomFieldsCard
+                  ticketId={ticketId}
+                  values={ticket?.customFields || {}}
+                  canWrite={canConverse}
+                  onSaved={() => { lastLocalMutationRef.current = Date.now(); fetchTicket({ silent: true }); showToast('emerald', 'Custom fields saved'); }}
+                />
 
                 {/* Related tickets: facts first, suggestions clearly labeled */}
                 {related && (related.sameRequester.length > 0 || (related.nearDuplicates.length > 0 && !dupeDismissed)) && (

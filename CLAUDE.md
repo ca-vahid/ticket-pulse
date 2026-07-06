@@ -50,7 +50,7 @@ The MVP roadmap in old docs is **complete and stale** — ignore it as a plan. T
 - **Timeline Explorer** (`/timeline`) — ownership/coverage timeline.
 - **Analytics & Insights** (`/analytics`, `/analytics/category-map`) — Overview, Demand & Flow, Team Balance, Quality, Automation Ops, Insights. Deterministic, explainable v1 — **no LLM summaries, predictions, or scheduled reports.**
 - **Assignment Review** (`/assignments`, with tab/run/history/live/competency sub-routes) — review queue, history, daily review, competencies, prompts, AI provider config.
-- **Settings** (`/settings`) — incl. **Mail Workflows** (JSON-graph email workflow editor).
+- **Settings** (`/settings`) — incl. **Mail Workflows** (JSON-graph workflow editor — since v3.1 a real automation engine: AND/OR condition builder, branch/delay/webhook/child-ticket/approval/sub-workflow nodes, time-based + SLA triggers, origin-aware assign/update actions, AI proposed-reply staging with confidence-gated auto-send, installable templates) and **Ticket Ops** (SLA policies for TP-born due dates, macros, custom fields, ticket links). Full node/trigger list: `AGENTS.md` → "Custom Mail Notification Workflows".
 - **Visuals** (`/visuals`) — agent map/location/visibility/schedule.
 - **My Competencies** (`/my-competencies`) — the **agent-role** landing page (role `agent` is redirected here; coordinators/managers go to `/dashboard`).
 - **Public token pages** — `/summit/*`, `/ticket-status/:token`, `/ticket-escalation/:token`, `/ticket-urgency/:token` (unauthenticated; need their own self-contained styling).
