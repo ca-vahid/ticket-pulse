@@ -2017,6 +2017,36 @@ router.delete(
   }),
 );
 
+// Installable LLM-email workflow templates. Installing creates a DISABLED
+// draft variant to review + publish — templates never auto-run.
+// MUST stay above the parameterized /:id routes or Express eats /templates.
+router.get(
+  '/templates',
+  asyncHandler(async (_req, res) => {
+    const { WORKFLOW_TEMPLATES } = await import('../services/notificationWorkflowDefinition.js');
+    res.json({
+      success: true,
+      data: WORKFLOW_TEMPLATES.map(({ key, name, description, triggerType }) => ({ key, name, description, triggerType })),
+    });
+  }),
+);
+
+router.post(
+  '/templates/:key/install',
+  asyncHandler(async (req, res) => {
+    const { WORKFLOW_TEMPLATES } = await import('../services/notificationWorkflowDefinition.js');
+    const template = WORKFLOW_TEMPLATES.find((t) => t.key === req.params.key);
+    if (!template) throw new NotFoundError('Unknown workflow template');
+    const workflow = await notificationWorkflowRepository.createWorkflowVariant(req.workspaceId, {
+      triggerType: template.triggerType,
+      name: template.name,
+      description: template.description,
+      definition: template.build(),
+    }, requestActor(req));
+    res.status(201).json({ success: true, data: workflow });
+  }),
+);
+
 router.get(
   '/:id',
   asyncHandler(async (req, res) => {
@@ -2099,35 +2129,6 @@ router.put(
       }, requestActor(req));
     }
     res.json({ success: true, data: workflow });
-  }),
-);
-
-// Installable LLM-email workflow templates. Installing creates a DISABLED
-// draft variant to review + publish — templates never auto-run.
-router.get(
-  '/templates',
-  asyncHandler(async (_req, res) => {
-    const { WORKFLOW_TEMPLATES } = await import('../services/notificationWorkflowDefinition.js');
-    res.json({
-      success: true,
-      data: WORKFLOW_TEMPLATES.map(({ key, name, description, triggerType }) => ({ key, name, description, triggerType })),
-    });
-  }),
-);
-
-router.post(
-  '/templates/:key/install',
-  asyncHandler(async (req, res) => {
-    const { WORKFLOW_TEMPLATES } = await import('../services/notificationWorkflowDefinition.js');
-    const template = WORKFLOW_TEMPLATES.find((t) => t.key === req.params.key);
-    if (!template) throw new NotFoundError('Unknown workflow template');
-    const workflow = await notificationWorkflowRepository.createWorkflowVariant(req.workspaceId, {
-      triggerType: template.triggerType,
-      name: template.name,
-      description: template.description,
-      definition: template.build(),
-    }, requestActor(req));
-    res.status(201).json({ success: true, data: workflow });
   }),
 );
 
