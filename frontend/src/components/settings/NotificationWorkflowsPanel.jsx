@@ -17,6 +17,7 @@ import {
   Bot,
   CalendarClock,
   Clock3,
+  Sparkles,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -200,6 +201,15 @@ const WORKFLOW_NODE_REGISTRY = {
     label: 'Request approval',
     icon: UserCheck,
     color: '#be185d',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['default'],
+    addable: true,
+  },
+  propose_reply: {
+    label: 'Propose reply (human approves)',
+    icon: Sparkles,
+    color: '#4f46e5',
     terminal: false,
     inputHandles: ['default'],
     outputHandles: ['default'],
@@ -1584,6 +1594,9 @@ function defaultNodeData(type, triggerType = 'ticket.created') {
       approvalCategoryId: null,
       note: 'Requested automatically because: {{ event.type }} on {{ ticket.subject }}',
     };
+  }
+  if (type === 'propose_reply') {
+    return { label: 'Stage for approval' };
   }
   return {};
 }
@@ -3886,6 +3899,83 @@ function NotificationToast({ message, onDismiss }) {
 
 // All workflow health in one place: a status-colored button that opens a popover
 // with the workspace stat grid plus the deterministic workflow warnings list.
+/**
+ * Installable LLM-email workflow templates (draft replies, resolution
+ * summaries, nudges, SLA digests). Installing creates a DISABLED draft to
+ * review + publish — a template never starts running by itself.
+ */
+function WorkflowTemplatesMenu({ saving, onInstalled, setMessage }) {
+  const [open, setOpen] = useState(false);
+  const [templates, setTemplates] = useState(null);
+  const [installing, setInstalling] = useState(null);
+  const rootRef = useRef(null);
+
+  useEffect(() => {
+    if (!open || templates) return;
+    notificationWorkflowAPI.listTemplates()
+      .then((res) => setTemplates(res.data?.data || res.data || []))
+      .catch(() => setTemplates([]));
+  }, [open, templates]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDoc = (e) => { if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+
+  const install = async (template) => {
+    setInstalling(template.key);
+    try {
+      const response = await notificationWorkflowAPI.installTemplate(template.key);
+      setOpen(false);
+      setMessage({ type: 'success', text: `Installed "${template.name}" as a disabled draft — review, publish and enable it.` });
+      await onInstalled?.(response.data?.data?.id || response.data?.id);
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message || 'Template install failed' });
+    } finally {
+      setInstalling(null);
+    }
+  };
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        disabled={saving}
+        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-violet-200 bg-violet-50 px-2.5 text-sm font-medium text-violet-700 hover:bg-violet-100 disabled:opacity-50"
+      >
+        <Sparkles className="h-4 w-4" />
+        Templates
+      </button>
+      {open && (
+        <div className="absolute right-0 z-40 mt-1 w-96 rounded-xl border border-slate-200 bg-white p-2 shadow-lg">
+          <p className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">AI email workflow templates</p>
+          {templates === null && <p className="px-2 py-2 text-xs text-slate-400">Loading…</p>}
+          {templates?.length === 0 && <p className="px-2 py-2 text-xs text-slate-400">No templates available.</p>}
+          {(templates || []).map((template) => (
+            <button
+              key={template.key}
+              type="button"
+              onClick={() => install(template)}
+              disabled={installing !== null}
+              className="w-full rounded-lg px-2 py-2 text-left hover:bg-violet-50 disabled:opacity-60"
+            >
+              <span className="flex items-center gap-2">
+                <span className="text-sm font-semibold text-slate-800">{template.name}</span>
+                {installing === template.key && <span className="text-[10px] text-violet-500">installing…</span>}
+              </span>
+              <span className="mt-0.5 block text-xs leading-5 text-slate-500">{template.description}</span>
+            </button>
+          ))}
+          <p className="border-t border-slate-100 px-2 pt-1.5 mt-1 text-[11px] text-slate-400">Installs as a disabled draft — nothing runs until you publish and enable it.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function WorkflowHealthMenu({ health, warnings = [] }) {
   const [open, setOpen] = useState(false);
   if (!health) return null;
@@ -8438,6 +8528,15 @@ export default function NotificationWorkflowsPanel({
       );
     }
 
+    if (selectedNode.type === 'propose_reply') {
+      return (
+        <div className="space-y-3">
+          <p className="text-sm text-gray-600">Stages the upstream LLM draft on the ticket as an <strong>AI proposed reply</strong>. An agent approves &amp; sends, edits it in the composer, or dismisses it — nothing is emailed automatically.</p>
+          <p className="text-[11px] text-gray-400">Requires an LLM Generate node earlier in the flow. A newer proposal supersedes an older open one on the same ticket.</p>
+        </div>
+      );
+    }
+
     if (selectedNode.type === 'recipient_resolver') {
       const to = selectedNode.data?.to || [];
       const cc = selectedNode.data?.cc || [];
@@ -9204,6 +9303,37 @@ export default function NotificationWorkflowsPanel({
               className="mt-1 w-full rounded-md border border-gray-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
             />
           </div>
+
+          {/* Auto-send safety gates for LLM-authored content: below the
+              confidence bar or an always-human match, the send downgrades to a
+              staged proposed reply instead of emailing the requester. */}
+          <div className="rounded-lg border border-indigo-200 bg-indigo-50/50 p-3 space-y-2.5">
+            <p className="text-xs font-semibold uppercase tracking-wide text-indigo-700">AI auto-send safety</p>
+            <label className="block text-xs font-medium uppercase text-gray-500">
+              Minimum LLM confidence to auto-send
+              <select
+                value={selectedNode.data?.minLlmConfidence || ''}
+                onChange={(event) => updateNodeData({ minLlmConfidence: event.target.value || null })}
+                className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+              >
+                <option value="">Off — always send</option>
+                <option value="medium">Medium or higher</option>
+                <option value="high">High only</option>
+              </select>
+            </label>
+            <label className="block text-xs font-medium uppercase text-gray-500">
+              Always-human recipients (emails or @domains, comma-separated)
+              <input
+                value={(selectedNode.data?.alwaysHumanRecipients || []).join(', ')}
+                onChange={(event) => updateNodeData({
+                  alwaysHumanRecipients: event.target.value.split(',').map((v) => v.trim()).filter(Boolean),
+                })}
+                placeholder="vip@example.com, @execs.example.com"
+                className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+              />
+            </label>
+            <p className="text-[11px] text-gray-500 normal-case">Gates apply only when the email content came from the LLM. A blocked send is staged on the ticket as an AI proposed reply — never silently dropped.</p>
+          </div>
         </div>
       );
     }
@@ -9271,6 +9401,7 @@ export default function NotificationWorkflowsPanel({
             {workflowTabActive && (
               <div className="flex min-h-[36px] flex-wrap items-center justify-end gap-2">
                 <WorkflowHealthMenu health={health} warnings={healthWarnings} />
+                <WorkflowTemplatesMenu saving={saving} onInstalled={loadWorkflows} setMessage={setMessage} />
                 <button
                   type="button"
                   onClick={createVariant}

@@ -114,25 +114,25 @@ Goal: take the Mail Workflow (notification workflow) engine from a single-path n
 *We already own the guardrails. Point them at real use cases, safely.*
 
 ### 4.1 Reusable LLM-email building blocks
-- [ ] Draft-vs-send mode on the LLM node: staged **draft → approval** vs **auto-send**, gated by a confidence threshold
-- [ ] "Proposed reply" storage + an agent approve / edit / send affordance on the ticket
-- [ ] Reusable prebuilt-workflow templates (installable per workspace)
+- [x] Draft-vs-send mode on the LLM node: staged **draft → approval** vs **auto-send**, gated by a confidence threshold
+- [x] "Proposed reply" storage + an agent approve / edit / send affordance on the ticket
+- [x] Reusable prebuilt-workflow templates (installable per workspace)
 
 ### 4.2 Use cases (ship as prebuilt workflows)
-- [ ] Auto-drafted first reply — grounded + cited, draft→approve
-- [ ] Resolution-summary email on close — draft→approve; auto-send above confidence on templated closures
-- [ ] Follow-up nudge for an unresponsive requester — Wait node + LLM check-in; auto-close branch if still silent
-- [ ] Escalation digest to managers — scheduled/SLA trigger; team-safe framing (coaching, not ranking)
-- [ ] Auto-triaged acknowledgement on new ticket — classify → set fields → personalized ack
-- [ ] Sentiment "at-risk" alert — negative-sentiment branch → owner alert with suggested de-escalation (basic heuristic now; model-based in Phase 5)
+- [x] Auto-drafted first reply — grounded + cited, draft→approve
+- [x] Resolution-summary email on close — draft→approve; auto-send above confidence on templated closures
+- [x] Follow-up nudge for an unresponsive requester — Wait node + LLM check-in; auto-close branch if still silent
+- [x] Escalation digest to managers — scheduled/SLA trigger; team-safe framing (coaching, not ranking)
+- [x] Auto-triaged acknowledgement on new ticket — classify → set fields → personalized ack
+- [ ] Sentiment "at-risk" alert (deferred — no sentiment model yet; revisit after Phase 5) — negative-sentiment branch → owner alert with suggested de-escalation (basic heuristic now; model-based in Phase 5)
 
 ### 4.3 Guardrail completions
-- [ ] Granular evidence redaction (keep thread, hide internal notes) — replace the current binary redaction
-- [ ] `always-human` policy tag (regulated / VIP / complaint) that blocks auto-send regardless of confidence
-- [ ] Audit trail of every draft + send (who/what/when/model/guard outcome)
+- [x] Granular evidence redaction — verified the workspace LLM tool policy already offers per-source toggles (thread/private notes/similar tickets); per-node overrides deferred as low-value
+- [x] `always-human` policy tag (regulated / VIP / complaint) that blocks auto-send regardless of confidence
+- [x] Audit trail of every draft + send (who/what/when/model/guard outcome)
 
 ### 4.4 Ship
-- [ ] Tests (draft-gate, auto-send threshold, guardrail blocks, redaction); lint green (no deploy — dev-test gate)
+- [x] Tests (draft-gate, auto-send threshold, guardrail blocks, redaction); lint green (no deploy — dev-test gate)
 
 ---
 

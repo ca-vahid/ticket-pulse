@@ -285,6 +285,33 @@ model ApprovalCategory {
   @@index([workspaceId, isActive])
 }
 
+// LLM-drafted replies staged for human approval (the draft→approve pattern).
+// A workflow's propose_reply node (or an auto-send node downgrading on low
+// confidence / always-human match) creates one; an agent approves & sends it
+// through the normal reply path, edits it first, or dismisses it.
+model TicketProposedReply {
+  id            Int       @id @default(autoincrement())
+  workspaceId   Int       @map("workspace_id")
+  ticketId      Int       @map("ticket_id")
+  ticket        Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  workflowRunId Int?      @map("workflow_run_id")
+  source        String    @default("workflow_llm") @db.VarChar(40) // workflow_llm | auto_send_downgrade
+  subject       String?   @db.VarChar(500)
+  bodyHtml      String?   @db.Text @map("body_html")
+  bodyText      String?   @db.Text @map("body_text")
+  confidence    String?   @db.VarChar(10) // low | medium | high (from the LLM output schema)
+  guardSummary  Json?     @map("guard_summary")
+  status        String    @default("proposed") @db.VarChar(20) // proposed | sent | dismissed
+  decidedBy     String?   @db.VarChar(255) @map("decided_by")
+  decidedAt     DateTime? @map("decided_at")
+  sentThreadEntryId Int?  @map("sent_thread_entry_id")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  @@map("ticket_proposed_replies")
+  @@index([ticketId, status])
+  @@index([workspaceId, status, createdAt])
+}
+
 // Monitored mailboxes for native ticketing (N per workspace). 'ingest' polls
 // the inbox for new tickets / requester replies; 'send' delivers agent replies
 // from this address via Microsoft Graph (proper threading); 'both' does both.
@@ -580,6 +607,7 @@ model Ticket {
   mirrorJobs           MirrorJob[]
   approvals            TicketApproval[]
   attachments          TicketAttachment[]
+  proposedReplies      TicketProposedReply[]
 
   @@map("tickets")
   @@index([workspaceId])

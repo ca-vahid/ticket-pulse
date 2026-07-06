@@ -645,6 +645,33 @@ router.get('/:id/related', asyncHandler(async (req, res) => {
   res.json({ success: true, data: related });
 }));
 
+// AI-proposed replies (draft→approve): list open proposals, approve & send
+// (optionally edited), or dismiss. Sending goes through the normal reply path
+// so threading/mirroring/events behave like a hand-written reply.
+router.get('/:id/proposed-replies', asyncHandler(async (req, res) => {
+  const { default: ticketProposedReplyService } = await import('../services/ticketProposedReplyService.js');
+  const proposals = await ticketProposedReplyService.listForTicket(parseTicketId(req), req.workspaceId);
+  res.json({ success: true, data: proposals });
+}));
+
+router.post('/:id/proposed-replies/:proposalId/send', asyncHandler(async (req, res) => {
+  const { default: ticketProposedReplyService } = await import('../services/ticketProposedReplyService.js');
+  const result = await ticketProposedReplyService.send(
+    parseTicketId(req), req.workspaceId, req.params.proposalId,
+    { bodyHtml: req.body?.bodyHtml, bodyText: req.body?.bodyText },
+    req.ticketActor,
+  );
+  res.json({ success: true, data: result });
+}));
+
+router.post('/:id/proposed-replies/:proposalId/dismiss', asyncHandler(async (req, res) => {
+  const { default: ticketProposedReplyService } = await import('../services/ticketProposedReplyService.js');
+  const proposal = await ticketProposedReplyService.dismiss(
+    parseTicketId(req), req.workspaceId, req.params.proposalId, req.ticketActor,
+  );
+  res.json({ success: true, data: proposal });
+}));
+
 // Forward the public thread to any address, recorded as a private entry.
 router.post('/:id/forward', requireNativeTicketing, asyncHandler(async (req, res) => {
   const result = await ticketService.forwardTicket(

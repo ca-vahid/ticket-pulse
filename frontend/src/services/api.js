@@ -586,6 +586,19 @@ export const ticketsAPI = {
     return await api.post(`/tickets/${id}/mirror/retry`);
   },
 
+  // AI-proposed replies (draft→approve)
+  proposedReplies: async (id) => {
+    return await api.get(`/tickets/${id}/proposed-replies`);
+  },
+
+  sendProposedReply: async (id, proposalId, body = {}) => {
+    return await api.post(`/tickets/${id}/proposed-replies/${proposalId}/send`, body);
+  },
+
+  dismissProposedReply: async (id, proposalId) => {
+    return await api.post(`/tickets/${id}/proposed-replies/${proposalId}/dismiss`);
+  },
+
   requesterSearch: async (q) => {
     return await api.get('/tickets/requester-search', { params: { q } });
   },
@@ -1106,6 +1119,9 @@ export const aiProviderAPI = {
 export const notificationWorkflowAPI = {
   list: () => api.get('/notification-workflows'),
   health: () => api.get('/notification-workflows/health'),
+  listTemplates: () => api.get('/notification-workflows/templates'),
+  installTemplate: (key) => api.post(`/notification-workflows/templates/${key}/install`),
+  runForTicket: (id, ticketId) => api.post(`/notification-workflows/${id}/run-for-ticket/${ticketId}`),
   variables: () => api.get('/notification-workflows/variables'),
   getSignature: () => api.get('/notification-workflows/signature'),
   updateSignature: (data) => api.put('/notification-workflows/signature', data),

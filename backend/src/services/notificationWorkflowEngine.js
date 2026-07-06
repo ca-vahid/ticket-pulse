@@ -1349,6 +1349,47 @@ function llmEmailFromState(state) {
   };
 }
 
+const CONFIDENCE_RANK = { low: 1, medium: 2, high: 3 };
+
+/**
+ * Auto-send safety gates on send_email nodes carrying LLM-authored content:
+ *  - minLlmConfidence ('low'|'medium'|'high'): the LLM's self-reported
+ *    confidence must meet the bar; a missing confidence counts as low.
+ *  - alwaysHumanRecipients (emails and/or @domains): matching requesters
+ *    ALWAYS get a human-approved reply regardless of confidence (regulated /
+ *    VIP / complaint handling).
+ * Gates only apply when the outgoing email actually came from the LLM
+ * (state.llm.promotedToEmail) — plain template sends are unaffected.
+ */
+function evaluateAutoSendGate(node, state, eventContext) {
+  if (state.llm?.promotedToEmail !== true) return { downgrade: false };
+
+  const requesterEmail = String(eventContext.requester?.email || '').trim().toLowerCase();
+  const alwaysHuman = Array.isArray(node.data?.alwaysHumanRecipients) ? node.data.alwaysHumanRecipients : [];
+  for (const raw of alwaysHuman) {
+    const entry = String(raw || '').trim().toLowerCase();
+    if (!entry || !requesterEmail) continue;
+    const matches = entry.startsWith('@') ? requesterEmail.endsWith(entry) : requesterEmail === entry;
+    if (matches) {
+      return { downgrade: true, reason: `Requester matches always-human rule (${entry})`, confidence: null };
+    }
+  }
+
+  const minConfidence = String(node.data?.minLlmConfidence || '').toLowerCase();
+  if (CONFIDENCE_RANK[minConfidence]) {
+    const confidence = String(state.llm?.email?.extra?.confidence || state.llm?.confidence || 'low').toLowerCase();
+    const rank = CONFIDENCE_RANK[confidence] || 1;
+    if (rank < CONFIDENCE_RANK[minConfidence]) {
+      return {
+        downgrade: true,
+        reason: `LLM confidence "${confidence}" is below the auto-send bar "${minConfidence}"`,
+        confidence,
+      };
+    }
+  }
+  return { downgrade: false };
+}
+
 /**
  * Minimal, claim-free notification used when an llm_only node has neither LLM
  * output (provider down / timeout / guard hard-block) nor a configured
@@ -1810,6 +1851,35 @@ async function executeNode({
     });
   }
 
+  if (node.type === 'propose_reply') {
+    const ticketId = Number(eventContext.ticket?.id);
+    const llmEmail = state.llm?.email || {};
+    const bodyHtml = llmEmail.html || null;
+    const bodyText = llmEmail.text || null;
+    const confidence = llmEmail.extra?.confidence || state.llm?.confidence || null;
+    if (!Number.isFinite(ticketId) || ticketId <= 0) return { skipped: true, reason: 'No ticket in event context' };
+    if (!bodyHtml && !bodyText) return { skipped: true, reason: 'No LLM draft to propose (upstream LLM produced nothing)' };
+    if (dryRun || executionMode === 'mock' || executionMode === 'preview') {
+      return { dryRun: true, wouldPropose: { subject: llmEmail.subject || null, confidence } };
+    }
+    const { default: ticketProposedReplyService } = await import('./ticketProposedReplyService.js');
+    const proposal = await ticketProposedReplyService.create({
+      workspaceId: workflow.workspaceId,
+      ticketId,
+      workflowRunId: run?.id || null,
+      source: 'workflow_llm',
+      subject: llmEmail.subject || null,
+      bodyHtml,
+      bodyText,
+      confidence,
+      guardSummary: state.llm?.guard ? safeJson({
+        accepted: state.llm.guard.accepted !== false,
+        issues: state.llm.guard.issues || [],
+      }) : null,
+    });
+    return { proposedReplyId: proposal.id, confidence };
+  }
+
   if (node.type === 'recipient_resolver') {
     const customEmails = Array.isArray(node.data?.customEmails) ? node.data.customEmails : [];
     // internal_group:<id> tokens resolve to active member emails (team routing).
@@ -2224,6 +2294,37 @@ async function executeNode({
         skipped: true,
         reason: 'No email body generated',
       };
+    }
+
+    // Auto-send safety gates for LLM-authored content: below-threshold
+    // confidence or an always-human requester downgrades the send to a staged
+    // proposal for a human to approve — the email is never silently lost.
+    const sendGate = evaluateAutoSendGate(node, state, eventContext);
+    if (sendGate.downgrade) {
+      if (dryRun || executionMode === 'mock' || executionMode === 'preview') {
+        return { skipped: true, wouldDowngradeToProposal: true, reason: sendGate.reason };
+      }
+      const ticketId = Number(eventContext.ticket?.id);
+      if (Number.isFinite(ticketId) && ticketId > 0) {
+        try {
+          const { default: ticketProposedReplyService } = await import('./ticketProposedReplyService.js');
+          const proposal = await ticketProposedReplyService.create({
+            workspaceId: workflow.workspaceId,
+            ticketId,
+            workflowRunId: run?.id || null,
+            source: 'auto_send_downgrade',
+            subject: baseEmail.subject || null,
+            bodyHtml: baseEmail.html || null,
+            bodyText: baseEmail.text || null,
+            confidence: sendGate.confidence || null,
+          });
+          return { skipped: true, downgradedToProposal: true, proposedReplyId: proposal.id, reason: sendGate.reason };
+        } catch (error) {
+          logger.warn(`Auto-send downgrade failed to stage a proposal: ${error.message}`);
+          return { skipped: true, reason: `${sendGate.reason} (proposal staging failed: ${error.message})` };
+        }
+      }
+      return { skipped: true, reason: sendGate.reason };
     }
 
     const email = await finalizeWorkflowSendEmail({

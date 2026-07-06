@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import AttachmentPreviewModal from '../components/tickets/AttachmentPreviewModal';
 import ApprovalTimeline from '../components/tickets/ApprovalTimeline';
+import ProposedReplyCard from '../components/tickets/ProposedReplyCard';
 import RequestApprovalModal from '../components/tickets/RequestApprovalModal';
 import AppHeader from '../components/AppHeader';
 import AiAssignModal from '../components/tickets/AiAssignModal';
@@ -1683,6 +1684,23 @@ export default function TicketDetail() {
                         </div>
                       )}
                     </section>
+
+                    {/* AI proposed reply (draft→approve) — staged by a workflow */}
+                    {canConverse && (
+                      <ProposedReplyCard
+                        ticketId={ticketId}
+                        refreshToken={ticket?.updatedAt}
+                        canWrite={canConverse}
+                        onSent={() => { lastLocalMutationRef.current = Date.now(); fetchTicket({ silent: true }); showToast('emerald', 'Reply sent'); }}
+                        onEditInComposer={(proposal) => {
+                          const html = proposal.bodyHtml || String(proposal.bodyText || '').replace(/\n/g, '<br>');
+                          switchComposerMode('reply');
+                          setComposerBody(html);
+                          setComposerText(htmlToText(html));
+                          setTimeout(() => composerRef.current?.focus(), 0);
+                        }}
+                      />
+                    )}
 
                     {/* Composer */}
                     {canConverse ? (

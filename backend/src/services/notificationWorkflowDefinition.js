@@ -46,6 +46,178 @@ export const TIME_TRIGGER_EVENT_TYPES = [
   'ticket.sla_breach',
 ];
 
+// --------------------------------------------------------------------------
+// Installable workflow templates (LLM-as-email use cases). Installing creates
+// a DISABLED draft variant the admin reviews, adjusts, publishes and enables —
+// templates never auto-run.
+// --------------------------------------------------------------------------
+
+function templateNodes(nodes, edges) {
+  return {
+    version: 2,
+    metadata: { installedFromTemplate: true },
+    nodes: nodes.map((node, i) => ({ position: { x: 80 + i * 240, y: 80 }, ...node })),
+    edges,
+  };
+}
+
+export const WORKFLOW_TEMPLATES = [
+  {
+    key: 'ai_first_reply_draft',
+    name: 'AI first-reply draft (human approves)',
+    description: 'On new tickets, the LLM drafts a grounded first reply and stages it on the ticket for an agent to approve, edit, or dismiss. Nothing sends automatically.',
+    triggerType: 'ticket.created',
+    build: () => templateNodes([
+      { id: 'trigger', type: 'trigger', data: { triggerType: 'ticket.created' } },
+      {
+        id: 'draft',
+        type: 'llm_generate',
+        data: {
+          label: 'Draft first reply',
+          prompt: 'Draft a first reply to the requester for this new ticket. Acknowledge the specific problem, state what will happen next in plain language, and ask for any obviously missing detail. Do not promise timelines.\n\nTicket: #{{ ticket.freshserviceTicketId }} {{ ticket.subject }}\nDescription: {{ ticket.descriptionText }}\nRequester: {{ requester.name }}',
+          outputMode: 'draft_email',
+          promoteToEmail: false,
+          maxTokens: 10000,
+          temperature: 0.3,
+        },
+      },
+      { id: 'propose', type: 'propose_reply', data: { label: 'Stage for approval' } },
+      { id: 'end', type: 'stop', data: {} },
+    ], [
+      { id: 'e1', source: 'trigger', target: 'draft' },
+      { id: 'e2', source: 'draft', target: 'propose' },
+      { id: 'e3', source: 'propose', target: 'end' },
+    ]),
+  },
+  {
+    key: 'resolution_summary_autosend',
+    name: 'Resolution summary (auto-send at high confidence)',
+    description: 'On resolve/close, the LLM writes a plain-language "what happened / what we did" summary for the requester. Sends automatically only at high confidence — otherwise it stages as a draft for approval.',
+    triggerType: 'ticket.resolved_closed',
+    build: () => templateNodes([
+      { id: 'trigger', type: 'trigger', data: { triggerType: 'ticket.resolved_closed' } },
+      { id: 'recipients', type: 'recipient_resolver', data: { to: ['requester'], cc: [], bcc: [] } },
+      {
+        id: 'summary',
+        type: 'llm_generate',
+        data: {
+          label: 'Write resolution summary',
+          prompt: 'Write a short resolution summary email for the requester: what the problem was, what was done, and how to reopen if it recurs. State only facts present in the context. Include a confidence field reflecting how sure you are the summary is accurate.\n\nTicket: #{{ ticket.freshserviceTicketId }} {{ ticket.subject }}',
+          outputMode: 'draft_email',
+          promoteToEmail: true,
+          maxTokens: 10000,
+          temperature: 0.3,
+        },
+      },
+      {
+        id: 'template',
+        type: 'template_render',
+        data: {
+          contentSource: 'llm_with_template_fallback',
+          subject: 'Your ticket #{{ ticket.freshserviceTicketId }} has been resolved',
+          html: '<p>Your ticket <strong>#{{ ticket.freshserviceTicketId }}</strong> ({{ ticket.subject }}) has been resolved.</p><p>Reply to this email if the problem comes back.</p>',
+          text: 'Your ticket #{{ ticket.freshserviceTicketId }} ({{ ticket.subject }}) has been resolved.\n\nReply to this email if the problem comes back.',
+          plainTextMode: 'auto',
+        },
+      },
+      {
+        id: 'send',
+        type: 'send_email',
+        data: { label: 'Send (gated)', provider: 'sendgrid', minLlmConfidence: 'high', includeFooter: true, includeHeader: false },
+      },
+    ], [
+      { id: 'e1', source: 'trigger', target: 'recipients' },
+      { id: 'e2', source: 'recipients', target: 'summary' },
+      { id: 'e3', source: 'summary', target: 'template' },
+      { id: 'e4', source: 'template', target: 'send' },
+    ]),
+  },
+  {
+    key: 'follow_up_nudge',
+    name: 'Follow-up nudge (24h after agent reply)',
+    description: 'A day after an agent replies, if the ticket is still open, send the requester a polite templated check-in. Template-driven — no free generation.',
+    triggerType: 'ticket.public_reply_added',
+    build: () => templateNodes([
+      { id: 'trigger', type: 'trigger', data: { triggerType: 'ticket.public_reply_added' } },
+      { id: 'wait', type: 'delay', data: { label: 'Wait a day', minutes: 1440 } },
+      {
+        id: 'still-open',
+        type: 'condition',
+        data: {
+          conditionGroup: {
+            logic: 'all',
+            conditions: [{ field: 'ticket.status', operator: 'in', value: ['Open', 'Pending'] }],
+          },
+        },
+      },
+      { id: 'recipients', type: 'recipient_resolver', data: { to: ['requester'], cc: [], bcc: [] } },
+      {
+        id: 'template',
+        type: 'template_render',
+        data: {
+          contentSource: 'template_only',
+          subject: 'Still need help with ticket #{{ ticket.freshserviceTicketId }}?',
+          html: '<p>Just checking in on your ticket <strong>#{{ ticket.freshserviceTicketId }}</strong> ({{ ticket.subject }}).</p><p>If our last reply solved it, no action is needed. If you still need help, just reply to this email.</p>',
+          text: 'Just checking in on your ticket #{{ ticket.freshserviceTicketId }} ({{ ticket.subject }}).\n\nIf our last reply solved it, no action is needed. If you still need help, just reply to this email.',
+          plainTextMode: 'auto',
+        },
+      },
+      { id: 'send', type: 'send_email', data: { provider: 'sendgrid', includeFooter: true, includeHeader: false } },
+      { id: 'end', type: 'stop', data: {} },
+    ], [
+      { id: 'e1', source: 'trigger', target: 'wait' },
+      { id: 'e2', source: 'wait', target: 'still-open' },
+      { id: 'e3', source: 'still-open', sourceHandle: 'true', target: 'recipients' },
+      { id: 'e4', source: 'still-open', sourceHandle: 'false', target: 'end' },
+      { id: 'e5', source: 'recipients', target: 'template' },
+      { id: 'e6', source: 'template', target: 'send' },
+    ]),
+  },
+  {
+    key: 'sla_breach_manager_alert',
+    name: 'SLA breach alert to managers (LLM digest)',
+    description: 'When a ticket blows its SLA, email a manager list an LLM-written situation digest: what the ticket is, who has it, why it matters. Configure the recipient emails after installing.',
+    triggerType: 'ticket.sla_breach',
+    build: () => templateNodes([
+      { id: 'trigger', type: 'trigger', data: { triggerType: 'ticket.sla_breach' } },
+      {
+        id: 'recipients',
+        type: 'recipient_resolver',
+        data: { to: ['custom_emails'], cc: [], bcc: [], customEmails: [] },
+      },
+      {
+        id: 'digest',
+        type: 'llm_generate',
+        data: {
+          label: 'Write breach digest',
+          prompt: 'Write a concise internal alert for IT coordinators: this ticket has breached its SLA. Summarize the issue, current status, assignee (or unassigned), and one suggested next action. Coaching tone — factual, no blame.\n\nTicket: #{{ ticket.freshserviceTicketId }} {{ ticket.subject }}\nStatus: {{ ticket.status }} · Assignee: {{ assignedAgent.name }}',
+          outputMode: 'draft_email',
+          promoteToEmail: true,
+          maxTokens: 10000,
+          temperature: 0.3,
+        },
+      },
+      {
+        id: 'template',
+        type: 'template_render',
+        data: {
+          contentSource: 'llm_with_template_fallback',
+          subject: 'SLA breached: #{{ ticket.freshserviceTicketId }} {{ ticket.subject }}',
+          html: '<p>Ticket <strong>#{{ ticket.freshserviceTicketId }}</strong> ({{ ticket.subject }}) has breached its SLA. Status: {{ ticket.status }}.</p>',
+          text: 'Ticket #{{ ticket.freshserviceTicketId }} ({{ ticket.subject }}) has breached its SLA. Status: {{ ticket.status }}.',
+          plainTextMode: 'auto',
+        },
+      },
+      { id: 'send', type: 'send_email', data: { provider: 'sendgrid', includeFooter: false, includeHeader: false, appendPublicStatusLink: false } },
+    ], [
+      { id: 'e1', source: 'trigger', target: 'recipients' },
+      { id: 'e2', source: 'recipients', target: 'digest' },
+      { id: 'e3', source: 'digest', target: 'template' },
+      { id: 'e4', source: 'template', target: 'send' },
+    ]),
+  },
+];
+
 export const AFTER_HOURS_WORKFLOW_KEY = 'ticket_created_after_hours';
 
 export const DEFAULT_WORKFLOW_SPECS = [
@@ -123,6 +295,14 @@ export const NOTIFICATION_NODE_REGISTRY = Object.freeze({
   },
   request_approval: {
     label: 'Request approval',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['default'],
+  },
+  // Stage the upstream LLM draft as a proposed reply on the ticket for a
+  // human to approve/edit/send — the draft→approve pattern.
+  propose_reply: {
+    label: 'Propose reply (human approves)',
     terminal: false,
     inputHandles: ['default'],
     outputHandles: ['default'],
@@ -319,7 +499,7 @@ function validateGraph(definition, triggerType) {
     errors.push(`Trigger node must use triggerType ${triggerType}`);
   }
 
-  const ACTION_NODE_TYPES = ['send_email', 'update_ticket', 'call_webhook', 'create_child_ticket', 'request_approval'];
+  const ACTION_NODE_TYPES = ['send_email', 'update_ticket', 'call_webhook', 'create_child_ticket', 'request_approval', 'propose_reply'];
   if (!definition.nodes.some((node) => ACTION_NODE_TYPES.includes(node.type))) {
     errors.push(`Workflow must include at least one action node (${ACTION_NODE_TYPES.join(', ')})`);
   }
@@ -414,6 +594,13 @@ function validateGraph(definition, triggerType) {
     }
     if (!upstream.has('template_render') && !upstream.has('llm_generate')) {
       errors.push(`Send email node ${node.id} must have an upstream template or LLM email source`);
+    }
+  }
+
+  for (const node of definition.nodes.filter((candidate) => candidate.type === 'propose_reply')) {
+    const upstream = upstreamNodeTypes(node.id, nodes, incoming);
+    if (!upstream.has('llm_generate')) {
+      errors.push(`Propose-reply node ${node.id} must have an upstream LLM generate node (it stages the LLM draft)`);
     }
   }
 

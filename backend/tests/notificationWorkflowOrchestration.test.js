@@ -18,12 +18,12 @@ const prismaMock = {
   ticketActivity: { create: jest.fn() },
   mirrorJob: { findFirst: jest.fn(), create: jest.fn() },
   ticketThreadEntry: { findMany: jest.fn() },
-  notificationDelivery: { upsert: jest.fn() },
+  notificationDelivery: { upsert: jest.fn(), findUnique: jest.fn(), update: jest.fn(), create: jest.fn() },
 };
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
 jest.unstable_mockModule('../src/services/notificationDeliveryService.js', () => ({
-  processDelivery: jest.fn().mockResolvedValue({ status: 'sent' }),
+  processDelivery: jest.fn().mockResolvedValue({ success: true, status: 'sent' }),
 }));
 // The live update_ticket path dynamically imports these; the real modules
 // open handles (SSE heartbeats etc.) that keep jest alive.
@@ -37,12 +37,17 @@ jest.unstable_mockModule('../src/routes/sse.routes.js', () => ({
   default: {},
   sseManager: { broadcast: jest.fn() },
 }));
+const proposedReplyCreateMock = jest.fn().mockResolvedValue({ id: 501 });
+jest.unstable_mockModule('../src/services/ticketProposedReplyService.js', () => ({
+  default: { create: proposedReplyCreateMock },
+}));
 jest.unstable_mockModule('../src/utils/logger.js', () => ({
   default: { warn: jest.fn(), info: jest.fn(), error: jest.fn(), debug: jest.fn() },
 }));
 
 const {
   validateWorkflowDefinition,
+  WORKFLOW_TEMPLATES,
 } = await import('../src/services/notificationWorkflowDefinition.js');
 const { default: engine, executeDefinition, resumeWaitingRuns } = await import('../src/services/notificationWorkflowEngine.js');
 
@@ -103,6 +108,10 @@ beforeEach(() => {
   prismaMock.ticketActivity.create.mockResolvedValue({});
   prismaMock.mirrorJob.findFirst.mockResolvedValue({ id: 1 });
   prismaMock.ticketThreadEntry.findMany.mockResolvedValue([]);
+  prismaMock.notificationDelivery.findUnique.mockResolvedValue(null);
+  prismaMock.notificationDelivery.upsert.mockImplementation(({ create }) => Promise.resolve({ id: 700, ...create }));
+  prismaMock.notificationDelivery.update.mockResolvedValue({});
+  prismaMock.notificationDelivery.create.mockImplementation(({ data }) => Promise.resolve({ id: 700, ...data }));
 });
 
 describe('branch node validation', () => {
@@ -263,5 +272,169 @@ describe('delay node — park and durable resume', () => {
       .map((c) => c[0])
       .find((c) => c.data?.status === 'completed' && c.where.id === 901);
     expect(completed).toBeTruthy();
+  });
+});
+
+describe('propose_reply node (draft-to-approve)', () => {
+  function proposeDefinition() {
+    return {
+      version: 2,
+      metadata: {},
+      nodes: [
+        { id: 'trigger', type: 'trigger', data: { triggerType: 'ticket.created' } },
+        { id: 'draft', type: 'llm_generate', data: { prompt: 'draft', promoteToEmail: false } },
+        { id: 'propose', type: 'propose_reply', data: {} },
+        { id: 'end', type: 'stop', data: {} },
+      ],
+      edges: [
+        { id: 'e1', source: 'trigger', target: 'draft' },
+        { id: 'e2', source: 'draft', target: 'propose' },
+        { id: 'e3', source: 'propose', target: 'end' },
+      ],
+    };
+  }
+
+  test('the graph validates (propose_reply is an action; needs upstream LLM)', () => {
+    expect(validateWorkflowDefinition(proposeDefinition(), { triggerType: 'ticket.created' }).errors).toEqual([]);
+
+    const noLlm = proposeDefinition();
+    noLlm.nodes = noLlm.nodes.filter((n) => n.id !== 'draft');
+    noLlm.edges = [
+      { id: 'e1', source: 'trigger', target: 'propose' },
+      { id: 'e3', source: 'propose', target: 'end' },
+    ];
+    expect(validateWorkflowDefinition(noLlm, { triggerType: 'ticket.created' }).errors.join(' '))
+      .toMatch(/upstream LLM/i);
+  });
+
+  test('live execution stages the LLM draft as a proposal', async () => {
+    const workflow = { id: 40, workspaceId: 1, triggerType: 'ticket.created', publishedVersion: 1, versions: [] };
+    // Resume mid-graph at the propose node with a saved LLM state, exactly as
+    // a real run carries it.
+    const result = await executeDefinition({
+      workflow,
+      definition: proposeDefinition(),
+      eventContext: eventContext(),
+      executionMode: 'live',
+      resume: {
+        run: { id: 950 },
+        state: { llm: { email: { subject: 'Re: VPN', html: '<p>Try this</p>', text: 'Try this', extra: { confidence: 'medium' } } } },
+        startNodeIds: ['propose'],
+      },
+    });
+
+    expect(result.status).toBe('completed');
+    expect(proposedReplyCreateMock).toHaveBeenCalledWith(expect.objectContaining({
+      workspaceId: 1,
+      ticketId: 100,
+      subject: 'Re: VPN',
+      bodyHtml: '<p>Try this</p>',
+      confidence: 'medium',
+      source: 'workflow_llm',
+    }));
+  });
+});
+
+describe('auto-send safety gates on send_email', () => {
+  function sendDefinition(sendData = {}) {
+    return {
+      version: 2,
+      metadata: {},
+      nodes: [
+        { id: 'trigger', type: 'trigger', data: { triggerType: 'ticket.created' } },
+        { id: 'recipients', type: 'recipient_resolver', data: { to: ['requester'] } },
+        { id: 'template', type: 'template_render', data: { contentSource: 'template_only', subject: 'S', html: '<p>B</p>', text: 'B' } },
+        { id: 'send', type: 'send_email', data: { provider: 'sendgrid', includeFooter: false, ...sendData } },
+      ],
+      edges: [
+        { id: 'e1', source: 'trigger', target: 'recipients' },
+        { id: 'e2', source: 'recipients', target: 'template' },
+        { id: 'e3', source: 'template', target: 'send' },
+      ],
+    };
+  }
+
+  test('low LLM confidence downgrades the send to a staged proposal', async () => {
+    const workflow = { id: 41, workspaceId: 1, triggerType: 'ticket.created', publishedVersion: 1, versions: [] };
+    const result = await executeDefinition({
+      workflow,
+      definition: sendDefinition({ minLlmConfidence: 'high' }),
+      eventContext: eventContext(),
+      executionMode: 'live',
+      resume: {
+        run: { id: 951 },
+        state: {
+          recipients: { to: ['rita@example.com'], cc: [], bcc: [] },
+          email: { subject: 'S', html: '<p>llm body</p>', text: 'llm body' },
+          llm: { promotedToEmail: true, email: { extra: { confidence: 'low' } } },
+        },
+        startNodeIds: ['send'],
+      },
+    });
+
+    expect(result.status).toBe('completed');
+    const sendStep = result.steps.find((s) => s.nodeId === 'send');
+    expect(sendStep.output.downgradedToProposal).toBe(true);
+    expect(proposedReplyCreateMock).toHaveBeenCalledWith(expect.objectContaining({
+      source: 'auto_send_downgrade',
+      confidence: 'low',
+    }));
+  });
+
+  test('always-human requester match downgrades regardless of confidence', async () => {
+    const workflow = { id: 42, workspaceId: 1, triggerType: 'ticket.created', publishedVersion: 1, versions: [] };
+    const result = await executeDefinition({
+      workflow,
+      definition: sendDefinition({ alwaysHumanRecipients: ['@example.com'] }),
+      eventContext: eventContext(),
+      executionMode: 'live',
+      resume: {
+        run: { id: 952 },
+        state: {
+          recipients: { to: ['rita@example.com'], cc: [], bcc: [] },
+          email: { subject: 'S', html: '<p>llm body</p>', text: 'llm body' },
+          llm: { promotedToEmail: true, email: { extra: { confidence: 'high' } } },
+        },
+        startNodeIds: ['send'],
+      },
+    });
+
+    const sendStep = result.steps.find((s) => s.nodeId === 'send');
+    expect(sendStep.output.downgradedToProposal).toBe(true);
+    expect(sendStep.output.reason).toMatch(/always-human/i);
+  });
+
+  test('plain template sends (no LLM content) are never gated', async () => {
+    const workflow = { id: 43, workspaceId: 1, triggerType: 'ticket.created', publishedVersion: 1, versions: [] };
+    const result = await executeDefinition({
+      workflow,
+      definition: sendDefinition({ minLlmConfidence: 'high', alwaysHumanRecipients: ['@example.com'] }),
+      eventContext: eventContext(),
+      executionMode: 'live',
+      resume: {
+        run: { id: 953 },
+        state: {
+          recipients: { to: ['rita@example.com'], cc: [], bcc: [] },
+          email: { subject: 'S', html: '<p>template body</p>', text: 'template body' },
+          // No promotedToEmail — the content came from the template.
+        },
+        startNodeIds: ['send'],
+      },
+    });
+
+    const sendStep = result.steps.find((s) => s.nodeId === 'send');
+    expect(sendStep.output.downgradedToProposal).toBeUndefined();
+    expect(proposedReplyCreateMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('installable workflow templates', () => {
+  test('every template builds a definition that validates for its trigger type', () => {
+    expect(WORKFLOW_TEMPLATES.length).toBeGreaterThanOrEqual(4);
+    for (const template of WORKFLOW_TEMPLATES) {
+      const definition = template.build();
+      const result = validateWorkflowDefinition(definition, { triggerType: template.triggerType });
+      expect({ key: template.key, errors: result.errors }).toEqual({ key: template.key, errors: [] });
+    }
   });
 });
