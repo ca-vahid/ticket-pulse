@@ -729,7 +729,16 @@ class TicketService {
     const NON_TERMINAL = !['Closed', 'Resolved', 'closed', 'resolved', 'Deleted', 'Spam', '4', '5'].includes(String(ticket.status));
     const shouldReconcile = withReconcile && Boolean(ticket.freshserviceTicketId) && NON_TERMINAL;
 
-    const [thread, activities, approvals, attachments, reconcile] = await Promise.all([
+    // The FreshService reconcile runs in the BACKGROUND (not awaited) so the page
+    // never waits on a FS round-trip. If it flips the status (deleted/closed in
+    // FS), reconcileSingleTicket broadcasts a ticket-change and the open page
+    // picks it up via its (debounced) SSE refetch. This keeps the load fast.
+    if (shouldReconcile) {
+      import('./syncService.js')
+        .then(({ default: syncService }) => syncService.reconcileSingleTicket(ticket.id, workspaceId))
+        .catch(() => null);
+    }
+    const [thread, activities, approvals, attachments] = await Promise.all([
       ticketThreadRepository.listForTicket(ticket.id, { limit: 300 }),
       prisma.ticketActivity.findMany({
         where: { ticketId: ticket.id },
@@ -755,24 +764,7 @@ class TicketService {
           threadEntryId: true, source: true, uploadedBy: true, createdAt: true,
         },
       }),
-      shouldReconcile
-        ? Promise.race([
-          import('./syncService.js')
-            .then(({ default: syncService }) => syncService.reconcileSingleTicket(ticket.id, workspaceId))
-            .catch(() => null),
-          // Hard cap: a slow/hung FreshService must never stall the page load.
-          // If it times out, the ticket loads with its current status; any
-          // FS-side flip is reflected on the next open (reconcile still writes
-          // it to the DB when it eventually finishes).
-          new Promise((resolve) => setTimeout(() => resolve(null), 3000)),
-        ])
-        : Promise.resolve(null),
     ]);
-
-    // Reflect an on-open status flip (Deleted/Spam) in this response.
-    if (reconcile?.changed && reconcile.status) {
-      ticket.status = reconcile.status;
-    }
 
     const incomingByTicket = await this._lastPublicEntryIncoming([ticket.id]);
     const resolvedThread = await this._resolveThreadActors(thread, workspaceId, ticket.requester);

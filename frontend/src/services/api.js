@@ -664,13 +664,18 @@ export const ticketsAPI = {
     return await api.get(`/tickets/${id}/attachments`);
   },
 
-  uploadAttachments: async (id, files) => {
+  // onProgress(percent 0-100) fires as the file bytes upload (big attachments
+  // can take a while, so the UI shows real progress instead of a bare spinner).
+  uploadAttachments: async (id, files, onProgress) => {
     const form = new FormData();
     for (const file of files) form.append('files', file);
     // Let the browser set the multipart boundary
     return await api.post(`/tickets/${id}/attachments`, form, {
       headers: { 'Content-Type': undefined },
       timeout: 120000,
+      onUploadProgress: onProgress
+        ? (e) => { if (e.total) onProgress(Math.min(100, Math.round((e.loaded / e.total) * 100))); }
+        : undefined,
     });
   },
 
