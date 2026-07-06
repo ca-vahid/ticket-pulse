@@ -60,7 +60,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { notificationWorkflowAPI } from '../../services/api';
+import { notificationWorkflowAPI, ticketsAPI } from '../../services/api';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 import ConditionGroupBuilder from './ConditionGroupBuilder';
 
@@ -6256,6 +6256,10 @@ export default function NotificationWorkflowsPanel({
   const [previewTestSending, setPreviewTestSending] = useState(false);
   const [previewTestResult, setPreviewTestResult] = useState(null);
   const [conditionText, setConditionText] = useState('');
+  // Ticket metadata (technicians / categories / groups / approval categories /
+  // custom fields) for the action-node pickers — fetched lazily on first need.
+  const [ticketMeta, setTicketMeta] = useState(null);
+  const [customFieldDefs, setCustomFieldDefs] = useState(null);
   const [routingBuilder, setRoutingBuilder] = useState({ field: 'requester.regionKey', operator: 'equals', value: 'AU-BRISBANE' });
   const [routingMode, setRoutingMode] = useState('exclusive');
   const [routingPriority, setRoutingPriority] = useState(1);
@@ -6474,6 +6478,22 @@ export default function NotificationWorkflowsPanel({
       setConditionText('');
     }
   }, [selectedNode]);
+
+  useEffect(() => {
+    if (!selectedNode || ticketMeta) return;
+    if (!['update_ticket', 'request_approval'].includes(selectedNode.type)) return;
+    ticketsAPI.meta()
+      .then((res) => setTicketMeta(res?.data || {}))
+      .catch(() => setTicketMeta({ technicians: [], categoryTree: [], groups: [], approvalCategories: [] }));
+  }, [selectedNode, ticketMeta]);
+
+  useEffect(() => {
+    if (!selectedNode || customFieldDefs) return;
+    if (selectedNode.type !== 'update_ticket') return;
+    ticketsAPI.customFieldDefinitions()
+      .then((res) => setCustomFieldDefs(res?.data || []))
+      .catch(() => setCustomFieldDefs([]));
+  }, [selectedNode, customFieldDefs]);
 
   useEffect(() => {
     if (!selected) return;
@@ -8335,6 +8355,150 @@ export default function NotificationWorkflowsPanel({
       );
     }
 
+    if (selectedNode.type === 'update_ticket') {
+      const technicians = ticketMeta?.technicians || [];
+      const categoryTree = ticketMeta?.categoryTree || [];
+      const groups = ticketMeta?.groups || [];
+      const assignMode = selectedNode.data?.assignTo?.mode || 'none';
+      const selectedCategory = categoryTree.find((c) => c.id === Number(selectedNode.data?.setInternalCategoryId)) || null;
+      const customValues = selectedNode.data?.setCustomFields || {};
+      const setAssign = (patch) => updateNodeData({ assignTo: { ...(selectedNode.data?.assignTo || {}), ...patch } });
+      return (
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block text-xs font-medium uppercase text-gray-500">
+              Set status
+              <select
+                value={selectedNode.data?.setStatus || ''}
+                onChange={(event) => updateNodeData({ setStatus: event.target.value || null })}
+                className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+              >
+                <option value="">Unchanged</option>
+                {['Open', 'Pending', 'Resolved', 'Closed'].map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </label>
+            <label className="block text-xs font-medium uppercase text-gray-500">
+              Set priority
+              <select
+                value={selectedNode.data?.setPriority || ''}
+                onChange={(event) => updateNodeData({ setPriority: Number(event.target.value) || null })}
+                className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+              >
+                <option value="">Unchanged</option>
+                {[['1', 'Low'], ['2', 'Medium'], ['3', 'High'], ['4', 'Urgent']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+            </label>
+          </div>
+
+          <div className="rounded-lg border border-blue-100 bg-blue-50/50 p-2.5 space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Assignment</p>
+            <select
+              value={assignMode}
+              onChange={(event) => setAssign({ mode: event.target.value })}
+              aria-label="Assignment mode"
+              className="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900"
+            >
+              <option value="none">Don&apos;t assign</option>
+              <option value="tech">Specific member</option>
+              <option value="round_robin">Round-robin (least-recently assigned)</option>
+              <option value="least_loaded">Least loaded (fewest open tickets)</option>
+            </select>
+            {assignMode === 'tech' && (
+              <select
+                value={selectedNode.data?.assignTo?.technicianId || ''}
+                onChange={(event) => setAssign({ technicianId: Number(event.target.value) || null })}
+                aria-label="Technician"
+                className="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900"
+              >
+                <option value="">Choose member…</option>
+                {technicians.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            )}
+            <p className="text-[11px] text-gray-500 normal-case">Assignment works for BOTH origins (FS-born via write-back). Other field changes apply to Ticket-Pulse-born tickets only.</p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block text-xs font-medium uppercase text-gray-500">
+              Set category
+              <select
+                value={selectedNode.data?.setInternalCategoryId || ''}
+                onChange={(event) => updateNodeData({ setInternalCategoryId: Number(event.target.value) || null, setInternalSubcategoryId: null })}
+                className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+              >
+                <option value="">Unchanged</option>
+                {categoryTree.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </label>
+            <label className="block text-xs font-medium uppercase text-gray-500">
+              Subcategory
+              <select
+                value={selectedNode.data?.setInternalSubcategoryId || ''}
+                onChange={(event) => updateNodeData({ setInternalSubcategoryId: Number(event.target.value) || null })}
+                disabled={!selectedCategory}
+                className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900 disabled:bg-gray-50 disabled:text-gray-400"
+              >
+                <option value="">None</option>
+                {(selectedCategory?.subcategories || []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </label>
+          </div>
+
+          <label className="block text-xs font-medium uppercase text-gray-500">
+            Move to group
+            <select
+              value={selectedNode.data?.setInternalGroupId || ''}
+              onChange={(event) => updateNodeData({ setInternalGroupId: Number(event.target.value) || null })}
+              className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+            >
+              <option value="">Unchanged</option>
+              {groups.map((g) => <option key={g.id} value={g.id}>{g.name}{g.origin === 'local' ? ' (internal)' : ''}</option>)}
+            </select>
+          </label>
+
+          {(customFieldDefs || []).length > 0 && (
+            <div className="rounded-lg border border-slate-200 p-2.5 space-y-1.5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Set custom fields</p>
+              {(customFieldDefs || []).map((definition) => (
+                <label key={definition.key} className="block text-[11px] text-slate-500">
+                  {definition.label}
+                  {definition.type === 'select' ? (
+                    <select
+                      value={customValues[definition.key] ?? ''}
+                      onChange={(event) => updateNodeData({
+                        setCustomFields: { ...customValues, [definition.key]: event.target.value || undefined },
+                      })}
+                      className="mt-0.5 w-full rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-900"
+                    >
+                      <option value="">Unchanged</option>
+                      {definition.options.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+                    </select>
+                  ) : (
+                    <input
+                      value={customValues[definition.key] ?? ''}
+                      onChange={(event) => updateNodeData({
+                        setCustomFields: { ...customValues, [definition.key]: event.target.value || undefined },
+                      })}
+                      placeholder="Unchanged"
+                      className="mt-0.5 w-full rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-900"
+                    />
+                  )}
+                </label>
+              ))}
+            </div>
+          )}
+
+          <label className="block text-xs font-medium uppercase text-gray-500">
+            Audit note (optional)
+            <input
+              value={selectedNode.data?.note || ''}
+              onChange={(event) => updateNodeData({ note: event.target.value })}
+              className="mt-1 w-full rounded-md border border-gray-200 px-3 py-2 text-sm normal-case text-gray-900"
+            />
+          </label>
+        </div>
+      );
+    }
+
     if (selectedNode.type === 'branch') {
       const branches = Array.isArray(selectedNode.data?.branches) ? selectedNode.data.branches : [];
       const branchTargets = (draft?.nodes || []).filter((node) => node.id !== selectedNode.id && node.type !== 'trigger');
@@ -8516,17 +8680,25 @@ export default function NotificationWorkflowsPanel({
     }
 
     if (selectedNode.type === 'request_approval') {
+      const approvalCategories = ticketMeta?.approvalCategories || [];
       return (
         <div className="space-y-3">
           <label className="block text-xs font-medium uppercase text-gray-500">
-            Approval category ID
-            <input
-              type="number"
+            Approval category
+            <select
               value={selectedNode.data?.approvalCategoryId ?? ''}
               onChange={(event) => updateNodeData({ approvalCategoryId: Number(event.target.value) || null })}
-              className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900 tabular-nums"
-            />
+              className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+            >
+              <option value="">Choose a category…</option>
+              {approvalCategories.map((category) => (
+                <option key={category.id} value={category.id}>{category.name}</option>
+              ))}
+            </select>
           </label>
+          {approvalCategories.length === 0 && ticketMeta && (
+            <p className="text-[11px] text-amber-600 normal-case">No approval categories yet — create one in Settings → Approval Categories first.</p>
+          )}
           <label className="block text-xs font-medium uppercase text-gray-500">
             Request note (Liquid)
             <textarea
@@ -8535,7 +8707,7 @@ export default function NotificationWorkflowsPanel({
               className="mt-1 h-20 w-full rounded-md border border-gray-200 px-3 py-2 text-sm normal-case"
             />
           </label>
-          <p className="text-[11px] text-gray-400">Routes the ticket to the category&apos;s approval managers (any one approves). Category IDs are listed in Settings → Approval Categories.</p>
+          <p className="text-[11px] text-gray-400">Routes the ticket to the category&apos;s approval managers (any one approves).</p>
         </div>
       );
     }

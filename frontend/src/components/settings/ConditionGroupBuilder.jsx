@@ -1,4 +1,6 @@
+import { useEffect, useState } from 'react';
 import { Plus, Trash2, X } from 'lucide-react';
+import { ticketsAPI } from '../../services/api';
 
 /**
  * AND/OR condition-group builder for workflow condition nodes. Edits the
@@ -55,7 +57,29 @@ const OPERATORS_BY_TYPE = {
 const VALUELESS = new Set(['is_empty', 'is_not_empty', 'is_true', 'is_false']);
 const LIST_OPERATORS = new Set(['in', 'not_in']);
 
-const fieldSpec = (value) => CG_FIELDS.find((f) => f.value === value) || CG_FIELDS[0];
+// Custom-field definitions extend the catalog as `custom:<key>` string fields
+// (mirrors the backend's dynamic fieldSpec). Fetched once per session.
+let customFieldCache = null;
+function useConditionFields() {
+  const [fields, setFields] = useState(customFieldCache
+    ? [...CG_FIELDS, ...customFieldCache]
+    : CG_FIELDS);
+  useEffect(() => {
+    if (customFieldCache) return;
+    ticketsAPI.customFieldDefinitions()
+      .then((res) => {
+        customFieldCache = (res?.data || []).map((d) => ({
+          value: `custom:${d.key}`, label: `Custom: ${d.label}`, type: 'string',
+        }));
+        if (customFieldCache.length) setFields([...CG_FIELDS, ...customFieldCache]);
+      })
+      .catch(() => { customFieldCache = []; });
+  }, []);
+  return fields;
+}
+
+const fieldSpecIn = (fields, value) => fields.find((f) => f.value === value)
+  || (String(value || '').startsWith('custom:') ? { value, label: value, type: 'string' } : fields[0]);
 const defaultOperator = (spec) => OPERATORS_BY_TYPE[spec.type][0][0];
 
 export function emptyRow() {
@@ -87,8 +111,8 @@ function LogicToggle({ logic, onChange }) {
   );
 }
 
-function ValueInput({ row, onChange }) {
-  const spec = fieldSpec(row.field);
+function ValueInput({ row, onChange, fields }) {
+  const spec = fieldSpecIn(fields, row.field);
   if (VALUELESS.has(row.operator)) return null;
 
   if (LIST_OPERATORS.has(row.operator)) {
@@ -138,21 +162,21 @@ function ValueInput({ row, onChange }) {
   );
 }
 
-function ConditionRow({ row, onChange, onRemove }) {
-  const spec = fieldSpec(row.field);
+function ConditionRow({ row, onChange, onRemove, fields }) {
+  const spec = fieldSpecIn(fields, row.field);
   const operators = OPERATORS_BY_TYPE[spec.type];
   return (
     <div className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,0.9fr)_minmax(0,1fr)_auto] items-center gap-1.5">
       <select
         value={row.field}
         onChange={(e) => {
-          const next = fieldSpec(e.target.value);
+          const next = fieldSpecIn(fields, e.target.value);
           onChange({ field: next.value, operator: defaultOperator(next), value: next.type === 'enum' ? next.options?.[0] : '' });
         }}
         aria-label="Field"
         className="w-full rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-slate-900"
       >
-        {CG_FIELDS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+        {fields.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
       </select>
       <select
         value={row.operator}
@@ -162,7 +186,7 @@ function ConditionRow({ row, onChange, onRemove }) {
       >
         {operators.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
       </select>
-      <div>{VALUELESS.has(row.operator) ? <span className="text-xs text-slate-400 pl-1">—</span> : <ValueInput row={row} onChange={(value) => onChange({ ...row, value })} />}</div>
+      <div>{VALUELESS.has(row.operator) ? <span className="text-xs text-slate-400 pl-1">—</span> : <ValueInput row={row} onChange={(value) => onChange({ ...row, value })} fields={fields} />}</div>
       <button
         type="button"
         onClick={onRemove}
@@ -175,7 +199,7 @@ function ConditionRow({ row, onChange, onRemove }) {
   );
 }
 
-function GroupEditor({ group, onChange, onRemove, nested = false }) {
+function GroupEditor({ group, onChange, onRemove, nested = false, fields }) {
   const patch = (index, entry) => {
     const conditions = group.conditions.slice();
     conditions[index] = entry;
@@ -208,6 +232,7 @@ function GroupEditor({ group, onChange, onRemove, nested = false }) {
               key={index}
               group={entry}
               nested
+              fields={fields}
               onChange={(next) => patch(index, next)}
               onRemove={() => removeAt(index)}
             />
@@ -215,6 +240,7 @@ function GroupEditor({ group, onChange, onRemove, nested = false }) {
             <ConditionRow
               key={index}
               row={entry}
+              fields={fields}
               onChange={(next) => patch(index, next)}
               onRemove={() => removeAt(index)}
             />
@@ -247,6 +273,7 @@ function GroupEditor({ group, onChange, onRemove, nested = false }) {
 }
 
 export default function ConditionGroupBuilder({ value, onChange, onClear }) {
+  const fields = useConditionFields();
   const group = isGroup(value) ? value : null;
 
   if (!group) {
@@ -263,7 +290,7 @@ export default function ConditionGroupBuilder({ value, onChange, onClear }) {
 
   return (
     <div className="space-y-2">
-      <GroupEditor group={group} onChange={onChange} />
+      <GroupEditor group={group} onChange={onChange} fields={fields} />
       <div className="flex items-center justify-between">
         <p className="text-[11px] text-slate-400">Structured conditions override the raw JSONLogic rule below.</p>
         <button

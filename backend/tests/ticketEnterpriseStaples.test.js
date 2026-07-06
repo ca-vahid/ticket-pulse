@@ -90,6 +90,19 @@ describe('macros', () => {
   });
 });
 
+describe('thread summary prompt safety', () => {
+  test('summarize refuses an empty thread instead of hallucinating', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue({
+      id: 501, workspaceId: 1, subject: 'x', status: 'Open', priority: 2,
+      descriptionText: null, requester: null, assignedTech: null,
+    });
+    const threadMock = { findMany: jest.fn().mockResolvedValue([]) };
+    prismaMock.ticketThreadEntry = threadMock;
+    const { default: ticketSummaryService } = await import('../src/services/ticketSummaryService.js');
+    await expect(ticketSummaryService.summarize(501, 1)).rejects.toThrow(/nothing to summarize/i);
+  });
+});
+
 describe('custom fields', () => {
   test('definition keys and types are validated', async () => {
     await expect(customFieldService.createDefinition(1, { key: 'Bad Key', label: 'X' })).rejects.toThrow(/lowercase/i);

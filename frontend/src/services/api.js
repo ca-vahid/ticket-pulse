@@ -603,6 +603,12 @@ export const ticketsAPI = {
     return await api.get(`/tickets/${id}/proposed-replies`);
   },
 
+  // AI thread summary (on-demand, read-only)
+  summarize: async (id) => await apiLongTimeout.post(`/tickets/${id}/summarize`),
+
+  // Time tracking
+  logTime: async (id, { minutes, billable = false, note = null }) => await api.post(`/tickets/${id}/time`, { minutes, billable, note }),
+
   // Explicit ticket links + duplicate-close
   links: async (id) => await api.get(`/tickets/${id}/links`),
   addLink: async (id, relatedTicketId, kind = 'related_to') => await api.post(`/tickets/${id}/links`, { relatedTicketId, kind }),

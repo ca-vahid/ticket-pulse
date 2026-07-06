@@ -1510,6 +1510,36 @@ class TicketService {
    * it works for any origin; the optional auto-resolve is TP-born only
    * (FS-born status belongs to FreshService).
    */
+  /**
+   * Log time against a ticket (TP's own tracking layer — both origins, never
+   * written to FreshService). Adds to the running totals with an audit entry.
+   */
+  async logTime(ticketId, workspaceId, { minutes, billable = false, note = null } = {}, actor) {
+    const amount = Number(minutes);
+    if (!Number.isInteger(amount) || amount < 1 || amount > 24 * 60) {
+      throw new ValidationError('Time entry must be between 1 minute and 24 hours');
+    }
+    const ticket = await prisma.ticket.findFirst({ where: { id: ticketId, workspaceId } });
+    if (!ticket) throw new NotFoundError(`Ticket ${ticketId} not found in this workspace`);
+
+    const updated = await prisma.ticket.update({
+      where: { id: ticket.id },
+      data: {
+        timeSpentMinutes: (ticket.timeSpentMinutes || 0) + amount,
+        ...(billable
+          ? { billableMinutes: (ticket.billableMinutes || 0) + amount }
+          : { nonBillableMinutes: (ticket.nonBillableMinutes || 0) + amount }),
+      },
+      select: { id: true, timeSpentMinutes: true, billableMinutes: true, nonBillableMinutes: true },
+    });
+    await this._audit(ticket.id, 'time_logged', actor, {
+      minutes: amount,
+      billable: billable === true,
+      ...(note ? { note: String(note).slice(0, 500) } : {}),
+    });
+    return updated;
+  }
+
   async setNoise(ticketId, workspaceId, { noise = true, resolve = false } = {}, actor) {
     const ticket = await prisma.ticket.findFirst({ where: { id: ticketId, workspaceId } });
     if (!ticket) throw new NotFoundError(`Ticket ${ticketId} not found in this workspace`);

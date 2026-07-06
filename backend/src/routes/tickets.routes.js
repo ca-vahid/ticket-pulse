@@ -658,6 +658,23 @@ router.get('/:id/related', asyncHandler(async (req, res) => {
   res.json({ success: true, data: related });
 }));
 
+// Log time against a ticket (TP tracking layer — both origins).
+router.post('/:id/time', asyncHandler(async (req, res) => {
+  const result = await ticketService.logTime(
+    parseTicketId(req), req.workspaceId,
+    { minutes: req.body?.minutes, billable: req.body?.billable === true, note: req.body?.note },
+    req.ticketActor,
+  );
+  res.json({ success: true, data: result });
+}));
+
+// On-demand AI thread summary for the handling agent (read-only, never stored).
+router.post('/:id/summarize', asyncHandler(async (req, res) => {
+  const { default: ticketSummaryService } = await import('../services/ticketSummaryService.js');
+  const summary = await ticketSummaryService.summarize(parseTicketId(req), req.workspaceId);
+  res.json({ success: true, data: summary });
+}));
+
 // Explicit ticket links (duplicate_of / related_to / parent_of) + duplicate-close.
 router.get('/:id/links', asyncHandler(async (req, res) => {
   const { default: ticketLinkService } = await import('../services/ticketLinkService.js');
