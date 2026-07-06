@@ -126,7 +126,7 @@ function recommendationList(recommendation) {
 }
 
 const TICKET_INCLUDE = {
-  assignedTech: { select: { id: true, name: true, email: true, photoUrl: true } },
+  assignedTech: { select: { id: true, name: true, email: true, photoUrl: true, isActive: true, origin: true } },
   requester: {
     select: {
       id: true, name: true, email: true, phone: true, mobile: true,
@@ -507,9 +507,10 @@ class TicketService {
       }),
     ]);
 
-    const [incomingByTicket, aiByTicket] = await Promise.all([
+    const [incomingByTicket, aiByTicket, bypassByTicket] = await Promise.all([
       this._lastPublicEntryIncoming(items.map((t) => t.id)),
       this._aiRunStateByTicket(items.map((t) => t.id)),
+      this._aiBypassByTicket(items),
     ]);
 
     return {
@@ -520,6 +521,7 @@ class TicketService {
         lastActivityAt: t.lastRealActivityAt || t.freshserviceUpdatedAt || t.updatedAt,
         stateChip: deriveStateChip(t, incomingByTicket.get(t.id) === true),
         ai: aiByTicket.get(t.id) || null,
+        aiBypass: bypassByTicket.get(t.id) || null,
       })),
       total,
       page,
@@ -563,6 +565,63 @@ class TicketService {
       }
     } catch (err) {
       logger.warn(`ai-run lookup failed (non-fatal): ${err.message}`);
+    }
+    return map;
+  }
+
+  /**
+   * "FS bypass" per ticket: our AI auto-assigned a technician (and synced it to
+   * FreshService), then a human reassigned the ticket in FS to someone else.
+   * The current assignee is then whoever the human picked — often an agent who
+   * is deactivated in Ticket Pulse (an external group we triage for). We surface
+   * this so the queue can show the real assignee with a "bypassed by FS" hint
+   * instead of the stale AI pick. Display-only — no pipeline state is changed.
+   */
+  async _aiBypassByTicket(items) {
+    const map = new Map();
+    // Only tickets that actually have a current assignee can have been bypassed.
+    const assigned = items.filter((t) => t.assignedTechId !== null && t.assignedTechId !== undefined);
+    if (!assigned.length) return map;
+    try {
+      const runs = await prisma.assignmentPipelineRun.findMany({
+        where: {
+          ticketId: { in: assigned.map((t) => t.id) },
+          status: 'completed',
+          decision: 'auto_assigned',
+          assignedTechId: { not: null },
+        },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, ticketId: true, assignedTechId: true, recommendation: true },
+      });
+      // Newest auto-assign per ticket.
+      const latestRun = new Map();
+      for (const r of runs) if (!latestRun.has(r.ticketId)) latestRun.set(r.ticketId, r);
+
+      const bypassed = assigned.filter((t) => {
+        const r = latestRun.get(t.id);
+        return r && r.assignedTechId !== t.assignedTechId; // human moved it off the AI pick
+      });
+      if (!bypassed.length) return map;
+
+      // Who did the reassignment: the current (still-active) episode's assigner.
+      const episodes = await prisma.ticketAssignmentEpisode.findMany({
+        where: { ticketId: { in: bypassed.map((t) => t.id) }, endMethod: 'still_active' },
+        select: { ticketId: true, startAssignedByName: true },
+      });
+      const actorByTicket = new Map(episodes.map((e) => [e.ticketId, e.startAssignedByName]));
+
+      for (const t of bypassed) {
+        const r = latestRun.get(t.id);
+        const top = recommendationList(r.recommendation)[0] || null;
+        map.set(t.id, {
+          runId: r.id,
+          aiTechId: r.assignedTechId,
+          aiTechName: top?.techName || null,
+          byActorName: actorByTicket.get(t.id) || null,
+        });
+      }
+    } catch (err) {
+      logger.warn(`ai-bypass lookup failed (non-fatal): ${err.message}`);
     }
     return map;
   }

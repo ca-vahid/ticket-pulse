@@ -423,6 +423,7 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                 <AssigneePicker
                   ticketId={ticketId}
                   value={ticket.assignedTechId}
+                  currentTech={ticket.assignedTech}
                   technicians={meta?.technicians || []}
                   ticketOrigin={ticket.origin}
                   assignFn={fsEditable ? fsAssign : undefined}

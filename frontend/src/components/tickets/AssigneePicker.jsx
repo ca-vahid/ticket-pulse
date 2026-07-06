@@ -27,6 +27,7 @@ export default function AssigneePicker({
   onAiAssign = null, // open the live AI-assignment modal instead of blind-queueing
   aiSuggestion = null, // { runId, state: 'suggested'|'analyzing'|'queued', techId, techName, score }
   ticketOrigin = null, // 'ticketpulse' | 'freshservice' — hides local agents on FS-born tickets
+  currentTech = null, // the ticket's own assignee object {id,name,photoUrl,isActive,origin} — used when the assignee isn't in the active team list (deactivated / FS-only agents)
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -39,7 +40,15 @@ export default function AssigneePicker({
   // cards can't clip it — position is computed from the trigger rect.
   const [panelPos, setPanelPos] = useState(null); // { left, top } | { left, bottom }
 
-  const current = technicians.find((t) => t.id === value) || null;
+  // Prefer the active-team match; fall back to the ticket's own assignee object
+  // so an assignee who's deactivated in Ticket Pulse (but still active in
+  // FreshService — e.g. an external group we triage for) still renders by name
+  // instead of collapsing to "unassigned" or an AI suggestion.
+  const activeMatch = technicians.find((t) => t.id === value) || null;
+  const current = activeMatch || (value != null ? currentTech : null);
+  // The assignee exists but isn't an assignable active member: show them, tag
+  // as read-only (they can only be (re)assigned in FreshService).
+  const currentReadOnly = Boolean(current) && !activeMatch;
 
   const placePanel = () => {
     const rect = rootRef.current?.getBoundingClientRect();
@@ -158,6 +167,14 @@ export default function AssigneePicker({
           <>
             <PersonAvatar name={current.name} photoUrl={current.photoUrl} size={sm ? 'h-5 w-5' : 'h-7 w-7'} textSize={sm ? 'text-[8px]' : 'text-[10px]'} />
             <span className={`${sm ? 'text-xs' : 'text-sm'} text-slate-700 truncate`}>{current.name}</span>
+            {currentReadOnly && (
+              <span
+                title="Assigned in FreshService — not an active Ticket Pulse member, so they can only be (re)assigned in FreshService."
+                className="flex-shrink-0 text-[8px] font-semibold uppercase tracking-wide px-1 py-0.5 rounded bg-amber-100 text-amber-700"
+              >
+                read-only
+              </span>
+            )}
           </>
         ) : aiSuggestion?.state === 'suggested' ? (
           // Unassigned but the AI has a pending pick — surface it at a glance.
