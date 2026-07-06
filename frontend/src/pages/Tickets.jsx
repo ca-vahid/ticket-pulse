@@ -10,6 +10,7 @@ import TicketPreview from '../components/tickets/TicketPreview';
 import ScheduledTicketsPanel from '../components/tickets/ScheduledTicketsPanel';
 import TicketFilterRail, { ActiveFilterBar } from '../components/tickets/TicketFilterRail';
 import AssigneePicker from '../components/tickets/AssigneePicker';
+import StatusPicker from '../components/tickets/StatusPicker';
 import MobileAssignSheet from '../components/tickets/MobileAssignSheet';
 import AiAssignModal from '../components/tickets/AiAssignModal';
 import FsSyncConfirm from '../components/tickets/FsSyncConfirm';
@@ -406,6 +407,13 @@ export default function Tickets() {
   // ---- AI assignment: live modal + the Assignment Review connector chip ----
   const [aiTicket, setAiTicket] = useState(null); // ticket whose pipeline modal is open
   const [assignSheetTicket, setAssignSheetTicket] = useState(null); // mobile touch-first assign sheet
+  const [toast, setToast] = useState(null); // { message, undo? } — instant-save feedback (QA 07-06 #3)
+  const toastTimerRef = useRef(null);
+  const showToast = useCallback((message, undo = null) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast({ message, undo });
+    toastTimerRef.current = setTimeout(() => setToast(null), undo ? 5000 : 3000);
+  }, []);
   const [aiReviewTotal, setAiReviewTotal] = useState(0);
   const fetchAiReviewTotal = useCallback(async () => {
     try {
@@ -465,6 +473,19 @@ export default function Tickets() {
       });
     });
   }, [meta?.technicians]);
+  // FS-born status change from the queue: same confirmed write-back flow
+  // (fails first if FreshService rejects), per QA 07-06 #2.
+  const fsStatusChange = useCallback((ticket, nextStatus) => new Promise((resolve, reject) => {
+    setFsError(null);
+    setFsConfirm({
+      ticketId: ticket.id,
+      fsRef: String(ticket.freshserviceTicketId),
+      changes: [{ field: 'Status', from: ticket.status, to: nextStatus }],
+      payload: { status: nextStatus },
+      resolve,
+      reject,
+    });
+  }), []);
   const runFsSync = async () => {
     if (!fsConfirm) return;
     setFsBusy(true); setFsError(null);
@@ -1101,7 +1122,23 @@ export default function Tickets() {
                                         )}
                                       </span>
                                     )}
-                                    <span className={`${CELL} ${cellPad}`}><StatusPill status={ticket.status} size="sm" /></span>
+                                    <span className={`${CELL} py-1`}>
+                                      {(isEditable || fsRowEditable) && !removedLike ? (
+                                        <StatusPicker
+                                          ticketId={ticket.id}
+                                          value={ticket.status}
+                                          fsChange={fsRowEditable ? ((next) => fsStatusChange(ticket, next)) : null}
+                                          onChanged={(next, prev) => {
+                                            refreshAfterEdit();
+                                            showToast(`${ticket.displayRef} → ${next}`, isEditable ? (async () => {
+                                              try { await ticketsAPI.setStatus(ticket.id, prev); refreshAfterEdit(); } catch { /* refresh shows truth */ }
+                                            }) : null);
+                                          }}
+                                        />
+                                      ) : (
+                                        <StatusPill status={ticket.status} size="sm" />
+                                      )}
+                                    </span>
                                     <span className={`${CELL} ${cellPad}`}>
                                       {removedLike
                                         ? <span className="text-xs text-slate-300">—</span>
@@ -1229,6 +1266,24 @@ export default function Tickets() {
 
       {/* Mobile filter bottom sheet (vaul) — always mounted so it animates in/out */}
       <TicketFilterRail meta={meta} stats={stats} sheet mobileOpen={mobileFilters} onMobileClose={() => setMobileFilters(false)} />
+
+      {/* Instant-save toast with Undo (QA 07-06 #3) */}
+      {toast && (
+        <div
+          role="status"
+          className="fixed bottom-5 right-5 z-[70] flex items-center gap-3 px-4 py-2.5 rounded-lg shadow-soft text-sm font-medium bg-emerald-600 text-white animate-slideInLeft"
+        >
+          {toast.message}
+          {toast.undo && (
+            <button
+              onClick={() => { const fn = toast.undo; setToast(null); fn(); }}
+              className="tp-focus-ring px-2 py-0.5 rounded-md bg-white/20 hover:bg-white/30 text-xs font-bold uppercase tracking-wide"
+            >
+              Undo
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Mobile touch-first assignment (bottom sheet) */}
       <MobileAssignSheet

@@ -1337,10 +1337,30 @@ class TicketService {
       if (data.internalSubcategoryId === undefined) {
         patch.internalSubcategoryId = null;
       }
+      // Keep the legacy AI-assessment name fields in lockstep — otherwise a
+      // cleared category "reappears" in the UI via the tpSkill fallback
+      // (QA 07-06 #5: choosing Uncategorized after assessment did nothing).
+      if (data.internalCategoryId === null) {
+        patch.tpSkill = null;
+        patch.tpSubskill = null;
+      } else {
+        const cat = await prisma.competencyCategory.findUnique({
+          where: { id: data.internalCategoryId }, select: { name: true },
+        });
+        if (cat) patch.tpSkill = cat.name;
+      }
     }
     if (data.internalSubcategoryId !== undefined && data.internalSubcategoryId !== ticket.internalSubcategoryId) {
       patch.internalSubcategoryId = data.internalSubcategoryId;
       changes.internalSubcategoryId = { from: ticket.internalSubcategoryId, to: data.internalSubcategoryId };
+      if (data.internalSubcategoryId === null) {
+        patch.tpSubskill = null;
+      } else {
+        const sub = await prisma.competencyCategory.findUnique({
+          where: { id: data.internalSubcategoryId }, select: { name: true },
+        });
+        if (sub) patch.tpSubskill = sub.name;
+      }
     }
     if (data.groupId !== undefined) {
       const fsGroupId = await this._validateGroup(workspaceId, data.groupId);

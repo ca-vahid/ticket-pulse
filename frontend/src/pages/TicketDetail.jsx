@@ -471,9 +471,9 @@ export default function TicketDetail() {
   const composerFileInputRef = useRef(null);
   const pasteCountRef = useRef(0);
 
-  const showToast = useCallback((tone, message) => {
-    setToast({ tone, message });
-    setTimeout(() => setToast(null), 3500);
+  const showToast = useCallback((tone, message, { undo = null, duration = 3500 } = {}) => {
+    setToast({ tone, message, undo });
+    setTimeout(() => setToast(null), undo ? Math.max(duration, 5000) : duration);
   }, []);
 
   // ---- Draft guard: per-ticket stash so navigating away never loses a reply ----
@@ -853,13 +853,26 @@ export default function TicketDetail() {
     return null;
   }, [techPhotoByEmail, requesterPhoto, requesterEmail]);
 
-  const applyChange = useCallback(async (field, fn) => {
+  const applyChange = useCallback(async (field, fn, { undo = null, label = 'Saved' } = {}) => {
     setSavingField(field);
     lastLocalMutationRef.current = Date.now(); // own change — no self-flash
     try {
       await fn();
       await fetchTicket({ silent: true });
-      showToast('emerald', 'Saved');
+      // Instant saves get an Undo (QA 07-06 #3): the toast holds the previous
+      // value for ~5s and re-applies it through the same API on click.
+      showToast('emerald', label, undo ? {
+        undo: async () => {
+          lastLocalMutationRef.current = Date.now();
+          try {
+            await undo();
+            await fetchTicket({ silent: true });
+            showToast('sky', 'Change undone');
+          } catch (err) {
+            showToast('red', err.response?.data?.message || err.message || 'Undo failed');
+          }
+        },
+      } : {});
     } catch (err) {
       showToast('red', err.response?.data?.message || err.message || 'Change failed');
     } finally {
@@ -1997,8 +2010,13 @@ export default function TicketDetail() {
                       disabled={(!canWrite && !fsEditable) || savingField === 'status'}
                       onChange={(e) => {
                         const next = e.target.value;
-                        if (canWrite) applyChange('status', () => ticketsAPI.setStatus(ticketId, next));
-                        else requestFsSync([{ field: 'Status', from: ticket.status, to: next }], { status: next }).catch(() => {});
+                        const prev = ticket.status;
+                        if (canWrite) {
+                          applyChange('status', () => ticketsAPI.setStatus(ticketId, next), {
+                            label: `Status → ${next}`,
+                            undo: () => ticketsAPI.setStatus(ticketId, prev),
+                          });
+                        } else requestFsSync([{ field: 'Status', from: ticket.status, to: next }], { status: next }).catch(() => {});
                       }}
                       className={fieldClass}
                       aria-label="Ticket status"
@@ -2014,8 +2032,13 @@ export default function TicketDetail() {
                       disabled={(!canWrite && !fsEditable) || savingField === 'priority'}
                       onChange={(e) => {
                         const next = Number(e.target.value);
-                        if (canWrite) applyChange('priority', () => ticketsAPI.update(ticketId, { priority: next }));
-                        else requestFsSync([{ field: 'Priority', from: PRIORITY_LABELS[ticket.priority], to: PRIORITY_LABELS[next] }], { priority: next }).catch(() => {});
+                        const prev = ticket.priority;
+                        if (canWrite) {
+                          applyChange('priority', () => ticketsAPI.update(ticketId, { priority: next }), {
+                            label: `Priority → ${PRIORITY_LABELS[next]}`,
+                            undo: () => ticketsAPI.update(ticketId, { priority: prev }),
+                          });
+                        } else requestFsSync([{ field: 'Priority', from: PRIORITY_LABELS[ticket.priority], to: PRIORITY_LABELS[next] }], { priority: next }).catch(() => {});
                       }}
                       className={fieldClass}
                       aria-label="Ticket priority"
@@ -2101,11 +2124,16 @@ export default function TicketDetail() {
                           disabled={savingField === 'category'}
                           onChange={(e) => {
                             const nextId = e.target.value ? Number(e.target.value) : null;
+                            const prevCat = ticket.internalCategoryId ?? null;
+                            const prevSub = ticket.internalSubcategoryId ?? null;
                             if (canWrite) {
                               applyChange('category', () => ticketsAPI.update(ticketId, {
                                 internalCategoryId: nextId,
                                 internalSubcategoryId: null,
-                              }));
+                              }), {
+                                label: 'Category updated',
+                                undo: () => ticketsAPI.update(ticketId, { internalCategoryId: prevCat, internalSubcategoryId: prevSub }),
+                              });
                             } else {
                               const nextName = (meta?.categoryTree || []).find((c) => c.id === nextId)?.name || 'Uncategorized';
                               requestFsSync(
@@ -2507,11 +2535,19 @@ export default function TicketDetail() {
       {toast && (
         <div
           role="status"
-          className={`fixed bottom-5 right-5 z-50 px-4 py-2.5 rounded-lg shadow-soft text-sm font-medium animate-slideInLeft ${
+          className={`fixed bottom-5 right-5 z-50 flex items-center gap-3 px-4 py-2.5 rounded-lg shadow-soft text-sm font-medium animate-slideInLeft ${
             toast.tone === 'red' ? 'bg-red-600 text-white' : toast.tone === 'sky' ? 'bg-sky-600 text-white' : 'bg-emerald-600 text-white'
           }`}
         >
           {toast.message}
+          {toast.undo && (
+            <button
+              onClick={() => { const fn = toast.undo; setToast(null); fn(); }}
+              className="tp-focus-ring px-2 py-0.5 rounded-md bg-white/20 hover:bg-white/30 text-xs font-bold uppercase tracking-wide"
+            >
+              Undo
+            </button>
+          )}
         </div>
       )}
 
