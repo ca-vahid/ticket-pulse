@@ -3673,6 +3673,7 @@ class SyncService {
         data: { status: 'skipped_stale' },
       }).catch(() => {});
       logger.info(`FS→TP mirror-back: TP ticket ${ticket.id} (FS #${ticket.freshserviceTicketId}) → ${fsTerminal}`);
+      await this._broadcastReconcile(workspaceId, ticket, fsTerminal);
       return { changed: true, status: fsTerminal };
     }
 
@@ -3704,7 +3705,22 @@ class SyncService {
       data: { status: 'skipped_stale' },
     });
     logger.info(`On-open reconcile: ticket ${ticket.id} (FS #${ticket.freshserviceTicketId}) → ${newStatus}`);
+    await this._broadcastReconcile(workspaceId, ticket, newStatus);
     return { changed: true, status: newStatus };
+  }
+
+  /**
+   * Notify open viewers when a background reconcile flipped a ticket's status,
+   * so the (debounced) SSE refetch reflects it — this is what lets the ticket
+   * page load instantly without blocking on the FreshService round-trip.
+   */
+  async _broadcastReconcile(workspaceId, ticket, status) {
+    try {
+      const mgr = await getSSEManager();
+      mgr?.broadcast?.('ticket-change', {
+        action: 'sync', workspaceId, ticketId: ticket.id, origin: ticket.origin, status,
+      }, workspaceId);
+    } catch { /* non-fatal */ }
   }
 
   /**

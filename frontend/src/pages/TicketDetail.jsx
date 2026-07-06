@@ -917,18 +917,22 @@ export default function TicketDetail() {
   }, [ticket?.attachments, showToast]);
 
   const attachmentInputRef = useRef(null);
+  const [uploadProgress, setUploadProgress] = useState(null); // { pct, name, count } | null
   const uploadAttachments = async (picked) => {
     const files = Array.from(picked || []);
     if (files.length === 0) return;
     setSavingField('attachments');
+    const label = files.length === 1 ? files[0].name : `${files.length} files`;
+    setUploadProgress({ pct: 0, name: label, count: files.length });
     try {
-      await ticketsAPI.uploadAttachments(ticketId, files);
+      await ticketsAPI.uploadAttachments(ticketId, files, (pct) => setUploadProgress((p) => (p ? { ...p, pct } : p)));
       await fetchTicket({ silent: true });
       showToast('emerald', `${files.length} file${files.length === 1 ? '' : 's'} attached`);
     } catch (err) {
       showToast('red', err.response?.data?.message || err.message || 'Upload failed');
     } finally {
       setSavingField(null);
+      setUploadProgress(null);
     }
   };
 
@@ -2254,11 +2258,27 @@ export default function TicketDetail() {
                           className="tp-focus-ring ml-auto inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 disabled:opacity-50"
                         >
                           {savingField === 'attachments' ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" /> : <Paperclip className="w-3 h-3" aria-hidden="true" />}
-                          Add
+                          {uploadProgress ? `${uploadProgress.pct}%` : 'Add'}
                         </button>
                       </>
                     )}
                   </div>
+                  {uploadProgress && (
+                    <div className="mb-2 rounded-lg border border-blue-100 bg-blue-50/60 px-2.5 py-2">
+                      <div className="flex items-center justify-between text-[11px] mb-1">
+                        <span className="text-slate-600 truncate mr-2">
+                          {uploadProgress.pct < 100 ? 'Uploading' : 'Processing'} {uploadProgress.name}
+                        </span>
+                        <span className="font-semibold text-blue-700 tabular-nums flex-shrink-0">{uploadProgress.pct}%</span>
+                      </div>
+                      <div className="h-1.5 rounded-full bg-blue-100 overflow-hidden">
+                        <div
+                          className="h-full bg-blue-600 rounded-full transition-[width] duration-150"
+                          style={{ width: `${uploadProgress.pct}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
                   {(ticket.attachments?.length || 0) === 0 ? (
                     <p className="text-xs text-slate-400">No files attached{canWrite ? ' — drop something in with Add.' : '.'}</p>
                   ) : (
