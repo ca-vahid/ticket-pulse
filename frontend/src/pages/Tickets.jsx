@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Activity, AlertCircle, ArrowDownWideNarrow, ArrowUpNarrowWide, CalendarDays, Check,
-  CheckCircle2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Download, Inbox,
+  CheckCircle2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, CornerUpRight, Download, Inbox,
   ListFilter, Loader2, MessageSquare, Plus, Rows2, Rows3, Rows4, Search, ShieldCheck, Sparkles, Ticket, UserRound, X,
 } from 'lucide-react';
 import AppHeader from '../components/AppHeader';
@@ -28,16 +28,27 @@ const DEFAULT_STATUSES = ['Open', 'Pending'];
 const PAGE_SIZE = 25;
 
 /**
- * "FS bypass" marker: our AI auto-assigned this ticket, then a human reassigned
- * it in FreshService (often to an agent deactivated in Ticket Pulse). The row
- * shows the real current assignee; this amber chip flags that the AI pick was
- * overridden and links to the assignment-history detail.
+ * "Handled in FreshService" marker: the assignment was made in FS, not by our
+ * AI. Either the AI auto-assigned someone and a human reassigned it in FS
+ * (kind='reassigned'), or the ticket was already taken in FS before the AI run
+ * could act (kind='handled_in_fs'). The row shows the real current assignee;
+ * this amber chip flags the FS handoff and links to the assignment-history
+ * detail.
  */
 function BypassBadge({ bypass }) {
-  const bits = [];
-  if (bypass.aiTechName) bits.push(`AI assigned ${bypass.aiTechName}`);
-  if (bypass.byActorName) bits.push(`reassigned by ${bypass.byActorName}`);
-  const title = `FS bypass — ${bits.join('; ') || 'reassigned in FreshService'}. Click for assignment history.`;
+  let title;
+  if (bypass.kind === 'reassigned') {
+    const bits = [];
+    if (bypass.aiTechName) bits.push(`AI assigned ${bypass.aiTechName}`);
+    if (bypass.byActorName) bits.push(`reassigned by ${bypass.byActorName}`);
+    title = `Handled in FreshService — ${bits.join('; ') || 'reassigned in FreshService'}. Click for assignment history.`;
+  } else {
+    const who = bypass.byActorName
+      ? (bypass.selfPicked ? `self-assigned by ${bypass.byActorName}` : `assigned by ${bypass.byActorName}`)
+      : 'assigned in FreshService';
+    const aiNote = bypass.aiTechName ? ` (AI would have picked ${bypass.aiTechName})` : '';
+    title = `Handled in FreshService — ${who} before AI could act${aiNote}. Click for assignment history.`;
+  }
   return (
     <Link
       to={`/assignments/history/${bypass.runId}`}
@@ -46,7 +57,7 @@ function BypassBadge({ bypass }) {
       aria-label={title}
       className="tp-focus-ring flex-shrink-0 inline-flex items-center h-5 w-5 rounded-md bg-amber-50 border border-amber-200 text-amber-600 hover:bg-amber-100 transition-colors"
     >
-      <Sparkles className="w-3 h-3 m-auto" aria-hidden="true" />
+      <CornerUpRight className="w-3 h-3 m-auto" aria-hidden="true" />
     </Link>
   );
 }

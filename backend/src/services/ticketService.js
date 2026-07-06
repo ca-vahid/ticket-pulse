@@ -570,55 +570,56 @@ class TicketService {
   }
 
   /**
-   * "FS bypass" per ticket: our AI auto-assigned a technician (and synced it to
-   * FreshService), then a human reassigned the ticket in FS to someone else.
-   * The current assignee is then whoever the human picked — often an agent who
-   * is deactivated in Ticket Pulse (an external group we triage for). We surface
-   * this so the queue can show the real assignee with a "bypassed by FS" hint
-   * instead of the stale AI pick. Display-only — no pipeline state is changed.
+   * "AI bypassed" per ticket: the assignment was made in FreshService, not by
+   * our AI, so the queue can flag it. Two shapes:
+   *   - reassigned:   our AI auto-assigned a tech (and synced it), then a human
+   *                   reassigned the ticket in FS to someone else.
+   *   - handled_in_fs: the ticket was already assigned in FS (self-picked or by
+   *                   a coordinator) before our AI run could act — the pipeline
+   *                   aborts with preflightAbort.code === 'superseded_assignee'.
+   * The current assignee is whoever picked it up (often an agent deactivated in
+   * Ticket Pulse — an external group we triage for). Display-only — no pipeline
+   * state is changed.
    */
   async _aiBypassByTicket(items) {
     const map = new Map();
-    // Only tickets that actually have a current assignee can have been bypassed.
     const assigned = items.filter((t) => t.assignedTechId !== null && t.assignedTechId !== undefined);
     if (!assigned.length) return map;
     try {
       const runs = await prisma.assignmentPipelineRun.findMany({
-        where: {
-          ticketId: { in: assigned.map((t) => t.id) },
-          status: 'completed',
-          decision: 'auto_assigned',
-          assignedTechId: { not: null },
-        },
+        where: { ticketId: { in: assigned.map((t) => t.id) }, status: 'completed' },
         orderBy: { createdAt: 'desc' },
-        select: { id: true, ticketId: true, assignedTechId: true, recommendation: true },
+        select: { id: true, ticketId: true, decision: true, assignedTechId: true, syncPayload: true, recommendation: true },
       });
-      // Newest auto-assign per ticket.
+      // Newest completed run per ticket — its outcome is what's relevant.
       const latestRun = new Map();
       for (const r of runs) if (!latestRun.has(r.ticketId)) latestRun.set(r.ticketId, r);
 
-      const bypassed = assigned.filter((t) => {
-        const r = latestRun.get(t.id);
-        return r && r.assignedTechId !== t.assignedTechId; // human moved it off the AI pick
-      });
-      if (!bypassed.length) return map;
-
-      // Who did the reassignment: the current (still-active) episode's assigner.
-      const episodes = await prisma.ticketAssignmentEpisode.findMany({
-        where: { ticketId: { in: bypassed.map((t) => t.id) }, endMethod: 'still_active' },
-        select: { ticketId: true, startAssignedByName: true },
-      });
-      const actorByTicket = new Map(episodes.map((e) => [e.ticketId, e.startAssignedByName]));
-
-      for (const t of bypassed) {
-        const r = latestRun.get(t.id);
+      const byId = new Map(assigned.map((t) => [t.id, t]));
+      const flagged = [];
+      for (const [ticketId, r] of latestRun) {
+        const t = byId.get(ticketId);
+        const supersededInFs = r.syncPayload?.preflightAbort?.code === 'superseded_assignee';
+        const reassigned = r.decision === 'auto_assigned' && r.assignedTechId !== null && r.assignedTechId !== t.assignedTechId;
+        if (!supersededInFs && !reassigned) continue;
         const top = recommendationList(r.recommendation)[0] || null;
-        map.set(t.id, {
-          runId: r.id,
-          aiTechId: r.assignedTechId,
-          aiTechName: top?.techName || null,
-          byActorName: actorByTicket.get(t.id) || null,
-        });
+        flagged.push({ t, runId: r.id, aiTechName: top?.techName || null, kind: reassigned ? 'reassigned' : 'handled_in_fs' });
+      }
+      if (!flagged.length) return map;
+
+      // Who assigned it in FS: the current (still-active) episode. self_picked
+      // means the assignee grabbed it themselves.
+      const episodes = await prisma.ticketAssignmentEpisode.findMany({
+        where: { ticketId: { in: flagged.map((f) => f.t.id) }, endMethod: 'still_active' },
+        select: { ticketId: true, startMethod: true, startAssignedByName: true },
+      });
+      const epByTicket = new Map(episodes.map((e) => [e.ticketId, e]));
+
+      for (const f of flagged) {
+        const ep = epByTicket.get(f.t.id);
+        const selfPicked = ep?.startMethod === 'self_picked';
+        const byActorName = selfPicked ? (f.t.assignedTech?.name || null) : (ep?.startAssignedByName || null);
+        map.set(f.t.id, { runId: f.runId, kind: f.kind, aiTechName: f.aiTechName, byActorName, selfPicked });
       }
     } catch (err) {
       logger.warn(`ai-bypass lookup failed (non-fatal): ${err.message}`);
