@@ -491,6 +491,74 @@ describe('notification workflow definitions', () => {
     expect(templateStep.output.builtinFallbackUsed).toBe(true);
   });
 
+  test('condition nodes evaluate structured conditionGroup (AND/OR builder) rules', async () => {
+    const definition = buildDefaultWorkflowDefinition('ticket.created');
+    const condition = definition.nodes.find((node) => node.type === 'condition');
+    // "urgent AND unassigned" — matches the sample context below.
+    condition.data = {
+      conditionGroup: {
+        logic: 'all',
+        conditions: [
+          { field: 'ticket.priorityLabel', operator: 'is', value: 'High' },
+          { field: 'assignedAgent.email', operator: 'is_empty' },
+        ],
+      },
+    };
+
+    const result = await notificationWorkflowEngine.executePreview({
+      workflow: {
+        id: 15, workspaceId: 1, triggerType: 'ticket.created',
+        draftDefinition: definition, publishedVersion: 0, versions: [],
+      },
+      definition,
+      eventContext: {
+        event: { type: 'ticket.created', source: 'test', occurredAt: '2026-07-06T20:00:00.000Z' },
+        workspace: { id: 1, name: 'IT', timezone: 'America/Vancouver' },
+        ticket: { id: 100, freshserviceTicketId: 225004, subject: 'VPN access problem', status: 'Open', priorityLabel: 'High', isNoise: false },
+        requester: { name: 'Requester', email: 'requester@example.com' },
+        assignedAgent: null,
+        previousAgent: null,
+      },
+      executeLlm: false,
+    });
+
+    expect(result.status).toBe('completed');
+    const conditionStep = result.steps.find((s) => s.nodeType === 'condition');
+    expect(conditionStep.output.passed).toBe(true);
+    // The email path executed (true branch).
+    expect(result.state.email?.subject).toBeTruthy();
+  });
+
+  test('a condition group that fails to compile fails CLOSED (false path), not crashed', async () => {
+    const definition = buildDefaultWorkflowDefinition('ticket.created');
+    const condition = definition.nodes.find((node) => node.type === 'condition');
+    condition.data = {
+      conditionGroup: { logic: 'all', conditions: [{ field: 'not.a.field', operator: 'is', value: 1 }] },
+    };
+
+    const result = await notificationWorkflowEngine.executePreview({
+      workflow: {
+        id: 16, workspaceId: 1, triggerType: 'ticket.created',
+        draftDefinition: definition, publishedVersion: 0, versions: [],
+      },
+      definition,
+      eventContext: {
+        event: { type: 'ticket.created', source: 'test', occurredAt: '2026-07-06T20:05:00.000Z' },
+        workspace: { id: 1, name: 'IT', timezone: 'America/Vancouver' },
+        ticket: { id: 100, freshserviceTicketId: 225005, subject: 'x', status: 'Open', priorityLabel: 'High', isNoise: false },
+        requester: { name: 'Requester', email: 'requester@example.com' },
+        assignedAgent: null,
+        previousAgent: null,
+      },
+      executeLlm: false,
+    });
+
+    expect(result.status).toBe('completed');
+    const conditionStep = result.steps.find((s) => s.nodeType === 'condition');
+    expect(conditionStep.output.passed).toBe(false);
+    expect(conditionStep.output.compileError).toMatch(/unknown condition field/i);
+  });
+
   test('template render can use the public ticket status URL variable', async () => {
     const definition = buildDefaultWorkflowDefinition('ticket.created');
     const template = definition.nodes.find((node) => node.id === 'template');

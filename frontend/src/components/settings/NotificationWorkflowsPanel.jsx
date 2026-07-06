@@ -60,6 +60,7 @@ import {
 import { AnimatePresence, motion } from 'motion/react';
 import { notificationWorkflowAPI } from '../../services/api';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
+import ConditionGroupBuilder from './ConditionGroupBuilder';
 
 const WORKFLOW_EDITOR_LAYOUT_ID = 'ticket-pulse-notification-workflow-editor-v3';
 
@@ -75,6 +76,9 @@ const EVENT_LABELS = {
   'approval.requested': 'Approval requested',
   'approval.decided': 'Approval decided',
   'approval.clarification_requested': 'Approval clarification requested',
+  'ticket.aging': 'Ticket unresolved for N hours',
+  'ticket.sla_pre_breach': 'SLA about to breach',
+  'ticket.sla_breach': 'SLA breached',
 };
 
 // Per-event color + icon, so the four trigger groups read as distinct zones in the
@@ -6067,7 +6071,6 @@ export default function NotificationWorkflowsPanel({
   const [previewTestSending, setPreviewTestSending] = useState(false);
   const [previewTestResult, setPreviewTestResult] = useState(null);
   const [conditionText, setConditionText] = useState('');
-  const [conditionBuilder, setConditionBuilder] = useState({ field: 'ticket.status', operator: 'equals', value: 'Open' });
   const [routingBuilder, setRoutingBuilder] = useState({ field: 'requester.regionKey', operator: 'equals', value: 'AU-BRISBANE' });
   const [routingMode, setRoutingMode] = useState('exclusive');
   const [routingPriority, setRoutingPriority] = useState(1);
@@ -6282,7 +6285,6 @@ export default function NotificationWorkflowsPanel({
     if (selectedNode?.type === 'condition') {
       const rule = selectedNode.data?.rule || true;
       setConditionText(JSON.stringify(rule, null, 2));
-      setConditionBuilder(conditionBuilderFromRule(rule));
     } else {
       setConditionText('');
     }
@@ -7330,13 +7332,6 @@ export default function NotificationWorkflowsPanel({
     }
   }
 
-  function applyVisualConditionRule() {
-    const rule = buildConditionRule(conditionBuilder);
-    setConditionText(JSON.stringify(rule, null, 2));
-    updateNodeData({ rule });
-    setMessage({ type: 'success', text: 'Condition updated' });
-  }
-
   function updateConditionBranch(handle, targetId) {
     if (!selectedNode || selectedNode.type !== 'condition' || !targetId) return;
     updateDraft((next) => {
@@ -8039,21 +8034,54 @@ export default function NotificationWorkflowsPanel({
     if (!selectedNode) return <div className="p-4 text-sm text-gray-500">Select a workflow node.</div>;
 
     if (selectedNode.type === 'trigger') {
+      const triggerType = selectedNode.data?.triggerType;
       return (
         <div className="space-y-3">
           <div>
             <label className="text-xs font-medium uppercase text-gray-500">Event</label>
             <div className="mt-1 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900">
-              {EVENT_LABELS[selectedNode.data?.triggerType] || selectedNode.data?.triggerType}
+              {EVENT_LABELS[triggerType] || triggerType}
             </div>
           </div>
+          {/* Time-trigger thresholds — read by the time-trigger worker. */}
+          {triggerType === 'ticket.aging' && (
+            <div>
+              <label className="text-xs font-medium uppercase text-gray-500">
+                Fire when unresolved for (hours)
+                <input
+                  type="number"
+                  min="1"
+                  value={selectedNode.data?.agingHours ?? 24}
+                  onChange={(event) => updateNodeData({ agingHours: Math.max(1, Number(event.target.value) || 24) })}
+                  className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900 tabular-nums"
+                />
+              </label>
+              <p className="mt-1 text-[11px] text-gray-400 normal-case">Open/Pending tickets older than this fire once per ticket (checked every few minutes).</p>
+            </div>
+          )}
+          {triggerType === 'ticket.sla_pre_breach' && (
+            <div>
+              <label className="text-xs font-medium uppercase text-gray-500">
+                Warn before the due date (minutes)
+                <input
+                  type="number"
+                  min="5"
+                  value={selectedNode.data?.preBreachMinutes ?? 60}
+                  onChange={(event) => updateNodeData({ preBreachMinutes: Math.max(5, Number(event.target.value) || 60) })}
+                  className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900 tabular-nums"
+                />
+              </label>
+              <p className="mt-1 text-[11px] text-gray-400 normal-case">Fires when a ticket&apos;s due date falls inside this window; a moved deadline re-arms it.</p>
+            </div>
+          )}
+          {triggerType === 'ticket.sla_breach' && (
+            <p className="text-[11px] text-gray-400 normal-case">Fires once per ticket when its due date passes while still Open/Pending; a moved deadline re-arms it.</p>
+          )}
         </div>
       );
     }
 
     if (selectedNode.type === 'condition') {
-      const fieldExample = conditionFieldOptions.find((option) => option.value === conditionBuilder.field)?.example || '';
-      const valueDisabled = ['exists', 'is_true', 'is_false'].includes(conditionBuilder.operator);
       const branchTargets = (draft?.nodes || []).filter((node) => node.id !== selectedNode.id && node.type !== 'trigger');
       const targetForBranch = (handle) => (draft?.edges || []).find((edge) => (
         edge.source === selectedNode.id
@@ -8061,57 +8089,15 @@ export default function NotificationWorkflowsPanel({
       ))?.target || '';
       return (
         <div className="space-y-4">
-          <div className="rounded-md border border-amber-100 bg-amber-50 p-3">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-800">Visual condition</div>
-            <div className="grid gap-2">
-              <label className="text-xs font-medium uppercase text-amber-900">
-                Field
-                <select
-                  value={conditionBuilder.field}
-                  onChange={(event) => setConditionBuilder((current) => ({ ...current, field: event.target.value }))}
-                  className="mt-1 w-full rounded-md border border-amber-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
-                >
-                  {conditionFieldOptions.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </select>
-              </label>
-              <div className="grid gap-2 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)]">
-                <label className="text-xs font-medium uppercase text-amber-900">
-                  Operator
-                  <select
-                    value={conditionBuilder.operator}
-                    onChange={(event) => setConditionBuilder((current) => ({ ...current, operator: event.target.value }))}
-                    className="mt-1 w-full rounded-md border border-amber-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
-                  >
-                    {CONDITION_OPERATOR_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="text-xs font-medium uppercase text-amber-900">
-                  Value
-                  <input
-                    value={conditionBuilder.value}
-                    onChange={(event) => setConditionBuilder((current) => ({ ...current, value: event.target.value }))}
-                    disabled={valueDisabled}
-                    placeholder={fieldExample}
-                    className="mt-1 w-full rounded-md border border-amber-200 bg-white px-3 py-2 text-sm normal-case text-gray-900 disabled:bg-amber-100 disabled:text-amber-500"
-                  />
-                </label>
-              </div>
-            </div>
-            <div className="mt-3 rounded-md bg-white/80 px-3 py-2 text-xs text-amber-900">
-              {describeCondition(conditionBuilder)}
-            </div>
-            <button
-              type="button"
-              onClick={applyVisualConditionRule}
-              className="mt-3 inline-flex items-center gap-1.5 rounded-md bg-amber-700 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-800"
-            >
-              <CheckCircle2 className="h-4 w-4" />
-              Apply visual rule
-            </button>
+          <div>
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-indigo-700">Conditions</div>
+            {/* Structured AND/OR builder — compiled to json-logic by the engine
+                at run time; takes precedence over the raw rule below. */}
+            <ConditionGroupBuilder
+              value={selectedNode.data?.conditionGroup}
+              onChange={(group) => updateNodeData({ conditionGroup: group })}
+              onClear={() => updateNodeData({ conditionGroup: null })}
+            />
           </div>
 
           <div className="rounded-md border border-gray-200 bg-white p-3">

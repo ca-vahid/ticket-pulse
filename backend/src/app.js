@@ -282,6 +282,14 @@ async function initialize() {
       logger.warn('Scheduled-ticket worker failed to start (non-fatal):', e.message);
     }
 
+    // Time-based workflow triggers: ticket.aging / sla_pre_breach / sla_breach.
+    try {
+      const { default: notificationTimeTriggerService } = await import('./services/notificationTimeTriggerService.js');
+      notificationTimeTriggerService.start();
+    } catch (e) {
+      logger.warn('Notification time-trigger worker failed to start (non-fatal):', e.message);
+    }
+
     logger.info('Server initialization complete');
   } catch (error) {
     logger.error('Server initialization failed:', error);

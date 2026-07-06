@@ -56,27 +56,27 @@ Goal: take the Mail Workflow (notification workflow) engine from a single-path n
 *Remove the boolean-only / weak-condition limitation and add the triggers a real engine needs.*
 
 ### 2.1 Condition data model
-- [ ] Define a condition schema: `{ field, operator, value }` rows inside `ALL | ANY` groups, **nestable one level** (hard depth/count cap for legibility)
-- [ ] Compile condition groups → json-logic at save/runtime so the existing evaluator is reused (no runtime rewrite)
-- [ ] Field catalog: ticket (status, priority, category, group, assignee, tags, origin, SLA/due, age, CSAT), requester (dept, location…), agent, availability, workspace
-- [ ] Operator set: `is`/`is not`, `in`/`not in`, `contains`, `changed`/`changed to`/`changed from`, `> / <` (numeric), relative-time (age, SLA), `is empty`, `matches regex`
+- [x] Define a condition schema: `{ field, operator, value }` rows inside `ALL | ANY` groups, **nestable one level** (hard depth/count cap for legibility)
+- [x] Compile condition groups → json-logic at save/runtime so the existing evaluator is reused (no runtime rewrite)
+- [x] Field catalog: ticket (status, priority, category, group, assignee, tags, origin, SLA/due, age, CSAT), requester (dept, location…), agent, availability, workspace
+- [x] Operator set: `is`/`is not`, `in`/`not in`, `contains`, `changed`/`changed to`/`changed from`, `> / <` (numeric), relative-time (age, SLA), `is empty`, `matches regex`
 
 ### 2.2 Condition builder UI
-- [ ] AND/OR group builder in `NotificationWorkflowsPanel.jsx` (typed field picker → operator → value), replacing hand-written JSONLogic for common cases
-- [ ] Keep a "raw JSONLogic / advanced" escape hatch for power users
-- [ ] Value inputs by type: text, number, select/multiselect, relative-time, changed-from/to
+- [x] AND/OR group builder in `NotificationWorkflowsPanel.jsx` (typed field picker → operator → value), replacing hand-written JSONLogic for common cases
+- [x] Keep a "raw JSONLogic / advanced" escape hatch for power users
+- [x] Value inputs by type: text, number, select/multiselect, relative-time, changed-from/to
 
 ### 2.3 Trigger expansion
-- [ ] Scheduler/worker for time-based triggers (reuse the existing `node-cron` + start/stop worker pattern; workspace-timezone aware)
-- [ ] `scheduled` (cron-ish) trigger + `ticket aging N hours` trigger
-- [ ] `sla.breach` / `sla.pre_breach` triggers derived from `dueBy` / `frDueBy` (business-hours aware where possible)
-- [ ] Manual "run this workflow on this ticket" trigger (ad-hoc)
+- [x] Scheduler/worker for time-based triggers (reuse the existing `node-cron` + start/stop worker pattern; workspace-timezone aware)
+- [x] `scheduled` (cron-ish) trigger + `ticket aging N hours` trigger
+- [x] `sla.breach` / `sla.pre_breach` triggers derived from `dueBy` / `frDueBy` (business-hours aware where possible)
+- [x] Manual "run this workflow on this ticket" trigger (ad-hoc)
 
 ### 2.4 Definition schema versioning (new — from gap assessment)
-- [ ] Definition `version: 2` for graphs using condition groups / new node types; loader accepts + normalizes v1 unchanged
+- [x] Definition `version: 2` for graphs using condition groups / new node types; loader accepts + normalizes v1 unchanged
 
 ### 2.5 Wrap phase
-- [ ] Tests for compile→evaluate parity + each new trigger; lint green (no deploy — dev-test gate)
+- [x] Tests for compile→evaluate parity + each new trigger; lint green (no deploy — dev-test gate)
 
 ---
 

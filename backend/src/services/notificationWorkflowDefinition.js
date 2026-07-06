@@ -31,6 +31,19 @@ export const NOTIFICATION_EVENT_TYPES = [
   'approval.requested',
   'approval.decided',
   'approval.clarification_requested',
+  // Time-based triggers → notificationTimeTriggerService worker (per-ticket
+  // scans; threshold config lives on the trigger node, so the worker
+  // dispatches with onlyWorkflowId)
+  'ticket.aging',
+  'ticket.sla_pre_breach',
+  'ticket.sla_breach',
+];
+
+/** Trigger types fired by the time-trigger worker, not by lifecycle events. */
+export const TIME_TRIGGER_EVENT_TYPES = [
+  'ticket.aging',
+  'ticket.sla_pre_breach',
+  'ticket.sla_breach',
 ];
 
 export const AFTER_HOURS_WORKFLOW_KEY = 'ticket_created_after_hours';
@@ -170,7 +183,10 @@ const workflowEdgeSchema = z.object({
 });
 
 export const workflowDefinitionSchema = z.object({
-  version: z.literal(1).default(1),
+  // v1 = original graphs; v2 = graphs using structured condition groups and/or
+  // the newer trigger/node types. Loaded identically today — the version only
+  // marks intent so a future migration can tell them apart.
+  version: z.union([z.literal(1), z.literal(2)]).default(1),
   nodes: z.array(workflowNodeSchema).min(2).max(30),
   edges: z.array(workflowEdgeSchema).max(60).default([]),
   metadata: z.record(z.any()).default({}),
@@ -455,6 +471,9 @@ function eventLabel(triggerType) {
     'approval.requested': 'Approval requested',
     'approval.decided': 'Approval decided',
     'approval.clarification_requested': 'Approval clarification requested',
+    'ticket.aging': 'Ticket unresolved for N hours',
+    'ticket.sla_pre_breach': 'SLA about to breach',
+    'ticket.sla_breach': 'SLA breached',
   }[triggerType] || triggerType;
 }
 

@@ -2102,4 +2102,33 @@ router.put(
   }),
 );
 
+// Manual ad-hoc dispatch: run THIS workflow against THIS ticket right now.
+// A unique dedupe stamp means run dedupe never blocks a deliberate manual
+// fire; onlyWorkflowId keeps sibling workflows on the same trigger type out.
+router.post(
+  '/:id/run-for-ticket/:ticketId',
+  asyncHandler(async (req, res) => {
+    const workflowId = parseId(req.params.id, 'workflow id');
+    const ticketId = parseId(req.params.ticketId, 'ticket id');
+    const workflow = await notificationWorkflowRepository.getWorkflow(req.workspaceId, workflowId);
+    if (!workflow.isEnabled || !workflow.publishedVersion) {
+      throw new ValidationError('Workflow must be published and enabled to run manually');
+    }
+    const ticket = await prisma.ticket.findFirst({
+      where: { id: ticketId, workspaceId: req.workspaceId },
+      select: { id: true },
+    });
+    if (!ticket) throw new NotFoundError('Ticket not found in this workspace');
+
+    const { emitTicketEvent } = await import('../services/ticketLifecycleNotificationService.js');
+    const result = await emitTicketEvent(workflow.triggerType, ticket.id, {
+      source: 'manual',
+      dedupeStamp: `manual:${Date.now()}:${requestActorEmail(req) || 'admin'}`,
+      extra: { manual: true, byEmail: requestActorEmail(req) },
+      onlyWorkflowId: workflow.id,
+    });
+    res.json({ success: true, data: result });
+  }),
+);
+
 export default router;

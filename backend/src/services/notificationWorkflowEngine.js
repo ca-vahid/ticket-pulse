@@ -58,10 +58,45 @@ import {
   EMAIL_FEEDBACK_ROCKS_BY_THEME,
 } from './notificationEmailIcons.js';
 
+import { compileConditionGroup } from './notificationConditionModel.js';
+
 const liquid = new Liquid({
   strictFilters: false,
   strictVariables: false,
 });
+
+// json-logic has no regex support — register the op the structured condition
+// model's `matches_regex` operator compiles to. Bad patterns fail closed.
+jsonLogic.add_operation('regex_match', (value, pattern) => {
+  try {
+    return new RegExp(String(pattern), 'i').test(String(value ?? ''));
+  } catch {
+    return false;
+  }
+});
+
+/**
+ * Derived relative-time fields for conditions ("older than 30m", "due within
+ * 2h"). Computed at evaluation time from the event context's ISO timestamps;
+ * negative dueInMinutes = overdue.
+ */
+function conditionTimeFields(ticket) {
+  const now = Date.now();
+  const minutesFrom = (iso) => {
+    if (!iso) return null;
+    const t = new Date(iso).getTime();
+    return Number.isNaN(t) ? null : Math.round((now - t) / 60000);
+  };
+  const minutesUntil = (iso) => {
+    const from = minutesFrom(iso);
+    return from === null ? null : -from;
+  };
+  return {
+    ageMinutes: minutesFrom(ticket?.createdAt),
+    dueInMinutes: minutesUntil(ticket?.dueBy),
+    frDueInMinutes: minutesUntil(ticket?.frDueBy),
+  };
+}
 
 const MAX_NODE_EXECUTIONS = 60;
 const MAX_EMAIL_RECIPIENTS = 25;
@@ -1657,7 +1692,13 @@ async function executeNode({
 }) {
   throwIfWorkflowAborted(signal, workflowRunTimeoutMs);
 
-  const scope = { ...eventContext, state };
+  const scope = {
+    ...eventContext,
+    ticket: eventContext.ticket
+      ? { ...eventContext.ticket, ...conditionTimeFields(eventContext.ticket) }
+      : eventContext.ticket,
+    state,
+  };
   const actionLinkAppendOptions = {
     actionLinkRenderMode,
     workflowScheduleMode,
@@ -1668,9 +1709,22 @@ async function executeNode({
   }
 
   if (node.type === 'condition') {
-    const rule = node.data?.rule || true;
-    const passed = Boolean(jsonLogic.apply(rule, scope));
-    return { passed, rule };
+    // Structured condition groups (the AND/OR builder) compile to json-logic
+    // at evaluation time; raw `rule` JSONLogic remains the advanced escape
+    // hatch. A group that fails to compile fails CLOSED (false path) rather
+    // than crashing the run.
+    let rule = node.data?.rule || true;
+    let compileError = null;
+    if (node.data?.conditionGroup) {
+      try {
+        rule = compileConditionGroup(node.data.conditionGroup);
+      } catch (error) {
+        compileError = error.message;
+        rule = false;
+      }
+    }
+    const passed = compileError ? false : Boolean(jsonLogic.apply(rule, scope));
+    return { passed, rule, ...(compileError ? { compileError } : {}) };
   }
 
   if (node.type === 'update_ticket') {
@@ -2652,7 +2706,13 @@ export async function executeForEvent(eventContext, options = {}) {
   const eventType = routedContext?.event?.type;
   if (!workspaceId || !eventType) return { status: 'skipped', reason: 'Missing workspace or event type' };
 
-  const workflows = await notificationWorkflowRepository.listEnabledForEvent(workspaceId, eventType);
+  let workflows = await notificationWorkflowRepository.listEnabledForEvent(workspaceId, eventType);
+  // Time-trigger and manual dispatches target ONE workflow (thresholds like
+  // agingHours are per-workflow config, so a shared event type must not fan
+  // out to siblings with different thresholds).
+  if (options.onlyWorkflowId) {
+    workflows = workflows.filter((w) => w.id === Number(options.onlyWorkflowId));
+  }
   const timing = selectWorkflowsForNotificationTiming(workflows, routedContext);
   const variantSelection = selectWorkflowVariants(timing.selected || [], routedContext, {
     baseSuppressed: timing.suppressed || [],

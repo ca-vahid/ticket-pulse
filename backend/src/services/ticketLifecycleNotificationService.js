@@ -292,10 +292,13 @@ function buildEventContext({ event, ticket, previousAgent, source }) {
         name: ticket.internalSubcategory.name,
       } : null,
       isNoise: ticket.isNoise === true,
+      origin: ticket.origin || 'freshservice',
       createdAt: dateIso(ticket.createdAt),
       assignedAt: dateIso(ticket.assignedAt),
       resolvedAt: dateIso(ticket.resolvedAt),
       closedAt: dateIso(ticket.closedAt),
+      dueBy: dateIso(ticket.dueBy),
+      frDueBy: dateIso(ticket.frDueBy),
       freshserviceUpdatedAt: dateIso(ticket.freshserviceUpdatedAt),
     },
     requester: ticket.requester ? {
@@ -369,6 +372,7 @@ export async function emitTicketEvent(eventType, ticketId, {
   source = 'ticketpulse_native',
   dedupeStamp = null,
   extra = null,
+  onlyWorkflowId = null, // time-trigger/manual dispatch targets one workflow
 } = {}) {
   const ticket = await hydrateTicket(ticketId);
   if (!ticket) return { status: 'skipped', reason: 'Ticket not found' };
@@ -384,7 +388,10 @@ export async function emitTicketEvent(eventType, ticketId, {
   if (extra) eventContext.event.extra = extra;
 
   try {
-    return await notificationWorkflowEngine.executeForEvent(eventContext, { triggerSource: source });
+    return await notificationWorkflowEngine.executeForEvent(eventContext, {
+      triggerSource: source,
+      ...(onlyWorkflowId ? { onlyWorkflowId } : {}),
+    });
   } catch (error) {
     logger.warn('Ticket event workflow dispatch failed', {
       workspaceId: ticket.workspaceId, ticketId: ticket.id, eventType, error: error.message,
