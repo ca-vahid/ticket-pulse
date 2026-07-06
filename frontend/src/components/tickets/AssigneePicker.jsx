@@ -79,7 +79,12 @@ export default function AssigneePicker({
     window.addEventListener('scroll', onMove, true);
     window.addEventListener('resize', onMove);
     // preventScroll: focusing must not scroll clipped ancestors (queue card).
-    setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 0);
+    // Only auto-focus on fine pointers (mouse) — on touch it pops the on-screen
+    // keyboard the moment the picker opens, which feels crude. Touch users tap
+    // the search field when they actually want it.
+    if (window.matchMedia?.('(pointer: fine)')?.matches) {
+      setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 0);
+    }
     return () => {
       document.removeEventListener('mousedown', onDoc);
       document.removeEventListener('keydown', onKey, true);
