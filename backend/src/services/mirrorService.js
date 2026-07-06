@@ -240,13 +240,36 @@ class MirrorService {
     return ticket;
   }
 
-  _customFields(ticket) {
-    const fields = {};
+  /**
+   * Build the Ticket Pulse skill custom fields for FreshService, resolving the
+   * category/subcategory NAMES to the lookup-field record ids FS expects
+   * (sending the name makes FS store "none"). Returns null when there's no
+   * category or the names can't be resolved (so we don't overwrite with junk).
+   */
+  async _skillCustomFields(client, ticket) {
     const skill = ticket.internalCategory?.name || ticket.tpSkill || null;
     const subskill = ticket.internalSubcategory?.name || ticket.tpSubskill || null;
-    if (skill && ticket.workspace?.tpSkillCustomField) fields[ticket.workspace.tpSkillCustomField] = skill;
-    if (subskill && ticket.workspace?.tpSubskillCustomField) fields[ticket.workspace.tpSubskillCustomField] = subskill;
-    return Object.keys(fields).length ? fields : null;
+    const categoryField = ticket.workspace?.tpSkillCustomField;
+    const subcategoryField = ticket.workspace?.tpSubskillCustomField;
+    if (!skill || !categoryField) return null;
+    try {
+      const { resolveTpSkillLookupIds } = await import('./freshServiceActionService.js');
+      const { categoryDisplayId, subcategoryDisplayId } = await resolveTpSkillLookupIds(client, {
+        skill,
+        subskill,
+        workspaceId: ticket.workspace?.freshserviceWorkspaceId ? String(ticket.workspace.freshserviceWorkspaceId) : null,
+      });
+      if (!categoryDisplayId) {
+        logger.warn(`Mirror: could not resolve FS lookup id for category "${skill}" — skipping category custom fields`);
+        return null;
+      }
+      const fields = { [categoryField]: categoryDisplayId };
+      if (subcategoryField && subcategoryDisplayId) fields[subcategoryField] = subcategoryDisplayId;
+      return fields;
+    } catch (err) {
+      logger.warn(`Mirror: skill lookup resolution failed (non-fatal): ${err.message}`);
+      return null;
+    }
   }
 
   async _mirrorCreate(job, client) {
@@ -267,15 +290,14 @@ class MirrorService {
       group_id: ticket.groupId ? Number(ticket.groupId) : undefined,
       responder_id: ticket.assignedTech?.freshserviceId ? Number(ticket.assignedTech.freshserviceId) : undefined,
     };
-    const customFields = this._customFields(ticket);
-
-    // The Ticket Pulse category fields (lf_ticket_pulse_*) are lookup fields that
+    // The Ticket Pulse category fields (lf_ticket_pulse_*) are LOOKUP fields that
     // FreshService validates strictly on CREATE ("should be of type Number") but
-    // accepts on UPDATE — the assessment writeback path only ever updates them.
-    // So create WITHOUT them, then set them via a follow-up update (below).
+    // accepts on UPDATE — and they need the record ID, not the category name. So
+    // create WITHOUT them, then set the resolved ids via a follow-up update.
     const fsTicket = await client.createTicket({ ...basePayload });
     if (!fsTicket?.id) throw new Error('FreshService did not return a ticket id');
 
+    const customFields = await this._skillCustomFields(client, ticket);
     if (customFields) {
       await client.updateTicket(fsTicket.id, { custom_fields: customFields })
         .catch((err) => logger.warn(`Mirror: TP category fields not set on ${ref} (non-fatal): ${err.message}`));
@@ -317,13 +339,14 @@ class MirrorService {
       throw new Error('Awaiting FreshService copy (create_ticket has not completed)');
     }
 
+    const customFields = await this._skillCustomFields(client, ticket);
     await client.updateTicket(Number(ticket.freshserviceTicketId), {
       subject: ticket.subject || undefined,
       status: FS_STATUS_CODES[ticket.status] || undefined,
       priority: ticket.priority || undefined,
       group_id: ticket.groupId ? Number(ticket.groupId) : undefined,
       responder_id: ticket.assignedTech?.freshserviceId ? Number(ticket.assignedTech.freshserviceId) : null,
-      custom_fields: this._customFields(ticket) || undefined,
+      custom_fields: customFields || undefined,
     });
 
     await prisma.ticket.update({

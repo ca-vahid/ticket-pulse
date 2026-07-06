@@ -12,12 +12,17 @@ const clientMock = {
   addNote: jest.fn(),
   fetchTicketSafe: jest.fn(),
   fetchTicketConversations: jest.fn(),
+  listCustomObjects: jest.fn(),
+  listCustomObjectRecords: jest.fn(),
 };
 const settingsMock = {
   getFreshServiceConfigForWorkspace: jest.fn().mockResolvedValue({ domain: 'demo', apiKey: 'key' }),
 };
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
+jest.unstable_mockModule('../src/services/attachmentService.js', () => ({
+  default: { buffersForThreadEntry: jest.fn().mockResolvedValue([]) },
+}));
 jest.unstable_mockModule('../src/services/settingsRepository.js', () => ({ default: settingsMock }));
 jest.unstable_mockModule('../src/services/ticketActivityRepository.js', () => ({ default: { create: jest.fn() } }));
 jest.unstable_mockModule('../src/integrations/freshservice.js', () => ({
@@ -60,12 +65,26 @@ const baseTicket = {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  // The dev .env disables the mirror; the outbox worker itself is what we're
+  // exercising here, so force-enable it for the drain path.
+  process.env.NATIVE_TICKET_MIRROR_ENABLED = 'true';
   mirrorService._clients.clear();
   settingsMock.getFreshServiceConfigForWorkspace.mockResolvedValue({ domain: 'demo', apiKey: 'key' });
   prismaMock.mirrorJob.update.mockResolvedValue({});
   prismaMock.ticket.update.mockResolvedValue({});
   prismaMock.requester.update.mockResolvedValue({});
   clientMock.addNote.mockResolvedValue({ conversation: { id: 777 } });
+  // TP skill/subskill lookup fields resolve NAMES → FS custom-object record
+  // display ids (sending the name makes FreshService store "none").
+  clientMock.listCustomObjects.mockResolvedValue([
+    { id: 1, title: 'Ticket Pulse Skills' },
+    { id: 2, title: 'Ticket Pulse Subskills' },
+  ]);
+  clientMock.listCustomObjectRecords.mockImplementation((objectId) => {
+    if (objectId === 1) return Promise.resolve([{ data: { name: 'Devices & Hardware', bo_display_id: 6001 } }]);
+    if (objectId === 2) return Promise.resolve([{ data: { name: 'Peripherals', bo_display_id: 6002 } }]);
+    return Promise.resolve([]);
+  });
 });
 
 describe('mirrorService job processing', () => {
@@ -89,10 +108,11 @@ describe('mirrorService job processing', () => {
     expect(clientMock.createTicket).toHaveBeenCalledWith(expect.not.objectContaining({
       custom_fields: expect.anything(),
     }));
+    // The follow-up update carries the RESOLVED custom-object record ids, not names.
     expect(clientMock.updateTicket).toHaveBeenCalledWith(90001, {
       custom_fields: {
-        lf_ticket_pulse_category: 'Devices & Hardware',
-        lf_ticket_pulse_subcategory: 'Peripherals',
+        lf_ticket_pulse_category: 6001,
+        lf_ticket_pulse_subcategory: 6002,
       },
     });
     expect(prismaMock.ticket.update).toHaveBeenCalledWith(expect.objectContaining({
