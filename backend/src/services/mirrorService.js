@@ -269,22 +269,17 @@ class MirrorService {
     };
     const customFields = this._customFields(ticket);
 
-    let fsTicket;
-    try {
-      fsTicket = await client.createTicket({ ...basePayload, custom_fields: customFields || undefined });
-    } catch (err) {
-      // The Ticket Pulse category custom fields are the usual cause of a
-      // "Validation failed" (e.g. the FS field is a Number type but we send the
-      // category name). Don't let that wedge the mirror — retry without the
-      // custom fields so the ticket still gets its FS copy.
-      if (customFields) {
-        logger.warn(`Mirror create for ${ref} rejected with custom fields (${err.message}); retrying without them`);
-        fsTicket = await client.createTicket({ ...basePayload, custom_fields: undefined });
-      } else {
-        throw err;
-      }
-    }
+    // The Ticket Pulse category fields (lf_ticket_pulse_*) are lookup fields that
+    // FreshService validates strictly on CREATE ("should be of type Number") but
+    // accepts on UPDATE — the assessment writeback path only ever updates them.
+    // So create WITHOUT them, then set them via a follow-up update (below).
+    const fsTicket = await client.createTicket({ ...basePayload });
     if (!fsTicket?.id) throw new Error('FreshService did not return a ticket id');
+
+    if (customFields) {
+      await client.updateTicket(fsTicket.id, { custom_fields: customFields })
+        .catch((err) => logger.warn(`Mirror: TP category fields not set on ${ref} (non-fatal): ${err.message}`));
+    }
 
     await prisma.ticket.update({
       where: { id: ticket.id },
