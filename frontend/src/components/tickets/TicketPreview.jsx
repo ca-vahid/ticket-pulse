@@ -152,6 +152,8 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
       setFsConfirm(null);
     } catch (err) {
       setFsError(err.response?.data?.message || err.message || 'FreshService rejected the change');
+      // A timeout can fire while the write actually lands — show the TRUE state.
+      load({ silent: true });
     } finally {
       setFsBusy(false);
     }

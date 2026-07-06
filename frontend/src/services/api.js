@@ -657,7 +657,10 @@ export const ticketsAPI = {
 
   /** FS-born write-back: FreshService is updated (and verified) FIRST. */
   fsUpdate: async (id, changes) => {
-    return await api.post(`/tickets/${id}/fs-update`, changes);
+    // FS write-backs can take >30s (custom-field lookup resolution on the
+    // rate-limited FS client) — the default timeout produced false "network
+    // error" failures while the write actually landed (QA 231648).
+    return await apiLongTimeout.post(`/tickets/${id}/fs-update`, changes);
   },
 
   setNoise: async (id, { noise = true, resolve = false } = {}) => {

@@ -418,12 +418,17 @@ class MirrorService {
   // ------------------------------------------------------------- reconcile
 
   /**
-   * Post-outage recovery: pull FS-side deltas on TP-born mirrored tickets back
-   * into Ticket Pulse. Imports conversation entries added in FS (skipping our
-   * own mirror notes) and logs conflicts for status/assignee drift — TP stays
-   * the source of truth, so drift is surfaced, never auto-applied.
+   * Pull FS-side deltas on TP-born mirrored tickets back into Ticket Pulse:
+   * conversation entries added in FS (skipping our own mirror notes) are
+   * imported, and status/assignee drift is logged as a conflict — TP stays the
+   * source of truth, so drift is surfaced, never auto-applied.
+   *
+   * activeOnly (default) scopes to open tickets so the periodic sweep stays
+   * cheap on the FS rate limit; the full scan remains for post-outage recovery.
+   * Read-only against FreshService — safe to run even when the OUTBOUND mirror
+   * is disabled (dev).
    */
-  async reconcile(workspaceId, { since = null } = {}) {
+  async reconcile(workspaceId, { since = null, activeOnly = true, limit = 30 } = {}) {
     const client = await this._getClient(workspaceId);
     if (!client) return { skipped: true, reason: 'freshservice_not_configured' };
 
@@ -432,82 +437,156 @@ class MirrorService {
         workspaceId,
         origin: TICKET_ORIGIN.TICKETPULSE,
         freshserviceTicketId: { not: null },
+        ...(activeOnly ? { status: { in: ['Open', 'Pending'] } } : {}),
         ...(since ? { mirroredAt: { gte: new Date(since) } } : {}),
       },
       include: { assignedTech: { select: { freshserviceId: true, name: true } } },
-      orderBy: { id: 'asc' },
-      take: 500,
+      orderBy: activeOnly ? { lastRealActivityAt: 'desc' } : { id: 'asc' },
+      take: activeOnly ? limit : 500,
     });
 
     let imported = 0;
     let conflicts = 0;
     for (const ticket of tickets) {
-      const fsId = Number(ticket.freshserviceTicketId);
       try {
-        const [fsTicket, conversations] = await Promise.all([
-          client.fetchTicketSafe ? client.fetchTicketSafe(fsId) : null,
-          client.fetchTicketConversations(fsId),
-        ]);
-
-        for (const conv of conversations || []) {
-          if (!conv?.id) continue;
-          const bodyText = String(conv.body_text || conv.body || '');
-          if (bodyText.includes(MIRROR_MARKER) || String(conv.body || '').includes(MIRROR_MARKER)) continue;
-          const externalEntryId = `fs-conv-${conv.id}`;
-          const exists = await prisma.ticketThreadEntry.findFirst({
-            where: { ticketId: ticket.id, externalEntryId },
-            select: { id: true },
-          });
-          if (exists) continue;
-          await prisma.ticketThreadEntry.create({
-            data: {
-              ticketId: ticket.id,
-              workspaceId,
-              externalEntryId,
-              source: 'freshservice_reconciliation',
-              eventType: conv.private ? 'note' : 'reply',
-              actorName: conv.user_name || conv.from_email || 'FreshService user',
-              actorEmail: conv.from_email || null,
-              authorType: conv.incoming ? 'requester' : 'agent',
-              incoming: conv.incoming === true,
-              isPrivate: conv.private === true,
-              visibility: conv.private ? 'private' : 'public',
-              bodyHtml: conv.body || null,
-              bodyText: conv.body_text || null,
-              content: conv.body_text || null,
-              occurredAt: conv.created_at ? new Date(conv.created_at) : new Date(),
-            },
-          });
-          imported += 1;
-        }
-
-        if (fsTicket && typeof fsTicket === 'object' && fsTicket.id) {
-          const fsStatusCode = Number(fsTicket.status);
-          const ourStatusCode = FS_STATUS_CODES[ticket.status] || null;
-          const fsResponder = fsTicket.responder_id ? Number(fsTicket.responder_id) : null;
-          const ourResponder = ticket.assignedTech?.freshserviceId ? Number(ticket.assignedTech.freshserviceId) : null;
-          const drift = [];
-          if (ourStatusCode && fsStatusCode && fsStatusCode !== ourStatusCode) drift.push(`status (FS ${fsStatusCode} vs TP ${ourStatusCode})`);
-          if (fsResponder !== ourResponder) drift.push(`assignee (FS ${fsResponder || 'none'} vs TP ${ourResponder || 'none'})`);
-          if (drift.length) {
-            conflicts += 1;
-            logger.warn(`Mirror conflict on ${ticketDisplayRef(ticket)}: FS copy drifted — ${drift.join(', ')}`);
-            await ticketActivityRepository.create({
-              ticketId: ticket.id,
-              activityType: 'mirror_conflict',
-              performedBy: 'Mirror reconciliation',
-              performedAt: new Date(),
-              details: { drift, freshserviceTicketId: fsId, note: 'FS copy was edited out-of-band; Ticket Pulse remains source of truth' },
-            }).catch(() => {});
-          }
-        }
+        const result = await this._reconcileTicketAgainstFs(ticket, client);
+        imported += result.imported;
+        conflicts += result.conflicts;
       } catch (err) {
         logger.warn(`Reconciliation failed for ticket ${ticket.id} (non-fatal): ${err.message}`);
       }
     }
 
-    logger.info(`Mirror reconciliation for workspace ${workspaceId}: ${tickets.length} tickets checked, ${imported} entries imported, ${conflicts} conflicts`);
+    if (tickets.length > 0) {
+      logger.info(`Mirror reconciliation for workspace ${workspaceId}: ${tickets.length} tickets checked, ${imported} entries imported, ${conflicts} conflicts`);
+    }
     return { checked: tickets.length, imported, conflicts };
+  }
+
+  /** Reconcile ONE TP-born ticket right now (used when a ticket page opens). */
+  async reconcileTicket(ticketId, workspaceId) {
+    const ticket = await prisma.ticket.findFirst({
+      where: { id: ticketId, workspaceId, origin: TICKET_ORIGIN.TICKETPULSE, freshserviceTicketId: { not: null } },
+      include: { assignedTech: { select: { freshserviceId: true, name: true } } },
+    });
+    if (!ticket) return { skipped: true };
+    const client = await this._getClient(workspaceId);
+    if (!client) return { skipped: true, reason: 'freshservice_not_configured' };
+    return this._reconcileTicketAgainstFs(ticket, client);
+  }
+
+  async _reconcileTicketAgainstFs(ticket, client) {
+    const workspaceId = ticket.workspaceId;
+    const fsId = Number(ticket.freshserviceTicketId);
+    let imported = 0;
+    let conflicts = 0;
+
+    const [fsTicket, conversations] = await Promise.all([
+      client.fetchTicketSafe ? client.fetchTicketSafe(fsId) : null,
+      client.fetchTicketConversations(fsId),
+    ]);
+
+    for (const conv of conversations || []) {
+      if (!conv?.id) continue;
+      const bodyText = String(conv.body_text || conv.body || '');
+      if (bodyText.includes(MIRROR_MARKER) || String(conv.body || '').includes(MIRROR_MARKER)) continue;
+      const externalEntryId = `fs-conv-${conv.id}`;
+      const exists = await prisma.ticketThreadEntry.findFirst({
+        where: { ticketId: ticket.id, externalEntryId },
+        select: { id: true },
+      });
+      if (exists) continue;
+      await prisma.ticketThreadEntry.create({
+        data: {
+          ticketId: ticket.id,
+          workspaceId,
+          externalEntryId,
+          source: 'freshservice_reconciliation',
+          eventType: conv.private ? 'note' : 'reply',
+          actorName: conv.user_name || conv.from_email || 'FreshService user',
+          actorEmail: conv.from_email || null,
+          authorType: conv.incoming ? 'requester' : 'agent',
+          incoming: conv.incoming === true,
+          isPrivate: conv.private === true,
+          visibility: conv.private ? 'private' : 'public',
+          bodyHtml: conv.body || null,
+          bodyText: conv.body_text || null,
+          content: conv.body_text || null,
+          occurredAt: conv.created_at ? new Date(conv.created_at) : new Date(),
+        },
+      });
+      imported += 1;
+
+      // Requester replies that arrived via FS behave like any other reply:
+      // fire the workflow event (stable per-conversation stamp) + live update.
+      if (conv.incoming === true && conv.private !== true) {
+        import('./ticketLifecycleNotificationService.js')
+          .then(({ emitTicketEvent }) => emitTicketEvent('ticket.reply_received', ticket.id, {
+            source: 'freshservice_reconciliation',
+            dedupeStamp: externalEntryId,
+            extra: { externalEntryId, fromEmail: conv.from_email || null },
+          }))
+          .catch(() => {});
+      }
+      this._broadcast(ticket, 'reply');
+    }
+
+    if (fsTicket && typeof fsTicket === 'object' && fsTicket.id) {
+      const fsStatusCode = Number(fsTicket.status);
+      const ourStatusCode = FS_STATUS_CODES[ticket.status] || null;
+      const fsResponder = fsTicket.responder_id ? Number(fsTicket.responder_id) : null;
+      const ourResponder = ticket.assignedTech?.freshserviceId ? Number(ticket.assignedTech.freshserviceId) : null;
+      const drift = [];
+      if (ourStatusCode && fsStatusCode && fsStatusCode !== ourStatusCode) drift.push(`status (FS ${fsStatusCode} vs TP ${ourStatusCode})`);
+      if (fsResponder !== ourResponder) drift.push(`assignee (FS ${fsResponder || 'none'} vs TP ${ourResponder || 'none'})`);
+      if (drift.length) {
+        conflicts += 1;
+        logger.warn(`Mirror conflict on ${ticketDisplayRef(ticket)}: FS copy drifted — ${drift.join(', ')}`);
+        await ticketActivityRepository.create({
+          ticketId: ticket.id,
+          activityType: 'mirror_conflict',
+          performedBy: 'Mirror reconciliation',
+          performedAt: new Date(),
+          details: { drift, freshserviceTicketId: fsId, note: 'FS copy was edited out-of-band; Ticket Pulse remains source of truth' },
+        }).catch(() => {});
+      }
+    }
+
+    return { imported, conflicts };
+  }
+
+  // -------------------------------------------------- periodic reconcile
+
+  /**
+   * Periodic inbound reconcile (QA 07-06 #4: requester replies made in FS
+   * never appeared in TP conversations because reconcile was never scheduled).
+   * Independent of the OUTBOUND mirror flag — it's read-only against FS.
+   */
+  startReconcile() {
+    if (this._reconcileTimer) return;
+    if (process.env.NATIVE_TICKET_RECONCILE_ENABLED === 'false') return;
+    const intervalMs = Number(process.env.NATIVE_TICKET_RECONCILE_INTERVAL_MS) || 3 * 60 * 1000;
+    this._reconcileTimer = setInterval(() => {
+      this._reconcileAllWorkspaces().catch((err) => logger.warn(`Mirror reconcile sweep failed (non-fatal): ${err.message}`));
+    }, intervalMs);
+    this._reconcileTimer.unref?.();
+    logger.info(`Mirror inbound-reconcile worker started (every ${Math.round(intervalMs / 1000)}s)`);
+  }
+
+  stopReconcile() {
+    if (this._reconcileTimer) clearInterval(this._reconcileTimer);
+    this._reconcileTimer = null;
+  }
+
+  async _reconcileAllWorkspaces() {
+    // Only workspaces that actually have TP-born mirrored tickets.
+    const rows = await prisma.ticket.groupBy({
+      by: ['workspaceId'],
+      where: { origin: TICKET_ORIGIN.TICKETPULSE, freshserviceTicketId: { not: null }, status: { in: ['Open', 'Pending'] } },
+    });
+    for (const row of rows) {
+      await this.reconcile(row.workspaceId, { activeOnly: true, limit: 30 }).catch(() => {});
+    }
   }
 }
 

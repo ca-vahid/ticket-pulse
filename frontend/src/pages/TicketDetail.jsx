@@ -647,6 +647,9 @@ export default function TicketDetail() {
     } catch (err) {
       // FS refused (or didn't accept the value) — nothing changed locally.
       setFsError(err.response?.data?.message || err.message || 'FreshService rejected the change');
+      // A timeout can fire while the write actually lands (QA 231648) —
+      // refetch so the page shows the TRUE state alongside the error.
+      fetchTicket({ silent: true });
     } finally {
       setFsBusy(false);
     }

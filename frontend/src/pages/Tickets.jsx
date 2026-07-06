@@ -475,6 +475,9 @@ export default function Tickets() {
       setFsConfirm(null);
     } catch (err) {
       setFsError(err.response?.data?.message || err.message || 'FreshService rejected the change');
+      // A timeout can fire while the write actually lands (QA 231648) —
+      // refresh so the list shows the TRUE state alongside the error.
+      refreshAfterEdit();
     } finally {
       setFsBusy(false);
     }

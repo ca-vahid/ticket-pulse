@@ -262,6 +262,9 @@ async function initialize() {
     try {
       const { default: mirrorService } = await import('./services/mirrorService.js');
       mirrorService.start();
+      // Inbound reconcile (FS→TP replies on TP-born tickets) is read-only and
+      // runs even when the outbound mirror is disabled.
+      mirrorService.startReconcile();
     } catch (e) {
       logger.warn('FreshService mirror worker failed to start (non-fatal):', e.message);
     }

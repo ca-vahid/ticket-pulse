@@ -24,7 +24,7 @@ jest.unstable_mockModule('../src/services/attachmentService.js', () => ({
   default: { buffersForThreadEntry: jest.fn().mockResolvedValue([]) },
 }));
 jest.unstable_mockModule('../src/services/settingsRepository.js', () => ({ default: settingsMock }));
-jest.unstable_mockModule('../src/services/ticketActivityRepository.js', () => ({ default: { create: jest.fn() } }));
+jest.unstable_mockModule('../src/services/ticketActivityRepository.js', () => ({ default: { create: jest.fn().mockResolvedValue({}) } }));
 jest.unstable_mockModule('../src/integrations/freshservice.js', () => ({
   createFreshServiceClient: jest.fn(() => clientMock),
 }));
@@ -32,8 +32,12 @@ jest.unstable_mockModule('../src/routes/sse.routes.js', () => ({
   default: {},
   sseManager: { broadcast: jest.fn() },
 }));
-jest.unstable_mockModule('../src/utils/logger.js', () => ({
-  default: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() },
+const loggerMock = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() };
+jest.unstable_mockModule('../src/utils/logger.js', () => ({ default: loggerMock }));
+const emitTicketEventMock = jest.fn().mockResolvedValue({ status: 'completed' });
+jest.unstable_mockModule('../src/services/ticketLifecycleNotificationService.js', () => ({
+  default: { emitTicketEvent: emitTicketEventMock },
+  emitTicketEvent: emitTicketEventMock,
 }));
 
 const { default: mirrorService } = await import('../src/services/mirrorService.js');
@@ -234,6 +238,13 @@ describe('mirrorService.reconcile', () => {
     const result = await mirrorService.reconcile(1);
 
     expect(result.imported).toBe(1); // mirror-marker entry skipped
+    // The imported requester reply fires the workflow event with a stable
+    // per-conversation stamp (QA 07-06 #4).
+    await new Promise((r) => setTimeout(r, 10)); // emit rides a dynamic import
+    expect(emitTicketEventMock).toHaveBeenCalledWith('ticket.reply_received', 501, expect.objectContaining({
+      dedupeStamp: 'fs-conv-2',
+      source: 'freshservice_reconciliation',
+    }));
     expect(result.conflicts).toBe(1); // status + assignee drift on the FS copy
     expect(prismaMock.ticketThreadEntry.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
