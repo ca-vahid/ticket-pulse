@@ -95,6 +95,38 @@ export const NOTIFICATION_NODE_REGISTRY = Object.freeze({
     inputHandles: ['default'],
     outputHandles: ['default'],
   },
+  // N-way switch: output handles are the configured branch keys + 'otherwise'
+  // (validated dynamically against node.data.branches).
+  branch: {
+    label: 'Branch',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: 'dynamic',
+  },
+  delay: {
+    label: 'Wait / delay',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['default'],
+  },
+  call_webhook: {
+    label: 'Call webhook',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['default'],
+  },
+  create_child_ticket: {
+    label: 'Create child ticket',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['default'],
+  },
+  request_approval: {
+    label: 'Request approval',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['default'],
+  },
   send_email: {
     label: 'Send email',
     terminal: true,
@@ -287,8 +319,9 @@ function validateGraph(definition, triggerType) {
     errors.push(`Trigger node must use triggerType ${triggerType}`);
   }
 
-  if (!definition.nodes.some((node) => node.type === 'send_email' || node.type === 'update_ticket')) {
-    errors.push('Workflow must include at least one action node (send_email or update_ticket)');
+  const ACTION_NODE_TYPES = ['send_email', 'update_ticket', 'call_webhook', 'create_child_ticket', 'request_approval'];
+  if (!definition.nodes.some((node) => ACTION_NODE_TYPES.includes(node.type))) {
+    errors.push(`Workflow must include at least one action node (${ACTION_NODE_TYPES.join(', ')})`);
   }
 
   for (const edge of definition.edges) {
@@ -308,7 +341,14 @@ function validateGraph(definition, triggerType) {
       errors.push(`Terminal node ${sourceNode.id} cannot have outgoing edge ${edge.id}`);
       continue;
     }
-    if (!registry.outputHandles.includes(handle)) {
+    if (registry.outputHandles === 'dynamic') {
+      // Branch nodes: valid handles = configured branch keys + 'otherwise'.
+      const branchKeys = new Set((sourceNode.data?.branches || []).map((b) => String(b.key || '').toLowerCase()));
+      branchKeys.add('otherwise');
+      if (!branchKeys.has(handle)) {
+        errors.push(`Edge ${edge.id} uses unknown branch "${handle}" on ${sourceNode.type} node ${sourceNode.id}`);
+      }
+    } else if (!registry.outputHandles.includes(handle)) {
       errors.push(`Edge ${edge.id} uses unsupported sourceHandle ${handle} for ${sourceNode.type} node ${sourceNode.id}`);
     }
     const targetNode = nodes.get(edge.target);
@@ -336,6 +376,30 @@ function validateGraph(definition, triggerType) {
       const handles = new Set(edges.map((edge) => normalizedSourceHandle(edge)));
       if (!handles.has('true')) errors.push(`Condition node ${node.id} must define a true branch`);
       if (!handles.has('false')) errors.push(`Condition node ${node.id} must define a false branch`);
+    }
+
+    if (node.type === 'branch' && reachable.has(node.id)) {
+      const branches = Array.isArray(node.data?.branches) ? node.data.branches : [];
+      if (branches.length === 0) errors.push(`Branch node ${node.id} needs at least one branch`);
+      if (branches.length > 8) errors.push(`Branch node ${node.id} has too many branches (max 8)`);
+      const keys = new Set();
+      for (const b of branches) {
+        const key = String(b?.key || '').trim().toLowerCase();
+        if (!key) errors.push(`Branch node ${node.id} has a branch without a key`);
+        else if (keys.has(key)) errors.push(`Branch node ${node.id} has duplicate branch key "${key}"`);
+        keys.add(key);
+      }
+      const handles = new Set(edges.map((edge) => normalizedSourceHandle(edge)));
+      if (!handles.has('otherwise')) {
+        errors.push(`Branch node ${node.id} must route its "otherwise" path (no silent dead ends)`);
+      }
+    }
+
+    if (node.type === 'delay' && reachable.has(node.id)) {
+      const minutes = Number(node.data?.minutes);
+      if (!Number.isFinite(minutes) || minutes < 1 || minutes > 7 * 24 * 60) {
+        errors.push(`Delay node ${node.id} must wait between 1 minute and 7 days`);
+      }
     }
   }
 

@@ -85,27 +85,27 @@ Goal: take the Mail Workflow (notification workflow) engine from a single-path n
 *Remove the "two actions" ceiling. Every action origin-aware.*
 
 ### 3.1 Mutate actions (extend `update_ticket` + new)
-- [ ] `assign` / route action (specific tech; strategies: round-robin, least-loaded, skill-match with capacity)
-- [ ] set group / category / subcategory
-- [ ] add / remove tags
-- [ ] set custom fields (depends on Phase 5 custom fields; stub the action contract now)
-- [ ] Origin guard on all mutate actions (TP-born full; FS-born → write-back/reply-via-FS only)
+- [x] `assign` / route action (specific tech; strategies: round-robin, least-loaded, skill-match with capacity)
+- [x] set group / category / subcategory
+- [ ] add / remove tags (deferred — tickets have no tag model yet; lands with Phase 5 staples)
+- [ ] set custom fields (deferred to Phase 5 with the JSON UDF model)
+- [x] Origin guard on all mutate actions (TP-born full; FS-born → write-back/reply-via-FS only)
 
 ### 3.2 Control-flow nodes
-- [ ] Branch / Switch node (N-way, first-match + explicit "otherwise")
-- [ ] Try / Catch wrapper for fallible nodes (external calls)
-- [ ] Wait / Delay node (duration or until-datetime) — **the big lift**: run-state persistence (`resumeAt`/`resumeNodeId` + state snapshot on `NotificationWorkflowRun`) + a resume worker; do last in this phase
+- [x] Branch / Switch node (N-way, first-match + explicit "otherwise")
+- [x] Try / Catch wrapper for fallible nodes (external calls)
+- [x] Wait / Delay node (duration or until-datetime) — **the big lift**: run-state persistence (`resumeAt`/`resumeNodeId` + state snapshot on `NotificationWorkflowRun`) + a resume worker; do last in this phase
 
 ### 3.3 Reach-out actions
-- [ ] Webhook / call-API action (sync + async), branch on response status
-- [ ] Create task / child ticket
-- [ ] Request-approval action (drives the existing approval system)
-- [ ] Notify team / distribution list / group routing (recipient resolver beyond individuals)
+- [x] Webhook / call-API action (sync + async), branch on response status
+- [x] Create task / child ticket
+- [x] Request-approval action (drives the existing approval system)
+- [x] Notify team / distribution list / group routing (recipient resolver beyond individuals)
 
 ### 3.4 Editor, wiring & validation
-- [ ] Node palette + config panels for each new node; graph validation rules updated
-- [ ] Render branches as indented collapsible sub-lists (reuse the indigo collapsible-group pattern); reserve canvas for complex splits
-- [ ] Tests per node; lint green (no deploy — dev-test gate)
+- [x] Node palette + config panels for each new node; graph validation rules updated
+- [x] Render branches as indented collapsible sub-lists (reuse the indigo collapsible-group pattern); reserve canvas for complex splits
+- [x] Tests per node; lint green (no deploy — dev-test gate)
 
 ---
 

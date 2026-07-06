@@ -16,6 +16,7 @@ import {
   AlertCircle,
   Bot,
   CalendarClock,
+  Clock3,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -154,6 +155,51 @@ const WORKFLOW_NODE_REGISTRY = {
     label: 'Update ticket',
     icon: Repeat,
     color: '#0284c7',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['default'],
+    addable: true,
+  },
+  branch: {
+    label: 'Branch',
+    icon: Waypoints,
+    color: '#7c3aed',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['otherwise'],
+    addable: true,
+  },
+  delay: {
+    label: 'Wait / delay',
+    icon: Clock3,
+    color: '#d97706',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['default'],
+    addable: true,
+  },
+  call_webhook: {
+    label: 'Call webhook',
+    icon: UploadCloud,
+    color: '#0f766e',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['default'],
+    addable: true,
+  },
+  create_child_ticket: {
+    label: 'Create child ticket',
+    icon: Inbox,
+    color: '#2563eb',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['default'],
+    addable: true,
+  },
+  request_approval: {
+    label: 'Request approval',
+    icon: UserCheck,
+    color: '#be185d',
     terminal: false,
     inputHandles: ['default'],
     outputHandles: ['default'],
@@ -1501,6 +1547,43 @@ function defaultNodeData(type, triggerType = 'ticket.created') {
   }
   if (type === 'stop') {
     return { reason: 'Workflow stopped' };
+  }
+  if (type === 'branch') {
+    return {
+      label: 'Branch',
+      branches: [
+        { key: 'branch_1', label: 'Branch 1', conditionGroup: { logic: 'all', conditions: [{ field: 'ticket.priorityLabel', operator: 'is', value: 'Urgent' }] } },
+      ],
+    };
+  }
+  if (type === 'delay') {
+    return { label: 'Wait', minutes: 60 };
+  }
+  if (type === 'call_webhook') {
+    return {
+      label: 'Call webhook',
+      url: '',
+      method: 'POST',
+      bodyTemplate: '{"ticketId": {{ ticket.id }}, "subject": {{ ticket.subject | json }}, "event": "{{ event.type }}"}',
+      timeoutMs: 5000,
+      onError: 'continue',
+    };
+  }
+  if (type === 'create_child_ticket') {
+    return {
+      label: 'Create child ticket',
+      subjectTemplate: 'Follow-up: {{ ticket.subject }}',
+      descriptionTemplate: 'Follow-up task created from {{ event.type }}.',
+      priority: 2,
+      notifyRequester: false,
+    };
+  }
+  if (type === 'request_approval') {
+    return {
+      label: 'Request approval',
+      approvalCategoryId: null,
+      note: 'Requested automatically because: {{ event.type }} on {{ ticket.subject }}',
+    };
   }
   return {};
 }
@@ -7254,11 +7337,13 @@ export default function NotificationWorkflowsPanel({
         sourceHandle: existingEdge.sourceHandle || null,
         target: newId,
       });
+      // Conditions continue downstream on true; branches on their otherwise
+      // path (both are required by validation, so inserted nodes stay valid).
+      const insertHandle = type === 'condition' ? 'true' : type === 'branch' ? 'otherwise' : null;
       next.edges.push({
-        id: uniqueEdgeId(next, newId, edgeRef.target, type === 'condition' ? 'true' : null),
+        id: uniqueEdgeId(next, newId, edgeRef.target, insertHandle),
         source: newId,
-        // Conditions only expose true/false outputs; continue downstream on true.
-        sourceHandle: type === 'condition' ? 'true' : null,
+        sourceHandle: insertHandle,
         target: edgeRef.target,
       });
       if (type === 'llm_generate') {
@@ -7280,7 +7365,11 @@ export default function NotificationWorkflowsPanel({
     if (!source || !target || target.type === 'trigger' || isTerminalNode(source)) return false;
     const sourceHandle = normalizedHandle(connection.sourceHandle);
     const targetHandle = normalizedHandle(connection.targetHandle);
-    return (WORKFLOW_NODE_REGISTRY[source.type]?.outputHandles || []).includes(sourceHandle)
+    // Branch nodes have dynamic output handles (their configured branch keys
+    // + otherwise) — accept any source handle; the backend validates keys.
+    const sourceOk = source.type === 'branch'
+      || (WORKFLOW_NODE_REGISTRY[source.type]?.outputHandles || []).includes(sourceHandle);
+    return sourceOk
       && (WORKFLOW_NODE_REGISTRY[target.type]?.inputHandles || ['default']).includes(targetHandle);
   }
 
@@ -7333,7 +7422,7 @@ export default function NotificationWorkflowsPanel({
   }
 
   function updateConditionBranch(handle, targetId) {
-    if (!selectedNode || selectedNode.type !== 'condition' || !targetId) return;
+    if (!selectedNode || !['condition', 'branch'].includes(selectedNode.type) || !targetId) return;
     updateDraft((next) => {
       const source = next.nodes.find((node) => node.id === selectedNode.id);
       const target = next.nodes.find((node) => node.id === targetId);
@@ -8140,6 +8229,211 @@ export default function NotificationWorkflowsPanel({
             <CheckCircle2 className="h-4 w-4" />
             Apply condition
           </button>
+        </div>
+      );
+    }
+
+    if (selectedNode.type === 'branch') {
+      const branches = Array.isArray(selectedNode.data?.branches) ? selectedNode.data.branches : [];
+      const branchTargets = (draft?.nodes || []).filter((node) => node.id !== selectedNode.id && node.type !== 'trigger');
+      const targetForBranch = (handle) => (draft?.edges || []).find((edge) => (
+        edge.source === selectedNode.id && normalizedHandle(edge.sourceHandle) === handle
+      ))?.target || '';
+      const setBranches = (nextBranches) => updateNodeData({ branches: nextBranches });
+      return (
+        <div className="space-y-4">
+          <p className="text-xs text-gray-500">Branches are checked top to bottom — the first match wins; nothing matching takes the <strong>otherwise</strong> path.</p>
+          {branches.map((branch, index) => (
+            <div key={branch.key || index} className="rounded-lg border border-violet-200 bg-violet-50/40 p-3 space-y-2">
+              <div className="flex items-center gap-2">
+                <input
+                  value={branch.label || ''}
+                  onChange={(event) => {
+                    const next = branches.slice();
+                    next[index] = { ...branch, label: event.target.value };
+                    setBranches(next);
+                  }}
+                  placeholder={`Branch ${index + 1}`}
+                  aria-label="Branch label"
+                  className="flex-1 rounded-md border border-violet-200 bg-white px-2.5 py-1.5 text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={() => setBranches(branches.filter((_, i) => i !== index))}
+                  className="rounded-md p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-500"
+                  aria-label="Remove branch"
+                >
+                  <XCircle className="h-4 w-4" />
+                </button>
+              </div>
+              <ConditionGroupBuilder
+                value={branch.conditionGroup}
+                onChange={(group) => {
+                  const next = branches.slice();
+                  next[index] = { ...branch, conditionGroup: group };
+                  setBranches(next);
+                }}
+                onClear={() => {
+                  const next = branches.slice();
+                  next[index] = { ...branch, conditionGroup: null };
+                  setBranches(next);
+                }}
+              />
+              <label className="block text-xs font-medium uppercase text-gray-500">
+                Route to
+                <select
+                  value={targetForBranch(String(branch.key || '').toLowerCase())}
+                  onChange={(event) => updateConditionBranch(String(branch.key || '').toLowerCase(), event.target.value)}
+                  className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+                >
+                  <option value="">Choose target node</option>
+                  {branchTargets.map((node) => (
+                    <option key={node.id} value={node.id}>{NODE_LABELS[node.type] || node.type}: {node.data?.label || node.id}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          ))}
+          <button
+            type="button"
+            onClick={() => setBranches([
+              ...branches,
+              { key: `branch_${branches.length + 1}`, label: `Branch ${branches.length + 1}`, conditionGroup: { logic: 'all', conditions: [] } },
+            ])}
+            disabled={branches.length >= 8}
+            className="inline-flex items-center gap-1.5 rounded-md border border-violet-300 px-3 py-2 text-xs font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-50"
+          >
+            + Add branch
+          </button>
+          <label className="block text-xs font-medium uppercase text-gray-500">
+            Otherwise route to
+            <select
+              value={targetForBranch('otherwise')}
+              onChange={(event) => updateConditionBranch('otherwise', event.target.value)}
+              className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+            >
+              <option value="">Choose target node</option>
+              {branchTargets.map((node) => (
+                <option key={node.id} value={node.id}>{NODE_LABELS[node.type] || node.type}: {node.data?.label || node.id}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+      );
+    }
+
+    if (selectedNode.type === 'delay') {
+      return (
+        <div className="space-y-3">
+          <label className="block text-xs font-medium uppercase text-gray-500">
+            Wait for (minutes)
+            <input
+              type="number"
+              min="1"
+              max="10080"
+              value={selectedNode.data?.minutes ?? 60}
+              onChange={(event) => updateNodeData({ minutes: Math.min(10080, Math.max(1, Number(event.target.value) || 60)) })}
+              className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900 tabular-nums"
+            />
+          </label>
+          <p className="text-[11px] text-gray-400">The run parks durably and resumes after the wait (survives restarts). Max 7 days. Previews skip the wait.</p>
+        </div>
+      );
+    }
+
+    if (selectedNode.type === 'call_webhook') {
+      return (
+        <div className="space-y-3">
+          <label className="block text-xs font-medium uppercase text-gray-500">
+            URL
+            <input
+              value={selectedNode.data?.url || ''}
+              onChange={(event) => updateNodeData({ url: event.target.value })}
+              placeholder="https://example.com/hook"
+              className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+            />
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block text-xs font-medium uppercase text-gray-500">
+              Method
+              <select
+                value={selectedNode.data?.method || 'POST'}
+                onChange={(event) => updateNodeData({ method: event.target.value })}
+                className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+              >
+                {['POST', 'GET', 'PUT', 'PATCH', 'DELETE'].map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </label>
+            <label className="block text-xs font-medium uppercase text-gray-500">
+              On error
+              <select
+                value={selectedNode.data?.onError || 'continue'}
+                onChange={(event) => updateNodeData({ onError: event.target.value })}
+                className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+              >
+                <option value="continue">Continue the workflow</option>
+                <option value="fail">Fail the workflow</option>
+              </select>
+            </label>
+          </div>
+          <label className="block text-xs font-medium uppercase text-gray-500">
+            Body template (Liquid, JSON)
+            <textarea
+              value={selectedNode.data?.bodyTemplate || ''}
+              onChange={(event) => updateNodeData({ bodyTemplate: event.target.value })}
+              className="mt-1 h-28 w-full rounded-md border border-gray-200 px-3 py-2 font-mono text-xs normal-case"
+            />
+          </label>
+          <p className="text-[11px] text-gray-400">Private/internal addresses are blocked. Responses are recorded (truncated) in the run audit.</p>
+        </div>
+      );
+    }
+
+    if (selectedNode.type === 'create_child_ticket') {
+      return (
+        <div className="space-y-3">
+          <label className="block text-xs font-medium uppercase text-gray-500">
+            Subject template
+            <input
+              value={selectedNode.data?.subjectTemplate || ''}
+              onChange={(event) => updateNodeData({ subjectTemplate: event.target.value })}
+              className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+            />
+          </label>
+          <label className="block text-xs font-medium uppercase text-gray-500">
+            Description template
+            <textarea
+              value={selectedNode.data?.descriptionTemplate || ''}
+              onChange={(event) => updateNodeData({ descriptionTemplate: event.target.value })}
+              className="mt-1 h-24 w-full rounded-md border border-gray-200 px-3 py-2 text-sm normal-case"
+            />
+          </label>
+          <p className="text-[11px] text-gray-400">Creates a Ticket-Pulse-born ticket for the same requester, noting the source ticket. Requires native ticketing on this workspace.</p>
+        </div>
+      );
+    }
+
+    if (selectedNode.type === 'request_approval') {
+      return (
+        <div className="space-y-3">
+          <label className="block text-xs font-medium uppercase text-gray-500">
+            Approval category ID
+            <input
+              type="number"
+              value={selectedNode.data?.approvalCategoryId ?? ''}
+              onChange={(event) => updateNodeData({ approvalCategoryId: Number(event.target.value) || null })}
+              className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900 tabular-nums"
+            />
+          </label>
+          <label className="block text-xs font-medium uppercase text-gray-500">
+            Request note (Liquid)
+            <textarea
+              value={selectedNode.data?.note || ''}
+              onChange={(event) => updateNodeData({ note: event.target.value })}
+              className="mt-1 h-20 w-full rounded-md border border-gray-200 px-3 py-2 text-sm normal-case"
+            />
+          </label>
+          <p className="text-[11px] text-gray-400">Routes the ticket to the category&apos;s approval managers (any one approves). Category IDs are listed in Settings → Approval Categories.</p>
         </div>
       );
     }

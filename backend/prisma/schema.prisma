@@ -1499,12 +1499,19 @@ model NotificationWorkflowRun {
   deliveries        NotificationDelivery[]
   aiProviderAttempts AiProviderAttempt[]
 
+  // Delay-node durable resume: a run parked on a `delay` node persists its
+  // state and continues from resumeNodeId when resumeAt passes (status='waiting').
+  resumeAt          DateTime? @map("resume_at")
+  resumeNodeId      String?   @db.VarChar(80) @map("resume_node_id")
+  resumeState       Json?     @map("resume_state")
+
   @@map("notification_workflow_runs")
   @@index([workspaceId, eventType, startedAt])
   @@index([workspaceId, executionMode, startedAt])
   @@index([workflowId, startedAt])
   @@index([ticketId])
   @@index([status])
+  @@index([status, resumeAt])
 }
 
 model NotificationWorkflowStepRun {

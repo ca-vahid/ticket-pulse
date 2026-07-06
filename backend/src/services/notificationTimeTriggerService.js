@@ -38,6 +38,7 @@ class NotificationTimeTriggerService {
     if (this._timer || !this.isEnabled()) return;
     this._timer = setInterval(() => {
       this.tick().catch((err) => logger.warn(`Time-trigger tick failed (non-fatal): ${err.message}`));
+      this.resumeDueRuns().catch(() => {});
     }, TICK_INTERVAL_MS);
     this._timer.unref?.();
     logger.info(`Notification time-trigger worker started (every ${Math.round(TICK_INTERVAL_MS / 1000)}s)`);
@@ -79,6 +80,17 @@ class NotificationTimeTriggerService {
       return { workflows: workflows.length, dispatched };
     } finally {
       this._ticking = false;
+    }
+  }
+
+  /** Delay-node resume rides the same tick cadence as the time triggers. */
+  async resumeDueRuns() {
+    try {
+      const { resumeWaitingRuns } = await import('./notificationWorkflowEngine.js');
+      return await resumeWaitingRuns();
+    } catch (err) {
+      logger.warn(`Workflow delay-resume sweep failed (non-fatal): ${err.message}`);
+      return { due: 0, resumed: 0 };
     }
   }
 

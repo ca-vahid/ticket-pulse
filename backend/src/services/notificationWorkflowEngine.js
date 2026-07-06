@@ -1425,6 +1425,15 @@ function nextNodeIds(definition, node, output = {}) {
     if (matching.length > 0) return matching.map((edge) => edge.target);
   }
 
+  if (node.type === 'branch') {
+    const wanted = String(output.matchedBranch || 'otherwise').toLowerCase();
+    const matching = edges.filter((edge) => String(edge.sourceHandle || '').toLowerCase() === wanted);
+    if (matching.length > 0) return matching.map((edge) => edge.target);
+    // No edge for the matched branch → fall through to 'otherwise'.
+    const otherwise = edges.filter((edge) => String(edge.sourceHandle || '').toLowerCase() === 'otherwise');
+    return otherwise.map((edge) => edge.target);
+  }
+
   return edges
     .filter((edge) => !edge.sourceHandle || edge.sourceHandle === 'default')
     .map((edge) => edge.target);
@@ -1733,11 +1742,93 @@ async function executeNode({
     });
   }
 
+  if (node.type === 'branch') {
+    // N-way switch: first matching branch wins; no match → 'otherwise'.
+    const { compileConditionGroup: compileGroup } = await import('./notificationConditionModel.js');
+    const branches = Array.isArray(node.data?.branches) ? node.data.branches : [];
+    for (const candidate of branches) {
+      const key = String(candidate?.key || '').trim().toLowerCase();
+      if (!key) continue;
+      try {
+        const rule = candidate.conditionGroup ? compileGroup(candidate.conditionGroup) : (candidate.rule || false);
+        if (jsonLogic.apply(rule, scope)) {
+          return { matchedBranch: key, label: candidate.label || key };
+        }
+      } catch (error) {
+        // A branch that fails to compile is skipped (fail closed on that branch).
+        logger.warn(`Branch ${node.id}/${key} compile failed: ${error.message}`);
+      }
+    }
+    return { matchedBranch: 'otherwise' };
+  }
+
+  if (node.type === 'delay') {
+    const minutes = Math.min(7 * 24 * 60, Math.max(1, Number(node.data?.minutes) || 5));
+    if (dryRun || executionMode === 'mock' || executionMode === 'preview') {
+      return { preview: true, wouldWaitMinutes: minutes };
+    }
+    // Live: signal the run loop to park this run for durable resume.
+    return { __waitMinutes: minutes };
+  }
+
+  if (node.type === 'call_webhook') {
+    const { executeWebhookNode } = await import('./notificationWorkflowActionNodes.js');
+    const renderedBody = await renderLiquid(node.data?.bodyTemplate || '', scope);
+    try {
+      const output = await executeWebhookNode(node, {
+        renderedBody,
+        dryRun: dryRun === true || executionMode === 'mock' || executionMode === 'preview',
+      });
+      state.webhook = { ...(state.webhook || {}), [nodeOutputKey(node)]: output };
+      return output;
+    } catch (error) {
+      // onError='fail' aborts the run; default 'continue' records and moves on.
+      if (node.data?.onError === 'fail') throw error;
+      const output = { failed: true, error: error.message };
+      state.webhook = { ...(state.webhook || {}), [nodeOutputKey(node)]: output };
+      return output;
+    }
+  }
+
+  if (node.type === 'create_child_ticket') {
+    const { executeCreateChildTicketNode } = await import('./notificationWorkflowActionNodes.js');
+    const renderedSubject = await renderLiquid(node.data?.subjectTemplate || '', scope);
+    const renderedDescription = await renderLiquid(node.data?.descriptionTemplate || '', scope);
+    return executeCreateChildTicketNode(node, eventContext, {
+      renderedSubject,
+      renderedDescription,
+      dryRun: dryRun === true || executionMode === 'mock' || executionMode === 'preview',
+    });
+  }
+
+  if (node.type === 'request_approval') {
+    const { executeRequestApprovalNode } = await import('./notificationWorkflowActionNodes.js');
+    const renderedNote = await renderLiquid(node.data?.note || '', scope);
+    return executeRequestApprovalNode(node, eventContext, {
+      renderedNote,
+      dryRun: dryRun === true || executionMode === 'mock' || executionMode === 'preview',
+    });
+  }
+
   if (node.type === 'recipient_resolver') {
     const customEmails = Array.isArray(node.data?.customEmails) ? node.data.customEmails : [];
-    const to = resolveRecipientList(node.data?.to || ['requester'], eventContext, customEmails);
-    const cc = excludeExistingEmails(resolveRecipientList(node.data?.cc || [], eventContext, customEmails), to);
-    const bcc = excludeExistingEmails(resolveRecipientList(node.data?.bcc || [], eventContext, customEmails), [...to, ...cc]);
+    // internal_group:<id> tokens resolve to active member emails (team routing).
+    const { resolveInternalGroupEmails } = await import('./notificationWorkflowActionNodes.js');
+    const allTokens = [
+      ...(node.data?.to || []),
+      ...(node.data?.cc || []),
+      ...(node.data?.bcc || []),
+    ];
+    const groupEmails = await resolveInternalGroupEmails(allTokens);
+    const resolveWithGroups = (tokens, fallbackTokens) => {
+      const list = Array.isArray(tokens) ? tokens : (fallbackTokens || []);
+      const direct = resolveRecipientList(list, eventContext, customEmails);
+      const hasGroupToken = list.some((t) => /^internal_group:\d+$/.test(String(t || '')));
+      return hasGroupToken ? uniqueEmails([direct, groupEmails]) : direct;
+    };
+    const to = resolveWithGroups(node.data?.to || ['requester']);
+    const cc = excludeExistingEmails(resolveWithGroups(node.data?.cc || []), to);
+    const bcc = excludeExistingEmails(resolveWithGroups(node.data?.bcc || []), [...to, ...cc]);
     const recipients = {
       to,
       cc,
@@ -2343,6 +2434,9 @@ export async function executeDefinition({
   routingResult = null,
   workflowRunTimeoutMs = NOTIFICATION_WORKFLOW_RUN_TIMEOUT_MS,
   signal = null,
+  // Delay-node durable resume: { run, state, startNodeIds } — reuses the
+  // parked run instead of creating one and continues mid-graph.
+  resume = null,
 }) {
   const normalizedExecutionMode = normalizeExecutionMode(executionMode, dryRun);
   const effectiveDryRun = dryRun || normalizedExecutionMode === EXECUTION_MODE_PREVIEW || normalizedExecutionMode === EXECUTION_MODE_MOCK;
@@ -2359,41 +2453,43 @@ export async function executeDefinition({
     || workflow?.draftDefinition?.metadata?.scheduleMode
     || null;
   const startedAt = Date.now();
-  const state = {};
+  const state = resume?.state || {};
   const previews = [];
   const version = workflowVersion(workflow);
-  let run = null;
+  let run = resume?.run || null;
   const workflowAbort = createWorkflowAbortController({
     timeoutMs: workflowRunTimeoutMs,
     parentSignal: signal,
   });
 
-  try {
-    run = await withWorkflowAbort(createRun({
-      workflow,
-      version,
-      eventContext: normalizedContext,
-      dryRun: effectiveDryRun,
-      triggerSource,
-      executionMode: normalizedExecutionMode,
-      routingResult,
-    }), workflowAbort.signal, workflowAbort.timeoutMs);
-  } catch (error) {
-    workflowAbort.cleanup();
-    if (error?.code === 'P2002') {
-      return {
-        status: 'skipped',
-        reason: 'Duplicate workflow event',
-        workflowId: workflow.id,
+  if (!run) {
+    try {
+      run = await withWorkflowAbort(createRun({
+        workflow,
+        version,
+        eventContext: normalizedContext,
+        dryRun: effectiveDryRun,
+        triggerSource,
         executionMode: normalizedExecutionMode,
-      };
+        routingResult,
+      }), workflowAbort.signal, workflowAbort.timeoutMs);
+    } catch (error) {
+      workflowAbort.cleanup();
+      if (error?.code === 'P2002') {
+        return {
+          status: 'skipped',
+          reason: 'Duplicate workflow event',
+          workflowId: workflow.id,
+          executionMode: normalizedExecutionMode,
+        };
+      }
+      throw error;
     }
-    throw error;
   }
 
   const nodes = nodeById(normalizedDefinition);
   const trigger = normalizedDefinition.nodes.find((node) => node.type === 'trigger');
-  const queue = [trigger.id];
+  const queue = resume ? [...(resume.startNodeIds || [])] : [trigger.id];
   const executed = [];
 
   try {
@@ -2433,6 +2529,36 @@ export async function executeDefinition({
           signal: workflowAbort.signal,
           workflowRunTimeoutMs: workflowAbort.timeoutMs,
         }), workflowAbort.signal, workflowAbort.timeoutMs);
+        // Delay node in live mode: park the run for durable resume instead of
+        // blocking the process. The step completes (the wait STARTED); the run
+        // sits in status='waiting' until the resume worker picks it up.
+        if (output?.__waitMinutes && !effectiveDryRun) {
+          const resumeTargets = nextNodeIds(normalizedDefinition, node, output);
+          const waitOutput = { waiting: true, waitMinutes: output.__waitMinutes };
+          await finishStep(step, 'completed', waitOutput);
+          executed.push({ nodeId: node.id, nodeType: node.type, output: waitOutput });
+          if (resumeTargets.length === 0) break; // nothing after the delay — just finish
+          const resumeAt = new Date(Date.now() + output.__waitMinutes * 60 * 1000);
+          await prisma.notificationWorkflowRun.update({
+            where: { id: run.id },
+            data: {
+              status: 'waiting',
+              resumeAt,
+              resumeNodeId: resumeTargets[0],
+              resumeState: safeJson({ state }),
+            },
+          });
+          workflowAbort.cleanup();
+          return {
+            status: 'waiting',
+            workflowId: workflow.id,
+            runId: run.id,
+            resumeAt: resumeAt.toISOString(),
+            executionMode: normalizedExecutionMode,
+            steps: executed,
+          };
+        }
+
         await finishStep(step, 'completed', output);
         executed.push({ nodeId: node.id, nodeType: node.type, output });
 
@@ -2617,20 +2743,61 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false } = 
   const ticketId = Number(eventContext.ticket?.id);
   const setStatus = node.data?.setStatus || null;
   const setPriority = node.data?.setPriority ? Number(node.data.setPriority) : null;
+  const setInternalCategoryId = node.data?.setInternalCategoryId ? Number(node.data.setInternalCategoryId) : null;
+  const setInternalSubcategoryId = node.data?.setInternalSubcategoryId ? Number(node.data.setInternalSubcategoryId) : null;
+  const setInternalGroupId = node.data?.setInternalGroupId ? Number(node.data.setInternalGroupId) : null;
+  const assignTo = node.data?.assignTo && node.data.assignTo.mode && node.data.assignTo.mode !== 'none'
+    ? node.data.assignTo
+    : null;
 
   if (!Number.isFinite(ticketId) || ticketId <= 0) return { skipped: true, reason: 'No ticket in event context' };
-  if (!setStatus && !setPriority) return { skipped: true, reason: 'update_ticket node has no changes configured' };
+  if (!setStatus && !setPriority && !setInternalCategoryId && !setInternalGroupId && !assignTo) {
+    return { skipped: true, reason: 'update_ticket node has no changes configured' };
+  }
   if (setStatus && !UPDATE_TICKET_STATUSES.includes(setStatus)) {
     return { skipped: true, reason: `Unsupported status "${setStatus}"` };
   }
   if (dryRun) {
-    return { dryRun: true, wouldSet: { status: setStatus || undefined, priority: setPriority || undefined } };
+    return {
+      dryRun: true,
+      wouldSet: {
+        status: setStatus || undefined,
+        priority: setPriority || undefined,
+        internalCategoryId: setInternalCategoryId || undefined,
+        internalSubcategoryId: setInternalSubcategoryId || undefined,
+        internalGroupId: setInternalGroupId || undefined,
+        assignTo: assignTo || undefined,
+      },
+    };
   }
 
   const { default: prisma } = await import('./prisma.js');
   const ticket = await prisma.ticket.findUnique({ where: { id: ticketId } });
   if (!ticket) return { skipped: true, reason: 'Ticket not found' };
+
+  // Assignment is origin-aware and handled first (TP-born via ticketService;
+  // FS-born via the FS write-back path) — it works for BOTH origins.
+  let assignment = null;
+  if (assignTo) {
+    const { resolveAssignmentTarget, applyWorkflowAssignment } = await import('./notificationWorkflowActionNodes.js');
+    const target = await resolveAssignmentTarget(ticket.workspaceId, assignTo);
+    if (target.error) {
+      assignment = { skipped: true, reason: target.error };
+    } else if (ticket.assignedTechId === target.techId) {
+      assignment = { skipped: true, reason: 'Already assigned to the selected technician', techId: target.techId };
+    } else {
+      try {
+        const applied = await applyWorkflowAssignment(ticket, target.techId);
+        assignment = { assigned: true, techId: target.techId, techName: target.techName, mode: target.mode, via: applied.via };
+      } catch (error) {
+        assignment = { skipped: true, reason: `Assignment failed: ${error.message}` };
+      }
+    }
+  }
+
+  // Field mutations remain TP-born only (FreshService owns FS-born fields).
   if (ticket.origin !== 'ticketpulse') {
+    if (assignment) return { assignment, skipped: true, reason: 'Field updates only apply to tickets born in Ticket Pulse (assignment write-back applied)' };
     return { skipped: true, reason: 'Workflow ticket updates only apply to tickets born in Ticket Pulse' };
   }
 
@@ -2664,8 +2831,43 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false } = 
     patch.priority = setPriority;
     changes.priority = { from: ticket.priority, to: setPriority };
   }
+  if (setInternalCategoryId && setInternalCategoryId !== ticket.internalCategoryId) {
+    const category = await prisma.competencyCategory.findFirst({
+      where: { id: setInternalCategoryId, workspaceId: ticket.workspaceId, parentId: null, isActive: true },
+      select: { id: true },
+    });
+    if (category) {
+      patch.internalCategoryId = setInternalCategoryId;
+      changes.internalCategoryId = { from: ticket.internalCategoryId, to: setInternalCategoryId };
+      if (setInternalSubcategoryId) {
+        const sub = await prisma.competencyCategory.findFirst({
+          where: { id: setInternalSubcategoryId, workspaceId: ticket.workspaceId, parentId: setInternalCategoryId, isActive: true },
+          select: { id: true },
+        });
+        if (sub) {
+          patch.internalSubcategoryId = setInternalSubcategoryId;
+          changes.internalSubcategoryId = { from: ticket.internalSubcategoryId, to: setInternalSubcategoryId };
+        }
+      } else {
+        patch.internalSubcategoryId = null;
+      }
+    }
+  }
+  if (setInternalGroupId && setInternalGroupId !== ticket.internalGroupId) {
+    const group = await prisma.group.findFirst({
+      where: { id: setInternalGroupId, workspaceId: ticket.workspaceId, isActive: true },
+      select: { id: true },
+    });
+    if (group) {
+      patch.internalGroupId = setInternalGroupId;
+      changes.internalGroupId = { from: ticket.internalGroupId, to: setInternalGroupId };
+    }
+  }
 
-  if (Object.keys(patch).length === 0) return { skipped: true, reason: 'No effective changes' };
+  if (Object.keys(patch).length === 0) {
+    if (assignment) return { assignment };
+    return { skipped: true, reason: 'No effective changes' };
+  }
   patch.mirrorState = 'pending';
   await prisma.ticket.update({ where: { id: ticket.id }, data: patch });
 
@@ -2696,7 +2898,7 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false } = 
   } catch { /* non-fatal */ }
 
   logger.info('Workflow update_ticket applied', { ticketId: ticket.id, changes });
-  return { updated: changes };
+  return { updated: changes, ...(assignment ? { assignment } : {}) };
 }
 
 export async function executeForEvent(eventContext, options = {}) {
@@ -2775,6 +2977,66 @@ export async function executeForEvent(eventContext, options = {}) {
   };
 }
 
+/**
+ * Resume runs parked by a delay node whose resumeAt has passed. Called from
+ * the time-trigger worker tick. Each run continues from its saved node with
+ * its saved state, pinned to the workflow version it launched on.
+ */
+export async function resumeWaitingRuns({ limit = 25 } = {}) {
+  const due = await prisma.notificationWorkflowRun.findMany({
+    where: { status: 'waiting', resumeAt: { lte: new Date() } },
+    orderBy: { resumeAt: 'asc' },
+    take: limit,
+  });
+  let resumed = 0;
+  for (const run of due) {
+    try {
+      await resumeRun(run);
+      resumed += 1;
+    } catch (error) {
+      logger.warn('Workflow resume failed', { runId: run.id, error: error.message });
+      await prisma.notificationWorkflowRun.update({
+        where: { id: run.id },
+        data: { status: 'failed', error: `Resume failed: ${error.message}`, completedAt: new Date() },
+      }).catch(() => {});
+    }
+  }
+  return { due: due.length, resumed };
+}
+
+async function resumeRun(run) {
+  const workflow = await prisma.notificationWorkflow.findUnique({ where: { id: run.workflowId } });
+  if (!workflow) throw new Error('Workflow no longer exists');
+  // Pin to the version the run launched on (in-flight runs must not switch
+  // definitions mid-graph); fall back to the current published definition.
+  const pinnedVersion = run.workflowVersionId
+    ? await prisma.notificationWorkflowVersion.findUnique({ where: { id: run.workflowVersionId } })
+    : null;
+  const definition = pinnedVersion?.definition || workflow.publishedDefinition;
+  if (!definition) throw new Error('No definition available to resume');
+  if (!run.resumeNodeId) throw new Error('Run has no resume node');
+
+  // Back to running before continuing so a crashed resume is visible.
+  await prisma.notificationWorkflowRun.update({
+    where: { id: run.id },
+    data: { status: 'running', resumeAt: null, resumeNodeId: null, resumeState: null },
+  });
+
+  return executeDefinition({
+    workflow,
+    definition,
+    eventContext: run.eventContext,
+    dryRun: run.dryRun === true,
+    executionMode: run.executionMode || EXECUTION_MODE_LIVE,
+    triggerSource: run.triggerSource || 'delay_resume',
+    resume: {
+      run,
+      state: run.resumeState?.state || {},
+      startNodeIds: [run.resumeNodeId],
+    },
+  });
+}
+
 export async function executePreview({
   workflow,
   definition = null,
@@ -2800,4 +3062,5 @@ export default {
   executeWorkflow,
   executeForEvent,
   executePreview,
+  resumeWaitingRuns,
 };
