@@ -47,6 +47,32 @@ function recordDisplayId(record) {
   return record?.data?.bo_display_id ?? record?.bo_display_id ?? record?.id ?? null;
 }
 
+/**
+ * Resolve Ticket Pulse skill/subskill NAMES to the FreshService custom-object
+ * record display ids that the lookup custom fields expect. Sending the name
+ * instead of the id makes FreshService store null ("none"). Lenient — returns
+ * null ids it can't resolve (never throws), so callers can decide to skip.
+ * Shared by the assignment writeback and the ticket mirror.
+ */
+export async function resolveTpSkillLookupIds(client, { skill, subskill, workspaceId }) {
+  if (!skill) return { categoryDisplayId: null, subcategoryDisplayId: null };
+  const objects = await client.listCustomObjects({ workspace_id: workspaceId });
+  const byTitle = new Map((objects || []).map((o) => [o.title, o]));
+  const categoryObject = byTitle.get(TP_SKILL_OBJECT_TITLE);
+  const subcategoryObject = byTitle.get(TP_SUBSKILL_OBJECT_TITLE);
+  if (!categoryObject) return { categoryDisplayId: null, subcategoryDisplayId: null };
+  const [categoryRecords, subcategoryRecords] = await Promise.all([
+    client.listCustomObjectRecords(categoryObject.id),
+    subcategoryObject ? client.listCustomObjectRecords(subcategoryObject.id) : Promise.resolve([]),
+  ]);
+  const catByName = new Map((categoryRecords || []).map((r) => [keyFor(recordName(r)), recordDisplayId(r)]));
+  const subByName = new Map((subcategoryRecords || []).map((r) => [keyFor(recordName(r)), recordDisplayId(r)]));
+  return {
+    categoryDisplayId: catByName.get(keyFor(skill)) ?? null,
+    subcategoryDisplayId: subskill ? (subByName.get(keyFor(subskill)) ?? null) : null,
+  };
+}
+
 function buildActionPreview(actions) {
   return actions.map((a) => {
     if (a.type === 'assign') return `Assign ticket #${a.ticketId} to agent ${a.agentId}`;
