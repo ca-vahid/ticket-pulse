@@ -151,15 +151,64 @@ describe('ticket lifecycle notification event derivation', () => {
     expect(second).not.toBe(first);
   });
 
-  test('resolved and closed statuses share one terminal event', () => {
+  test('resolved and closed statuses share one terminal event (plus the generic status change)', () => {
     expect(deriveTicketLifecycleEvents(
       { assignedTechId: 20, status: 'Open' },
       { assignedTechId: 20, status: 'Resolved', resolvedAt: new Date('2026-05-29T20:00:00.000Z') },
-    ).map((event) => event.type)).toEqual(['ticket.resolved_closed']);
+    ).map((event) => event.type)).toEqual(['ticket.resolved_closed', 'ticket.status_changed']);
 
+    // Resolved→Closed is already terminal (no second resolved_closed) but IS a
+    // status transition, so the generic event still fires.
     expect(deriveTicketLifecycleEvents(
       { assignedTechId: 20, status: 'Resolved' },
       { assignedTechId: 20, status: 'Closed', closedAt: new Date('2026-05-29T21:00:00.000Z') },
+    ).map((event) => event.type)).toEqual(['ticket.status_changed']);
+  });
+
+  test('status transitions fire ticket.status_changed with from/to extra and a stable stamp', () => {
+    const events = deriveTicketLifecycleEvents(
+      { assignedTechId: 20, status: 'Open' },
+      {
+        id: 501,
+        workspaceId: 1,
+        assignedTechId: 20,
+        status: 'Pending',
+        freshserviceUpdatedAt: new Date('2026-07-06T10:00:00.000Z'),
+      },
+    );
+
+    expect(events.map((e) => e.type)).toEqual(['ticket.status_changed']);
+    expect(events[0].extra).toEqual({ from: 'Open', to: 'Pending' });
+    expect(events[0].dedupeStamp).toBe('Open->Pending:2026-07-06T10:00:00.000Z');
+
+    // Re-sync of the same FS change (same freshserviceUpdatedAt) → same stamp,
+    // so the engine's run dedupe suppresses a double fire.
+    const resync = deriveTicketLifecycleEvents(
+      { assignedTechId: 20, status: 'Open' },
+      {
+        id: 501,
+        workspaceId: 1,
+        assignedTechId: 20,
+        status: 'Pending',
+        freshserviceUpdatedAt: new Date('2026-07-06T10:00:00.000Z'),
+      },
+    );
+    expect(resync[0].dedupeStamp).toBe(events[0].dedupeStamp);
+    expect(resync[0].notificationFingerprint).toBe(events[0].notificationFingerprint);
+  });
+
+  test('status_changed does not fire on first sight or when the status is unchanged', () => {
+    // First sight (create) — only ticket.created.
+    expect(deriveTicketLifecycleEvents(null, {
+      id: 1,
+      createdAt: new Date('2026-07-06T09:00:00.000Z'),
+      status: 'Open',
+    }).map((e) => e.type)).toEqual(['ticket.created']);
+
+    // Same status on both sides — nothing.
+    expect(deriveTicketLifecycleEvents(
+      { assignedTechId: 20, status: 'Open' },
+      { assignedTechId: 20, status: 'Open' },
     )).toEqual([]);
   });
 });

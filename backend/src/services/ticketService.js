@@ -1579,11 +1579,10 @@ class TicketService {
     }
 
     await this._audit(ticket.id, 'status_changed', actor, { oldStatus: ticket.status, newStatus: status });
+    // ticket.status_changed (with from/to extra) is derived inside
+    // _notifyLifecycle now — single emit path shared with the FS sync, with a
+    // stable dedupe stamp instead of the old Date.now() one.
     await this._notifyLifecycle(ticket, updated);
-    ticketLifecycleNotificationService.emitTicketEvent?.('ticket.status_changed', ticket.id, {
-      dedupeStamp: `status:${ticket.id}:${ticket.status}->${status}:${Date.now()}`,
-      extra: { from: ticket.status, to: status, byEmail: actor?.email || null },
-    }).catch?.(() => {});
     this._broadcast(workspaceId, 'status', updated, { oldStatus: ticket.status });
     await mirrorService.enqueueFieldSync(workspaceId, ticket.id);
     return { ...updated, displayRef: ticketDisplayRef(updated), changed: true };
@@ -1764,15 +1763,21 @@ class TicketService {
         email = await this._emailRequesterReply(ticket, entry, { cc, attachments: storedAttachments });
       }
       await mirrorService.enqueueThreadEntry(workspaceId, ticket.id, entry.id);
-      if (isPrivate) {
-        ticketLifecycleNotificationService.emitTicketEvent?.('ticket.note_added', ticket.id, {
-          dedupeStamp: `note:${entry.id}`,
-          extra: { entryId: entry.id, byEmail: actor?.email || null },
-        }).catch?.(() => {});
-      }
     } else if (!isPrivate) {
       email = { sent: true, via: 'freshservice' };
     }
+
+    // Workflow events fire for BOTH origins — the entry exists locally either
+    // way, and workflows keying on notes/replies must not care where the
+    // ticket was born. Stable per-entry stamps keep retries idempotent.
+    ticketLifecycleNotificationService.emitTicketEvent?.(
+      isPrivate ? 'ticket.note_added' : 'ticket.public_reply_added',
+      ticket.id,
+      {
+        dedupeStamp: `${isPrivate ? 'note' : 'reply'}:${entry.id}`,
+        extra: { entryId: entry.id, byEmail: actor?.email || null },
+      },
+    ).catch?.(() => {});
 
     this._broadcast(workspaceId, isPrivate ? 'note' : 'reply', ticket, { entryId: entry.id });
     return { entry, email, attachments: storedAttachments.map((s) => s.attachment) };

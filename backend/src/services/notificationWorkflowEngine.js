@@ -1314,6 +1314,28 @@ function llmEmailFromState(state) {
   };
 }
 
+/**
+ * Minimal, claim-free notification used when an llm_only node has neither LLM
+ * output (provider down / timeout / guard hard-block) nor a configured
+ * template — losing the email entirely is worse than a plain factual update.
+ */
+function builtinFallbackEmail(eventContext) {
+  const ticket = eventContext?.ticket || {};
+  const ref = ticket.freshserviceTicketId
+    ? `#${ticket.freshserviceTicketId}`
+    : (ticket.id ? `#${ticket.id}` : '');
+  const lines = [
+    `There is an update on your ticket ${ref}${ticket.subject ? ` — “${ticket.subject}”` : ''}.`.trim(),
+    ticket.status ? `Current status: ${ticket.status}.` : null,
+    'Reply to this email to add more information to your ticket.',
+  ].filter(Boolean);
+  return {
+    subject: `Update on your ticket ${ref}`.trim(),
+    html: `<p>${lines.join('</p><p>')}</p>`,
+    text: lines.join('\n\n'),
+  };
+}
+
 function nodeOutputKey(node) {
   const configured = String(node?.data?.outputKey || '').trim();
   const raw = configured || node?.id || 'node';
@@ -1674,14 +1696,28 @@ async function executeNode({
   if (node.type === 'template_render') {
     const contentSource = templateContentSource(node);
     const llmEmail = llmEmailFromState(state);
-    const shouldRenderTemplate = contentSource !== 'llm_only';
-    const subject = shouldRenderTemplate ? await renderLiquid(node.data?.subject, scope) : null;
+    const llmHasContent = Boolean(llmEmail.html || llmEmail.text);
+    // llm_only normally skips template rendering — but when the LLM produced
+    // nothing (provider down, timeout, guard hard-block) render the template
+    // anyway rather than dropping the notification on the floor.
+    const shouldRenderTemplate = contentSource !== 'llm_only' || !llmHasContent;
+    let subject = shouldRenderTemplate ? await renderLiquid(node.data?.subject, scope) : null;
     const rawHtml = shouldRenderTemplate ? await renderLiquid(node.data?.html, scope) : null;
     const rawText = shouldRenderTemplate && node.data?.plainTextMode !== 'auto'
       ? await renderLiquid(node.data?.text, scope)
       : null;
-    const html = sanitizeEmailHtml(rawHtml);
-    const text = String(rawText || stripHtml(html)).trim() || null;
+    let html = sanitizeEmailHtml(rawHtml);
+    let text = String(rawText || stripHtml(html)).trim() || null;
+    // Last resort: llm_only with no LLM output AND no configured template still
+    // sends a minimal factual email instead of silently losing the delivery.
+    let builtinFallbackUsed = false;
+    if (contentSource === 'llm_only' && !llmHasContent && !html && !text) {
+      const fallback = builtinFallbackEmail(eventContext);
+      subject = String(subject || '').trim() || fallback.subject;
+      html = fallback.html;
+      text = fallback.text;
+      builtinFallbackUsed = true;
+    }
     const useLlm = contentSource === 'llm_only' || contentSource === 'llm_with_template_fallback';
     state.email = {
       ...(state.email || {}),
@@ -1695,6 +1731,7 @@ async function executeNode({
     const auditEmail = compactEmailForAudit(state.email);
     return {
       email: auditEmail,
+      builtinFallbackUsed,
       contentSource,
       actionLinks: auditEmail.actionLinks || {},
       publicStatusLinkApplied: state.email.publicStatusLinkApplied === true,

@@ -71,8 +71,10 @@ const EVENT_LABELS = {
   'ticket.reply_received': 'Requester replied',
   'ticket.note_added': 'Internal note added',
   'ticket.status_changed': 'Status changed',
+  'ticket.public_reply_added': 'Agent replied to requester',
   'approval.requested': 'Approval requested',
   'approval.decided': 'Approval decided',
+  'approval.clarification_requested': 'Approval clarification requested',
 };
 
 // Per-event color + icon, so the four trigger groups read as distinct zones in the
@@ -85,6 +87,7 @@ const TRIGGER_VISUALS = {
   'ticket.reply_received': { icon: Repeat, icon_: 'text-sky-600', chip: 'bg-sky-50 text-sky-700 ring-sky-200', rail: 'bg-sky-400' },
   'ticket.note_added': { icon: FileJson, icon_: 'text-indigo-600', chip: 'bg-indigo-50 text-indigo-700 ring-indigo-200', rail: 'bg-indigo-400' },
   'ticket.status_changed': { icon: Waypoints, icon_: 'text-violet-600', chip: 'bg-violet-50 text-violet-700 ring-violet-200', rail: 'bg-violet-400' },
+  'ticket.public_reply_added': { icon: Repeat, icon_: 'text-cyan-600', chip: 'bg-cyan-50 text-cyan-700 ring-cyan-200', rail: 'bg-cyan-400' },
 };
 
 function triggerVisuals(triggerType) {

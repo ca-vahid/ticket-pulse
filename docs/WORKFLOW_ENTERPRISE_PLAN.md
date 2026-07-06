@@ -27,27 +27,27 @@ Goal: take the Mail Workflow (notification workflow) engine from a single-path n
 *Lock in what already works with tests, close the last wiring gaps, and guarantee an email is never silently lost.*
 
 ### 1.1 Event dispatch verification + regression tests
-- [ ] Integration test: `ticket.status_changed` reaches the engine on a status change
-- [ ] Integration test: `ticket.note_added` reaches the engine on a private note
-- [ ] Integration test: `ticket.reply_received` reaches the engine on an inbound-email reply
-- [ ] Integration test: `approval.requested` / `approval.decided` / `approval.clarification_requested` each dispatch
-- [ ] Add a single source-of-truth map (code comment or small registry) of event → emit site(s), so future events can't be defined-but-unfired
+- [x] Integration test: `ticket.status_changed` reaches the engine on a status change
+- [x] Integration test: `ticket.note_added` reaches the engine on a private note
+- [x] Integration test: `ticket.reply_received` reaches the engine on an inbound-email reply
+- [x] Integration test: `approval.requested` / `approval.decided` / `approval.clarification_requested` each dispatch
+- [x] Add a single source-of-truth map (code comment or small registry) of event → emit site(s), so future events can't be defined-but-unfired
 
 ### 1.2 Close the agent-reply event gap
-- [ ] Add `ticket.public_reply_added` event; emit it in `_addThreadEntry` for non-private replies (both origins), with a stable `dedupeStamp` (`reply:<entryId>`)
-- [ ] Register in `NOTIFICATION_EVENT_TYPES`, labels, and trigger metadata (`notificationWorkflowDefinition.js`)
-- [ ] Test coverage for the new event
+- [x] Add `ticket.public_reply_added` event; emit it in `_addThreadEntry` for non-private replies (both origins), with a stable `dedupeStamp` (`reply:<entryId>`)
+- [x] Register in `NOTIFICATION_EVENT_TYPES`, labels, and trigger metadata (`notificationWorkflowDefinition.js`)
+- [x] Test coverage for the new event
 
 ### 1.2b Close the FS-born status-change gap (new — from gap assessment)
-- [ ] Derive `ticket.status_changed` in `deriveTicketLifecycleEvents` when `existing.status !== upserted.status` (stable dedupe stamp `status:<old>-><new>:<fsUpdatedAt>`), so FS-synced transitions fire workflows like TP-native ones
-- [ ] Test coverage (incl. no double-fire alongside `resolved_closed`, and no fire on first sight/create)
+- [x] Derive `ticket.status_changed` in `deriveTicketLifecycleEvents` when `existing.status !== upserted.status` (stable dedupe stamp `status:<old>-><new>:<fsUpdatedAt>`), so FS-synced transitions fire workflows like TP-native ones
+- [x] Test coverage (incl. no double-fire alongside `resolved_closed`, and no fire on first sight/create)
 
 ### 1.3 LLM-email fallback hardening
-- [ ] `llm_only` nodes: on LLM failure, fall back to the rendered template (or a minimal built-in factual template) instead of silently skipping the send — the notification must not be lost
-- [ ] Test: LLM throw/timeout on `llm_with_template_fallback` → template email still sends; on `llm_only` → fallback email sends; `failWorkflowOnError:true` still aborts
+- [x] `llm_only` nodes: on LLM failure, fall back to the rendered template (or a minimal built-in factual template) instead of silently skipping the send — the notification must not be lost
+- [x] Test: LLM throw/timeout on `llm_with_template_fallback` → template email still sends; on `llm_only` → fallback email sends; `failWorkflowOnError:true` still aborts
 
 ### 1.4 Wrap phase
-- [ ] Lint + backend tests green (no deploy — dev-test gate)
+- [x] Lint + backend tests green (no deploy — dev-test gate)
 
 ---
 

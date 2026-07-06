@@ -1,6 +1,22 @@
 import { z } from 'zod';
 import { ValidationError } from '../utils/errors.js';
 
+/**
+ * Registered workflow trigger events and WHERE each one is emitted. Keep this
+ * map honest — an event listed here but fired nowhere is a silent no-op for
+ * every workflow built on it (that bug shipped once already).
+ *
+ *   ticket.created / .assigned / .reassigned / .resolved_closed / .status_changed
+ *     → derived in ticketLifecycleNotificationService.deriveTicketLifecycleEvents,
+ *       dispatched by emitTicketLifecycleNotifications from BOTH the FS sync
+ *       upsert path (syncService) and the TP-native write paths (ticketService
+ *       _notifyLifecycle).
+ *   ticket.reply_received   → mailboxIngestService (inbound requester email)
+ *   ticket.note_added       → ticketService._addThreadEntry (private notes)
+ *   ticket.public_reply_added → ticketService._addThreadEntry (agent public replies)
+ *   approval.requested / .decided / .clarification_requested
+ *     → ticketApprovalService.emitApprovalEvent
+ */
 export const NOTIFICATION_EVENT_TYPES = [
   'ticket.created',
   'ticket.assigned',
@@ -10,6 +26,7 @@ export const NOTIFICATION_EVENT_TYPES = [
   'ticket.reply_received',
   'ticket.note_added',
   'ticket.status_changed',
+  'ticket.public_reply_added',
   // Approvals (Phase 6)
   'approval.requested',
   'approval.decided',
@@ -434,8 +451,10 @@ function eventLabel(triggerType) {
     'ticket.reply_received': 'Requester replied',
     'ticket.note_added': 'Internal note added',
     'ticket.status_changed': 'Status changed',
+    'ticket.public_reply_added': 'Agent replied to requester',
     'approval.requested': 'Approval requested',
     'approval.decided': 'Approval decided',
+    'approval.clarification_requested': 'Approval clarification requested',
   }[triggerType] || triggerType;
 }
 
