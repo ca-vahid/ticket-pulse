@@ -392,6 +392,173 @@ describe('notification workflow definitions', () => {
     expect(result.state.email.html).toContain('Fallback VPN access problem');
   });
 
+  test('llm_only with no LLM output falls back to the configured template instead of losing the email', async () => {
+    const definition = buildDefaultWorkflowDefinition('ticket.assigned');
+    const template = definition.nodes.find((node) => node.id === 'template');
+    template.data = {
+      ...template.data,
+      contentSource: 'llm_only',
+      subject: 'Fallback #{{ ticket.freshserviceTicketId }}',
+      html: '<p>Fallback {{ ticket.subject }}</p>',
+      text: 'Fallback {{ ticket.subject }}',
+    };
+    definition.nodes.splice(3, 0, {
+      id: 'llm-generate',
+      type: 'llm_generate',
+      position: { x: 650, y: 0 },
+      data: { prompt: 'Skipped in this test', outputSchema: DEFAULT_LLM_OUTPUT_SCHEMA },
+    });
+    definition.edges = [
+      { id: 'trigger-to-condition', source: 'trigger', target: 'skip-noise' },
+      { id: 'condition-true-to-recipients', source: 'skip-noise', sourceHandle: 'true', target: 'recipients' },
+      { id: 'condition-false-to-stop', source: 'skip-noise', sourceHandle: 'false', target: 'stop-skipped' },
+      { id: 'recipients-to-llm', source: 'recipients', target: 'llm-generate' },
+      { id: 'llm-to-template', source: 'llm-generate', target: 'template' },
+      { id: 'template-to-send', source: 'template', target: 'send' },
+    ];
+
+    const result = await notificationWorkflowEngine.executePreview({
+      workflow: {
+        id: 13, workspaceId: 1, triggerType: 'ticket.assigned',
+        draftDefinition: definition, publishedVersion: 0, versions: [],
+      },
+      definition,
+      eventContext: {
+        event: { type: 'ticket.assigned', source: 'test', occurredAt: '2026-07-06T19:00:00.000Z' },
+        workspace: { id: 1, name: 'IT', timezone: 'America/Vancouver' },
+        ticket: { id: 100, freshserviceTicketId: 225002, subject: 'VPN access problem', status: 'Open', priorityLabel: 'High', isNoise: false },
+        requester: { name: 'Requester', email: 'requester@example.com' },
+        assignedAgent: { name: 'Agent', email: 'agent@example.com' },
+        previousAgent: null,
+      },
+      executeLlm: false,
+    });
+
+    expect(result.status).toBe('completed');
+    // The template renders even though contentSource is llm_only, because the
+    // LLM produced nothing — the delivery must not be dropped.
+    expect(result.state.email.subject).toBe('Fallback #225002');
+    expect(result.state.email.html).toContain('Fallback VPN access problem');
+  });
+
+  test('llm_only with no LLM output and no template sends the built-in factual fallback', async () => {
+    const definition = buildDefaultWorkflowDefinition('ticket.assigned');
+    const template = definition.nodes.find((node) => node.id === 'template');
+    template.data = {
+      ...template.data,
+      contentSource: 'llm_only',
+      subject: '',
+      html: '',
+      text: '',
+    };
+    definition.nodes.splice(3, 0, {
+      id: 'llm-generate',
+      type: 'llm_generate',
+      position: { x: 650, y: 0 },
+      data: { prompt: 'Skipped in this test', outputSchema: DEFAULT_LLM_OUTPUT_SCHEMA },
+    });
+    definition.edges = [
+      { id: 'trigger-to-condition', source: 'trigger', target: 'skip-noise' },
+      { id: 'condition-true-to-recipients', source: 'skip-noise', sourceHandle: 'true', target: 'recipients' },
+      { id: 'condition-false-to-stop', source: 'skip-noise', sourceHandle: 'false', target: 'stop-skipped' },
+      { id: 'recipients-to-llm', source: 'recipients', target: 'llm-generate' },
+      { id: 'llm-to-template', source: 'llm-generate', target: 'template' },
+      { id: 'template-to-send', source: 'template', target: 'send' },
+    ];
+
+    const result = await notificationWorkflowEngine.executePreview({
+      workflow: {
+        id: 14, workspaceId: 1, triggerType: 'ticket.assigned',
+        draftDefinition: definition, publishedVersion: 0, versions: [],
+      },
+      definition,
+      eventContext: {
+        event: { type: 'ticket.assigned', source: 'test', occurredAt: '2026-07-06T19:05:00.000Z' },
+        workspace: { id: 1, name: 'IT', timezone: 'America/Vancouver' },
+        ticket: { id: 100, freshserviceTicketId: 225003, subject: 'VPN access problem', status: 'Open', priorityLabel: 'High', isNoise: false },
+        requester: { name: 'Requester', email: 'requester@example.com' },
+        assignedAgent: { name: 'Agent', email: 'agent@example.com' },
+        previousAgent: null,
+      },
+      executeLlm: false,
+    });
+
+    expect(result.status).toBe('completed');
+    expect(result.state.email.subject).toBe('Update on your ticket #225003');
+    expect(result.state.email.html).toContain('There is an update on your ticket #225003');
+    expect(result.state.email.html).toContain('Current status: Open.');
+    const templateStep = result.steps.find((s) => s.nodeId === 'template');
+    expect(templateStep.output.builtinFallbackUsed).toBe(true);
+  });
+
+  test('condition nodes evaluate structured conditionGroup (AND/OR builder) rules', async () => {
+    const definition = buildDefaultWorkflowDefinition('ticket.created');
+    const condition = definition.nodes.find((node) => node.type === 'condition');
+    // "urgent AND unassigned" — matches the sample context below.
+    condition.data = {
+      conditionGroup: {
+        logic: 'all',
+        conditions: [
+          { field: 'ticket.priorityLabel', operator: 'is', value: 'High' },
+          { field: 'assignedAgent.email', operator: 'is_empty' },
+        ],
+      },
+    };
+
+    const result = await notificationWorkflowEngine.executePreview({
+      workflow: {
+        id: 15, workspaceId: 1, triggerType: 'ticket.created',
+        draftDefinition: definition, publishedVersion: 0, versions: [],
+      },
+      definition,
+      eventContext: {
+        event: { type: 'ticket.created', source: 'test', occurredAt: '2026-07-06T20:00:00.000Z' },
+        workspace: { id: 1, name: 'IT', timezone: 'America/Vancouver' },
+        ticket: { id: 100, freshserviceTicketId: 225004, subject: 'VPN access problem', status: 'Open', priorityLabel: 'High', isNoise: false },
+        requester: { name: 'Requester', email: 'requester@example.com' },
+        assignedAgent: null,
+        previousAgent: null,
+      },
+      executeLlm: false,
+    });
+
+    expect(result.status).toBe('completed');
+    const conditionStep = result.steps.find((s) => s.nodeType === 'condition');
+    expect(conditionStep.output.passed).toBe(true);
+    // The email path executed (true branch).
+    expect(result.state.email?.subject).toBeTruthy();
+  });
+
+  test('a condition group that fails to compile fails CLOSED (false path), not crashed', async () => {
+    const definition = buildDefaultWorkflowDefinition('ticket.created');
+    const condition = definition.nodes.find((node) => node.type === 'condition');
+    condition.data = {
+      conditionGroup: { logic: 'all', conditions: [{ field: 'not.a.field', operator: 'is', value: 1 }] },
+    };
+
+    const result = await notificationWorkflowEngine.executePreview({
+      workflow: {
+        id: 16, workspaceId: 1, triggerType: 'ticket.created',
+        draftDefinition: definition, publishedVersion: 0, versions: [],
+      },
+      definition,
+      eventContext: {
+        event: { type: 'ticket.created', source: 'test', occurredAt: '2026-07-06T20:05:00.000Z' },
+        workspace: { id: 1, name: 'IT', timezone: 'America/Vancouver' },
+        ticket: { id: 100, freshserviceTicketId: 225005, subject: 'x', status: 'Open', priorityLabel: 'High', isNoise: false },
+        requester: { name: 'Requester', email: 'requester@example.com' },
+        assignedAgent: null,
+        previousAgent: null,
+      },
+      executeLlm: false,
+    });
+
+    expect(result.status).toBe('completed');
+    const conditionStep = result.steps.find((s) => s.nodeType === 'condition');
+    expect(conditionStep.output.passed).toBe(false);
+    expect(conditionStep.output.compileError).toMatch(/unknown condition field/i);
+  });
+
   test('template render can use the public ticket status URL variable', async () => {
     const definition = buildDefaultWorkflowDefinition('ticket.created');
     const template = definition.nodes.find((node) => node.id === 'template');

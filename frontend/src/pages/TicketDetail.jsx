@@ -8,6 +8,9 @@ import {
 } from 'lucide-react';
 import AttachmentPreviewModal from '../components/tickets/AttachmentPreviewModal';
 import ApprovalTimeline from '../components/tickets/ApprovalTimeline';
+import ProposedReplyCard from '../components/tickets/ProposedReplyCard';
+import { CustomFieldsCard, MacroMenu, TicketLinksCard, TimeTrackingCard } from '../components/tickets/TicketOpsCards';
+import ThreadSummaryCard from '../components/tickets/ThreadSummaryCard';
 import RequestApprovalModal from '../components/tickets/RequestApprovalModal';
 import AppHeader from '../components/AppHeader';
 import AiAssignModal from '../components/tickets/AiAssignModal';
@@ -1388,6 +1391,19 @@ export default function TicketDetail() {
                     >
                       <Link2 className="w-3.5 h-3.5" aria-hidden="true" /> Copy link
                     </button>
+                    {canConverse && (
+                      <MacroMenu
+                        ticketId={ticketId}
+                        onApplied={(result) => {
+                          lastLocalMutationRef.current = Date.now();
+                          fetchTicket({ silent: true });
+                          const failed = (result?.steps || []).filter((s) => !s.ok);
+                          showToast(failed.length ? 'amber' : 'emerald', failed.length
+                            ? `Macro applied with ${failed.length} failed step${failed.length === 1 ? '' : 's'}`
+                            : `Macro "${result?.macro?.name || ''}" applied`);
+                        }}
+                      />
+                    )}
                     {ticketingOn && (
                       <button
                         onClick={() => setCloneConfirm(true)}
@@ -1621,6 +1637,8 @@ export default function TicketDetail() {
                     )}
 
                     <section aria-label="Conversation">
+                      {/* On-demand AI thread summary (read-only, never stored) */}
+                      <ThreadSummaryCard ticketId={ticketId} />
                       <div className="flex flex-wrap items-center gap-2 mb-2 px-1">
                         <h2 className="text-sm font-bold text-slate-800">Conversation</h2>
                         <div role="tablist" aria-label="Filter conversation" className="ml-auto flex items-center gap-1">
@@ -1683,6 +1701,23 @@ export default function TicketDetail() {
                         </div>
                       )}
                     </section>
+
+                    {/* AI proposed reply (draft→approve) — staged by a workflow */}
+                    {canConverse && (
+                      <ProposedReplyCard
+                        ticketId={ticketId}
+                        refreshToken={ticket?.updatedAt}
+                        canWrite={canConverse}
+                        onSent={() => { lastLocalMutationRef.current = Date.now(); fetchTicket({ silent: true }); showToast('emerald', 'Reply sent'); }}
+                        onEditInComposer={(proposal) => {
+                          const html = proposal.bodyHtml || String(proposal.bodyText || '').replace(/\n/g, '<br>');
+                          switchComposerMode('reply');
+                          setComposerBody(html);
+                          setComposerText(htmlToText(html));
+                          setTimeout(() => composerRef.current?.focus(), 0);
+                        }}
+                      />
+                    )}
 
                     {/* Composer */}
                     {canConverse ? (
@@ -2173,6 +2208,30 @@ export default function TicketDetail() {
                     </div>
                   )}
                 </div>
+
+                {/* Explicit ticket links (duplicate/related/parent) */}
+                <TicketLinksCard
+                  ticketId={ticketId}
+                  canWrite={canConverse}
+                  refreshToken={ticket?.updatedAt}
+                  onNavigate={(id) => navigate(`/tickets/${id}`)}
+                />
+
+                {/* Per-workspace custom fields (TP annotation layer, both origins) */}
+                <CustomFieldsCard
+                  ticketId={ticketId}
+                  values={ticket?.customFields || {}}
+                  canWrite={canConverse}
+                  onSaved={() => { lastLocalMutationRef.current = Date.now(); fetchTicket({ silent: true }); showToast('emerald', 'Custom fields saved'); }}
+                />
+
+                {/* Time tracking (TP layer, both origins) */}
+                <TimeTrackingCard
+                  ticketId={ticketId}
+                  ticket={ticket}
+                  canWrite={canConverse}
+                  onLogged={() => { lastLocalMutationRef.current = Date.now(); fetchTicket({ silent: true }); showToast('emerald', 'Time logged'); }}
+                />
 
                 {/* Related tickets: facts first, suggestions clearly labeled */}
                 {related && (related.sameRequester.length > 0 || (related.nearDuplicates.length > 0 && !dupeDismissed)) && (

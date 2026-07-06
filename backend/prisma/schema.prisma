@@ -285,6 +285,132 @@ model ApprovalCategory {
   @@index([workspaceId, isActive])
 }
 
+// LLM-drafted replies staged for human approval (the draft→approve pattern).
+// A workflow's propose_reply node (or an auto-send node downgrading on low
+// confidence / always-human match) creates one; an agent approves & sends it
+// through the normal reply path, edits it first, or dismisses it.
+model TicketProposedReply {
+  id            Int       @id @default(autoincrement())
+  workspaceId   Int       @map("workspace_id")
+  ticketId      Int       @map("ticket_id")
+  ticket        Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  workflowRunId Int?      @map("workflow_run_id")
+  source        String    @default("workflow_llm") @db.VarChar(40) // workflow_llm | auto_send_downgrade
+  subject       String?   @db.VarChar(500)
+  bodyHtml      String?   @db.Text @map("body_html")
+  bodyText      String?   @db.Text @map("body_text")
+  confidence    String?   @db.VarChar(10) // low | medium | high (from the LLM output schema)
+  guardSummary  Json?     @map("guard_summary")
+  status        String    @default("proposed") @db.VarChar(20) // proposed | sent | dismissed
+  decidedBy     String?   @db.VarChar(255) @map("decided_by")
+  decidedAt     DateTime? @map("decided_at")
+  sentThreadEntryId Int?  @map("sent_thread_entry_id")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  @@map("ticket_proposed_replies")
+  @@index([ticketId, status])
+  @@index([workspaceId, status, createdAt])
+}
+
+// Explicit ticket relationships (duplicate_of / related_to / parent_of).
+// Directional: kind describes how `ticket` relates to `relatedTicket`.
+model TicketLink {
+  id              Int      @id @default(autoincrement())
+  workspaceId     Int      @map("workspace_id")
+  ticketId        Int      @map("ticket_id")
+  ticket          Ticket   @relation("linkSource", fields: [ticketId], references: [id], onDelete: Cascade)
+  relatedTicketId Int      @map("related_ticket_id")
+  relatedTicket   Ticket   @relation("linkTarget", fields: [relatedTicketId], references: [id], onDelete: Cascade)
+  kind            String   @db.VarChar(20) // duplicate_of | related_to | parent_of
+  createdBy       String?  @db.VarChar(255) @map("created_by")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@unique([ticketId, relatedTicketId, kind])
+  @@map("ticket_links")
+  @@index([ticketId])
+  @@index([relatedTicketId])
+}
+
+// Ticket Pulse's own SLA targets for TP-born tickets (FS-born keep FS's SLA):
+// per-priority first-response/resolution windows applied at creation.
+model SlaPolicy {
+  id                   Int      @id @default(autoincrement())
+  workspaceId          Int      @map("workspace_id")
+  priority             Int      // 1..4
+  firstResponseMinutes Int?     @map("first_response_minutes")
+  resolveMinutes       Int?     @map("resolve_minutes")
+  isActive             Boolean  @default(true) @map("is_active")
+  updatedBy            String?  @db.VarChar(255) @map("updated_by")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+  createdAt            DateTime @default(now()) @map("created_at")
+
+  @@unique([workspaceId, priority])
+  @@map("sla_policies")
+  @@index([workspaceId, isActive])
+}
+
+// Agent quick-action bundles: one click applies status/priority/assignment/
+// note together, reusing the same origin-aware write paths as manual edits.
+model TicketMacro {
+  id          Int      @id @default(autoincrement())
+  workspaceId Int      @map("workspace_id")
+  name        String   @db.VarChar(120)
+  description String?  @db.Text
+  // { setStatus?, setPriority?, assignToTechnicianId?, addNote?, replyBody? }
+  actions     Json
+  isActive    Boolean  @default(true) @map("is_active")
+  sortOrder   Int      @default(0) @map("sort_order")
+  createdBy   String?  @db.VarChar(255) @map("created_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([workspaceId, name])
+  @@map("ticket_macros")
+  @@index([workspaceId, isActive])
+}
+
+// Create-form presets: one click pre-fills subject/description/priority/
+// category on the new-ticket form (recurring request shapes).
+model TicketTemplate {
+  id                     Int      @id @default(autoincrement())
+  workspaceId            Int      @map("workspace_id")
+  name                   String   @db.VarChar(120)
+  subject                String?  @db.VarChar(500)
+  description            String?  @db.Text
+  priority               Int?     // 1..4
+  ticketType             String?  @db.VarChar(30) @map("ticket_type")
+  internalCategoryId     Int?     @map("internal_category_id")
+  internalSubcategoryId  Int?     @map("internal_subcategory_id")
+  isActive               Boolean  @default(true) @map("is_active")
+  sortOrder              Int      @default(0) @map("sort_order")
+  createdBy              String?  @db.VarChar(255) @map("created_by")
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+
+  @@unique([workspaceId, name])
+  @@map("ticket_templates")
+  @@index([workspaceId, isActive])
+}
+
+// Per-workspace user-defined ticket fields (pragmatic JSON UDF — values live
+// in Ticket.customFields keyed by definition key; no EAV).
+model CustomFieldDefinition {
+  id          Int      @id @default(autoincrement())
+  workspaceId Int      @map("workspace_id")
+  key         String   @db.VarChar(60) // machine key inside Ticket.customFields
+  label       String   @db.VarChar(120)
+  type        String   @default("text") @db.VarChar(20) // text | number | select | boolean | date
+  options     String[] @default([]) // for select
+  isActive    Boolean  @default(true) @map("is_active")
+  sortOrder   Int      @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([workspaceId, key])
+  @@map("custom_field_definitions")
+  @@index([workspaceId, isActive])
+}
+
 // Monitored mailboxes for native ticketing (N per workspace). 'ingest' polls
 // the inbox for new tickets / requester replies; 'send' delivers agent replies
 // from this address via Microsoft Graph (proper threading); 'both' does both.
@@ -580,6 +706,12 @@ model Ticket {
   mirrorJobs           MirrorJob[]
   approvals            TicketApproval[]
   attachments          TicketAttachment[]
+  proposedReplies      TicketProposedReply[]
+  linksFrom            TicketLink[] @relation("linkSource")
+  linksTo              TicketLink[] @relation("linkTarget")
+
+  // Per-workspace user-defined fields — values keyed by CustomFieldDefinition.key.
+  customFields         Json?     @map("custom_fields")
 
   @@map("tickets")
   @@index([workspaceId])
@@ -1499,12 +1631,19 @@ model NotificationWorkflowRun {
   deliveries        NotificationDelivery[]
   aiProviderAttempts AiProviderAttempt[]
 
+  // Delay-node durable resume: a run parked on a `delay` node persists its
+  // state and continues from resumeNodeId when resumeAt passes (status='waiting').
+  resumeAt          DateTime? @map("resume_at")
+  resumeNodeId      String?   @db.VarChar(80) @map("resume_node_id")
+  resumeState       Json?     @map("resume_state")
+
   @@map("notification_workflow_runs")
   @@index([workspaceId, eventType, startedAt])
   @@index([workspaceId, executionMode, startedAt])
   @@index([workflowId, startedAt])
   @@index([ticketId])
   @@index([status])
+  @@index([status, resumeAt])
 }
 
 model NotificationWorkflowStepRun {

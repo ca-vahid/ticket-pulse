@@ -2017,6 +2017,36 @@ router.delete(
   }),
 );
 
+// Installable LLM-email workflow templates. Installing creates a DISABLED
+// draft variant to review + publish — templates never auto-run.
+// MUST stay above the parameterized /:id routes or Express eats /templates.
+router.get(
+  '/templates',
+  asyncHandler(async (_req, res) => {
+    const { WORKFLOW_TEMPLATES } = await import('../services/notificationWorkflowDefinition.js');
+    res.json({
+      success: true,
+      data: WORKFLOW_TEMPLATES.map(({ key, name, description, triggerType }) => ({ key, name, description, triggerType })),
+    });
+  }),
+);
+
+router.post(
+  '/templates/:key/install',
+  asyncHandler(async (req, res) => {
+    const { WORKFLOW_TEMPLATES } = await import('../services/notificationWorkflowDefinition.js');
+    const template = WORKFLOW_TEMPLATES.find((t) => t.key === req.params.key);
+    if (!template) throw new NotFoundError('Unknown workflow template');
+    const workflow = await notificationWorkflowRepository.createWorkflowVariant(req.workspaceId, {
+      triggerType: template.triggerType,
+      name: template.name,
+      description: template.description,
+      definition: template.build(),
+    }, requestActor(req));
+    res.status(201).json({ success: true, data: workflow });
+  }),
+);
+
 router.get(
   '/:id',
   asyncHandler(async (req, res) => {
@@ -2099,6 +2129,35 @@ router.put(
       }, requestActor(req));
     }
     res.json({ success: true, data: workflow });
+  }),
+);
+
+// Manual ad-hoc dispatch: run THIS workflow against THIS ticket right now.
+// A unique dedupe stamp means run dedupe never blocks a deliberate manual
+// fire; onlyWorkflowId keeps sibling workflows on the same trigger type out.
+router.post(
+  '/:id/run-for-ticket/:ticketId',
+  asyncHandler(async (req, res) => {
+    const workflowId = parseId(req.params.id, 'workflow id');
+    const ticketId = parseId(req.params.ticketId, 'ticket id');
+    const workflow = await notificationWorkflowRepository.getWorkflow(req.workspaceId, workflowId);
+    if (!workflow.isEnabled || !workflow.publishedVersion) {
+      throw new ValidationError('Workflow must be published and enabled to run manually');
+    }
+    const ticket = await prisma.ticket.findFirst({
+      where: { id: ticketId, workspaceId: req.workspaceId },
+      select: { id: true },
+    });
+    if (!ticket) throw new NotFoundError('Ticket not found in this workspace');
+
+    const { emitTicketEvent } = await import('../services/ticketLifecycleNotificationService.js');
+    const result = await emitTicketEvent(workflow.triggerType, ticket.id, {
+      source: 'manual',
+      dedupeStamp: `manual:${Date.now()}:${requestActorEmail(req) || 'admin'}`,
+      extra: { manual: true, byEmail: requestActorEmail(req) },
+      onlyWorkflowId: workflow.id,
+    });
+    res.json({ success: true, data: result });
   }),
 );
 

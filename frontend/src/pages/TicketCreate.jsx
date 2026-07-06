@@ -47,6 +47,7 @@ export default function TicketCreate() {
   const [aiClassify, setAiClassify] = useState(true); // AI classifies + assesses priority/type (independent of assignment)
   const [cc, setCc] = useState([]);
   const [notifyRequester, setNotifyRequester] = useState(true);
+  const [createTemplates, setCreateTemplates] = useState([]);
   const [files, setFiles] = useState([]);
   const [dragOver, setDragOver] = useState(false);
   const [editFile, setEditFile] = useState(null);
@@ -75,7 +76,29 @@ export default function TicketCreate() {
     ticketsAPI.meta()
       .then((res) => setMeta(res.data))
       .catch((err) => setMetaError(err.response?.data?.message || 'Could not load ticket options'));
+    ticketsAPI.createTemplates()
+      .then((res) => setCreateTemplates(res?.data || []))
+      .catch(() => setCreateTemplates([]));
   }, []);
+
+  // Pre-fill the form from a saved preset. Only fields the template SETS are
+  // touched — everything the agent already typed elsewhere is left alone.
+  const applyCreateTemplate = (templateId) => {
+    const template = createTemplates.find((t) => t.id === templateId);
+    if (!template) return;
+    if (template.subject) setSubject(template.subject);
+    if (template.description) {
+      const html = isRichContent(template.description)
+        ? template.description
+        : `<p>${String(template.description).replace(/\n/g, '<br>')}</p>`;
+      setDescription(html);
+      setDescriptionText(String(template.description));
+    }
+    if (template.priority) setPriority(template.priority);
+    if (template.ticketType) setTicketType(template.ticketType);
+    if (template.internalCategoryId) setCategoryId(String(template.internalCategoryId));
+    if (template.internalSubcategoryId) setSubcategoryId(String(template.internalSubcategoryId));
+  };
 
   useEffect(() => { rqInputRef.current?.focus(); }, [meta]);
 
@@ -458,6 +481,21 @@ export default function TicketCreate() {
                     Don’t email the requester about this ticket
                   </label>
                 </div>
+
+                {createTemplates.length > 0 && (
+                  <div>
+                    <label htmlFor="tc-template" className={labelClass}>Start from a template</label>
+                    <select
+                      id="tc-template"
+                      value=""
+                      onChange={(e) => applyCreateTemplate(Number(e.target.value))}
+                      className={fieldClass}
+                    >
+                      <option value="">Choose a template… (optional)</option>
+                      {createTemplates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
+                  </div>
+                )}
 
                 <div>
                   <label htmlFor="tc-subject" className={labelClass}>Subject <span className="text-red-500">*</span></label>

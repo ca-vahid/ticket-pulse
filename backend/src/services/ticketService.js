@@ -1177,6 +1177,14 @@ class TicketService {
     const now = new Date();
     const isSelfPicked = Boolean(assignee && actor?.technicianId && actor.technicianId === assignee.id);
 
+    // TP-born tickets get Ticket Pulse's own SLA clocks (per-priority policy,
+    // if the workspace configured one). FS-born tickets keep FS's SLA fields.
+    let slaDueDates = { frDueBy: null, dueBy: null };
+    try {
+      const { default: slaPolicyService } = await import('./slaPolicyService.js');
+      slaDueDates = await slaPolicyService.dueDatesFor(workspaceId, data.priority, now);
+    } catch { /* no policy — no clocks */ }
+
     const ticket = await prisma.ticket.create({
       data: {
         origin: TICKET_ORIGIN.TICKETPULSE,
@@ -1204,6 +1212,8 @@ class TicketService {
         noiseRuleMatched: ruleId,
         lastIngestSource: 'ticketpulse_native',
         lastIngestedAt: now,
+        ...(slaDueDates.frDueBy ? { frDueBy: slaDueDates.frDueBy } : {}),
+        ...(slaDueDates.dueBy ? { dueBy: slaDueDates.dueBy } : {}),
         ...(assignee ? {
           assignedTechId: assignee.id,
           assignedAt: now,
@@ -1500,6 +1510,36 @@ class TicketService {
    * it works for any origin; the optional auto-resolve is TP-born only
    * (FS-born status belongs to FreshService).
    */
+  /**
+   * Log time against a ticket (TP's own tracking layer — both origins, never
+   * written to FreshService). Adds to the running totals with an audit entry.
+   */
+  async logTime(ticketId, workspaceId, { minutes, billable = false, note = null } = {}, actor) {
+    const amount = Number(minutes);
+    if (!Number.isInteger(amount) || amount < 1 || amount > 24 * 60) {
+      throw new ValidationError('Time entry must be between 1 minute and 24 hours');
+    }
+    const ticket = await prisma.ticket.findFirst({ where: { id: ticketId, workspaceId } });
+    if (!ticket) throw new NotFoundError(`Ticket ${ticketId} not found in this workspace`);
+
+    const updated = await prisma.ticket.update({
+      where: { id: ticket.id },
+      data: {
+        timeSpentMinutes: (ticket.timeSpentMinutes || 0) + amount,
+        ...(billable
+          ? { billableMinutes: (ticket.billableMinutes || 0) + amount }
+          : { nonBillableMinutes: (ticket.nonBillableMinutes || 0) + amount }),
+      },
+      select: { id: true, timeSpentMinutes: true, billableMinutes: true, nonBillableMinutes: true },
+    });
+    await this._audit(ticket.id, 'time_logged', actor, {
+      minutes: amount,
+      billable: billable === true,
+      ...(note ? { note: String(note).slice(0, 500) } : {}),
+    });
+    return updated;
+  }
+
   async setNoise(ticketId, workspaceId, { noise = true, resolve = false } = {}, actor) {
     const ticket = await prisma.ticket.findFirst({ where: { id: ticketId, workspaceId } });
     if (!ticket) throw new NotFoundError(`Ticket ${ticketId} not found in this workspace`);
@@ -1579,11 +1619,10 @@ class TicketService {
     }
 
     await this._audit(ticket.id, 'status_changed', actor, { oldStatus: ticket.status, newStatus: status });
+    // ticket.status_changed (with from/to extra) is derived inside
+    // _notifyLifecycle now — single emit path shared with the FS sync, with a
+    // stable dedupe stamp instead of the old Date.now() one.
     await this._notifyLifecycle(ticket, updated);
-    ticketLifecycleNotificationService.emitTicketEvent?.('ticket.status_changed', ticket.id, {
-      dedupeStamp: `status:${ticket.id}:${ticket.status}->${status}:${Date.now()}`,
-      extra: { from: ticket.status, to: status, byEmail: actor?.email || null },
-    }).catch?.(() => {});
     this._broadcast(workspaceId, 'status', updated, { oldStatus: ticket.status });
     await mirrorService.enqueueFieldSync(workspaceId, ticket.id);
     return { ...updated, displayRef: ticketDisplayRef(updated), changed: true };
@@ -1764,15 +1803,21 @@ class TicketService {
         email = await this._emailRequesterReply(ticket, entry, { cc, attachments: storedAttachments });
       }
       await mirrorService.enqueueThreadEntry(workspaceId, ticket.id, entry.id);
-      if (isPrivate) {
-        ticketLifecycleNotificationService.emitTicketEvent?.('ticket.note_added', ticket.id, {
-          dedupeStamp: `note:${entry.id}`,
-          extra: { entryId: entry.id, byEmail: actor?.email || null },
-        }).catch?.(() => {});
-      }
     } else if (!isPrivate) {
       email = { sent: true, via: 'freshservice' };
     }
+
+    // Workflow events fire for BOTH origins — the entry exists locally either
+    // way, and workflows keying on notes/replies must not care where the
+    // ticket was born. Stable per-entry stamps keep retries idempotent.
+    ticketLifecycleNotificationService.emitTicketEvent?.(
+      isPrivate ? 'ticket.note_added' : 'ticket.public_reply_added',
+      ticket.id,
+      {
+        dedupeStamp: `${isPrivate ? 'note' : 'reply'}:${entry.id}`,
+        extra: { entryId: entry.id, byEmail: actor?.email || null },
+      },
+    ).catch?.(() => {});
 
     this._broadcast(workspaceId, isPrivate ? 'note' : 'reply', ticket, { entryId: entry.id });
     return { entry, email, attachments: storedAttachments.map((s) => s.attachment) };

@@ -55,6 +55,10 @@ describe('ticketApprovalService.request (category fan-out)', () => {
     expect(res.count).toBe(2);
     // Both managers emailed (mailbox unconfigured → sendgrid).
     expect(sendgridMock.sendEmail).toHaveBeenCalledTimes(2);
+    // Workflow event dispatched — approval workflows must actually fire.
+    expect(lifecycleMock.emitTicketEvent).toHaveBeenCalledWith(
+      'approval.requested', 501, expect.objectContaining({ extra: expect.any(Object) }),
+    );
   });
 
   test('rejects a category with no managers', async () => {
@@ -88,6 +92,10 @@ describe('ticketApprovalService.decideInApp', () => {
     expect(prismaMock.ticketThreadEntry.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ mirrorState: null }),
     }));
+    // Workflow event dispatched for the decision.
+    expect(lifecycleMock.emitTicketEvent).toHaveBeenCalledWith(
+      'approval.decided', 501, expect.objectContaining({ extra: expect.any(Object) }),
+    );
   });
 
   test('non-approver without admin cannot decide', async () => {

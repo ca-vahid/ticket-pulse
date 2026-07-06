@@ -1,6 +1,20 @@
-export const APP_VERSION = '3.0.2-preview';
+export const APP_VERSION = '3.0.3-preview';
 
 export const changelog = [
+  {
+    version: '3.0.3-preview',
+    date: 'July 7, 2026',
+    entries: [
+      { type: 'new', html: '<strong>⚙️ Workflow engine, grown up</strong> — Mail Workflows are now a real automation engine: a visual <strong>AND/OR condition builder</strong> (with nested groups, regex, and time-based operators), an <strong>N-way Branch</strong> node, a durable <strong>Wait/Delay</strong> node that survives restarts, <strong>webhooks</strong>, <strong>create child ticket</strong>, <strong>request approval</strong>, and <strong>run-workflow</strong> (reusable sub-workflows). Ticket updates can now assign (specific member, round-robin, or least-loaded), set category and group — origin-aware throughout.' },
+      { type: 'new', html: '<strong>⏰ Time-based triggers</strong> — workflows can fire when a ticket sits unresolved for N hours, when an SLA is about to breach, or when it has breached. Plus a manual “run this workflow on this ticket” dispatch for admins.' },
+      { type: 'new', html: '<strong>🤖 AI-drafted replies with human approval</strong> — workflows can stage an LLM-drafted reply on the ticket for an agent to <strong>approve &amp; send</strong>, edit in the composer, or dismiss. Auto-send emails carrying AI content respect a <strong>confidence bar</strong> and an <strong>always-human list</strong> (VIP/regulated requesters) — below the bar, the email becomes a staged draft instead of being sent or lost. Four <strong>installable workflow templates</strong> (first-reply draft, resolution summary, follow-up nudge, SLA-breach digest) install as disabled drafts.' },
+      { type: 'new', html: '<strong>🧰 Ticket ops</strong> — <strong>SLA policies</strong> (per-priority clocks for Ticket-Pulse-born tickets), <strong>macros</strong> (one-click status/priority/note/reply bundles), <strong>custom fields</strong> (per-workspace, usable in workflow conditions), <strong>ticket links</strong> (duplicate/related/parent, with a mark-as-duplicate that resolves the source), and <strong>time tracking</strong> (log minutes, billable or not, from the ticket sidebar). New Settings → Ticket Ops section.' },
+      { type: 'new', html: '<strong>📝 Summarize thread</strong> — one click on any ticket generates an AI summary for the handling agent: what happened, where it stands, suggested next steps, and open requester questions. Generated fresh each time, never stored — the conversation stays the source of truth.' },
+      { type: 'improved', html: '<strong>Events that actually fire</strong> — status changes on FreshService-synced tickets, agent public replies, and internal notes now trigger workflows on both ticket origins; every registered event is regression-tested against the engine.' },
+      { type: 'fixed', html: '<strong>LLM email never silently lost</strong> — if the AI times out or produces nothing, the workflow falls back to the configured template (or a minimal factual notice) instead of dropping the notification.' },
+      { type: 'database', html: '<strong>Database updates</strong> — new tables for proposed replies, ticket links, SLA policies, macros and custom-field definitions; workflow runs gain durable-resume columns; tickets gain a custom-fields store. All additive.' },
+    ],
+  },
   {
     version: '3.0.2-preview',
     date: 'July 6, 2026',

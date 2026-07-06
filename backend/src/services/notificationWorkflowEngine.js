@@ -58,10 +58,45 @@ import {
   EMAIL_FEEDBACK_ROCKS_BY_THEME,
 } from './notificationEmailIcons.js';
 
+import { compileConditionGroup } from './notificationConditionModel.js';
+
 const liquid = new Liquid({
   strictFilters: false,
   strictVariables: false,
 });
+
+// json-logic has no regex support — register the op the structured condition
+// model's `matches_regex` operator compiles to. Bad patterns fail closed.
+jsonLogic.add_operation('regex_match', (value, pattern) => {
+  try {
+    return new RegExp(String(pattern), 'i').test(String(value ?? ''));
+  } catch {
+    return false;
+  }
+});
+
+/**
+ * Derived relative-time fields for conditions ("older than 30m", "due within
+ * 2h"). Computed at evaluation time from the event context's ISO timestamps;
+ * negative dueInMinutes = overdue.
+ */
+function conditionTimeFields(ticket) {
+  const now = Date.now();
+  const minutesFrom = (iso) => {
+    if (!iso) return null;
+    const t = new Date(iso).getTime();
+    return Number.isNaN(t) ? null : Math.round((now - t) / 60000);
+  };
+  const minutesUntil = (iso) => {
+    const from = minutesFrom(iso);
+    return from === null ? null : -from;
+  };
+  return {
+    ageMinutes: minutesFrom(ticket?.createdAt),
+    dueInMinutes: minutesUntil(ticket?.dueBy),
+    frDueInMinutes: minutesUntil(ticket?.frDueBy),
+  };
+}
 
 const MAX_NODE_EXECUTIONS = 60;
 const MAX_EMAIL_RECIPIENTS = 25;
@@ -1314,6 +1349,69 @@ function llmEmailFromState(state) {
   };
 }
 
+const CONFIDENCE_RANK = { low: 1, medium: 2, high: 3 };
+
+/**
+ * Auto-send safety gates on send_email nodes carrying LLM-authored content:
+ *  - minLlmConfidence ('low'|'medium'|'high'): the LLM's self-reported
+ *    confidence must meet the bar; a missing confidence counts as low.
+ *  - alwaysHumanRecipients (emails and/or @domains): matching requesters
+ *    ALWAYS get a human-approved reply regardless of confidence (regulated /
+ *    VIP / complaint handling).
+ * Gates only apply when the outgoing email actually came from the LLM
+ * (state.llm.promotedToEmail) — plain template sends are unaffected.
+ */
+function evaluateAutoSendGate(node, state, eventContext) {
+  if (state.llm?.promotedToEmail !== true) return { downgrade: false };
+
+  const requesterEmail = String(eventContext.requester?.email || '').trim().toLowerCase();
+  const alwaysHuman = Array.isArray(node.data?.alwaysHumanRecipients) ? node.data.alwaysHumanRecipients : [];
+  for (const raw of alwaysHuman) {
+    const entry = String(raw || '').trim().toLowerCase();
+    if (!entry || !requesterEmail) continue;
+    const matches = entry.startsWith('@') ? requesterEmail.endsWith(entry) : requesterEmail === entry;
+    if (matches) {
+      return { downgrade: true, reason: `Requester matches always-human rule (${entry})`, confidence: null };
+    }
+  }
+
+  const minConfidence = String(node.data?.minLlmConfidence || '').toLowerCase();
+  if (CONFIDENCE_RANK[minConfidence]) {
+    const confidence = String(state.llm?.email?.extra?.confidence || state.llm?.confidence || 'low').toLowerCase();
+    const rank = CONFIDENCE_RANK[confidence] || 1;
+    if (rank < CONFIDENCE_RANK[minConfidence]) {
+      return {
+        downgrade: true,
+        reason: `LLM confidence "${confidence}" is below the auto-send bar "${minConfidence}"`,
+        confidence,
+      };
+    }
+  }
+  return { downgrade: false };
+}
+
+/**
+ * Minimal, claim-free notification used when an llm_only node has neither LLM
+ * output (provider down / timeout / guard hard-block) nor a configured
+ * template — losing the email entirely is worse than a plain factual update.
+ */
+function builtinFallbackEmail(eventContext) {
+  const ticket = eventContext?.ticket || {};
+  const ref = ticket.freshserviceTicketId
+    ? `#${ticket.freshserviceTicketId}`
+    : (ticket.id ? `#${ticket.id}` : '');
+  const lines = [
+    `There is an update on your ticket ${ref}${ticket.subject ? ` — “${ticket.subject}”` : ''}.`.trim(),
+    ticket.status ? `Current status: ${ticket.status}.` : null,
+    'Reply to this email to add more information to your ticket.',
+  ].filter(Boolean);
+  return {
+    subject: `Update on your ticket ${ref}`.trim(),
+    html: `<p>${lines.join('</p><p>')}</p>`,
+    text: lines.join('\n\n'),
+  };
+}
+
 function nodeOutputKey(node) {
   const configured = String(node?.data?.outputKey || '').trim();
   const raw = configured || node?.id || 'node';
@@ -1366,6 +1464,15 @@ function nextNodeIds(definition, node, output = {}) {
     const wantedHandle = output.passed ? 'true' : 'false';
     const matching = edges.filter((edge) => String(edge.sourceHandle || '').toLowerCase() === wantedHandle);
     if (matching.length > 0) return matching.map((edge) => edge.target);
+  }
+
+  if (node.type === 'branch') {
+    const wanted = String(output.matchedBranch || 'otherwise').toLowerCase();
+    const matching = edges.filter((edge) => String(edge.sourceHandle || '').toLowerCase() === wanted);
+    if (matching.length > 0) return matching.map((edge) => edge.target);
+    // No edge for the matched branch → fall through to 'otherwise'.
+    const otherwise = edges.filter((edge) => String(edge.sourceHandle || '').toLowerCase() === 'otherwise');
+    return otherwise.map((edge) => edge.target);
   }
 
   return edges
@@ -1635,7 +1742,13 @@ async function executeNode({
 }) {
   throwIfWorkflowAborted(signal, workflowRunTimeoutMs);
 
-  const scope = { ...eventContext, state };
+  const scope = {
+    ...eventContext,
+    ticket: eventContext.ticket
+      ? { ...eventContext.ticket, ...conditionTimeFields(eventContext.ticket) }
+      : eventContext.ticket,
+    state,
+  };
   const actionLinkAppendOptions = {
     actionLinkRenderMode,
     workflowScheduleMode,
@@ -1646,9 +1759,22 @@ async function executeNode({
   }
 
   if (node.type === 'condition') {
-    const rule = node.data?.rule || true;
-    const passed = Boolean(jsonLogic.apply(rule, scope));
-    return { passed, rule };
+    // Structured condition groups (the AND/OR builder) compile to json-logic
+    // at evaluation time; raw `rule` JSONLogic remains the advanced escape
+    // hatch. A group that fails to compile fails CLOSED (false path) rather
+    // than crashing the run.
+    let rule = node.data?.rule || true;
+    let compileError = null;
+    if (node.data?.conditionGroup) {
+      try {
+        rule = compileConditionGroup(node.data.conditionGroup);
+      } catch (error) {
+        compileError = error.message;
+        rule = false;
+      }
+    }
+    const passed = compileError ? false : Boolean(jsonLogic.apply(rule, scope));
+    return { passed, rule, ...(compileError ? { compileError } : {}) };
   }
 
   if (node.type === 'update_ticket') {
@@ -1657,11 +1783,151 @@ async function executeNode({
     });
   }
 
+  if (node.type === 'branch') {
+    // N-way switch: first matching branch wins; no match → 'otherwise'.
+    const { compileConditionGroup: compileGroup } = await import('./notificationConditionModel.js');
+    const branches = Array.isArray(node.data?.branches) ? node.data.branches : [];
+    for (const candidate of branches) {
+      const key = String(candidate?.key || '').trim().toLowerCase();
+      if (!key) continue;
+      try {
+        const rule = candidate.conditionGroup ? compileGroup(candidate.conditionGroup) : (candidate.rule || false);
+        if (jsonLogic.apply(rule, scope)) {
+          return { matchedBranch: key, label: candidate.label || key };
+        }
+      } catch (error) {
+        // A branch that fails to compile is skipped (fail closed on that branch).
+        logger.warn(`Branch ${node.id}/${key} compile failed: ${error.message}`);
+      }
+    }
+    return { matchedBranch: 'otherwise' };
+  }
+
+  if (node.type === 'delay') {
+    const minutes = Math.min(7 * 24 * 60, Math.max(1, Number(node.data?.minutes) || 5));
+    if (dryRun || executionMode === 'mock' || executionMode === 'preview') {
+      return { preview: true, wouldWaitMinutes: minutes };
+    }
+    // Live: signal the run loop to park this run for durable resume.
+    return { __waitMinutes: minutes };
+  }
+
+  if (node.type === 'call_webhook') {
+    const { executeWebhookNode } = await import('./notificationWorkflowActionNodes.js');
+    const renderedBody = await renderLiquid(node.data?.bodyTemplate || '', scope);
+    try {
+      const output = await executeWebhookNode(node, {
+        renderedBody,
+        dryRun: dryRun === true || executionMode === 'mock' || executionMode === 'preview',
+      });
+      state.webhook = { ...(state.webhook || {}), [nodeOutputKey(node)]: output };
+      return output;
+    } catch (error) {
+      // onError='fail' aborts the run; default 'continue' records and moves on.
+      if (node.data?.onError === 'fail') throw error;
+      const output = { failed: true, error: error.message };
+      state.webhook = { ...(state.webhook || {}), [nodeOutputKey(node)]: output };
+      return output;
+    }
+  }
+
+  if (node.type === 'create_child_ticket') {
+    const { executeCreateChildTicketNode } = await import('./notificationWorkflowActionNodes.js');
+    const renderedSubject = await renderLiquid(node.data?.subjectTemplate || '', scope);
+    const renderedDescription = await renderLiquid(node.data?.descriptionTemplate || '', scope);
+    return executeCreateChildTicketNode(node, eventContext, {
+      renderedSubject,
+      renderedDescription,
+      dryRun: dryRun === true || executionMode === 'mock' || executionMode === 'preview',
+    });
+  }
+
+  if (node.type === 'request_approval') {
+    const { executeRequestApprovalNode } = await import('./notificationWorkflowActionNodes.js');
+    const renderedNote = await renderLiquid(node.data?.note || '', scope);
+    return executeRequestApprovalNode(node, eventContext, {
+      renderedNote,
+      dryRun: dryRun === true || executionMode === 'mock' || executionMode === 'preview',
+    });
+  }
+
+  if (node.type === 'run_workflow') {
+    const childId = Number(node.data?.workflowId);
+    if (!Number.isFinite(childId) || childId <= 0) return { skipped: true, reason: 'No workflow configured' };
+    if (childId === workflow.id) return { skipped: true, reason: 'A workflow cannot run itself' };
+    const depth = Number(eventContext.event?.subWorkflowDepth) || 0;
+    if (depth >= 1) return { skipped: true, reason: 'Sub-workflows cannot nest further (one level only)' };
+
+    const child = await prisma.notificationWorkflow.findFirst({
+      where: { id: childId, workspaceId: workflow.workspaceId, archivedAt: null },
+    });
+    if (!child) return { skipped: true, reason: 'Referenced workflow not found in this workspace' };
+    if (!child.publishedDefinition) return { skipped: true, reason: 'Referenced workflow has never been published' };
+    if (dryRun || executionMode === 'mock' || executionMode === 'preview') {
+      return { dryRun: true, wouldRun: { workflowId: child.id, name: child.name } };
+    }
+
+    const childContext = {
+      ...eventContext,
+      event: { ...(eventContext.event || {}), subWorkflowDepth: depth + 1 },
+    };
+    try {
+      const result = await executeWorkflow(child, childContext, { triggerSource: 'sub_workflow' });
+      return { ranWorkflowId: child.id, name: child.name, status: result?.status || 'completed', runId: result?.runId || null };
+    } catch (error) {
+      if (node.data?.onError === 'fail') throw error;
+      return { ranWorkflowId: child.id, failed: true, error: error.message };
+    }
+  }
+
+  if (node.type === 'propose_reply') {
+    const ticketId = Number(eventContext.ticket?.id);
+    const llmEmail = state.llm?.email || {};
+    const bodyHtml = llmEmail.html || null;
+    const bodyText = llmEmail.text || null;
+    const confidence = llmEmail.extra?.confidence || state.llm?.confidence || null;
+    if (!Number.isFinite(ticketId) || ticketId <= 0) return { skipped: true, reason: 'No ticket in event context' };
+    if (!bodyHtml && !bodyText) return { skipped: true, reason: 'No LLM draft to propose (upstream LLM produced nothing)' };
+    if (dryRun || executionMode === 'mock' || executionMode === 'preview') {
+      return { dryRun: true, wouldPropose: { subject: llmEmail.subject || null, confidence } };
+    }
+    const { default: ticketProposedReplyService } = await import('./ticketProposedReplyService.js');
+    const proposal = await ticketProposedReplyService.create({
+      workspaceId: workflow.workspaceId,
+      ticketId,
+      workflowRunId: run?.id || null,
+      source: 'workflow_llm',
+      subject: llmEmail.subject || null,
+      bodyHtml,
+      bodyText,
+      confidence,
+      guardSummary: state.llm?.guard ? safeJson({
+        accepted: state.llm.guard.accepted !== false,
+        issues: state.llm.guard.issues || [],
+      }) : null,
+    });
+    return { proposedReplyId: proposal.id, confidence };
+  }
+
   if (node.type === 'recipient_resolver') {
     const customEmails = Array.isArray(node.data?.customEmails) ? node.data.customEmails : [];
-    const to = resolveRecipientList(node.data?.to || ['requester'], eventContext, customEmails);
-    const cc = excludeExistingEmails(resolveRecipientList(node.data?.cc || [], eventContext, customEmails), to);
-    const bcc = excludeExistingEmails(resolveRecipientList(node.data?.bcc || [], eventContext, customEmails), [...to, ...cc]);
+    // internal_group:<id> tokens resolve to active member emails (team routing).
+    const { resolveInternalGroupEmails } = await import('./notificationWorkflowActionNodes.js');
+    const allTokens = [
+      ...(node.data?.to || []),
+      ...(node.data?.cc || []),
+      ...(node.data?.bcc || []),
+    ];
+    const groupEmails = await resolveInternalGroupEmails(allTokens);
+    const resolveWithGroups = (tokens, fallbackTokens) => {
+      const list = Array.isArray(tokens) ? tokens : (fallbackTokens || []);
+      const direct = resolveRecipientList(list, eventContext, customEmails);
+      const hasGroupToken = list.some((t) => /^internal_group:\d+$/.test(String(t || '')));
+      return hasGroupToken ? uniqueEmails([direct, groupEmails]) : direct;
+    };
+    const to = resolveWithGroups(node.data?.to || ['requester']);
+    const cc = excludeExistingEmails(resolveWithGroups(node.data?.cc || []), to);
+    const bcc = excludeExistingEmails(resolveWithGroups(node.data?.bcc || []), [...to, ...cc]);
     const recipients = {
       to,
       cc,
@@ -1674,14 +1940,28 @@ async function executeNode({
   if (node.type === 'template_render') {
     const contentSource = templateContentSource(node);
     const llmEmail = llmEmailFromState(state);
-    const shouldRenderTemplate = contentSource !== 'llm_only';
-    const subject = shouldRenderTemplate ? await renderLiquid(node.data?.subject, scope) : null;
+    const llmHasContent = Boolean(llmEmail.html || llmEmail.text);
+    // llm_only normally skips template rendering — but when the LLM produced
+    // nothing (provider down, timeout, guard hard-block) render the template
+    // anyway rather than dropping the notification on the floor.
+    const shouldRenderTemplate = contentSource !== 'llm_only' || !llmHasContent;
+    let subject = shouldRenderTemplate ? await renderLiquid(node.data?.subject, scope) : null;
     const rawHtml = shouldRenderTemplate ? await renderLiquid(node.data?.html, scope) : null;
     const rawText = shouldRenderTemplate && node.data?.plainTextMode !== 'auto'
       ? await renderLiquid(node.data?.text, scope)
       : null;
-    const html = sanitizeEmailHtml(rawHtml);
-    const text = String(rawText || stripHtml(html)).trim() || null;
+    let html = sanitizeEmailHtml(rawHtml);
+    let text = String(rawText || stripHtml(html)).trim() || null;
+    // Last resort: llm_only with no LLM output AND no configured template still
+    // sends a minimal factual email instead of silently losing the delivery.
+    let builtinFallbackUsed = false;
+    if (contentSource === 'llm_only' && !llmHasContent && !html && !text) {
+      const fallback = builtinFallbackEmail(eventContext);
+      subject = String(subject || '').trim() || fallback.subject;
+      html = fallback.html;
+      text = fallback.text;
+      builtinFallbackUsed = true;
+    }
     const useLlm = contentSource === 'llm_only' || contentSource === 'llm_with_template_fallback';
     state.email = {
       ...(state.email || {}),
@@ -1695,6 +1975,7 @@ async function executeNode({
     const auditEmail = compactEmailForAudit(state.email);
     return {
       email: auditEmail,
+      builtinFallbackUsed,
       contentSource,
       actionLinks: auditEmail.actionLinks || {},
       publicStatusLinkApplied: state.email.publicStatusLinkApplied === true,
@@ -2044,6 +2325,37 @@ async function executeNode({
       };
     }
 
+    // Auto-send safety gates for LLM-authored content: below-threshold
+    // confidence or an always-human requester downgrades the send to a staged
+    // proposal for a human to approve — the email is never silently lost.
+    const sendGate = evaluateAutoSendGate(node, state, eventContext);
+    if (sendGate.downgrade) {
+      if (dryRun || executionMode === 'mock' || executionMode === 'preview') {
+        return { skipped: true, wouldDowngradeToProposal: true, reason: sendGate.reason };
+      }
+      const ticketId = Number(eventContext.ticket?.id);
+      if (Number.isFinite(ticketId) && ticketId > 0) {
+        try {
+          const { default: ticketProposedReplyService } = await import('./ticketProposedReplyService.js');
+          const proposal = await ticketProposedReplyService.create({
+            workspaceId: workflow.workspaceId,
+            ticketId,
+            workflowRunId: run?.id || null,
+            source: 'auto_send_downgrade',
+            subject: baseEmail.subject || null,
+            bodyHtml: baseEmail.html || null,
+            bodyText: baseEmail.text || null,
+            confidence: sendGate.confidence || null,
+          });
+          return { skipped: true, downgradedToProposal: true, proposedReplyId: proposal.id, reason: sendGate.reason };
+        } catch (error) {
+          logger.warn(`Auto-send downgrade failed to stage a proposal: ${error.message}`);
+          return { skipped: true, reason: `${sendGate.reason} (proposal staging failed: ${error.message})` };
+        }
+      }
+      return { skipped: true, reason: sendGate.reason };
+    }
+
     const email = await finalizeWorkflowSendEmail({
       workflow,
       eventContext,
@@ -2252,6 +2564,9 @@ export async function executeDefinition({
   routingResult = null,
   workflowRunTimeoutMs = NOTIFICATION_WORKFLOW_RUN_TIMEOUT_MS,
   signal = null,
+  // Delay-node durable resume: { run, state, startNodeIds } — reuses the
+  // parked run instead of creating one and continues mid-graph.
+  resume = null,
 }) {
   const normalizedExecutionMode = normalizeExecutionMode(executionMode, dryRun);
   const effectiveDryRun = dryRun || normalizedExecutionMode === EXECUTION_MODE_PREVIEW || normalizedExecutionMode === EXECUTION_MODE_MOCK;
@@ -2268,41 +2583,43 @@ export async function executeDefinition({
     || workflow?.draftDefinition?.metadata?.scheduleMode
     || null;
   const startedAt = Date.now();
-  const state = {};
+  const state = resume?.state || {};
   const previews = [];
   const version = workflowVersion(workflow);
-  let run = null;
+  let run = resume?.run || null;
   const workflowAbort = createWorkflowAbortController({
     timeoutMs: workflowRunTimeoutMs,
     parentSignal: signal,
   });
 
-  try {
-    run = await withWorkflowAbort(createRun({
-      workflow,
-      version,
-      eventContext: normalizedContext,
-      dryRun: effectiveDryRun,
-      triggerSource,
-      executionMode: normalizedExecutionMode,
-      routingResult,
-    }), workflowAbort.signal, workflowAbort.timeoutMs);
-  } catch (error) {
-    workflowAbort.cleanup();
-    if (error?.code === 'P2002') {
-      return {
-        status: 'skipped',
-        reason: 'Duplicate workflow event',
-        workflowId: workflow.id,
+  if (!run) {
+    try {
+      run = await withWorkflowAbort(createRun({
+        workflow,
+        version,
+        eventContext: normalizedContext,
+        dryRun: effectiveDryRun,
+        triggerSource,
         executionMode: normalizedExecutionMode,
-      };
+        routingResult,
+      }), workflowAbort.signal, workflowAbort.timeoutMs);
+    } catch (error) {
+      workflowAbort.cleanup();
+      if (error?.code === 'P2002') {
+        return {
+          status: 'skipped',
+          reason: 'Duplicate workflow event',
+          workflowId: workflow.id,
+          executionMode: normalizedExecutionMode,
+        };
+      }
+      throw error;
     }
-    throw error;
   }
 
   const nodes = nodeById(normalizedDefinition);
   const trigger = normalizedDefinition.nodes.find((node) => node.type === 'trigger');
-  const queue = [trigger.id];
+  const queue = resume ? [...(resume.startNodeIds || [])] : [trigger.id];
   const executed = [];
 
   try {
@@ -2342,6 +2659,36 @@ export async function executeDefinition({
           signal: workflowAbort.signal,
           workflowRunTimeoutMs: workflowAbort.timeoutMs,
         }), workflowAbort.signal, workflowAbort.timeoutMs);
+        // Delay node in live mode: park the run for durable resume instead of
+        // blocking the process. The step completes (the wait STARTED); the run
+        // sits in status='waiting' until the resume worker picks it up.
+        if (output?.__waitMinutes && !effectiveDryRun) {
+          const resumeTargets = nextNodeIds(normalizedDefinition, node, output);
+          const waitOutput = { waiting: true, waitMinutes: output.__waitMinutes };
+          await finishStep(step, 'completed', waitOutput);
+          executed.push({ nodeId: node.id, nodeType: node.type, output: waitOutput });
+          if (resumeTargets.length === 0) break; // nothing after the delay — just finish
+          const resumeAt = new Date(Date.now() + output.__waitMinutes * 60 * 1000);
+          await prisma.notificationWorkflowRun.update({
+            where: { id: run.id },
+            data: {
+              status: 'waiting',
+              resumeAt,
+              resumeNodeId: resumeTargets[0],
+              resumeState: safeJson({ state }),
+            },
+          });
+          workflowAbort.cleanup();
+          return {
+            status: 'waiting',
+            workflowId: workflow.id,
+            runId: run.id,
+            resumeAt: resumeAt.toISOString(),
+            executionMode: normalizedExecutionMode,
+            steps: executed,
+          };
+        }
+
         await finishStep(step, 'completed', output);
         executed.push({ nodeId: node.id, nodeType: node.type, output });
 
@@ -2526,20 +2873,86 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false } = 
   const ticketId = Number(eventContext.ticket?.id);
   const setStatus = node.data?.setStatus || null;
   const setPriority = node.data?.setPriority ? Number(node.data.setPriority) : null;
+  const setInternalCategoryId = node.data?.setInternalCategoryId ? Number(node.data.setInternalCategoryId) : null;
+  const setInternalSubcategoryId = node.data?.setInternalSubcategoryId ? Number(node.data.setInternalSubcategoryId) : null;
+  const setInternalGroupId = node.data?.setInternalGroupId ? Number(node.data.setInternalGroupId) : null;
+  const setCustomFields = node.data?.setCustomFields && typeof node.data.setCustomFields === 'object'
+    && Object.keys(node.data.setCustomFields).length > 0
+    ? node.data.setCustomFields
+    : null;
+  const assignTo = node.data?.assignTo && node.data.assignTo.mode && node.data.assignTo.mode !== 'none'
+    ? node.data.assignTo
+    : null;
 
   if (!Number.isFinite(ticketId) || ticketId <= 0) return { skipped: true, reason: 'No ticket in event context' };
-  if (!setStatus && !setPriority) return { skipped: true, reason: 'update_ticket node has no changes configured' };
+  if (!setStatus && !setPriority && !setInternalCategoryId && !setInternalGroupId && !assignTo && !setCustomFields) {
+    return { skipped: true, reason: 'update_ticket node has no changes configured' };
+  }
   if (setStatus && !UPDATE_TICKET_STATUSES.includes(setStatus)) {
     return { skipped: true, reason: `Unsupported status "${setStatus}"` };
   }
   if (dryRun) {
-    return { dryRun: true, wouldSet: { status: setStatus || undefined, priority: setPriority || undefined } };
+    return {
+      dryRun: true,
+      wouldSet: {
+        status: setStatus || undefined,
+        priority: setPriority || undefined,
+        internalCategoryId: setInternalCategoryId || undefined,
+        internalSubcategoryId: setInternalSubcategoryId || undefined,
+        internalGroupId: setInternalGroupId || undefined,
+        assignTo: assignTo || undefined,
+      },
+    };
   }
 
   const { default: prisma } = await import('./prisma.js');
   const ticket = await prisma.ticket.findUnique({ where: { id: ticketId } });
   if (!ticket) return { skipped: true, reason: 'Ticket not found' };
+
+  // Assignment is origin-aware and handled first (TP-born via ticketService;
+  // FS-born via the FS write-back path) — it works for BOTH origins.
+  let assignment = null;
+  if (assignTo) {
+    const { resolveAssignmentTarget, applyWorkflowAssignment } = await import('./notificationWorkflowActionNodes.js');
+    const target = await resolveAssignmentTarget(ticket.workspaceId, assignTo);
+    if (target.error) {
+      assignment = { skipped: true, reason: target.error };
+    } else if (ticket.assignedTechId === target.techId) {
+      assignment = { skipped: true, reason: 'Already assigned to the selected technician', techId: target.techId };
+    } else {
+      try {
+        const applied = await applyWorkflowAssignment(ticket, target.techId);
+        assignment = { assigned: true, techId: target.techId, techName: target.techName, mode: target.mode, via: applied.via };
+      } catch (error) {
+        assignment = { skipped: true, reason: `Assignment failed: ${error.message}` };
+      }
+    }
+  }
+
+  // Custom fields are Ticket Pulse's OWN annotation layer — never written to
+  // FreshService — so they apply to both origins.
+  let customFieldResult = null;
+  if (setCustomFields) {
+    try {
+      const { default: customFieldService } = await import('./customFieldService.js');
+      customFieldResult = await customFieldService.setValues(
+        ticket.id, ticket.workspaceId, setCustomFields, { name: 'Notification workflow' },
+      );
+    } catch (error) {
+      customFieldResult = { skipped: true, reason: error.message };
+    }
+  }
+
+  // Field mutations remain TP-born only (FreshService owns FS-born fields).
   if (ticket.origin !== 'ticketpulse') {
+    if (assignment || customFieldResult) {
+      return {
+        ...(assignment ? { assignment } : {}),
+        ...(customFieldResult ? { customFields: customFieldResult } : {}),
+        skipped: true,
+        reason: 'FS-born ticket: only assignment write-back and TP custom fields applied',
+      };
+    }
     return { skipped: true, reason: 'Workflow ticket updates only apply to tickets born in Ticket Pulse' };
   }
 
@@ -2573,8 +2986,48 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false } = 
     patch.priority = setPriority;
     changes.priority = { from: ticket.priority, to: setPriority };
   }
+  if (setInternalCategoryId && setInternalCategoryId !== ticket.internalCategoryId) {
+    const category = await prisma.competencyCategory.findFirst({
+      where: { id: setInternalCategoryId, workspaceId: ticket.workspaceId, parentId: null, isActive: true },
+      select: { id: true },
+    });
+    if (category) {
+      patch.internalCategoryId = setInternalCategoryId;
+      changes.internalCategoryId = { from: ticket.internalCategoryId, to: setInternalCategoryId };
+      if (setInternalSubcategoryId) {
+        const sub = await prisma.competencyCategory.findFirst({
+          where: { id: setInternalSubcategoryId, workspaceId: ticket.workspaceId, parentId: setInternalCategoryId, isActive: true },
+          select: { id: true },
+        });
+        if (sub) {
+          patch.internalSubcategoryId = setInternalSubcategoryId;
+          changes.internalSubcategoryId = { from: ticket.internalSubcategoryId, to: setInternalSubcategoryId };
+        }
+      } else {
+        patch.internalSubcategoryId = null;
+      }
+    }
+  }
+  if (setInternalGroupId && setInternalGroupId !== ticket.internalGroupId) {
+    const group = await prisma.group.findFirst({
+      where: { id: setInternalGroupId, workspaceId: ticket.workspaceId, isActive: true },
+      select: { id: true },
+    });
+    if (group) {
+      patch.internalGroupId = setInternalGroupId;
+      changes.internalGroupId = { from: ticket.internalGroupId, to: setInternalGroupId };
+    }
+  }
 
-  if (Object.keys(patch).length === 0) return { skipped: true, reason: 'No effective changes' };
+  if (Object.keys(patch).length === 0) {
+    if (assignment || customFieldResult) {
+      return {
+        ...(assignment ? { assignment } : {}),
+        ...(customFieldResult ? { customFields: customFieldResult } : {}),
+      };
+    }
+    return { skipped: true, reason: 'No effective changes' };
+  }
   patch.mirrorState = 'pending';
   await prisma.ticket.update({ where: { id: ticket.id }, data: patch });
 
@@ -2605,7 +3058,11 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false } = 
   } catch { /* non-fatal */ }
 
   logger.info('Workflow update_ticket applied', { ticketId: ticket.id, changes });
-  return { updated: changes };
+  return {
+    updated: changes,
+    ...(assignment ? { assignment } : {}),
+    ...(customFieldResult ? { customFields: customFieldResult } : {}),
+  };
 }
 
 export async function executeForEvent(eventContext, options = {}) {
@@ -2615,7 +3072,13 @@ export async function executeForEvent(eventContext, options = {}) {
   const eventType = routedContext?.event?.type;
   if (!workspaceId || !eventType) return { status: 'skipped', reason: 'Missing workspace or event type' };
 
-  const workflows = await notificationWorkflowRepository.listEnabledForEvent(workspaceId, eventType);
+  let workflows = await notificationWorkflowRepository.listEnabledForEvent(workspaceId, eventType);
+  // Time-trigger and manual dispatches target ONE workflow (thresholds like
+  // agingHours are per-workflow config, so a shared event type must not fan
+  // out to siblings with different thresholds).
+  if (options.onlyWorkflowId) {
+    workflows = workflows.filter((w) => w.id === Number(options.onlyWorkflowId));
+  }
   const timing = selectWorkflowsForNotificationTiming(workflows, routedContext);
   const variantSelection = selectWorkflowVariants(timing.selected || [], routedContext, {
     baseSuppressed: timing.suppressed || [],
@@ -2678,6 +3141,66 @@ export async function executeForEvent(eventContext, options = {}) {
   };
 }
 
+/**
+ * Resume runs parked by a delay node whose resumeAt has passed. Called from
+ * the time-trigger worker tick. Each run continues from its saved node with
+ * its saved state, pinned to the workflow version it launched on.
+ */
+export async function resumeWaitingRuns({ limit = 25 } = {}) {
+  const due = await prisma.notificationWorkflowRun.findMany({
+    where: { status: 'waiting', resumeAt: { lte: new Date() } },
+    orderBy: { resumeAt: 'asc' },
+    take: limit,
+  });
+  let resumed = 0;
+  for (const run of due) {
+    try {
+      await resumeRun(run);
+      resumed += 1;
+    } catch (error) {
+      logger.warn('Workflow resume failed', { runId: run.id, error: error.message });
+      await prisma.notificationWorkflowRun.update({
+        where: { id: run.id },
+        data: { status: 'failed', error: `Resume failed: ${error.message}`, completedAt: new Date() },
+      }).catch(() => {});
+    }
+  }
+  return { due: due.length, resumed };
+}
+
+async function resumeRun(run) {
+  const workflow = await prisma.notificationWorkflow.findUnique({ where: { id: run.workflowId } });
+  if (!workflow) throw new Error('Workflow no longer exists');
+  // Pin to the version the run launched on (in-flight runs must not switch
+  // definitions mid-graph); fall back to the current published definition.
+  const pinnedVersion = run.workflowVersionId
+    ? await prisma.notificationWorkflowVersion.findUnique({ where: { id: run.workflowVersionId } })
+    : null;
+  const definition = pinnedVersion?.definition || workflow.publishedDefinition;
+  if (!definition) throw new Error('No definition available to resume');
+  if (!run.resumeNodeId) throw new Error('Run has no resume node');
+
+  // Back to running before continuing so a crashed resume is visible.
+  await prisma.notificationWorkflowRun.update({
+    where: { id: run.id },
+    data: { status: 'running', resumeAt: null, resumeNodeId: null, resumeState: null },
+  });
+
+  return executeDefinition({
+    workflow,
+    definition,
+    eventContext: run.eventContext,
+    dryRun: run.dryRun === true,
+    executionMode: run.executionMode || EXECUTION_MODE_LIVE,
+    triggerSource: run.triggerSource || 'delay_resume',
+    resume: {
+      run,
+      state: run.resumeState?.state || {},
+      startNodeIds: [run.resumeNodeId],
+    },
+  });
+}
+
 export async function executePreview({
   workflow,
   definition = null,
@@ -2703,4 +3226,5 @@ export default {
   executeWorkflow,
   executeForEvent,
   executePreview,
+  resumeWaitingRuns,
 };

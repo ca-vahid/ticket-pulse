@@ -161,6 +161,39 @@ describe('notification workflow policy routing', () => {
     expect(result.matched.map((workflow) => workflow.id)).toContain(3);
   });
 
+  test('a rule-less workflow ACTS as the default when its trigger has no default variant', () => {
+    // The dev self-test trap: a user's only workflow on a fresh trigger type
+    // (status_changed, SLA, schedule…) has no routing rule and no default
+    // sibling — it must fire, not be silently suppressed.
+    const only = {
+      id: 9,
+      key: 'qa_status_automation',
+      triggerType: 'ticket.status_changed',
+      routingMode: 'exclusive',
+      routingPriority: 100,
+      routingRule: null,
+      isDefaultVariant: false,
+    };
+
+    const result = selectWorkflowVariants([only], { event: { type: 'ticket.status_changed' } });
+
+    expect(result.selectedWorkflowIds).toEqual([9]);
+    expect(result.matched).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 9, reason: 'acting_default_no_rule' }),
+    ]));
+
+    // …but with a default sibling present, rule-less variants stay suppressed
+    // (unchanged behavior).
+    const withDefault = selectWorkflowVariants(
+      [{ id: 1, key: 'default', triggerType: 'ticket.status_changed', isDefaultVariant: true, routingPriority: 100 }, only],
+      { event: { type: 'ticket.status_changed' } },
+    );
+    expect(withDefault.selectedWorkflowIds).toEqual([1]);
+    expect(withDefault.suppressed).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 9, reason: 'missing_routing_rule' }),
+    ]));
+  });
+
   test('variant routing falls back to default when no custom variant matches', () => {
     const result = selectWorkflowVariants(
       [

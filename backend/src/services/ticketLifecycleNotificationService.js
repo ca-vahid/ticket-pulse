@@ -79,6 +79,13 @@ function eventStamp(eventType, upsertedTicket, existingTicket = null) {
       || dateIso(upsertedTicket.freshserviceUpdatedAt)
       || String(upsertedTicket.status || 'terminal');
   }
+  if (eventType === 'ticket.status_changed') {
+    // Composite of the transition + the source's own change timestamp: stable
+    // across sync retries (FS re-delivers the same freshserviceUpdatedAt), and
+    // unique per live TP change (updatedAt bumps on every write).
+    return `${String(existingTicket?.status || '').trim()}->${String(upsertedTicket.status || '').trim()}:${
+      dateIso(upsertedTicket.freshserviceUpdatedAt) || dateIso(upsertedTicket.updatedAt) || 'live'}`;
+  }
   return dateIso(upsertedTicket.freshserviceUpdatedAt) || new Date().toISOString();
 }
 
@@ -195,6 +202,26 @@ export function deriveTicketLifecycleEvents(existingTicket, upsertedTicket) {
     });
   }
 
+  // Any status transition fires ticket.status_changed — for BOTH origins.
+  // (Previously only TP-native in-app changes emitted this, so FS-synced
+  // transitions like Open→Pending never triggered workflows.) The from/to pair
+  // rides on event.extra for conditions. resolved_closed above still fires for
+  // terminal transitions; they are distinct trigger types.
+  const oldStatus = String(existingTicket.status || '').trim();
+  const newStatus = String(upsertedTicket.status || '').trim();
+  if (oldStatus && newStatus && oldStatus !== newStatus) {
+    events.push({
+      type: 'ticket.status_changed',
+      occurredAt: dateIso(upsertedTicket.resolvedAt)
+        || dateIso(upsertedTicket.closedAt)
+        || dateIso(upsertedTicket.freshserviceUpdatedAt)
+        || new Date().toISOString(),
+      dedupeStamp: eventStamp('ticket.status_changed', upsertedTicket, existingTicket),
+      notificationFingerprint: lifecycleNotificationFingerprint('ticket.status_changed', upsertedTicket, existingTicket),
+      extra: { from: oldStatus, to: newStatus },
+    });
+  }
+
   return events;
 }
 
@@ -231,6 +258,7 @@ function buildEventContext({ event, ticket, previousAgent, source }) {
       occurredAt: event.occurredAt,
       dedupeStamp: event.dedupeStamp,
       notificationFingerprint: event.notificationFingerprint,
+      ...(event.extra ? { extra: event.extra } : {}),
     },
     workspace: {
       id: ticket.workspaceId,
@@ -264,10 +292,14 @@ function buildEventContext({ event, ticket, previousAgent, source }) {
         name: ticket.internalSubcategory.name,
       } : null,
       isNoise: ticket.isNoise === true,
+      origin: ticket.origin || 'freshservice',
+      customFields: ticket.customFields || {},
       createdAt: dateIso(ticket.createdAt),
       assignedAt: dateIso(ticket.assignedAt),
       resolvedAt: dateIso(ticket.resolvedAt),
       closedAt: dateIso(ticket.closedAt),
+      dueBy: dateIso(ticket.dueBy),
+      frDueBy: dateIso(ticket.frDueBy),
       freshserviceUpdatedAt: dateIso(ticket.freshserviceUpdatedAt),
     },
     requester: ticket.requester ? {
@@ -341,6 +373,7 @@ export async function emitTicketEvent(eventType, ticketId, {
   source = 'ticketpulse_native',
   dedupeStamp = null,
   extra = null,
+  onlyWorkflowId = null, // time-trigger/manual dispatch targets one workflow
 } = {}) {
   const ticket = await hydrateTicket(ticketId);
   if (!ticket) return { status: 'skipped', reason: 'Ticket not found' };
@@ -356,7 +389,10 @@ export async function emitTicketEvent(eventType, ticketId, {
   if (extra) eventContext.event.extra = extra;
 
   try {
-    return await notificationWorkflowEngine.executeForEvent(eventContext, { triggerSource: source });
+    return await notificationWorkflowEngine.executeForEvent(eventContext, {
+      triggerSource: source,
+      ...(onlyWorkflowId ? { onlyWorkflowId } : {}),
+    });
   } catch (error) {
     logger.warn('Ticket event workflow dispatch failed', {
       workspaceId: ticket.workspaceId, ticketId: ticket.id, eventType, error: error.message,

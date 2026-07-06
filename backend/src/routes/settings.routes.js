@@ -601,6 +601,214 @@ router.get(
   }),
 );
 
+// --------------------------------------------------- ticket ops (enterprise)
+// SLA policies (TP-born due-date clocks), macros (quick-action bundles) and
+// custom field definitions. Admin-only, per-workspace.
+
+router.get(
+  '/sla-policies',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { default: slaPolicyService } = await import('../services/slaPolicyService.js');
+    res.json({ success: true, data: await slaPolicyService.list(req.workspaceId) });
+  }),
+);
+
+router.put(
+  '/sla-policies',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { default: slaPolicyService } = await import('../services/slaPolicyService.js');
+    const policy = await slaPolicyService.upsert(req.workspaceId, req.body || {}, req.session?.user || null);
+    res.json({ success: true, data: policy });
+  }),
+);
+
+router.delete(
+  '/sla-policies/:priority',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { default: slaPolicyService } = await import('../services/slaPolicyService.js');
+    res.json({ success: true, data: await slaPolicyService.remove(req.workspaceId, req.params.priority) });
+  }),
+);
+
+router.get(
+  '/macros',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { default: ticketMacroService } = await import('../services/ticketMacroService.js');
+    res.json({ success: true, data: await ticketMacroService.list(req.workspaceId, { includeInactive: true }) });
+  }),
+);
+
+router.post(
+  '/macros',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { default: ticketMacroService } = await import('../services/ticketMacroService.js');
+    const macro = await ticketMacroService.create(req.workspaceId, req.body || {}, req.session?.user || null);
+    res.status(201).json({ success: true, data: macro });
+  }),
+);
+
+router.patch(
+  '/macros/:id',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { default: ticketMacroService } = await import('../services/ticketMacroService.js');
+    const macro = await ticketMacroService.update(req.workspaceId, req.params.id, req.body || {}, req.session?.user || null);
+    res.json({ success: true, data: macro });
+  }),
+);
+
+router.delete(
+  '/macros/:id',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { default: ticketMacroService } = await import('../services/ticketMacroService.js');
+    res.json({ success: true, data: await ticketMacroService.remove(req.workspaceId, req.params.id) });
+  }),
+);
+
+router.get(
+  '/ticket-templates',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const templates = await prisma.ticketTemplate.findMany({
+      where: { workspaceId: req.workspaceId },
+      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+    });
+    res.json({ success: true, data: templates });
+  }),
+);
+
+router.post(
+  '/ticket-templates',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const name = String(req.body?.name || '').trim();
+    if (!name) throw new ValidationError('Template needs a name');
+    const priority = req.body?.priority ? Number(req.body.priority) : null;
+    if (priority !== null && !(priority >= 1 && priority <= 4)) throw new ValidationError('Priority must be 1–4');
+    const template = await prisma.ticketTemplate.create({
+      data: {
+        workspaceId: req.workspaceId,
+        name: name.slice(0, 120),
+        subject: String(req.body?.subject || '').slice(0, 500) || null,
+        description: req.body?.description || null,
+        priority,
+        ticketType: req.body?.ticketType || null,
+        internalCategoryId: Number(req.body?.internalCategoryId) || null,
+        internalSubcategoryId: Number(req.body?.internalSubcategoryId) || null,
+        createdBy: requestActor(req)?.email || null,
+      },
+    });
+    res.status(201).json({ success: true, data: template });
+  }),
+);
+
+router.patch(
+  '/ticket-templates/:id',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const existing = await prisma.ticketTemplate.findFirst({
+      where: { id: parsePositiveId(req.params.id, 'template id'), workspaceId: req.workspaceId },
+    });
+    if (!existing) throw new ValidationError('Template not found');
+    const patch = {};
+    if (req.body?.name !== undefined) patch.name = String(req.body.name).trim().slice(0, 120);
+    if (req.body?.subject !== undefined) patch.subject = String(req.body.subject || '').slice(0, 500) || null;
+    if (req.body?.description !== undefined) patch.description = req.body.description || null;
+    if (req.body?.priority !== undefined) patch.priority = Number(req.body.priority) || null;
+    if (req.body?.isActive !== undefined) patch.isActive = req.body.isActive !== false;
+    const template = await prisma.ticketTemplate.update({ where: { id: existing.id }, data: patch });
+    res.json({ success: true, data: template });
+  }),
+);
+
+router.delete(
+  '/ticket-templates/:id',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const existing = await prisma.ticketTemplate.findFirst({
+      where: { id: parsePositiveId(req.params.id, 'template id'), workspaceId: req.workspaceId },
+    });
+    if (!existing) throw new ValidationError('Template not found');
+    await prisma.ticketTemplate.delete({ where: { id: existing.id } });
+    res.json({ success: true, data: { deleted: true } });
+  }),
+);
+
+router.get(
+  '/custom-fields',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { default: customFieldService } = await import('../services/customFieldService.js');
+    res.json({ success: true, data: await customFieldService.listDefinitions(req.workspaceId, { includeInactive: true }) });
+  }),
+);
+
+router.post(
+  '/custom-fields',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { default: customFieldService } = await import('../services/customFieldService.js');
+    const definition = await customFieldService.createDefinition(req.workspaceId, req.body || {});
+    res.status(201).json({ success: true, data: definition });
+  }),
+);
+
+router.patch(
+  '/custom-fields/:id',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { default: customFieldService } = await import('../services/customFieldService.js');
+    const definition = await customFieldService.updateDefinition(req.workspaceId, req.params.id, req.body || {});
+    res.json({ success: true, data: definition });
+  }),
+);
+
+router.delete(
+  '/custom-fields/:id',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { default: customFieldService } = await import('../services/customFieldService.js');
+    res.json({ success: true, data: await customFieldService.removeDefinition(req.workspaceId, req.params.id) });
+  }),
+);
+
+
 /**
  * PUT /api/settings/:key
  * Update a single setting

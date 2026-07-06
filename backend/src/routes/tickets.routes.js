@@ -567,6 +567,32 @@ router.post('/mailboxes/:mailboxId/test', requireTicketingAdmin, asyncHandler(as
   res.json({ success: true, data: result });
 }));
 
+// Static collection routes — MUST stay above /:id or Express eats them.
+// Create-form presets (active only; '/templates' is taken by reply templates).
+router.get('/create-templates', asyncHandler(async (req, res) => {
+  const templates = await prisma.ticketTemplate.findMany({
+    where: { workspaceId: req.workspaceId, isActive: true },
+    orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+    select: {
+      id: true, name: true, subject: true, description: true, priority: true,
+      ticketType: true, internalCategoryId: true, internalSubcategoryId: true,
+    },
+  });
+  res.json({ success: true, data: templates });
+}));
+
+router.get('/macros', asyncHandler(async (req, res) => {
+  const { default: ticketMacroService } = await import('../services/ticketMacroService.js');
+  const macros = await ticketMacroService.list(req.workspaceId);
+  res.json({ success: true, data: macros });
+}));
+
+router.get('/custom-fields/definitions', asyncHandler(async (req, res) => {
+  const { default: customFieldService } = await import('../services/customFieldService.js');
+  const definitions = await customFieldService.listDefinitions(req.workspaceId);
+  res.json({ success: true, data: definitions });
+}));
+
 router.get('/:id', asyncHandler(async (req, res) => {
   // The peek preview passes ?reconcile=0 to skip the live FreshService check
   // (which otherwise fires a FS API call on every rapid step through tickets).
@@ -643,6 +669,99 @@ router.post('/:id/triage', asyncHandler(async (req, res) => {
 router.get('/:id/related', asyncHandler(async (req, res) => {
   const related = await ticketService.relatedTickets(parseTicketId(req), req.workspaceId);
   res.json({ success: true, data: related });
+}));
+
+// Log time against a ticket (TP tracking layer — both origins).
+router.post('/:id/time', asyncHandler(async (req, res) => {
+  const result = await ticketService.logTime(
+    parseTicketId(req), req.workspaceId,
+    { minutes: req.body?.minutes, billable: req.body?.billable === true, note: req.body?.note },
+    req.ticketActor,
+  );
+  res.json({ success: true, data: result });
+}));
+
+// On-demand AI thread summary for the handling agent (read-only, never stored).
+router.post('/:id/summarize', asyncHandler(async (req, res) => {
+  const { default: ticketSummaryService } = await import('../services/ticketSummaryService.js');
+  const summary = await ticketSummaryService.summarize(parseTicketId(req), req.workspaceId);
+  res.json({ success: true, data: summary });
+}));
+
+// Explicit ticket links (duplicate_of / related_to / parent_of) + duplicate-close.
+router.get('/:id/links', asyncHandler(async (req, res) => {
+  const { default: ticketLinkService } = await import('../services/ticketLinkService.js');
+  const links = await ticketLinkService.listForTicket(parseTicketId(req), req.workspaceId);
+  res.json({ success: true, data: links });
+}));
+
+router.post('/:id/links', asyncHandler(async (req, res) => {
+  const { default: ticketLinkService } = await import('../services/ticketLinkService.js');
+  const link = await ticketLinkService.link(
+    parseTicketId(req), req.workspaceId,
+    { relatedTicketId: req.body?.relatedTicketId, kind: req.body?.kind || 'related_to' },
+    req.ticketActor,
+  );
+  res.status(201).json({ success: true, data: link });
+}));
+
+router.delete('/:id/links/:linkId', asyncHandler(async (req, res) => {
+  const { default: ticketLinkService } = await import('../services/ticketLinkService.js');
+  const result = await ticketLinkService.unlink(parseTicketId(req), req.workspaceId, req.params.linkId);
+  res.json({ success: true, data: result });
+}));
+
+router.post('/:id/duplicate-of/:targetId', asyncHandler(async (req, res) => {
+  const { default: ticketLinkService } = await import('../services/ticketLinkService.js');
+  const result = await ticketLinkService.markDuplicate(
+    parseTicketId(req), req.workspaceId, req.params.targetId, req.ticketActor,
+  );
+  res.json({ success: true, data: result });
+}));
+
+// Apply a macro (quick-action bundle) to this ticket.
+router.post('/:id/macros/:macroId/apply', asyncHandler(async (req, res) => {
+  const { default: ticketMacroService } = await import('../services/ticketMacroService.js');
+  const result = await ticketMacroService.apply(
+    parseTicketId(req), req.workspaceId, req.params.macroId, req.ticketActor,
+  );
+  res.json({ success: true, data: result });
+}));
+
+// Set custom-field values on a ticket (definitions are listed pre-/:id above).
+router.patch('/:id/custom-fields', asyncHandler(async (req, res) => {
+  const { default: customFieldService } = await import('../services/customFieldService.js');
+  const result = await customFieldService.setValues(
+    parseTicketId(req), req.workspaceId, req.body?.values || {}, req.ticketActor,
+  );
+  res.json({ success: true, data: result });
+}));
+
+// AI-proposed replies (draft→approve): list open proposals, approve & send
+// (optionally edited), or dismiss. Sending goes through the normal reply path
+// so threading/mirroring/events behave like a hand-written reply.
+router.get('/:id/proposed-replies', asyncHandler(async (req, res) => {
+  const { default: ticketProposedReplyService } = await import('../services/ticketProposedReplyService.js');
+  const proposals = await ticketProposedReplyService.listForTicket(parseTicketId(req), req.workspaceId);
+  res.json({ success: true, data: proposals });
+}));
+
+router.post('/:id/proposed-replies/:proposalId/send', asyncHandler(async (req, res) => {
+  const { default: ticketProposedReplyService } = await import('../services/ticketProposedReplyService.js');
+  const result = await ticketProposedReplyService.send(
+    parseTicketId(req), req.workspaceId, req.params.proposalId,
+    { bodyHtml: req.body?.bodyHtml, bodyText: req.body?.bodyText },
+    req.ticketActor,
+  );
+  res.json({ success: true, data: result });
+}));
+
+router.post('/:id/proposed-replies/:proposalId/dismiss', asyncHandler(async (req, res) => {
+  const { default: ticketProposedReplyService } = await import('../services/ticketProposedReplyService.js');
+  const proposal = await ticketProposedReplyService.dismiss(
+    parseTicketId(req), req.workspaceId, req.params.proposalId, req.ticketActor,
+  );
+  res.json({ success: true, data: proposal });
 }));
 
 // Forward the public thread to any address, recorded as a private entry.

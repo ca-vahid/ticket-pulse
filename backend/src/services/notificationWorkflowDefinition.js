@@ -1,6 +1,22 @@
 import { z } from 'zod';
 import { ValidationError } from '../utils/errors.js';
 
+/**
+ * Registered workflow trigger events and WHERE each one is emitted. Keep this
+ * map honest — an event listed here but fired nowhere is a silent no-op for
+ * every workflow built on it (that bug shipped once already).
+ *
+ *   ticket.created / .assigned / .reassigned / .resolved_closed / .status_changed
+ *     → derived in ticketLifecycleNotificationService.deriveTicketLifecycleEvents,
+ *       dispatched by emitTicketLifecycleNotifications from BOTH the FS sync
+ *       upsert path (syncService) and the TP-native write paths (ticketService
+ *       _notifyLifecycle).
+ *   ticket.reply_received   → mailboxIngestService (inbound requester email)
+ *   ticket.note_added       → ticketService._addThreadEntry (private notes)
+ *   ticket.public_reply_added → ticketService._addThreadEntry (agent public replies)
+ *   approval.requested / .decided / .clarification_requested
+ *     → ticketApprovalService.emitApprovalEvent
+ */
 export const NOTIFICATION_EVENT_TYPES = [
   'ticket.created',
   'ticket.assigned',
@@ -10,10 +26,250 @@ export const NOTIFICATION_EVENT_TYPES = [
   'ticket.reply_received',
   'ticket.note_added',
   'ticket.status_changed',
+  'ticket.public_reply_added',
   // Approvals (Phase 6)
   'approval.requested',
   'approval.decided',
   'approval.clarification_requested',
+  // Time-based triggers → notificationTimeTriggerService worker (per-ticket
+  // scans; threshold config lives on the trigger node, so the worker
+  // dispatches with onlyWorkflowId)
+  'ticket.aging',
+  'ticket.sla_pre_breach',
+  'ticket.sla_breach',
+  // Scheduled (ticketless) trigger: fires once per configured slot in the
+  // workspace timezone with a `digest` context (open/unassigned/overdue counts
+  // + oldest open tickets) for daily/weekly digest emails.
+  'schedule.time',
+];
+
+/** Trigger types fired by the time-trigger worker, not by lifecycle events. */
+export const TIME_TRIGGER_EVENT_TYPES = [
+  'ticket.aging',
+  'ticket.sla_pre_breach',
+  'ticket.sla_breach',
+];
+
+// --------------------------------------------------------------------------
+// Installable workflow templates (LLM-as-email use cases). Installing creates
+// a DISABLED draft variant the admin reviews, adjusts, publishes and enables —
+// templates never auto-run.
+// --------------------------------------------------------------------------
+
+function templateNodes(nodes, edges) {
+  return {
+    version: 2,
+    metadata: { installedFromTemplate: true },
+    nodes: nodes.map((node, i) => ({ position: { x: 80 + i * 240, y: 80 }, ...node })),
+    edges,
+  };
+}
+
+export const WORKFLOW_TEMPLATES = [
+  {
+    key: 'ai_first_reply_draft',
+    name: 'AI first-reply draft (human approves)',
+    description: 'On new tickets, the LLM drafts a grounded first reply and stages it on the ticket for an agent to approve, edit, or dismiss. Nothing sends automatically.',
+    triggerType: 'ticket.created',
+    build: () => templateNodes([
+      { id: 'trigger', type: 'trigger', data: { triggerType: 'ticket.created' } },
+      {
+        id: 'draft',
+        type: 'llm_generate',
+        data: {
+          label: 'Draft first reply',
+          prompt: 'Draft a first reply to the requester for this new ticket. Acknowledge the specific problem, state what will happen next in plain language, and ask for any obviously missing detail. Do not promise timelines.\n\nTicket: #{{ ticket.freshserviceTicketId }} {{ ticket.subject }}\nDescription: {{ ticket.descriptionText }}\nRequester: {{ requester.name }}',
+          outputMode: 'draft_email',
+          promoteToEmail: false,
+          maxTokens: 10000,
+          temperature: 0.3,
+        },
+      },
+      { id: 'propose', type: 'propose_reply', data: { label: 'Stage for approval' } },
+      { id: 'end', type: 'stop', data: {} },
+    ], [
+      { id: 'e1', source: 'trigger', target: 'draft' },
+      { id: 'e2', source: 'draft', target: 'propose' },
+      { id: 'e3', source: 'propose', target: 'end' },
+    ]),
+  },
+  {
+    key: 'resolution_summary_autosend',
+    name: 'Resolution summary (auto-send at high confidence)',
+    description: 'On resolve/close, the LLM writes a plain-language "what happened / what we did" summary for the requester. Sends automatically only at high confidence — otherwise it stages as a draft for approval.',
+    triggerType: 'ticket.resolved_closed',
+    build: () => templateNodes([
+      { id: 'trigger', type: 'trigger', data: { triggerType: 'ticket.resolved_closed' } },
+      { id: 'recipients', type: 'recipient_resolver', data: { to: ['requester'], cc: [], bcc: [] } },
+      {
+        id: 'summary',
+        type: 'llm_generate',
+        data: {
+          label: 'Write resolution summary',
+          prompt: 'Write a short resolution summary email for the requester: what the problem was, what was done, and how to reopen if it recurs. State only facts present in the context. Include a confidence field reflecting how sure you are the summary is accurate.\n\nTicket: #{{ ticket.freshserviceTicketId }} {{ ticket.subject }}',
+          outputMode: 'draft_email',
+          promoteToEmail: true,
+          maxTokens: 10000,
+          temperature: 0.3,
+        },
+      },
+      {
+        id: 'template',
+        type: 'template_render',
+        data: {
+          contentSource: 'llm_with_template_fallback',
+          subject: 'Your ticket #{{ ticket.freshserviceTicketId }} has been resolved',
+          html: '<p>Your ticket <strong>#{{ ticket.freshserviceTicketId }}</strong> ({{ ticket.subject }}) has been resolved.</p><p>Reply to this email if the problem comes back.</p>',
+          text: 'Your ticket #{{ ticket.freshserviceTicketId }} ({{ ticket.subject }}) has been resolved.\n\nReply to this email if the problem comes back.',
+          plainTextMode: 'auto',
+        },
+      },
+      {
+        id: 'send',
+        type: 'send_email',
+        data: { label: 'Send (gated)', provider: 'sendgrid', minLlmConfidence: 'high', includeFooter: true, includeHeader: false },
+      },
+    ], [
+      { id: 'e1', source: 'trigger', target: 'recipients' },
+      { id: 'e2', source: 'recipients', target: 'summary' },
+      { id: 'e3', source: 'summary', target: 'template' },
+      { id: 'e4', source: 'template', target: 'send' },
+    ]),
+  },
+  {
+    key: 'follow_up_nudge',
+    name: 'Follow-up nudge (24h after agent reply)',
+    description: 'A day after an agent replies, if the ticket is still open, send the requester a polite templated check-in. Template-driven — no free generation.',
+    triggerType: 'ticket.public_reply_added',
+    build: () => templateNodes([
+      { id: 'trigger', type: 'trigger', data: { triggerType: 'ticket.public_reply_added' } },
+      { id: 'wait', type: 'delay', data: { label: 'Wait a day', minutes: 1440 } },
+      {
+        id: 'still-open',
+        type: 'condition',
+        data: {
+          conditionGroup: {
+            logic: 'all',
+            conditions: [{ field: 'ticket.status', operator: 'in', value: ['Open', 'Pending'] }],
+          },
+        },
+      },
+      { id: 'recipients', type: 'recipient_resolver', data: { to: ['requester'], cc: [], bcc: [] } },
+      {
+        id: 'template',
+        type: 'template_render',
+        data: {
+          contentSource: 'template_only',
+          subject: 'Still need help with ticket #{{ ticket.freshserviceTicketId }}?',
+          html: '<p>Just checking in on your ticket <strong>#{{ ticket.freshserviceTicketId }}</strong> ({{ ticket.subject }}).</p><p>If our last reply solved it, no action is needed. If you still need help, just reply to this email.</p>',
+          text: 'Just checking in on your ticket #{{ ticket.freshserviceTicketId }} ({{ ticket.subject }}).\n\nIf our last reply solved it, no action is needed. If you still need help, just reply to this email.',
+          plainTextMode: 'auto',
+        },
+      },
+      { id: 'send', type: 'send_email', data: { provider: 'sendgrid', includeFooter: true, includeHeader: false } },
+      { id: 'end', type: 'stop', data: {} },
+    ], [
+      { id: 'e1', source: 'trigger', target: 'wait' },
+      { id: 'e2', source: 'wait', target: 'still-open' },
+      { id: 'e3', source: 'still-open', sourceHandle: 'true', target: 'recipients' },
+      { id: 'e4', source: 'still-open', sourceHandle: 'false', target: 'end' },
+      { id: 'e5', source: 'recipients', target: 'template' },
+      { id: 'e6', source: 'template', target: 'send' },
+    ]),
+  },
+  {
+    key: 'daily_open_tickets_digest',
+    name: 'Daily open-tickets digest',
+    description: 'Every morning, email a configured list a plain-language digest: open/unassigned/overdue counts and the oldest open tickets. Deterministic template — no AI. Configure the recipients and send time after installing.',
+    triggerType: 'schedule.time',
+    build: () => templateNodes([
+      { id: 'trigger', type: 'trigger', data: { triggerType: 'schedule.time', frequency: 'daily', time: '08:30' } },
+      {
+        id: 'recipients',
+        type: 'recipient_resolver',
+        data: { to: ['custom_emails'], cc: [], bcc: [], customEmails: [] },
+      },
+      {
+        id: 'template',
+        type: 'template_render',
+        data: {
+          contentSource: 'template_only',
+          subject: 'Ticket digest — {{ digest.openCount }} open · {{ digest.overdueCount }} overdue',
+          html: [
+            '<p><strong>{{ workspace.name }}</strong> ticket digest:</p>',
+            '<ul>',
+            '<li><strong>{{ digest.openCount }}</strong> open ({{ digest.unassignedCount }} unassigned)</li>',
+            '<li><strong>{{ digest.overdueCount }}</strong> overdue · {{ digest.dueTodayCount }} due today</li>',
+            '</ul>',
+            '{% if digest.oldestOpen.size > 0 %}<p><strong>Oldest open tickets:</strong></p><ul>',
+            '{% for t in digest.oldestOpen %}<li>{{ t.ref }} — {{ t.subject }} ({{ t.status }}, {{ t.assignee }}, {{ t.ageDays }}d old)</li>{% endfor %}',
+            '</ul>{% endif %}',
+          ].join(''),
+          text: [
+            '{{ workspace.name }} ticket digest:',
+            '- {{ digest.openCount }} open ({{ digest.unassignedCount }} unassigned)',
+            '- {{ digest.overdueCount }} overdue, {{ digest.dueTodayCount }} due today',
+            '',
+            '{% for t in digest.oldestOpen %}{{ t.ref }} - {{ t.subject }} ({{ t.status }}, {{ t.assignee }}, {{ t.ageDays }}d old)',
+            '{% endfor %}',
+          ].join('\n'),
+          plainTextMode: 'manual',
+          appendPublicStatusLink: false,
+          appendRaiseUrgencyLink: false,
+          appendAfterHoursSupportLink: false,
+          appendFeedbackLink: false,
+        },
+      },
+      { id: 'send', type: 'send_email', data: { provider: 'sendgrid', includeFooter: false, includeHeader: false, appendPublicStatusLink: false } },
+    ], [
+      { id: 'e1', source: 'trigger', target: 'recipients' },
+      { id: 'e2', source: 'recipients', target: 'template' },
+      { id: 'e3', source: 'template', target: 'send' },
+    ]),
+  },
+  {
+    key: 'sla_breach_manager_alert',
+    name: 'SLA breach alert to managers (LLM digest)',
+    description: 'When a ticket blows its SLA, email a manager list an LLM-written situation digest: what the ticket is, who has it, why it matters. Configure the recipient emails after installing.',
+    triggerType: 'ticket.sla_breach',
+    build: () => templateNodes([
+      { id: 'trigger', type: 'trigger', data: { triggerType: 'ticket.sla_breach' } },
+      {
+        id: 'recipients',
+        type: 'recipient_resolver',
+        data: { to: ['custom_emails'], cc: [], bcc: [], customEmails: [] },
+      },
+      {
+        id: 'digest',
+        type: 'llm_generate',
+        data: {
+          label: 'Write breach digest',
+          prompt: 'Write a concise internal alert for IT coordinators: this ticket has breached its SLA. Summarize the issue, current status, assignee (or unassigned), and one suggested next action. Coaching tone — factual, no blame.\n\nTicket: #{{ ticket.freshserviceTicketId }} {{ ticket.subject }}\nStatus: {{ ticket.status }} · Assignee: {{ assignedAgent.name }}',
+          outputMode: 'draft_email',
+          promoteToEmail: true,
+          maxTokens: 10000,
+          temperature: 0.3,
+        },
+      },
+      {
+        id: 'template',
+        type: 'template_render',
+        data: {
+          contentSource: 'llm_with_template_fallback',
+          subject: 'SLA breached: #{{ ticket.freshserviceTicketId }} {{ ticket.subject }}',
+          html: '<p>Ticket <strong>#{{ ticket.freshserviceTicketId }}</strong> ({{ ticket.subject }}) has breached its SLA. Status: {{ ticket.status }}.</p>',
+          text: 'Ticket #{{ ticket.freshserviceTicketId }} ({{ ticket.subject }}) has breached its SLA. Status: {{ ticket.status }}.',
+          plainTextMode: 'auto',
+        },
+      },
+      { id: 'send', type: 'send_email', data: { provider: 'sendgrid', includeFooter: false, includeHeader: false, appendPublicStatusLink: false } },
+    ], [
+      { id: 'e1', source: 'trigger', target: 'recipients' },
+      { id: 'e2', source: 'recipients', target: 'digest' },
+      { id: 'e3', source: 'digest', target: 'template' },
+      { id: 'e4', source: 'template', target: 'send' },
+    ]),
+  },
 ];
 
 export const AFTER_HOURS_WORKFLOW_KEY = 'ticket_created_after_hours';
@@ -61,6 +317,55 @@ export const NOTIFICATION_NODE_REGISTRY = Object.freeze({
   },
   update_ticket: {
     label: 'Update ticket',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['default'],
+  },
+  // N-way switch: output handles are the configured branch keys + 'otherwise'
+  // (validated dynamically against node.data.branches).
+  branch: {
+    label: 'Branch',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: 'dynamic',
+  },
+  delay: {
+    label: 'Wait / delay',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['default'],
+  },
+  call_webhook: {
+    label: 'Call webhook',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['default'],
+  },
+  create_child_ticket: {
+    label: 'Create child ticket',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['default'],
+  },
+  request_approval: {
+    label: 'Request approval',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['default'],
+  },
+  // Stage the upstream LLM draft as a proposed reply on the ticket for a
+  // human to approve/edit/send — the draft→approve pattern.
+  propose_reply: {
+    label: 'Propose reply (human approves)',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['default'],
+  },
+  // Invoke another PUBLISHED workflow inline (one level deep, no recursion).
+  // The child may be disabled — disabled only stops its own trigger firing,
+  // which is exactly what a reusable "subflow" wants.
+  run_workflow: {
+    label: 'Run workflow',
     terminal: false,
     inputHandles: ['default'],
     outputHandles: ['default'],
@@ -153,7 +458,10 @@ const workflowEdgeSchema = z.object({
 });
 
 export const workflowDefinitionSchema = z.object({
-  version: z.literal(1).default(1),
+  // v1 = original graphs; v2 = graphs using structured condition groups and/or
+  // the newer trigger/node types. Loaded identically today — the version only
+  // marks intent so a future migration can tell them apart.
+  version: z.union([z.literal(1), z.literal(2)]).default(1),
   nodes: z.array(workflowNodeSchema).min(2).max(30),
   edges: z.array(workflowEdgeSchema).max(60).default([]),
   metadata: z.record(z.any()).default({}),
@@ -254,8 +562,9 @@ function validateGraph(definition, triggerType) {
     errors.push(`Trigger node must use triggerType ${triggerType}`);
   }
 
-  if (!definition.nodes.some((node) => node.type === 'send_email' || node.type === 'update_ticket')) {
-    errors.push('Workflow must include at least one action node (send_email or update_ticket)');
+  const ACTION_NODE_TYPES = ['send_email', 'update_ticket', 'call_webhook', 'create_child_ticket', 'request_approval', 'propose_reply'];
+  if (!definition.nodes.some((node) => ACTION_NODE_TYPES.includes(node.type))) {
+    errors.push(`Workflow must include at least one action node (${ACTION_NODE_TYPES.join(', ')})`);
   }
 
   for (const edge of definition.edges) {
@@ -275,7 +584,14 @@ function validateGraph(definition, triggerType) {
       errors.push(`Terminal node ${sourceNode.id} cannot have outgoing edge ${edge.id}`);
       continue;
     }
-    if (!registry.outputHandles.includes(handle)) {
+    if (registry.outputHandles === 'dynamic') {
+      // Branch nodes: valid handles = configured branch keys + 'otherwise'.
+      const branchKeys = new Set((sourceNode.data?.branches || []).map((b) => String(b.key || '').toLowerCase()));
+      branchKeys.add('otherwise');
+      if (!branchKeys.has(handle)) {
+        errors.push(`Edge ${edge.id} uses unknown branch "${handle}" on ${sourceNode.type} node ${sourceNode.id}`);
+      }
+    } else if (!registry.outputHandles.includes(handle)) {
       errors.push(`Edge ${edge.id} uses unsupported sourceHandle ${handle} for ${sourceNode.type} node ${sourceNode.id}`);
     }
     const targetNode = nodes.get(edge.target);
@@ -304,6 +620,52 @@ function validateGraph(definition, triggerType) {
       if (!handles.has('true')) errors.push(`Condition node ${node.id} must define a true branch`);
       if (!handles.has('false')) errors.push(`Condition node ${node.id} must define a false branch`);
     }
+
+    if (node.type === 'branch' && reachable.has(node.id)) {
+      const branches = Array.isArray(node.data?.branches) ? node.data.branches : [];
+      if (branches.length === 0) errors.push(`Branch node ${node.id} needs at least one branch`);
+      if (branches.length > 8) errors.push(`Branch node ${node.id} has too many branches (max 8)`);
+      const keys = new Set();
+      for (const b of branches) {
+        const key = String(b?.key || '').trim().toLowerCase();
+        if (!key) errors.push(`Branch node ${node.id} has a branch without a key`);
+        else if (keys.has(key)) errors.push(`Branch node ${node.id} has duplicate branch key "${key}"`);
+        keys.add(key);
+      }
+      const handles = new Set(edges.map((edge) => normalizedSourceHandle(edge)));
+      if (!handles.has('otherwise')) {
+        errors.push(`Branch node ${node.id} must route its "otherwise" path (no silent dead ends)`);
+      }
+    }
+
+    if (node.type === 'delay' && reachable.has(node.id)) {
+      const minutes = Number(node.data?.minutes);
+      if (!Number.isFinite(minutes) || minutes < 1 || minutes > 7 * 24 * 60) {
+        errors.push(`Delay node ${node.id} must wait between 1 minute and 7 days`);
+      }
+    }
+
+    if (node.type === 'run_workflow' && reachable.has(node.id)) {
+      const workflowId = Number(node.data?.workflowId);
+      if (!Number.isFinite(workflowId) || workflowId <= 0) {
+        errors.push(`Run-workflow node ${node.id} must reference a workflow`);
+      }
+    }
+
+    if (node.type === 'trigger' && node.data?.triggerType === 'schedule.time') {
+      if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(String(node.data?.time || ''))) {
+        errors.push(`Schedule trigger ${node.id} needs a time in HH:mm (24h)`);
+      }
+      if (!['daily', 'weekly'].includes(node.data?.frequency || 'daily')) {
+        errors.push(`Schedule trigger ${node.id} frequency must be daily or weekly`);
+      }
+      if ((node.data?.frequency || 'daily') === 'weekly') {
+        const weekday = Number(node.data?.weekday);
+        if (!(weekday >= 0 && weekday <= 6)) {
+          errors.push(`Schedule trigger ${node.id} needs a weekday (0=Sunday … 6=Saturday)`);
+        }
+      }
+    }
   }
 
   for (const cycle of detectCycles(definition, outgoing)) {
@@ -317,6 +679,13 @@ function validateGraph(definition, triggerType) {
     }
     if (!upstream.has('template_render') && !upstream.has('llm_generate')) {
       errors.push(`Send email node ${node.id} must have an upstream template or LLM email source`);
+    }
+  }
+
+  for (const node of definition.nodes.filter((candidate) => candidate.type === 'propose_reply')) {
+    const upstream = upstreamNodeTypes(node.id, nodes, incoming);
+    if (!upstream.has('llm_generate')) {
+      errors.push(`Propose-reply node ${node.id} must have an upstream LLM generate node (it stages the LLM draft)`);
     }
   }
 
@@ -434,8 +803,14 @@ function eventLabel(triggerType) {
     'ticket.reply_received': 'Requester replied',
     'ticket.note_added': 'Internal note added',
     'ticket.status_changed': 'Status changed',
+    'ticket.public_reply_added': 'Agent replied to requester',
     'approval.requested': 'Approval requested',
     'approval.decided': 'Approval decided',
+    'approval.clarification_requested': 'Approval clarification requested',
+    'ticket.aging': 'Ticket unresolved for N hours',
+    'ticket.sla_pre_breach': 'SLA about to breach',
+    'ticket.sla_breach': 'SLA breached',
+    'schedule.time': 'On a schedule (digest)',
   }[triggerType] || triggerType;
 }
 
@@ -578,7 +953,11 @@ export function buildDefaultWorkflowDefinition(triggerType, options = {}) {
         id: 'trigger',
         type: 'trigger',
         position: { x: 0, y: 0 },
-        data: { triggerType },
+        // Scheduled triggers carry default slot config so a fresh workflow
+        // validates before the admin tunes it.
+        data: triggerType === 'schedule.time'
+          ? { triggerType, frequency: 'daily', time: '08:30' }
+          : { triggerType },
       },
       {
         id: 'skip-noise',

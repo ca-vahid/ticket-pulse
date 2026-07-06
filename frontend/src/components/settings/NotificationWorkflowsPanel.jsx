@@ -16,6 +16,8 @@ import {
   AlertCircle,
   Bot,
   CalendarClock,
+  Clock3,
+  Sparkles,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -58,8 +60,9 @@ import {
   XCircle,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { notificationWorkflowAPI } from '../../services/api';
+import { notificationWorkflowAPI, ticketsAPI } from '../../services/api';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
+import ConditionGroupBuilder from './ConditionGroupBuilder';
 
 const WORKFLOW_EDITOR_LAYOUT_ID = 'ticket-pulse-notification-workflow-editor-v3';
 
@@ -71,8 +74,14 @@ const EVENT_LABELS = {
   'ticket.reply_received': 'Requester replied',
   'ticket.note_added': 'Internal note added',
   'ticket.status_changed': 'Status changed',
+  'ticket.public_reply_added': 'Agent replied to requester',
   'approval.requested': 'Approval requested',
   'approval.decided': 'Approval decided',
+  'approval.clarification_requested': 'Approval clarification requested',
+  'ticket.aging': 'Ticket unresolved for N hours',
+  'ticket.sla_pre_breach': 'SLA about to breach',
+  'ticket.sla_breach': 'SLA breached',
+  'schedule.time': 'On a schedule (digest)',
 };
 
 // Per-event color + icon, so the four trigger groups read as distinct zones in the
@@ -85,6 +94,7 @@ const TRIGGER_VISUALS = {
   'ticket.reply_received': { icon: Repeat, icon_: 'text-sky-600', chip: 'bg-sky-50 text-sky-700 ring-sky-200', rail: 'bg-sky-400' },
   'ticket.note_added': { icon: FileJson, icon_: 'text-indigo-600', chip: 'bg-indigo-50 text-indigo-700 ring-indigo-200', rail: 'bg-indigo-400' },
   'ticket.status_changed': { icon: Waypoints, icon_: 'text-violet-600', chip: 'bg-violet-50 text-violet-700 ring-violet-200', rail: 'bg-violet-400' },
+  'ticket.public_reply_added': { icon: Repeat, icon_: 'text-cyan-600', chip: 'bg-cyan-50 text-cyan-700 ring-cyan-200', rail: 'bg-cyan-400' },
 };
 
 function triggerVisuals(triggerType) {
@@ -147,6 +157,69 @@ const WORKFLOW_NODE_REGISTRY = {
     label: 'Update ticket',
     icon: Repeat,
     color: '#0284c7',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['default'],
+    addable: true,
+  },
+  branch: {
+    label: 'Branch',
+    icon: Waypoints,
+    color: '#7c3aed',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['otherwise'],
+    addable: true,
+  },
+  delay: {
+    label: 'Wait / delay',
+    icon: Clock3,
+    color: '#d97706',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['default'],
+    addable: true,
+  },
+  call_webhook: {
+    label: 'Call webhook',
+    icon: UploadCloud,
+    color: '#0f766e',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['default'],
+    addable: true,
+  },
+  create_child_ticket: {
+    label: 'Create child ticket',
+    icon: Inbox,
+    color: '#2563eb',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['default'],
+    addable: true,
+  },
+  request_approval: {
+    label: 'Request approval',
+    icon: UserCheck,
+    color: '#be185d',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['default'],
+    addable: true,
+  },
+  propose_reply: {
+    label: 'Propose reply (human approves)',
+    icon: Sparkles,
+    color: '#4f46e5',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['default'],
+    addable: true,
+  },
+  run_workflow: {
+    label: 'Run workflow',
+    icon: Repeat,
+    color: '#0e7490',
     terminal: false,
     inputHandles: ['default'],
     outputHandles: ['default'],
@@ -1494,6 +1567,49 @@ function defaultNodeData(type, triggerType = 'ticket.created') {
   }
   if (type === 'stop') {
     return { reason: 'Workflow stopped' };
+  }
+  if (type === 'branch') {
+    return {
+      label: 'Branch',
+      branches: [
+        { key: 'branch_1', label: 'Branch 1', conditionGroup: { logic: 'all', conditions: [{ field: 'ticket.priorityLabel', operator: 'is', value: 'Urgent' }] } },
+      ],
+    };
+  }
+  if (type === 'delay') {
+    return { label: 'Wait', minutes: 60 };
+  }
+  if (type === 'call_webhook') {
+    return {
+      label: 'Call webhook',
+      url: '',
+      method: 'POST',
+      bodyTemplate: '{"ticketId": {{ ticket.id }}, "subject": {{ ticket.subject | json }}, "event": "{{ event.type }}"}',
+      timeoutMs: 5000,
+      onError: 'continue',
+    };
+  }
+  if (type === 'create_child_ticket') {
+    return {
+      label: 'Create child ticket',
+      subjectTemplate: 'Follow-up: {{ ticket.subject }}',
+      descriptionTemplate: 'Follow-up task created from {{ event.type }}.',
+      priority: 2,
+      notifyRequester: false,
+    };
+  }
+  if (type === 'request_approval') {
+    return {
+      label: 'Request approval',
+      approvalCategoryId: null,
+      note: 'Requested automatically because: {{ event.type }} on {{ ticket.subject }}',
+    };
+  }
+  if (type === 'propose_reply') {
+    return { label: 'Stage for approval' };
+  }
+  if (type === 'run_workflow') {
+    return { label: 'Run workflow', workflowId: null, onError: 'continue' };
   }
   return {};
 }
@@ -3796,6 +3912,83 @@ function NotificationToast({ message, onDismiss }) {
 
 // All workflow health in one place: a status-colored button that opens a popover
 // with the workspace stat grid plus the deterministic workflow warnings list.
+/**
+ * Installable LLM-email workflow templates (draft replies, resolution
+ * summaries, nudges, SLA digests). Installing creates a DISABLED draft to
+ * review + publish — a template never starts running by itself.
+ */
+function WorkflowTemplatesMenu({ saving, onInstalled, setMessage }) {
+  const [open, setOpen] = useState(false);
+  const [templates, setTemplates] = useState(null);
+  const [installing, setInstalling] = useState(null);
+  const rootRef = useRef(null);
+
+  useEffect(() => {
+    if (!open || templates) return;
+    notificationWorkflowAPI.listTemplates()
+      .then((res) => setTemplates(res.data?.data || res.data || []))
+      .catch(() => setTemplates([]));
+  }, [open, templates]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDoc = (e) => { if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+
+  const install = async (template) => {
+    setInstalling(template.key);
+    try {
+      const response = await notificationWorkflowAPI.installTemplate(template.key);
+      setOpen(false);
+      setMessage({ type: 'success', text: `Installed "${template.name}" as a disabled draft — review, publish and enable it.` });
+      await onInstalled?.(response.data?.data?.id || response.data?.id);
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message || 'Template install failed' });
+    } finally {
+      setInstalling(null);
+    }
+  };
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        disabled={saving}
+        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-violet-200 bg-violet-50 px-2.5 text-sm font-medium text-violet-700 hover:bg-violet-100 disabled:opacity-50"
+      >
+        <Sparkles className="h-4 w-4" />
+        Templates
+      </button>
+      {open && (
+        <div className="absolute right-0 z-40 mt-1 w-96 rounded-xl border border-slate-200 bg-white p-2 shadow-lg">
+          <p className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">AI email workflow templates</p>
+          {templates === null && <p className="px-2 py-2 text-xs text-slate-400">Loading…</p>}
+          {templates?.length === 0 && <p className="px-2 py-2 text-xs text-slate-400">No templates available.</p>}
+          {(templates || []).map((template) => (
+            <button
+              key={template.key}
+              type="button"
+              onClick={() => install(template)}
+              disabled={installing !== null}
+              className="w-full rounded-lg px-2 py-2 text-left hover:bg-violet-50 disabled:opacity-60"
+            >
+              <span className="flex items-center gap-2">
+                <span className="text-sm font-semibold text-slate-800">{template.name}</span>
+                {installing === template.key && <span className="text-[10px] text-violet-500">installing…</span>}
+              </span>
+              <span className="mt-0.5 block text-xs leading-5 text-slate-500">{template.description}</span>
+            </button>
+          ))}
+          <p className="border-t border-slate-100 px-2 pt-1.5 mt-1 text-[11px] text-slate-400">Installs as a disabled draft — nothing runs until you publish and enable it.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function WorkflowHealthMenu({ health, warnings = [] }) {
   const [open, setOpen] = useState(false);
   if (!health) return null;
@@ -6064,7 +6257,10 @@ export default function NotificationWorkflowsPanel({
   const [previewTestSending, setPreviewTestSending] = useState(false);
   const [previewTestResult, setPreviewTestResult] = useState(null);
   const [conditionText, setConditionText] = useState('');
-  const [conditionBuilder, setConditionBuilder] = useState({ field: 'ticket.status', operator: 'equals', value: 'Open' });
+  // Ticket metadata (technicians / categories / groups / approval categories /
+  // custom fields) for the action-node pickers — fetched lazily on first need.
+  const [ticketMeta, setTicketMeta] = useState(null);
+  const [customFieldDefs, setCustomFieldDefs] = useState(null);
   const [routingBuilder, setRoutingBuilder] = useState({ field: 'requester.regionKey', operator: 'equals', value: 'AU-BRISBANE' });
   const [routingMode, setRoutingMode] = useState('exclusive');
   const [routingPriority, setRoutingPriority] = useState(1);
@@ -6279,11 +6475,26 @@ export default function NotificationWorkflowsPanel({
     if (selectedNode?.type === 'condition') {
       const rule = selectedNode.data?.rule || true;
       setConditionText(JSON.stringify(rule, null, 2));
-      setConditionBuilder(conditionBuilderFromRule(rule));
     } else {
       setConditionText('');
     }
   }, [selectedNode]);
+
+  useEffect(() => {
+    if (!selectedNode || ticketMeta) return;
+    if (!['update_ticket', 'request_approval'].includes(selectedNode.type)) return;
+    ticketsAPI.meta()
+      .then((res) => setTicketMeta(res?.data || {}))
+      .catch(() => setTicketMeta({ technicians: [], categoryTree: [], groups: [], approvalCategories: [] }));
+  }, [selectedNode, ticketMeta]);
+
+  useEffect(() => {
+    if (!selectedNode || customFieldDefs) return;
+    if (selectedNode.type !== 'update_ticket') return;
+    ticketsAPI.customFieldDefinitions()
+      .then((res) => setCustomFieldDefs(res?.data || []))
+      .catch(() => setCustomFieldDefs([]));
+  }, [selectedNode, customFieldDefs]);
 
   useEffect(() => {
     if (!selected) return;
@@ -7249,11 +7460,13 @@ export default function NotificationWorkflowsPanel({
         sourceHandle: existingEdge.sourceHandle || null,
         target: newId,
       });
+      // Conditions continue downstream on true; branches on their otherwise
+      // path (both are required by validation, so inserted nodes stay valid).
+      const insertHandle = type === 'condition' ? 'true' : type === 'branch' ? 'otherwise' : null;
       next.edges.push({
-        id: uniqueEdgeId(next, newId, edgeRef.target, type === 'condition' ? 'true' : null),
+        id: uniqueEdgeId(next, newId, edgeRef.target, insertHandle),
         source: newId,
-        // Conditions only expose true/false outputs; continue downstream on true.
-        sourceHandle: type === 'condition' ? 'true' : null,
+        sourceHandle: insertHandle,
         target: edgeRef.target,
       });
       if (type === 'llm_generate') {
@@ -7275,7 +7488,11 @@ export default function NotificationWorkflowsPanel({
     if (!source || !target || target.type === 'trigger' || isTerminalNode(source)) return false;
     const sourceHandle = normalizedHandle(connection.sourceHandle);
     const targetHandle = normalizedHandle(connection.targetHandle);
-    return (WORKFLOW_NODE_REGISTRY[source.type]?.outputHandles || []).includes(sourceHandle)
+    // Branch nodes have dynamic output handles (their configured branch keys
+    // + otherwise) — accept any source handle; the backend validates keys.
+    const sourceOk = source.type === 'branch'
+      || (WORKFLOW_NODE_REGISTRY[source.type]?.outputHandles || []).includes(sourceHandle);
+    return sourceOk
       && (WORKFLOW_NODE_REGISTRY[target.type]?.inputHandles || ['default']).includes(targetHandle);
   }
 
@@ -7327,15 +7544,8 @@ export default function NotificationWorkflowsPanel({
     }
   }
 
-  function applyVisualConditionRule() {
-    const rule = buildConditionRule(conditionBuilder);
-    setConditionText(JSON.stringify(rule, null, 2));
-    updateNodeData({ rule });
-    setMessage({ type: 'success', text: 'Condition updated' });
-  }
-
   function updateConditionBranch(handle, targetId) {
-    if (!selectedNode || selectedNode.type !== 'condition' || !targetId) return;
+    if (!selectedNode || !['condition', 'branch'].includes(selectedNode.type) || !targetId) return;
     updateDraft((next) => {
       const source = next.nodes.find((node) => node.id === selectedNode.id);
       const target = next.nodes.find((node) => node.id === targetId);
@@ -8036,21 +8246,95 @@ export default function NotificationWorkflowsPanel({
     if (!selectedNode) return <div className="p-4 text-sm text-gray-500">Select a workflow node.</div>;
 
     if (selectedNode.type === 'trigger') {
+      const triggerType = selectedNode.data?.triggerType;
       return (
         <div className="space-y-3">
           <div>
             <label className="text-xs font-medium uppercase text-gray-500">Event</label>
             <div className="mt-1 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900">
-              {EVENT_LABELS[selectedNode.data?.triggerType] || selectedNode.data?.triggerType}
+              {EVENT_LABELS[triggerType] || triggerType}
             </div>
           </div>
+          {/* Time-trigger thresholds — read by the time-trigger worker. */}
+          {triggerType === 'ticket.aging' && (
+            <div>
+              <label className="text-xs font-medium uppercase text-gray-500">
+                Fire when unresolved for (hours)
+                <input
+                  type="number"
+                  min="1"
+                  value={selectedNode.data?.agingHours ?? 24}
+                  onChange={(event) => updateNodeData({ agingHours: Math.max(1, Number(event.target.value) || 24) })}
+                  className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900 tabular-nums"
+                />
+              </label>
+              <p className="mt-1 text-[11px] text-gray-400 normal-case">Open/Pending tickets older than this fire once per ticket (checked every few minutes).</p>
+            </div>
+          )}
+          {triggerType === 'ticket.sla_pre_breach' && (
+            <div>
+              <label className="text-xs font-medium uppercase text-gray-500">
+                Warn before the due date (minutes)
+                <input
+                  type="number"
+                  min="5"
+                  value={selectedNode.data?.preBreachMinutes ?? 60}
+                  onChange={(event) => updateNodeData({ preBreachMinutes: Math.max(5, Number(event.target.value) || 60) })}
+                  className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900 tabular-nums"
+                />
+              </label>
+              <p className="mt-1 text-[11px] text-gray-400 normal-case">Fires when a ticket&apos;s due date falls inside this window; a moved deadline re-arms it.</p>
+            </div>
+          )}
+          {triggerType === 'ticket.sla_breach' && (
+            <p className="text-[11px] text-gray-400 normal-case">Fires once per ticket when its due date passes while still Open/Pending; a moved deadline re-arms it.</p>
+          )}
+          {triggerType === 'schedule.time' && (
+            <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                <label className="block text-xs font-medium uppercase text-gray-500">
+                  Frequency
+                  <select
+                    value={selectedNode.data?.frequency || 'daily'}
+                    onChange={(event) => updateNodeData({ frequency: event.target.value })}
+                    className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+                  >
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                  </select>
+                </label>
+                <label className="block text-xs font-medium uppercase text-gray-500">
+                  Send at (workspace time)
+                  <input
+                    type="time"
+                    value={selectedNode.data?.time || '08:30'}
+                    onChange={(event) => updateNodeData({ time: event.target.value })}
+                    className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900 tabular-nums"
+                  />
+                </label>
+              </div>
+              {(selectedNode.data?.frequency || 'daily') === 'weekly' && (
+                <label className="block text-xs font-medium uppercase text-gray-500">
+                  On
+                  <select
+                    value={selectedNode.data?.weekday ?? 1}
+                    onChange={(event) => updateNodeData({ weekday: Number(event.target.value) })}
+                    className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+                  >
+                    {['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((day, i) => (
+                      <option key={day} value={i}>{day}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <p className="text-[11px] text-gray-400 normal-case">Runs without a ticket — templates use <code>{'{{ digest.* }}'}</code> variables (openCount, unassignedCount, overdueCount, dueTodayCount, oldestOpen list). Fires once per slot; restarts within an hour catch up safely.</p>
+            </div>
+          )}
         </div>
       );
     }
 
     if (selectedNode.type === 'condition') {
-      const fieldExample = conditionFieldOptions.find((option) => option.value === conditionBuilder.field)?.example || '';
-      const valueDisabled = ['exists', 'is_true', 'is_false'].includes(conditionBuilder.operator);
       const branchTargets = (draft?.nodes || []).filter((node) => node.id !== selectedNode.id && node.type !== 'trigger');
       const targetForBranch = (handle) => (draft?.edges || []).find((edge) => (
         edge.source === selectedNode.id
@@ -8058,57 +8342,15 @@ export default function NotificationWorkflowsPanel({
       ))?.target || '';
       return (
         <div className="space-y-4">
-          <div className="rounded-md border border-amber-100 bg-amber-50 p-3">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-800">Visual condition</div>
-            <div className="grid gap-2">
-              <label className="text-xs font-medium uppercase text-amber-900">
-                Field
-                <select
-                  value={conditionBuilder.field}
-                  onChange={(event) => setConditionBuilder((current) => ({ ...current, field: event.target.value }))}
-                  className="mt-1 w-full rounded-md border border-amber-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
-                >
-                  {conditionFieldOptions.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </select>
-              </label>
-              <div className="grid gap-2 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)]">
-                <label className="text-xs font-medium uppercase text-amber-900">
-                  Operator
-                  <select
-                    value={conditionBuilder.operator}
-                    onChange={(event) => setConditionBuilder((current) => ({ ...current, operator: event.target.value }))}
-                    className="mt-1 w-full rounded-md border border-amber-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
-                  >
-                    {CONDITION_OPERATOR_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="text-xs font-medium uppercase text-amber-900">
-                  Value
-                  <input
-                    value={conditionBuilder.value}
-                    onChange={(event) => setConditionBuilder((current) => ({ ...current, value: event.target.value }))}
-                    disabled={valueDisabled}
-                    placeholder={fieldExample}
-                    className="mt-1 w-full rounded-md border border-amber-200 bg-white px-3 py-2 text-sm normal-case text-gray-900 disabled:bg-amber-100 disabled:text-amber-500"
-                  />
-                </label>
-              </div>
-            </div>
-            <div className="mt-3 rounded-md bg-white/80 px-3 py-2 text-xs text-amber-900">
-              {describeCondition(conditionBuilder)}
-            </div>
-            <button
-              type="button"
-              onClick={applyVisualConditionRule}
-              className="mt-3 inline-flex items-center gap-1.5 rounded-md bg-amber-700 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-800"
-            >
-              <CheckCircle2 className="h-4 w-4" />
-              Apply visual rule
-            </button>
+          <div>
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-indigo-700">Conditions</div>
+            {/* Structured AND/OR builder — compiled to json-logic by the engine
+                at run time; takes precedence over the raw rule below. */}
+            <ConditionGroupBuilder
+              value={selectedNode.data?.conditionGroup}
+              onChange={(group) => updateNodeData({ conditionGroup: group })}
+              onClear={() => updateNodeData({ conditionGroup: null })}
+            />
           </div>
 
           <div className="rounded-md border border-gray-200 bg-white p-3">
@@ -8151,6 +8393,407 @@ export default function NotificationWorkflowsPanel({
             <CheckCircle2 className="h-4 w-4" />
             Apply condition
           </button>
+        </div>
+      );
+    }
+
+    if (selectedNode.type === 'update_ticket') {
+      const technicians = ticketMeta?.technicians || [];
+      const categoryTree = ticketMeta?.categoryTree || [];
+      const groups = ticketMeta?.groups || [];
+      const assignMode = selectedNode.data?.assignTo?.mode || 'none';
+      const selectedCategory = categoryTree.find((c) => c.id === Number(selectedNode.data?.setInternalCategoryId)) || null;
+      const customValues = selectedNode.data?.setCustomFields || {};
+      const setAssign = (patch) => updateNodeData({ assignTo: { ...(selectedNode.data?.assignTo || {}), ...patch } });
+      return (
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block text-xs font-medium uppercase text-gray-500">
+              Set status
+              <select
+                value={selectedNode.data?.setStatus || ''}
+                onChange={(event) => updateNodeData({ setStatus: event.target.value || null })}
+                className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+              >
+                <option value="">Unchanged</option>
+                {['Open', 'Pending', 'Resolved', 'Closed'].map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </label>
+            <label className="block text-xs font-medium uppercase text-gray-500">
+              Set priority
+              <select
+                value={selectedNode.data?.setPriority || ''}
+                onChange={(event) => updateNodeData({ setPriority: Number(event.target.value) || null })}
+                className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+              >
+                <option value="">Unchanged</option>
+                {[['1', 'Low'], ['2', 'Medium'], ['3', 'High'], ['4', 'Urgent']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+            </label>
+          </div>
+
+          <div className="rounded-lg border border-blue-100 bg-blue-50/50 p-2.5 space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Assignment</p>
+            <select
+              value={assignMode}
+              onChange={(event) => setAssign({ mode: event.target.value })}
+              aria-label="Assignment mode"
+              className="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900"
+            >
+              <option value="none">Don&apos;t assign</option>
+              <option value="tech">Specific member</option>
+              <option value="round_robin">Round-robin (least-recently assigned)</option>
+              <option value="least_loaded">Least loaded (fewest open tickets)</option>
+            </select>
+            {assignMode === 'tech' && (
+              <select
+                value={selectedNode.data?.assignTo?.technicianId || ''}
+                onChange={(event) => setAssign({ technicianId: Number(event.target.value) || null })}
+                aria-label="Technician"
+                className="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900"
+              >
+                <option value="">Choose member…</option>
+                {technicians.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            )}
+            <p className="text-[11px] text-gray-500 normal-case">Assignment works for BOTH origins (FS-born via write-back). Other field changes apply to Ticket-Pulse-born tickets only.</p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block text-xs font-medium uppercase text-gray-500">
+              Set category
+              <select
+                value={selectedNode.data?.setInternalCategoryId || ''}
+                onChange={(event) => updateNodeData({ setInternalCategoryId: Number(event.target.value) || null, setInternalSubcategoryId: null })}
+                className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+              >
+                <option value="">Unchanged</option>
+                {categoryTree.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </label>
+            <label className="block text-xs font-medium uppercase text-gray-500">
+              Subcategory
+              <select
+                value={selectedNode.data?.setInternalSubcategoryId || ''}
+                onChange={(event) => updateNodeData({ setInternalSubcategoryId: Number(event.target.value) || null })}
+                disabled={!selectedCategory}
+                className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900 disabled:bg-gray-50 disabled:text-gray-400"
+              >
+                <option value="">None</option>
+                {(selectedCategory?.subcategories || []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </label>
+          </div>
+
+          <label className="block text-xs font-medium uppercase text-gray-500">
+            Move to group
+            <select
+              value={selectedNode.data?.setInternalGroupId || ''}
+              onChange={(event) => updateNodeData({ setInternalGroupId: Number(event.target.value) || null })}
+              className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+            >
+              <option value="">Unchanged</option>
+              {groups.map((g) => <option key={g.id} value={g.id}>{g.name}{g.origin === 'local' ? ' (internal)' : ''}</option>)}
+            </select>
+          </label>
+
+          {(customFieldDefs || []).length > 0 && (
+            <div className="rounded-lg border border-slate-200 p-2.5 space-y-1.5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Set custom fields</p>
+              {(customFieldDefs || []).map((definition) => (
+                <label key={definition.key} className="block text-[11px] text-slate-500">
+                  {definition.label}
+                  {definition.type === 'select' ? (
+                    <select
+                      value={customValues[definition.key] ?? ''}
+                      onChange={(event) => updateNodeData({
+                        setCustomFields: { ...customValues, [definition.key]: event.target.value || undefined },
+                      })}
+                      className="mt-0.5 w-full rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-900"
+                    >
+                      <option value="">Unchanged</option>
+                      {definition.options.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+                    </select>
+                  ) : (
+                    <input
+                      value={customValues[definition.key] ?? ''}
+                      onChange={(event) => updateNodeData({
+                        setCustomFields: { ...customValues, [definition.key]: event.target.value || undefined },
+                      })}
+                      placeholder="Unchanged"
+                      className="mt-0.5 w-full rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-900"
+                    />
+                  )}
+                </label>
+              ))}
+            </div>
+          )}
+
+          <label className="block text-xs font-medium uppercase text-gray-500">
+            Audit note (optional)
+            <input
+              value={selectedNode.data?.note || ''}
+              onChange={(event) => updateNodeData({ note: event.target.value })}
+              className="mt-1 w-full rounded-md border border-gray-200 px-3 py-2 text-sm normal-case text-gray-900"
+            />
+          </label>
+        </div>
+      );
+    }
+
+    if (selectedNode.type === 'branch') {
+      const branches = Array.isArray(selectedNode.data?.branches) ? selectedNode.data.branches : [];
+      const branchTargets = (draft?.nodes || []).filter((node) => node.id !== selectedNode.id && node.type !== 'trigger');
+      const targetForBranch = (handle) => (draft?.edges || []).find((edge) => (
+        edge.source === selectedNode.id && normalizedHandle(edge.sourceHandle) === handle
+      ))?.target || '';
+      const setBranches = (nextBranches) => updateNodeData({ branches: nextBranches });
+      return (
+        <div className="space-y-4">
+          <p className="text-xs text-gray-500">Branches are checked top to bottom — the first match wins; nothing matching takes the <strong>otherwise</strong> path.</p>
+          {branches.map((branch, index) => (
+            <div key={branch.key || index} className="rounded-lg border border-violet-200 bg-violet-50/40 p-3 space-y-2">
+              <div className="flex items-center gap-2">
+                <input
+                  value={branch.label || ''}
+                  onChange={(event) => {
+                    const next = branches.slice();
+                    next[index] = { ...branch, label: event.target.value };
+                    setBranches(next);
+                  }}
+                  placeholder={`Branch ${index + 1}`}
+                  aria-label="Branch label"
+                  className="flex-1 rounded-md border border-violet-200 bg-white px-2.5 py-1.5 text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={() => setBranches(branches.filter((_, i) => i !== index))}
+                  className="rounded-md p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-500"
+                  aria-label="Remove branch"
+                >
+                  <XCircle className="h-4 w-4" />
+                </button>
+              </div>
+              <ConditionGroupBuilder
+                value={branch.conditionGroup}
+                onChange={(group) => {
+                  const next = branches.slice();
+                  next[index] = { ...branch, conditionGroup: group };
+                  setBranches(next);
+                }}
+                onClear={() => {
+                  const next = branches.slice();
+                  next[index] = { ...branch, conditionGroup: null };
+                  setBranches(next);
+                }}
+              />
+              <label className="block text-xs font-medium uppercase text-gray-500">
+                Route to
+                <select
+                  value={targetForBranch(String(branch.key || '').toLowerCase())}
+                  onChange={(event) => updateConditionBranch(String(branch.key || '').toLowerCase(), event.target.value)}
+                  className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+                >
+                  <option value="">Choose target node</option>
+                  {branchTargets.map((node) => (
+                    <option key={node.id} value={node.id}>{NODE_LABELS[node.type] || node.type}: {node.data?.label || node.id}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          ))}
+          <button
+            type="button"
+            onClick={() => setBranches([
+              ...branches,
+              { key: `branch_${branches.length + 1}`, label: `Branch ${branches.length + 1}`, conditionGroup: { logic: 'all', conditions: [] } },
+            ])}
+            disabled={branches.length >= 8}
+            className="inline-flex items-center gap-1.5 rounded-md border border-violet-300 px-3 py-2 text-xs font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-50"
+          >
+            + Add branch
+          </button>
+          <label className="block text-xs font-medium uppercase text-gray-500">
+            Otherwise route to
+            <select
+              value={targetForBranch('otherwise')}
+              onChange={(event) => updateConditionBranch('otherwise', event.target.value)}
+              className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+            >
+              <option value="">Choose target node</option>
+              {branchTargets.map((node) => (
+                <option key={node.id} value={node.id}>{NODE_LABELS[node.type] || node.type}: {node.data?.label || node.id}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+      );
+    }
+
+    if (selectedNode.type === 'delay') {
+      return (
+        <div className="space-y-3">
+          <label className="block text-xs font-medium uppercase text-gray-500">
+            Wait for (minutes)
+            <input
+              type="number"
+              min="1"
+              max="10080"
+              value={selectedNode.data?.minutes ?? 60}
+              onChange={(event) => updateNodeData({ minutes: Math.min(10080, Math.max(1, Number(event.target.value) || 60)) })}
+              className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900 tabular-nums"
+            />
+          </label>
+          <p className="text-[11px] text-gray-400">The run parks durably and resumes after the wait (survives restarts). Max 7 days. Previews skip the wait.</p>
+        </div>
+      );
+    }
+
+    if (selectedNode.type === 'call_webhook') {
+      return (
+        <div className="space-y-3">
+          <label className="block text-xs font-medium uppercase text-gray-500">
+            URL
+            <input
+              value={selectedNode.data?.url || ''}
+              onChange={(event) => updateNodeData({ url: event.target.value })}
+              placeholder="https://example.com/hook"
+              className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+            />
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block text-xs font-medium uppercase text-gray-500">
+              Method
+              <select
+                value={selectedNode.data?.method || 'POST'}
+                onChange={(event) => updateNodeData({ method: event.target.value })}
+                className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+              >
+                {['POST', 'GET', 'PUT', 'PATCH', 'DELETE'].map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </label>
+            <label className="block text-xs font-medium uppercase text-gray-500">
+              On error
+              <select
+                value={selectedNode.data?.onError || 'continue'}
+                onChange={(event) => updateNodeData({ onError: event.target.value })}
+                className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+              >
+                <option value="continue">Continue the workflow</option>
+                <option value="fail">Fail the workflow</option>
+              </select>
+            </label>
+          </div>
+          <label className="block text-xs font-medium uppercase text-gray-500">
+            Body template (Liquid, JSON)
+            <textarea
+              value={selectedNode.data?.bodyTemplate || ''}
+              onChange={(event) => updateNodeData({ bodyTemplate: event.target.value })}
+              className="mt-1 h-28 w-full rounded-md border border-gray-200 px-3 py-2 font-mono text-xs normal-case"
+            />
+          </label>
+          <p className="text-[11px] text-gray-400">Private/internal addresses are blocked. Responses are recorded (truncated) in the run audit.</p>
+        </div>
+      );
+    }
+
+    if (selectedNode.type === 'create_child_ticket') {
+      return (
+        <div className="space-y-3">
+          <label className="block text-xs font-medium uppercase text-gray-500">
+            Subject template
+            <input
+              value={selectedNode.data?.subjectTemplate || ''}
+              onChange={(event) => updateNodeData({ subjectTemplate: event.target.value })}
+              className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+            />
+          </label>
+          <label className="block text-xs font-medium uppercase text-gray-500">
+            Description template
+            <textarea
+              value={selectedNode.data?.descriptionTemplate || ''}
+              onChange={(event) => updateNodeData({ descriptionTemplate: event.target.value })}
+              className="mt-1 h-24 w-full rounded-md border border-gray-200 px-3 py-2 text-sm normal-case"
+            />
+          </label>
+          <p className="text-[11px] text-gray-400">Creates a Ticket-Pulse-born ticket for the same requester, noting the source ticket. Requires native ticketing on this workspace.</p>
+        </div>
+      );
+    }
+
+    if (selectedNode.type === 'request_approval') {
+      const approvalCategories = ticketMeta?.approvalCategories || [];
+      return (
+        <div className="space-y-3">
+          <label className="block text-xs font-medium uppercase text-gray-500">
+            Approval category
+            <select
+              value={selectedNode.data?.approvalCategoryId ?? ''}
+              onChange={(event) => updateNodeData({ approvalCategoryId: Number(event.target.value) || null })}
+              className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+            >
+              <option value="">Choose a category…</option>
+              {approvalCategories.map((category) => (
+                <option key={category.id} value={category.id}>{category.name}</option>
+              ))}
+            </select>
+          </label>
+          {approvalCategories.length === 0 && ticketMeta && (
+            <p className="text-[11px] text-amber-600 normal-case">No approval categories yet — create one in Settings → Approval Categories first.</p>
+          )}
+          <label className="block text-xs font-medium uppercase text-gray-500">
+            Request note (Liquid)
+            <textarea
+              value={selectedNode.data?.note || ''}
+              onChange={(event) => updateNodeData({ note: event.target.value })}
+              className="mt-1 h-20 w-full rounded-md border border-gray-200 px-3 py-2 text-sm normal-case"
+            />
+          </label>
+          <p className="text-[11px] text-gray-400">Routes the ticket to the category&apos;s approval managers (any one approves).</p>
+        </div>
+      );
+    }
+
+    if (selectedNode.type === 'propose_reply') {
+      return (
+        <div className="space-y-3">
+          <p className="text-sm text-gray-600">Stages the upstream LLM draft on the ticket as an <strong>AI proposed reply</strong>. An agent approves &amp; sends, edits it in the composer, or dismisses it — nothing is emailed automatically.</p>
+          <p className="text-[11px] text-gray-400">Requires an LLM Generate node earlier in the flow. A newer proposal supersedes an older open one on the same ticket.</p>
+        </div>
+      );
+    }
+
+    if (selectedNode.type === 'run_workflow') {
+      const candidates = (workflows || []).filter((w) => w.id !== selected?.id && !w.archivedAt);
+      return (
+        <div className="space-y-3">
+          <label className="block text-xs font-medium uppercase text-gray-500">
+            Workflow to run
+            <select
+              value={selectedNode.data?.workflowId || ''}
+              onChange={(event) => updateNodeData({ workflowId: Number(event.target.value) || null })}
+              className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+            >
+              <option value="">Choose a workflow…</option>
+              {candidates.map((w) => (
+                <option key={w.id} value={w.id}>
+                  {workflowDisplayName(w)} {w.publishedVersion ? `(v${w.publishedVersion})` : '(never published)'}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block text-xs font-medium uppercase text-gray-500">
+            On error
+            <select
+              value={selectedNode.data?.onError || 'continue'}
+              onChange={(event) => updateNodeData({ onError: event.target.value })}
+              className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+            >
+              <option value="continue">Continue this workflow</option>
+              <option value="fail">Fail this workflow</option>
+            </select>
+          </label>
+          <p className="text-[11px] text-gray-400">Runs the referenced workflow&apos;s <strong>published</strong> version with this event&apos;s context. One level only — sub-workflows can&apos;t call further sub-workflows. The child may be disabled (disabled only stops its own trigger), making it a reusable subflow.</p>
         </div>
       );
     }
@@ -8921,6 +9564,37 @@ export default function NotificationWorkflowsPanel({
               className="mt-1 w-full rounded-md border border-gray-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
             />
           </div>
+
+          {/* Auto-send safety gates for LLM-authored content: below the
+              confidence bar or an always-human match, the send downgrades to a
+              staged proposed reply instead of emailing the requester. */}
+          <div className="rounded-lg border border-indigo-200 bg-indigo-50/50 p-3 space-y-2.5">
+            <p className="text-xs font-semibold uppercase tracking-wide text-indigo-700">AI auto-send safety</p>
+            <label className="block text-xs font-medium uppercase text-gray-500">
+              Minimum LLM confidence to auto-send
+              <select
+                value={selectedNode.data?.minLlmConfidence || ''}
+                onChange={(event) => updateNodeData({ minLlmConfidence: event.target.value || null })}
+                className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+              >
+                <option value="">Off — always send</option>
+                <option value="medium">Medium or higher</option>
+                <option value="high">High only</option>
+              </select>
+            </label>
+            <label className="block text-xs font-medium uppercase text-gray-500">
+              Always-human recipients (emails or @domains, comma-separated)
+              <input
+                value={(selectedNode.data?.alwaysHumanRecipients || []).join(', ')}
+                onChange={(event) => updateNodeData({
+                  alwaysHumanRecipients: event.target.value.split(',').map((v) => v.trim()).filter(Boolean),
+                })}
+                placeholder="vip@example.com, @execs.example.com"
+                className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+              />
+            </label>
+            <p className="text-[11px] text-gray-500 normal-case">Gates apply only when the email content came from the LLM. A blocked send is staged on the ticket as an AI proposed reply — never silently dropped.</p>
+          </div>
         </div>
       );
     }
@@ -8988,6 +9662,7 @@ export default function NotificationWorkflowsPanel({
             {workflowTabActive && (
               <div className="flex min-h-[36px] flex-wrap items-center justify-end gap-2">
                 <WorkflowHealthMenu health={health} warnings={healthWarnings} />
+                <WorkflowTemplatesMenu saving={saving} onInstalled={loadWorkflows} setMessage={setMessage} />
                 <button
                   type="button"
                   onClick={createVariant}
