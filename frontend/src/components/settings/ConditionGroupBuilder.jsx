@@ -22,6 +22,7 @@ export const CG_FIELDS = [
   { value: 'ticket.internalCategory', label: 'Category', type: 'string' },
   { value: 'ticket.internalSubcategory', label: 'Subcategory', type: 'string' },
   { value: 'ticket.category', label: 'Category (FreshService)', type: 'string' },
+  { value: 'ticket.tags', label: 'Tags', type: 'list' },
   { value: 'ticket.isNoise', label: 'Is noise/spam', type: 'boolean' },
   { value: 'ticket.ageMinutes', label: 'Ticket age (minutes)', type: 'duration' },
   { value: 'ticket.dueInMinutes', label: 'Minutes until due (negative = overdue)', type: 'duration' },
@@ -52,10 +53,14 @@ const OPERATORS_BY_TYPE = {
   ],
   boolean: [['is_true', 'is true'], ['is_false', 'is false']],
   duration: [['gt', 'more than'], ['lt', 'less than'], ['gte', 'at least'], ['lte', 'at most']],
+  list: [
+    ['has_any', 'has any of'], ['has_all', 'has all of'], ['has_none', 'has none of'],
+    ['is_empty', 'is empty'], ['is_not_empty', 'is not empty'],
+  ],
 };
 
 const VALUELESS = new Set(['is_empty', 'is_not_empty', 'is_true', 'is_false']);
-const LIST_OPERATORS = new Set(['in', 'not_in']);
+const LIST_OPERATORS = new Set(['in', 'not_in', 'has_any', 'has_all', 'has_none']);
 
 // Custom-field definitions extend the catalog as `custom:<key>` string fields
 // (mirrors the backend's dynamic fieldSpec). Fetched once per session.

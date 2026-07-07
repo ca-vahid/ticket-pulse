@@ -891,6 +891,133 @@ router.delete(
   }),
 );
 
+// ---------------------------------------------------- ticket tags (gap plan P1)
+// Admin CRUD for the workspace tag palette. Tags in use can be renamed,
+// recolored, deactivated (hidden from pickers, links kept) or merged; hard
+// delete only when unused.
+
+const TAG_COLORS = new Set(['slate', 'red', 'orange', 'amber', 'emerald', 'sky', 'blue', 'violet', 'pink']);
+
+router.get(
+  '/ticket-tags',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const tags = await prisma.ticketTag.findMany({
+      where: { workspaceId: req.workspaceId },
+      include: { _count: { select: { links: true } } },
+      orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
+    });
+    res.json({
+      success: true,
+      data: tags.map((t) => ({
+        id: t.id, name: t.name, color: t.color, isActive: t.isActive,
+        ticketCount: t._count.links, createdBy: t.createdBy,
+      })),
+    });
+  }),
+);
+
+router.post(
+  '/ticket-tags',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const name = String(req.body?.name || '').trim();
+    if (!name || name.length > 60) throw new ValidationError('Tag name is required (max 60 characters)');
+    const color = TAG_COLORS.has(req.body?.color) ? req.body.color : 'slate';
+    try {
+      const tag = await prisma.ticketTag.create({
+        data: { workspaceId: req.workspaceId, name, color, createdBy: requestActor(req)?.email || null },
+      });
+      res.status(201).json({ success: true, data: tag });
+    } catch (error) {
+      if (error.code === 'P2002') throw new ValidationError('A tag with that name already exists');
+      throw error;
+    }
+  }),
+);
+
+router.patch(
+  '/ticket-tags/:id',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const existing = await prisma.ticketTag.findFirst({
+      where: { id: parsePositiveId(req.params.id, 'tag id'), workspaceId: req.workspaceId },
+    });
+    if (!existing) throw new ValidationError('Tag not found');
+    const patch = {};
+    if (req.body?.name !== undefined) {
+      const name = String(req.body.name).trim();
+      if (!name || name.length > 60) throw new ValidationError('Tag name is required (max 60 characters)');
+      patch.name = name;
+    }
+    if (req.body?.color !== undefined && TAG_COLORS.has(req.body.color)) patch.color = req.body.color;
+    if (req.body?.isActive !== undefined) patch.isActive = req.body.isActive !== false;
+    try {
+      const tag = await prisma.ticketTag.update({ where: { id: existing.id }, data: patch });
+      res.json({ success: true, data: tag });
+    } catch (error) {
+      if (error.code === 'P2002') throw new ValidationError('A tag with that name already exists');
+      throw error;
+    }
+  }),
+);
+
+// Merge source tag into target: relink tickets (skipping duplicates), delete source.
+router.post(
+  '/ticket-tags/:id/merge',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const sourceId = parsePositiveId(req.params.id, 'tag id');
+    const targetId = parsePositiveId(req.body?.targetTagId, 'target tag id');
+    if (sourceId === targetId) throw new ValidationError('A tag cannot be merged into itself');
+    const [source, target] = await Promise.all([
+      prisma.ticketTag.findFirst({ where: { id: sourceId, workspaceId: req.workspaceId } }),
+      prisma.ticketTag.findFirst({ where: { id: targetId, workspaceId: req.workspaceId, isActive: true } }),
+    ]);
+    if (!source) throw new ValidationError('Source tag not found');
+    if (!target) throw new ValidationError('Merge target must be an active tag in this workspace');
+    const moved = await prisma.$transaction(async (tx) => {
+      const links = await tx.ticketTagLink.findMany({ where: { tagId: sourceId }, select: { ticketId: true, createdBy: true } });
+      if (links.length) {
+        await tx.ticketTagLink.createMany({
+          data: links.map((l) => ({ ticketId: l.ticketId, tagId: targetId, createdBy: l.createdBy })),
+          skipDuplicates: true,
+        });
+      }
+      await tx.ticketTag.delete({ where: { id: sourceId } }); // cascades source links
+      return links.length;
+    });
+    res.json({ success: true, data: { merged: true, relinked: moved, targetTagId: targetId } });
+  }),
+);
+
+router.delete(
+  '/ticket-tags/:id',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const existing = await prisma.ticketTag.findFirst({
+      where: { id: parsePositiveId(req.params.id, 'tag id'), workspaceId: req.workspaceId },
+      include: { _count: { select: { links: true } } },
+    });
+    if (!existing) throw new ValidationError('Tag not found');
+    if (existing._count.links > 0) {
+      throw new ValidationError(`"${existing.name}" is on ${existing._count.links} ticket${existing._count.links === 1 ? '' : 's'} — deactivate or merge it instead of deleting`);
+    }
+    await prisma.ticketTag.delete({ where: { id: existing.id } });
+    res.json({ success: true, data: { deleted: true } });
+  }),
+);
+
 
 /**
  * PUT /api/settings/:key

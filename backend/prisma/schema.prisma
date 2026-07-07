@@ -97,6 +97,7 @@ model Workspace {
   watchSubscriptions     TicketWatchSubscription[]
   replyTemplates         ReplyTemplate[]
   quickNotes             QuickNote[]
+  ticketTags             TicketTag[]
 
   @@map("workspaces")
 }
@@ -226,6 +227,41 @@ model ReplyTemplate {
 
   @@map("reply_templates")
   @@index([workspaceId, isActive])
+}
+
+// Tags (gap plan Phase 1) — a TP-owned annotation layer for BOTH ticket
+// origins; never written back to FreshService. Feeds queue filters, workflow
+// conditions/actions, and analytics slices.
+model TicketTag {
+  id          Int       @id @default(autoincrement())
+  workspaceId Int       @map("workspace_id")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name        String    @db.VarChar(60)
+  color       String    @default("slate") @db.VarChar(20) // named palette key, not hex
+  isActive    Boolean   @default(true) @map("is_active")
+  createdBy   String?   @db.VarChar(255) @map("created_by")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  links TicketTagLink[]
+
+  @@unique([workspaceId, name])
+  @@map("ticket_tags")
+  @@index([workspaceId, isActive])
+}
+
+model TicketTagLink {
+  id        Int       @id @default(autoincrement())
+  ticketId  Int       @map("ticket_id")
+  ticket    Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  tagId     Int       @map("tag_id")
+  tag       TicketTag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  createdBy String?   @db.VarChar(255) @map("created_by")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@unique([ticketId, tagId])
+  @@map("ticket_tag_links")
+  @@index([tagId])
 }
 
 // Canned INTERNAL notes ("quick notes", QA 07-06 #12) — insertable from the
@@ -732,6 +768,7 @@ model Ticket {
   proposedReplies      TicketProposedReply[]
   linksFrom            TicketLink[] @relation("linkSource")
   linksTo              TicketLink[] @relation("linkTarget")
+  tagLinks             TicketTagLink[]
 
   // Per-workspace user-defined fields — values keyed by CustomFieldDefinition.key.
   customFields         Json?     @map("custom_fields")

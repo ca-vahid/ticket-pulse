@@ -369,6 +369,12 @@ export const settingsAPI = {
   updateGroup: (id, data) => api.patch(`/settings/groups/${id}`, data),
   getGroupMembers: (id) => api.get(`/settings/groups/${id}/members`),
   setGroupMembers: (id, technicianIds) => api.put(`/settings/groups/${id}/members`, { technicianIds }),
+  // Ticket tags — workspace palette admin (gap plan P1)
+  getTicketTags: () => api.get('/settings/ticket-tags'),
+  createTicketTag: (data) => api.post('/settings/ticket-tags', data),
+  updateTicketTag: (id, data) => api.patch(`/settings/ticket-tags/${id}`, data),
+  mergeTicketTag: (id, targetTagId) => api.post(`/settings/ticket-tags/${id}/merge`, { targetTagId }),
+  deleteTicketTag: (id) => api.delete(`/settings/ticket-tags/${id}`),
   // Quick notes — canned internal notes per top category (QA 07-06 #12)
   getQuickNotes: () => api.get('/settings/quick-notes'),
   createQuickNote: (data) => api.post('/settings/quick-notes', data),
@@ -630,6 +636,10 @@ export const ticketsAPI = {
   // Macros (quick-action bundles)
   macros: async () => await api.get('/tickets/macros'),
   applyMacro: async (id, macroId) => await api.post(`/tickets/${id}/macros/${macroId}/apply`),
+
+  // Tags (gap plan P1) — TP-side layer, both origins, never written to FS
+  listTags: async () => await api.get('/tickets/tags'),
+  setTags: async (id, tagIds) => await api.put(`/tickets/${id}/tags`, { tagIds }),
 
   // Custom fields
   customFieldDefinitions: async () => await api.get('/tickets/custom-fields/definitions'),

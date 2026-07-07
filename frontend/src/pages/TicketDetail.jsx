@@ -7,6 +7,7 @@ import {
   RefreshCw, Send, ShieldCheck, Smartphone, Sparkles, Stamp, StickyNote, Trash2, UserRound, VolumeX, X, XCircle,
 } from 'lucide-react';
 import AttachmentPreviewModal from '../components/tickets/AttachmentPreviewModal';
+import TicketTagEditor from '../components/tickets/TicketTagEditor';
 import ApprovalTimeline from '../components/tickets/ApprovalTimeline';
 import ProposedReplyCard from '../components/tickets/ProposedReplyCard';
 import { CustomFieldsCard, MacroMenu, TicketLinksCard, TimeTrackingCard } from '../components/tickets/TicketOpsCards';
@@ -2352,6 +2353,16 @@ export default function TicketDetail() {
                       </select>
                     </SidebarField>
                   )}
+
+                  {/* Tags — TP-side layer, editable on BOTH origins */}
+                  <TicketTagEditor
+                    ticketId={ticketId}
+                    tags={ticket.tags || []}
+                    allTags={meta?.tags || []}
+                    canEdit={canConverse}
+                    isAdmin={isAdmin}
+                    onChanged={() => { lastLocalMutationRef.current = Date.now(); fetchTicket({ silent: true }); }}
+                  />
 
                   {/* Watchers are per category/group scopes, never per ticket */}
                   {(ticket.internalCategoryId || ticket.groupId) && (

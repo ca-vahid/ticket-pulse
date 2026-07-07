@@ -75,6 +75,19 @@ jsonLogic.add_operation('regex_match', (value, pattern) => {
   }
 });
 
+// List-membership ops for array fields (ticket.tags) — the condition model's
+// has_any / has_all / has_none compile to these. Case-insensitive.
+const asLowerList = (v) => (Array.isArray(v) ? v : v == null ? [] : [v]).map((x) => String(x).toLowerCase());
+jsonLogic.add_operation('list_has_any', (haystack, wanted) => {
+  const have = new Set(asLowerList(haystack));
+  return asLowerList(wanted).some((w) => have.has(w));
+});
+jsonLogic.add_operation('list_has_all', (haystack, wanted) => {
+  const have = new Set(asLowerList(haystack));
+  const want = asLowerList(wanted);
+  return want.length > 0 && want.every((w) => have.has(w));
+});
+
 /**
  * Derived relative-time fields for conditions ("older than 30m", "due within
  * 2h"). Computed at evaluation time from the event context's ISO timestamps;
@@ -2883,9 +2896,14 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false } = 
   const assignTo = node.data?.assignTo && node.data.assignTo.mode && node.data.assignTo.mode !== 'none'
     ? node.data.assignTo
     : null;
+  const normalizeTagNames = (v) => (Array.isArray(v) ? v : [])
+    .map((s) => String(s).trim()).filter(Boolean).slice(0, 10);
+  const addTags = normalizeTagNames(node.data?.addTags);
+  const removeTags = normalizeTagNames(node.data?.removeTags);
 
   if (!Number.isFinite(ticketId) || ticketId <= 0) return { skipped: true, reason: 'No ticket in event context' };
-  if (!setStatus && !setPriority && !setInternalCategoryId && !setInternalGroupId && !assignTo && !setCustomFields) {
+  if (!setStatus && !setPriority && !setInternalCategoryId && !setInternalGroupId && !assignTo && !setCustomFields
+    && !addTags.length && !removeTags.length) {
     return { skipped: true, reason: 'update_ticket node has no changes configured' };
   }
   if (setStatus && !UPDATE_TICKET_STATUSES.includes(setStatus)) {
@@ -2901,6 +2919,8 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false } = 
         internalSubcategoryId: setInternalSubcategoryId || undefined,
         internalGroupId: setInternalGroupId || undefined,
         assignTo: assignTo || undefined,
+        addTags: addTags.length ? addTags : undefined,
+        removeTags: removeTags.length ? removeTags : undefined,
       },
     };
   }
@@ -2943,14 +2963,26 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false } = 
     }
   }
 
+  // Tags are TP-side annotations (both origins, never written to FS). Add
+  // auto-creates missing workspace tags; remove matches by name.
+  let tagResult = null;
+  if (addTags.length || removeTags.length) {
+    try {
+      tagResult = await applyWorkflowTagChanges(prisma, ticket, addTags, removeTags);
+    } catch (error) {
+      tagResult = { skipped: true, reason: error.message };
+    }
+  }
+
   // Field mutations remain TP-born only (FreshService owns FS-born fields).
   if (ticket.origin !== 'ticketpulse') {
-    if (assignment || customFieldResult) {
+    if (assignment || customFieldResult || tagResult) {
       return {
         ...(assignment ? { assignment } : {}),
         ...(customFieldResult ? { customFields: customFieldResult } : {}),
+        ...(tagResult ? { tags: tagResult } : {}),
         skipped: true,
-        reason: 'FS-born ticket: only assignment write-back and TP custom fields applied',
+        reason: 'FS-born ticket: only assignment write-back and TP annotations (custom fields, tags) applied',
       };
     }
     return { skipped: true, reason: 'Workflow ticket updates only apply to tickets born in Ticket Pulse' };
@@ -3020,10 +3052,11 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false } = 
   }
 
   if (Object.keys(patch).length === 0) {
-    if (assignment || customFieldResult) {
+    if (assignment || customFieldResult || tagResult) {
       return {
         ...(assignment ? { assignment } : {}),
         ...(customFieldResult ? { customFields: customFieldResult } : {}),
+        ...(tagResult ? { tags: tagResult } : {}),
       };
     }
     return { skipped: true, reason: 'No effective changes' };
@@ -3062,7 +3095,71 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false } = 
     updated: changes,
     ...(assignment ? { assignment } : {}),
     ...(customFieldResult ? { customFields: customFieldResult } : {}),
+    ...(tagResult ? { tags: tagResult } : {}),
   };
+}
+
+/**
+ * Apply workflow tag changes (gap plan P1). Adds auto-create missing workspace
+ * tags (the workflow author named them deliberately); removals match by name,
+ * case-insensitively. Audited as tags_changed like manual edits.
+ */
+async function applyWorkflowTagChanges(prisma, ticket, addNames, removeNames) {
+  const wanted = [...new Set(addNames.map((n) => n.toLowerCase()))];
+  const unwanted = new Set(removeNames.map((n) => n.toLowerCase()));
+
+  const existing = await prisma.ticketTag.findMany({
+    where: { workspaceId: ticket.workspaceId },
+    select: { id: true, name: true, isActive: true },
+  });
+  const byLower = new Map(existing.map((t) => [t.name.toLowerCase(), t]));
+
+  const added = [];
+  for (const name of addNames) {
+    const lower = name.toLowerCase();
+    if (unwanted.has(lower)) continue; // remove wins on conflicting config
+    let tag = byLower.get(lower);
+    if (!tag) {
+      tag = await prisma.ticketTag.create({
+        data: { workspaceId: ticket.workspaceId, name: name.slice(0, 60), createdBy: 'workflow' },
+        select: { id: true, name: true, isActive: true },
+      });
+      byLower.set(lower, tag);
+    }
+    if (!tag.isActive) continue;
+    const link = await prisma.ticketTagLink.createMany({
+      data: [{ ticketId: ticket.id, tagId: tag.id, createdBy: 'workflow' }],
+      skipDuplicates: true,
+    });
+    if (link.count > 0) added.push(tag.name);
+  }
+
+  const removeIds = existing.filter((t) => unwanted.has(t.name.toLowerCase())).map((t) => t.id);
+  let removed = [];
+  if (removeIds.length) {
+    const links = await prisma.ticketTagLink.findMany({
+      where: { ticketId: ticket.id, tagId: { in: removeIds } },
+      select: { tagId: true },
+    });
+    if (links.length) {
+      await prisma.ticketTagLink.deleteMany({ where: { ticketId: ticket.id, tagId: { in: removeIds } } });
+      const linkedIds = new Set(links.map((l) => l.tagId));
+      removed = existing.filter((t) => linkedIds.has(t.id)).map((t) => t.name);
+    }
+  }
+
+  if (added.length || removed.length) {
+    try {
+      const { default: ticketActivityRepository } = await import('./ticketActivityRepository.js');
+      await ticketActivityRepository.create({
+        ticketId: ticket.id,
+        activityType: 'tags_changed',
+        performedBy: 'Notification workflow',
+        details: { added, removed },
+      });
+    } catch { /* non-fatal */ }
+  }
+  return { added, removed };
 }
 
 export async function executeForEvent(eventContext, options = {}) {

@@ -137,7 +137,14 @@ const TICKET_INCLUDE = {
   internalCategory: { select: { id: true, name: true } },
   internalSubcategory: { select: { id: true, name: true } },
   internalGroup: { select: { id: true, name: true, origin: true } },
+  tagLinks: { select: { tag: { select: { id: true, name: true, color: true } } } },
 };
+
+/** Flatten the tagLinks relation into a plain tags array for API payloads. */
+function ticketTags(t) {
+  return (t?.tagLinks || []).map((l) => l.tag).filter(Boolean)
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
 
 /**
  * Native ticketing engine — tickets born inside Ticket Pulse.
@@ -422,6 +429,22 @@ class TicketService {
       if (buckets.includes('none')) or.push({ dueBy: null });
       if (or.length) where.AND = [...(where.AND || []), { OR: or }];
     }
+    if (query.tagId) {
+      // Multi-select tag facet: ids and/or the literal 'none' (untagged).
+      // tagMode 'all' requires every selected tag; default 'any'.
+      const values = asList(query.tagId);
+      const ids = values.filter((v) => /^\d+$/.test(v)).map(Number);
+      const wantsUntagged = values.includes('none');
+      if (query.tagMode === 'all' && ids.length) {
+        where.AND = [...(where.AND || []), ...ids.map((id) => ({ tagLinks: { some: { tagId: id } } }))];
+      } else if (ids.length && wantsUntagged) {
+        where.AND = [...(where.AND || []), { OR: [{ tagLinks: { some: { tagId: { in: ids } } } }, { tagLinks: { none: {} } }] }];
+      } else if (ids.length) {
+        where.tagLinks = { some: { tagId: { in: ids } } };
+      } else if (wantsUntagged) {
+        where.tagLinks = { none: {} };
+      }
+    }
     if (query.noise === 'only') where.isNoise = true;
     else if (query.excludeNoise !== 'false') where.isNoise = false;
 
@@ -516,6 +539,8 @@ class TicketService {
     return {
       items: items.map((t) => ({
         ...t,
+        tagLinks: undefined,
+        tags: ticketTags(t),
         displayRef: ticketDisplayRef(t),
         // truthful "last activity" for display: FS's timestamp for FS-born rows
         lastActivityAt: t.lastRealActivityAt || t.freshserviceUpdatedAt || t.updatedAt,
@@ -854,6 +879,8 @@ class TicketService {
 
     return {
       ...ticket,
+      tagLinks: undefined,
+      tags: ticketTags(ticket),
       displayRef: ticketDisplayRef(ticket),
       thread: resolvedThread,
       activities,
@@ -863,6 +890,63 @@ class TicketService {
       stateChip: deriveStateChip(ticket, incomingByTicket.get(ticket.id) === true),
       lastActivityAt: ticket.lastRealActivityAt || ticket.freshserviceUpdatedAt || ticket.updatedAt,
     };
+  }
+
+  /**
+   * Replace a ticket's tag set (gap plan Phase 1). Tags are a TP-side layer:
+   * valid for BOTH origins and never written back to FreshService. Only active
+   * workspace tags may be linked; the diff is audited.
+   */
+  async setTags(ticketId, workspaceId, tagIds, actor = null) {
+    const ticket = await prisma.ticket.findFirst({
+      where: { id: ticketId, workspaceId },
+      select: { id: true, tagLinks: { select: { tagId: true } } },
+    });
+    if (!ticket) throw new NotFoundError(`Ticket ${ticketId} not found in this workspace`);
+
+    const wanted = [...new Set((Array.isArray(tagIds) ? tagIds : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+    const valid = wanted.length
+      ? await prisma.ticketTag.findMany({ where: { id: { in: wanted }, workspaceId, isActive: true }, select: { id: true, name: true } })
+      : [];
+    if (valid.length !== wanted.length) throw new ValidationError('One or more tags do not exist in this workspace');
+
+    const current = new Set(ticket.tagLinks.map((l) => l.tagId));
+    const toAdd = valid.filter((t) => !current.has(t.id));
+    const toRemove = [...current].filter((id) => !wanted.includes(id));
+    if (!toAdd.length && !toRemove.length) return { changed: false, tags: await this._ticketTagList(ticketId) };
+
+    await prisma.$transaction([
+      ...(toRemove.length ? [prisma.ticketTagLink.deleteMany({ where: { ticketId, tagId: { in: toRemove } } })] : []),
+      ...(toAdd.length ? [prisma.ticketTagLink.createMany({
+        data: toAdd.map((t) => ({ ticketId, tagId: t.id, createdBy: actor?.email || null })),
+        skipDuplicates: true,
+      })] : []),
+    ]);
+
+    const removedNames = toRemove.length
+      ? (await prisma.ticketTag.findMany({ where: { id: { in: toRemove } }, select: { name: true } })).map((t) => t.name)
+      : [];
+    await ticketActivityRepository.create({
+      ticketId,
+      activityType: 'tags_changed',
+      performedBy: actor?.email || 'system',
+      details: { added: toAdd.map((t) => t.name), removed: removedNames },
+    }).catch(() => null);
+
+    const fresh = await prisma.ticket.findUnique({
+      where: { id: ticketId },
+      select: { id: true, origin: true, status: true, assignedTechId: true, nativeNumber: true, freshserviceTicketId: true },
+    });
+    if (fresh) this._broadcast(workspaceId, 'tags', fresh);
+    return { changed: true, tags: await this._ticketTagList(ticketId) };
+  }
+
+  async _ticketTagList(ticketId) {
+    const links = await prisma.ticketTagLink.findMany({
+      where: { ticketId },
+      select: { tag: { select: { id: true, name: true, color: true } } },
+    });
+    return links.map((l) => l.tag).sort((a, b) => a.name.localeCompare(b.name));
   }
 
   /**
@@ -924,7 +1008,7 @@ class TicketService {
 
   /** Reference data for the ticket composer / filters. */
   async getMeta(workspaceId) {
-    const [workspace, groups, technicians, categories, sourceRows, approvalCategories] = await Promise.all([
+    const [workspace, groups, technicians, categories, sourceRows, approvalCategories, tags] = await Promise.all([
       this._getWorkspace(workspaceId),
       prisma.group.findMany({
         where: { workspaceId, isActive: true },
@@ -950,6 +1034,11 @@ class TicketService {
         where: { workspaceId, isActive: true },
         select: { id: true, name: true, description: true, managerEmails: true },
         orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+      }),
+      prisma.ticketTag.findMany({
+        where: { workspaceId, isActive: true },
+        select: { id: true, name: true, color: true },
+        orderBy: { name: 'asc' },
       }),
     ]);
 
@@ -992,6 +1081,7 @@ class TicketService {
         managerEmails: c.managerEmails || [],
         managerCount: (c.managerEmails || []).length,
       })),
+      tags,
     };
   }
 

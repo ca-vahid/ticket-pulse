@@ -125,6 +125,41 @@ export function TypePill({ type, full = false }) {
   );
 }
 
+// Tag palette (gap plan P1) — named keys map to soft chip tones. Keep in sync
+// with the backend TAG_COLORS whitelist.
+export const TAG_CHIP_TONES = {
+  slate: 'bg-slate-100 text-slate-600 border-slate-200',
+  red: 'bg-red-50 text-red-700 border-red-200',
+  orange: 'bg-orange-50 text-orange-700 border-orange-200',
+  amber: 'bg-amber-50 text-amber-700 border-amber-200',
+  emerald: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  sky: 'bg-sky-50 text-sky-700 border-sky-200',
+  blue: 'bg-blue-50 text-blue-700 border-blue-200',
+  violet: 'bg-violet-50 text-violet-700 border-violet-200',
+  pink: 'bg-pink-50 text-pink-700 border-pink-200',
+};
+
+export function TagChip({ tag, size = 'sm', onRemove = null, className = '' }) {
+  if (!tag) return null;
+  const tone = TAG_CHIP_TONES[tag.color] || TAG_CHIP_TONES.slate;
+  const pad = size === 'xs' ? 'px-1.5 py-0 text-[10px]' : 'px-2 py-0.5 text-[11px]';
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full border font-medium whitespace-nowrap ${pad} ${tone} ${className}`}>
+      {tag.name}
+      {onRemove && (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onRemove(tag); }}
+          aria-label={`Remove tag ${tag.name}`}
+          className="tp-focus-ring rounded-full leading-none opacity-60 hover:opacity-100"
+        >
+          ×
+        </button>
+      )}
+    </span>
+  );
+}
+
 /** Countdown label + tone for an SLA deadline. */
 export function dueIn(value) {
   if (!value) return null;

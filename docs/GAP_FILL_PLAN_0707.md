@@ -14,26 +14,26 @@
 
 ---
 
-## Phase 1 — Tags (full system)
+## Phase 1 — Tags (full system) ✅ DONE
 
 The single most-referenced deferred item; unlocks queue filtering, workflow automation, and analytics slices. TP-owned annotation layer — applies to BOTH origins, never written back to FreshService.
 
 ### 1.1 Model + API
-- [ ] `ticket_tags` (workspaceId, name unique-per-ws, color, createdBy, isActive) + `ticket_tag_links` (ticketId, tagId) — additive migration (dev via db execute + resolve; prod at deploy)
-- [ ] Ticket read paths include tags (list, detail, peek, meta); write path `setTags`/`addTag`/`removeTag` with audit entries (both origins — this is TP-side metadata)
-- [ ] Tag CRUD (rename/recolor/deactivate/merge-two-tags) — admin, Settings → Ticket Ops
-- [ ] Tests: link/unlink, audit, workspace scoping, tag merge
+- [x] `ticket_tags` (workspaceId, name unique-per-ws, color, createdBy, isActive) + `ticket_tag_links` (ticketId, tagId) — additive migration (dev via db execute + resolve; prod at deploy)
+- [x] Ticket read paths include tags (list, detail, peek, meta); write path `setTags`/`addTag`/`removeTag` with audit entries (both origins — this is TP-side metadata)
+- [x] Tag CRUD (rename/recolor/deactivate/merge-two-tags) — admin, Settings → Ticket Ops
+- [x] Tests: link/unlink, audit, workspace scoping, tag merge
 
 ### 1.2 Queue + detail UI
-- [ ] Tag chips on queue rows (truncated +N overflow) and detail header; inline add/remove on editable contexts; keyboard-friendly typeahead (create-on-enter for admins, pick-only for agents — confirm role rule at build)
-- [ ] Filter rail: tag facet (multi-select, AND/OR toggle); saved views + CSV export include tags
-- [ ] Tests: component + filter param round-trip
+- [x] Tag chips on queue rows (truncated +N overflow) and detail header; inline add/remove on editable contexts; keyboard-friendly typeahead (create-on-enter for admins, pick-only for agents — confirm role rule at build)
+- [x] Filter rail: tag facet (multi-select, AND/OR toggle); saved views + CSV export include tags
+- [x] Tests: component + filter param round-trip
 
 ### 1.3 Workflow + automation integration
-- [ ] Conditions: `tags` field in the AND/OR builder (`has any / has all / has none`)
-- [ ] Actions: `add_tags` / `remove_tags` on update_ticket (origin-agnostic — TP-side)
-- [ ] Trigger context: tags in the LLM/template context bundle (`{{ ticket.tags }}`)
-- [ ] Tests: condition compile + action execution + template render
+- [x] Conditions: `tags` field in the AND/OR builder (`has any / has all / has none`)
+- [x] Actions: `add_tags` / `remove_tags` on update_ticket (origin-agnostic — TP-side)
+- [x] Trigger context: tags in the LLM/template context bundle (`{{ ticket.tags }}`)
+- [x] Tests: condition compile + action execution + template render
 
 ---
 

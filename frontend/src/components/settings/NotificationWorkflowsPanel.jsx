@@ -8529,6 +8529,33 @@ export default function NotificationWorkflowsPanel({
             </div>
           )}
 
+          <div className="rounded-lg border border-slate-200 p-2.5 space-y-1.5">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Tags</p>
+            <p className="text-[11px] text-slate-400 normal-case">Applies to both origins (Ticket Pulse layer — never written to FreshService). Missing tags are created automatically.</p>
+            <label className="block text-[11px] text-slate-500">
+              Add tags (comma-separated)
+              <input
+                value={Array.isArray(selectedNode.data?.addTags) ? selectedNode.data.addTags.join(', ') : ''}
+                onChange={(event) => updateNodeData({
+                  addTags: event.target.value.split(',').map((v) => v.trim()).filter(Boolean),
+                })}
+                placeholder="e.g. vip, follow-up"
+                className="mt-0.5 w-full rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-900"
+              />
+            </label>
+            <label className="block text-[11px] text-slate-500">
+              Remove tags (comma-separated)
+              <input
+                value={Array.isArray(selectedNode.data?.removeTags) ? selectedNode.data.removeTags.join(', ') : ''}
+                onChange={(event) => updateNodeData({
+                  removeTags: event.target.value.split(',').map((v) => v.trim()).filter(Boolean),
+                })}
+                placeholder="e.g. new"
+                className="mt-0.5 w-full rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-900"
+              />
+            </label>
+          </div>
+
           <label className="block text-xs font-medium uppercase text-gray-500">
             Audit note (optional)
             <input

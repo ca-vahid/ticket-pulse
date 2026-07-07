@@ -16,7 +16,7 @@ import MobileAssignSheet from '../components/tickets/MobileAssignSheet';
 import AiAssignModal from '../components/tickets/AiAssignModal';
 import FsSyncConfirm from '../components/tickets/FsSyncConfirm';
 import {
-  PersonAvatar, PriorityDot, SlaChip, StateChip, StatusPill, TypePill, UnassignedBadge,
+  PersonAvatar, PriorityDot, SlaChip, StateChip, StatusPill, TagChip, TypePill, UnassignedBadge,
   PRIORITY_LABELS, PRIORITY_STRIP_COLORS, ticketCategoryLabels, timeAgo,
 } from '../components/tickets/ticketUi';
 import { assignmentAPI, ticketsAPI } from '../services/api';
@@ -299,6 +299,8 @@ export default function Tickets() {
   const createdTo = searchParams.get('createdTo') || '';
   const due = searchParams.get('due') || '';
   const noise = searchParams.get('noise') || '';
+  const tag = searchParams.get('tag') || '';
+  const tagMode = searchParams.get('tagMode') || '';
   const view = searchParams.get('view') || '';
   const requesterId = searchParams.get('requesterId') || '';
   const requesterName = searchParams.get('requesterName') || '';
@@ -363,11 +365,15 @@ export default function Tickets() {
     if (createdTo) params.createdTo = createdTo;
     if (due) params.due = due;
     if (noise) params.noise = noise;
+    if (tag) {
+      params.tagId = tag;
+      if (tagMode === 'all') params.tagMode = 'all';
+    }
     if (requesterId) params.requesterId = requesterId;
     if (debouncedSearch) params.q = debouncedSearch;
     return params;
   }, [page, statuses, assignee, priority, origin, segment, sort, dir, debouncedSearch,
-    type, category, subcategory, group, source, createdFrom, createdTo, due, noise, requesterId]);
+    type, category, subcategory, group, source, createdFrom, createdTo, due, noise, tag, tagMode, requesterId]);
 
   const fetchTickets = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setIsLoading(true);
@@ -995,6 +1001,14 @@ export default function Tickets() {
                                           {ticket.subject || '(no subject)'}
                                         </button>
                                         <StateChip state={ticket.stateChip} />
+                                        {(ticket.tags || []).slice(0, 3).map((tag) => (
+                                          <TagChip key={tag.id} tag={tag} size="xs" className="shrink-0" />
+                                        ))}
+                                        {(ticket.tags || []).length > 3 && (
+                                          <span className="shrink-0 text-[10px] text-slate-400" title={ticket.tags.slice(3).map((t) => t.name).join(', ')}>
+                                            +{ticket.tags.length - 3}
+                                          </span>
+                                        )}
                                       </span>
                                       <span className="block w-full text-[11px] text-slate-400 truncate pl-4">
                                         <span className="font-mono">{ticket.displayRef}</span>
