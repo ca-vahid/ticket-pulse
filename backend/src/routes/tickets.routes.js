@@ -444,6 +444,20 @@ router.delete('/templates/:templateId', asyncHandler(async (req, res) => {
   res.json({ success: true });
 }));
 
+// ---------------------------------------------------- quick notes (QA 07-06 #12)
+// Active canned INTERNAL notes for the composer's note mode. The client
+// filters by the ticket's top category (empty internalCategoryIds = always
+// shown). CRUD is admin-only in Settings → Ticket Ops.
+
+router.get('/quick-notes', asyncHandler(async (req, res) => {
+  const notes = await prisma.quickNote.findMany({
+    where: { workspaceId: req.workspaceId, isActive: true },
+    select: { id: true, name: true, bodyText: true, bodyHtml: true, internalCategoryIds: true },
+    orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+  });
+  res.json({ success: true, data: notes });
+}));
+
 // ------------------------------------------------- watch subscriptions (T3.6)
 // Per-category or per-group, never per-ticket (decision d7).
 

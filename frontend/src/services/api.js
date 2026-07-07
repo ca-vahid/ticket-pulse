@@ -369,6 +369,11 @@ export const settingsAPI = {
   updateGroup: (id, data) => api.patch(`/settings/groups/${id}`, data),
   getGroupMembers: (id) => api.get(`/settings/groups/${id}/members`),
   setGroupMembers: (id, technicianIds) => api.put(`/settings/groups/${id}/members`, { technicianIds }),
+  // Quick notes — canned internal notes per top category (QA 07-06 #12)
+  getQuickNotes: () => api.get('/settings/quick-notes'),
+  createQuickNote: (data) => api.post('/settings/quick-notes', data),
+  updateQuickNote: (id, data) => api.patch(`/settings/quick-notes/${id}`, data),
+  deleteQuickNote: (id) => api.delete(`/settings/quick-notes/${id}`),
   // Approval categories (per-workspace; managers via GAL)
   getApprovalCategories: () => api.get('/settings/approval-categories'),
   createApprovalCategory: (data) => api.post('/settings/approval-categories', data),
@@ -675,9 +680,14 @@ export const ticketsAPI = {
     return await api.post(`/tickets/${id}/forward`, { to, note });
   },
 
-  // Reply templates (canned quick notes)
+  // Reply templates (canned reply snippets)
   listTemplates: async () => {
     return await api.get('/tickets/templates');
+  },
+
+  // Quick notes — canned INTERNAL notes for the composer's note mode (QA 07-06 #12)
+  listQuickNotes: async () => {
+    return await api.get('/tickets/quick-notes');
   },
 
   createTemplate: async ({ name, bodyText, bodyHtml = null, categoryId = null }) => {

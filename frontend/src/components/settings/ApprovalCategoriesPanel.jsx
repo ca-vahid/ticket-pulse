@@ -21,13 +21,16 @@ function Avatar({ name, photoUrl, size = 'h-6 w-6' }) {
 }
 
 /**
- * Approval-manager picker — searches the workspace's MEMBERS (not the whole
- * Entra directory), since only members can act on approvals in-app. Client-side
- * filter over the already-loaded members list; returns the picked email.
+ * Approval-manager picker — workspace members first, then the Entra directory
+ * for anyone else (admins/coordinators who aren't technicians — QA 07-06 #7).
+ * Approvals key on EMAIL: any picked person can decide via the emailed magic
+ * link, and in-app if they can sign in.
  */
 function MemberPicker({ members, exclude = [], onPick }) {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
+  const [directoryResults, setDirectoryResults] = useState([]);
+  const [searching, setSearching] = useState(false);
   const rootRef = useRef(null);
 
   useEffect(() => {
@@ -36,15 +39,50 @@ function MemberPicker({ members, exclude = [], onPick }) {
     return () => document.removeEventListener('mousedown', onDoc);
   }, []);
 
-  const results = useMemo(() => {
+  const memberResults = useMemo(() => {
     const q = query.trim().toLowerCase();
     return (members || [])
       .filter((m) => m.isActive !== false && m.email && !exclude.includes(m.email.toLowerCase()))
       .filter((m) => !q || (m.name || '').toLowerCase().includes(q) || m.email.toLowerCase().includes(q))
-      .slice(0, 8);
+      .slice(0, 6);
   }, [members, query, exclude]);
 
-  const pick = (m) => { onPick(m.email.toLowerCase()); setQuery(''); setOpen(false); };
+  // Directory search (debounced) surfaces people who aren't workspace members.
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) { setDirectoryResults([]); return undefined; }
+    setSearching(true);
+    const timer = setTimeout(async () => {
+      try {
+        const res = await settingsAPI.searchDirectory(q);
+        const memberEmails = new Set((members || []).map((m) => String(m.email || '').toLowerCase()));
+        setDirectoryResults((res.data || [])
+          .filter((p) => p.mail && !memberEmails.has(p.mail.toLowerCase()) && !exclude.includes(p.mail.toLowerCase()))
+          .slice(0, 5));
+      } catch { setDirectoryResults([]); }
+      setSearching(false);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [query, members, exclude]);
+
+  const pick = (email) => { onPick(String(email).toLowerCase()); setQuery(''); setDirectoryResults([]); setOpen(false); };
+
+  const row = (key, name, email, badge, photoUrl) => (
+    <button
+      key={key}
+      type="button"
+      onClick={() => pick(email)}
+      className="w-full flex items-center gap-3 px-2.5 py-2 rounded-lg text-left hover:bg-blue-50 tp-focus-ring"
+    >
+      <Avatar name={name} photoUrl={photoUrl} size="h-9 w-9" />
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-medium text-gray-900 truncate">{name || email}</span>
+        <span className="block text-xs text-gray-500 truncate">{email}</span>
+      </span>
+      {badge && <span className="text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 shrink-0">{badge}</span>}
+      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 shrink-0"><UserPlus className="w-3.5 h-3.5" /> Add</span>
+    </button>
+  );
 
   return (
     <div ref={rootRef} className="relative">
@@ -54,32 +92,24 @@ function MemberPicker({ members, exclude = [], onPick }) {
           value={query}
           onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
           onFocus={() => setOpen(true)}
-          placeholder="Add an approval manager — search members…"
+          placeholder="Add an approval manager — search members or the directory…"
           className="w-full pl-10 pr-3 py-2.5 border border-input rounded-lg text-sm tp-focus-ring"
         />
       </div>
       {open && (
         <div className="absolute z-30 mt-1 w-full tp-card rounded-xl shadow-soft p-1.5 max-h-72 overflow-y-auto settings-scrollbar animate-scaleIn">
-          {results.length === 0 ? (
+          {memberResults.map((m) => row(`m-${m.email}`, m.name, m.email, null, m.photoUrl))}
+          {directoryResults.length > 0 && (
+            <p className="px-2.5 pt-1.5 pb-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">Directory</p>
+          )}
+          {directoryResults.map((p) => row(`d-${p.mail}`, p.displayName, p.mail, 'directory', p.photoUrl))}
+          {searching && <p className="px-3 py-2 text-xs text-slate-400">Searching directory…</p>}
+          {!searching && memberResults.length === 0 && directoryResults.length === 0 && (
             <div className="px-3 py-4 text-sm text-slate-400">
-              {query.trim() ? `No members match “${query}”.` : 'No more members to add.'}
-              <span className="block text-[11px] mt-0.5">Only workspace members can be approval managers — add them under Settings → Members.</span>
+              {query.trim().length >= 2 ? `No one matches “${query}”.` : 'Type at least 2 characters to search the directory.'}
+              <span className="block text-[11px] mt-0.5">Anyone with an email can approve via the emailed link; members and admins can also decide in-app.</span>
             </div>
-          ) : results.map((m) => (
-            <button
-              key={m.email}
-              type="button"
-              onClick={() => pick(m)}
-              className="w-full flex items-center gap-3 px-2.5 py-2 rounded-lg text-left hover:bg-blue-50 tp-focus-ring"
-            >
-              <Avatar name={m.name} photoUrl={m.photoUrl} size="h-9 w-9" />
-              <span className="min-w-0 flex-1">
-                <span className="block text-sm font-medium text-gray-900 truncate">{m.name || m.email}</span>
-                <span className="block text-xs text-gray-500 truncate">{m.email}</span>
-              </span>
-              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 shrink-0"><UserPlus className="w-3.5 h-3.5" /> Add</span>
-            </button>
-          ))}
+          )}
         </div>
       )}
     </div>
@@ -123,7 +153,7 @@ function CategoryForm({ initial, members, memberByEmail, onCancel, onSave, savin
         className="w-full px-3 py-2 border border-input rounded-lg text-sm tp-focus-ring"
       />
       <div>
-        <p className="text-xs font-semibold text-slate-600 mb-1.5 flex items-center gap-1.5"><Users className="w-3.5 h-3.5" /> Approval managers <span className="font-normal text-slate-400">(members — any one can approve)</span></p>
+        <p className="text-xs font-semibold text-slate-600 mb-1.5 flex items-center gap-1.5"><Users className="w-3.5 h-3.5" /> Approval managers <span className="font-normal text-slate-400">(any one can approve)</span></p>
         {form.managerEmails.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mb-2">
             {form.managerEmails.map((email) => (

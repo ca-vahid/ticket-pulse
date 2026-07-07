@@ -808,6 +808,89 @@ router.delete(
   }),
 );
 
+// ------------------------------------------------- quick notes (QA 07-06 #12)
+// Canned internal notes, optionally scoped to top-level internal categories.
+
+router.get(
+  '/quick-notes',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const notes = await prisma.quickNote.findMany({
+      where: { workspaceId: req.workspaceId },
+      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+    });
+    res.json({ success: true, data: notes });
+  }),
+);
+
+router.post(
+  '/quick-notes',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const name = String(req.body?.name || '').trim();
+    const bodyText = String(req.body?.bodyText || '').trim();
+    if (!name) throw new ValidationError('Quick note needs a name');
+    if (!bodyText) throw new ValidationError('Quick note needs a body');
+    const note = await prisma.quickNote.create({
+      data: {
+        workspaceId: req.workspaceId,
+        name: name.slice(0, 120),
+        bodyText,
+        bodyHtml: req.body?.bodyHtml || null,
+        internalCategoryIds: (Array.isArray(req.body?.internalCategoryIds) ? req.body.internalCategoryIds : [])
+          .map(Number).filter((n) => Number.isInteger(n) && n > 0),
+        sortOrder: Number(req.body?.sortOrder) || 0,
+        createdBy: requestActor(req)?.email || null,
+      },
+    });
+    res.status(201).json({ success: true, data: note });
+  }),
+);
+
+router.patch(
+  '/quick-notes/:id',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const existing = await prisma.quickNote.findFirst({
+      where: { id: parsePositiveId(req.params.id, 'quick note id'), workspaceId: req.workspaceId },
+    });
+    if (!existing) throw new ValidationError('Quick note not found');
+    const patch = {};
+    if (req.body?.name !== undefined) patch.name = String(req.body.name).trim().slice(0, 120);
+    if (req.body?.bodyText !== undefined) patch.bodyText = String(req.body.bodyText).trim();
+    if (req.body?.bodyHtml !== undefined) patch.bodyHtml = req.body.bodyHtml || null;
+    if (req.body?.internalCategoryIds !== undefined) {
+      patch.internalCategoryIds = (Array.isArray(req.body.internalCategoryIds) ? req.body.internalCategoryIds : [])
+        .map(Number).filter((n) => Number.isInteger(n) && n > 0);
+    }
+    if (req.body?.isActive !== undefined) patch.isActive = req.body.isActive !== false;
+    if (req.body?.sortOrder !== undefined) patch.sortOrder = Number(req.body.sortOrder) || 0;
+    const note = await prisma.quickNote.update({ where: { id: existing.id }, data: patch });
+    res.json({ success: true, data: note });
+  }),
+);
+
+router.delete(
+  '/quick-notes/:id',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const existing = await prisma.quickNote.findFirst({
+      where: { id: parsePositiveId(req.params.id, 'quick note id'), workspaceId: req.workspaceId },
+    });
+    if (!existing) throw new ValidationError('Quick note not found');
+    await prisma.quickNote.delete({ where: { id: existing.id } });
+    res.json({ success: true, data: { deleted: true } });
+  }),
+);
+
 
 /**
  * PUT /api/settings/:key
