@@ -649,6 +649,13 @@ export const ticketsAPI = {
   categoryGroupLinks: async () => await api.get('/tickets/category-group-links'),
   setCategoryGroupLinks: async (links) => await api.put('/tickets/category-group-links', { links }),
 
+  // Outbound webhooks (admin; gap plan 2 P3)
+  listWebhooks: async () => await api.get('/tickets/webhook-subscriptions'),
+  createWebhook: async ({ url, events }) => await api.post('/tickets/webhook-subscriptions', { url, events }),
+  updateWebhook: async (id, data) => await api.patch(`/tickets/webhook-subscriptions/${id}`, data),
+  deleteWebhook: async (id) => await api.delete(`/tickets/webhook-subscriptions/${id}`),
+  testWebhook: async (id) => await api.post(`/tickets/webhook-subscriptions/${id}/test`),
+
   // Integration API keys (admin; gap plan P3.1)
   listApiKeys: async () => await api.get('/tickets/api-keys'),
   createApiKey: async ({ name, scopes }) => await api.post('/tickets/api-keys', { name, scopes }),

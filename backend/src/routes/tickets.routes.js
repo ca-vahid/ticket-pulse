@@ -661,6 +661,81 @@ router.delete('/api-keys/:keyId', requireTicketingAdmin, asyncHandler(async (req
   res.json({ success: true });
 }));
 
+// ------------------------------------- outbound webhooks (gap plan 2 P3)
+
+router.get('/webhook-subscriptions', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const subs = await prisma.webhookSubscription.findMany({
+    where: { workspaceId: req.workspaceId },
+    orderBy: { id: 'asc' },
+    select: {
+      id: true, url: true, events: true, isEnabled: true, failureCount: true,
+      lastDeliveryAt: true, lastError: true, recentDeliveries: true, createdBy: true, createdAt: true,
+    },
+  });
+  res.json({ success: true, data: subs });
+}));
+
+router.post('/webhook-subscriptions', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const { WEBHOOK_EVENTS, webhookUrlProblem, invalidateWebhookCache } = await import('../services/webhookDispatchService.js');
+  const url = String(req.body?.url || '').trim();
+  const problem = webhookUrlProblem(url);
+  if (problem) throw new ValidationError(problem);
+  const events = (Array.isArray(req.body?.events) ? req.body.events : []).filter((e) => WEBHOOK_EVENTS.includes(e));
+  if (events.length === 0) throw new ValidationError(`Pick at least one event: ${WEBHOOK_EVENTS.join(', ')}`);
+  const crypto = await import('node:crypto');
+  const secret = `whsec_${crypto.randomBytes(24).toString('base64url')}`;
+  const sub = await prisma.webhookSubscription.create({
+    data: { workspaceId: req.workspaceId, url, secret, events, createdBy: req.ticketActor.email },
+    select: { id: true, url: true, events: true, isEnabled: true, createdAt: true },
+  });
+  invalidateWebhookCache(req.workspaceId);
+  // The signing secret is returned exactly once.
+  res.status(201).json({ success: true, data: { ...sub, secret } });
+}));
+
+router.patch('/webhook-subscriptions/:subId', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const { WEBHOOK_EVENTS, webhookUrlProblem, invalidateWebhookCache } = await import('../services/webhookDispatchService.js');
+  const id = Number(req.params.subId);
+  const existing = await prisma.webhookSubscription.findFirst({ where: { id, workspaceId: req.workspaceId } });
+  if (!existing) throw new ValidationError('Webhook subscription not found');
+  const data = {};
+  if (req.body?.url !== undefined) {
+    const problem = webhookUrlProblem(String(req.body.url).trim());
+    if (problem) throw new ValidationError(problem);
+    data.url = String(req.body.url).trim();
+  }
+  if (Array.isArray(req.body?.events)) {
+    data.events = req.body.events.filter((e) => WEBHOOK_EVENTS.includes(e));
+    if (data.events.length === 0) throw new ValidationError('Pick at least one event');
+  }
+  if (req.body?.isEnabled !== undefined) {
+    data.isEnabled = req.body.isEnabled === true;
+    if (data.isEnabled) data.failureCount = 0; // manual re-enable resets the strike counter
+  }
+  const sub = await prisma.webhookSubscription.update({
+    where: { id },
+    data,
+    select: { id: true, url: true, events: true, isEnabled: true, failureCount: true },
+  });
+  invalidateWebhookCache(req.workspaceId);
+  res.json({ success: true, data: sub });
+}));
+
+router.delete('/webhook-subscriptions/:subId', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const id = Number(req.params.subId);
+  const existing = await prisma.webhookSubscription.findFirst({ where: { id, workspaceId: req.workspaceId } });
+  if (!existing) throw new ValidationError('Webhook subscription not found');
+  await prisma.webhookSubscription.delete({ where: { id } });
+  const { invalidateWebhookCache } = await import('../services/webhookDispatchService.js');
+  invalidateWebhookCache(req.workspaceId);
+  res.json({ success: true });
+}));
+
+router.post('/webhook-subscriptions/:subId/test', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const { testWebhookSubscription } = await import('../services/webhookDispatchService.js');
+  res.json({ success: true, data: await testWebhookSubscription(Number(req.params.subId), req.workspaceId) });
+}));
+
 router.post('/mailboxes/:mailboxId/test', requireTicketingAdmin, asyncHandler(async (req, res) => {
   const id = Number(req.params.mailboxId);
   const existing = await prisma.mailboxConnection.findFirst({ where: { id, workspaceId: req.workspaceId } });

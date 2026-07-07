@@ -58,14 +58,14 @@ The v3.0.5 features exist end-to-end but not *everywhere*. Close the loops:
 - [x] Create-form: drop the "can't ride a scheduled ticket yet" error; show staged chips
 - [x] Tests: stage → activate → attached; schedule deletion cleans blobs
 
-## Phase 3 — API webhooks (outbound events)
+## Phase 3 — API webhooks (outbound events) ✅ DONE
 
-- [ ] `webhook_subscriptions` model (workspaceId, url, secret, events[], isEnabled, lastDeliveryAt, failureCount) + additive migration
-- [ ] Delivery worker: queue on ticket.created / status_changed / reply_added / tags_changed / approval.decided; HMAC-SHA256 signature header; retries with backoff; auto-disable after N dead deliveries (with admin visibility)
-- [ ] SSRF guard on target URLs (reuse the workflow webhook guard)
-- [ ] Admin UI in Settings → API Keys (same page: "Outbound webhooks" section — subscribe, test-ping, delivery log tail)
-- [ ] OpenAPI/docs page documents the event payloads + signature verification
-- [ ] Tests: signing, retry/backoff, event fan-out, SSRF guard
+- [x] `webhook_subscriptions` model (workspaceId, url, secret, events[], isEnabled, lastDeliveryAt, failureCount) + additive migration
+- [x] Delivery: fire-and-forget with in-process retries (0s/30s/2m, documented as non-durable across restarts), HMAC-SHA256 signature header, auto-disable after 20 consecutive failures with the error visible in the admin UI; 8-event catalog incl. assigned + public_reply + approval.requested
+- [x] SSRF guard on target URLs (reuse the workflow webhook guard)
+- [x] Admin UI in Settings → API Keys (same page: "Outbound webhooks" section — subscribe, test-ping, delivery log tail)
+- [x] OpenAPI/docs page documents the event payloads + signature verification
+- [x] Tests: signing, retry/backoff, event fan-out, SSRF guard
 
 ## Phase 4 — UX: presence + command palette
 

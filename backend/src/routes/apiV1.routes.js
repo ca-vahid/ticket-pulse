@@ -298,6 +298,9 @@ table{border-collapse:collapse;width:100%;font-size:.85rem}td,th{padding:.5rem .
 .p{font-family:ui-monospace,monospace;font-size:.8rem;white-space:nowrap}.s{font-family:ui-monospace,monospace;font-size:.75rem;color:#64748b}</style></head>
 <body><h1>Ticket Pulse Integration API</h1>
 <p>Authenticate every call with <code>Authorization: Bearer tpk_…</code>. Keys are issued per workspace in <b>Settings → API Keys</b>, each with explicit scopes. Rate limit: ${RATE_LIMIT_PER_MINUTE} requests/minute per key. Machine-readable spec: <a href="openapi.json">openapi.json</a>.</p>
+<h2 style="font-size:1.1rem">Outbound webhooks</h2>
+<p>Subscribe in <b>Settings → API Keys → Outbound webhooks</b>. Events: <code>ticket.created</code>, <code>ticket.status_changed</code>, <code>ticket.assigned</code>, <code>ticket.reply_received</code>, <code>ticket.public_reply_added</code>, <code>ticket.tags_changed</code>, <code>approval.requested</code>, <code>approval.decided</code>.
+Each delivery is a JSON POST carrying <code>{event, occurredAt, workspaceId, data}</code> with headers <code>X-TicketPulse-Event</code> and <code>X-TicketPulse-Signature: sha256=&lt;HMAC-SHA256(secret, raw body)&gt;</code> — verify the signature before trusting a delivery. Failed deliveries retry twice (30s, 2m); 20 consecutive failures auto-disable the subscription.</p>
 <table><thead><tr><th></th><th>Path</th><th>Summary</th><th>Scope</th></tr></thead><tbody>${rows}</tbody></table>
 </body></html>`);
 });

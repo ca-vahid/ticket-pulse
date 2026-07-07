@@ -98,6 +98,7 @@ model Workspace {
   replyTemplates         ReplyTemplate[]
   quickNotes             QuickNote[]
   ticketTags             TicketTag[]
+  webhookSubscriptions   WebhookSubscription[]
 
   @@map("workspaces")
 }
@@ -247,6 +248,28 @@ model ReplyTemplate {
 
   @@map("reply_templates")
   @@index([workspaceId, isActive])
+}
+
+// Outbound webhooks (gap plan 2 P3): integrations subscribe to ticket events;
+// deliveries are HMAC-SHA256 signed. Auto-disabled after sustained failures.
+model WebhookSubscription {
+  id               Int       @id @default(autoincrement())
+  workspaceId      Int       @map("workspace_id")
+  workspace        Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  url              String    @db.VarChar(1000)
+  secret           String    @db.VarChar(64)
+  events           String[]  @default([])
+  isEnabled        Boolean   @default(true) @map("is_enabled")
+  failureCount     Int       @default(0) @map("failure_count")
+  lastDeliveryAt   DateTime? @map("last_delivery_at")
+  lastError        String?   @db.Text @map("last_error")
+  recentDeliveries Json?     @map("recent_deliveries")
+  createdBy        String?   @db.VarChar(255) @map("created_by")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  @@map("webhook_subscriptions")
+  @@index([workspaceId, isEnabled])
 }
 
 // Tags (gap plan Phase 1) — a TP-owned annotation layer for BOTH ticket

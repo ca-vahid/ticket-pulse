@@ -964,10 +964,29 @@ class TicketService {
 
     const fresh = await prisma.ticket.findUnique({
       where: { id: ticketId },
-      select: { id: true, origin: true, status: true, assignedTechId: true, nativeNumber: true, freshserviceTicketId: true },
+      select: { id: true, origin: true, status: true, assignedTechId: true, nativeNumber: true, freshserviceTicketId: true, subject: true, priority: true },
     });
     if (fresh) this._broadcast(workspaceId, 'tags', fresh);
-    return { changed: true, tags: await this._ticketTagList(ticketId) };
+    const finalTags = await this._ticketTagList(ticketId);
+    // Outbound webhooks (gap plan 2 P3): tags_changed doesn't ride the
+    // lifecycle pipeline, so dispatch directly.
+    if (fresh) {
+      import('./webhookDispatchService.js').then(({ dispatchWebhookEvent }) => {
+        dispatchWebhookEvent(workspaceId, 'ticket.tags_changed', {
+          ticket: {
+            id: fresh.id,
+            ref: ticketDisplayRef(fresh),
+            subject: fresh.subject,
+            status: fresh.status,
+            priority: fresh.priority,
+            origin: fresh.origin,
+            tags: finalTags.map((t) => t.name),
+          },
+          extra: { added: toAdd.map((t) => t.name), removed: removedNames },
+        });
+      }).catch(() => {});
+    }
+    return { changed: true, tags: finalTags };
   }
 
   async _ticketTagList(ticketId) {
