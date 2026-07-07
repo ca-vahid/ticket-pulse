@@ -77,7 +77,7 @@ jsonLogic.add_operation('regex_match', (value, pattern) => {
 
 // List-membership ops for array fields (ticket.tags) — the condition model's
 // has_any / has_all / has_none compile to these. Case-insensitive.
-const asLowerList = (v) => (Array.isArray(v) ? v : v == null ? [] : [v]).map((x) => String(x).toLowerCase());
+const asLowerList = (v) => (Array.isArray(v) ? v : v === null || v === undefined ? [] : [v]).map((x) => String(x).toLowerCase());
 jsonLogic.add_operation('list_has_any', (haystack, wanted) => {
   const have = new Set(asLowerList(haystack));
   return asLowerList(wanted).some((w) => have.has(w));
@@ -3105,7 +3105,6 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false } = 
  * case-insensitively. Audited as tags_changed like manual edits.
  */
 async function applyWorkflowTagChanges(prisma, ticket, addNames, removeNames) {
-  const wanted = [...new Set(addNames.map((n) => n.toLowerCase()))];
   const unwanted = new Set(removeNames.map((n) => n.toLowerCase()));
 
   const existing = await prisma.ticketTag.findMany({
