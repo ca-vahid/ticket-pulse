@@ -1,6 +1,23 @@
-export const APP_VERSION = '3.0.7-preview';
+export const APP_VERSION = '3.0.8-preview';
 
 export const changelog = [
+  {
+    version: '3.0.8-preview',
+    date: 'July 8, 2026',
+    entries: [
+      { type: 'new', html: '<strong>⌨️ Command palette</strong> — press <code>Ctrl/Cmd + K</code> anywhere: jump to a page, search tickets by subject/requester/number, and act on the ticket you’re viewing (assign to me, mark resolved, copy link — origin-aware). The queue also gets full keyboard driving: <code>j</code>/<code>k</code> move the peek, <code>Enter</code> opens, <code>x</code> selects for bulk actions.' },
+      { type: 'new', html: '<strong>👀 Presence</strong> — see who else has a ticket open right now: an “also viewing” chip on the ticket header and a subtle dot on queue rows. Live and in-memory only — nothing is recorded and no durations are tracked.' },
+      { type: 'new', html: '<strong>🔔 Outbound webhooks</strong> — integrations can subscribe to 8 ticket/approval events per workspace (created, status, assigned, replies, tags, approvals). Deliveries are HMAC-SHA256-signed JSON with retries and auto-disable after sustained failure; manage them (with a test ping) on Settings → API Keys, documented at <code>/api/v1/docs</code>.' },
+      { type: 'new', html: '<strong>📎 Attachments on scheduled tickets</strong> — files added while scheduling are held in staging and attached to the ticket the moment it activates (mirroring to the FreshService copy as usual); cancelling the schedule cleans them up.' },
+      { type: 'new', html: '<strong>🎭 Requester sentiment</strong> — a low-cost AI pass reads the requester’s own recent messages and flags the ticket <em>frustrated</em> or <em>positive</em> (neutral stays quiet), refreshing automatically when they reply. Usable as a Mail Workflows condition (<code>ticket.sentiment</code>) — e.g. escalate frustrated requesters. It describes the requester’s tone only, never agent performance.' },
+      { type: 'new', html: '<strong>🧭 Similar tickets by content</strong> — the Related card gains an AI tier that finds tickets with similar wording (with a % match), and the duplicate/merge picker suggests likely targets as one-click chips. Suggestions are clearly labeled and never act on their own.' },
+      { type: 'improved', html: '<strong>Peek & mobile parity</strong> — the peek preview shows tags, impact/urgency and merged-into state; mobile queue cards show tag chips; the create form takes tags and impact/urgency up front; the filter rail gains impact/urgency facets once the fields are in use.' },
+      { type: 'improved', html: '<strong>Public approval page parity</strong> — the emailed approval page renders rich-text request notes and lets the approver write a formatted decision note.' },
+      { type: 'improved', html: '<strong>Tag Demand analytics</strong> — a new Overview panel shows ticket volume by tag with tagged-coverage context.' },
+      { type: 'improved', html: '<strong>Bulk edit grows tags & category</strong> — “everything matching this filter” actions now include add/remove tag and set category (TP-born).' },
+      { type: 'database', html: '<strong>Database updates</strong> — new tables <code>scheduled_ticket_attachments</code>, <code>webhook_subscriptions</code>, <code>ticket_embeddings</code>; additive sentiment columns on tickets. All additive.' },
+    ],
+  },
   {
     version: '3.0.7-preview',
     date: 'July 8, 2026',
