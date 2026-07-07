@@ -1444,6 +1444,15 @@ router.get(
   }),
 );
 
+// Per-tool last-used / last-error / call count (gap plan P5 rollout tooling).
+router.get(
+  '/llm-tools/usage',
+  asyncHandler(async (req, res) => {
+    const { getNotificationToolUsage } = await import('../services/notificationWorkflowTools.js');
+    res.json({ success: true, data: await getNotificationToolUsage(req.workspaceId) });
+  }),
+);
+
 router.put(
   '/llm-tools/policy',
   asyncHandler(async (req, res) => {

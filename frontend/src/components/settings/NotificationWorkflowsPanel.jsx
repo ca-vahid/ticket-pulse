@@ -5121,6 +5121,14 @@ export function LlmContextToolsPanel({
 
               {mode === 'tools_enabled' && (
                 <div>
+                  {/* First-enable notice (gap plan P5 rollout): what tool mode means. */}
+                  <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800">
+                    <span className="font-semibold">Tool mode is on for this workspace.</span>{' '}
+                    The LLM may call the read-only Ticket Pulse evidence tools below while drafting.
+                    Internal notes enter the evidence bundle but the output guard hard-blocks quoting them verbatim.
+                    Recommended rollout: run one non-critical workflow in <span className="font-semibold">mock mode for a week</span>,
+                    review its audit for unsupported claims and latency, then enable live delivery per workflow.
+                  </div>
                   <div className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-600">
                     Read-only tool availability
                     <LlmHelpButton topic="toolCatalog" onOpenHelp={onOpenHelp} className="h-6 w-6 shadow-none" />

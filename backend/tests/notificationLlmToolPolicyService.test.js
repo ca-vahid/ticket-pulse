@@ -30,7 +30,7 @@ describe('notification LLM tool policy service', () => {
     expect(policy).toMatchObject({
       workspaceId: 1,
       mode: 'context_only',
-      includePrivateNotes: false,
+      includePrivateNotes: true, // policy decision 2026-07-07: internal notes = guarded evidence (verbatim hard-blocked),
       redactionEnabled: true,
       maxTurns: 4,
       maxToolCalls: 6,
@@ -69,7 +69,7 @@ describe('notification LLM tool policy service', () => {
       maxToolCalls: 6,
       totalTimeoutMs: 20000,
       perToolTimeoutMs: 3000,
-      includePrivateNotes: false,
+      includePrivateNotes: true, // policy decision 2026-07-07: internal notes = guarded evidence (verbatim hard-blocked),
       redactionEnabled: true,
       policyVersion: 2,
     });

@@ -9,6 +9,7 @@ export const HARD_BLOCK_GUARD_CHECKS = Object.freeze([
   'provider_model_internals',
   'workflow_audit_identifiers',
   'private_internal_notes',
+  'internal_note_verbatim',
   'direct_email_address',
   'direct_phone_number',
   'base64_image_data',
@@ -86,6 +87,38 @@ const COPY_REPAIR_GUARDRAILS = new Set([
   'emoji',
   'playful_tone',
 ]);
+
+/**
+ * Internal-notes evidence policy (gap plan P5, user decision 2026-07-07):
+ * private notes MAY inform a draft (quoteAllowed=false in the evidence
+ * bundle) but their content must never appear verbatim in requester-facing
+ * copy. Detection: slide 12-word windows over each non-quotable entry; any
+ * window (≥40 normalized chars) found verbatim in the draft is a hard leak.
+ */
+export function internalNoteVerbatimLeak(content, contextBundle = {}) {
+  const entries = contextBundle?.threadSummary?.entries || [];
+  const normalize = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  const haystack = normalize(content);
+  if (!haystack) return null;
+  for (const entry of entries) {
+    if (entry?.quoteAllowed !== false) continue;
+    const text = normalize(entry.content);
+    if (text.length < 40) continue;
+    const words = text.split(' ');
+    const WINDOW = 12;
+    if (words.length < WINDOW) {
+      if (haystack.includes(text)) return { evidenceId: entry.evidenceId || null, snippet: text.slice(0, 80) };
+      continue;
+    }
+    for (let i = 0; i + WINDOW <= words.length; i += 4) {
+      const window = words.slice(i, i + WINDOW).join(' ');
+      if (window.length >= 40 && haystack.includes(window)) {
+        return { evidenceId: entry.evidenceId || null, snippet: window.slice(0, 80) };
+      }
+    }
+  }
+  return null;
+}
 
 function guardError(message, issues = [message], issueDetails = []) {
   const error = new Error(message);
@@ -632,6 +665,16 @@ export function guardNotificationEmailPayload(payload, {
 
   if (UNSUPPORTED_TIMING_PATTERN.test(content) && !hasTimingEvidence(contextBundle || {})) {
     handleIssue(guardIssue('unsupported_timing_claims', 'Requester-facing email cannot include response-time or resolution-time claims without deterministic timing evidence.'));
+  }
+
+  const noteLeak = internalNoteVerbatimLeak(content, contextBundle || {});
+  if (noteLeak) {
+    handleIssue(guardIssue(
+      'internal_note_verbatim',
+      'Requester-facing email quotes internal-note content verbatim — internal notes may inform a draft but never be quoted.',
+      null,
+      noteLeak,
+    ));
   }
 
   if (hasUnsupportedSimilarReportClaim(content, allowedPublicPhrases)) {

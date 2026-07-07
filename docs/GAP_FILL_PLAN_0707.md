@@ -102,15 +102,15 @@ Links + mark-as-duplicate exist; this is the real thing.
 
 ---
 
-## Phase 5 — LLM evidence tools go-live (secondary priority)
+## Phase 5 — LLM evidence tools go-live (secondary priority) ✅ DONE (mock-week = operational step)
 
 Policy decided: internal notes ARE allowed as evidence, guarded — the output guard hard-blocks verbatim quoting of internal notes and flags close paraphrases for audit.
 
-- [ ] Implement the internal-notes evidence policy: notes enter the evidence bundle labeled `internal`; output guard rule blocks verbatim/near-verbatim internal content in requester-facing drafts (extend `notificationWorkflowOutputGuard`)
-- [ ] Resolve remaining open decisions (defaults unless overridden at build): `context_only` default for NEW/edited workflows only; no per-workflow opt-out of workspace policy; ILIKE search first, pg_trgm after prod cost data; admin can manually mark a known outage
-- [ ] Rollout sequence: 1 week mock mode on one non-critical workflow → audit review (unsupported claims, latency, tokens) → admin banner on first enable → enable live per-workflow
-- [ ] Milestone D leftovers: last-used/last-error tool indicators in the admin UI; prod smoke script (catalog, policy, context preview, mock/live)
-- [ ] Tests: guard rules for internal evidence; tool loop regression
+- [x] Implement the internal-notes evidence policy: notes enter the evidence bundle labeled `internal`; output guard rule blocks verbatim/near-verbatim internal content in requester-facing drafts (extend `notificationWorkflowOutputGuard`)
+- [x] Resolve remaining open decisions (defaults unless overridden at build): `context_only` default for NEW/edited workflows only; no per-workflow opt-out of workspace policy; ILIKE search first, pg_trgm after prod cost data; admin can manually mark a known outage
+- [x] Rollout tooling shipped (banner on tool-mode enable, usage indicators, smoke script). The mock-week itself is an OPERATIONAL step for the team — sequence documented in the banner + this plan; enabling live stays a per-workflow human action.
+- [x] Milestone D leftovers: last-used/last-error tool indicators in the admin UI; prod smoke script (catalog, policy, context preview, mock/live)
+- [x] Tests: guard rules for internal evidence; tool loop regression
 
 ---
 

@@ -182,8 +182,12 @@ describe('notification context enrichment service', () => {
     expect(bundle.ticket.subject).toBe('VPN outage for accounting');
     expect(bundle.ticket.descriptionText).toContain('[REDACTED]');
     expect(bundle.recipients.originalCc).toEqual(['manager@example.com']);
-    expect(bundle.threadSummary.entries).toHaveLength(1);
-    expect(bundle.threadSummary.omittedPrivateEntries).toBe(1);
+    // Policy decision 2026-07-07: private notes enter the bundle as GUARDED
+    // evidence (quoteAllowed=false); the output guard blocks verbatim reuse.
+    expect(bundle.threadSummary.entries).toHaveLength(2);
+    expect(bundle.threadSummary.omittedPrivateEntries).toBe(0);
+    const privateEntry = bundle.threadSummary.entries.find((e) => e.isPrivate);
+    expect(privateEntry.quoteAllowed).toBe(false);
     expect(bundle.recentSimilarTickets.windows.at(-1).count).toBe(5);
     expect(bundle.outageSignals.signalLevel).toBe('possible_broader_issue');
     expect(bundle.outageSignals.confidence).toBe('high');
@@ -207,8 +211,8 @@ describe('notification context enrichment service', () => {
       enabled: true,
       signalLevel: 'possible_broader_issue',
       signalConfidence: 'high',
-      threadEntryCount: 1,
-      omittedPrivateEntries: 1,
+      threadEntryCount: 2,
+      omittedPrivateEntries: 0,
       timingEvidenceSource: 'freshservice_sla_due_dates',
     });
   });

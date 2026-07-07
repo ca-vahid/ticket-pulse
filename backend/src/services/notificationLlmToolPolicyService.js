@@ -77,7 +77,11 @@ export const DEFAULT_NOTIFICATION_LLM_TOOL_POLICY = {
   maxToolCalls: 6,
   totalTimeoutMs: 20000,
   perToolTimeoutMs: 3000,
-  includePrivateNotes: false,
+  // Policy decision 2026-07-07 (gap plan P5): internal notes ARE allowed as
+  // evidence — they enter the bundle quoteAllowed=false and the output guard's
+  // internal_note_verbatim check hard-blocks lifting their content into
+  // requester-facing copy. Admins can still switch this off per workspace.
+  includePrivateNotes: true,
   redactionEnabled: true,
   policyVersion: 1,
   updatedBy: null,
