@@ -303,6 +303,8 @@ export default function Tickets() {
   const noise = searchParams.get('noise') || '';
   const tag = searchParams.get('tag') || '';
   const tagMode = searchParams.get('tagMode') || '';
+  const impactFilter = searchParams.get('impact') || '';
+  const urgencyFilter = searchParams.get('urgency') || '';
   const view = searchParams.get('view') || '';
   const requesterId = searchParams.get('requesterId') || '';
   const requesterName = searchParams.get('requesterName') || '';
@@ -371,11 +373,13 @@ export default function Tickets() {
       params.tagId = tag;
       if (tagMode === 'all') params.tagMode = 'all';
     }
+    if (impactFilter) params.impact = impactFilter;
+    if (urgencyFilter) params.urgency = urgencyFilter;
     if (requesterId) params.requesterId = requesterId;
     if (debouncedSearch) params.q = debouncedSearch;
     return params;
   }, [page, statuses, assignee, priority, origin, segment, sort, dir, debouncedSearch,
-    type, category, subcategory, group, source, createdFrom, createdTo, due, noise, tag, tagMode, requesterId]);
+    type, category, subcategory, group, source, createdFrom, createdTo, due, noise, tag, tagMode, impactFilter, urgencyFilter, requesterId]);
 
   // Post-refresh row highlights: ticketId → 'new' | 'updated'. Set when a
   // refresh is asked to diff against the previous page (update-pill apply,
@@ -1377,6 +1381,14 @@ export default function Tickets() {
                                       </div>
                                     );
                                   })()}
+                                  {(ticket.tags || []).length > 0 && (
+                                    <div className="mt-1 flex flex-wrap items-center gap-1">
+                                      {ticket.tags.slice(0, 3).map((tag) => <TagChip key={tag.id} tag={tag} size="xs" />)}
+                                      {ticket.tags.length > 3 && (
+                                        <span className="text-[10px] text-slate-400" title={ticket.tags.slice(3).map((t) => t.name).join(', ')}>+{ticket.tags.length - 3}</span>
+                                      )}
+                                    </div>
+                                  )}
                                   <div className="mt-2 flex items-center gap-2">
                                     {mobileAssignable ? (
                                       <button
@@ -1612,6 +1624,48 @@ export default function Tickets() {
                 <option value="">Bulk status…</option>
                 {['Open', 'Pending', 'Resolved', 'Closed'].map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
+              {queryScope && (meta?.tags?.length || 0) > 0 && (
+                <select
+                  value=""
+                  onChange={(e) => {
+                    if (!e.target.value) return;
+                    const [op, id] = e.target.value.split(':');
+                    const tagObj = (meta?.tags || []).find((t) => String(t.id) === id);
+                    setBulkAction({
+                      type: op === 'add' ? 'add_tags' : 'remove_tags',
+                      value: [Number(id)],
+                      label: `${op === 'add' ? 'tag +' : 'tag −'} ${tagObj?.name || id}`,
+                    });
+                  }}
+                  aria-label="Bulk tag"
+                  className="tp-focus-ring text-sm bg-white border border-input rounded-lg px-2.5 py-1.5 text-slate-700"
+                >
+                  <option value="">Bulk tag…</option>
+                  <optgroup label="Add tag">
+                    {(meta?.tags || []).map((t) => <option key={`add-${t.id}`} value={`add:${t.id}`}>+ {t.name}</option>)}
+                  </optgroup>
+                  <optgroup label="Remove tag">
+                    {(meta?.tags || []).map((t) => <option key={`rm-${t.id}`} value={`rm:${t.id}`}>− {t.name}</option>)}
+                  </optgroup>
+                </select>
+              )}
+              {queryScope && (meta?.categoryTree?.length || 0) > 0 && (
+                <select
+                  value=""
+                  onChange={(e) => {
+                    if (e.target.value === '') return;
+                    const id = e.target.value === 'none' ? null : Number(e.target.value);
+                    const name = id ? (meta?.categoryTree || []).find((c) => c.id === id)?.name : 'Uncategorized';
+                    setBulkAction({ type: 'set_category', value: id, label: `category → ${name}` });
+                  }}
+                  aria-label="Bulk category"
+                  className="tp-focus-ring text-sm bg-white border border-input rounded-lg px-2.5 py-1.5 text-slate-700"
+                >
+                  <option value="">Bulk category…</option>
+                  <option value="none">Uncategorized</option>
+                  {(meta?.categoryTree || []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              )}
               <button
                 onClick={() => { setSelectedIds(new Set()); setQueryScope(null); }}
                 aria-label="Clear selection"

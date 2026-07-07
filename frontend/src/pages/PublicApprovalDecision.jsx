@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { Activity, AlertCircle, CheckCircle2, MessageCircleQuestion, ShieldCheck, XCircle } from 'lucide-react';
 import { publicApprovalAPI } from '../services/api';
+import { SafeHtml } from '../components/tickets/ticketUi';
+import RichTextEditor, { isRichContent } from '../components/tickets/RichTextEditor';
 
 /**
  * Public approval decision page (magic link — no login).
@@ -13,6 +15,7 @@ export default function PublicApprovalDecision() {
   const [error, setError] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [note, setNote] = useState('');
+  const [noteHtml, setNoteHtml] = useState('');
   const [deciding, setDeciding] = useState(null);
   const [decided, setDecided] = useState(null);
 
@@ -33,8 +36,9 @@ export default function PublicApprovalDecision() {
     setDeciding(decision);
     setError(null);
     try {
+      const richHtml = note.trim() && isRichContent(noteHtml) ? noteHtml : null;
       if (decision === 'clarify') await publicApprovalAPI.clarify(token, note.trim());
-      else await publicApprovalAPI.decide(token, decision, note.trim() || null);
+      else await publicApprovalAPI.decide(token, decision, note.trim() || null, richHtml);
       setDecided(decision);
     } catch (err) {
       setError(err.response?.data?.message || 'Could not record your decision.');
@@ -76,9 +80,12 @@ export default function PublicApprovalDecision() {
                 {ticket?.requesterName ? `Requested for ${ticket.requesterName} · ` : ''}
                 status {ticket?.status}
               </p>
-              {approval?.requestNote && (
+              {(approval?.requestNoteHtml || approval?.requestNote) && (
                 <div className="mt-3 p-3 bg-blue-50 border border-blue-100 rounded-lg text-sm text-slate-700">
-                  <span className="font-semibold">{approval.requestedBy}:</span> {approval.requestNote}
+                  <span className="font-semibold">{approval.requestedBy}:</span>{' '}
+                  {approval.requestNoteHtml
+                    ? <SafeHtml html={approval.requestNoteHtml} className="inline-block text-sm text-slate-700" />
+                    : approval.requestNote}
                 </div>
               )}
               {ticket?.summary && (
@@ -110,14 +117,15 @@ export default function PublicApprovalDecision() {
                     <label htmlFor="approval-note" className="block text-xs font-semibold text-slate-500 mb-1">
                       Optional note
                     </label>
-                    <textarea
-                      id="approval-note"
-                      rows={2}
-                      value={note}
-                      onChange={(e) => setNote(e.target.value)}
-                      placeholder="Context for your decision…"
-                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 mb-3 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
-                    />
+                    <div className="mb-3">
+                      <RichTextEditor
+                        value={noteHtml}
+                        onChange={({ html, text }) => { setNoteHtml(html); setNote(text); }}
+                        placeholder="Context for your decision…"
+                        ariaLabel="Decision note"
+                        minHeight={72}
+                      />
+                    </div>
                     {error && (
                       <p className="text-sm text-red-600 mb-3" role="alert">{error}</p>
                     )}

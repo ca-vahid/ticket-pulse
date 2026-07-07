@@ -1070,7 +1070,7 @@ ticketApprovalPublicRouter.get('/:token', asyncHandler(async (req, res) => {
 ticketApprovalPublicRouter.post('/:token/decide', asyncHandler(async (req, res) => {
   const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');
   const approval = await ticketApprovalService.decideByToken(
-    req.params.token, req.body?.decision, req.body?.note || null,
+    req.params.token, req.body?.decision, req.body?.note || null, req.body?.noteHtml || null,
   );
   res.json({ success: true, data: { status: approval.status, decidedAt: approval.decidedAt } });
 }));

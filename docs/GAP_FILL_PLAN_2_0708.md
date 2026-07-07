@@ -22,34 +22,34 @@
 - [x] Backfill ran (45d, set-only, 819 tickets stamped) → 30d coverage 495/4,772 (~10%; the 30% reveal gate correctly stays closed — most tickets never get a public reply; ongoing syncs keep filling)
 - [x] Hand QA `docs/QA_Test_Plan_v3.0.5.docx`
 
-## Phase 1 — Parity fast-follows
+## Phase 1 — Parity fast-follows ✅ DONE
 
 The v3.0.5 features exist end-to-end but not *everywhere*. Close the loops:
 
 ### 1.1 Peek preview parity
-- [ ] TicketPreview shows tag chips, impact/urgency (read-only), and the merged-into banner
-- [ ] Tests: preview render with tags/merged data
+- [x] TicketPreview shows tag chips, impact/urgency (read-only), and the merged-into banner
+- [x] Tests: preview render with tags/merged data
 
 ### 1.2 Mobile parity
-- [ ] Mobile queue cards show tag chips (match desktop 3+overflow)
-- [ ] MobileAssignSheet header shows tags + category so assignment has context
+- [x] Mobile queue cards show tag chips (match desktop 3+overflow)
+- [x] MobileAssignSheet header shows tags + category so assignment has context
 
 ### 1.3 Create-form parity
-- [ ] Tag picker on TicketCreate (existing palette; admins create inline) — tags apply at creation
-- [ ] Impact/urgency selects on TicketCreate (optional, collapsed under "More fields")
+- [x] Tag picker on TicketCreate (existing palette; admins create inline) — tags apply at creation
+- [x] Impact/urgency selects on TicketCreate (optional, collapsed under "More fields")
 
 ### 1.4 Analytics tag dimension
-- [ ] Tag breakdown in Analytics (Demand & Flow or Overview): created/open per tag for the range, top-N + "untagged" bucket; deterministic counts only
-- [ ] Tag filter param on the analytics queries (mirrors queue tagId semantics)
-- [ ] Tests: dimension math
+- [x] Tag breakdown in Analytics (Demand & Flow or Overview): created/open per tag for the range, top-N + "untagged" bucket; deterministic counts only
+- [x] Tag filter param on the analytics queries (mirrors queue tagId semantics)
+- [x] Tests: dimension math
 
 ### 1.5 Bulk + filter completions
-- [ ] Bulk-by-query actions: `remove_tags` and `set_category` (TP-born only for category, same guardrails)
-- [ ] Queue filter facet for impact/urgency (simple 1–3 multi-select; hidden until any ticket in the workspace uses them)
+- [x] Bulk-by-query actions: `remove_tags` and `set_category` (TP-born only for category, same guardrails)
+- [x] Queue filter facet for impact/urgency (simple 1–3 multi-select; hidden until any ticket in the workspace uses them)
 
 ### 1.6 Public approval page parity
-- [ ] Magic-link page renders requestNoteHtml (sanitized) and gives the clarification/decision note the rich composer; payloads carry noteHtml through decideByToken
-- [ ] Tests: token decide with noteHtml; sanitization
+- [x] Magic-link page renders requestNoteHtml (sanitized) and gives the clarification/decision note the rich composer; payloads carry noteHtml through decideByToken
+- [x] Tests: token decide with noteHtml; sanitization
 
 ## Phase 2 — Scheduled-ticket attachments
 

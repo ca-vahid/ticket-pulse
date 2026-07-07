@@ -43,6 +43,9 @@ export default function TicketCreate() {
   const [categoryId, setCategoryId] = useState('');
   const [subcategoryId, setSubcategoryId] = useState('');
   const [groupId, setGroupId] = useState('');
+  const [tagIds, setTagIds] = useState([]); // gap plan 2 P1.3
+  const [impact, setImpact] = useState('');
+  const [urgency, setUrgency] = useState('');
   const [assignMode, setAssignMode] = useState('none'); // ai | me | pick | none
   const [assignTechId, setAssignTechId] = useState('');
   const [aiClassify, setAiClassify] = useState(true); // AI classifies + assesses priority/type (independent of assignment)
@@ -193,6 +196,9 @@ export default function TicketCreate() {
     setCategoryId('');
     setSubcategoryId('');
     setGroupId('');
+    setTagIds([]);
+    setImpact('');
+    setUrgency('');
     setAssignMode('ai');
     setAssignTechId('');
     setCc([]);
@@ -232,6 +238,9 @@ export default function TicketCreate() {
         aiClassifyOnly: aiClassify && assignMode !== 'ai',
         notifyRequester,
         ccEmails: cc,
+        tagIds,
+        impact: impact ? Number(impact) : null,
+        urgency: urgency ? Number(urgency) : null,
       };
       if (assignMode === 'me' && canTakeMyself) payload.assignedTechId = meta.actor.technicianId;
       if (assignMode === 'pick' && assignTechId) payload.assignedTechId = Number(assignTechId);
@@ -700,6 +709,48 @@ export default function TicketCreate() {
                     </select>
                   </div>
                 )}
+              </div>
+
+              {/* Tags + impact/urgency at creation (gap plan 2 P1.3) */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {(meta?.tags?.length || 0) > 0 && (
+                  <div>
+                    <span className={labelClass}>Tags</span>
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {meta.tags.map((tag) => (
+                        <button
+                          key={tag.id}
+                          type="button"
+                          onClick={() => setTagIds((prev) => (prev.includes(tag.id) ? prev.filter((id) => id !== tag.id) : [...prev, tag.id]))}
+                          aria-pressed={tagIds.includes(tag.id)}
+                          className={`tp-focus-ring px-2 py-0.5 rounded-full border text-[11px] font-medium transition-colors ${
+                            tagIds.includes(tag.id)
+                              ? 'bg-blue-600 text-white border-blue-600'
+                              : 'bg-white text-slate-500 border-slate-200 hover:border-blue-300'
+                          }`}
+                        >
+                          {tag.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label htmlFor="tc-impact" className={labelClass}>Impact</label>
+                    <select id="tc-impact" value={impact} onChange={(e) => setImpact(e.target.value)} className={fieldClass}>
+                      <option value="">—</option>
+                      {[1, 2, 3].map((v) => <option key={v} value={v}>{['Low', 'Medium', 'High'][v - 1]}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label htmlFor="tc-urgency" className={labelClass}>Urgency</label>
+                    <select id="tc-urgency" value={urgency} onChange={(e) => setUrgency(e.target.value)} className={fieldClass}>
+                      <option value="">—</option>
+                      {[1, 2, 3].map((v) => <option key={v} value={v}>{['Low', 'Medium', 'High'][v - 1]}</option>)}
+                    </select>
+                  </div>
+                </div>
               </div>
 
               {error && (

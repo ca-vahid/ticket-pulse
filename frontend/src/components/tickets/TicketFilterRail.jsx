@@ -148,7 +148,7 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
 
   // Personal, persisted facet-section order — drag to rearrange (e.g. Status
   // above Technician). New sections append so the list survives app updates.
-  const FACET_KEYS = ['status', 'technician', 'priority', 'type', 'category', 'tag', 'group', 'source', 'created', 'due', 'origin'];
+  const FACET_KEYS = ['status', 'technician', 'priority', 'type', 'category', 'tag', 'impact', 'group', 'source', 'created', 'due', 'origin'];
   const [sectionOrder, setSectionOrder] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('tp_filter_section_order') || 'null');
@@ -209,6 +209,8 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
   const sources = csvList(get('source'));
   const tags = csvList(get('tag'));
   const tagMode = get('tagMode');
+  const impacts = csvList(get('impact'));
+  const urgencies = csvList(get('urgency'));
   const due = csvList(get('due'));
   const origin = get('origin');
   const createdFrom = get('createdFrom');
@@ -218,7 +220,7 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
 
   const activeTotal = [
     segment && segment !== 'all', statusRaw, assignees.length, priorities.length, types.length,
-    categories.length, subcategories.length, groups.length, sources.length, tags.length, due.length,
+    categories.length, subcategories.length, groups.length, sources.length, tags.length, impacts.length, urgencies.length, due.length,
     origin, createdFrom || createdTo, noise, view, get('q'),
   ].filter(Boolean).length;
 
@@ -331,7 +333,7 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
     && activeTotal === Object.keys(v.params).length;
 
   // Snapshot the active filter query for a new saved view.
-  const FILTER_KEYS = ['segment', 'status', 'assignee', 'priority', 'type', 'category', 'subcategory', 'group', 'source', 'tag', 'tagMode', 'due', 'origin', 'createdFrom', 'createdTo', 'noise', 'q', 'view'];
+  const FILTER_KEYS = ['segment', 'status', 'assignee', 'priority', 'type', 'category', 'subcategory', 'group', 'source', 'tag', 'tagMode', 'impact', 'urgency', 'due', 'origin', 'createdFrom', 'createdTo', 'noise', 'q', 'view'];
   const captureParams = () => {
     const out = {};
     for (const k of FILTER_KEYS) { const val = searchParams.get(k); if (val) out[k] = val; }
@@ -698,6 +700,31 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
               <Facet checked={tags.includes('none')} onToggle={() => toggleCsv('tag', 'none')}>
                 <span className="text-slate-400 italic">Untagged</span>
               </Facet>
+            </Section>
+          </SortableFacet>
+        )}
+
+        {/* Impact / urgency (P1.5) — appears once anyone uses the fields */}
+        {meta?.hasImpactUrgency && (
+          <SortableFacet {...facetProps('impact')}>
+            <Section title="Impact / Urgency" activeCount={impacts.length + urgencies.length} onClear={() => setParams({ impact: null, urgency: null })}>
+              {[['impact', impacts], ['urgency', urgencies]].map(([key, active]) => (
+                <div key={key} className="flex items-center gap-1 px-1.5 py-0.5">
+                  <span className="w-14 text-[10px] uppercase tracking-wide text-slate-400">{key}</span>
+                  {[1, 2, 3].map((v) => (
+                    <button
+                      key={v}
+                      onClick={() => toggleCsv(key, String(v))}
+                      aria-pressed={active.includes(String(v))}
+                      className={`tp-focus-ring px-1.5 py-0.5 rounded text-[11px] font-medium ${
+                        active.includes(String(v)) ? 'bg-blue-100 text-blue-700' : 'text-slate-500 hover:bg-slate-50'
+                      }`}
+                    >
+                      {['Low', 'Med', 'High'][v - 1]}
+                    </button>
+                  ))}
+                </div>
+              ))}
             </Section>
           </SortableFacet>
         )}

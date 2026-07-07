@@ -46,6 +46,7 @@ const CATEGORY_TICKET_SELECT = {
   firstAssignedAt: true,
   firstPublicAgentReplyAt: true,
   origin: true,
+  tagLinks: { select: { tag: { select: { id: true, name: true, color: true } } } },
   dueBy: true,
   frDueBy: true,
   assignedBy: true,
@@ -1183,6 +1184,26 @@ export async function getOverview(workspaceId, query = {}) {
       freshservice: rangeTickets.filter((t) => t.origin !== 'ticketpulse').length,
     };
 
+    // Tag breakdown (gap plan 2 P1.4): created-in-range per tag, top 12 +
+    // untagged bucket. Open counts ride along for a pressure hint.
+    const tagRows = new Map();
+    let untagged = 0;
+    for (const t of rangeTickets) {
+      const tags = (t.tagLinks || []).map((l) => l.tag).filter(Boolean);
+      if (!tags.length) { untagged += 1; continue; }
+      for (const tag of tags) {
+        const row = tagRows.get(tag.id) || { id: tag.id, name: tag.name, color: tag.color, created: 0, open: 0 };
+        row.created += 1;
+        if (['Open', 'Pending'].includes(t.status)) row.open += 1;
+        tagRows.set(tag.id, row);
+      }
+    }
+    const tagBreakdown = {
+      rows: [...tagRows.values()].sort((a, b) => b.created - a.created).slice(0, 12),
+      untagged,
+      taggedPct: rangeTickets.length ? Number((((rangeTickets.length - untagged) / rangeTickets.length) * 100).toFixed(1)) : 0,
+    };
+
     return {
       metadata: metadata(rangeInfo, { excludeNoise, categoryMode: categoryFilter.mode, categoryFilters: categoryFilter.selected }),
       cards: {
@@ -1207,6 +1228,7 @@ export async function getOverview(workspaceId, query = {}) {
       assignmentMix,
       originMix,
       firstResponse,
+      tagBreakdown,
       dataQuality: {
         rangeTicketCount: rangeTickets.length,
         resolutionTimeCoverage: rangeTickets.length

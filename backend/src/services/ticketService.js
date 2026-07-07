@@ -45,6 +45,10 @@ const createTicketSchema = z.object({
   groupId: z.union([z.number().int(), z.string().regex(/^\d+$/)]).optional().nullable(),
   internalGroupId: z.number().int().positive().optional().nullable(),
   assignedTechId: z.number().int().positive().optional().nullable(),
+  impact: z.number().int().min(1).max(3).optional().nullable(),
+  urgency: z.number().int().min(1).max(3).optional().nullable(),
+  // Tags applied at creation (gap plan 2 P1.3); validated in setTags semantics.
+  tagIds: z.array(z.number().int().positive()).max(10).default([]),
   // runAiTriage = run the FULL pipeline (classify + priority + type + recommend
   // an assignee). aiClassifyOnly = run AI ASSESSMENT ONLY (classify + priority +
   // type), never touching the assignee — for tickets that are hand-assigned or
@@ -432,6 +436,14 @@ class TicketService {
       if (buckets.includes('week')) or.push({ dueBy: { gte: dueNow, lte: dueWeekOut } });
       if (buckets.includes('none')) or.push({ dueBy: null });
       if (or.length) where.AND = [...(where.AND || []), { OR: or }];
+    }
+    if (query.impact) {
+      const vals = asList(query.impact).map(Number).filter((n) => n >= 1 && n <= 3);
+      if (vals.length) where.impact = { in: vals };
+    }
+    if (query.urgency) {
+      const vals = asList(query.urgency).map(Number).filter((n) => n >= 1 && n <= 3);
+      if (vals.length) where.urgency = { in: vals };
     }
     if (query.tagId) {
       // Multi-select tag facet: ids and/or the literal 'none' (untagged).
@@ -1045,11 +1057,12 @@ class TicketService {
     }
 
     const type = action?.type;
-    if (!['assign', 'status', 'add_tags'].includes(type)) {
-      throw new ValidationError('Bulk action must be assign, status, or add_tags');
+    if (!['assign', 'status', 'add_tags', 'remove_tags', 'set_category'].includes(type)) {
+      throw new ValidationError('Bulk action must be assign, status, add_tags, remove_tags, or set_category');
     }
     // Tags are TP-side (both origins); field mutations are TP-born only.
-    const editable = type === 'add_tags' ? matching : matching.filter((t) => t.origin === TICKET_ORIGIN.TICKETPULSE);
+    const TAG_ACTIONS = new Set(['add_tags', 'remove_tags']);
+    const editable = TAG_ACTIONS.has(type) ? matching : matching.filter((t) => t.origin === TICKET_ORIGIN.TICKETPULSE);
     const skippedFsBorn = matching.length - editable.length;
 
     if (preview) {
@@ -1067,10 +1080,17 @@ class TicketService {
           await this.assignTicket(t.id, workspaceId, action.value ? Number(action.value) : null, actor);
         } else if (type === 'status') {
           await this.changeStatus(t.id, workspaceId, String(action.value), actor);
-        } else if (type === 'add_tags') {
+        } else if (type === 'add_tags' || type === 'remove_tags') {
           const current = await prisma.ticketTagLink.findMany({ where: { ticketId: t.id }, select: { tagId: true } });
-          const wanted = [...new Set([...current.map((l) => l.tagId), ...((action.value || []).map(Number))])];
+          const delta = new Set((action.value || []).map(Number));
+          const wanted = type === 'add_tags'
+            ? [...new Set([...current.map((l) => l.tagId), ...delta])]
+            : current.map((l) => l.tagId).filter((id) => !delta.has(id));
           await this.setTags(t.id, workspaceId, wanted, actor);
+        } else if (type === 'set_category') {
+          await this.updateTicketFields(t.id, workspaceId, {
+            internalCategoryId: action.value ? Number(action.value) : null,
+          }, actor);
         }
         applied += 1;
       } catch (err) {
@@ -1090,7 +1110,7 @@ class TicketService {
 
   /** Reference data for the ticket composer / filters. */
   async getMeta(workspaceId) {
-    const [workspace, groups, technicians, categories, sourceRows, approvalCategories, tags, categoryGroupLinks] = await Promise.all([
+    const [workspace, groups, technicians, categories, sourceRows, approvalCategories, tags, categoryGroupLinks, impactUsage] = await Promise.all([
       this._getWorkspace(workspaceId),
       prisma.group.findMany({
         where: { workspaceId, isActive: true },
@@ -1126,6 +1146,7 @@ class TicketService {
         where: { workspaceId },
         select: { categoryId: true, groupId: true },
       }),
+      prisma.ticket.count({ where: { workspaceId, OR: [{ impact: { not: null } }, { urgency: { not: null } }] } }),
     ]);
 
     const tops = categories.filter((c) => c.parentId === null);
@@ -1171,6 +1192,8 @@ class TicketService {
       // Category↔group affinity (gap plan P2.3): pickers scope the category
       // tree by the ticket's group. Unmapped categories are visible to all.
       categoryGroupLinks: categoryGroupLinks.map((l) => ({ categoryId: l.categoryId, groupId: String(l.groupId) })),
+      // Impact/urgency facet only shows once anyone uses the fields (P1.5).
+      hasImpactUrgency: impactUsage > 0,
     };
   }
 
@@ -1391,6 +1414,8 @@ class TicketService {
         department: requester.department || null,
         internalCategoryId: data.internalCategoryId ?? null,
         internalSubcategoryId: data.internalSubcategoryId ?? null,
+        impact: data.impact ?? null,
+        urgency: data.urgency ?? null,
         groupId,
         internalGroupId,
         createdAt: now,
@@ -1411,6 +1436,13 @@ class TicketService {
       },
       include: TICKET_INCLUDE,
     });
+
+    // Tags at creation (gap plan 2 P1.3) — validated + audited by setTags.
+    if (Array.isArray(data.tagIds) && data.tagIds.length) {
+      await this.setTags(ticket.id, workspaceId, data.tagIds, actor).catch((err) => {
+        logger.warn(`Create-time tags failed (non-fatal): ${err.message}`);
+      });
+    }
 
     await this._audit(ticket.id, 'created', actor, {
       nativeNumber,

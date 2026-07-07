@@ -890,8 +890,8 @@ export const publicApprovalAPI = {
     return response;
   },
 
-  decide: async (token, decision, note = null) => {
-    const response = await api.post(`/ticket-approvals/public/${encodeURIComponent(token)}/decide`, { decision, note });
+  decide: async (token, decision, note = null, noteHtml = null) => {
+    const response = await api.post(`/ticket-approvals/public/${encodeURIComponent(token)}/decide`, { decision, note, noteHtml });
     return response;
   },
 
