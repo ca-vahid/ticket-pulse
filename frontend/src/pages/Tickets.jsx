@@ -535,7 +535,23 @@ export default function Tickets() {
     pendingIdsRef.current.add(data?.ticketId ?? `evt-${Date.now()}`);
     setPendingCount(pendingIdsRef.current.size);
   }, [fetchStats, fetchAiReviewTotal]);
-  useSSE({ onTicketChange, enabled: Boolean(workspaceId) });
+  // Presence dots (gap plan 2 P4.1): who has which ticket open right now.
+  // Snapshot on load, then live deltas over the same SSE connection.
+  const [presenceMap, setPresenceMap] = useState({}); // ticketId -> [{email, name}]
+  useEffect(() => {
+    if (!workspaceId) return;
+    ticketsAPI.presenceSnapshot().then((res) => setPresenceMap(res.data || {})).catch(() => {});
+  }, [workspaceId]);
+  const onPresence = useCallback((data) => {
+    if (!data?.ticketId) return;
+    setPresenceMap((prev) => {
+      const next = { ...prev };
+      if (data.viewers?.length) next[data.ticketId] = data.viewers;
+      else delete next[data.ticketId];
+      return next;
+    });
+  }, []);
+  useSSE({ onTicketChange, onPresence, enabled: Boolean(workspaceId) });
   useEffect(() => () => {
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     if (rowFxTimerRef.current) clearTimeout(rowFxTimerRef.current);
@@ -632,21 +648,40 @@ export default function Tickets() {
     if (next) setParams({ peek: next.id }, { resetPage: false });
   }, [tickets, searchParams, setParams]);
 
+  // ---- Bulk selection & actions (page-scoped, or query-scoped via "Select all N") ----
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+
+  // Keyboard queue navigation (gap plan 2 P4.2): j/k (or ↑/↓) move the peek
+  // selection — j with nothing open starts at the top — Enter opens the
+  // peeked ticket, x toggles its bulk-select checkbox. Never fires while the
+  // focus is in an input/select/composer.
   useEffect(() => {
-    if (!previewId) return undefined;
+    if (tickets.length === 0) return undefined;
     const onKey = (e) => {
       const target = e.target;
       if (target && (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable)) return;
-      if (e.key === 'ArrowDown') { e.preventDefault(); stepPreview(1); }
-      else if (e.key === 'ArrowUp') { e.preventDefault(); stepPreview(-1); }
-      else if (e.key === 'Enter') { e.preventDefault(); navigate(`/tickets/${previewId}`); }
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const down = e.key === 'ArrowDown' || e.key === 'j';
+      const up = e.key === 'ArrowUp' || e.key === 'k';
+      if (down || up) {
+        e.preventDefault();
+        if (previewId) stepPreview(down ? 1 : -1);
+        else setParams({ peek: tickets[down ? 0 : tickets.length - 1].id }, { resetPage: false });
+      } else if (e.key === 'Enter' && previewId) {
+        e.preventDefault();
+        navigate(`/tickets/${previewId}`);
+      } else if (e.key.toLowerCase() === 'x' && previewId) {
+        e.preventDefault();
+        setSelectedIds((prev) => {
+          const next = new Set(prev);
+          if (next.has(previewId)) next.delete(previewId); else next.add(previewId);
+          return next;
+        });
+      }
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [previewId, stepPreview, navigate]);
-
-  // ---- Bulk selection & actions (page-scoped, or query-scoped via "Select all N") ----
-  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  }, [previewId, tickets, stepPreview, navigate, setParams]);
   const [bulkAction, setBulkAction] = useState(null); // { type: 'assign'|'status', value, label }
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkResult, setBulkResult] = useState(null); // { ok, failed: [{ref, message}], skipped }
@@ -1159,6 +1194,14 @@ export default function Tickets() {
                                           </span>
                                         ))}
                                         <StateChip state={ticket.stateChip} />
+                                        {presenceMap[ticket.id]?.length > 0 && (
+                                          <span
+                                            className="shrink-0 w-2 h-2 rounded-full bg-violet-500 ring-2 ring-violet-200"
+                                            title={`Viewing now: ${presenceMap[ticket.id].map((v) => v.name).join(', ')}`}
+                                            role="img"
+                                            aria-label={`Being viewed by ${presenceMap[ticket.id].map((v) => v.name).join(', ')}`}
+                                          />
+                                        )}
                                         {(ticket.tags || []).slice(0, 3).map((tag) => (
                                           <TagChip key={tag.id} tag={tag} size="xs" className="shrink-0" />
                                         ))}
@@ -1444,6 +1487,13 @@ export default function Tickets() {
                       {/* Full pagination */}
                       <div className="px-4 py-3 border-t border-slate-100 bg-slate-50/50">
                         <Pagination page={page} totalPages={totalPages} total={total} pageSize={PAGE_SIZE} onPage={goPage} />
+                        {/* Keyboard hint (gap plan 2 P4.2) — desktop only, keys are pointless on touch */}
+                        <p className="hidden lg:flex items-center justify-center gap-3 mt-2 text-[10px] text-slate-400">
+                          <span><kbd className="font-mono border border-slate-200 rounded px-1 bg-white">j</kbd>/<kbd className="font-mono border border-slate-200 rounded px-1 bg-white">k</kbd> move</span>
+                          <span><kbd className="font-mono border border-slate-200 rounded px-1 bg-white">↵</kbd> open</span>
+                          <span><kbd className="font-mono border border-slate-200 rounded px-1 bg-white">x</kbd> select</span>
+                          <span><kbd className="font-mono border border-slate-200 rounded px-1 bg-white">Ctrl K</kbd> commands</span>
+                        </p>
                       </div>
                     </div>
                   )}

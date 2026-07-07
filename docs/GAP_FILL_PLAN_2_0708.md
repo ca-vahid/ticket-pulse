@@ -67,18 +67,18 @@ The v3.0.5 features exist end-to-end but not *everywhere*. Close the loops:
 - [x] OpenAPI/docs page documents the event payloads + signature verification
 - [x] Tests: signing, retry/backoff, event fan-out, SSRF guard
 
-## Phase 4 — UX: presence + command palette
+## Phase 4 — UX: presence + command palette ✅ DONE
 
 ### 4.1 Presence
-- [ ] SSE-based "viewing" registry (in-memory per backend instance is fine — single-instance prod): opening a ticket announces presence; leave/timeout clears
-- [ ] Detail header shows "Also viewing: <avatars>" when someone else has the ticket open; queue rows get a subtle dot
-- [ ] Team-safe: presence only — no duration tracking, nothing stored
+- [x] SSE-based "viewing" registry (in-memory per backend instance is fine — single-instance prod): opening a ticket announces presence; leave/timeout clears
+- [x] Detail header shows "Also viewing: <avatars>" when someone else has the ticket open; queue rows get a subtle dot
+- [x] Team-safe: presence only — no duration tracking, nothing stored
 
 ### 4.2 Command palette + keyboard nav
-- [ ] Ctrl/Cmd+K palette: go to page, search tickets (reuses queue search), quick actions on the open ticket (assign to me, resolve, tag…)
-- [ ] j/k row navigation on the queue (moves peek selection), Enter opens, x toggles select
-- [ ] Respect inputs/composer focus; discoverable hint in the queue header
-- [ ] Tests: palette component; key handling doesn't fire while typing
+- [x] Ctrl/Cmd+K palette: go to page, search tickets (reuses queue search), quick actions on the open ticket (assign to me, resolve, tag…)
+- [x] j/k row navigation on the queue (moves peek selection), Enter opens, x toggles select
+- [x] Respect inputs/composer focus; discoverable hint in the queue header
+- [x] Tests: palette component; key handling doesn't fire while typing
 
 ## Phase 5 — AI: sentiment + vector similar-tickets
 

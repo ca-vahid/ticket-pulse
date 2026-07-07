@@ -7,6 +7,7 @@ import ticketService from '../services/ticketService.js';
 import scheduledTicketService from '../services/scheduledTicketService.js';
 import attachmentService, { MAX_ATTACHMENT_BYTES } from '../services/attachmentService.js';
 import workspaceRepository from '../services/workspaceRepository.js';
+import { heartbeatPresence, leavePresence, presenceSnapshot } from '../services/presenceService.js';
 import prisma from '../services/prisma.js';
 import logger from '../utils/logger.js';
 
@@ -481,6 +482,26 @@ router.delete('/templates/:templateId', asyncHandler(async (req, res) => {
   if (!isOwner && !isAdmin) throw new ValidationError('Only the creator or an admin can remove a template');
   await prisma.replyTemplate.update({ where: { id }, data: { isActive: false } });
   res.json({ success: true });
+}));
+
+// --------------------------------------------------- presence (gap plan 2 P4)
+// In-memory "also viewing" only — nothing stored, no durations (team-safe).
+// Works for both origins; not gated on the native-ticketing flag.
+
+router.get('/presence', asyncHandler(async (req, res) => {
+  res.json({ success: true, data: presenceSnapshot(req.workspaceId) });
+}));
+
+router.post('/:id/presence', asyncHandler(async (req, res) => {
+  const ticketId = parseTicketId(req);
+  const { email, name } = req.ticketActor;
+  if (req.body?.leaving) {
+    leavePresence(req.workspaceId, ticketId, email);
+    res.json({ success: true, data: { viewers: [] } });
+    return;
+  }
+  const viewers = heartbeatPresence(req.workspaceId, ticketId, { email, name });
+  res.json({ success: true, data: { viewers: viewers.filter((v) => v.email !== email) } });
 }));
 
 // --------------------------------------------------------- tags (gap plan P1)

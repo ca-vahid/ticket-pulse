@@ -24,6 +24,7 @@ export function useSSE(options = {}) {
     onMessage,
     onSyncCompleted,
     onTicketChange,
+    onPresence,
     onConnected,
     onError,
     enabled = true,
@@ -112,6 +113,15 @@ export function useSSE(options = {}) {
           }
         });
 
+        // Ticket presence ("also viewing" — gap plan 2 P4.1). Not routed
+        // through lastEvent: presence churns and shouldn't rerender consumers
+        // that only care about data changes.
+        eventSource.addEventListener('presence', (event) => {
+          if (onPresence) {
+            onPresence(parseAndScrub(event.data));
+          }
+        });
+
         eventSource.onmessage = (event) => {
           // SSE message received
           const data = parseAndScrub(event.data);
@@ -155,7 +165,7 @@ export function useSSE(options = {}) {
       closeCurrentSource();
       setConnectionStatus('disconnected');
     };
-  }, [enabled, onMessage, onSyncCompleted, onTicketChange, onConnected, onError, reconnectKey]);
+  }, [enabled, onMessage, onSyncCompleted, onTicketChange, onPresence, onConnected, onError, reconnectKey]);
 
   const disconnect = () => {
     if (eventSourceRef.current) {

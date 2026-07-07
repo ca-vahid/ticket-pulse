@@ -649,6 +649,10 @@ export const ticketsAPI = {
   categoryGroupLinks: async () => await api.get('/tickets/category-group-links'),
   setCategoryGroupLinks: async (links) => await api.put('/tickets/category-group-links', { links }),
 
+  // Presence (gap plan 2 P4.1) — in-memory "also viewing", nothing stored
+  presenceHeartbeat: async (id, leaving = false) => await api.post(`/tickets/${id}/presence`, leaving ? { leaving: true } : {}),
+  presenceSnapshot: async () => await api.get('/tickets/presence'),
+
   // Outbound webhooks (admin; gap plan 2 P3)
   listWebhooks: async () => await api.get('/tickets/webhook-subscriptions'),
   createWebhook: async ({ url, events }) => await api.post('/tickets/webhook-subscriptions', { url, events }),

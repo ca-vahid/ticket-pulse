@@ -32,6 +32,7 @@ import { useWorkspaceRole } from '../components/nav/navDestinations';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { assignmentAPI, ticketsAPI } from '../services/api';
 import { useSSE } from '../hooks/useSSE';
+import { useTicketPresence } from '../hooks/useTicketPresence';
 
 const STATUSES = ['Open', 'Pending', 'Resolved', 'Closed'];
 const TICKET_TYPES = ['Incident', 'Service Request'];
@@ -682,7 +683,10 @@ export default function TicketDetail() {
       fetchTicket({ silent: true, diff: true });
     }, 600);
   }, [ticketId, fetchTicket]);
-  useSSE({ onTicketChange, enabled: Number.isFinite(ticketId) });
+  // "Also viewing" (gap plan 2 P4.1): heartbeat while open, live avatar list
+  // over the same SSE connection.
+  const { viewers: alsoViewing, onPresence } = useTicketPresence(ticketId, Number.isFinite(ticketId));
+  useSSE({ onTicketChange, onPresence, enabled: Number.isFinite(ticketId) });
   useEffect(() => () => { if (liveRefetchTimerRef.current) clearTimeout(liveRefetchTimerRef.current); }, []);
 
   const isNative = ticket?.origin === 'ticketpulse';
@@ -1451,6 +1455,28 @@ export default function TicketDetail() {
                     )}
                     {ticket.isNoise && (
                       <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-500 border border-slate-200">Noise</span>
+                    )}
+                    {alsoViewing.length > 0 && (
+                      <span
+                        className="inline-flex items-center gap-1.5 pl-1 pr-2 py-0.5 rounded-full bg-violet-50 border border-violet-200 animate-fadeIn"
+                        title={`Also viewing: ${alsoViewing.map((v) => v.name).join(', ')}`}
+                      >
+                        <span className="flex -space-x-1.5" aria-hidden="true">
+                          {alsoViewing.slice(0, 4).map((v) => (
+                            <span
+                              key={v.email}
+                              className="w-4.5 h-4.5 min-w-[18px] min-h-[18px] rounded-full bg-violet-500 border border-white text-white text-[8px] font-bold flex items-center justify-center uppercase"
+                            >
+                              {(v.name || v.email).trim().split(/\s+/).slice(0, 2).map((p) => p[0]).join('')}
+                            </span>
+                          ))}
+                        </span>
+                        <span className="text-[10px] font-semibold text-violet-700">
+                          {alsoViewing.length === 1
+                            ? `${(alsoViewing[0].name || alsoViewing[0].email).split(/\s+/)[0]} is also viewing`
+                            : `${alsoViewing.length} also viewing`}
+                        </span>
+                      </span>
                     )}
                     <div
                       onMouseEnter={() => { ackChange('status'); ackChange('priority'); }}
