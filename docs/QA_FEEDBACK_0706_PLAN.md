@@ -12,39 +12,39 @@
 ### 1.1 Prod incident: status→Resolved "network error" ×2 but succeeded + 2 resolved emails (QA #13, ticket 231648)
 Symptom: changing an FS-born ticket to Resolved on prod failed twice with a network error, yet both FS and TP show Resolved and the requester got TWO "resolved" emails.
 Likely chain (to verify): FS write-back exceeded the frontend's **30s axios timeout** (`api.js` default; `fsUpdate` uses the default client) → UI shows network error while the backend completes → user retries → second full write + second `ticket.resolved_closed` workflow fire (different dedupe stamps) → 2 emails.
-- [ ] Investigate on prod (read-only): notification runs + deliveries for ticket 231648 (timestamps, dedupe keys), the two attempts' timing
-- [ ] Fix A — timeout: route `fs-update`/status write-backs through a longer-timeout client (90s) and show an "applying…" state instead of failing at 30s
-- [ ] Fix B — idempotency: a repeat status change to the same status must be a no-op end-to-end (no second FS write, no second lifecycle event); make the FS-born resolved_closed dedupe stamp stable across retries
-- [ ] Fix C — UX: if the request errors client-side, verify actual state on refetch before showing "failed"
-- [ ] Tests: idempotent re-resolve; stable dedupe stamp
+- [x] Investigate on prod (read-only): notification runs + deliveries for ticket 231648 (timestamps, dedupe keys), the two attempts' timing
+- [x] Fix A — timeout: route `fs-update`/status write-backs through a longer-timeout client (90s) and show an "applying…" state instead of failing at 30s
+- [x] Fix B — idempotency: a repeat status change to the same status must be a no-op end-to-end (no second FS write, no second lifecycle event); make the FS-born resolved_closed dedupe stamp stable across retries
+- [x] Fix C — UX: if the request errors client-side, verify actual state on refetch before showing "failed"
+- [x] Tests: idempotent re-resolve; stable dedupe stamp
 
 ### 1.2 FS-side requester replies not appearing in TP conversations (QA #4)
 Symptom: requester replies by email → FreshService shows the reply immediately, Ticket Pulse conversation stays empty (screenshots show both).
 **CONFIRMED root cause (TP-born):** `mirrorService.reconcile(workspaceId)` — which imports FS-side conversation entries for TP-born tickets — **is never called anywhere** (no worker, no schedule).
-- [ ] Wire `mirrorService.reconcile` into a worker cadence (ride the mirror drain or its own interval, env-tunable)
-- [ ] Reconcile-on-open: opening a TP-born ticket (non-silent) also imports fresh FS conversation entries (like FS-born reconcile does today)
-- [ ] Verify the FS-born path too: confirm webhook/poll sync imports new requester conversations promptly; fix any gap found
-- [ ] Fire `ticket.reply_received` for entries imported via reconcile (stable stamp = FS conversation id) so workflows react
-- [ ] Tests: reconcile imports + no double-import; reply_received emitted once
+- [x] Wire `mirrorService.reconcile` into a worker cadence (ride the mirror drain or its own interval, env-tunable)
+- [x] Reconcile-on-open: opening a TP-born ticket (non-silent) also imports fresh FS conversation entries (like FS-born reconcile does today)
+- [x] Verify the FS-born path too: confirm webhook/poll sync imports new requester conversations promptly; fix any gap found
+- [x] Fire `ticket.reply_received` for entries imported via reconcile (stable stamp = FS conversation id) so workflows react
+- [x] Tests: reconcile imports + no double-import; reply_received emitted once
 
 ---
 
 ## Phase 2 — Queue & detail interactions
 
 ### 2.1 Status dropdown on the ticket queue (QA #2)
-- [ ] New `StatusPicker` on queue rows (pattern: AssigneePicker) — TP-born: simple "are you sure" confirm → `changeStatus`; FS-born: the existing `FsSyncConfirm` real-time sync flow, failing first if FS fails (same as assignee/category)
-- [ ] Peek/mobile card parity where sensible; SSE refresh after change
-- [ ] Tests: component + both confirm paths
+- [x] New `StatusPicker` on queue rows (pattern: AssigneePicker) — TP-born: simple "are you sure" confirm → `changeStatus`; FS-born: the existing `FsSyncConfirm` real-time sync flow, failing first if FS fails (same as assignee/category)
+- [x] Peek/mobile card parity where sensible; SSE refresh after change
+- [x] Tests: component + both confirm paths
 
 ### 2.2 Undo toast for instant saves (QA #3)
-- [ ] Reusable "Saved — Undo (5s)" toast in TicketDetail for field edits (status, priority, category, group, assignee): keep the previous value, Undo re-applies it through the same API
-- [ ] Same toast on the new queue status change (TP-born; FS-born undo re-runs the confirmed sync flow)
-- [ ] Tests: undo restores the prior value
+- [x] Reusable "Saved — Undo (5s)" toast in TicketDetail for field edits (status, priority, category, group, assignee): keep the previous value, Undo re-applies it through the same API
+- [x] Same toast on the new queue status change (TP-born; FS-born undo re-runs the confirmed sync flow)
+- [x] Tests: undo restores the prior value
 
 ### 2.3 Category → "Uncategorized" impossible (QA #5)
 Hypothesis: the UI never sends an explicit clear (`''` dropped / undefined skipped), so a category can't be removed once assessed. Backend zod already allows `nullable()`.
-- [ ] Trace the detail category editor → ensure choosing "Uncategorized" sends `internalCategoryId: null` (+ clears subcategory) and the backend patch honors explicit null
-- [ ] Tests: clearing works after AI assessment; audit records the change
+- [x] Trace the detail category editor → ensure choosing "Uncategorized" sends `internalCategoryId: null` (+ clears subcategory) and the backend patch honors explicit null
+- [x] Tests: clearing works after AI assessment; audit records the change
 
 ---
 
@@ -103,7 +103,7 @@ Hypothesis: the UI never sends an explicit clear (`''` dropped / undefined skipp
 - [x] Self-test the sync fixes on dev (no outbound email / FS writes — action-only or mock, same guardrails as last time)
 - [x] Dev migrations applied (`quick_notes`); prod migration at deploy via `migrate deploy`
 - [x] Branded **QA response PDF** next to the request file (per the established loop): item-by-item what changed, incl. the 231648 incident explanation
-- [ ] Deploy to prod on user go-ahead → verify health/version + probe new endpoints
+- [x] Deploy to prod on user go-ahead → verify health/version + probe new endpoints
 
 ---
 
