@@ -99,6 +99,7 @@ model Workspace {
   quickNotes             QuickNote[]
   ticketTags             TicketTag[]
   webhookSubscriptions   WebhookSubscription[]
+  ticketEmbeddings       TicketEmbedding[]
 
   @@map("workspaces")
 }
@@ -305,6 +306,25 @@ model TicketTagLink {
   @@unique([ticketId, tagId])
   @@map("ticket_tag_links")
   @@index([tagId])
+}
+
+// Content embedding for similar-ticket suggestions (gap plan 2 P5.2). One row
+// per ticket; embedding is a float[] (cosine computed app-side over a bounded
+// candidate set) — upgradable to pgvector once azure.extensions allows it.
+// contentHash short-circuits regeneration when subject/description are unchanged.
+model TicketEmbedding {
+  id          Int       @id @default(autoincrement())
+  workspaceId Int       @map("workspace_id")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  ticketId    Int       @unique @map("ticket_id")
+  ticket      Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  embedding   Float[]
+  model       String    @db.VarChar(80)
+  contentHash String    @db.VarChar(64) @map("content_hash")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@map("ticket_embeddings")
+  @@index([workspaceId, updatedAt])
 }
 
 // Canned INTERNAL notes ("quick notes", QA 07-06 #12) — insertable from the
@@ -689,6 +709,11 @@ model Ticket {
   // TP-side annotations on both origins; priority remains the operative field.
   impact                Int?      @db.SmallInt
   urgency               Int?      @db.SmallInt
+  // Requester sentiment (gap plan 2 P5.1): positive | neutral | frustrated.
+  // TEAM-SAFE: describes the REQUESTER's state in their own messages — never
+  // agent performance, never aggregated per agent.
+  sentiment             String?   @db.VarChar(16)
+  sentimentComputedAt   DateTime? @map("sentiment_computed_at")
   assessedPriority      String?   @db.VarChar(20) @map("assessed_priority")
   assessedPriorityId    Int?      @map("assessed_priority_id")
   priorityRationale     String?   @db.Text @map("priority_rationale")
@@ -820,6 +845,7 @@ model Ticket {
   linksFrom            TicketLink[] @relation("linkSource")
   linksTo              TicketLink[] @relation("linkTarget")
   tagLinks             TicketTagLink[]
+  embedding            TicketEmbedding?
 
   // Per-workspace user-defined fields — values keyed by CustomFieldDefinition.key.
   customFields         Json?     @map("custom_fields")

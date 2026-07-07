@@ -279,6 +279,16 @@ async function dispatchLifecycleWebhook(eventContext) {
   } catch { /* integrations never break the pipeline */ }
 }
 
+// A new requester reply may shift their tone — re-classify sentiment
+// (debounced; gap plan 2 P5.1). Fire-and-forget like the webhook dispatch.
+async function maybeRefreshSentiment(eventContext) {
+  if (eventContext.event?.type !== 'ticket.reply_received') return;
+  try {
+    const { default: ticketSentimentService } = await import('./ticketSentimentService.js');
+    ticketSentimentService.scheduleRefresh(eventContext.ticket?.id, eventContext.workspace?.id);
+  } catch { /* sentiment is an annotation, never a pipeline step */ }
+}
+
 function buildEventContext({ event, ticket, previousAgent, source }) {
   return {
     event: {
@@ -304,6 +314,8 @@ function buildEventContext({ event, ticket, previousAgent, source }) {
       priorityLabel: priorityLabel(ticket),
       impact: ticket.impact ?? null,
       urgency: ticket.urgency ?? null,
+      // Requester sentiment (P5.1) — requester state only, team-safe.
+      sentiment: ticket.sentiment || null,
       assessedPriority: ticket.assessedPriority || null,
       toEmails: emailList(ticket.toEmails),
       ccEmails: emailList(ticket.ccEmails),
@@ -375,6 +387,7 @@ export async function emitTicketLifecycleNotifications({
   for (const event of events) {
     const eventContext = buildEventContext({ event, ticket, previousAgent, source });
     dispatchLifecycleWebhook(eventContext);
+    maybeRefreshSentiment(eventContext);
     try {
       results.push(await notificationWorkflowEngine.executeForEvent(eventContext, {
         triggerSource: source,
@@ -423,6 +436,7 @@ export async function emitTicketEvent(eventType, ticketId, {
   const eventContext = buildEventContext({ event, ticket, previousAgent: null, source });
   if (extra) eventContext.event.extra = extra;
   dispatchLifecycleWebhook(eventContext);
+  maybeRefreshSentiment(eventContext);
 
   try {
     return await notificationWorkflowEngine.executeForEvent(eventContext, {

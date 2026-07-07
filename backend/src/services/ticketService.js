@@ -1318,7 +1318,30 @@ class TicketService {
         .map(toItem);
     }
 
-    return { sameRequester, sameRequesterCount, nearDuplicates };
+    // AI suggestion tier (gap plan 2 P5.2): similar by CONTENT via embeddings.
+    // Clearly a suggestion (scored), quietly empty when embeddings are off.
+    let similarByContent = [];
+    try {
+      const { default: ticketEmbeddingService } = await import('./ticketEmbeddingService.js');
+      const scored = await ticketEmbeddingService.similarByContent(ticketId, workspaceId, { limit: 6 });
+      if (scored.length) {
+        const rows = await prisma.ticket.findMany({
+          where: {
+            id: { in: scored.map((s) => s.ticketId) },
+            isNoise: false,
+            status: { notIn: ['Deleted', 'Spam'] },
+          },
+          select,
+        });
+        const byId = new Map(rows.map((r) => [r.id, r]));
+        similarByContent = scored
+          .filter((s) => byId.has(s.ticketId))
+          .slice(0, 4)
+          .map((s) => ({ ...toItem(byId.get(s.ticketId)), similarity: Math.round(s.score * 100) / 100 }));
+      }
+    } catch { /* embeddings unavailable — related tickets still work */ }
+
+    return { sameRequester, sameRequesterCount, nearDuplicates, similarByContent };
   }
 
   /**
@@ -1504,8 +1527,17 @@ class TicketService {
       }
     }
 
+    // Content embedding for similar-ticket suggestions (P5.2, fire-and-forget).
+    this._refreshEmbedding(ticket.id, workspaceId);
+
     logger.info(`Native ticket created: ${ticketDisplayRef(ticket)} (id ${ticket.id}, ws ${workspaceId}) by ${actor?.email || 'unknown'}`);
     return { ...ticket, displayRef: ticketDisplayRef(ticket), triage };
+  }
+
+  _refreshEmbedding(ticketId, workspaceId) {
+    import('./ticketEmbeddingService.js')
+      .then(({ default: svc }) => svc.upsertForTicket(ticketId, workspaceId))
+      .catch(() => {});
   }
 
   async _startAiTriage(ticketId, workspaceId, triggerSource = APP_NATIVE_TRIGGER_SOURCE) {
@@ -1629,6 +1661,8 @@ class TicketService {
     await this._audit(ticket.id, 'fields_updated', actor, { changes });
     this._broadcast(workspaceId, 'updated', updated, { changes: Object.keys(changes) });
     await mirrorService.enqueueFieldSync(workspaceId, ticket.id);
+    // Subject/description changed → the content embedding is stale (P5.2).
+    if (changes.subject || changes.description) this._refreshEmbedding(ticket.id, workspaceId);
     return { ...updated, displayRef: ticketDisplayRef(updated), changed: true };
   }
 

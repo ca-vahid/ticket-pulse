@@ -21,6 +21,7 @@ class ScheduledSyncService {
     this.calendarLeaveCronJobs = new Map();
     this.assignmentFastSyncCronJobs = new Map();
     this.assignmentFastSyncInProgress = new Set();
+    this.embeddingBackfillCronJobs = new Map();
   }
 
   /**
@@ -41,6 +42,7 @@ class ScheduledSyncService {
         await this.startAssignmentFastSyncForWorkspace(ws);
         await this.startVTSyncForWorkspace(ws);
         await this.startCalendarLeaveSyncForWorkspace(ws);
+        this.startEmbeddingBackfillForWorkspace(ws);
       }
 
       // Start email polling for assignment pipeline
@@ -300,6 +302,38 @@ class ScheduledSyncService {
     }
   }
 
+  /**
+   * Nightly similar-tickets embedding backfill (gap plan 2 P5.2): sweeps
+   * recent tickets that never got an embedding (created before the feature,
+   * or whose fire-and-forget upsert was lost). Quiet no-op without an
+   * OpenAI key.
+   */
+  startEmbeddingBackfillForWorkspace(workspace) {
+    const wsId = workspace.id;
+    this.stopEmbeddingBackfillForWorkspace(wsId);
+    const tz = workspace.defaultTimezone || 'America/Los_Angeles';
+    const job = cron.schedule('30 3 * * *', async () => {
+      try {
+        const { default: ticketEmbeddingService } = await import('./ticketEmbeddingService.js');
+        const result = await ticketEmbeddingService.backfillWorkspace(wsId);
+        if (result.embedded > 0) {
+          logger.info(`[${workspace.name}] Nightly embedding backfill: ${result.embedded}/${result.scanned}`);
+        }
+      } catch (error) {
+        logger.error(`[${workspace.name}] Embedding backfill failed:`, error);
+      }
+    }, { scheduled: true, timezone: tz });
+    this.embeddingBackfillCronJobs.set(wsId, { job, workspaceName: workspace.name });
+  }
+
+  stopEmbeddingBackfillForWorkspace(wsId) {
+    const entry = this.embeddingBackfillCronJobs.get(wsId);
+    if (entry) {
+      entry.job.stop();
+      this.embeddingBackfillCronJobs.delete(wsId);
+    }
+  }
+
   stopForWorkspace(wsId) {
     const entry = this.cronJobs.get(wsId);
     if (entry) {
@@ -310,6 +344,7 @@ class ScheduledSyncService {
     this.stopAssignmentFastSyncForWorkspace(wsId);
     this.stopVTSyncForWorkspace(wsId);
     this.stopCalendarLeaveSyncForWorkspace(wsId);
+    this.stopEmbeddingBackfillForWorkspace(wsId);
   }
 
   stopAssignmentFastSyncForWorkspace(wsId) {
@@ -338,6 +373,9 @@ class ScheduledSyncService {
     for (const [wsId] of this.calendarLeaveCronJobs) {
       this.stopCalendarLeaveSyncForWorkspace(wsId);
     }
+    for (const [wsId] of this.embeddingBackfillCronJobs) {
+      this.stopEmbeddingBackfillForWorkspace(wsId);
+    }
   }
 
   /**
@@ -355,6 +393,7 @@ class ScheduledSyncService {
       await this.startAssignmentFastSyncForWorkspace(ws);
       await this.startVTSyncForWorkspace(ws);
       await this.startCalendarLeaveSyncForWorkspace(ws);
+      this.startEmbeddingBackfillForWorkspace(ws);
     } else {
       return await this.start();
     }

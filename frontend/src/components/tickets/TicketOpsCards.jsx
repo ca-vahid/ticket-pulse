@@ -26,6 +26,26 @@ export function TicketLinksCard({ ticketId, canWrite = false, canMerge = false, 
   const [error, setError] = useState(null);
   const [notifyRequester, setNotifyRequester] = useState(false);
 
+  // Likely-duplicate suggestions for the duplicate/merge pickers (gap plan 2
+  // P5.2): same-subject matches + high embedding similarity, fetched lazily
+  // the first time the add form opens.
+  const [suggestions, setSuggestions] = useState(null);
+  useEffect(() => {
+    if (!adding || suggestions !== null) return;
+    ticketsAPI.related(ticketId)
+      .then((res) => {
+        const d = res?.data || {};
+        const seen = new Set();
+        setSuggestions([
+          ...(d.nearDuplicates || []).map((t) => ({ ...t, why: 'same subject' })),
+          ...(d.similarByContent || [])
+            .filter((t) => (t.similarity || 0) >= 0.7)
+            .map((t) => ({ ...t, why: `${Math.round(t.similarity * 100)}% similar` })),
+        ].filter((t) => (seen.has(t.id) ? false : seen.add(t.id))).slice(0, 3));
+      })
+      .catch(() => setSuggestions([]));
+  }, [adding, suggestions, ticketId]);
+
   const load = useCallback(async () => {
     try {
       const res = await ticketsAPI.links(ticketId);
@@ -126,6 +146,26 @@ export function TicketLinksCard({ ticketId, canWrite = false, canMerge = false, 
               {busy ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" /> : 'Add'}
             </button>
           </div>
+          {['duplicate_of', 'merge_into'].includes(kind) && suggestions?.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1">
+              <span className="text-[10px] text-slate-400">Likely:</span>
+              {suggestions.map((s) => (
+                <button
+                  key={s.id}
+                  onClick={() => setTargetId(String(s.id))}
+                  title={`${s.subject || '(no subject)'} — ${s.why}`}
+                  className={`tp-focus-ring inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[10px] font-mono font-semibold ${
+                    String(s.id) === targetId
+                      ? 'bg-violet-100 border-violet-300 text-violet-800'
+                      : 'bg-violet-50 border-violet-200 text-violet-700 hover:bg-violet-100'
+                  }`}
+                >
+                  {s.displayRef}
+                  <span className="font-sans font-normal text-violet-500">{s.why}</span>
+                </button>
+              ))}
+            </div>
+          )}
           {kind === 'duplicate_of' && (
             <p className="text-[10px] text-amber-600">Marks this ticket as the duplicate and resolves it (TP-born) with an audit note.</p>
           )}

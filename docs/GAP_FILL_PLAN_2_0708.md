@@ -80,19 +80,19 @@ The v3.0.5 features exist end-to-end but not *everywhere*. Close the loops:
 - [x] Respect inputs/composer focus; discoverable hint in the queue header
 - [x] Tests: palette component; key handling doesn't fire while typing
 
-## Phase 5 — AI: sentiment + vector similar-tickets
+## Phase 5 — AI: sentiment + vector similar-tickets ✅ DONE
 
 ### 5.1 Requester sentiment
-- [ ] Per-ticket sentiment (positive/neutral/frustrated) computed from the latest requester messages via the provider gateway (schema-constrained, cheap model tier); stored on the ticket with computedAt; refreshed on new requester replies (debounced)
-- [ ] Chip on detail header + optional queue dot; workflow condition field `ticket.sentiment`
-- [ ] TEAM-SAFE: sentiment describes the REQUESTER's state, never agent performance; no aggregation by agent
-- [ ] Tests: refresh triggers, condition field
+- [x] Per-ticket sentiment (positive/neutral/frustrated) computed from the latest requester messages via the provider gateway (schema-constrained, cheap model tier); stored on the ticket with computedAt; refreshed on new requester replies (debounced)
+- [x] Chip on detail header + optional queue dot; workflow condition field `ticket.sentiment`
+- [x] TEAM-SAFE: sentiment describes the REQUESTER's state, never agent performance; no aggregation by agent
+- [x] Tests: refresh triggers, condition field
 
 ### 5.2 Vector similar-tickets
-- [ ] Enable pgvector on Azure Postgres (azure.extensions) — dev first; fall back plan: cosine over float[] if the extension is unavailable
-- [ ] `ticket_embeddings` (ticketId, embedding, model, updatedAt); generate on create + subject/description edit; nightly backfill sweep for recent history (rate-limited)
-- [ ] Related-tickets card gains "similar by content" section (labeled as suggestion, with distance); merge modal suggests likely duplicates
-- [ ] Tests: storage round-trip, query shape; embedding calls mocked
+- [x] Shipped the float[] cosine path (256-dim, app-side over a bounded candidate pool) — pgvector 0.8.2 IS available on prod but azure.extensions is not allow-listed yet and dev Postgres lacks the extension entirely; design upgrades to an indexed pgvector column later without an API change
+- [x] `ticket_embeddings` (ticketId, embedding, model, updatedAt); generate on create + subject/description edit; nightly backfill sweep for recent history (rate-limited)
+- [x] Related-tickets card gains "similar by content" section (labeled as suggestion, with distance); merge modal suggests likely duplicates
+- [x] Tests: storage round-trip, query shape; embedding calls mocked
 
 ## Phase 6 — Wrap & ship
 
