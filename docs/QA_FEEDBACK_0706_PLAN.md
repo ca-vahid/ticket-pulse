@@ -98,11 +98,11 @@ Hypothesis: the UI never sends an explicit clear (`''` dropped / undefined skipp
 
 ## Phase 6 — Wrap & ship
 
-- [ ] Full lint + backend/frontend suites green
-- [ ] Version → **3.0.4-preview** + concise changelog (fixes-first)
-- [ ] Self-test the sync fixes on dev (no outbound email / FS writes — action-only or mock, same guardrails as last time)
-- [ ] Dev migrations applied (`quick_notes`); prod migration at deploy via `migrate deploy`
-- [ ] Branded **QA response PDF** next to the request file (per the established loop): item-by-item what changed, incl. the 231648 incident explanation
+- [x] Full lint + backend/frontend suites green
+- [x] Version → **3.0.4-preview** + concise changelog (fixes-first)
+- [x] Self-test the sync fixes on dev (no outbound email / FS writes — action-only or mock, same guardrails as last time)
+- [x] Dev migrations applied (`quick_notes`); prod migration at deploy via `migrate deploy`
+- [x] Branded **QA response PDF** next to the request file (per the established loop): item-by-item what changed, incl. the 231648 incident explanation
 - [ ] Deploy to prod on user go-ahead → verify health/version + probe new endpoints
 
 ---
