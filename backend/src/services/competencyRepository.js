@@ -224,8 +224,30 @@ class CompetencyRepository {
 
   async deleteCategory(id) {
     try {
+      // Deleting a category in use is destructive far beyond the row itself:
+      // subcategories are orphaned (parent_id -> NULL), tickets lose their
+      // internal_category_id (SET NULL), and technician competencies are
+      // CASCADE-deleted. This orphaned 4.4k Accounting tickets in July 2026 —
+      // block instead, and point at the safe alternatives.
+      const [childCount, ticketCount] = await Promise.all([
+        prisma.competencyCategory.count({ where: { parentId: id } }),
+        prisma.ticket.count({
+          where: { OR: [{ internalCategoryId: id }, { internalSubcategoryId: id }] },
+        }),
+      ]);
+      if (childCount > 0) {
+        throw new ValidationError(
+          `This category has ${childCount} subcategor${childCount === 1 ? 'y' : 'ies'}. Move or delete them first — deleting the parent would orphan them.`,
+        );
+      }
+      if (ticketCount > 0) {
+        throw new ValidationError(
+          `${ticketCount} ticket${ticketCount === 1 ? ' is' : 's are'} categorized under this category. Deactivate it instead (it disappears from pickers but keeps ticket history), or merge it into another category first.`,
+        );
+      }
       return await prisma.competencyCategory.delete({ where: { id } });
     } catch (error) {
+      if (error instanceof ValidationError) throw error;
       logger.error('Error deleting competency category:', error);
       throw new DatabaseError('Failed to delete competency category', error);
     }

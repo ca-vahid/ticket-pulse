@@ -22,9 +22,19 @@ export function normalizeTicketCategory(ticket, workspaceId) {
     };
   }
 
-  const categoryId = ticket?.internalCategoryId ?? ticket?.internalCategory?.id ?? null;
+  // Self-heal: if the top category is missing but the subcategory relation is
+  // loaded, derive the parent from it. A bare category delete once orphaned
+  // 4.4k tickets into per-subcategory "Uncategorized" islands on the category
+  // map — deletes are guarded now, but analytics shouldn't fracture on data
+  // that arrives broken.
+  const categoryId = ticket?.internalCategoryId
+    ?? ticket?.internalCategory?.id
+    ?? ticket?.internalSubcategory?.parentId
+    ?? null;
   const subcategoryId = ticket?.internalSubcategoryId ?? ticket?.internalSubcategory?.id ?? null;
-  const categoryName = ticket?.internalCategory?.name || null;
+  const categoryName = ticket?.internalCategory?.name
+    || ticket?.internalSubcategory?.parent?.name
+    || null;
   const subcategoryName = ticket?.internalSubcategory?.name || null;
 
   if (categoryId || subcategoryId || categoryName || subcategoryName) {
