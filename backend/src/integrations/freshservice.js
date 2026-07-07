@@ -905,6 +905,21 @@ class FreshServiceClient {
     }
   }
 
+  async deleteCustomObjectRecord(objectId, recordId) {
+    try {
+      await this._delete(`/objects/${objectId}/records/${recordId}`);
+      return { deleted: true };
+    } catch (error) {
+      const detail = getFreshServiceDetail(error);
+      const status = getFreshServiceStatus(error);
+      logger.error(`Error deleting FreshService custom object record ${recordId} for ${objectId}:`, { status, detail });
+      const wrapped = new Error(detail?.description || detail?.message || error.message);
+      wrapped.freshserviceDetail = detail;
+      wrapped.freshserviceStatus = status;
+      throw wrapped;
+    }
+  }
+
   async _buildClosureRetryPayload(ticketId, status, validationDetail = null) {
     const ticket = await this.getTicket(ticketId).catch((error) => {
       logger.warn(`Could not fetch ticket ${ticketId} before closure retry`, { error: error.message });
