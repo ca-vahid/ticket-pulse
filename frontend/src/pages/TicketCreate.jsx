@@ -646,9 +646,19 @@ export default function TicketCreate() {
                       className={`${fieldClass} disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed`}
                     >
                       <option value="">{aiDecides ? 'AI will choose' : 'Choose a category'}</option>
-                      {(meta?.categoryTree || []).map((c) => (
-                        <option key={c.id} value={c.id}>{c.name}</option>
-                      ))}
+                      {(() => {
+                        // Scope by the chosen FS group (gap plan P2.3); unmapped
+                        // categories stay visible everywhere.
+                        const tree = meta?.categoryTree || [];
+                        const links = meta?.categoryGroupLinks || [];
+                        const gid = groupId.startsWith('fs:') ? groupId.slice(3) : null;
+                        if (!links.length || !gid) return tree.map((c) => <option key={c.id} value={c.id}>{c.name}</option>);
+                        const mapped = new Set(links.map((l) => l.categoryId));
+                        const allowed = new Set(links.filter((l) => l.groupId === gid).map((l) => l.categoryId));
+                        return tree
+                          .filter((c) => !mapped.has(c.id) || allowed.has(c.id) || String(c.id) === categoryId)
+                          .map((c) => <option key={c.id} value={c.id}>{c.name}</option>);
+                      })()}
                     </select>
                   </div>
                   <div>

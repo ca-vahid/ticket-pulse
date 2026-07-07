@@ -223,6 +223,39 @@ async function searchRecentTickets(input, ctx) {
   };
 }
 
+/**
+ * Durable per-workspace tool usage (gap plan P5 rollout tooling): last-used /
+ * last-error / call count per tool, surfaced in the admin UI so mock-week
+ * audits can see what actually ran. Stored as one JSON blob per workspace in
+ * app_settings — tool calls are low-volume, so churn is negligible.
+ */
+export async function recordNotificationToolUsage(workspaceId, name, error = null) {
+  try {
+    const { default: settingsRepository } = await import('./settingsRepository.js');
+    const key = `llm_tool_usage_ws${workspaceId || 0}`;
+    let current = {};
+    try { current = JSON.parse((await settingsRepository.get(key)) || '{}') || {}; } catch { current = {}; }
+    const row = current[name] || { count: 0 };
+    row.count = (row.count || 0) + 1;
+    row.lastUsedAt = new Date().toISOString();
+    if (error) {
+      row.lastError = String(error.message || error).slice(0, 300);
+      row.lastErrorAt = row.lastUsedAt;
+    }
+    current[name] = row;
+    await settingsRepository.set(key, JSON.stringify(current));
+  } catch { /* observability must never break a tool call */ }
+}
+
+export async function getNotificationToolUsage(workspaceId) {
+  try {
+    const { default: settingsRepository } = await import('./settingsRepository.js');
+    return JSON.parse((await settingsRepository.get(`llm_tool_usage_ws${workspaceId || 0}`)) || '{}') || {};
+  } catch {
+    return {};
+  }
+}
+
 export async function executeNotificationWorkflowTool(name, input, ctx) {
   const maxBytes = ctx.policy?.toolSettings?.safety?.maxToolOutputBytes || 12000;
   let result;
@@ -258,10 +291,16 @@ export async function executeNotificationWorkflowTool(name, input, ctx) {
     });
     result = { generatedAt: new Date().toISOString(), untrustedEvidence: true, outageSignals: bundle.outageSignals };
   } else if (name === 'search_recent_tickets') {
-    result = await searchRecentTickets(input, ctx);
+    try {
+      result = await searchRecentTickets(input, ctx);
+    } catch (err) {
+      recordNotificationToolUsage(ctx?.workspaceId, name, err).catch(() => {});
+      throw err;
+    }
   } else {
     throw new Error(`Unsupported notification workflow tool: ${name}`);
   }
+  recordNotificationToolUsage(ctx?.workspaceId, name).catch(() => {});
   return capJson(result, maxBytes);
 }
 

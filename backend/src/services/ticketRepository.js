@@ -243,6 +243,9 @@ class TicketRepository {
         nonBillableMinutes: data.nonBillableMinutes,
         resolutionTimeSeconds: data.resolutionTimeSeconds,
         firstAssignedAt: data.firstAssignedAt,
+        // Only ever set, never clear — FS stats can lag on partial payloads
+        // and a null must not wipe an already-known first response (P4.1).
+        firstPublicAgentReplyAt: data.firstPublicAgentReplyAt || undefined,
         isNoise: data.isNoise ?? undefined,
         noiseRuleMatched: data.noiseRuleMatched ?? undefined,
         groupId: data.groupId !== undefined ? data.groupId : undefined,
@@ -298,6 +301,7 @@ class TicketRepository {
         nonBillableMinutes: data.nonBillableMinutes,
         resolutionTimeSeconds: data.resolutionTimeSeconds,
         firstAssignedAt: data.firstAssignedAt,
+        firstPublicAgentReplyAt: data.firstPublicAgentReplyAt || null,
         isNoise: data.isNoise || false,
         noiseRuleMatched: data.noiseRuleMatched || null,
         groupId: data.groupId || null,

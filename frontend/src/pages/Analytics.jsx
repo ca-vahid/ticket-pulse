@@ -2233,9 +2233,37 @@ export default function Analytics({ view = 'standard' }) {
             <StatCard title="Review Needed" value={formatNumber(overview?.dataQuality?.categoryReviewNeededCount || 0)} subtitle="Weak or flagged category fit" icon={AlertTriangle} tone="amber" />
             <StatCard title="Unclassified" value={formatNumber(overview?.dataQuality?.unclassifiedCount || 0)} subtitle="No usable category value" icon={XCircle} tone="red" />
           </div>
-          <p className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-            First-response analytics are hidden until the source field is populated enough to avoid misleading zero-value charts.
-          </p>
+          {(overview?.firstResponse?.coveragePct ?? 0) >= 30 ? (
+            <div className="mt-3 grid gap-3 sm:grid-cols-3">
+              <StatCard
+                title="Median First Response"
+                value={overview.firstResponse.medianHours === null ? '—' : `${overview.firstResponse.medianHours}h`}
+                subtitle={`n=${overview.firstResponse.sampleSize} (${overview.firstResponse.coveragePct}% coverage)`}
+                icon={Gauge}
+                tone="green"
+              />
+              <StatCard
+                title="P90 First Response"
+                value={overview.firstResponse.p90Hours === null ? '—' : `${overview.firstResponse.p90Hours}h`}
+                subtitle="90% of first replies were faster"
+                icon={Gauge}
+                tone="amber"
+              />
+              <StatCard
+                title="Origin Split"
+                value={`${formatNumber(overview?.originMix?.ticketpulse || 0)} / ${formatNumber(overview?.originMix?.freshservice || 0)}`}
+                subtitle="TP-born / FreshService-born (created in range)"
+                icon={Info}
+                tone="slate"
+              />
+            </div>
+          ) : (
+            <p className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+              First-response analytics unlock at 30% coverage — currently {overview?.firstResponse?.coveragePct ?? 0}% of range tickets carry a first-response timestamp
+              (populates from FreshService stats on sync; run a backfill under Settings → Backfill to fill history).
+              Origin split: {formatNumber(overview?.originMix?.ticketpulse || 0)} TP-born / {formatNumber(overview?.originMix?.freshservice || 0)} FS-born.
+            </p>
+          )}
         </Panel>
       </div>
     </div>
@@ -2336,7 +2364,7 @@ export default function Analytics({ view = 'standard' }) {
             <button
               type="button"
               onClick={() => goToFrame(activeCategoryFrameIndex - 1)}
-              disabled={!hasFrames}
+              disabled={!hasFrames || agentPortfolioLensEnabled}
               className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40"
               title="Previous period"
             >
@@ -2359,7 +2387,7 @@ export default function Analytics({ view = 'standard' }) {
             <button
               type="button"
               onClick={() => goToFrame(activeCategoryFrameIndex + 1)}
-              disabled={!hasFrames}
+              disabled={!hasFrames || agentPortfolioLensEnabled}
               className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40"
               title="Next period"
             >
@@ -2398,6 +2426,12 @@ export default function Analytics({ view = 'standard' }) {
             </div>
           </div>
         </div>
+        {agentPortfolioLensEnabled && (
+          <p className="mt-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-700">
+            The timeline pauses while the personal-heatmap lens is active (the two would tell conflicting stories).
+            Switch the agent lens to <span className="font-semibold">Team share</span> — or clear it — to animate the map again.
+          </p>
+        )}
       </Panel>
     );
   };

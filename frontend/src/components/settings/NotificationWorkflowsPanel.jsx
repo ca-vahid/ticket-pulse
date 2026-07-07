@@ -5121,6 +5121,14 @@ export function LlmContextToolsPanel({
 
               {mode === 'tools_enabled' && (
                 <div>
+                  {/* First-enable notice (gap plan P5 rollout): what tool mode means. */}
+                  <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800">
+                    <span className="font-semibold">Tool mode is on for this workspace.</span>{' '}
+                    The LLM may call the read-only Ticket Pulse evidence tools below while drafting.
+                    Internal notes enter the evidence bundle but the output guard hard-blocks quoting them verbatim.
+                    Recommended rollout: run one non-critical workflow in <span className="font-semibold">mock mode for a week</span>,
+                    review its audit for unsupported claims and latency, then enable live delivery per workflow.
+                  </div>
                   <div className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-600">
                     Read-only tool availability
                     <LlmHelpButton topic="toolCatalog" onOpenHelp={onOpenHelp} className="h-6 w-6 shadow-none" />
@@ -8528,6 +8536,33 @@ export default function NotificationWorkflowsPanel({
               ))}
             </div>
           )}
+
+          <div className="rounded-lg border border-slate-200 p-2.5 space-y-1.5">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Tags</p>
+            <p className="text-[11px] text-slate-400 normal-case">Applies to both origins (Ticket Pulse layer — never written to FreshService). Missing tags are created automatically.</p>
+            <label className="block text-[11px] text-slate-500">
+              Add tags (comma-separated)
+              <input
+                value={Array.isArray(selectedNode.data?.addTags) ? selectedNode.data.addTags.join(', ') : ''}
+                onChange={(event) => updateNodeData({
+                  addTags: event.target.value.split(',').map((v) => v.trim()).filter(Boolean),
+                })}
+                placeholder="e.g. vip, follow-up"
+                className="mt-0.5 w-full rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-900"
+              />
+            </label>
+            <label className="block text-[11px] text-slate-500">
+              Remove tags (comma-separated)
+              <input
+                value={Array.isArray(selectedNode.data?.removeTags) ? selectedNode.data.removeTags.join(', ') : ''}
+                onChange={(event) => updateNodeData({
+                  removeTags: event.target.value.split(',').map((v) => v.trim()).filter(Boolean),
+                })}
+                placeholder="e.g. new"
+                className="mt-0.5 w-full rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-900"
+              />
+            </label>
+          </div>
 
           <label className="block text-xs font-medium uppercase text-gray-500">
             Audit note (optional)

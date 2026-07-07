@@ -14,15 +14,17 @@ const KIND_LABEL = {
   duplicate_of: 'duplicate of',
   related_to: 'related to',
   parent_of: 'parent of',
+  merged_into: 'merged into',
 };
 
-export function TicketLinksCard({ ticketId, canWrite = false, onNavigate, refreshToken = null }) {
+export function TicketLinksCard({ ticketId, canWrite = false, canMerge = false, onNavigate, onMerged, refreshToken = null }) {
   const [links, setLinks] = useState([]);
   const [adding, setAdding] = useState(false);
   const [targetId, setTargetId] = useState('');
   const [kind, setKind] = useState('related_to');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const [notifyRequester, setNotifyRequester] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -37,7 +39,10 @@ export function TicketLinksCard({ ticketId, canWrite = false, onNavigate, refres
     if (!Number.isFinite(id) || id <= 0 || busy) return;
     setBusy(true); setError(null);
     try {
-      if (kind === 'duplicate_of') await ticketsAPI.markDuplicateOf(ticketId, id);
+      if (kind === 'merge_into') {
+        await ticketsAPI.mergeTicket(ticketId, id, notifyRequester);
+        onMerged?.();
+      } else if (kind === 'duplicate_of') await ticketsAPI.markDuplicateOf(ticketId, id);
       else await ticketsAPI.addLink(ticketId, id, kind);
       setTargetId(''); setAdding(false);
       await load();
@@ -104,6 +109,7 @@ export function TicketLinksCard({ ticketId, canWrite = false, onNavigate, refres
               <option value="related_to">related to</option>
               <option value="duplicate_of">duplicate of</option>
               <option value="parent_of">parent of</option>
+              {canMerge && <option value="merge_into">merge into…</option>}
             </select>
             <input
               value={targetId}
@@ -122,6 +128,22 @@ export function TicketLinksCard({ ticketId, canWrite = false, onNavigate, refres
           </div>
           {kind === 'duplicate_of' && (
             <p className="text-[10px] text-amber-600">Marks this ticket as the duplicate and resolves it (TP-born) with an audit note.</p>
+          )}
+          {kind === 'merge_into' && (
+            <>
+              <p className="text-[10px] text-amber-600">
+                Copies this ticket&apos;s conversation onto the target, carries its tags over, and closes this ticket (TP-born) with an audit trail. Attachments stay here, referenced from the target.
+              </p>
+              <label className="flex items-center gap-1.5 text-[11px] text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={notifyRequester}
+                  onChange={(e) => setNotifyRequester(e.target.checked)}
+                  className="tp-focus-ring rounded border-slate-300 text-blue-600"
+                />
+                Email the requester that their ticket was consolidated (TP-born only)
+              </label>
+            </>
           )}
           {error && <p className="text-[10px] text-red-500">{error}</p>}
         </div>

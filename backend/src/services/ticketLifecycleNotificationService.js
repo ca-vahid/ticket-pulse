@@ -234,6 +234,7 @@ async function hydrateTicket(ticketId) {
       assignedTech: true,
       internalCategory: true,
       internalSubcategory: true,
+      tagLinks: { select: { tag: { select: { name: true } } } },
     },
   });
 }
@@ -273,6 +274,8 @@ function buildEventContext({ event, ticket, previousAgent, source }) {
       status: ticket.status,
       priority: ticket.priority,
       priorityLabel: priorityLabel(ticket),
+      impact: ticket.impact ?? null,
+      urgency: ticket.urgency ?? null,
       assessedPriority: ticket.assessedPriority || null,
       toEmails: emailList(ticket.toEmails),
       ccEmails: emailList(ticket.ccEmails),
@@ -294,6 +297,9 @@ function buildEventContext({ event, ticket, previousAgent, source }) {
       isNoise: ticket.isNoise === true,
       origin: ticket.origin || 'freshservice',
       customFields: ticket.customFields || {},
+      // Tag NAMES (lowercased for case-insensitive condition matching); also
+      // exposed to templates as {{ ticket.tags }}.
+      tags: (ticket.tagLinks || []).map((l) => l.tag?.name).filter(Boolean).map((n) => n.toLowerCase()),
       createdAt: dateIso(ticket.createdAt),
       assignedAt: dateIso(ticket.assignedAt),
       resolvedAt: dateIso(ticket.resolvedAt),

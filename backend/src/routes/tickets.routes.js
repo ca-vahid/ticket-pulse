@@ -246,7 +246,7 @@ router.get('/export.csv', asyncHandler(async (req, res) => {
     const s = v === null || v === undefined ? '' : String(v);
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
-  const header = ['Ref', 'Subject', 'Status', 'Priority', 'Type', 'State', 'Requester', 'Requester Email', 'Assignee', 'Category', 'Subcategory', 'Origin', 'Created', 'Last Activity'];
+  const header = ['Ref', 'Subject', 'Status', 'Priority', 'Type', 'State', 'Requester', 'Requester Email', 'Assignee', 'Category', 'Subcategory', 'Tags', 'Origin', 'Created', 'Last Activity'];
   const lines = [header.join(',')];
   for (const t of result.items) {
     lines.push([
@@ -254,6 +254,7 @@ router.get('/export.csv', asyncHandler(async (req, res) => {
       esc(t.stateChip), esc(t.requester?.name), esc(t.requester?.email), esc(t.assignedTech?.name),
       // TP taxonomy first (canonical → tp custom fields), legacy single box last
       esc(t.internalCategory?.name || t.tpSkill || t.ticketCategory), esc(t.internalSubcategory?.name || t.tpSubskill),
+      esc((t.tags || []).map((tag) => tag.name).join('; ')),
       esc(t.origin), esc(t.createdAt?.toISOString?.() || t.createdAt),
       esc(t.lastActivityAt?.toISOString?.() || t.lastActivityAt),
     ].join(','));
@@ -442,6 +443,59 @@ router.delete('/templates/:templateId', asyncHandler(async (req, res) => {
   if (!isOwner && !isAdmin) throw new ValidationError('Only the creator or an admin can remove a template');
   await prisma.replyTemplate.update({ where: { id }, data: { isActive: false } });
   res.json({ success: true });
+}));
+
+// --------------------------------------------------------- tags (gap plan P1)
+// TP-side tag layer for BOTH origins — never written back to FreshService.
+// CRUD is admin-only (Settings → Ticket Ops); linking is any ticket actor.
+
+router.get('/tags', asyncHandler(async (req, res) => {
+  const tags = await prisma.ticketTag.findMany({
+    where: { workspaceId: req.workspaceId, isActive: true },
+    select: { id: true, name: true, color: true },
+    orderBy: { name: 'asc' },
+  });
+  res.json({ success: true, data: tags });
+}));
+
+router.put('/:id/tags', asyncHandler(async (req, res) => {
+  const result = await ticketService.setTags(
+    parseTicketId(req), req.workspaceId, req.body?.tagIds, req.ticketActor,
+  );
+  res.json({ success: true, data: result });
+}));
+
+// ---------------------------------------------- bulk by query (gap plan P2.2)
+// Apply one action to EVERYTHING matching the current filter (not just the
+// page). Preview first for the confirm count; expectedTotal guards staleness.
+
+router.post('/bulk-by-query', asyncHandler(async (req, res) => {
+  if (req.ticketActor.kind === 'agent') {
+    throw new ValidationError('Bulk editing requires coordinator or admin access');
+  }
+  const result = await ticketService.bulkByQuery(req.workspaceId, {
+    query: req.body?.query || {},
+    action: req.body?.action,
+    preview: req.body?.preview === true,
+    expectedTotal: req.body?.expectedTotal ?? null,
+  }, req.ticketActor);
+  res.json({ success: true, data: result });
+}));
+
+// ---------------------------------------------------- merge (gap plan P2.1)
+// True merge: copies the source conversation onto the target, unions tags,
+// links + closes the source. Members/admins only — agents cannot merge.
+
+router.post('/:id/merge', asyncHandler(async (req, res) => {
+  if (req.ticketActor.kind === 'agent') {
+    throw new ValidationError('Merging tickets requires coordinator or admin access');
+  }
+  const { default: ticketMergeService } = await import('../services/ticketMergeService.js');
+  const result = await ticketMergeService.merge(parseTicketId(req), req.workspaceId, {
+    targetTicketId: req.body?.targetTicketId,
+    notifyRequester: req.body?.notifyRequester === true,
+  }, req.ticketActor);
+  res.json({ success: true, data: result });
 }));
 
 // ---------------------------------------------------- quick notes (QA 07-06 #12)
@@ -870,6 +924,15 @@ router.post(
         uploadedBy: req.ticketActor.email,
       }));
     }
+    // WS-A.5: push ticket-level uploads to the FS fallback copy (TP-born only;
+    // best-effort — a failed mirror never fails the upload).
+    const full = await prisma.ticket.findUnique({ where: { id: ticketId }, select: { origin: true } });
+    if (full?.origin === 'ticketpulse') {
+      const { default: mirrorService } = await import('../services/mirrorService.js');
+      for (const s of stored) {
+        mirrorService.enqueueAttachment(req.workspaceId, ticketId, s.id).catch(() => {});
+      }
+    }
     res.status(201).json({ success: true, data: stored });
   }),
 );
@@ -943,7 +1006,7 @@ router.post('/:id/approvals/:approvalId/decide', asyncHandler(async (req, res) =
   const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');
   const approval = await ticketApprovalService.decideInApp(
     parseTicketId(req), req.workspaceId, Number(req.params.approvalId),
-    req.body?.decision, req.body?.note || null, req.ticketActor,
+    req.body?.decision, req.body?.note || null, req.ticketActor, req.body?.noteHtml || null,
   );
   res.json({ success: true, data: approval });
 }));

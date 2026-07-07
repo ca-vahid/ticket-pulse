@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Check, FileText, Loader2, Plus, StickyNote, Timer, Trash2, Wand2 } from 'lucide-react';
+import { Check, FileText, Loader2, Plus, StickyNote, Tag as TagGlyph, Timer, Trash2, Wand2 } from 'lucide-react';
 import { settingsAPI, ticketsAPI } from '../../services/api';
+import { TAG_CHIP_TONES } from '../tickets/ticketUi';
 
 /**
  * Admin config for the enterprise ticket ops shipped with the workflow revamp:
@@ -429,10 +430,188 @@ function QuickNotesSection() {
   );
 }
 
+function TagsSection() {
+  const [tags, setTags] = useState([]);
+  const [draft, setDraft] = useState(null); // { name, color }
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [mergingId, setMergingId] = useState(null); // tag id with merge picker open
+
+  const load = useCallback(() => {
+    settingsAPI.getTicketTags().then((res) => setTags(res.data?.data || res.data || [])).catch(() => {});
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const save = async () => {
+    setBusy(true); setError(null);
+    try {
+      await settingsAPI.createTicketTag(draft);
+      setDraft(null);
+      load();
+    } catch (e) { setError(e.response?.data?.message || e.message); }
+    setBusy(false);
+  };
+
+  const act = async (fn) => {
+    setError(null);
+    try { await fn(); load(); } catch (e) { setError(e.response?.data?.message || e.message); }
+  };
+
+  return (
+    <SectionCard icon={TagGlyph} title="Tags" hint="The workspace tag palette. Tags apply to tickets of both origins (never written to FreshService) and power queue filters, workflow conditions/actions, and analytics.">
+      <ul className="space-y-1 mb-2">
+        {tags.map((tag) => (
+          <li key={tag.id} className="flex items-center gap-2 text-xs">
+            <span className={`px-2 py-0.5 rounded-full border font-medium ${TAG_CHIP_TONES[tag.color] || TAG_CHIP_TONES.slate} ${tag.isActive ? '' : 'opacity-40 line-through'}`}>{tag.name}</span>
+            <span className="text-slate-400">{tag.ticketCount} ticket{tag.ticketCount === 1 ? '' : 's'}</span>
+            <span className="flex-1" />
+            <select
+              value=""
+              onChange={(e) => { if (e.target.value) act(() => settingsAPI.updateTicketTag(tag.id, { color: e.target.value })); }}
+              aria-label={`Recolor ${tag.name}`}
+              className="tp-focus-ring text-[10px] border border-slate-200 rounded px-1 py-0.5 text-slate-500"
+            >
+              <option value="">color…</option>
+              {Object.keys(TAG_CHIP_TONES).map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+            {mergingId === tag.id ? (
+              <select
+                autoFocus
+                value=""
+                onChange={(e) => {
+                  const target = Number(e.target.value);
+                  setMergingId(null);
+                  if (target) act(() => settingsAPI.mergeTicketTag(tag.id, target));
+                }}
+                onBlur={() => setMergingId(null)}
+                aria-label={`Merge ${tag.name} into`}
+                className="tp-focus-ring text-[10px] border border-blue-300 rounded px-1 py-0.5 text-blue-700"
+              >
+                <option value="">merge into…</option>
+                {tags.filter((t) => t.id !== tag.id && t.isActive).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            ) : (
+              <button onClick={() => setMergingId(tag.id)} className="tp-focus-ring text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 hover:bg-slate-50">Merge</button>
+            )}
+            <button
+              onClick={() => act(() => settingsAPI.updateTicketTag(tag.id, { isActive: !tag.isActive }))}
+              className="tp-focus-ring text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 hover:bg-slate-50"
+            >
+              {tag.isActive ? 'Disable' : 'Enable'}
+            </button>
+            <button
+              onClick={() => act(() => settingsAPI.deleteTicketTag(tag.id))}
+              aria-label={`Delete tag ${tag.name}`}
+              className="tp-focus-ring p-1 rounded text-slate-300 hover:text-red-500"
+            >
+              <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+            </button>
+          </li>
+        ))}
+        {tags.length === 0 && <li className="text-xs text-slate-400 italic">No tags yet.</li>}
+      </ul>
+      {error && <p className="text-xs text-red-500 mb-1.5">{error}</p>}
+      {draft ? (
+        <div className="rounded-lg border border-slate-200 p-2.5 flex items-center gap-1.5 text-xs">
+          <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Tag name (e.g. VIP)" aria-label="Tag name" className="tp-focus-ring flex-1 border border-slate-200 rounded-md px-2 py-1" />
+          <select value={draft.color} onChange={(e) => setDraft({ ...draft, color: e.target.value })} aria-label="Tag color" className="tp-focus-ring border border-slate-200 rounded-md px-1.5 py-1">
+            {Object.keys(TAG_CHIP_TONES).map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+          <button onClick={save} disabled={busy || !draft.name.trim()} className="tp-focus-ring px-2.5 py-1 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-60">
+            {busy ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" /> : 'Create'}
+          </button>
+          <button onClick={() => setDraft(null)} className="tp-focus-ring px-2.5 py-1 rounded-md text-slate-500 hover:bg-slate-50">Cancel</button>
+        </div>
+      ) : (
+        <button onClick={() => setDraft({ name: '', color: 'slate' })} className="tp-focus-ring inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700">
+          <Plus className="w-3.5 h-3.5" aria-hidden="true" /> New tag
+        </button>
+      )}
+    </SectionCard>
+  );
+}
+
+function CategoryGroupSection() {
+  const [links, setLinks] = useState([]); // [{ categoryId, groupId }]
+  const [categories, setCategories] = useState([]);
+  const [groups, setGroups] = useState([]);
+  const [dirty, setDirty] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    ticketsAPI.meta().then((res) => {
+      setCategories((res.data?.categoryTree || []).map((c) => ({ id: c.id, name: c.name })));
+      setGroups((res.data?.groups || []).filter((g) => g.freshserviceId).map((g) => ({ id: String(g.freshserviceId), name: g.name })));
+    }).catch(() => {});
+    ticketsAPI.categoryGroupLinks().then((res) => {
+      setLinks((res.data || []).map((l) => ({ categoryId: l.categoryId, groupId: String(l.groupId) })));
+    }).catch(() => {});
+  }, []);
+
+  const toggle = (categoryId, groupId) => {
+    setDirty(true);
+    setLinks((prev) => {
+      const exists = prev.some((l) => l.categoryId === categoryId && l.groupId === groupId);
+      return exists
+        ? prev.filter((l) => !(l.categoryId === categoryId && l.groupId === groupId))
+        : [...prev, { categoryId, groupId }];
+    });
+  };
+
+  const save = async () => {
+    setBusy(true); setError(null);
+    try {
+      await ticketsAPI.setCategoryGroupLinks(links);
+      setDirty(false);
+    } catch (e) { setError(e.response?.data?.message || e.message); }
+    setBusy(false);
+  };
+
+  if (groups.length === 0) return null;
+
+  return (
+    <SectionCard icon={Check} title="Category ↔ group mapping" hint="Scope top categories to specific groups: a mapped category only shows in pickers for tickets in one of its groups. Categories with no mapping stay visible everywhere.">
+      <div className="space-y-1.5 mb-2">
+        {categories.map((cat) => {
+          const mapped = links.filter((l) => l.categoryId === cat.id).map((l) => l.groupId);
+          return (
+            <div key={cat.id} className="flex flex-wrap items-center gap-1.5 text-xs">
+              <span className="w-56 truncate font-semibold text-slate-600" title={cat.name}>{cat.name}</span>
+              {groups.map((g) => (
+                <button
+                  key={g.id}
+                  type="button"
+                  onClick={() => toggle(cat.id, g.id)}
+                  aria-pressed={mapped.includes(g.id)}
+                  className={`tp-focus-ring px-2 py-0.5 rounded-full border text-[11px] ${
+                    mapped.includes(g.id) ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-400 border-slate-200 hover:border-indigo-300'
+                  }`}
+                >
+                  {g.name}
+                </button>
+              ))}
+              {mapped.length === 0 && <span className="text-[10px] text-slate-300 italic">all groups</span>}
+            </div>
+          );
+        })}
+      </div>
+      {error && <p className="text-xs text-red-500 mb-1.5">{error}</p>}
+      {dirty && (
+        <button onClick={save} disabled={busy} className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 disabled:opacity-60">
+          {busy ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" /> : <Check className="w-3 h-3" aria-hidden="true" />} Save mapping
+        </button>
+      )}
+    </SectionCard>
+  );
+}
+
 export default function TicketOpsPanel() {
   return (
     <div className="space-y-4 animate-fadeIn">
       <SlaSection />
+      <TagsSection />
+      <CategoryGroupSection />
       <MacrosSection />
       <QuickNotesSection />
       <CustomFieldsSection />

@@ -98,6 +98,15 @@ class MirrorService {
     return this._enqueue(workspaceId, ticketId, 'delete_ticket');
   }
 
+  /**
+   * Mirror a ticket-LEVEL attachment (uploaded via the rail, not on a reply)
+   * to the FS fallback copy as a private note carrying the file (WS-A.5).
+   * Thread-entry attachments already ride their entry's mirror job.
+   */
+  async enqueueAttachment(workspaceId, ticketId, attachmentId) {
+    return this._enqueue(workspaceId, ticketId, 'attachment', null, { attachmentId });
+  }
+
   async _enqueue(workspaceId, ticketId, kind, threadEntryId = null, payload = null) {
     try {
       return await prisma.mirrorJob.create({
@@ -190,6 +199,7 @@ class MirrorService {
       else if (job.kind === 'thread_entry') await this._mirrorThreadEntry(job, client);
       else if (job.kind === 'delete_thread_entry') await this._mirrorThreadEntryDelete(job, client);
       else if (job.kind === 'delete_ticket') await this._mirrorDelete(job, client);
+      else if (job.kind === 'attachment') await this._mirrorAttachment(job, client);
       else throw new Error(`Unknown mirror job kind: ${job.kind}`);
 
       await prisma.mirrorJob.update({
@@ -387,6 +397,42 @@ class MirrorService {
         externalEntryId: result?.conversation?.id ? `mirror-${result.conversation.id}` : entry.externalEntryId,
       },
     });
+  }
+
+  /**
+   * WS-A.5: ticket-level attachment → private note with the file on the FS
+   * copy. Size-capped (FS rejects very large uploads); a missing blob or an
+   * oversize file resolves the job with a warning instead of dead-lettering.
+   */
+  async _mirrorAttachment(job, client) {
+    const FS_ATTACHMENT_CAP_BYTES = 15 * 1024 * 1024; // FreshService per-request cap
+    const ticket = await this._loadTicket(job.ticketId);
+    if (!ticket.freshserviceTicketId) {
+      throw new Error('Awaiting FreshService copy (create_ticket has not completed)');
+    }
+    const row = await prisma.ticketAttachment.findFirst({
+      where: { id: Number(job.payload?.attachmentId), ticketId: job.ticketId },
+    });
+    if (!row) return; // deleted before the mirror ran — nothing to do
+    if (row.sizeBytes > FS_ATTACHMENT_CAP_BYTES) {
+      logger.warn(`Mirror: attachment "${row.fileName}" (${row.sizeBytes}B) exceeds the FS cap — skipped`);
+      return;
+    }
+    const buffers = await attachmentService.buffersForThreadEntry(row.threadEntryId ?? -1);
+    let files = buffers;
+    if (!files.length) {
+      // Ticket-level rows have no threadEntryId — fetch the single blob.
+      try {
+        const buffer = await attachmentService._container().getBlockBlobClient(row.blobName).downloadToBuffer();
+        files = [{ filename: row.fileName, buffer, contentType: row.contentType }];
+      } catch (err) {
+        logger.warn(`Mirror: attachment blob fetch failed for "${row.fileName}": ${err.message} — skipped`);
+        return;
+      }
+    }
+    const body = `<p><b>${MIRROR_MARKER}</b> attachment uploaded in Ticket Pulse · ${ticketDisplayRef(ticket)}</p><p>${String(row.fileName).replace(/</g, '&lt;')}</p>`;
+    await client.addNote(Number(ticket.freshserviceTicketId), body, { isPrivate: true, attachments: files });
+    logger.info(`Mirror: attachment "${row.fileName}" pushed to FS copy of ticket ${job.ticketId}`);
   }
 
   async _mirrorThreadEntryDelete(job, client) {

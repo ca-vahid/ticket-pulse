@@ -9,7 +9,7 @@ import {
   CalendarClock, CalendarDays, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight,
   GripVertical, LayoutList, ListFilter, Plus, Search, Star, Trash2, Users, VolumeX, X,
 } from 'lucide-react';
-import { PersonAvatar, PRIORITY_LABELS, PRIORITY_STRIP_COLORS } from './ticketUi';
+import { PersonAvatar, PRIORITY_LABELS, PRIORITY_STRIP_COLORS, TagChip } from './ticketUi';
 import { ticketsAPI } from '../../services/api';
 import 'react-day-picker/style.css';
 
@@ -148,7 +148,7 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
 
   // Personal, persisted facet-section order — drag to rearrange (e.g. Status
   // above Technician). New sections append so the list survives app updates.
-  const FACET_KEYS = ['status', 'technician', 'priority', 'type', 'category', 'group', 'source', 'created', 'due', 'origin'];
+  const FACET_KEYS = ['status', 'technician', 'priority', 'type', 'category', 'tag', 'group', 'source', 'created', 'due', 'origin'];
   const [sectionOrder, setSectionOrder] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('tp_filter_section_order') || 'null');
@@ -207,6 +207,8 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
   const subcategories = csvList(get('subcategory'));
   const groups = csvList(get('group'));
   const sources = csvList(get('source'));
+  const tags = csvList(get('tag'));
+  const tagMode = get('tagMode');
   const due = csvList(get('due'));
   const origin = get('origin');
   const createdFrom = get('createdFrom');
@@ -216,7 +218,7 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
 
   const activeTotal = [
     segment && segment !== 'all', statusRaw, assignees.length, priorities.length, types.length,
-    categories.length, subcategories.length, groups.length, sources.length, due.length,
+    categories.length, subcategories.length, groups.length, sources.length, tags.length, due.length,
     origin, createdFrom || createdTo, noise, view, get('q'),
   ].filter(Boolean).length;
 
@@ -329,7 +331,7 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
     && activeTotal === Object.keys(v.params).length;
 
   // Snapshot the active filter query for a new saved view.
-  const FILTER_KEYS = ['segment', 'status', 'assignee', 'priority', 'type', 'category', 'subcategory', 'group', 'source', 'due', 'origin', 'createdFrom', 'createdTo', 'noise', 'q', 'view'];
+  const FILTER_KEYS = ['segment', 'status', 'assignee', 'priority', 'type', 'category', 'subcategory', 'group', 'source', 'tag', 'tagMode', 'due', 'origin', 'createdFrom', 'createdTo', 'noise', 'q', 'view'];
   const captureParams = () => {
     const out = {};
     for (const k of FILTER_KEYS) { const val = searchParams.get(k); if (val) out[k] = val; }
@@ -663,6 +665,43 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
           </SortableFacet>
         )}
 
+        {/* Tags (gap plan P1) */}
+        {(meta?.tags?.length || 0) > 0 && (
+          <SortableFacet {...facetProps('tag')}>
+            <Section title="Tags" activeCount={tags.length} onClear={() => setParams({ tag: null, tagMode: null })}>
+              {tags.length > 1 && (
+                <div className="flex items-center gap-1 mb-1 px-1.5">
+                  <span className="text-[10px] uppercase tracking-wide text-slate-400">Match</span>
+                  {['any', 'all'].map((mode) => (
+                    <button
+                      key={mode}
+                      onClick={() => setParams({ tagMode: mode === 'any' ? null : mode })}
+                      aria-pressed={(tagMode || 'any') === mode}
+                      className={`tp-focus-ring px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase ${
+                        (tagMode || 'any') === mode ? 'bg-blue-100 text-blue-700' : 'text-slate-400 hover:bg-slate-50'
+                      }`}
+                    >
+                      {mode}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {meta.tags.map((t) => (
+                <Facet
+                  key={t.id}
+                  checked={tags.includes(String(t.id))}
+                  onToggle={() => toggleCsv('tag', String(t.id))}
+                >
+                  <TagChip tag={t} size="xs" />
+                </Facet>
+              ))}
+              <Facet checked={tags.includes('none')} onToggle={() => toggleCsv('tag', 'none')}>
+                <span className="text-slate-400 italic">Untagged</span>
+              </Facet>
+            </Section>
+          </SortableFacet>
+        )}
+
         {/* Source */}
         {(meta?.sources?.length || 0) > 0 && (
           <SortableFacet {...facetProps('source')}>
@@ -897,6 +936,13 @@ export function ActiveFilterBar({ meta }) {
   for (const s of csvList(get('subcategory'))) chips.push({ label: catName(s), onRemove: () => removeFromCsv('subcategory', s) });
   for (const g of csvList(get('group'))) chips.push({ label: groupName(g), onRemove: () => removeFromCsv('group', g) });
   for (const s of csvList(get('source'))) chips.push({ label: sourceName(s), onRemove: () => removeFromCsv('source', s) });
+  for (const t of csvList(get('tag'))) {
+    const tagObj = (meta?.tags || []).find((x) => String(x.id) === t);
+    chips.push({
+      label: t === 'none' ? 'Untagged' : `#${tagObj?.name || t}`,
+      onRemove: () => removeFromCsv('tag', t),
+    });
+  }
   const from = get('createdFrom');
   const to = get('createdTo');
   if (from || to) {

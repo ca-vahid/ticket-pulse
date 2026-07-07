@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import {
   Ban, CheckCircle2, ChevronRight, Clock, MessageCircleQuestion, RefreshCw, Send, Stamp, Trash2, XCircle,
 } from 'lucide-react';
-import { PersonAvatar, timeAgo } from './ticketUi';
+import { PersonAvatar, SafeHtml, timeAgo } from './ticketUi';
 
 // Per-approver / verdict status → color-coded look (dot, chip, text, header tint).
 const STATUS = {
@@ -111,7 +111,9 @@ export default function ApprovalTimeline({
                   ) : (
                     <p className="text-sm text-slate-500">Cancelled · requested by {head.requestedBy}</p>
                   )}
-                  {decider?.decisionNote && !/^superseded/i.test(decider.decisionNote) && (
+                  {decider?.decisionNoteHtml && !/^superseded/i.test(decider.decisionNote || '') ? (
+                    <div className="mt-1.5"><SafeHtml html={decider.decisionNoteHtml} className="text-xs text-slate-500" /></div>
+                  ) : decider?.decisionNote && !/^superseded/i.test(decider.decisionNote) && (
                     <p className="text-xs text-slate-500 mt-1.5 italic">“{decider.decisionNote}”</p>
                   )}
                 </div>
@@ -149,7 +151,11 @@ export default function ApprovalTimeline({
                 Requested by <span className="font-medium text-slate-600">{head.requestedBy}</span>
                   {rows.length > 1 && <span className="text-slate-400"> · {rows.length} approvers · any one decides</span>}
                 </p>
-                {head.requestNote && (
+                {head.requestNoteHtml ? (
+                  <div className="mt-1 text-xs text-slate-500 border-l-2 border-slate-200 pl-2">
+                    <SafeHtml html={head.requestNoteHtml} className="text-xs text-slate-500" />
+                  </div>
+                ) : head.requestNote && (
                   <p className="mt-1 text-xs text-slate-500 italic border-l-2 border-slate-200 pl-2">“{head.requestNote}”</p>
                 )}
 

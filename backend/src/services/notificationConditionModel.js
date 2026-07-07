@@ -31,6 +31,9 @@ export const CONDITION_FIELDS = Object.freeze({
   'ticket.category': { label: 'Category (FS)', type: 'string', path: 'ticket.category' },
   'ticket.internalCategory': { label: 'Category', type: 'string', path: 'ticket.internalCategory.name' },
   'ticket.internalSubcategory': { label: 'Subcategory', type: 'string', path: 'ticket.internalSubcategory.name' },
+  'ticket.tags': { label: 'Tags', type: 'list', path: 'ticket.tags' },
+  'ticket.impact': { label: 'Impact (1-3)', type: 'number', path: 'ticket.impact' },
+  'ticket.urgency': { label: 'Urgency (1-3)', type: 'number', path: 'ticket.urgency' },
   'ticket.isNoise': { label: 'Is noise/spam', type: 'boolean', path: 'ticket.isNoise' },
   'ticket.ageMinutes': { label: 'Ticket age', type: 'duration', path: 'ticket.ageMinutes' },
   'ticket.dueInMinutes': { label: 'Time until due', type: 'duration', path: 'ticket.dueInMinutes' },
@@ -56,6 +59,8 @@ export const CONDITION_OPERATORS = Object.freeze({
   boolean: ['is_true', 'is_false'],
   duration: ['gt', 'lt', 'gte', 'lte'],
   number: ['is', 'is_not', 'gt', 'lt', 'gte', 'lte'],
+  // Array-valued fields (e.g. ticket.tags): membership tests over the list.
+  list: ['has_any', 'has_all', 'has_none', 'is_empty', 'is_not_empty'],
 });
 
 export const VALUELESS_OPERATORS = new Set(['is_empty', 'is_not_empty', 'is_true', 'is_false']);
@@ -98,6 +103,10 @@ function compileRow(row) {
   case 'lte': return { '<=': [v, Number(value)] };
     // Custom op registered by the engine (json-logic has no regex built-in).
   case 'matches_regex': return { regex_match: [v, String(value ?? '')] };
+    // List membership (custom engine ops; values compared case-insensitively).
+  case 'has_any': return { list_has_any: [v, Array.isArray(value) ? value : [value]] };
+  case 'has_all': return { list_has_all: [v, Array.isArray(value) ? value : [value]] };
+  case 'has_none': return { '!': { list_has_any: [v, Array.isArray(value) ? value : [value]] } };
   default: throw new Error(`Unknown condition operator: ${row.operator}`);
   }
 }

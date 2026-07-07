@@ -111,12 +111,19 @@ const getSSEManager = async () => {
   return sseManager;
 };
 
+// If a sync run holds the per-workspace lock longer than this, presume it hung
+// (a hung 00:00Z run on 2026-07-07 silently blocked ALL ticket ingest for 64
+// minutes) and let the next scheduled run take the lock over. Normal cycles
+// finish in ~1 min; multi-day catch-up syncs stay well under this too.
+const SYNC_LOCK_STALE_MS = 30 * 60 * 1000;
+
 /**
  * Service for syncing data from FreshService
  */
 class SyncService {
   constructor() {
-    this.runningWorkspaces = new Set();
+    // workspaceId (or 'backfill:<ws>') -> lock acquisition timestamp (ms)
+    this.runningWorkspaces = new Map();
     this.lastSyncTime = null;
     this.currentStep = null;
     this.progressByWorkspace = new Map();
@@ -2290,12 +2297,20 @@ class SyncService {
   async performFullSync(options = {}) {
     const workspaceId = options.workspaceId || 1;
 
-    if (this.runningWorkspaces.has(workspaceId)) {
-      logger.warn(`Sync already in progress for workspace ${workspaceId}, skipping`);
-      return { status: 'skipped', reason: `Sync already in progress for workspace ${workspaceId}` };
+    const lockHeldSince = this.runningWorkspaces.get(workspaceId);
+    if (lockHeldSince) {
+      const heldMs = Date.now() - lockHeldSince;
+      if (heldMs < SYNC_LOCK_STALE_MS) {
+        logger.warn(`Sync already in progress for workspace ${workspaceId}, skipping`);
+        return { status: 'skipped', reason: `Sync already in progress for workspace ${workspaceId}` };
+      }
+      // Watchdog: the previous run hung (or died without cleanup). Take the
+      // lock over so one bad run can't silently stop ingest indefinitely.
+      logger.error(`Sync lock for workspace ${workspaceId} held ${Math.round(heldMs / 60000)}min — presumed hung; taking over`);
+      syncLogRepository.failStaleStarted(workspaceId, SYNC_LOCK_STALE_MS).catch(() => {});
     }
 
-    this.runningWorkspaces.add(workspaceId);
+    this.runningWorkspaces.set(workspaceId, Date.now());
     this._embeddedRequesterNames = new Map();
     this.progress = {
       currentStep: 'Initializing sync',
@@ -2343,7 +2358,7 @@ class SyncService {
         // Skip scheduled CSAT sync entirely if an admin backfill is running
         // for any workspace — the backfill will handle CSAT more thoroughly
         // and we don't want to compete for the shared FS rate limiter budget.
-        const backfillActive = [...this.runningWorkspaces].some((k) => String(k).startsWith('backfill:'));
+        const backfillActive = [...this.runningWorkspaces.keys()].some((k) => String(k).startsWith('backfill:'));
         if (backfillActive) {
           logger.info('Skipping scheduled CSAT sync: admin backfill is active');
         } else {
@@ -2759,7 +2774,7 @@ class SyncService {
    */
   async syncWeek({ startDate, endDate, concurrency = 10, workspaceId = 1 }) {
     try {
-      this.runningWorkspaces.add(workspaceId);
+      this.runningWorkspaces.set(workspaceId, Date.now());
       this.progress = {
         currentStep: 'Initializing week sync',
         currentStepNumber: 1,
@@ -2920,7 +2935,7 @@ class SyncService {
       return { status: 'skipped', reason: 'Backfill already running for this workspace', backfillRunId: existing?.id };
     }
 
-    this.runningWorkspaces.add(backfillKey);
+    this.runningWorkspaces.set(backfillKey, Date.now());
 
     // Create a DB row tracking this run — so the UI can rejoin after navigation
     // and we have a permanent history of all backfills.

@@ -7,6 +7,7 @@ import {
   RefreshCw, Send, ShieldCheck, Smartphone, Sparkles, Stamp, StickyNote, Trash2, UserRound, VolumeX, X, XCircle,
 } from 'lucide-react';
 import AttachmentPreviewModal from '../components/tickets/AttachmentPreviewModal';
+import TicketTagEditor from '../components/tickets/TicketTagEditor';
 import ApprovalTimeline from '../components/tickets/ApprovalTimeline';
 import ProposedReplyCard from '../components/tickets/ProposedReplyCard';
 import { CustomFieldsCard, MacroMenu, TicketLinksCard, TimeTrackingCard } from '../components/tickets/TicketOpsCards';
@@ -903,6 +904,19 @@ export default function TicketDetail() {
     return top?.subcategories || [];
   }, [meta, effectiveCategoryId]);
 
+  // Category picker scoped by the ticket's group (gap plan P2.3): categories
+  // mapped to OTHER groups drop out; unmapped categories stay visible to all.
+  // The current value is always kept so an off-scope pick never disappears.
+  const scopedCategoryTree = useMemo(() => {
+    const tree = meta?.categoryTree || [];
+    const links = meta?.categoryGroupLinks || [];
+    if (!links.length || !ticket?.groupId) return tree;
+    const gid = String(ticket.groupId);
+    const mapped = new Set(links.map((l) => l.categoryId));
+    const allowed = new Set(links.filter((l) => l.groupId === gid).map((l) => l.categoryId));
+    return tree.filter((c) => !mapped.has(c.id) || allowed.has(c.id) || c.id === effectiveCategoryId);
+  }, [meta?.categoryTree, meta?.categoryGroupLinks, ticket?.groupId, effectiveCategoryId]);
+
   const attachmentsByEntry = useMemo(() => {
     const map = new Map();
     for (const a of ticket?.attachments || []) {
@@ -1347,11 +1361,11 @@ export default function TicketDetail() {
 
   return (
     <div className="tp-tickets-backdrop min-h-screen">
-      <AppHeader activePage="tickets" />
+      <div className="print-hide"><AppHeader activePage="tickets" /></div>
 
       {/* pb clears the mobile bottom tab bar (QA 07-06 #11) */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 pb-20 md:pb-6 animate-fadeIn">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-4 print-hide">
           <button
             onClick={() => navigate('/tickets')}
             className="tp-focus-ring inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-blue-700 rounded"
@@ -1490,7 +1504,7 @@ export default function TicketDetail() {
                   </p>
 
                   {/* Quick actions */}
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <div className="mt-3 flex flex-wrap items-center gap-2 print-hide">
                     {canPickUp && (
                       <button
                         onClick={pickUp}
@@ -1521,6 +1535,12 @@ export default function TicketDetail() {
                       className="tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-white text-slate-600 border border-slate-200 hover:border-blue-300 hover:text-blue-700"
                     >
                       <Link2 className="w-3.5 h-3.5" aria-hidden="true" /> Copy link
+                    </button>
+                    <button
+                      onClick={() => window.print()}
+                      className="tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-white text-slate-600 border border-slate-200 hover:border-blue-300 hover:text-blue-700"
+                    >
+                      <Download className="w-3.5 h-3.5" aria-hidden="true" /> Print
                     </button>
                     {canConverse && (
                       <MacroMenu
@@ -1601,6 +1621,20 @@ export default function TicketDetail() {
                       )}
                     </span>
                   </div>
+
+                  {ticket.mergedInto && (
+                    <div className="mt-3 flex flex-wrap items-center gap-2 p-2.5 bg-violet-50 border border-violet-200 rounded-lg text-xs text-violet-800">
+                      <CopyPlus className="w-3.5 h-3.5 text-violet-500 flex-shrink-0" aria-hidden="true" />
+                      This ticket was merged into
+                      <button
+                        onClick={() => navigate(`/tickets/${ticket.mergedInto.id}`)}
+                        className="tp-focus-ring font-mono font-bold text-violet-700 hover:underline rounded"
+                      >
+                        {ticket.mergedInto.displayRef}
+                      </button>
+                      — the conversation continues there.
+                    </div>
+                  )}
 
                   {!isNative && (
                     <div className="mt-3 flex flex-wrap items-center gap-2 p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-600">
@@ -1691,7 +1725,7 @@ export default function TicketDetail() {
 
             {/* Page tabs — folder-style: squared, bordered, sitting on a baseline;
                 scroll horizontally on narrow screens instead of clipping. */}
-            <div role="tablist" aria-label="Ticket sections" className="flex items-end gap-1 border-b border-slate-200 mb-4 overflow-x-auto no-scrollbar">
+            <div role="tablist" aria-label="Ticket sections" className="flex items-end gap-1 border-b border-slate-200 mb-4 overflow-x-auto no-scrollbar print-hide">
               {[
                 { key: 'conversation', label: 'Conversation', icon: MessageSquare, count: conversationEntries.filter(isConversationEntry).length },
                 { key: 'approvals', label: 'Approvals', icon: CheckCircle2, count: new Set((ticket.approvals || []).map((a) => a.requestGroupId || `single-${a.id}`)).size },
@@ -1853,7 +1887,7 @@ export default function TicketDetail() {
 
                     {/* Composer */}
                     {canConverse ? (
-                      <section className="tp-card rounded-xl p-3.5" aria-label="Reply composer">
+                      <section className="tp-card rounded-xl p-3.5 print-hide" aria-label="Reply composer">
                         {/* QA 07-06 #10: wraps + compact labels under sm so nothing
                             (Templates, Quick notes) ever exceeds a phone viewport. */}
                         <div role="group" aria-label="Composer mode" className="flex flex-wrap items-center gap-1.5 mb-2.5">
@@ -2197,6 +2231,33 @@ export default function TicketDetail() {
                     </select>
                   </SidebarField>
 
+                  {/* Impact / urgency (gap plan P2.5) — optional ITSM nuance, TP-born editable */}
+                  {(canWrite || ticket.impact || ticket.urgency) && (
+                    <div className="grid grid-cols-2 gap-2">
+                      {[['impact', 'Impact'], ['urgency', 'Urgency']].map(([field, label]) => (
+                        <SidebarField key={field} label={label}>
+                          <select
+                            value={ticket[field] ?? ''}
+                            disabled={!canWrite || savingField === field}
+                            onChange={(e) => {
+                              const next = e.target.value ? Number(e.target.value) : null;
+                              const prev = ticket[field] ?? null;
+                              applyChange(field, () => ticketsAPI.update(ticketId, { [field]: next }), {
+                                label: `${label} → ${next ? ['Low', 'Medium', 'High'][next - 1] : '—'}`,
+                                undo: () => ticketsAPI.update(ticketId, { [field]: prev }),
+                              });
+                            }}
+                            className={fieldClass}
+                            aria-label={`Ticket ${field}`}
+                          >
+                            <option value="">—</option>
+                            {[1, 2, 3].map((v) => <option key={v} value={v}>{['Low', 'Medium', 'High'][v - 1]}</option>)}
+                          </select>
+                        </SidebarField>
+                      ))}
+                    </div>
+                  )}
+
                   {(ticket.frDueBy || ticket.dueBy) && !['Deleted', 'Spam'].includes(ticket.status) && (
                     <div className="pt-1 border-t border-slate-100 space-y-2">
                       {ticket.frDueBy && (
@@ -2296,7 +2357,7 @@ export default function TicketDetail() {
                           aria-label="Category"
                         >
                           <option value="">Uncategorized</option>
-                          {(meta?.categoryTree || []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                          {scopedCategoryTree.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                         </select>
                         {subcategories.length > 0 && (
                           <select
@@ -2353,6 +2414,16 @@ export default function TicketDetail() {
                     </SidebarField>
                   )}
 
+                  {/* Tags — TP-side layer, editable on BOTH origins */}
+                  <TicketTagEditor
+                    ticketId={ticketId}
+                    tags={ticket.tags || []}
+                    allTags={meta?.tags || []}
+                    canEdit={canConverse}
+                    isAdmin={isAdmin}
+                    onChanged={() => { lastLocalMutationRef.current = Date.now(); fetchTicket({ silent: true }); }}
+                  />
+
                   {/* Watchers are per category/group scopes, never per ticket */}
                   {(ticket.internalCategoryId || ticket.groupId) && (
                     <div className="flex flex-wrap items-center gap-1.5 pt-1">
@@ -2390,10 +2461,12 @@ export default function TicketDetail() {
                   )}
                 </div>
 
-                {/* Explicit ticket links (duplicate/related/parent) */}
+                {/* Explicit ticket links (duplicate/related/parent) + merge */}
                 <TicketLinksCard
                   ticketId={ticketId}
                   canWrite={canConverse}
+                  canMerge={meta?.actor?.kind !== 'agent'}
+                  onMerged={() => { lastLocalMutationRef.current = Date.now(); fetchTicket({ silent: true }); showToast('emerald', 'Ticket merged — the conversation continues on the target'); }}
                   refreshToken={ticket?.updatedAt}
                   onNavigate={(id) => navigate(`/tickets/${id}`)}
                 />
@@ -2748,9 +2821,9 @@ export default function TicketDetail() {
           technicians={meta?.technicians || []}
           busy={savingField === 'approval-request'}
           onClose={() => setRequestApprovalOpen(false)}
-          onSubmit={({ approvalCategoryId, note }) => {
+          onSubmit={({ approvalCategoryId, note, noteHtml }) => {
             applyChange('approval-request', async () => {
-              await ticketsAPI.requestApproval(ticketId, { approvalCategoryId, note });
+              await ticketsAPI.requestApproval(ticketId, { approvalCategoryId, note, noteHtml });
               setRequestApprovalOpen(false);
             });
           }}
@@ -2892,7 +2965,7 @@ export default function TicketDetail() {
         </div>
       )}
 
-      <MobileTabBar />
+      <div className="print-hide"><MobileTabBar /></div>
     </div>
   );
 }

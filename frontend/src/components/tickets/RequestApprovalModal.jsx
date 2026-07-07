@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Check, Loader2, Mail, Search, Send, ShieldCheck, Stamp, X } from 'lucide-react';
 import { PersonAvatar } from './ticketUi';
+import RichTextEditor, { isRichContent } from './RichTextEditor';
 
 const SEARCH_THRESHOLD = 6; // show the filter box once the list gets long
 
@@ -13,7 +14,8 @@ const SEARCH_THRESHOLD = 6; // show the filter box once the list gets long
  */
 export default function RequestApprovalModal({ categories = [], technicians = [], busy = false, onSubmit, onClose }) {
   const [categoryId, setCategoryId] = useState(categories.length === 1 ? categories[0].id : null);
-  const [note, setNote] = useState('');
+  const [note, setNote] = useState(''); // plain text (canonical fallback)
+  const [noteHtml, setNoteHtml] = useState(''); // sanitized rich variant (P2.4)
   const [query, setQuery] = useState('');
 
   const showSearch = categories.length > SEARCH_THRESHOLD;
@@ -44,7 +46,11 @@ export default function RequestApprovalModal({ categories = [], technicians = []
   const submit = (e) => {
     e.preventDefault();
     if (!categoryId || busy) return;
-    onSubmit({ approvalCategoryId: Number(categoryId), note: note.trim() || null });
+    onSubmit({
+      approvalCategoryId: Number(categoryId),
+      note: note.trim() || null,
+      noteHtml: note.trim() && isRichContent(noteHtml) ? noteHtml : null,
+    });
   };
 
   return (
@@ -129,13 +135,12 @@ export default function RequestApprovalModal({ categories = [], technicians = []
             <label htmlFor="approval-note" className="block text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-2">
               2 · Context for the approver(s) <span className="font-normal normal-case text-slate-300">— optional</span>
             </label>
-            <textarea
-              id="approval-note"
-              rows={4}
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
+            <RichTextEditor
+              value={noteHtml}
+              onChange={({ html, text }) => { setNoteHtml(html); setNote(text); }}
               placeholder="Why does this need approval? e.g. “New hire starting Monday needs a dev laptop — budget code IT-204.”"
-              className="tp-focus-ring w-full text-sm bg-white border border-input rounded-xl px-3 py-2.5 placeholder:text-slate-400 resize-y"
+              ariaLabel="Approval context"
+              minHeight={96}
             />
           </div>
 

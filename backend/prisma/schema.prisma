@@ -97,6 +97,7 @@ model Workspace {
   watchSubscriptions     TicketWatchSubscription[]
   replyTemplates         ReplyTemplate[]
   quickNotes             QuickNote[]
+  ticketTags             TicketTag[]
 
   @@map("workspaces")
 }
@@ -228,6 +229,41 @@ model ReplyTemplate {
   @@index([workspaceId, isActive])
 }
 
+// Tags (gap plan Phase 1) — a TP-owned annotation layer for BOTH ticket
+// origins; never written back to FreshService. Feeds queue filters, workflow
+// conditions/actions, and analytics slices.
+model TicketTag {
+  id          Int       @id @default(autoincrement())
+  workspaceId Int       @map("workspace_id")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name        String    @db.VarChar(60)
+  color       String    @default("slate") @db.VarChar(20) // named palette key, not hex
+  isActive    Boolean   @default(true) @map("is_active")
+  createdBy   String?   @db.VarChar(255) @map("created_by")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  links TicketTagLink[]
+
+  @@unique([workspaceId, name])
+  @@map("ticket_tags")
+  @@index([workspaceId, isActive])
+}
+
+model TicketTagLink {
+  id        Int       @id @default(autoincrement())
+  ticketId  Int       @map("ticket_id")
+  ticket    Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  tagId     Int       @map("tag_id")
+  tag       TicketTag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  createdBy String?   @db.VarChar(255) @map("created_by")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@unique([ticketId, tagId])
+  @@map("ticket_tag_links")
+  @@index([tagId])
+}
+
 // Canned INTERNAL notes ("quick notes", QA 07-06 #12) — insertable from the
 // composer's Internal-note mode. Scoped to top-level internal categories via
 // internalCategoryIds (empty array = shown on every ticket). Admin-editable in
@@ -271,8 +307,12 @@ model TicketApproval {
   approverName  String?   @db.VarChar(255) @map("approver_name")
   requestedBy   String    @db.VarChar(255) @map("requested_by")
   requestNote   String?   @db.Text @map("request_note")
+  // Sanitized rich-text variants (gap plan P2.4); the plain columns stay the
+  // canonical fallback for email/text surfaces.
+  requestNoteHtml String? @db.Text @map("request_note_html")
   // Holds the clarification question while info_requested; the decision note otherwise.
   decisionNote  String?   @db.Text @map("decision_note")
+  decisionNoteHtml String? @db.Text @map("decision_note_html")
   decidedAt     DateTime? @map("decided_at")
   decidedVia    String?   @db.VarChar(20) @map("decided_via") // link | app
   tokenHash     String    @unique @db.VarChar(64) @map("token_hash")
@@ -602,6 +642,10 @@ model Ticket {
   descriptionText       String?   @db.Text @map("description_text")
   status                String    @db.VarChar(50)
   priority              Int       @default(3)
+  // Optional ITSM impact/urgency (gap plan P2.5): 1=Low 2=Medium 3=High.
+  // TP-side annotations on both origins; priority remains the operative field.
+  impact                Int?      @db.SmallInt
+  urgency               Int?      @db.SmallInt
   assessedPriority      String?   @db.VarChar(20) @map("assessed_priority")
   assessedPriorityId    Int?      @map("assessed_priority_id")
   priorityRationale     String?   @db.Text @map("priority_rationale")
@@ -732,6 +776,7 @@ model Ticket {
   proposedReplies      TicketProposedReply[]
   linksFrom            TicketLink[] @relation("linkSource")
   linksTo              TicketLink[] @relation("linkTarget")
+  tagLinks             TicketTagLink[]
 
   // Per-workspace user-defined fields — values keyed by CustomFieldDefinition.key.
   customFields         Json?     @map("custom_fields")

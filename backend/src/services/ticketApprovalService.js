@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import sanitizeHtml from 'sanitize-html';
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { ValidationError, NotFoundError } from '../utils/errors.js';
@@ -26,6 +27,18 @@ function publicBaseUrl() {
   return String(configured).trim().replace(/\/+$/, '');
 }
 
+// Conservative allowlist for approval notes (gap plan P2.4) — inline text
+// formatting + lists + links only; matches what the composer can produce.
+function sanitizeNoteHtml(html) {
+  const clean = sanitizeHtml(String(html || ''), {
+    allowedTags: ['p', 'br', 'b', 'strong', 'i', 'em', 'u', 'ul', 'ol', 'li', 'a', 'span', 'div'],
+    allowedAttributes: { a: ['href', 'target', 'rel'] },
+    allowedSchemes: ['http', 'https', 'mailto'],
+    transformTags: { a: sanitizeHtml.simpleTransform('a', { target: '_blank', rel: 'noreferrer' }) },
+  }).trim();
+  return clean || null;
+}
+
 async function emitApprovalEvent(eventType, ticketId, extra) {
   try {
     const { default: lifecycle } = await import('./ticketLifecycleNotificationService.js');
@@ -51,7 +64,7 @@ class TicketApprovalService {
       orderBy: { id: 'desc' },
       select: {
         id: true, status: true, approverEmail: true, approverName: true,
-        requestedBy: true, requestNote: true, decisionNote: true,
+        requestedBy: true, requestNote: true, requestNoteHtml: true, decisionNote: true, decisionNoteHtml: true,
         decidedAt: true, decidedVia: true, expiresAt: true, createdAt: true,
       },
     });
@@ -62,7 +75,7 @@ class TicketApprovalService {
    * (sharing requestGroupId) — any one can approve. Each manager gets a personal
    * magic link. TP-only (no FreshService involvement).
    */
-  async request(ticketId, workspaceId, { approvalCategoryId, note = null }, actor) {
+  async request(ticketId, workspaceId, { approvalCategoryId, note = null, noteHtml = null }, actor) {
     const ticket = await prisma.ticket.findFirst({
       where: { id: ticketId, workspaceId },
       include: { requester: { select: { name: true, email: true } } },
@@ -99,6 +112,7 @@ class TicketApprovalService {
           approverEmail: email,
           requestedBy: actor?.email || 'unknown',
           requestNote: note?.trim() || null,
+          requestNoteHtml: noteHtml ? sanitizeNoteHtml(noteHtml) : null,
           tokenHash: hashToken(token),
           expiresAt: new Date(Date.now() + APPROVAL_EXPIRY_DAYS * 24 * 60 * 60 * 1000),
         },
@@ -180,7 +194,7 @@ class TicketApprovalService {
     });
   }
 
-  async decideInApp(ticketId, workspaceId, approvalId, decision, note, actor) {
+  async decideInApp(ticketId, workspaceId, approvalId, decision, note, actor, noteHtml = null) {
     const approval = await prisma.ticketApproval.findFirst({
       where: { id: approvalId, ticketId, workspaceId },
     });
@@ -193,6 +207,7 @@ class TicketApprovalService {
     return this._decide(approval, decision, note, {
       via: 'app',
       actorLabel: actor?.name || actor?.email || 'Ticket Pulse user',
+      noteHtml,
     });
   }
 
@@ -531,7 +546,7 @@ class TicketApprovalService {
     return approval;
   }
 
-  async _decide(approval, decision, note, { via, actorLabel, changedFrom = null }) {
+  async _decide(approval, decision, note, { via, actorLabel, changedFrom = null, noteHtml = null }) {
     const normalized = String(decision || '').toLowerCase();
     if (!['approved', 'rejected'].includes(normalized)) {
       throw new ValidationError('Decision must be "approved" or "rejected"');
@@ -552,6 +567,7 @@ class TicketApprovalService {
         decidedAt: new Date(),
         decidedVia: via,
         decisionNote: note?.trim() || null,
+        decisionNoteHtml: noteHtml ? sanitizeNoteHtml(noteHtml) : null,
         approverName: approval.approverName || actorLabel,
       },
     });
@@ -633,14 +649,18 @@ class TicketApprovalService {
 
     // T3.9: the request note supports placeholders. Plain values substitute
     // before escaping; {{decision.url}} becomes a real link after escaping.
+    // Rich notes (P2.4) arrive pre-sanitized — substitute placeholders directly.
     let noteHtml = '';
-    if (approval.requestNote) {
-      const substituted = String(approval.requestNote)
-        .replace(/\{\{\s*approver\.name\s*\}\}/gi, approval.approverName || approval.approverEmail.split('@')[0])
-        .replace(/\{\{\s*ticket\.subject\s*\}\}/gi, ticket.subject || '')
-        .replace(/\{\{\s*ticket\.ref\s*\}\}/gi, ref)
-        .replace(/\{\{\s*requester\.name\s*\}\}/gi, ticket.requester?.name || 'the requester');
-      noteHtml = substituted
+    const substitutePlain = (s) => String(s)
+      .replace(/\{\{\s*approver\.name\s*\}\}/gi, approval.approverName || approval.approverEmail.split('@')[0])
+      .replace(/\{\{\s*ticket\.subject\s*\}\}/gi, ticket.subject || '')
+      .replace(/\{\{\s*ticket\.ref\s*\}\}/gi, ref)
+      .replace(/\{\{\s*requester\.name\s*\}\}/gi, ticket.requester?.name || 'the requester');
+    if (approval.requestNoteHtml) {
+      noteHtml = substitutePlain(approval.requestNoteHtml)
+        .replace(/\{\{\s*decision\.url\s*\}\}/gi, `<a href="${decisionUrl}">review &amp; decide</a>`);
+    } else if (approval.requestNote) {
+      noteHtml = substitutePlain(approval.requestNote)
         .replace(/</g, '&lt;')
         .replace(/\{\{\s*decision\.url\s*\}\}/gi, `<a href="${decisionUrl}">review &amp; decide</a>`)
         .replace(/\n/g, '<br/>');

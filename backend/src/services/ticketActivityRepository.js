@@ -75,21 +75,17 @@ class TicketActivityRepository {
    */
   async getByTechnicianId(technicianId, limit = 100) {
     try {
-      // Note: Since we don't have direct tech relations, we need to filter by details JSON
-      // This is less efficient but works for now
-      const allActivities = await prisma.ticketActivity.findMany({
-        orderBy: { performedAt: 'desc' },
-        take: limit * 2, // Get more than needed since we'll filter in JS
-      });
-
-      // Filter activities related to this technician
-      const filteredActivities = allActivities.filter(activity => {
-        if (!activity.details) return false;
-        const details = activity.details;
-        return details.fromTechId === technicianId || details.toTechId === technicianId;
-      }).slice(0, limit);
-
-      return filteredActivities;
+      // JSON containment pushed into SQL (GIN jsonb_path_ops index on details).
+      // The old version fetched the 2×limit most-recent rows GLOBALLY and
+      // filtered in JS — slow at scale and silently missed older activities.
+      const id = Number(technicianId);
+      const from = JSON.stringify({ fromTechId: id });
+      const to = JSON.stringify({ toTechId: id });
+      return await prisma.$queryRaw`
+        SELECT * FROM ticket_activities
+        WHERE details @> ${from}::jsonb OR details @> ${to}::jsonb
+        ORDER BY performed_at DESC
+        LIMIT ${Math.max(1, Math.min(Number(limit) || 100, 500))}`;
     } catch (error) {
       logger.error(`Error fetching activities for technician ${technicianId}:`, error);
       throw new DatabaseError(`Failed to fetch activities for technician ${technicianId}`, error);

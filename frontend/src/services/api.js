@@ -369,6 +369,12 @@ export const settingsAPI = {
   updateGroup: (id, data) => api.patch(`/settings/groups/${id}`, data),
   getGroupMembers: (id) => api.get(`/settings/groups/${id}/members`),
   setGroupMembers: (id, technicianIds) => api.put(`/settings/groups/${id}/members`, { technicianIds }),
+  // Ticket tags — workspace palette admin (gap plan P1)
+  getTicketTags: () => api.get('/settings/ticket-tags'),
+  createTicketTag: (data) => api.post('/settings/ticket-tags', data),
+  updateTicketTag: (id, data) => api.patch(`/settings/ticket-tags/${id}`, data),
+  mergeTicketTag: (id, targetTagId) => api.post(`/settings/ticket-tags/${id}/merge`, { targetTagId }),
+  deleteTicketTag: (id) => api.delete(`/settings/ticket-tags/${id}`),
   // Quick notes — canned internal notes per top category (QA 07-06 #12)
   getQuickNotes: () => api.get('/settings/quick-notes'),
   createQuickNote: (data) => api.post('/settings/quick-notes', data),
@@ -626,10 +632,28 @@ export const ticketsAPI = {
   addLink: async (id, relatedTicketId, kind = 'related_to') => await api.post(`/tickets/${id}/links`, { relatedTicketId, kind }),
   removeLink: async (id, linkId) => await api.delete(`/tickets/${id}/links/${linkId}`),
   markDuplicateOf: async (id, targetId) => await api.post(`/tickets/${id}/duplicate-of/${targetId}`),
+  mergeTicket: async (id, targetTicketId, notifyRequester = false) => await api.post(`/tickets/${id}/merge`, { targetTicketId, notifyRequester }),
 
   // Macros (quick-action bundles)
   macros: async () => await api.get('/tickets/macros'),
   applyMacro: async (id, macroId) => await api.post(`/tickets/${id}/macros/${macroId}/apply`),
+
+  // Tags (gap plan P1) — TP-side layer, both origins, never written to FS
+  listTags: async () => await api.get('/tickets/tags'),
+  setTags: async (id, tagIds) => await api.put(`/tickets/${id}/tags`, { tagIds }),
+
+  // Bulk edit by query (gap plan P2.2) — long timeout: applies up to 500 tickets
+  bulkByQuery: async (payload) => await apiLongTimeout.post('/tickets/bulk-by-query', payload),
+
+  // Category↔group affinity (gap plan P2.3)
+  categoryGroupLinks: async () => await api.get('/tickets/category-group-links'),
+  setCategoryGroupLinks: async (links) => await api.put('/tickets/category-group-links', { links }),
+
+  // Integration API keys (admin; gap plan P3.1)
+  listApiKeys: async () => await api.get('/tickets/api-keys'),
+  createApiKey: async ({ name, scopes }) => await api.post('/tickets/api-keys', { name, scopes }),
+  updateApiKey: async (keyId, data) => await api.patch(`/tickets/api-keys/${keyId}`, data),
+  deleteApiKey: async (keyId) => await api.delete(`/tickets/api-keys/${keyId}`),
 
   // Custom fields
   customFieldDefinitions: async () => await api.get('/tickets/custom-fields/definitions'),
