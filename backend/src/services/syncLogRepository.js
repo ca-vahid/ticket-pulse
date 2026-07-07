@@ -118,7 +118,11 @@ class SyncLogRepository {
 
   async getLatestSuccessful(workspaceId = null) {
     try {
-      const where = { status: 'completed' };
+      // TICKET syncs only ('full'). Other scheduled jobs (vacation-tracker,
+      // calendar-leave) also write completed rows here — on 2026-07-07 a
+      // vacation-tracker row poisoned the incremental watermark after a sync
+      // outage, so tickets created during the gap were never ingested.
+      const where = { status: 'completed', syncType: 'full' };
       if (workspaceId) where.workspaceId = workspaceId;
 
       return await prisma.syncLog.findFirst({
@@ -128,6 +132,27 @@ class SyncLogRepository {
     } catch (error) {
       logger.error('Error fetching latest successful sync log:', error);
       throw new DatabaseError('Failed to fetch latest successful sync log', error);
+    }
+  }
+
+  /**
+   * Hygiene: mark 'started' rows that never completed (crashed or hung runs)
+   * as failed, so outages are visible instead of showing eternal ghost runs.
+   */
+  async failStaleStarted(workspaceId, olderThanMs = 30 * 60 * 1000) {
+    try {
+      const cutoff = new Date(Date.now() - olderThanMs);
+      const result = await prisma.syncLog.updateMany({
+        where: { workspaceId, status: 'started', startedAt: { lt: cutoff } },
+        data: { status: 'failed', errorMessage: 'Abandoned — run never completed (stale started row)', completedAt: new Date() },
+      });
+      if (result.count > 0) {
+        logger.warn(`Marked ${result.count} stale 'started' sync log(s) as failed for workspace ${workspaceId}`);
+      }
+      return result.count;
+    } catch (error) {
+      logger.error('Error failing stale sync logs:', error);
+      return 0;
     }
   }
 
