@@ -44,6 +44,8 @@ const CATEGORY_TICKET_SELECT = {
   source: true,
   createdAt: true,
   firstAssignedAt: true,
+  firstPublicAgentReplyAt: true,
+  origin: true,
   dueBy: true,
   frDueBy: true,
   assignedBy: true,
@@ -254,7 +256,7 @@ function metadata(rangeInfo, extra = {}) {
     },
     caveats: [
       'Resolution analytics use resolutionTimeSeconds because closedAt/resolvedAt are sparse in the local dataset.',
-      'First-response analytics are intentionally omitted because firstPublicAgentReplyAt is not populated.',
+      'First-response analytics show only when coverage clears the sparse-data gate; coverage rides in overview.firstResponse.coveragePct.',
       'Category analytics use Ticket Pulse category/subcategory first, then Freshservice mirror fields, then legacy ticketCategory only for historical continuity.',
       'CSAT cards show sample size because survey coverage is low.',
     ],
@@ -1160,6 +1162,27 @@ export async function getOverview(workspaceId, query = {}) {
       assignmentMix[assignmentSource(ticket, serviceAccountNames)] += 1;
     }
 
+    // First-response times (gap plan P4.1): createdAt → firstPublicAgentReplyAt,
+    // now populated from FreshService stats + TP reply writes. Coverage rides
+    // along so the UI keeps its sparse-data gate honest.
+    const frSeconds = rangeTickets
+      .filter((t) => t.firstPublicAgentReplyAt && t.createdAt)
+      .map((t) => (new Date(t.firstPublicAgentReplyAt).getTime() - new Date(t.createdAt).getTime()) / 1000)
+      .filter((v) => v >= 0);
+    const frSummary = summarizeNumeric(frSeconds);
+    const firstResponse = {
+      coveragePct: rangeTickets.length ? Number(((frSeconds.length / rangeTickets.length) * 100).toFixed(1)) : 0,
+      sampleSize: frSeconds.length,
+      medianHours: frSummary.median === null ? null : Number((frSummary.median / 3600).toFixed(1)),
+      p90Hours: frSummary.p90 === null ? null : Number((frSummary.p90 / 3600).toFixed(1)),
+    };
+
+    // Origin split (gap plan P4.2): TP-born vs FS-born demand, deterministic.
+    const originMix = {
+      ticketpulse: rangeTickets.filter((t) => t.origin === 'ticketpulse').length,
+      freshservice: rangeTickets.filter((t) => t.origin !== 'ticketpulse').length,
+    };
+
     return {
       metadata: metadata(rangeInfo, { excludeNoise, categoryMode: categoryFilter.mode, categoryFilters: categoryFilter.selected }),
       cards: {
@@ -1182,13 +1205,15 @@ export async function getOverview(workspaceId, query = {}) {
         },
       },
       assignmentMix,
+      originMix,
+      firstResponse,
       dataQuality: {
         rangeTicketCount: rangeTickets.length,
         resolutionTimeCoverage: rangeTickets.length
           ? Number(((rangeTickets.filter((t) => t.resolutionTimeSeconds !== null).length / rangeTickets.length) * 100).toFixed(1))
           : 0,
         csatSampleCount: current.csatCount,
-        firstResponsePopulated: 0,
+        firstResponsePopulated: rangeTickets.filter((t) => t.firstPublicAgentReplyAt).length,
         categoryMode: categoryFilter.mode,
         categoryCoverage,
         canonicalClassifiedCount: categoryCoverage.canonical,

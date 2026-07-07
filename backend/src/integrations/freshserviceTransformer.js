@@ -127,6 +127,11 @@ export function transformTicket(fsTicket, {
       nonBillableMinutes: null,
       // Resolution time - Available in stats field
       resolutionTimeSeconds: fsTicket.stats?.resolution_time_in_secs || null,
+      // First response — FreshService's own stat (gap plan P4.1). This is the
+      // authoritative source; unlocks the gated first-response analytics.
+      firstPublicAgentReplyAt: fsTicket.stats?.first_responded_at
+        ? new Date(fsTicket.stats.first_responded_at)
+        : null,
       // First assigned time - Will be populated by activity analysis
       firstAssignedAt: null, // Populated later in sync process
     };

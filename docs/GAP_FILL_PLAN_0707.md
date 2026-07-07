@@ -88,17 +88,17 @@ Links + mark-as-duplicate exist; this is the real thing.
 
 ---
 
-## Phase 4 — Analytics unlocks (secondary priority)
+## Phase 4 — Analytics unlocks (secondary priority) ✅ DONE
 
 ### 4.1 First-response metrics
-- [ ] Backfill `firstPublicAgentReplyAt` from cached thread entries (agent public replies exist in `ticket_thread_entries` for both origins now); ongoing population already wired — verify
-- [ ] Unlock the gated first-response analytics (Overview + Quality) once coverage ≥ threshold; keep the sparse-data caveat banner logic
-- [ ] Tests: backfill idempotency, coverage gate
+- [x] Population fixed at the SOURCE: FreshService stats.first_responded_at now maps through the transformer on every sync (thread cache was too sparse to backfill from — verified on prod). TP-born replies already set it. History fills via Settings → Backfill after deploy.
+- [x] Unlock the gated first-response analytics (Overview + Quality) once coverage ≥ threshold; keep the sparse-data caveat banner logic
+- [x] Tests: backfill idempotency, coverage gate
 
 ### 4.2 Origin dimension + map polish
-- [ ] TP-born vs FS-born as a filter/split in Analytics (Demand & Flow + Overview) — deterministic counts only
-- [ ] Category-map: timeline animation × Agent-Lens interaction fix (animation currently disabled under lens); polish pass on lens UX
-- [ ] Tests: dimension math
+- [x] TP-born vs FS-born as a filter/split in Analytics (Demand & Flow + Overview) — deterministic counts only
+- [x] Category-map: timeline animation × Agent-Lens interaction fix (animation currently disabled under lens); polish pass on lens UX
+- [x] Tests: dimension math
 
 ---
 

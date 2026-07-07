@@ -24,4 +24,21 @@ describe('FreshService transformer', () => {
     expect(ticket.fwdEmails).toEqual(['audit@example.com']);
     expect(ticket.ticketType).toBe('Service Request');
   });
+
+  test('maps first_responded_at from FreshService stats (gap plan P4.1)', () => {
+    const withStats = transformTicket({
+      id: 2, subject: 'FR', status: 2, priority: 2,
+      created_at: '2026-07-01T10:00:00.000Z',
+      updated_at: '2026-07-01T11:00:00.000Z',
+      stats: { first_responded_at: '2026-07-01T10:30:00.000Z' },
+    });
+    expect(withStats.firstPublicAgentReplyAt).toEqual(new Date('2026-07-01T10:30:00.000Z'));
+
+    const withoutStats = transformTicket({
+      id: 3, subject: 'No FR', status: 2, priority: 2,
+      created_at: '2026-07-01T10:00:00.000Z',
+      updated_at: '2026-07-01T11:00:00.000Z',
+    });
+    expect(withoutStats.firstPublicAgentReplyAt).toBeNull();
+  });
 });
