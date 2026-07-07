@@ -52,47 +52,47 @@ Hypothesis: the UI never sends an explicit clear (`''` dropped / undefined skipp
 
 ### 3.1 Admins can't be approval managers (QA #7 — Vahid, Soheil, Mo, Sam, Susan missing)
 **CONFIRMED root cause:** the manager picker lists `settingsAPI.getTechnicians()` only — admins who aren't workspace technicians never appear.
-- [ ] Extend the picker source to technicians **+ app users/admins** (labeled), or the Entra directory typeahead used by Members — pick whichever matches the approval flow (managers act in-app, so app users + technicians)
-- [ ] Backend: ensure approval routing/inbox works for manager emails that aren't technicians (it keys on email — verify)
-- [ ] Tests: an admin-only email can be added and receives/decides approvals
+- [x] Extend the picker source to technicians **+ app users/admins** (labeled), or the Entra directory typeahead used by Members — pick whichever matches the approval flow (managers act in-app, so app users + technicians)
+- [x] Backend: ensure approval routing/inbox works for manager emails that aren't technicians (it keys on email — verify)
+- [x] Tests: an admin-only email can be added and receives/decides approvals
 
 ### 3.2 "Quick notes" — canned internal notes per top category, editable in settings (QA #12)
-- [ ] Model: `quick_notes` (workspaceId, name, body, internalCategoryIds int[], isActive, sortOrder) + additive migration (dev now, prod at deploy)
-- [ ] CRUD in Settings → Ticket Ops (new section; body + top-category multi-select)
-- [ ] Ticket composer: in **Internal note** mode show a "Quick notes" dropdown filtered by the ticket's top category (unscoped notes always shown); insert into the editor
-- [ ] Seed nothing — Gaby's three examples go in the QA response as ready-to-paste content, not hardcoded
-- [ ] Tests: CRUD + category filtering
+- [x] Model: `quick_notes` (workspaceId, name, body, internalCategoryIds int[], isActive, sortOrder) + additive migration (dev now, prod at deploy)
+- [x] CRUD in Settings → Ticket Ops (new section; body + top-category multi-select)
+- [x] Ticket composer: in **Internal note** mode show a "Quick notes" dropdown filtered by the ticket's top category (unscoped notes always shown); insert into the editor
+- [x] Seed nothing — Gaby's three examples go in the QA response as ready-to-paste content, not hardcoded
+- [x] Tests: CRUD + category filtering
 
 ---
 
 ## Phase 4 — Presentation & cleanup
 
 ### 4.1 Remove Mail Workflows from Settings (QA #1)
-- [ ] Remove the Settings nav item + section render (the homepage nav destination remains the single home). Keep the route working via the main tab only
-- [ ] Verify deep links to settings?section=notification-workflows redirect sensibly
+- [x] Remove the Settings nav item + section render (the homepage nav destination remains the single home). Keep the route working via the main tab only
+- [x] Verify deep links to settings?section=notification-workflows redirect sensibly
 
 ### 4.2 Ticket header spacing (QA #6)
-- [ ] Per screenshot: even out subject ↔ type ↔ category spacing on the detail header (gap audit, one consistent rhythm)
+- [x] Per screenshot: even out subject ↔ type ↔ category spacing on the detail header (gap audit, one consistent rhythm)
 
 ### 4.3 Description: show more by default (QA #8)
-- [ ] Default to expanded; clamp only genuinely long descriptions (≈2 "pages" — pick a px threshold, e.g. ~1200px) with Show more; short/medium emails never clipped
+- [x] Default to expanded; clamp only genuinely long descriptions (≈2 "pages" — pick a px threshold, e.g. ~1200px) with Show more; short/medium emails never clipped
 
 ### 4.4 Inline description images (QA #9)
-- [ ] Investigate how description images are stored per source (email-born cid images, TP-created pasted images) — why they land only in the attachments rail
-- [ ] Render inline images inline where the HTML references them; otherwise show an image strip directly under the description (click → existing preview lightbox)
-- [ ] Keep the attachments rail as the canonical list
+- [x] Investigate how description images are stored per source (email-born cid images, TP-created pasted images) — why they land only in the attachments rail
+- [x] Render inline images inline where the HTML references them; otherwise show an image strip directly under the description (click → existing preview lightbox)
+- [x] Keep the attachments rail as the canonical list
 
 ---
 
 ## Phase 5 — Mobile
 
 ### 5.1 Template button overflows on mobile (QA #10)
-- [ ] Composer toolbar: make the Templates button/toolbar wrap or compact (icon-only under sm) so nothing exceeds the viewport
+- [x] Composer toolbar: make the Templates button/toolbar wrap or compact (icon-only under sm) so nothing exceeds the viewport
 
 ### 5.2 Bottom nav missing on Tickets pages (QA #11)
 **CONFIRMED root cause:** `MobileTabBar` renders via `AppShell`, but Tickets/TicketDetail/TicketCreate render standalone (own `AppHeader`) — Settings adds it manually; Tickets pages don't.
-- [ ] Add `MobileTabBar` to Tickets, TicketDetail, TicketCreate (and any other standalone pages missing it)
-- [ ] Fix stacking: the mobile sticky "Create ticket" bar / composer must sit above the tab bar (safe-area + spacing), no overlap
+- [x] Add `MobileTabBar` to Tickets, TicketDetail, TicketCreate (and any other standalone pages missing it)
+- [x] Fix stacking: the mobile sticky "Create ticket" bar / composer must sit above the tab bar (safe-area + spacing), no overlap
 
 ---
 

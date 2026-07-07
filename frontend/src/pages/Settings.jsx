@@ -24,7 +24,6 @@ import CalendarLeavePanel from '../components/settings/CalendarLeavePanel';
 import TechnicianVisibilityPanel from '../components/settings/TechnicianVisibilityPanel';
 import WorkspaceAccessPanel from '../components/settings/WorkspaceAccessPanel';
 import FreshServiceWebhookCard from '../components/settings/FreshServiceWebhookCard';
-import NotificationWorkflowsPanel from '../components/settings/NotificationWorkflowsPanel';
 import AiProviderSettingsPanel from '../components/settings/AiProviderSettingsPanel';
 import PublicTicketStatusPanel from '../components/settings/PublicTicketStatusPanel';
 import FeedbackPagePanel from '../components/settings/FeedbackPagePanel';
@@ -83,12 +82,21 @@ export default function Settings() {
   })();
   const isWsAdmin = wsRole === 'admin';
 
-  const validSections = ['freshservice', 'webhooks', 'ticket-mailboxes', 'agents', 'groups', 'notification-providers', 'notification-workflows', 'public-ticket-status', 'feedback-page', 'urgent-escalation', 'ai-providers', 'sync', 'sync-ops', 'backfill', 'workspaces', 'admins', 'workspace-access', 'dashboard', 'photos', 'business-hours', 'tech-schedules', 'tech-visibility', 'noise-rules', 'vacation-tracker', 'calendar-leave'];
+  const validSections = ['freshservice', 'webhooks', 'ticket-mailboxes', 'agents', 'members', 'groups', 'approval-categories', 'ticket-ops', 'notification-providers', 'public-ticket-status', 'feedback-page', 'urgent-escalation', 'ai-providers', 'sync', 'sync-ops', 'backfill', 'workspaces', 'admins', 'workspace-access', 'dashboard', 'photos', 'business-hours', 'tech-schedules', 'tech-visibility', 'noise-rules', 'vacation-tracker', 'calendar-leave'];
   const initialSection = (() => {
     const hash = window.location.hash.replace('#', '');
     return validSections.includes(hash) ? hash : 'freshservice';
   })();
   const [activeSection, setActiveSectionRaw] = useState(initialSection);
+
+  // Mail Workflows moved out of Settings (QA 07-06 #1) — its single home is the
+  // main-nav /workflows page. Old deep links land there instead of a dead tab.
+  useEffect(() => {
+    if (window.location.hash.replace('#', '') === 'notification-workflows') {
+      navigate('/workflows', { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [isNavCollapsed, setIsNavCollapsed] = useState(() => {
     try {
       return window.localStorage.getItem('ticketPulse.settingsNavCollapsed') === 'true';
@@ -149,7 +157,6 @@ export default function Settings() {
     { id: 'approval-categories', label: 'Approval Categories', Icon: Stamp, minRole: 'admin' },
     { id: 'ticket-ops', label: 'Ticket Ops', Icon: Wand2, minRole: 'admin' },
     { id: 'notification-providers', label: 'Notifications', Icon: Bell, minRole: 'global' },
-    { id: 'notification-workflows', label: 'Mail Workflows', Icon: Send, minRole: 'admin' },
     { id: 'public-ticket-status', label: 'Public Status', Icon: ExternalLink, minRole: 'admin' },
     { id: 'feedback-page', label: 'Feedback', Icon: MessageSquare, minRole: 'admin' },
     { id: 'urgent-escalation', label: 'Urgent Escalation', Icon: Siren, minRole: 'admin' },
@@ -1361,10 +1368,6 @@ export default function Settings() {
                 </div>
               )}
 
-              {/* Notification Workflows */}
-              {activeSection === 'notification-workflows' && (
-                <NotificationWorkflowsPanel />
-              )}
 
               {activeSection === 'public-ticket-status' && (
                 <PublicTicketStatusPanel />

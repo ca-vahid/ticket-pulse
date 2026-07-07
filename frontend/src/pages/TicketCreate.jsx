@@ -5,6 +5,7 @@ import {
   Paperclip, Search, Send, Sparkles, Ticket, X,
 } from 'lucide-react';
 import AppHeader from '../components/AppHeader';
+import MobileTabBar from '../components/nav/MobileTabBar';
 import { ticketsAPI } from '../services/api';
 import CcChips from '../components/tickets/CcChips';
 import RichTextEditor, { isRichContent } from '../components/tickets/RichTextEditor';
@@ -314,7 +315,8 @@ export default function TicketCreate() {
     <div className="tp-tickets-backdrop min-h-screen">
       <AppHeader activePage="tickets" />
 
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-5 pb-28 lg:pb-5">
+      {/* pb clears the sticky action bar + the mobile tab bar under it (QA 07-06 #11) */}
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-5 pb-44 md:pb-28 lg:pb-5">
         {/* Header / breadcrumb */}
         <div className="flex items-center gap-3 mb-5">
           <button
@@ -883,9 +885,10 @@ export default function TicketCreate() {
         )}
       </div>
 
-      {/* Sticky mobile action bar — Create is otherwise buried at the bottom of a long scroll */}
+      {/* Sticky mobile action bar — Create is otherwise buried at the bottom of a
+          long scroll. Under md it sits ABOVE the bottom tab bar (QA 07-06 #11). */}
       {meta && (
-        <div className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur border-t border-slate-200 px-4 pt-3 pb-3 pb-safe flex items-center gap-2 shadow-[0_-4px_16px_-8px_rgba(15,23,42,0.25)]">
+        <div className="lg:hidden fixed bottom-[calc(48px+env(safe-area-inset-bottom))] md:bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur border-t border-slate-200 px-4 pt-3 pb-3 md:pb-safe flex items-center gap-2 shadow-[0_-4px_16px_-8px_rgba(15,23,42,0.25)]">
           <button
             type="button"
             onClick={goBack}
@@ -915,6 +918,8 @@ export default function TicketCreate() {
           }}
         />
       )}
+
+      <MobileTabBar />
     </div>
   );
 }
