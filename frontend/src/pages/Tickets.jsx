@@ -14,6 +14,7 @@ import AssigneePicker from '../components/tickets/AssigneePicker';
 import StatusPicker from '../components/tickets/StatusPicker';
 import MobileAssignSheet from '../components/tickets/MobileAssignSheet';
 import AiAssignModal from '../components/tickets/AiAssignModal';
+import LiveUpdatePill from '../components/tickets/LiveUpdatePill';
 import FsSyncConfirm from '../components/tickets/FsSyncConfirm';
 import {
   PersonAvatar, PriorityDot, SlaChip, StateChip, StatusPill, TagChip, TypePill, UnassignedBadge,
@@ -375,16 +376,46 @@ export default function Tickets() {
   }, [page, statuses, assignee, priority, origin, segment, sort, dir, debouncedSearch,
     type, category, subcategory, group, source, createdFrom, createdTo, due, noise, tag, tagMode, requesterId]);
 
-  const fetchTickets = useCallback(async ({ silent = false } = {}) => {
+  // Post-refresh row highlights: ticketId → 'new' | 'updated'. Set when a
+  // refresh is asked to diff against the previous page (update-pill apply,
+  // live AI pipeline pings) so what changed glows for a few seconds instead
+  // of the list just snapping to a new state.
+  const [rowFx, setRowFx] = useState(() => new Map());
+  const rowFxTimerRef = useRef(null);
+
+  const fetchTickets = useCallback(async ({ silent = false, diffAgainst = null } = {}) => {
     if (!silent) setIsLoading(true);
     try {
       const res = await ticketsAPI.list(queryParams);
-      setTickets(res.data.items || []);
+      const items = res.data.items || [];
+      setTickets(items);
       setTotal(res.data.total || 0);
       setLoadError(null);
+      if (diffAgainst) {
+        const fx = new Map();
+        for (const t of items) {
+          const prev = diffAgainst.get(t.id);
+          if (!prev) fx.set(t.id, 'new');
+          else if (
+            prev.updatedAt !== t.updatedAt
+            || prev.lastActivityAt !== t.lastActivityAt
+            || prev.status !== t.status
+            || prev.assignedTechId !== t.assignedTechId
+            || prev.priority !== t.priority
+            || (prev.ai?.state || null) !== (t.ai?.state || null)
+          ) fx.set(t.id, 'updated');
+        }
+        if (fx.size) {
+          // Merge (don't replace) so an in-flight flash isn't cut short by a
+          // second refresh; identical entries won't restart their animation.
+          setRowFx((current) => new Map([...current, ...fx]));
+          if (rowFxTimerRef.current) clearTimeout(rowFxTimerRef.current);
+          rowFxTimerRef.current = setTimeout(() => setRowFx(new Map()), 3200);
+        }
+      }
       // Hand the ordered id list to the detail page for prev/next navigation.
       try {
-        sessionStorage.setItem('tp_ticket_nav', JSON.stringify((res.data.items || []).map((t) => t.id)));
+        sessionStorage.setItem('tp_ticket_nav', JSON.stringify(items.map((t) => t.id)));
       } catch { /* sessionStorage unavailable */ }
     } catch (err) {
       setLoadError(err.response?.data?.message || err.message);
@@ -433,11 +464,37 @@ export default function Tickets() {
   }, []);
   useEffect(() => { if (workspaceId && canReview) fetchAiReviewTotal(); }, [workspaceId, canReview, fetchAiReviewTotal]);
 
-  const applyPendingUpdates = useCallback(() => {
+  // Mirror of the rendered list for diffing/lookup inside SSE callbacks.
+  const ticketsRef = useRef([]);
+  useEffect(() => { ticketsRef.current = tickets; }, [tickets]);
+  // Latest fetcher behind a stable ref — onTicketChange must keep a stable
+  // identity (useSSE re-subscribes when it changes) while queryParams churn.
+  const fetchTicketsRef = useRef(fetchTickets);
+  useEffect(() => { fetchTicketsRef.current = fetchTickets; }, [fetchTickets]);
+
+  // Update-pill lifecycle: idle → busy (refetching) → done ("Up to date"
+  // flash) → idle. Ref-guarded so double-clicks don't stack refreshes.
+  const [refreshState, setRefreshState] = useState('idle');
+  const refreshBusyRef = useRef(false);
+  const refreshStateTimerRef = useRef(null);
+  const aiLiveTimerRef = useRef(null);
+
+  const applyPendingUpdates = useCallback(async () => {
+    if (refreshBusyRef.current) return;
+    refreshBusyRef.current = true;
+    setRefreshState('busy');
+    const before = new Map(ticketsRef.current.map((t) => [t.id, t]));
     pendingIdsRef.current = new Set();
     setPendingCount(0);
-    fetchTickets({ silent: true });
-    fetchStats();
+    try {
+      await fetchTickets({ silent: true, diffAgainst: before });
+      fetchStats();
+    } finally {
+      refreshBusyRef.current = false;
+      setRefreshState('done');
+      if (refreshStateTimerRef.current) clearTimeout(refreshStateTimerRef.current);
+      refreshStateTimerRef.current = setTimeout(() => setRefreshState('idle'), 1100);
+    }
   }, [fetchTickets, fetchStats]);
 
   const onTicketChange = useCallback((data) => {
@@ -446,17 +503,37 @@ export default function Tickets() {
       fetchStats();
       setPulse((p) => p + 1);
     }, 400);
-    // Pipeline lifecycle events also move the "awaiting review" connector chip.
-    if (data?.action === 'pipeline') fetchAiReviewTotal();
+    // Pipeline lifecycle events live-update their row in place (the indigo
+    // "AI matching" aura appears/clears, the outcome flashes) instead of
+    // counting toward the manual-refresh pill — AI runs aren't "unread
+    // updates", they're a process the queue should show happening.
+    if (data?.action === 'pipeline') {
+      fetchAiReviewTotal();
+      const tid = Number(data.ticketId);
+      if (tid && ticketsRef.current.some((t) => t.id === tid)) {
+        if (aiLiveTimerRef.current) clearTimeout(aiLiveTimerRef.current);
+        aiLiveTimerRef.current = setTimeout(() => {
+          // Background tabs skip the work — the pill/stats catch them up on return.
+          if (document.visibilityState === 'hidden') return;
+          fetchTicketsRef.current({ silent: true, diffAgainst: new Map(ticketsRef.current.map((t) => [t.id, t])) });
+        }, 450);
+      }
+      return;
+    }
     // Our own mutation's echo — the list is already fresh.
     if (Date.now() - lastLocalMutationRef.current < 2500) return;
     pendingIdsRef.current.add(data?.ticketId ?? `evt-${Date.now()}`);
     setPendingCount(pendingIdsRef.current.size);
   }, [fetchStats, fetchAiReviewTotal]);
   useSSE({ onTicketChange, enabled: Boolean(workspaceId) });
-  useEffect(() => () => { if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current); }, []);
+  useEffect(() => () => {
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    if (rowFxTimerRef.current) clearTimeout(rowFxTimerRef.current);
+    if (refreshStateTimerRef.current) clearTimeout(refreshStateTimerRef.current);
+    if (aiLiveTimerRef.current) clearTimeout(aiLiveTimerRef.current);
+  }, []);
   // A filter/page change reloads the list anyway — drop stale pending state.
-  useEffect(() => { pendingIdsRef.current = new Set(); setPendingCount(0); }, [queryParams]);
+  useEffect(() => { pendingIdsRef.current = new Set(); setPendingCount(0); setRowFx(new Map()); }, [queryParams]);
 
   const refreshAfterEdit = useCallback(() => {
     lastLocalMutationRef.current = Date.now(); // swallow our own SSE echo
@@ -916,19 +993,8 @@ export default function Tickets() {
 
                 {/* Results — the peek is a fixed overlay drawer, so nothing here reflows */}
                 <div className="relative">
-                  {pendingCount > 0 && view !== 'scheduled' && (
-                    <div className="absolute top-1.5 left-1/2 -translate-x-1/2 z-20 animate-fadeIn">
-                      <button
-                        onClick={applyPendingUpdates}
-                        className="tp-focus-ring inline-flex items-center gap-1.5 pl-2.5 pr-3 py-1.5 rounded-full bg-blue-600 text-white text-xs font-semibold shadow-soft hover:bg-blue-700"
-                      >
-                        <span aria-hidden="true" className="relative flex h-2 w-2">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white/70" />
-                          <span className="relative inline-flex rounded-full h-2 w-2 bg-white" />
-                        </span>
-                        {pendingCount} update{pendingCount === 1 ? '' : 's'} — refresh
-                      </button>
-                    </div>
+                  {(pendingCount > 0 || refreshState !== 'idle') && view !== 'scheduled' && (
+                    <LiveUpdatePill count={pendingCount} state={refreshState} onApply={applyPendingUpdates} />
                   )}
 
                   {view === 'scheduled' ? (
@@ -988,11 +1054,19 @@ export default function Tickets() {
                       <ul className="divide-y divide-slate-100">
                         {tickets.map((ticket) => {
                           const previewing = previewId === ticket.id;
+                          // The AI assignment pipeline is deciding this ticket RIGHT NOW —
+                          // the row gets a live indigo aura so watchers see it happening.
+                          const aiLive = ticket.ai?.state === 'analyzing';
+                          // Post-refresh flash: this row just arrived / changed.
+                          const fx = rowFx.get(ticket.id) || null;
                           // Left accent bar: blue when this row is the open preview (focus without
-                          // washing the whole row), otherwise the priority strip for High/Urgent.
+                          // washing the whole row), flowing indigo while AI is assigning, blue for
+                          // fresh arrivals, otherwise the priority strip for High/Urgent.
                           const accent = previewing
                             ? 'bg-blue-500'
-                            : ticket.priority >= 3 ? (PRIORITY_STRIP_COLORS[ticket.priority] || 'bg-transparent') : 'bg-transparent';
+                            : aiLive ? 'tp-ai-accent'
+                              : fx === 'new' ? 'bg-blue-400'
+                                : ticket.priority >= 3 ? (PRIORITY_STRIP_COLORS[ticket.priority] || 'bg-transparent') : 'bg-transparent';
                           const isEditable = ticket.origin === 'ticketpulse' && ticketingOn;
                           // FS-born rows can be reassigned too, via a confirmed FreshService write-back.
                           const fsRowEditable = ticket.origin !== 'ticketpulse' && Boolean(ticket.freshserviceTicketId);
@@ -1007,9 +1081,10 @@ export default function Tickets() {
                             <li
                               key={ticket.id}
                               className={`group flex items-stretch transition-colors cursor-pointer ${
-                                previewing ? 'bg-blue-50/50'
-                                  : selectedIds.has(ticket.id) ? 'bg-blue-50/40' : 'hover:bg-slate-50'
-                              }`}
+                                aiLive ? 'tp-ai-live'
+                                  : previewing ? 'bg-blue-50/50'
+                                    : selectedIds.has(ticket.id) ? 'bg-blue-50/40' : 'hover:bg-slate-50'
+                              } ${fx === 'new' ? 'tp-row-flash-new' : fx === 'updated' && !aiLive ? 'tp-row-flash-updated' : ''}`}
                               onClick={() => onRowClick(ticket.id)}
                               onDoubleClick={() => onRowDoubleClick(ticket.id)}
                               title="Click to preview (double-click opens)"
@@ -1044,6 +1119,30 @@ export default function Tickets() {
                                         >
                                           {ticket.subject || '(no subject)'}
                                         </button>
+                                        {fx === 'new' && (
+                                          <span className="tp-new-chip shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full bg-blue-600 text-white text-[9px] font-extrabold tracking-widest uppercase" aria-hidden="true">
+                                            New
+                                          </span>
+                                        )}
+                                        {aiLive && (canReview ? (
+                                          <button
+                                            onClick={(e) => { e.stopPropagation(); setAiTicket(ticket); }}
+                                            onDoubleClick={(e) => e.stopPropagation()}
+                                            title="AI is picking the best technician right now — click to watch live or take over"
+                                            className="tp-focus-ring tp-ai-chip shrink-0 inline-flex items-center gap-1 pl-1.5 pr-2 py-0.5 rounded-full text-[10px] font-bold text-white"
+                                          >
+                                            <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
+                                            AI matching…
+                                          </button>
+                                        ) : (
+                                          <span
+                                            title="AI is picking the best technician right now"
+                                            className="tp-ai-chip shrink-0 inline-flex items-center gap-1 pl-1.5 pr-2 py-0.5 rounded-full text-[10px] font-bold text-white"
+                                          >
+                                            <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
+                                            AI matching…
+                                          </span>
+                                        ))}
                                         <StateChip state={ticket.stateChip} />
                                         {(ticket.tags || []).slice(0, 3).map((tag) => (
                                           <TagChip key={tag.id} tag={tag} size="xs" className="shrink-0" />
@@ -1160,18 +1259,16 @@ export default function Tickets() {
                                               >
                                                 <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
                                               </button>
-                                            ) : ticket.ai?.state === 'analyzing' || ticket.ai?.state === 'queued' ? (
+                                            ) : ticket.ai?.state === 'queued' ? (
                                               <button
                                                 onClick={() => setAiTicket(ticket)}
-                                                title={ticket.ai.state === 'analyzing' ? 'AI is analyzing this ticket — watch live' : 'AI run queued for business hours'}
-                                                aria-label="AI run in progress"
+                                                title="AI run queued for business hours"
+                                                aria-label="AI run queued"
                                                 className="tp-focus-ring p-1 rounded-md text-indigo-400 hover:bg-indigo-50 flex-shrink-0"
                                               >
-                                                {ticket.ai.state === 'analyzing'
-                                                  ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
-                                                  : <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />}
+                                                <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
                                               </button>
-                                            ) : !ticket.assignedTech && !resolvedLike ? (
+                                            ) : ticket.ai?.state === 'analyzing' ? null : !ticket.assignedTech && !resolvedLike ? (
                                               <button
                                                 onClick={() => setAiTicket(ticket)}
                                                 title="Ask AI to assign"
@@ -1236,6 +1333,21 @@ export default function Tickets() {
                                     <PriorityDot priority={ticket.priority} />
                                     <span className="font-mono text-[11px] font-semibold text-slate-500">{ticket.displayRef}</span>
                                     <StateChip state={ticket.stateChip} />
+                                    {fx === 'new' && (
+                                      <span className="tp-new-chip shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full bg-blue-600 text-white text-[9px] font-extrabold tracking-widest uppercase" aria-hidden="true">
+                                        New
+                                      </span>
+                                    )}
+                                    {aiLive && (
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); if (canReview) setAiTicket(ticket); }}
+                                        title="AI is picking the best technician right now"
+                                        className="tp-focus-ring tp-ai-chip shrink-0 inline-flex items-center gap-1 pl-1.5 pr-2 py-0.5 rounded-full text-[10px] font-bold text-white"
+                                      >
+                                        <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
+                                        AI
+                                      </button>
+                                    )}
                                     <StatusPill status={ticket.status} className="ml-auto" />
                                   </div>
                                   <p className="text-sm font-medium text-slate-800 line-clamp-2">{ticket.subject || '(no subject)'}</p>

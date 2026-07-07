@@ -1,6 +1,16 @@
-export const APP_VERSION = '3.0.5-preview';
+export const APP_VERSION = '3.0.6-preview';
 
 export const changelog = [
+  {
+    version: '3.0.6-preview',
+    date: 'July 8, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>🔔 Live updates you can actually see</strong> — the queue’s “N updates — refresh” pill grew up: it drops in with an animation, pulses so arrivals catch your eye, shows the count in a badge that pops as it climbs, sticks below the header while you scroll, and gives real click feedback (“Refreshing…” → “✓ Up to date”). Screen readers get announcements too.' },
+      { type: 'improved', html: '<strong>✨ Smooth refresh with change highlighting</strong> — applying updates no longer snaps the list: new tickets arrive flagged <strong>NEW</strong> with a blue glow that fades over a few seconds, and tickets that changed (status, assignee, priority, activity) flash softly so you can see exactly what moved.' },
+      { type: 'new', html: '<strong>🤖 AI assignment, visible live</strong> — while the auto-assignment pipeline is deciding a ticket (the 1–2 minutes after it arrives), its queue row glows with an animated indigo aura and an <strong>“AI matching…”</strong> chip. Click the chip to watch the run live or take over; assigning someone by hand still overrides the AI instantly. Rows update in place over the live connection — the aura appears when a run starts and resolves into a highlighted result when it lands, no refresh needed.' },
+      { type: 'improved', html: '<strong>Quieter, cheaper live connection</strong> — AI pipeline chatter no longer inflates the update counter (it live-updates the affected row instead), background tabs skip refresh work entirely, and all the new motion respects your reduced-motion preference.' },
+    ],
+  },
   {
     version: '3.0.5-preview',
     date: 'July 8, 2026',
