@@ -924,6 +924,15 @@ router.post(
         uploadedBy: req.ticketActor.email,
       }));
     }
+    // WS-A.5: push ticket-level uploads to the FS fallback copy (TP-born only;
+    // best-effort — a failed mirror never fails the upload).
+    const full = await prisma.ticket.findUnique({ where: { id: ticketId }, select: { origin: true } });
+    if (full?.origin === 'ticketpulse') {
+      const { default: mirrorService } = await import('../services/mirrorService.js');
+      for (const s of stored) {
+        mirrorService.enqueueAttachment(req.workspaceId, ticketId, s.id).catch(() => {});
+      }
+    }
     res.status(201).json({ success: true, data: stored });
   }),
 );

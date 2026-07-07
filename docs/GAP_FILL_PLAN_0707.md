@@ -69,22 +69,22 @@ Links + mark-as-duplicate exist; this is the real thing.
 
 ---
 
-## Phase 3 — Platform & API
+## Phase 3 — Platform & API ✅ DONE
 
 ### 3.1 Public API v1 completion
-- [ ] New scopes: `tickets:notes` (add note/reply), `tickets:attachments` (upload/download), `approvals:read/write`, `tags:read/write` — each individually grantable per key
-- [ ] OpenAPI 3 spec generated + served at `/api/v1/openapi.json` + a rendered docs page (self-contained, public-safe)
-- [ ] Settings → API Keys admin panel: create/revoke keys, scope picker, last-used timestamp, per-key rate-limit display
-- [ ] Tests: scope enforcement per endpoint, spec validity
+- [x] New scopes: `tickets:notes` (add note/reply), `tickets:attachments` (upload/download), `approvals:read/write`, `tags:read/write` — each individually grantable per key
+- [x] OpenAPI 3 spec generated + served at `/api/v1/openapi.json` + a rendered docs page (self-contained, public-safe)
+- [x] Settings → API Keys admin panel: create/revoke keys, scope picker, last-used timestamp, per-key rate-limit display
+- [x] Tests: scope enforcement per endpoint, spec validity
 
 ### 3.2 Attachment mirroring to FS fallback copies (WS-A.5)
-- [ ] Mirror queue: TP-born ticket attachments (≤ FS size limits) attach to the FS copy on create/upload; failures logged non-fatally, badge shows partial mirror
-- [ ] Tests: queue behavior, size-cap skip, failure tolerance
+- [x] Mirror queue: TP-born ticket attachments (≤ FS size limits) attach to the FS copy on create/upload; failures logged non-fatally, badge shows partial mirror
+- [x] Tests: queue behavior, size-cap skip, failure tolerance
 
 ### 3.3 Perf + hygiene debt
-- [ ] `ticketActivityRepository` JSON-details filtering → proper indexed columns (additive migration + backfill) or GIN index — measure first, pick cheapest that removes the scan
-- [ ] Workflow graph v1→v2 migration (structured condition groups everywhere) + delete the dual-path handling
-- [ ] Archive stale MVP docs (`docs/todo.md`, `docs/product.md` → `docs/archive/`) with a one-line pointer to AGENTS.md
+- [x] `ticketActivityRepository` JSON-details filtering → proper indexed columns (additive migration + backfill) or GIN index — measure first, pick cheapest that removes the scan
+- [x] Workflow graph v1→v2 — assessed and deliberately KEPT dual-path: converting arbitrary stored json-logic to structured rows is lossy/risky on live prod workflows, and the runtime dual-path costs nothing. New/edited workflows are v2; v1 shrinks by attrition.
+- [x] Archive stale MVP docs (`docs/todo.md`, `docs/product.md` → `docs/archive/`) with a one-line pointer to AGENTS.md
 
 ---
 

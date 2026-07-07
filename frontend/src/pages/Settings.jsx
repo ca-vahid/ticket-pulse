@@ -18,6 +18,7 @@ import MembersPanel from '../components/settings/MembersPanel';
 import GroupsPanel from '../components/settings/GroupsPanel';
 import ApprovalCategoriesPanel from '../components/settings/ApprovalCategoriesPanel';
 import TicketOpsPanel from '../components/settings/TicketOpsPanel';
+import ApiKeysPanel from '../components/settings/ApiKeysPanel';
 import AdminManagementPanel from '../components/settings/AdminManagementPanel';
 import VacationTrackerPanel from '../components/settings/VacationTrackerPanel';
 import CalendarLeavePanel from '../components/settings/CalendarLeavePanel';
@@ -82,7 +83,7 @@ export default function Settings() {
   })();
   const isWsAdmin = wsRole === 'admin';
 
-  const validSections = ['freshservice', 'webhooks', 'ticket-mailboxes', 'agents', 'members', 'groups', 'approval-categories', 'ticket-ops', 'notification-providers', 'public-ticket-status', 'feedback-page', 'urgent-escalation', 'ai-providers', 'sync', 'sync-ops', 'backfill', 'workspaces', 'admins', 'workspace-access', 'dashboard', 'photos', 'business-hours', 'tech-schedules', 'tech-visibility', 'noise-rules', 'vacation-tracker', 'calendar-leave'];
+  const validSections = ['freshservice', 'webhooks', 'ticket-mailboxes', 'agents', 'members', 'groups', 'approval-categories', 'ticket-ops', 'api-keys', 'notification-providers', 'public-ticket-status', 'feedback-page', 'urgent-escalation', 'ai-providers', 'sync', 'sync-ops', 'backfill', 'workspaces', 'admins', 'workspace-access', 'dashboard', 'photos', 'business-hours', 'tech-schedules', 'tech-visibility', 'noise-rules', 'vacation-tracker', 'calendar-leave'];
   const initialSection = (() => {
     const hash = window.location.hash.replace('#', '');
     return validSections.includes(hash) ? hash : 'freshservice';
@@ -156,6 +157,7 @@ export default function Settings() {
     { id: 'groups', label: 'Groups', Icon: Users2, minRole: 'admin' },
     { id: 'approval-categories', label: 'Approval Categories', Icon: Stamp, minRole: 'admin' },
     { id: 'ticket-ops', label: 'Ticket Ops', Icon: Wand2, minRole: 'admin' },
+    { id: 'api-keys', label: 'API Keys', Icon: KeyRound, minRole: 'admin' },
     { id: 'notification-providers', label: 'Notifications', Icon: Bell, minRole: 'global' },
     { id: 'public-ticket-status', label: 'Public Status', Icon: ExternalLink, minRole: 'admin' },
     { id: 'feedback-page', label: 'Feedback', Icon: MessageSquare, minRole: 'admin' },
@@ -1201,6 +1203,13 @@ export default function Settings() {
               {activeSection === 'ticket-ops' && (
                 <div className="p-6">
                   <TicketOpsPanel />
+                </div>
+              )}
+
+              {/* Integration API keys (gap plan P3.1) */}
+              {activeSection === 'api-keys' && (
+                <div className="p-6">
+                  <ApiKeysPanel />
                 </div>
               )}
 

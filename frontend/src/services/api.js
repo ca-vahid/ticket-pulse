@@ -649,6 +649,12 @@ export const ticketsAPI = {
   categoryGroupLinks: async () => await api.get('/tickets/category-group-links'),
   setCategoryGroupLinks: async (links) => await api.put('/tickets/category-group-links', { links }),
 
+  // Integration API keys (admin; gap plan P3.1)
+  listApiKeys: async () => await api.get('/tickets/api-keys'),
+  createApiKey: async ({ name, scopes }) => await api.post('/tickets/api-keys', { name, scopes }),
+  updateApiKey: async (keyId, data) => await api.patch(`/tickets/api-keys/${keyId}`, data),
+  deleteApiKey: async (keyId) => await api.delete(`/tickets/api-keys/${keyId}`),
+
   // Custom fields
   customFieldDefinitions: async () => await api.get('/tickets/custom-fields/definitions'),
   setCustomFields: async (id, values) => await api.patch(`/tickets/${id}/custom-fields`, { values }),
