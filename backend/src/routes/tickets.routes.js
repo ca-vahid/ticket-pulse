@@ -465,6 +465,39 @@ router.put('/:id/tags', asyncHandler(async (req, res) => {
   res.json({ success: true, data: result });
 }));
 
+// ---------------------------------------------- bulk by query (gap plan P2.2)
+// Apply one action to EVERYTHING matching the current filter (not just the
+// page). Preview first for the confirm count; expectedTotal guards staleness.
+
+router.post('/bulk-by-query', asyncHandler(async (req, res) => {
+  if (req.ticketActor.kind === 'agent') {
+    throw new ValidationError('Bulk editing requires coordinator or admin access');
+  }
+  const result = await ticketService.bulkByQuery(req.workspaceId, {
+    query: req.body?.query || {},
+    action: req.body?.action,
+    preview: req.body?.preview === true,
+    expectedTotal: req.body?.expectedTotal ?? null,
+  }, req.ticketActor);
+  res.json({ success: true, data: result });
+}));
+
+// ---------------------------------------------------- merge (gap plan P2.1)
+// True merge: copies the source conversation onto the target, unions tags,
+// links + closes the source. Members/admins only — agents cannot merge.
+
+router.post('/:id/merge', asyncHandler(async (req, res) => {
+  if (req.ticketActor.kind === 'agent') {
+    throw new ValidationError('Merging tickets requires coordinator or admin access');
+  }
+  const { default: ticketMergeService } = await import('../services/ticketMergeService.js');
+  const result = await ticketMergeService.merge(parseTicketId(req), req.workspaceId, {
+    targetTicketId: req.body?.targetTicketId,
+    notifyRequester: req.body?.notifyRequester === true,
+  }, req.ticketActor);
+  res.json({ success: true, data: result });
+}));
+
 // ---------------------------------------------------- quick notes (QA 07-06 #12)
 // Active canned INTERNAL notes for the composer's note mode. The client
 // filters by the ticket's top category (empty internalCategoryIds = always
@@ -964,7 +997,7 @@ router.post('/:id/approvals/:approvalId/decide', asyncHandler(async (req, res) =
   const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');
   const approval = await ticketApprovalService.decideInApp(
     parseTicketId(req), req.workspaceId, Number(req.params.approvalId),
-    req.body?.decision, req.body?.note || null, req.ticketActor,
+    req.body?.decision, req.body?.note || null, req.ticketActor, req.body?.noteHtml || null,
   );
   res.json({ success: true, data: approval });
 }));

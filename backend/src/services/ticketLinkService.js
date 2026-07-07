@@ -4,8 +4,9 @@ import { NotFoundError, ValidationError } from '../utils/errors.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 
 const LINK_KINDS = ['duplicate_of', 'related_to', 'parent_of'];
-// The inverse label shown on the other ticket.
-const INVERSE_LABEL = { duplicate_of: 'has duplicate', related_to: 'related to', parent_of: 'child of' };
+// The inverse label shown on the other ticket. merged_into links are created
+// by ticketMergeService (not user-linkable directly).
+const INVERSE_LABEL = { duplicate_of: 'has duplicate', related_to: 'related to', parent_of: 'child of', merged_into: 'merged from' };
 
 /**
  * Explicit ticket relationships: duplicate_of / related_to / parent_of.

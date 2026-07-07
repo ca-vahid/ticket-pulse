@@ -69,6 +69,8 @@ const updateTicketSchema = z.object({
   internalSubcategoryId: z.number().int().positive().optional().nullable(),
   groupId: z.union([z.number().int(), z.string().regex(/^\d+$/)]).optional().nullable(),
   internalGroupId: z.number().int().positive().optional().nullable(),
+  impact: z.number().int().min(1).max(3).optional().nullable(),
+  urgency: z.number().int().min(1).max(3).optional().nullable(),
 }).strict();
 
 const threadBodySchema = z.object({
@@ -361,10 +363,12 @@ class TicketService {
 
   // ------------------------------------------------------------------ reads
 
-  async listTickets(workspaceId, query = {}, { maxPageSize = 100 } = {}) {
-    const page = Math.max(1, Number(query.page) || 1);
-    const pageSize = Math.min(maxPageSize, Math.max(1, Number(query.pageSize) || 25));
-
+  /**
+   * Build the prisma `where` for a queue query. Shared by listTickets, the CSV
+   * export, and bulk-by-query so "everything matching this filter" always
+   * resolves to exactly what the list shows.
+   */
+  async buildListWhere(workspaceId, query = {}) {
     const where = { workspaceId };
 
     const asList = (v) => (Array.isArray(v) ? v : String(v ?? '').split(',')).map((s) => String(s).trim()).filter(Boolean);
@@ -502,6 +506,14 @@ class TicketService {
       // AND-composed so it can't collide with segment OR clauses
       where.AND = [...(where.AND || []), { OR: or }];
     }
+
+    return where;
+  }
+
+  async listTickets(workspaceId, query = {}, { maxPageSize = 100 } = {}) {
+    const page = Math.max(1, Number(query.page) || 1);
+    const pageSize = Math.min(maxPageSize, Math.max(1, Number(query.pageSize) || 25));
+    const where = await this.buildListWhere(workspaceId, query);
 
     const sortField = ['createdAt', 'updatedAt', 'priority', 'status', 'subject', 'requester'].includes(query.sort) ? query.sort : 'createdAt';
     const sortDir = query.dir === 'asc' ? 'asc' : 'desc';
@@ -858,7 +870,7 @@ class TicketService {
         orderBy: { id: 'desc' },
         select: {
           id: true, status: true, approverEmail: true, approverName: true,
-          requestedBy: true, requestNote: true, decisionNote: true,
+          requestedBy: true, requestNote: true, requestNoteHtml: true, decisionNote: true, decisionNoteHtml: true,
           decidedAt: true, decidedVia: true, createdAt: true,
           requestGroupId: true,
           approvalCategory: { select: { id: true, name: true } },
@@ -876,9 +888,14 @@ class TicketService {
 
     const incomingByTicket = await this._lastPublicEntryIncoming([ticket.id]);
     const resolvedThread = await this._resolveThreadActors(thread, workspaceId, ticket.requester);
+    // Merged-away tickets carry a pointer to their target for the banner.
+    const mergedInto = await import('./ticketMergeService.js')
+      .then(({ default: svc }) => svc.mergedInto(ticket.id, workspaceId))
+      .catch(() => null);
 
     return {
       ...ticket,
+      mergedInto,
       tagLinks: undefined,
       tags: ticketTags(ticket),
       displayRef: ticketDisplayRef(ticket),
@@ -1006,9 +1023,74 @@ class TicketService {
     });
   }
 
+  /**
+   * Bulk edit by QUERY (gap plan P2.2): apply one action to every ticket
+   * matching the current filter — not just the visible page. Two-step:
+   * `preview: true` returns the counts for the confirm dialog; the apply call
+   * passes `expectedTotal` back so a changed queue can't be edited blind.
+   * Capped hard; each ticket goes through the normal audited write paths.
+   */
+  async bulkByQuery(workspaceId, { query = {}, action, preview = false, expectedTotal = null }, actor) {
+    const BULK_CAP = 500;
+    const where = await this.buildListWhere(workspaceId, query);
+
+    const matching = await prisma.ticket.findMany({
+      where,
+      select: { id: true, origin: true, status: true, nativeNumber: true, freshserviceTicketId: true },
+      orderBy: { id: 'asc' },
+      take: BULK_CAP + 1,
+    });
+    if (matching.length > BULK_CAP) {
+      throw new ValidationError(`This filter matches more than ${BULK_CAP} tickets — narrow it down before bulk-editing`);
+    }
+
+    const type = action?.type;
+    if (!['assign', 'status', 'add_tags'].includes(type)) {
+      throw new ValidationError('Bulk action must be assign, status, or add_tags');
+    }
+    // Tags are TP-side (both origins); field mutations are TP-born only.
+    const editable = type === 'add_tags' ? matching : matching.filter((t) => t.origin === TICKET_ORIGIN.TICKETPULSE);
+    const skippedFsBorn = matching.length - editable.length;
+
+    if (preview) {
+      return { preview: true, total: matching.length, editable: editable.length, skippedFsBorn };
+    }
+    if (expectedTotal !== null && Number(expectedTotal) !== matching.length) {
+      throw new ValidationError(`The queue changed since you confirmed (${matching.length} now match, you confirmed ${expectedTotal}) — re-run the bulk edit`);
+    }
+
+    const failed = [];
+    let applied = 0;
+    for (const t of editable) {
+      try {
+        if (type === 'assign') {
+          await this.assignTicket(t.id, workspaceId, action.value ? Number(action.value) : null, actor);
+        } else if (type === 'status') {
+          await this.changeStatus(t.id, workspaceId, String(action.value), actor);
+        } else if (type === 'add_tags') {
+          const current = await prisma.ticketTagLink.findMany({ where: { ticketId: t.id }, select: { tagId: true } });
+          const wanted = [...new Set([...current.map((l) => l.tagId), ...((action.value || []).map(Number))])];
+          await this.setTags(t.id, workspaceId, wanted, actor);
+        }
+        applied += 1;
+      } catch (err) {
+        failed.push({ ref: ticketDisplayRef(t), message: err.message });
+      }
+    }
+
+    await ticketActivityRepository.create({
+      ticketId: editable[0]?.id || matching[0]?.id || 0,
+      activityType: 'bulk_edit',
+      performedBy: actor?.email || 'system',
+      details: { type, value: action.value ?? null, total: matching.length, applied, skippedFsBorn, failedCount: failed.length },
+    }).catch(() => null);
+
+    return { total: matching.length, applied, skippedFsBorn, failed };
+  }
+
   /** Reference data for the ticket composer / filters. */
   async getMeta(workspaceId) {
-    const [workspace, groups, technicians, categories, sourceRows, approvalCategories, tags] = await Promise.all([
+    const [workspace, groups, technicians, categories, sourceRows, approvalCategories, tags, categoryGroupLinks] = await Promise.all([
       this._getWorkspace(workspaceId),
       prisma.group.findMany({
         where: { workspaceId, isActive: true },
@@ -1039,6 +1121,10 @@ class TicketService {
         where: { workspaceId, isActive: true },
         select: { id: true, name: true, color: true },
         orderBy: { name: 'asc' },
+      }),
+      prisma.categoryGroupLink.findMany({
+        where: { workspaceId },
+        select: { categoryId: true, groupId: true },
       }),
     ]);
 
@@ -1082,6 +1168,9 @@ class TicketService {
         managerCount: (c.managerEmails || []).length,
       })),
       tags,
+      // Category↔group affinity (gap plan P2.3): pickers scope the category
+      // tree by the ticket's group. Unmapped categories are visible to all.
+      categoryGroupLinks: categoryGroupLinks.map((l) => ({ categoryId: l.categoryId, groupId: String(l.groupId) })),
     };
   }
 
@@ -1420,6 +1509,14 @@ class TicketService {
     if (data.ticketType !== undefined && data.ticketType !== ticket.ticketType) {
       patch.ticketType = data.ticketType;
       changes.ticketType = { from: ticket.ticketType, to: data.ticketType };
+    }
+    if (data.impact !== undefined && data.impact !== ticket.impact) {
+      patch.impact = data.impact;
+      changes.impact = { from: ticket.impact, to: data.impact };
+    }
+    if (data.urgency !== undefined && data.urgency !== ticket.urgency) {
+      patch.urgency = data.urgency;
+      changes.urgency = { from: ticket.urgency, to: data.urgency };
     }
     if (data.internalCategoryId !== undefined && data.internalCategoryId !== ticket.internalCategoryId) {
       patch.internalCategoryId = data.internalCategoryId;

@@ -558,12 +558,29 @@ export default function Tickets() {
     return () => document.removeEventListener('keydown', onKey);
   }, [previewId, stepPreview, navigate]);
 
-  // ---- Bulk selection & actions (page-scoped) ----
+  // ---- Bulk selection & actions (page-scoped, or query-scoped via "Select all N") ----
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [bulkAction, setBulkAction] = useState(null); // { type: 'assign'|'status', value, label }
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkResult, setBulkResult] = useState(null); // { ok, failed: [{ref, message}], skipped }
-  useEffect(() => { setSelectedIds(new Set()); setBulkAction(null); }, [queryParams]);
+  // Query scope (gap plan P2.2): the action applies to EVERYTHING matching the
+  // current filter, not just the visible page. Set via the preview call.
+  const [queryScope, setQueryScope] = useState(null); // { total, editable, skippedFsBorn }
+  useEffect(() => { setSelectedIds(new Set()); setBulkAction(null); setQueryScope(null); }, [queryParams]);
+
+  const bulkQueryParams = useMemo(() => {
+    const { page: _p, pageSize: _s, sort: _sort, dir: _dir, ...rest } = queryParams;
+    return rest;
+  }, [queryParams]);
+
+  const selectAllMatching = async () => {
+    try {
+      const res = await ticketsAPI.bulkByQuery({ query: bulkQueryParams, action: { type: 'status', value: 'Open' }, preview: true });
+      setQueryScope(res.data);
+    } catch (e) {
+      setBulkResult({ ok: 0, failed: [{ ref: 'preview', message: e.response?.data?.message || e.message }], skipped: 0, label: 'select all' });
+    }
+  };
 
   const pageIds = tickets.map((t) => t.id);
   const allSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id));
@@ -579,9 +596,36 @@ export default function Tickets() {
   const bulkSkipCount = selectedTickets.length - editableSelected.length;
 
   const runBulk = async () => {
-    if (!bulkAction || editableSelected.length === 0 || bulkBusy) return;
+    if (!bulkAction || bulkBusy) return;
+    if (!queryScope && editableSelected.length === 0) return;
     setBulkBusy(true);
     lastLocalMutationRef.current = Date.now();
+
+    if (queryScope) {
+      // Query-scoped: the server re-resolves the filter and applies with a cap.
+      try {
+        const res = await ticketsAPI.bulkByQuery({
+          query: bulkQueryParams,
+          action: { type: bulkAction.type, value: bulkAction.value },
+          expectedTotal: queryScope.total,
+        });
+        setBulkResult({
+          ok: res.data.applied,
+          failed: res.data.failed || [],
+          skipped: res.data.skippedFsBorn || 0,
+          label: bulkAction.label,
+        });
+      } catch (e) {
+        setBulkResult({ ok: 0, failed: [{ ref: 'bulk', message: e.response?.data?.message || e.message }], skipped: 0, label: bulkAction.label });
+      }
+      setBulkBusy(false);
+      setBulkAction(null);
+      setQueryScope(null);
+      setSelectedIds(new Set());
+      refreshAfterEdit();
+      return;
+    }
+
     const targets = editableSelected;
     const results = await Promise.allSettled(targets.map((t) => (
       bulkAction.type === 'assign'
@@ -1339,7 +1383,7 @@ export default function Tickets() {
       )}
 
       {/* Bulk action bar */}
-      {(selectedIds.size > 0 || bulkResult) && (
+      {(selectedIds.size > 0 || bulkResult || queryScope) && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 tp-card rounded-xl shadow-soft px-4 py-3 flex flex-wrap items-center gap-3 max-w-[94vw] animate-fadeIn border border-slate-200">
           {bulkResult ? (
             <>
@@ -1368,12 +1412,12 @@ export default function Tickets() {
           ) : bulkAction ? (
             <>
               <span className="text-sm text-slate-700">
-                {bulkAction.type === 'assign' ? 'Assign' : 'Set'} <strong>{editableSelected.length}</strong> ticket{editableSelected.length === 1 ? '' : 's'} to <strong>{bulkAction.label}</strong>?
-                {bulkSkipCount > 0 && <span className="text-xs text-slate-400"> ({bulkSkipCount} FS-born skipped)</span>}
+                {bulkAction.type === 'assign' ? 'Assign' : 'Set'} <strong>{queryScope ? queryScope.editable : editableSelected.length}</strong> ticket{(queryScope ? queryScope.editable : editableSelected.length) === 1 ? '' : 's'}{queryScope ? ' (everything matching this filter)' : ''} to <strong>{bulkAction.label}</strong>?
+                {(queryScope ? queryScope.skippedFsBorn : bulkSkipCount) > 0 && <span className="text-xs text-slate-400"> ({queryScope ? queryScope.skippedFsBorn : bulkSkipCount} FS-born skipped)</span>}
               </span>
               <button
                 onClick={runBulk}
-                disabled={bulkBusy || editableSelected.length === 0}
+                disabled={bulkBusy || (queryScope ? queryScope.editable === 0 : editableSelected.length === 0)}
                 className="tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold rounded-lg bg-primary text-primary-foreground hover:bg-blue-700 disabled:opacity-50"
               >
                 {bulkBusy ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Check className="w-4 h-4" aria-hidden="true" />}
@@ -1389,11 +1433,29 @@ export default function Tickets() {
             </>
           ) : (
             <>
-              <span className="text-sm font-semibold text-slate-800">{selectedIds.size} selected</span>
-              {bulkSkipCount > 0 && (
+              <span className="text-sm font-semibold text-slate-800">
+                {queryScope ? `All ${queryScope.total} matching selected` : `${selectedIds.size} selected`}
+              </span>
+              {!queryScope && bulkSkipCount > 0 && (
                 <span className="text-xs text-slate-400" title="FreshService-born tickets are mirrors and stay read-only here">
                   {bulkSkipCount} FS-born read-only
                 </span>
+              )}
+              {!queryScope && allSelected && total > pageIds.length && (
+                <button
+                  onClick={selectAllMatching}
+                  className="tp-focus-ring text-xs font-semibold text-blue-600 hover:text-blue-700 px-1.5 py-0.5 rounded"
+                >
+                  Select all {total} matching
+                </button>
+              )}
+              {queryScope && (
+                <button
+                  onClick={() => setQueryScope(null)}
+                  className="tp-focus-ring text-xs font-medium text-slate-500 hover:text-slate-700 px-1.5 py-0.5 rounded"
+                >
+                  Back to page selection
+                </button>
               )}
               <select
                 value=""
@@ -1423,7 +1485,7 @@ export default function Tickets() {
                 {['Open', 'Pending', 'Resolved', 'Closed'].map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
               <button
-                onClick={() => setSelectedIds(new Set())}
+                onClick={() => { setSelectedIds(new Set()); setQueryScope(null); }}
                 aria-label="Clear selection"
                 className="tp-focus-ring p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
               >

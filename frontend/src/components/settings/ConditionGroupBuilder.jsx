@@ -23,6 +23,8 @@ export const CG_FIELDS = [
   { value: 'ticket.internalSubcategory', label: 'Subcategory', type: 'string' },
   { value: 'ticket.category', label: 'Category (FreshService)', type: 'string' },
   { value: 'ticket.tags', label: 'Tags', type: 'list' },
+  { value: 'ticket.impact', label: 'Impact (1=Low 2=Medium 3=High)', type: 'number' },
+  { value: 'ticket.urgency', label: 'Urgency (1=Low 2=Medium 3=High)', type: 'number' },
   { value: 'ticket.isNoise', label: 'Is noise/spam', type: 'boolean' },
   { value: 'ticket.ageMinutes', label: 'Ticket age (minutes)', type: 'duration' },
   { value: 'ticket.dueInMinutes', label: 'Minutes until due (negative = overdue)', type: 'duration' },
@@ -53,6 +55,7 @@ const OPERATORS_BY_TYPE = {
   ],
   boolean: [['is_true', 'is true'], ['is_false', 'is false']],
   duration: [['gt', 'more than'], ['lt', 'less than'], ['gte', 'at least'], ['lte', 'at most']],
+  number: [['is', 'is'], ['is_not', 'is not'], ['gt', 'more than'], ['lt', 'less than'], ['gte', 'at least'], ['lte', 'at most']],
   list: [
     ['has_any', 'has any of'], ['has_all', 'has all of'], ['has_none', 'has none of'],
     ['is_empty', 'is empty'], ['is_not_empty', 'is not empty'],

@@ -307,8 +307,12 @@ model TicketApproval {
   approverName  String?   @db.VarChar(255) @map("approver_name")
   requestedBy   String    @db.VarChar(255) @map("requested_by")
   requestNote   String?   @db.Text @map("request_note")
+  // Sanitized rich-text variants (gap plan P2.4); the plain columns stay the
+  // canonical fallback for email/text surfaces.
+  requestNoteHtml String? @db.Text @map("request_note_html")
   // Holds the clarification question while info_requested; the decision note otherwise.
   decisionNote  String?   @db.Text @map("decision_note")
+  decisionNoteHtml String? @db.Text @map("decision_note_html")
   decidedAt     DateTime? @map("decided_at")
   decidedVia    String?   @db.VarChar(20) @map("decided_via") // link | app
   tokenHash     String    @unique @db.VarChar(64) @map("token_hash")
@@ -638,6 +642,10 @@ model Ticket {
   descriptionText       String?   @db.Text @map("description_text")
   status                String    @db.VarChar(50)
   priority              Int       @default(3)
+  // Optional ITSM impact/urgency (gap plan P2.5): 1=Low 2=Medium 3=High.
+  // TP-side annotations on both origins; priority remains the operative field.
+  impact                Int?      @db.SmallInt
+  urgency               Int?      @db.SmallInt
   assessedPriority      String?   @db.VarChar(20) @map("assessed_priority")
   assessedPriorityId    Int?      @map("assessed_priority_id")
   priorityRationale     String?   @db.Text @map("priority_rationale")

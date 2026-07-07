@@ -632,6 +632,7 @@ export const ticketsAPI = {
   addLink: async (id, relatedTicketId, kind = 'related_to') => await api.post(`/tickets/${id}/links`, { relatedTicketId, kind }),
   removeLink: async (id, linkId) => await api.delete(`/tickets/${id}/links/${linkId}`),
   markDuplicateOf: async (id, targetId) => await api.post(`/tickets/${id}/duplicate-of/${targetId}`),
+  mergeTicket: async (id, targetTicketId, notifyRequester = false) => await api.post(`/tickets/${id}/merge`, { targetTicketId, notifyRequester }),
 
   // Macros (quick-action bundles)
   macros: async () => await api.get('/tickets/macros'),
@@ -640,6 +641,13 @@ export const ticketsAPI = {
   // Tags (gap plan P1) — TP-side layer, both origins, never written to FS
   listTags: async () => await api.get('/tickets/tags'),
   setTags: async (id, tagIds) => await api.put(`/tickets/${id}/tags`, { tagIds }),
+
+  // Bulk edit by query (gap plan P2.2) — long timeout: applies up to 500 tickets
+  bulkByQuery: async (payload) => await apiLongTimeout.post('/tickets/bulk-by-query', payload),
+
+  // Category↔group affinity (gap plan P2.3)
+  categoryGroupLinks: async () => await api.get('/tickets/category-group-links'),
+  setCategoryGroupLinks: async (links) => await api.put('/tickets/category-group-links', { links }),
 
   // Custom fields
   customFieldDefinitions: async () => await api.get('/tickets/custom-fields/definitions'),

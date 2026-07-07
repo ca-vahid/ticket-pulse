@@ -160,6 +160,24 @@ code {
     box-shadow: 0 0 0 2px rgb(59 130 246 / 0.55);
   }
 
+  /* Print view (gap plan P2.5): chrome (nav, composer, actions) hides via
+     .print-hide; the page prints white with the conversation intact. */
+  @media print {
+    .print-hide {
+      display: none !important;
+    }
+    body,
+    .tp-tickets-backdrop,
+    .tp-page-backdrop {
+      background: #fff !important;
+    }
+    .tp-card,
+    .tp-surface {
+      box-shadow: none !important;
+      border-color: #e2e8f0 !important;
+    }
+  }
+
   /* iOS safe-area helpers (needs viewport-fit=cover). Used on mobile sticky
      bars and bottom sheets so content clears the notch / home indicator. */
   .pb-safe {

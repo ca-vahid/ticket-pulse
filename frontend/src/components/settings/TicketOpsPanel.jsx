@@ -531,11 +531,87 @@ function TagsSection() {
   );
 }
 
+function CategoryGroupSection() {
+  const [links, setLinks] = useState([]); // [{ categoryId, groupId }]
+  const [categories, setCategories] = useState([]);
+  const [groups, setGroups] = useState([]);
+  const [dirty, setDirty] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    ticketsAPI.meta().then((res) => {
+      setCategories((res.data?.categoryTree || []).map((c) => ({ id: c.id, name: c.name })));
+      setGroups((res.data?.groups || []).filter((g) => g.freshserviceId).map((g) => ({ id: String(g.freshserviceId), name: g.name })));
+    }).catch(() => {});
+    ticketsAPI.categoryGroupLinks().then((res) => {
+      setLinks((res.data || []).map((l) => ({ categoryId: l.categoryId, groupId: String(l.groupId) })));
+    }).catch(() => {});
+  }, []);
+
+  const toggle = (categoryId, groupId) => {
+    setDirty(true);
+    setLinks((prev) => {
+      const exists = prev.some((l) => l.categoryId === categoryId && l.groupId === groupId);
+      return exists
+        ? prev.filter((l) => !(l.categoryId === categoryId && l.groupId === groupId))
+        : [...prev, { categoryId, groupId }];
+    });
+  };
+
+  const save = async () => {
+    setBusy(true); setError(null);
+    try {
+      await ticketsAPI.setCategoryGroupLinks(links);
+      setDirty(false);
+    } catch (e) { setError(e.response?.data?.message || e.message); }
+    setBusy(false);
+  };
+
+  if (groups.length === 0) return null;
+
+  return (
+    <SectionCard icon={Check} title="Category ↔ group mapping" hint="Scope top categories to specific groups: a mapped category only shows in pickers for tickets in one of its groups. Categories with no mapping stay visible everywhere.">
+      <div className="space-y-1.5 mb-2">
+        {categories.map((cat) => {
+          const mapped = links.filter((l) => l.categoryId === cat.id).map((l) => l.groupId);
+          return (
+            <div key={cat.id} className="flex flex-wrap items-center gap-1.5 text-xs">
+              <span className="w-56 truncate font-semibold text-slate-600" title={cat.name}>{cat.name}</span>
+              {groups.map((g) => (
+                <button
+                  key={g.id}
+                  type="button"
+                  onClick={() => toggle(cat.id, g.id)}
+                  aria-pressed={mapped.includes(g.id)}
+                  className={`tp-focus-ring px-2 py-0.5 rounded-full border text-[11px] ${
+                    mapped.includes(g.id) ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-400 border-slate-200 hover:border-indigo-300'
+                  }`}
+                >
+                  {g.name}
+                </button>
+              ))}
+              {mapped.length === 0 && <span className="text-[10px] text-slate-300 italic">all groups</span>}
+            </div>
+          );
+        })}
+      </div>
+      {error && <p className="text-xs text-red-500 mb-1.5">{error}</p>}
+      {dirty && (
+        <button onClick={save} disabled={busy} className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 disabled:opacity-60">
+          {busy ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" /> : <Check className="w-3 h-3" aria-hidden="true" />} Save mapping
+        </button>
+      )}
+    </SectionCard>
+  );
+}
+
 export default function TicketOpsPanel() {
   return (
     <div className="space-y-4 animate-fadeIn">
       <SlaSection />
       <TagsSection />
+      <CategoryGroupSection />
       <MacrosSection />
       <QuickNotesSection />
       <CustomFieldsSection />

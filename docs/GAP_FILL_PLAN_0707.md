@@ -37,35 +37,35 @@ The single most-referenced deferred item; unlocks queue filtering, workflow auto
 
 ---
 
-## Phase 2 — Ticketing depth
+## Phase 2 — Ticketing depth ✅ DONE (2 scoped caveats noted)
 
 ### 2.1 Merge tickets (true merge)
 Links + mark-as-duplicate exist; this is the real thing.
-- [ ] Design pass: TP-born↔TP-born first-class; FS-born as merge SOURCE only (its thread copies in; FS copy gets a closing note + link — FS stays owner of its record)
-- [ ] `mergeTicket(sourceId, targetId)`: move/copy thread entries (labeled provenance), attachments, tags, watchers, links; source → status Closed + `merged_into` link; audit both sides; old displayRef resolves/redirects to target
-- [ ] Requester notification choice (notify / silent) at merge time
-- [ ] UI: merge action in detail (pick target via typeahead with preview), confirm modal listing exactly what moves
-- [ ] Tests: merge semantics, idempotency, permissions, origin rules
+- [x] Design pass: TP-born↔TP-born first-class; FS-born as merge SOURCE only (its thread copies in; FS copy gets a closing note + link — FS stays owner of its record)
+- [x] `mergeTicket(sourceId, targetId)`: move/copy thread entries (labeled provenance), attachments, tags, watchers, links; source → status Closed + `merged_into` link; audit both sides; old displayRef resolves/redirects to target
+- [x] Requester notification choice (notify / silent) at merge time
+- [x] UI: merge action in detail (pick target via typeahead with preview), confirm modal listing exactly what moves
+- [x] Tests: merge semantics, idempotency, permissions, origin rules
 
 ### 2.2 Bulk edit by query
-- [ ] Backend: bulk endpoint accepts the current filter params (not just ids) + a server-computed count confirmation token, capped batch size with progress; runs as background job with per-ticket audit + failure report
-- [ ] UI: "Select all N matching" affordance beyond the current page; progress + result toast (reuse bulk result bar)
-- [ ] Guardrails: TP-born only for destructive ops (status), FS-born skipped with count (same as today); explicit cap (e.g. 500) with "narrow your filter" message
-- [ ] Tests: query-scope resolution matches list endpoint; cap; skip logic
+- [x] Backend: bulk endpoint accepts the current filter params (not just ids) + a server-computed count confirmation token, capped batch size with progress; runs as background job with per-ticket audit + failure report
+- [x] UI: "Select all N matching" affordance beyond the current page; progress + result toast (reuse bulk result bar)
+- [x] Guardrails: TP-born only for destructive ops (status), FS-born skipped with count (same as today); explicit cap (e.g. 500) with "narrow your filter" message
+- [x] Tests: query-scope resolution matches list endpoint; cap; skip logic
 
 ### 2.3 Per-group taxonomies + category↔group mapping UI
-- [ ] Admin UX for the existing CategoryGroupLink API (Settings → Ticket Ops or Categories): map top categories → FS groups; unmapped = visible to all
-- [ ] Ticket create/edit + queue filters: category picker scoped by the ticket's group where mappings exist (fallback: full tree)
-- [ ] AI triage + workflows respect the scoping (assignment candidate filtering)
-- [ ] Tests: scoped picker, fallback, API round-trip
+- [x] Admin UX for the existing CategoryGroupLink API (Settings → Ticket Ops or Categories): map top categories → FS groups; unmapped = visible to all
+- [x] Ticket create/edit + queue filters: category picker scoped by the ticket's group where mappings exist (fallback: full tree)
+- [~] AI triage + workflows respect the scoping — pickers/UI done; pipeline-side candidate filtering is Codex's domain (coordinate, not edit) — flagged for handoff
+- [x] Tests: scoped picker, fallback, API round-trip
 
 ### 2.4 Approval composer rich text
-- [ ] Request note + decision note + clarification use the existing sanitized rich-text composer (same pipeline as replies); emails render the HTML
-- [ ] Tests: sanitization, email render
+- [x] Request note rich end-to-end (modal composer → sanitized HTML → approver email + timeline render); decision-note HTML accepted/stored/rendered. Public magic-link page + clarification stay plain text (self-contained page, deliberate)
+- [x] Tests: sanitization, email render
 
 ### 2.5 Small but real
-- [ ] Impact + urgency as optional separate fields (TP-born; priority derived or manual — confirm matrix at build), shown on detail sidebar; workflow condition fields
-- [ ] Print view for a ticket (clean CSS print stylesheet: header, thread, attachments list)
+- [x] Impact + urgency as optional separate fields (TP-born; priority derived or manual — confirm matrix at build), shown on detail sidebar; workflow condition fields
+- [x] Print view for a ticket (clean CSS print stylesheet: header, thread, attachments list)
 
 ---
 

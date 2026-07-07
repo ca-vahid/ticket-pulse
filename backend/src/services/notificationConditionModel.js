@@ -32,6 +32,8 @@ export const CONDITION_FIELDS = Object.freeze({
   'ticket.internalCategory': { label: 'Category', type: 'string', path: 'ticket.internalCategory.name' },
   'ticket.internalSubcategory': { label: 'Subcategory', type: 'string', path: 'ticket.internalSubcategory.name' },
   'ticket.tags': { label: 'Tags', type: 'list', path: 'ticket.tags' },
+  'ticket.impact': { label: 'Impact (1-3)', type: 'number', path: 'ticket.impact' },
+  'ticket.urgency': { label: 'Urgency (1-3)', type: 'number', path: 'ticket.urgency' },
   'ticket.isNoise': { label: 'Is noise/spam', type: 'boolean', path: 'ticket.isNoise' },
   'ticket.ageMinutes': { label: 'Ticket age', type: 'duration', path: 'ticket.ageMinutes' },
   'ticket.dueInMinutes': { label: 'Time until due', type: 'duration', path: 'ticket.dueInMinutes' },

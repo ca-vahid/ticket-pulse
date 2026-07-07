@@ -274,6 +274,8 @@ function buildEventContext({ event, ticket, previousAgent, source }) {
       status: ticket.status,
       priority: ticket.priority,
       priorityLabel: priorityLabel(ticket),
+      impact: ticket.impact ?? null,
+      urgency: ticket.urgency ?? null,
       assessedPriority: ticket.assessedPriority || null,
       toEmails: emailList(ticket.toEmails),
       ccEmails: emailList(ticket.ccEmails),
