@@ -97,10 +97,10 @@ The v3.0.5 features exist end-to-end but not *everywhere*. Close the loops:
 ## Phase 6 — Wrap & ship
 
 - [x] Full lint + backend/frontend suites green (backend 692/693 — only the pre-existing CC-resolver failure; frontend 69/69; both lints 0 errors)
-- [x] Version → 3.0.6-preview + in-app changelog entry
+- [x] Version → 3.0.8-preview (renumbered — main took 3.0.6/3.0.7 for the live-update releases) + in-app changelog entry
 - [x] Dev self-test: scripts/selftest-306.mjs — 15/15 (presence lifecycle, webhook CRUD/signing/SSRF/failure accounting, 87% similar-by-content sibling match, live Haiku sentiment stored + served); throwaways cleaned up. Playwright visual pass on palette + queue peek.
 - [x] Migrations: 3 applied to dev (scheduled_ticket_attachments, webhook_subscriptions, sentiment_and_embeddings); prod via `migrate deploy` at deploy
-- [x] QA test doc: docs/QA_Test_Plan_v3.0.6.docx
+- [x] QA test doc: docs/QA_Test_Plan_v3.0.8.docx
 - [ ] Deploy to prod on user go-ahead → verify
 
 ---
