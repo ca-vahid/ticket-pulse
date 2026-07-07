@@ -1,6 +1,16 @@
-export const APP_VERSION = '3.0.6-preview';
+export const APP_VERSION = '3.0.7-preview';
 
 export const changelog = [
+  {
+    version: '3.0.7-preview',
+    date: 'July 8, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Live rows now finish the story</strong> — when an AI assignment run completes, the assignee, category, and status on the queue row update in place the moment the write-back lands (a follow-up live event now fires after the sync, not just when the analysis ends).' },
+      { type: 'improved', html: '<strong>Calmer change highlighting</strong> — the post-refresh flash no longer washes the whole row: a soft glow hugs just the subject line (blue for new tickets, sky for changed ones), and new rows slide in with a spring instead of popping.' },
+      { type: 'improved', html: '<strong>Beefier update pill</strong> — the “N updates — refresh” pill is bigger and easier to hit, with a larger count badge.' },
+      { type: 'improved', html: '<strong>Manual override, clarified</strong> — assigning someone while “AI matching…” is running takes precedence over the AI pick, and the run still finishes its category & priority detection (the chip’s tooltip now says so). Pipeline updates that land while the tab is in the background join the refresh pill instead of being lost.' },
+    ],
+  },
   {
     version: '3.0.6-preview',
     date: 'July 8, 2026',

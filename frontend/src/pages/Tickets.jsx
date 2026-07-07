@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { motion } from 'motion/react';
 import {
   Activity, AlertCircle, ArrowDownWideNarrow, ArrowUpNarrowWide, CalendarDays, Check,
   CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, CornerUpRight, Download, Inbox,
@@ -513,8 +514,13 @@ export default function Tickets() {
       if (tid && ticketsRef.current.some((t) => t.id === tid)) {
         if (aiLiveTimerRef.current) clearTimeout(aiLiveTimerRef.current);
         aiLiveTimerRef.current = setTimeout(() => {
-          // Background tabs skip the work — the pill/stats catch them up on return.
-          if (document.visibilityState === 'hidden') return;
+          // Background tabs skip the fetch; the change joins the pill instead
+          // so it isn't silently lost when the user comes back.
+          if (document.visibilityState === 'hidden') {
+            pendingIdsRef.current.add(tid);
+            setPendingCount(pendingIdsRef.current.size);
+            return;
+          }
           fetchTicketsRef.current({ silent: true, diffAgainst: new Map(ticketsRef.current.map((t) => [t.id, t])) });
         }, 450);
       }
@@ -1078,13 +1084,16 @@ export default function Tickets() {
                           const assigneeReadOnly = ticket.assignedTech
                             && !(meta?.technicians || []).some((t) => t.id === ticket.assignedTechId);
                           return (
-                            <li
+                            <motion.li
                               key={ticket.id}
+                              initial={fx === 'new' ? { opacity: 0, y: -14 } : false}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{ type: 'spring', stiffness: 420, damping: 34 }}
                               className={`group flex items-stretch transition-colors cursor-pointer ${
                                 aiLive ? 'tp-ai-live'
                                   : previewing ? 'bg-blue-50/50'
                                     : selectedIds.has(ticket.id) ? 'bg-blue-50/40' : 'hover:bg-slate-50'
-                              } ${fx === 'new' ? 'tp-row-flash-new' : fx === 'updated' && !aiLive ? 'tp-row-flash-updated' : ''}`}
+                              }`}
                               onClick={() => onRowClick(ticket.id)}
                               onDoubleClick={() => onRowDoubleClick(ticket.id)}
                               title="Click to preview (double-click opens)"
@@ -1115,7 +1124,9 @@ export default function Tickets() {
                                         <button
                                           onClick={(e) => { e.stopPropagation(); onRowClick(ticket.id); }}
                                           onDoubleClick={(e) => { e.stopPropagation(); onRowDoubleClick(ticket.id); }}
-                                          className="tp-focus-ring rounded text-left text-sm font-medium text-slate-800 truncate"
+                                          className={`tp-focus-ring rounded text-left text-sm font-medium text-slate-800 truncate ${
+                                            fx === 'new' ? 'tp-subject-flash-new' : fx === 'updated' ? 'tp-subject-flash-updated' : ''
+                                          }`}
                                         >
                                           {ticket.subject || '(no subject)'}
                                         </button>
@@ -1128,7 +1139,7 @@ export default function Tickets() {
                                           <button
                                             onClick={(e) => { e.stopPropagation(); setAiTicket(ticket); }}
                                             onDoubleClick={(e) => e.stopPropagation()}
-                                            title="AI is picking the best technician right now — click to watch live or take over"
+                                            title="AI is picking the best technician right now — click to watch live. Assigning someone manually overrides the AI pick; category & priority detection still finish."
                                             className="tp-focus-ring tp-ai-chip shrink-0 inline-flex items-center gap-1 pl-1.5 pr-2 py-0.5 rounded-full text-[10px] font-bold text-white"
                                           >
                                             <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
@@ -1136,7 +1147,7 @@ export default function Tickets() {
                                           </button>
                                         ) : (
                                           <span
-                                            title="AI is picking the best technician right now"
+                                            title="AI is picking the best technician right now. A manual assignment overrides the AI pick; category & priority detection still finish."
                                             className="tp-ai-chip shrink-0 inline-flex items-center gap-1 pl-1.5 pr-2 py-0.5 rounded-full text-[10px] font-bold text-white"
                                           >
                                             <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
@@ -1350,7 +1361,12 @@ export default function Tickets() {
                                     )}
                                     <StatusPill status={ticket.status} className="ml-auto" />
                                   </div>
-                                  <p className="text-sm font-medium text-slate-800 line-clamp-2">{ticket.subject || '(no subject)'}</p>
+                                  <p className={`text-sm font-medium text-slate-800 line-clamp-2 ${
+                                    fx === 'new' ? 'tp-subject-flash-new' : fx === 'updated' ? 'tp-subject-flash-updated' : ''
+                                  }`}
+                                  >
+                                    {ticket.subject || '(no subject)'}
+                                  </p>
                                   {(() => {
                                     const { category: catLabel, subcategory: subLabel } = ticketCategoryLabels(ticket);
                                     const label = subLabel || catLabel;
@@ -1408,7 +1424,7 @@ export default function Tickets() {
                                   </div>
                                 </div>
                               </div>
-                            </li>
+                            </motion.li>
                           );
                         })}
                       </ul>

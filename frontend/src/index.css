@@ -324,21 +324,26 @@ code {
   animation: tpCountPop 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.35) both;
 }
 
-/* Post-refresh row highlights: arrivals sweep blue, edits sweep sky. */
-@keyframes tpRowNew {
-  0% { background-color: rgb(191 219 254 / 0.9); }
-  55% { background-color: rgb(219 234 254 / 0.65); }
-  100% { background-color: transparent; }
+/* Post-refresh change highlight, scoped to the SUBJECT cell (a full-row wash
+   read as noise): a soft rounded glow behind the subject line that fades.
+   Blue = new arrival, sky = existing row changed. */
+@keyframes tpSubjectGlow {
+  0% { box-shadow: 0 0 0 5px var(--tp-glow); background-color: var(--tp-glow); }
+  55% { box-shadow: 0 0 0 5px var(--tp-glow-soft); background-color: var(--tp-glow-soft); }
+  100% { box-shadow: 0 0 0 5px transparent; background-color: transparent; }
 }
-.tp-row-flash-new {
-  animation: tpRowNew 3s ease-out both;
+.tp-subject-flash-new,
+.tp-subject-flash-updated {
+  border-radius: 0.375rem;
+  animation: tpSubjectGlow 2.6s ease-out both;
 }
-@keyframes tpRowUpdated {
-  0% { background-color: rgb(186 230 253 / 0.75); }
-  100% { background-color: transparent; }
+.tp-subject-flash-new {
+  --tp-glow: rgb(147 197 253 / 0.55);
+  --tp-glow-soft: rgb(191 219 254 / 0.38);
 }
-.tp-row-flash-updated {
-  animation: tpRowUpdated 2.4s ease-out both;
+.tp-subject-flash-updated {
+  --tp-glow: rgb(125 211 252 / 0.45);
+  --tp-glow-soft: rgb(186 230 253 / 0.3);
 }
 
 /* "NEW" chip beside the subject: pop in, linger, fade with the row sweep. */
@@ -409,8 +414,8 @@ code {
   .tp-pill-pulse,
   .tp-pill-done,
   .tp-count-pop,
-  .tp-row-flash-new,
-  .tp-row-flash-updated,
+  .tp-subject-flash-new,
+  .tp-subject-flash-updated,
   .tp-new-chip,
   .tp-ai-live,
   .tp-ai-accent,

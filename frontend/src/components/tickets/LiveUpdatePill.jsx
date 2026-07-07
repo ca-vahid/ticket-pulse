@@ -26,7 +26,7 @@ export default function LiveUpdatePill({ count, state = 'idle', onApply }) {
         onClick={onApply}
         disabled={busy || done}
         title={done ? undefined : busy ? undefined : 'Load the changes into the list — new and updated rows get highlighted'}
-        className={`pointer-events-auto inline-flex items-center gap-2 pl-3 pr-4 py-2 rounded-full text-sm font-semibold text-white shadow-soft transition-all duration-200 tp-focus-ring ${
+        className={`pointer-events-auto inline-flex items-center gap-2.5 pl-4 pr-5 py-3 rounded-full text-[15px] font-semibold text-white shadow-soft transition-all duration-200 tp-focus-ring ${
           done
             ? 'bg-emerald-600 tp-pill-done'
             : busy
@@ -36,24 +36,24 @@ export default function LiveUpdatePill({ count, state = 'idle', onApply }) {
       >
         {done ? (
           <>
-            <Check className="w-4 h-4" aria-hidden="true" />
+            <Check className="w-5 h-5" aria-hidden="true" />
             Up to date
           </>
         ) : busy ? (
           <>
-            <RefreshCw className="w-4 h-4 animate-spin" aria-hidden="true" />
+            <RefreshCw className="w-5 h-5 animate-spin" aria-hidden="true" />
             Refreshing…
           </>
         ) : (
           <>
-            <span aria-hidden="true" className="relative flex h-2.5 w-2.5">
+            <span aria-hidden="true" className="relative flex h-3 w-3">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white/70" />
-              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-white" />
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-white" />
             </span>
             {/* Re-keying replays the pop each time the count moves. */}
             <span
               key={count}
-              className="tp-count-pop inline-flex items-center justify-center min-w-[1.5rem] h-6 px-1.5 rounded-full bg-white text-blue-700 text-xs font-extrabold tabular-nums shadow-sm"
+              className="tp-count-pop inline-flex items-center justify-center min-w-[1.75rem] h-7 px-2 rounded-full bg-white text-blue-700 text-sm font-extrabold tabular-nums shadow-sm"
             >
               {count}
             </span>
