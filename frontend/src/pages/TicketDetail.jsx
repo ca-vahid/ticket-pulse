@@ -13,6 +13,7 @@ import { CustomFieldsCard, MacroMenu, TicketLinksCard, TimeTrackingCard } from '
 import ThreadSummaryCard from '../components/tickets/ThreadSummaryCard';
 import RequestApprovalModal from '../components/tickets/RequestApprovalModal';
 import AppHeader from '../components/AppHeader';
+import MobileTabBar from '../components/nav/MobileTabBar';
 import AiAssignModal from '../components/tickets/AiAssignModal';
 import AssigneePicker from '../components/tickets/AssigneePicker';
 import CcChips from '../components/tickets/CcChips';
@@ -129,22 +130,50 @@ function approvalEventMeta(entry) {
   return null;
 }
 
+// QA 07-06 #8: descriptions render fully by default — only genuinely long ones
+// (taller than ~2 screens of content) collapse to a generous preview. Measured
+// on the rendered height, not character count, so image-heavy or formatted
+// emails aren't clipped mid-read.
+const BODY_CLAMP_AT_PX = 1200; // collapse only when taller than this
+const BODY_PREVIEW_PX = 800; // collapsed preview height
+
 function CollapsibleBody({ html, text }) {
-  const raw = String(text || html || '');
-  const isLong = raw.length > 700;
-  const [expanded, setExpanded] = useState(!isLong);
+  const bodyRef = useRef(null);
+  const userToggled = useRef(false);
+  const [collapsed, setCollapsed] = useState(false);
+  const [isLong, setIsLong] = useState(false);
+
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return undefined;
+    const measure = () => {
+      if (el.scrollHeight > BODY_CLAMP_AT_PX) {
+        setIsLong(true);
+        if (!userToggled.current) setCollapsed(true);
+      }
+    };
+    measure();
+    // Late image loads can push a "short" description past the threshold.
+    el.addEventListener('load', measure, true);
+    return () => el.removeEventListener('load', measure, true);
+  }, [html, text]);
+
   return (
     <div>
-      <div className={expanded ? '' : 'max-h-40 overflow-hidden relative'}>
+      <div
+        ref={bodyRef}
+        className={collapsed ? 'overflow-hidden relative' : ''}
+        style={collapsed ? { maxHeight: `${BODY_PREVIEW_PX}px` } : undefined}
+      >
         <Body html={html} text={text} />
-        {!expanded && <div className="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-white to-transparent" aria-hidden="true" />}
+        {collapsed && <div className="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-white to-transparent" aria-hidden="true" />}
       </div>
       {isLong && (
         <button
-          onClick={() => setExpanded((v) => !v)}
+          onClick={() => { userToggled.current = true; setCollapsed((v) => !v); }}
           className="tp-focus-ring mt-1.5 text-xs font-semibold text-blue-600 hover:underline rounded"
         >
-          {expanded ? 'Show less' : 'Show more'}
+          {collapsed ? 'Show more' : 'Show less'}
         </button>
       )}
     </div>
@@ -154,6 +183,57 @@ function CollapsibleBody({ html, text }) {
 const isImageAttachment = (a) =>
   /^image\//i.test(a?.contentType || a?.mimeType || '') ||
   /\.(png|jpe?g|gif|webp|bmp|svg|heic|avif)$/i.test(a?.fileName || '');
+
+/**
+ * QA 07-06 #9: images attached to the DESCRIPTION (ticket-level, not a reply)
+ * surface as a thumbnail strip right under the description text instead of
+ * hiding only in the attachments rail. Click → the existing preview lightbox.
+ * The rail stays the canonical list of everything attached.
+ */
+function DescriptionImageStrip({ ticketId, images, onPreview }) {
+  const [urls, setUrls] = useState({}); // attachmentId → object URL
+  useEffect(() => {
+    if (!images.length) return undefined;
+    let alive = true;
+    const made = [];
+    images.forEach((a) => {
+      ticketsAPI.attachmentObjectUrl(ticketId, a.id)
+        .then((res) => {
+          if (!alive) { URL.revokeObjectURL(res.url); return; }
+          made.push(res.url);
+          setUrls((u) => ({ ...u, [a.id]: res.url }));
+        })
+        .catch(() => {});
+    });
+    return () => { alive = false; setTimeout(() => made.forEach((u) => URL.revokeObjectURL(u)), 300); };
+  }, [ticketId, images]);
+
+  if (!images.length) return null;
+  return (
+    <div className="mt-3 pt-3 border-t border-slate-100 flex flex-wrap gap-2" aria-label="Images attached to the description">
+      {images.map((a) => (
+        <button
+          key={a.id}
+          type="button"
+          onClick={() => onPreview(a)}
+          className="tp-focus-ring group relative rounded-lg overflow-hidden border border-slate-200 bg-slate-50 hover:border-blue-300 transition-colors"
+          title={`Preview ${a.fileName}`}
+        >
+          {urls[a.id]
+            ? <img src={urls[a.id]} alt={a.fileName} loading="lazy" className="h-24 w-auto max-w-[220px] object-cover" />
+            : (
+              <span className="flex items-center justify-center h-24 w-32">
+                <ImageIcon className="w-5 h-5 text-slate-300" aria-hidden="true" />
+              </span>
+            )}
+          <span className="absolute inset-x-0 bottom-0 bg-slate-900/55 text-white text-[10px] px-1.5 py-0.5 truncate opacity-0 group-hover:opacity-100 transition-opacity">
+            {a.fileName}
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
 
 function AttachmentChip({ attachment, onDownload, onPreview }) {
   const isImage = isImageAttachment(attachment);
@@ -471,9 +551,9 @@ export default function TicketDetail() {
   const composerFileInputRef = useRef(null);
   const pasteCountRef = useRef(0);
 
-  const showToast = useCallback((tone, message) => {
-    setToast({ tone, message });
-    setTimeout(() => setToast(null), 3500);
+  const showToast = useCallback((tone, message, { undo = null, duration = 3500 } = {}) => {
+    setToast({ tone, message, undo });
+    setTimeout(() => setToast(null), undo ? Math.max(duration, 5000) : duration);
   }, []);
 
   // ---- Draft guard: per-ticket stash so navigating away never loses a reply ----
@@ -647,6 +727,9 @@ export default function TicketDetail() {
     } catch (err) {
       // FS refused (or didn't accept the value) — nothing changed locally.
       setFsError(err.response?.data?.message || err.message || 'FreshService rejected the change');
+      // A timeout can fire while the write actually lands (QA 231648) —
+      // refetch so the page shows the TRUE state alongside the error.
+      fetchTicket({ silent: true });
     } finally {
       setFsBusy(false);
     }
@@ -830,6 +913,13 @@ export default function TicketDetail() {
     return map;
   }, [ticket?.attachments]);
 
+  // Ticket-level (description) image attachments — shown as an inline strip
+  // under the description (QA 07-06 #9).
+  const descriptionImages = useMemo(
+    () => (ticket?.attachments || []).filter((a) => !a.threadEntryId && isImageAttachment(a)),
+    [ticket?.attachments],
+  );
+
   const techPhotoByEmail = useMemo(() => {
     const map = new Map();
     for (const t of meta?.technicians || []) {
@@ -850,13 +940,26 @@ export default function TicketDetail() {
     return null;
   }, [techPhotoByEmail, requesterPhoto, requesterEmail]);
 
-  const applyChange = useCallback(async (field, fn) => {
+  const applyChange = useCallback(async (field, fn, { undo = null, label = 'Saved' } = {}) => {
     setSavingField(field);
     lastLocalMutationRef.current = Date.now(); // own change — no self-flash
     try {
       await fn();
       await fetchTicket({ silent: true });
-      showToast('emerald', 'Saved');
+      // Instant saves get an Undo (QA 07-06 #3): the toast holds the previous
+      // value for ~5s and re-applies it through the same API on click.
+      showToast('emerald', label, undo ? {
+        undo: async () => {
+          lastLocalMutationRef.current = Date.now();
+          try {
+            await undo();
+            await fetchTicket({ silent: true });
+            showToast('sky', 'Change undone');
+          } catch (err) {
+            showToast('red', err.response?.data?.message || err.message || 'Undo failed');
+          }
+        },
+      } : {});
     } catch (err) {
       showToast('red', err.response?.data?.message || err.message || 'Change failed');
     } finally {
@@ -1095,6 +1198,33 @@ export default function TicketDetail() {
     }
   };
 
+  // ---- Quick notes: canned INTERNAL notes, scoped by top category (QA 07-06 #12) ----
+  const [quickNotes, setQuickNotes] = useState([]);
+  const [quickNotesOpen, setQuickNotesOpen] = useState(false);
+  const quickNotesRef = useRef(null);
+  useEffect(() => {
+    ticketsAPI.listQuickNotes().then((res) => setQuickNotes(res.data || [])).catch(() => {});
+  }, []);
+  useEffect(() => {
+    if (!quickNotesOpen) return undefined;
+    const onDoc = (e) => { if (quickNotesRef.current && !quickNotesRef.current.contains(e.target)) setQuickNotesOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [quickNotesOpen]);
+  // Unscoped notes always show; scoped notes only on tickets in one of their top categories.
+  const visibleQuickNotes = useMemo(() => quickNotes.filter((n) =>
+    !(n.internalCategoryIds || []).length
+    || (effectiveCategoryId && n.internalCategoryIds.includes(effectiveCategoryId)),
+  ), [quickNotes, effectiveCategoryId]);
+  const insertQuickNote = (note) => {
+    const addition = note.bodyHtml || String(note.bodyText || '').replace(/\n/g, '<br>');
+    const joined = composerText.trim() ? `${composerBody}<p><br></p>${addition}` : addition;
+    setComposerBody(joined);
+    setComposerText(htmlToText(joined));
+    setQuickNotesOpen(false);
+    setTimeout(() => composerRef.current?.focus(), 0);
+  };
+
   // ---- Forward mode ----
   const [forwardTo, setForwardTo] = useState([]);
 
@@ -1219,7 +1349,8 @@ export default function TicketDetail() {
     <div className="tp-tickets-backdrop min-h-screen">
       <AppHeader activePage="tickets" />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 animate-fadeIn">
+      {/* pb clears the mobile bottom tab bar (QA 07-06 #11) */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 pb-20 md:pb-6 animate-fadeIn">
         <div className="flex items-center justify-between mb-4">
           <button
             onClick={() => navigate('/tickets')}
@@ -1616,6 +1747,7 @@ export default function TicketDetail() {
                           )}
                         </div>
                         <CollapsibleBody html={ticket.description} text={ticket.descriptionText} />
+                        <DescriptionImageStrip ticketId={ticketId} images={descriptionImages} onPreview={previewImage} />
                       </section>
                     )}
                     {editingDescription && (
@@ -1722,7 +1854,9 @@ export default function TicketDetail() {
                     {/* Composer */}
                     {canConverse ? (
                       <section className="tp-card rounded-xl p-3.5" aria-label="Reply composer">
-                        <div role="group" aria-label="Composer mode" className="flex items-center gap-1.5 mb-2.5">
+                        {/* QA 07-06 #10: wraps + compact labels under sm so nothing
+                            (Templates, Quick notes) ever exceeds a phone viewport. */}
+                        <div role="group" aria-label="Composer mode" className="flex flex-wrap items-center gap-1.5 mb-2.5">
                           <button
                             onClick={() => switchComposerMode('reply')}
                             aria-pressed={composerMode === 'reply'}
@@ -1730,7 +1864,7 @@ export default function TicketDetail() {
                               composerMode === 'reply' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300'
                             }`}
                           >
-                            <Mail className="w-3.5 h-3.5" aria-hidden="true" /> Reply to requester
+                            <Mail className="w-3.5 h-3.5" aria-hidden="true" /> Reply<span className="hidden sm:inline">&nbsp;to requester</span>
                           </button>
                           <button
                             onClick={() => switchComposerMode('note')}
@@ -1739,7 +1873,7 @@ export default function TicketDetail() {
                               composerMode === 'note' ? 'bg-amber-500 text-white border-amber-500' : 'bg-white text-slate-600 border-slate-200 hover:border-amber-300'
                             }`}
                           >
-                            <StickyNote className="w-3.5 h-3.5" aria-hidden="true" /> Internal note
+                            <StickyNote className="w-3.5 h-3.5" aria-hidden="true" /> <span className="sm:hidden">Note</span><span className="hidden sm:inline">Internal note</span>
                           </button>
                           <button
                             onClick={() => switchComposerMode('forward')}
@@ -1751,17 +1885,49 @@ export default function TicketDetail() {
                             <Forward className="w-3.5 h-3.5" aria-hidden="true" /> Forward
                           </button>
 
-                          <span ref={templatesRef} className="relative ml-auto">
+                          {composerMode === 'note' && visibleQuickNotes.length > 0 && (
+                            <span ref={quickNotesRef} className="relative ml-auto">
+                              <button
+                                onClick={() => setQuickNotesOpen((v) => !v)}
+                                aria-expanded={quickNotesOpen}
+                                className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 hover:border-amber-400"
+                              >
+                                <StickyNote className="w-3.5 h-3.5" aria-hidden="true" />
+                                <span className="hidden sm:inline">Quick notes&nbsp;</span>({visibleQuickNotes.length})
+                              </button>
+                              {quickNotesOpen && (
+                                <span className="absolute right-0 top-full mt-1 z-30 w-72 max-w-[calc(100vw-2.5rem)] tp-card rounded-lg shadow-soft p-1.5 flex flex-col animate-scaleIn">
+                                  <span className="max-h-52 overflow-y-auto settings-scrollbar flex flex-col">
+                                    {visibleQuickNotes.map((note) => (
+                                      <button
+                                        key={note.id}
+                                        onClick={() => insertQuickNote(note)}
+                                        className="tp-focus-ring text-left px-2 py-1.5 text-sm rounded-md text-slate-700 hover:bg-amber-50"
+                                        title={note.bodyText.slice(0, 200)}
+                                      >
+                                        <span className="block truncate">{note.name}</span>
+                                        <span className="block text-[10px] text-slate-400 truncate">{note.bodyText.slice(0, 60)}</span>
+                                      </button>
+                                    ))}
+                                  </span>
+                                  <span className="px-2 pt-1.5 mt-1 border-t border-slate-100 text-[10px] text-slate-400">Admins manage these under Settings → Ticket Ops.</span>
+                                </span>
+                              )}
+                            </span>
+                          )}
+
+                          <span ref={templatesRef} className={`relative ${composerMode === 'note' && visibleQuickNotes.length > 0 ? '' : 'ml-auto'}`}>
                             <button
                               onClick={() => setTemplatesOpen((v) => !v)}
                               aria-expanded={templatesOpen}
                               className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-500 bg-white border border-slate-200 hover:border-blue-300 hover:text-blue-700"
                             >
                               <FileText className="w-3.5 h-3.5" aria-hidden="true" />
-                          Templates{templates.length > 0 ? ` (${templates.length})` : ''}
+                              <span className="hidden sm:inline">Templates{templates.length > 0 ? ` (${templates.length})` : ''}</span>
+                              <span className="sm:hidden">{templates.length > 0 ? `(${templates.length})` : 'Tpl'}</span>
                             </button>
                             {templatesOpen && (
-                              <span className="absolute right-0 top-full mt-1 z-30 w-72 tp-card rounded-lg shadow-soft p-1.5 flex flex-col animate-scaleIn">
+                              <span className="absolute right-0 top-full mt-1 z-30 w-72 max-w-[calc(100vw-2.5rem)] tp-card rounded-lg shadow-soft p-1.5 flex flex-col animate-scaleIn">
                                 {templates.length === 0 && (
                                   <span className="px-2 py-1.5 text-xs text-slate-400">No templates yet — write a reply below, then save it here.</span>
                                 )}
@@ -1994,8 +2160,13 @@ export default function TicketDetail() {
                       disabled={(!canWrite && !fsEditable) || savingField === 'status'}
                       onChange={(e) => {
                         const next = e.target.value;
-                        if (canWrite) applyChange('status', () => ticketsAPI.setStatus(ticketId, next));
-                        else requestFsSync([{ field: 'Status', from: ticket.status, to: next }], { status: next }).catch(() => {});
+                        const prev = ticket.status;
+                        if (canWrite) {
+                          applyChange('status', () => ticketsAPI.setStatus(ticketId, next), {
+                            label: `Status → ${next}`,
+                            undo: () => ticketsAPI.setStatus(ticketId, prev),
+                          });
+                        } else requestFsSync([{ field: 'Status', from: ticket.status, to: next }], { status: next }).catch(() => {});
                       }}
                       className={fieldClass}
                       aria-label="Ticket status"
@@ -2011,8 +2182,13 @@ export default function TicketDetail() {
                       disabled={(!canWrite && !fsEditable) || savingField === 'priority'}
                       onChange={(e) => {
                         const next = Number(e.target.value);
-                        if (canWrite) applyChange('priority', () => ticketsAPI.update(ticketId, { priority: next }));
-                        else requestFsSync([{ field: 'Priority', from: PRIORITY_LABELS[ticket.priority], to: PRIORITY_LABELS[next] }], { priority: next }).catch(() => {});
+                        const prev = ticket.priority;
+                        if (canWrite) {
+                          applyChange('priority', () => ticketsAPI.update(ticketId, { priority: next }), {
+                            label: `Priority → ${PRIORITY_LABELS[next]}`,
+                            undo: () => ticketsAPI.update(ticketId, { priority: prev }),
+                          });
+                        } else requestFsSync([{ field: 'Priority', from: PRIORITY_LABELS[ticket.priority], to: PRIORITY_LABELS[next] }], { priority: next }).catch(() => {});
                       }}
                       className={fieldClass}
                       aria-label="Ticket priority"
@@ -2098,11 +2274,16 @@ export default function TicketDetail() {
                           disabled={savingField === 'category'}
                           onChange={(e) => {
                             const nextId = e.target.value ? Number(e.target.value) : null;
+                            const prevCat = ticket.internalCategoryId ?? null;
+                            const prevSub = ticket.internalSubcategoryId ?? null;
                             if (canWrite) {
                               applyChange('category', () => ticketsAPI.update(ticketId, {
                                 internalCategoryId: nextId,
                                 internalSubcategoryId: null,
-                              }));
+                              }), {
+                                label: 'Category updated',
+                                undo: () => ticketsAPI.update(ticketId, { internalCategoryId: prevCat, internalSubcategoryId: prevSub }),
+                              });
                             } else {
                               const nextName = (meta?.categoryTree || []).find((c) => c.id === nextId)?.name || 'Uncategorized';
                               requestFsSync(
@@ -2504,11 +2685,19 @@ export default function TicketDetail() {
       {toast && (
         <div
           role="status"
-          className={`fixed bottom-5 right-5 z-50 px-4 py-2.5 rounded-lg shadow-soft text-sm font-medium animate-slideInLeft ${
+          className={`fixed bottom-20 md:bottom-5 right-5 z-50 flex items-center gap-3 px-4 py-2.5 rounded-lg shadow-soft text-sm font-medium animate-slideInLeft ${
             toast.tone === 'red' ? 'bg-red-600 text-white' : toast.tone === 'sky' ? 'bg-sky-600 text-white' : 'bg-emerald-600 text-white'
           }`}
         >
           {toast.message}
+          {toast.undo && (
+            <button
+              onClick={() => { const fn = toast.undo; setToast(null); fn(); }}
+              className="tp-focus-ring px-2 py-0.5 rounded-md bg-white/20 hover:bg-white/30 text-xs font-bold uppercase tracking-wide"
+            >
+              Undo
+            </button>
+          )}
         </div>
       )}
 
@@ -2702,6 +2891,8 @@ export default function TicketDetail() {
           </div>
         </div>
       )}
+
+      <MobileTabBar />
     </div>
   );
 }

@@ -812,6 +812,14 @@ class TicketService {
       import('./syncService.js')
         .then(({ default: syncService }) => syncService.reconcileSingleTicket(ticket.id, workspaceId))
         .catch(() => null);
+      // Fresh FS-side conversation entries (requester replied in FreshService
+      // — QA 07-06 #4). Background, like the status reconcile; new entries
+      // broadcast a ticket-change so the open page refetches.
+      if (ticket.origin === TICKET_ORIGIN.TICKETPULSE) {
+        mirrorService.reconcileTicket(ticket.id, workspaceId).catch(() => null);
+      } else {
+        this._refreshFsBornThread(ticket).catch(() => null);
+      }
     }
     const [thread, activities, approvals, attachments] = await Promise.all([
       ticketThreadRepository.listForTicket(ticket.id, { limit: 300 }),
@@ -1329,10 +1337,30 @@ class TicketService {
       if (data.internalSubcategoryId === undefined) {
         patch.internalSubcategoryId = null;
       }
+      // Keep the legacy AI-assessment name fields in lockstep — otherwise a
+      // cleared category "reappears" in the UI via the tpSkill fallback
+      // (QA 07-06 #5: choosing Uncategorized after assessment did nothing).
+      if (data.internalCategoryId === null) {
+        patch.tpSkill = null;
+        patch.tpSubskill = null;
+      } else {
+        const cat = await prisma.competencyCategory.findUnique({
+          where: { id: data.internalCategoryId }, select: { name: true },
+        });
+        if (cat) patch.tpSkill = cat.name;
+      }
     }
     if (data.internalSubcategoryId !== undefined && data.internalSubcategoryId !== ticket.internalSubcategoryId) {
       patch.internalSubcategoryId = data.internalSubcategoryId;
       changes.internalSubcategoryId = { from: ticket.internalSubcategoryId, to: data.internalSubcategoryId };
+      if (data.internalSubcategoryId === null) {
+        patch.tpSubskill = null;
+      } else {
+        const sub = await prisma.competencyCategory.findUnique({
+          where: { id: data.internalSubcategoryId }, select: { name: true },
+        });
+        if (sub) patch.tpSubskill = sub.name;
+      }
     }
     if (data.groupId !== undefined) {
       const fsGroupId = await this._validateGroup(workspaceId, data.groupId);
@@ -1397,9 +1425,14 @@ class TicketService {
       if (!NATIVE_TICKET_STATUSES.includes(input.status)) {
         throw new ValidationError(`Status must be one of: ${NATIVE_TICKET_STATUSES.join(', ')}`);
       }
-      fsPayload.status = getStatusId(input.status);
-      localPatch.status = input.status;
-      changes.status = { from: ticket.status, to: input.status };
+      // Idempotency: re-applying the current status is a no-op, not another FS
+      // write. (QA 231648: a timed-out-then-retried resolve wrote to FS twice,
+      // and each FS transition emailed the requester.)
+      if (input.status !== ticket.status) {
+        fsPayload.status = getStatusId(input.status);
+        localPatch.status = input.status;
+        changes.status = { from: ticket.status, to: input.status };
+      }
     }
 
     if (input.priority !== undefined) {
@@ -1457,10 +1490,21 @@ class TicketService {
       };
     }
 
-    if (Object.keys(fsPayload).length === 0) throw new ValidationError('Nothing to sync');
+    if (Object.keys(fsPayload).length === 0) {
+      // Everything requested already matches (e.g. a retried status change) —
+      // succeed as a no-op instead of erroring or re-writing FS.
+      return { ...ticket, displayRef: ticketDisplayRef(ticket), synced: [], noChanges: true };
+    }
 
     // 1) Write to FreshService — any failure aborts before local changes.
+    //    Slow write-backs are logged: the custom-field lookup resolution can
+    //    take multiple FS calls on the rate-limited client (QA 231648).
+    const fsWriteStartedAt = Date.now();
     const fsTicket = await client.updateTicketFields(Number(ticket.freshserviceTicketId), fsPayload);
+    const fsWriteMs = Date.now() - fsWriteStartedAt;
+    if (fsWriteMs > 10000) {
+      logger.warn(`Slow FS write-back for #${ticket.freshserviceTicketId}: ${Math.round(fsWriteMs / 1000)}s (${Object.keys(fsPayload).join(', ')})`);
+    }
 
     // 2) Verify FS actually accepted each value (a 200 with silently-dropped
     //    fields must NOT desync us).
@@ -1510,6 +1554,30 @@ class TicketService {
    * it works for any origin; the optional auto-resolve is TP-born only
    * (FS-born status belongs to FreshService).
    */
+  /**
+   * On-open thread refresh for FS-born tickets: the preheat only covers
+   * today's cohort, so requester replies on older FS tickets never reached
+   * the cached thread (QA 07-06 #4). Reuses the preheat's idempotent
+   * transform + bulkUpsert; broadcasts when anything new arrives.
+   */
+  async _refreshFsBornThread(ticket) {
+    if (!ticket.freshserviceTicketId) return;
+    const client = await mirrorService.getClient(ticket.workspaceId);
+    if (!client) return;
+    const conversations = await client.fetchTicketConversations(Number(ticket.freshserviceTicketId), { maxEntries: 60 });
+    if (!conversations?.length) return;
+    const { transformTicketConversationEntries } = await import('../integrations/freshserviceTransformer.js');
+    const entries = transformTicketConversationEntries(conversations, {
+      ticketId: ticket.id,
+      workspaceId: ticket.workspaceId,
+    });
+    if (!entries.length) return;
+    const { upserted } = await ticketThreadRepository.bulkUpsert(entries);
+    if (upserted > 0) {
+      this._broadcast(ticket.workspaceId, 'reply', ticket, { refreshedFromFs: upserted });
+    }
+  }
+
   /**
    * Log time against a ticket (TP's own tracking layer — both origins, never
    * written to FreshService). Adds to the running totals with an audit entry.

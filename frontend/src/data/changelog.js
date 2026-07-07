@@ -1,6 +1,21 @@
-export const APP_VERSION = '3.0.3-preview';
+export const APP_VERSION = '3.0.4-preview';
 
 export const changelog = [
+  {
+    version: '3.0.4-preview',
+    date: 'July 7, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Requester replies from FreshService land here too</strong> — a background reconcile now imports incoming FreshService replies onto Ticket-Pulse-born tickets every few minutes (and on opening the ticket), and FreshService-born tickets refresh their thread on open. Imported replies fire the same workflow triggers as native ones.' },
+      { type: 'fixed', html: '<strong>“Network error” on slow status changes</strong> — FreshService write-backs get a proper 90-second window (they were timing out at 30s while FreshService was still applying the change), repeating the same status is now a no-op instead of a second write, and if a write-back does fail the ticket refetches so you see the true state. (The duplicate “resolved” emails on #231648 came from FreshService reacting to the double transition — Ticket Pulse sent nothing.)' },
+      { type: 'new', html: '<strong>Status dropdown on the queue</strong> — change status directly from the ticket list: Ticket-Pulse-born tickets confirm inline, FreshService-born ones go through the usual sync-confirm. Instant edits (status, priority, category) now show a toast with a <strong>5-second Undo</strong>.' },
+      { type: 'new', html: '<strong>Quick notes</strong> — canned internal notes, managed under Settings → Ticket Ops and scoped to top-level categories, insertable from the composer’s Internal-note mode.' },
+      { type: 'improved', html: '<strong>Approval managers beyond the member list</strong> — the manager picker now searches the whole directory, so admins and coordinators who aren’t technicians can approve too (decisions work via the emailed link for anyone).' },
+      { type: 'fixed', html: '<strong>Category can be cleared again</strong> — setting a ticket back to Uncategorized sticks, even after an AI assessment (the legacy skill fields are cleared in lockstep).' },
+      { type: 'improved', html: '<strong>Calmer reading</strong> — descriptions show in full by default (only genuinely long ones collapse), images attached to the description appear as a thumbnail strip right under it, broken <code>cid:</code> email images are dropped, and the queue’s type/category columns got even spacing.' },
+      { type: 'improved', html: '<strong>Mobile</strong> — the bottom navigation bar now shows on all Tickets pages, the create-ticket bar stacks above it, and the composer toolbar wraps instead of overflowing the screen. Mail Workflows left Settings — its single home is the main-nav tab.' },
+      { type: 'database', html: '<strong>Database updates</strong> — one new table (<code>quick_notes</code>); the approvals-v2 tables are now tracked migrations for deployment. All additive.' },
+    ],
+  },
   {
     version: '3.0.3-preview',
     date: 'July 7, 2026',

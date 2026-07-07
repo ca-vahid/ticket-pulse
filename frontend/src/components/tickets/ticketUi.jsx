@@ -46,6 +46,13 @@ export function pipelineTriggerLabel(source) {
   return map[source] || String(source || '').replace(/_/g, ' ');
 }
 
+// Email bodies reference inline images by `cid:` (Content-ID) — those can
+// never resolve in a browser and render as broken-image icons. Drop them; the
+// actual bytes surface via the attachment strip/rail instead (QA 07-06 #9).
+DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+  if (node.tagName === 'IMG' && /^cid:/i.test(node.getAttribute('src') || '')) node.remove();
+});
+
 /** Sanitized HTML rendering for email/description bodies. */
 export function SafeHtml({ html, className = '' }) {
   const clean = DOMPurify.sanitize(String(html || ''), {

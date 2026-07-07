@@ -25,22 +25,10 @@ class ApprovalCategoryService {
     return out;
   }
 
-  /**
-   * Approval managers must be active members of the workspace (so they can act
-   * in-app + be found in the members lookup). Rejects any email that isn't one.
-   */
-  async _assertActiveMembers(workspaceId, emails) {
-    if (!emails.length) return;
-    const techs = await prisma.technician.findMany({
-      where: { workspaceId, isActive: true, email: { not: null } },
-      select: { email: true },
-    });
-    const memberSet = new Set(techs.map((t) => (t.email || '').toLowerCase()));
-    const missing = emails.filter((e) => !memberSet.has(e));
-    if (missing.length) {
-      throw new ValidationError(`Approval managers must be active members of this workspace: ${missing.join(', ')}`);
-    }
-  }
+  // NOTE (QA 07-06 #7): managers no longer have to be workspace members.
+  // Approvals key on email — anyone can decide via the emailed magic link, and
+  // members/admins can also decide in-app — so admins/coordinators who aren't
+  // technicians (e.g. app admins) are valid approval managers.
 
   /** All categories for a workspace (admin view), active first then by sort/name. */
   async list(workspaceId) {
@@ -68,7 +56,6 @@ class ApprovalCategoryService {
     const trimmed = String(name || '').trim();
     if (trimmed.length < 2) throw new ValidationError('A category name is required');
     const emails = this._cleanEmails(managerEmails);
-    await this._assertActiveMembers(workspaceId, emails);
     try {
       return await prisma.approvalCategory.create({
         data: {
@@ -98,7 +85,6 @@ class ApprovalCategoryService {
     if (patch.description !== undefined) data.description = patch.description?.trim() || null;
     if (patch.managerEmails !== undefined) {
       data.managerEmails = this._cleanEmails(patch.managerEmails);
-      await this._assertActiveMembers(workspaceId, data.managerEmails);
     }
     if (patch.isActive !== undefined) data.isActive = patch.isActive === true;
     if (patch.sortOrder !== undefined) data.sortOrder = Number(patch.sortOrder) || 0;
