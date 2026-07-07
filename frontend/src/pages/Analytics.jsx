@@ -2223,6 +2223,25 @@ export default function Analytics({ view = 'standard' }) {
             </div>
           </div>
         </Panel>
+        {(overview?.tagBreakdown?.rows?.length || 0) > 0 && (
+          <Panel title="Tag Demand" subtitle={`Created in range per tag - ${overview.tagBreakdown.taggedPct}% of range tickets carry at least one tag.`}>
+            <div className="space-y-1.5">
+              {overview.tagBreakdown.rows.map((row) => (
+                <div key={row.id} className="flex items-center gap-2 text-sm">
+                  <span className="truncate font-medium text-slate-700">{row.name}</span>
+                  <span className="ml-auto shrink-0 tabular-nums text-slate-500">{formatNumber(row.created)} created</span>
+                  <span className="shrink-0 tabular-nums text-xs text-amber-600">{row.open} open</span>
+                </div>
+              ))}
+              {overview.tagBreakdown.untagged > 0 && (
+                <div className="flex items-center gap-2 border-t border-slate-100 pt-1.5 text-xs text-slate-400">
+                  <span>Untagged</span>
+                  <span className="ml-auto tabular-nums">{formatNumber(overview.tagBreakdown.untagged)}</span>
+                </div>
+              )}
+            </div>
+          </Panel>
+        )}
         <Panel title="Data Quality" subtitle="Coverage labels prevent sparse fields from looking more precise than they are.">
           <div className="grid gap-3 sm:grid-cols-2">
             <StatCard title="Range Tickets" value={formatNumber(overview?.dataQuality?.rangeTicketCount)} icon={Info} tone="slate" />

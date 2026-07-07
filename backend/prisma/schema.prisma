@@ -98,6 +98,8 @@ model Workspace {
   replyTemplates         ReplyTemplate[]
   quickNotes             QuickNote[]
   ticketTags             TicketTag[]
+  webhookSubscriptions   WebhookSubscription[]
+  ticketEmbeddings       TicketEmbedding[]
 
   @@map("workspaces")
 }
@@ -166,9 +168,29 @@ model ScheduledTicket {
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
 
+  stagedAttachments ScheduledTicketAttachment[]
+
   @@map("scheduled_tickets")
   @@index([status, scheduledForAt])
   @@index([workspaceId, status])
+}
+
+// Files staged against a schedule (gap plan 2 P2); adopted as real ticket
+// attachments (same blob, new row) at activation. Cancel/delete cleans blobs.
+model ScheduledTicketAttachment {
+  id                Int             @id @default(autoincrement())
+  workspaceId       Int             @map("workspace_id")
+  scheduledTicketId Int             @map("scheduled_ticket_id")
+  scheduledTicket   ScheduledTicket @relation(fields: [scheduledTicketId], references: [id], onDelete: Cascade)
+  fileName          String          @db.VarChar(255) @map("file_name")
+  contentType       String?         @db.VarChar(255) @map("content_type")
+  sizeBytes         Int             @default(0) @map("size_bytes")
+  blobName          String          @db.VarChar(500) @map("blob_name")
+  uploadedBy        String?         @db.VarChar(255) @map("uploaded_by")
+  createdAt         DateTime        @default(now()) @map("created_at")
+
+  @@map("scheduled_ticket_attachments")
+  @@index([scheduledTicketId])
 }
 
 // T3.3 groundwork: category↔group affinity so AP and AR can each keep their
@@ -229,6 +251,28 @@ model ReplyTemplate {
   @@index([workspaceId, isActive])
 }
 
+// Outbound webhooks (gap plan 2 P3): integrations subscribe to ticket events;
+// deliveries are HMAC-SHA256 signed. Auto-disabled after sustained failures.
+model WebhookSubscription {
+  id               Int       @id @default(autoincrement())
+  workspaceId      Int       @map("workspace_id")
+  workspace        Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  url              String    @db.VarChar(1000)
+  secret           String    @db.VarChar(64)
+  events           String[]  @default([])
+  isEnabled        Boolean   @default(true) @map("is_enabled")
+  failureCount     Int       @default(0) @map("failure_count")
+  lastDeliveryAt   DateTime? @map("last_delivery_at")
+  lastError        String?   @db.Text @map("last_error")
+  recentDeliveries Json?     @map("recent_deliveries")
+  createdBy        String?   @db.VarChar(255) @map("created_by")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  @@map("webhook_subscriptions")
+  @@index([workspaceId, isEnabled])
+}
+
 // Tags (gap plan Phase 1) — a TP-owned annotation layer for BOTH ticket
 // origins; never written back to FreshService. Feeds queue filters, workflow
 // conditions/actions, and analytics slices.
@@ -262,6 +306,25 @@ model TicketTagLink {
   @@unique([ticketId, tagId])
   @@map("ticket_tag_links")
   @@index([tagId])
+}
+
+// Content embedding for similar-ticket suggestions (gap plan 2 P5.2). One row
+// per ticket; embedding is a float[] (cosine computed app-side over a bounded
+// candidate set) — upgradable to pgvector once azure.extensions allows it.
+// contentHash short-circuits regeneration when subject/description are unchanged.
+model TicketEmbedding {
+  id          Int       @id @default(autoincrement())
+  workspaceId Int       @map("workspace_id")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  ticketId    Int       @unique @map("ticket_id")
+  ticket      Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  embedding   Float[]
+  model       String    @db.VarChar(80)
+  contentHash String    @db.VarChar(64) @map("content_hash")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@map("ticket_embeddings")
+  @@index([workspaceId, updatedAt])
 }
 
 // Canned INTERNAL notes ("quick notes", QA 07-06 #12) — insertable from the
@@ -646,6 +709,11 @@ model Ticket {
   // TP-side annotations on both origins; priority remains the operative field.
   impact                Int?      @db.SmallInt
   urgency               Int?      @db.SmallInt
+  // Requester sentiment (gap plan 2 P5.1): positive | neutral | frustrated.
+  // TEAM-SAFE: describes the REQUESTER's state in their own messages — never
+  // agent performance, never aggregated per agent.
+  sentiment             String?   @db.VarChar(16)
+  sentimentComputedAt   DateTime? @map("sentiment_computed_at")
   assessedPriority      String?   @db.VarChar(20) @map("assessed_priority")
   assessedPriorityId    Int?      @map("assessed_priority_id")
   priorityRationale     String?   @db.Text @map("priority_rationale")
@@ -777,6 +845,7 @@ model Ticket {
   linksFrom            TicketLink[] @relation("linkSource")
   linksTo              TicketLink[] @relation("linkTarget")
   tagLinks             TicketTagLink[]
+  embedding            TicketEmbedding?
 
   // Per-workspace user-defined fields — values keyed by CustomFieldDefinition.key.
   customFields         Json?     @map("custom_fields")

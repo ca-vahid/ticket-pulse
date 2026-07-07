@@ -649,6 +649,17 @@ export const ticketsAPI = {
   categoryGroupLinks: async () => await api.get('/tickets/category-group-links'),
   setCategoryGroupLinks: async (links) => await api.put('/tickets/category-group-links', { links }),
 
+  // Presence (gap plan 2 P4.1) — in-memory "also viewing", nothing stored
+  presenceHeartbeat: async (id, leaving = false) => await api.post(`/tickets/${id}/presence`, leaving ? { leaving: true } : {}),
+  presenceSnapshot: async () => await api.get('/tickets/presence'),
+
+  // Outbound webhooks (admin; gap plan 2 P3)
+  listWebhooks: async () => await api.get('/tickets/webhook-subscriptions'),
+  createWebhook: async ({ url, events }) => await api.post('/tickets/webhook-subscriptions', { url, events }),
+  updateWebhook: async (id, data) => await api.patch(`/tickets/webhook-subscriptions/${id}`, data),
+  deleteWebhook: async (id) => await api.delete(`/tickets/webhook-subscriptions/${id}`),
+  testWebhook: async (id) => await api.post(`/tickets/webhook-subscriptions/${id}/test`),
+
   // Integration API keys (admin; gap plan P3.1)
   listApiKeys: async () => await api.get('/tickets/api-keys'),
   createApiKey: async ({ name, scopes }) => await api.post('/tickets/api-keys', { name, scopes }),
@@ -746,6 +757,15 @@ export const ticketsAPI = {
 
   cancelScheduled: async (scheduledId) => {
     return await api.delete(`/tickets/scheduled/${scheduledId}`);
+  },
+
+  // Staged attachments on a schedule (gap plan 2 P2) — adopted at activation
+  uploadScheduledAttachments: async (scheduledId, files) => {
+    const form = new FormData();
+    for (const file of files) form.append('files', file, file.name);
+    return await apiLongTimeout.post(`/tickets/scheduled/${scheduledId}/attachments`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
   },
 
   // Attachments
@@ -890,8 +910,8 @@ export const publicApprovalAPI = {
     return response;
   },
 
-  decide: async (token, decision, note = null) => {
-    const response = await api.post(`/ticket-approvals/public/${encodeURIComponent(token)}/decide`, { decision, note });
+  decide: async (token, decision, note = null, noteHtml = null) => {
+    const response = await api.post(`/ticket-approvals/public/${encodeURIComponent(token)}/decide`, { decision, note, noteHtml });
     return response;
   },
 

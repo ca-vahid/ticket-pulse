@@ -164,6 +164,7 @@ class TicketApprovalService {
         approverEmail: approval.approverEmail,
         requestedBy: approval.requestedBy,
         requestNote: approval.requestNote,
+        requestNoteHtml: approval.requestNoteHtml || null,
         decidedAt: approval.decidedAt,
         expiresAt: approval.expiresAt,
       },
@@ -180,7 +181,7 @@ class TicketApprovalService {
     };
   }
 
-  async decideByToken(token, decision, note = null) {
+  async decideByToken(token, decision, note = null, noteHtml = null) {
     const approval = await this._findByToken(token);
     // The approver can also bounce it back for more info from the magic link.
     if (String(decision || '').toLowerCase() === 'clarify') {
@@ -191,6 +192,7 @@ class TicketApprovalService {
     return this._decide(approval, decision, note, {
       via: 'link',
       actorLabel: approval.approverName || approval.approverEmail,
+      noteHtml,
     });
   }
 

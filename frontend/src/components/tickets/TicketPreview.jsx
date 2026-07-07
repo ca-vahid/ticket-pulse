@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import {
   MirrorChip, OriginChip, PersonAvatar, PriorityDot, ProvenanceChip, SafeHtml, SlaChip, StateChip, StatusPill,
-  TypePill, PRIORITY_LABELS, isConversationEntry, pipelineRunLabel, pipelineTriggerLabel,
+  TagChip, TypePill, PRIORITY_LABELS, isConversationEntry, pipelineRunLabel, pipelineTriggerLabel,
   ticketCategoryLabels, timeAgo,
 } from './ticketUi';
 import AssigneePicker from './AssigneePicker';
@@ -308,7 +308,20 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
               <StatusPill status={ticket.status} />
               <PriorityDot priority={ticket.priority} withLabel />
               {(ticket.frDueBy && !ticket.firstPublicAgentReplyAt && !['Resolved', 'Closed', 'Deleted', 'Spam'].includes(ticket.status)) && <SlaChip value={ticket.frDueBy} />}
+              {(ticket.tags || []).map((tag) => <TagChip key={tag.id} tag={tag} size="xs" />)}
+              {(ticket.impact || ticket.urgency) && (
+                <span className="text-[10px] text-slate-400">
+                  {ticket.impact ? `Impact ${['Low', 'Medium', 'High'][ticket.impact - 1]}` : null}
+                  {ticket.impact && ticket.urgency ? ' · ' : ''}
+                  {ticket.urgency ? `Urgency ${['Low', 'Medium', 'High'][ticket.urgency - 1]}` : null}
+                </span>
+              )}
             </div>
+            {ticket.mergedInto && (
+              <p className="mt-1.5 rounded-lg bg-violet-50 border border-violet-200 px-2 py-1 text-[11px] text-violet-800">
+                Merged into <span className="font-mono font-bold">{ticket.mergedInto.displayRef}</span> — the conversation continues there.
+              </p>
+            )}
           </>
         )}
       </div>

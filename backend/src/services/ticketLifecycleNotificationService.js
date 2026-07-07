@@ -251,6 +251,44 @@ async function hydratePreviousAgent(existingTicket) {
   });
 }
 
+
+// Compact webhook payload from an event context (gap plan 2 P3) — enough for
+// integrations to react without a follow-up read; full detail via /api/v1.
+function webhookPayloadFromContext(eventContext) {
+  const t = eventContext.ticket || {};
+  return {
+    ticket: {
+      id: t.id,
+      ref: t.freshserviceTicketId ? `#${t.freshserviceTicketId}` : `TP-${t.id}`,
+      subject: t.subject,
+      status: t.status,
+      priority: t.priority,
+      origin: t.origin,
+      tags: t.tags || [],
+    },
+    requester: eventContext.requester ? { name: eventContext.requester.name, email: eventContext.requester.email } : null,
+    assignedAgent: eventContext.assignedAgent ? { name: eventContext.assignedAgent.name } : null,
+    extra: eventContext.event?.extra || null,
+  };
+}
+
+async function dispatchLifecycleWebhook(eventContext) {
+  try {
+    const { dispatchWebhookEvent } = await import('./webhookDispatchService.js');
+    dispatchWebhookEvent(eventContext.workspace?.id, eventContext.event?.type, webhookPayloadFromContext(eventContext));
+  } catch { /* integrations never break the pipeline */ }
+}
+
+// A new requester reply may shift their tone — re-classify sentiment
+// (debounced; gap plan 2 P5.1). Fire-and-forget like the webhook dispatch.
+async function maybeRefreshSentiment(eventContext) {
+  if (eventContext.event?.type !== 'ticket.reply_received') return;
+  try {
+    const { default: ticketSentimentService } = await import('./ticketSentimentService.js');
+    ticketSentimentService.scheduleRefresh(eventContext.ticket?.id, eventContext.workspace?.id);
+  } catch { /* sentiment is an annotation, never a pipeline step */ }
+}
+
 function buildEventContext({ event, ticket, previousAgent, source }) {
   return {
     event: {
@@ -276,6 +314,8 @@ function buildEventContext({ event, ticket, previousAgent, source }) {
       priorityLabel: priorityLabel(ticket),
       impact: ticket.impact ?? null,
       urgency: ticket.urgency ?? null,
+      // Requester sentiment (P5.1) — requester state only, team-safe.
+      sentiment: ticket.sentiment || null,
       assessedPriority: ticket.assessedPriority || null,
       toEmails: emailList(ticket.toEmails),
       ccEmails: emailList(ticket.ccEmails),
@@ -346,6 +386,8 @@ export async function emitTicketLifecycleNotifications({
   const results = [];
   for (const event of events) {
     const eventContext = buildEventContext({ event, ticket, previousAgent, source });
+    dispatchLifecycleWebhook(eventContext);
+    maybeRefreshSentiment(eventContext);
     try {
       results.push(await notificationWorkflowEngine.executeForEvent(eventContext, {
         triggerSource: source,
@@ -393,6 +435,8 @@ export async function emitTicketEvent(eventType, ticketId, {
   };
   const eventContext = buildEventContext({ event, ticket, previousAgent: null, source });
   if (extra) eventContext.event.extra = extra;
+  dispatchLifecycleWebhook(eventContext);
+  maybeRefreshSentiment(eventContext);
 
   try {
     return await notificationWorkflowEngine.executeForEvent(eventContext, {

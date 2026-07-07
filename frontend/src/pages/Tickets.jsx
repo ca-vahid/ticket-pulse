@@ -303,6 +303,8 @@ export default function Tickets() {
   const noise = searchParams.get('noise') || '';
   const tag = searchParams.get('tag') || '';
   const tagMode = searchParams.get('tagMode') || '';
+  const impactFilter = searchParams.get('impact') || '';
+  const urgencyFilter = searchParams.get('urgency') || '';
   const view = searchParams.get('view') || '';
   const requesterId = searchParams.get('requesterId') || '';
   const requesterName = searchParams.get('requesterName') || '';
@@ -371,11 +373,13 @@ export default function Tickets() {
       params.tagId = tag;
       if (tagMode === 'all') params.tagMode = 'all';
     }
+    if (impactFilter) params.impact = impactFilter;
+    if (urgencyFilter) params.urgency = urgencyFilter;
     if (requesterId) params.requesterId = requesterId;
     if (debouncedSearch) params.q = debouncedSearch;
     return params;
   }, [page, statuses, assignee, priority, origin, segment, sort, dir, debouncedSearch,
-    type, category, subcategory, group, source, createdFrom, createdTo, due, noise, tag, tagMode, requesterId]);
+    type, category, subcategory, group, source, createdFrom, createdTo, due, noise, tag, tagMode, impactFilter, urgencyFilter, requesterId]);
 
   // Post-refresh row highlights: ticketId → 'new' | 'updated'. Set when a
   // refresh is asked to diff against the previous page (update-pill apply,
@@ -531,7 +535,23 @@ export default function Tickets() {
     pendingIdsRef.current.add(data?.ticketId ?? `evt-${Date.now()}`);
     setPendingCount(pendingIdsRef.current.size);
   }, [fetchStats, fetchAiReviewTotal]);
-  useSSE({ onTicketChange, enabled: Boolean(workspaceId) });
+  // Presence dots (gap plan 2 P4.1): who has which ticket open right now.
+  // Snapshot on load, then live deltas over the same SSE connection.
+  const [presenceMap, setPresenceMap] = useState({}); // ticketId -> [{email, name}]
+  useEffect(() => {
+    if (!workspaceId) return;
+    ticketsAPI.presenceSnapshot().then((res) => setPresenceMap(res.data || {})).catch(() => {});
+  }, [workspaceId]);
+  const onPresence = useCallback((data) => {
+    if (!data?.ticketId) return;
+    setPresenceMap((prev) => {
+      const next = { ...prev };
+      if (data.viewers?.length) next[data.ticketId] = data.viewers;
+      else delete next[data.ticketId];
+      return next;
+    });
+  }, []);
+  useSSE({ onTicketChange, onPresence, enabled: Boolean(workspaceId) });
   useEffect(() => () => {
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     if (rowFxTimerRef.current) clearTimeout(rowFxTimerRef.current);
@@ -628,21 +648,40 @@ export default function Tickets() {
     if (next) setParams({ peek: next.id }, { resetPage: false });
   }, [tickets, searchParams, setParams]);
 
+  // ---- Bulk selection & actions (page-scoped, or query-scoped via "Select all N") ----
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+
+  // Keyboard queue navigation (gap plan 2 P4.2): j/k (or ↑/↓) move the peek
+  // selection — j with nothing open starts at the top — Enter opens the
+  // peeked ticket, x toggles its bulk-select checkbox. Never fires while the
+  // focus is in an input/select/composer.
   useEffect(() => {
-    if (!previewId) return undefined;
+    if (tickets.length === 0) return undefined;
     const onKey = (e) => {
       const target = e.target;
       if (target && (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable)) return;
-      if (e.key === 'ArrowDown') { e.preventDefault(); stepPreview(1); }
-      else if (e.key === 'ArrowUp') { e.preventDefault(); stepPreview(-1); }
-      else if (e.key === 'Enter') { e.preventDefault(); navigate(`/tickets/${previewId}`); }
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const down = e.key === 'ArrowDown' || e.key === 'j';
+      const up = e.key === 'ArrowUp' || e.key === 'k';
+      if (down || up) {
+        e.preventDefault();
+        if (previewId) stepPreview(down ? 1 : -1);
+        else setParams({ peek: tickets[down ? 0 : tickets.length - 1].id }, { resetPage: false });
+      } else if (e.key === 'Enter' && previewId) {
+        e.preventDefault();
+        navigate(`/tickets/${previewId}`);
+      } else if (e.key.toLowerCase() === 'x' && previewId) {
+        e.preventDefault();
+        setSelectedIds((prev) => {
+          const next = new Set(prev);
+          if (next.has(previewId)) next.delete(previewId); else next.add(previewId);
+          return next;
+        });
+      }
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [previewId, stepPreview, navigate]);
-
-  // ---- Bulk selection & actions (page-scoped, or query-scoped via "Select all N") ----
-  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  }, [previewId, tickets, stepPreview, navigate, setParams]);
   const [bulkAction, setBulkAction] = useState(null); // { type: 'assign'|'status', value, label }
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkResult, setBulkResult] = useState(null); // { ok, failed: [{ref, message}], skipped }
@@ -1155,6 +1194,14 @@ export default function Tickets() {
                                           </span>
                                         ))}
                                         <StateChip state={ticket.stateChip} />
+                                        {presenceMap[ticket.id]?.length > 0 && (
+                                          <span
+                                            className="shrink-0 w-2 h-2 rounded-full bg-violet-500 ring-2 ring-violet-200"
+                                            title={`Viewing now: ${presenceMap[ticket.id].map((v) => v.name).join(', ')}`}
+                                            role="img"
+                                            aria-label={`Being viewed by ${presenceMap[ticket.id].map((v) => v.name).join(', ')}`}
+                                          />
+                                        )}
                                         {(ticket.tags || []).slice(0, 3).map((tag) => (
                                           <TagChip key={tag.id} tag={tag} size="xs" className="shrink-0" />
                                         ))}
@@ -1377,6 +1424,14 @@ export default function Tickets() {
                                       </div>
                                     );
                                   })()}
+                                  {(ticket.tags || []).length > 0 && (
+                                    <div className="mt-1 flex flex-wrap items-center gap-1">
+                                      {ticket.tags.slice(0, 3).map((tag) => <TagChip key={tag.id} tag={tag} size="xs" />)}
+                                      {ticket.tags.length > 3 && (
+                                        <span className="text-[10px] text-slate-400" title={ticket.tags.slice(3).map((t) => t.name).join(', ')}>+{ticket.tags.length - 3}</span>
+                                      )}
+                                    </div>
+                                  )}
                                   <div className="mt-2 flex items-center gap-2">
                                     {mobileAssignable ? (
                                       <button
@@ -1432,6 +1487,13 @@ export default function Tickets() {
                       {/* Full pagination */}
                       <div className="px-4 py-3 border-t border-slate-100 bg-slate-50/50">
                         <Pagination page={page} totalPages={totalPages} total={total} pageSize={PAGE_SIZE} onPage={goPage} />
+                        {/* Keyboard hint (gap plan 2 P4.2) — desktop only, keys are pointless on touch */}
+                        <p className="hidden lg:flex items-center justify-center gap-3 mt-2 text-[10px] text-slate-400">
+                          <span><kbd className="font-mono border border-slate-200 rounded px-1 bg-white">j</kbd>/<kbd className="font-mono border border-slate-200 rounded px-1 bg-white">k</kbd> move</span>
+                          <span><kbd className="font-mono border border-slate-200 rounded px-1 bg-white">↵</kbd> open</span>
+                          <span><kbd className="font-mono border border-slate-200 rounded px-1 bg-white">x</kbd> select</span>
+                          <span><kbd className="font-mono border border-slate-200 rounded px-1 bg-white">Ctrl K</kbd> commands</span>
+                        </p>
                       </div>
                     </div>
                   )}
@@ -1612,6 +1674,48 @@ export default function Tickets() {
                 <option value="">Bulk status…</option>
                 {['Open', 'Pending', 'Resolved', 'Closed'].map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
+              {queryScope && (meta?.tags?.length || 0) > 0 && (
+                <select
+                  value=""
+                  onChange={(e) => {
+                    if (!e.target.value) return;
+                    const [op, id] = e.target.value.split(':');
+                    const tagObj = (meta?.tags || []).find((t) => String(t.id) === id);
+                    setBulkAction({
+                      type: op === 'add' ? 'add_tags' : 'remove_tags',
+                      value: [Number(id)],
+                      label: `${op === 'add' ? 'tag +' : 'tag −'} ${tagObj?.name || id}`,
+                    });
+                  }}
+                  aria-label="Bulk tag"
+                  className="tp-focus-ring text-sm bg-white border border-input rounded-lg px-2.5 py-1.5 text-slate-700"
+                >
+                  <option value="">Bulk tag…</option>
+                  <optgroup label="Add tag">
+                    {(meta?.tags || []).map((t) => <option key={`add-${t.id}`} value={`add:${t.id}`}>+ {t.name}</option>)}
+                  </optgroup>
+                  <optgroup label="Remove tag">
+                    {(meta?.tags || []).map((t) => <option key={`rm-${t.id}`} value={`rm:${t.id}`}>− {t.name}</option>)}
+                  </optgroup>
+                </select>
+              )}
+              {queryScope && (meta?.categoryTree?.length || 0) > 0 && (
+                <select
+                  value=""
+                  onChange={(e) => {
+                    if (e.target.value === '') return;
+                    const id = e.target.value === 'none' ? null : Number(e.target.value);
+                    const name = id ? (meta?.categoryTree || []).find((c) => c.id === id)?.name : 'Uncategorized';
+                    setBulkAction({ type: 'set_category', value: id, label: `category → ${name}` });
+                  }}
+                  aria-label="Bulk category"
+                  className="tp-focus-ring text-sm bg-white border border-input rounded-lg px-2.5 py-1.5 text-slate-700"
+                >
+                  <option value="">Bulk category…</option>
+                  <option value="none">Uncategorized</option>
+                  {(meta?.categoryTree || []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              )}
               <button
                 onClick={() => { setSelectedIds(new Set()); setQueryScope(null); }}
                 aria-label="Clear selection"

@@ -7,6 +7,7 @@ import ticketService from '../services/ticketService.js';
 import scheduledTicketService from '../services/scheduledTicketService.js';
 import attachmentService, { MAX_ATTACHMENT_BYTES } from '../services/attachmentService.js';
 import workspaceRepository from '../services/workspaceRepository.js';
+import { heartbeatPresence, leavePresence, presenceSnapshot } from '../services/presenceService.js';
 import prisma from '../services/prisma.js';
 import logger from '../utils/logger.js';
 
@@ -236,6 +237,44 @@ router.delete('/scheduled/:sid', requireNativeTicketing, asyncHandler(async (req
   res.json({ success: true, data: row });
 }));
 
+// Staged attachments on a schedule (gap plan 2 P2): adopted at activation.
+router.get('/scheduled/:sid/attachments', requireNativeTicketing, asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await attachmentService.listStaged(Number(req.params.sid), req.workspaceId) });
+}));
+
+router.post(
+  '/scheduled/:sid/attachments',
+  requireNativeTicketing,
+  attachmentUpload.array('files', 5),
+  asyncHandler(async (req, res) => {
+    const sid = Number(req.params.sid);
+    const row = await prisma.scheduledTicket.findFirst({ where: { id: sid, workspaceId: req.workspaceId } });
+    if (!row) throw new ValidationError('Scheduled ticket not found in this workspace');
+    if (!['pending', 'error'].includes(row.status)) throw new ValidationError(`This scheduled ticket is already ${row.status}`);
+    const files = req.files || [];
+    if (files.length === 0) throw new ValidationError('No files were uploaded');
+    const stored = [];
+    for (const file of files) {
+      stored.push(await attachmentService.stageForSchedule({
+        workspaceId: req.workspaceId,
+        scheduledTicketId: sid,
+        fileName: file.originalname,
+        contentType: file.mimetype,
+        buffer: file.buffer,
+        uploadedBy: req.ticketActor.email,
+      }));
+    }
+    res.status(201).json({ success: true, data: stored });
+  }),
+);
+
+router.delete('/scheduled/:sid/attachments/:attachmentId', requireNativeTicketing, asyncHandler(async (req, res) => {
+  res.json({
+    success: true,
+    data: await attachmentService.removeStaged(Number(req.params.attachmentId), Number(req.params.sid), req.workspaceId),
+  });
+}));
+
 router.get('/export.csv', asyncHandler(async (req, res) => {
   const result = await ticketService.listTickets(
     req.workspaceId,
@@ -445,6 +484,26 @@ router.delete('/templates/:templateId', asyncHandler(async (req, res) => {
   res.json({ success: true });
 }));
 
+// --------------------------------------------------- presence (gap plan 2 P4)
+// In-memory "also viewing" only — nothing stored, no durations (team-safe).
+// Works for both origins; not gated on the native-ticketing flag.
+
+router.get('/presence', asyncHandler(async (req, res) => {
+  res.json({ success: true, data: presenceSnapshot(req.workspaceId) });
+}));
+
+router.post('/:id/presence', asyncHandler(async (req, res) => {
+  const ticketId = parseTicketId(req);
+  const { email, name } = req.ticketActor;
+  if (req.body?.leaving) {
+    leavePresence(req.workspaceId, ticketId, email);
+    res.json({ success: true, data: { viewers: [] } });
+    return;
+  }
+  const viewers = heartbeatPresence(req.workspaceId, ticketId, { email, name });
+  res.json({ success: true, data: { viewers: viewers.filter((v) => v.email !== email) } });
+}));
+
 // --------------------------------------------------------- tags (gap plan P1)
 // TP-side tag layer for BOTH origins — never written back to FreshService.
 // CRUD is admin-only (Settings → Ticket Ops); linking is any ticket actor.
@@ -621,6 +680,81 @@ router.delete('/api-keys/:keyId', requireTicketingAdmin, asyncHandler(async (req
   if (!existing) throw new ValidationError('API key not found in this workspace');
   await prisma.apiKey.delete({ where: { id } });
   res.json({ success: true });
+}));
+
+// ------------------------------------- outbound webhooks (gap plan 2 P3)
+
+router.get('/webhook-subscriptions', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const subs = await prisma.webhookSubscription.findMany({
+    where: { workspaceId: req.workspaceId },
+    orderBy: { id: 'asc' },
+    select: {
+      id: true, url: true, events: true, isEnabled: true, failureCount: true,
+      lastDeliveryAt: true, lastError: true, recentDeliveries: true, createdBy: true, createdAt: true,
+    },
+  });
+  res.json({ success: true, data: subs });
+}));
+
+router.post('/webhook-subscriptions', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const { WEBHOOK_EVENTS, webhookUrlProblem, invalidateWebhookCache } = await import('../services/webhookDispatchService.js');
+  const url = String(req.body?.url || '').trim();
+  const problem = webhookUrlProblem(url);
+  if (problem) throw new ValidationError(problem);
+  const events = (Array.isArray(req.body?.events) ? req.body.events : []).filter((e) => WEBHOOK_EVENTS.includes(e));
+  if (events.length === 0) throw new ValidationError(`Pick at least one event: ${WEBHOOK_EVENTS.join(', ')}`);
+  const crypto = await import('node:crypto');
+  const secret = `whsec_${crypto.randomBytes(24).toString('base64url')}`;
+  const sub = await prisma.webhookSubscription.create({
+    data: { workspaceId: req.workspaceId, url, secret, events, createdBy: req.ticketActor.email },
+    select: { id: true, url: true, events: true, isEnabled: true, createdAt: true },
+  });
+  invalidateWebhookCache(req.workspaceId);
+  // The signing secret is returned exactly once.
+  res.status(201).json({ success: true, data: { ...sub, secret } });
+}));
+
+router.patch('/webhook-subscriptions/:subId', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const { WEBHOOK_EVENTS, webhookUrlProblem, invalidateWebhookCache } = await import('../services/webhookDispatchService.js');
+  const id = Number(req.params.subId);
+  const existing = await prisma.webhookSubscription.findFirst({ where: { id, workspaceId: req.workspaceId } });
+  if (!existing) throw new ValidationError('Webhook subscription not found');
+  const data = {};
+  if (req.body?.url !== undefined) {
+    const problem = webhookUrlProblem(String(req.body.url).trim());
+    if (problem) throw new ValidationError(problem);
+    data.url = String(req.body.url).trim();
+  }
+  if (Array.isArray(req.body?.events)) {
+    data.events = req.body.events.filter((e) => WEBHOOK_EVENTS.includes(e));
+    if (data.events.length === 0) throw new ValidationError('Pick at least one event');
+  }
+  if (req.body?.isEnabled !== undefined) {
+    data.isEnabled = req.body.isEnabled === true;
+    if (data.isEnabled) data.failureCount = 0; // manual re-enable resets the strike counter
+  }
+  const sub = await prisma.webhookSubscription.update({
+    where: { id },
+    data,
+    select: { id: true, url: true, events: true, isEnabled: true, failureCount: true },
+  });
+  invalidateWebhookCache(req.workspaceId);
+  res.json({ success: true, data: sub });
+}));
+
+router.delete('/webhook-subscriptions/:subId', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const id = Number(req.params.subId);
+  const existing = await prisma.webhookSubscription.findFirst({ where: { id, workspaceId: req.workspaceId } });
+  if (!existing) throw new ValidationError('Webhook subscription not found');
+  await prisma.webhookSubscription.delete({ where: { id } });
+  const { invalidateWebhookCache } = await import('../services/webhookDispatchService.js');
+  invalidateWebhookCache(req.workspaceId);
+  res.json({ success: true });
+}));
+
+router.post('/webhook-subscriptions/:subId/test', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const { testWebhookSubscription } = await import('../services/webhookDispatchService.js');
+  res.json({ success: true, data: await testWebhookSubscription(Number(req.params.subId), req.workspaceId) });
 }));
 
 router.post('/mailboxes/:mailboxId/test', requireTicketingAdmin, asyncHandler(async (req, res) => {
@@ -1070,7 +1204,7 @@ ticketApprovalPublicRouter.get('/:token', asyncHandler(async (req, res) => {
 ticketApprovalPublicRouter.post('/:token/decide', asyncHandler(async (req, res) => {
   const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');
   const approval = await ticketApprovalService.decideByToken(
-    req.params.token, req.body?.decision, req.body?.note || null,
+    req.params.token, req.body?.decision, req.body?.note || null, req.body?.noteHtml || null,
   );
   res.json({ success: true, data: { status: approval.status, decidedAt: approval.decidedAt } });
 }));

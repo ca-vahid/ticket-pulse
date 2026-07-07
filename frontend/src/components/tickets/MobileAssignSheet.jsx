@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Drawer } from 'vaul';
 import { Check, Loader2, Search, Sparkles, UserRound, X } from 'lucide-react';
-import { PersonAvatar } from './ticketUi';
+import { PersonAvatar, TagChip, ticketCategoryLabels } from './ticketUi';
 import { assignmentAPI, ticketsAPI } from '../../services/api';
 
 /**
@@ -106,6 +106,20 @@ export default function MobileAssignSheet({
             <div className="min-w-0 flex-1">
               <p className="font-mono text-[11px] font-semibold text-slate-400">{ticket?.displayRef}</p>
               <p className="text-sm font-semibold text-slate-800 line-clamp-2">{ticket?.subject || '(no subject)'}</p>
+              {/* Context for the assignment decision (gap plan 2 P1.2) */}
+              {(() => {
+                const { category, subcategory } = ticketCategoryLabels(ticket || {});
+                const label = subcategory || category;
+                const tags = ticket?.tags || [];
+                if (!label && tags.length === 0) return null;
+                return (
+                  <div className="mt-1 flex flex-wrap items-center gap-1">
+                    {label && <span className="text-[11px] text-slate-500 truncate max-w-[60%]">{label}</span>}
+                    {tags.slice(0, 3).map((tag) => <TagChip key={tag.id} tag={tag} size="xs" />)}
+                    {tags.length > 3 && <span className="text-[10px] text-slate-400">+{tags.length - 3}</span>}
+                  </div>
+                );
+              })()}
             </div>
             <button
               onClick={onClose}

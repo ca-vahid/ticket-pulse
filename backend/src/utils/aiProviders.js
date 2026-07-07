@@ -15,6 +15,8 @@ export const AI_OPERATIONS = [
   'notification_workflow_generation',
   // On-demand agent-facing thread summary (ticketSummaryService).
   'ticket_thread_summary',
+  // Requester-sentiment classification (gap plan 2 P5.1) — cheap tier.
+  'requester_sentiment',
 ];
 
 export const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-4-6';
@@ -50,7 +52,7 @@ export const MODEL_METADATA = [
     provider: AI_PROVIDER_ANTHROPIC,
     model: DEFAULT_RECLASSIFICATION_MODEL,
     label: 'Claude Haiku 4.5',
-    operations: ['ticket_reclassification', 'calendar_leave'],
+    operations: ['ticket_reclassification', 'calendar_leave', 'requester_sentiment'],
     supportsStreaming: false,
     supportsTools: false,
     supportsJson: true,
@@ -123,7 +125,7 @@ export function shouldOmitAnthropicTemperature(model) {
 export function defaultModelForProvider(provider, operation = null) {
   const normalizedProvider = normalizeProvider(provider);
   if (normalizedProvider === AI_PROVIDER_OPENAI) return DEFAULT_OPENAI_MODEL;
-  if (operation === 'ticket_reclassification' || operation === 'calendar_leave') {
+  if (operation === 'ticket_reclassification' || operation === 'calendar_leave' || operation === 'requester_sentiment') {
     return DEFAULT_RECLASSIFICATION_MODEL;
   }
   if (operation === 'daily_review_consolidation') {

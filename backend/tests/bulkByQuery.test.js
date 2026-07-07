@@ -77,4 +77,28 @@ describe('ticketService.bulkByQuery', () => {
       query: {}, action: { type: 'delete' }, preview: true,
     }, null)).rejects.toThrow(ValidationError);
   });
+
+  test('remove_tags computes the set difference through setTags', async () => {
+    prismaMock.ticket.findMany.mockResolvedValue([mkTicket(1)]);
+    prismaMock.ticketTagLink.findMany.mockResolvedValue([{ tagId: 5 }, { tagId: 7 }]);
+    const setTags = jest.spyOn(ticketService, 'setTags').mockResolvedValue({ changed: true });
+    const result = await ticketService.bulkByQuery(1, {
+      query: {}, action: { type: 'remove_tags', value: [7] }, expectedTotal: 1,
+    }, null);
+    expect(result.applied).toBe(1);
+    expect(setTags).toHaveBeenCalledWith(1, 1, [5], null);
+    setTags.mockRestore();
+  });
+
+  test('set_category routes through updateTicketFields (TP-born only)', async () => {
+    prismaMock.ticket.findMany.mockResolvedValue([mkTicket(1), mkTicket(2, 'freshservice')]);
+    const upd = jest.spyOn(ticketService, 'updateTicketFields').mockResolvedValue({});
+    const result = await ticketService.bulkByQuery(1, {
+      query: {}, action: { type: 'set_category', value: 42 }, expectedTotal: 2,
+    }, null);
+    expect(result.applied).toBe(1);
+    expect(result.skippedFsBorn).toBe(1);
+    expect(upd).toHaveBeenCalledWith(1, 1, { internalCategoryId: 42 }, null);
+    upd.mockRestore();
+  });
 });

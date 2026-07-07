@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   Activity, AlertCircle, ArrowLeft, Bell, BellRing, Bot, Building2, Check, CheckCircle2,
-  ChevronDown, ChevronLeft, ChevronRight, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Forward, Hand,
+  ChevronDown, ChevronLeft, ChevronRight, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Flame, Forward, Hand,
   History, Image as ImageIcon, Link2, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, Paperclip, Pencil, Phone, Plus,
-  RefreshCw, Send, ShieldCheck, Smartphone, Sparkles, Stamp, StickyNote, Trash2, UserRound, VolumeX, X, XCircle,
+  RefreshCw, Send, ShieldCheck, Smartphone, Smile, Sparkles, Stamp, StickyNote, Trash2, UserRound, VolumeX, X, XCircle,
 } from 'lucide-react';
 import AttachmentPreviewModal from '../components/tickets/AttachmentPreviewModal';
 import TicketTagEditor from '../components/tickets/TicketTagEditor';
@@ -32,6 +32,7 @@ import { useWorkspaceRole } from '../components/nav/navDestinations';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { assignmentAPI, ticketsAPI } from '../services/api';
 import { useSSE } from '../hooks/useSSE';
+import { useTicketPresence } from '../hooks/useTicketPresence';
 
 const STATUSES = ['Open', 'Pending', 'Resolved', 'Closed'];
 const TICKET_TYPES = ['Incident', 'Service Request'];
@@ -682,7 +683,10 @@ export default function TicketDetail() {
       fetchTicket({ silent: true, diff: true });
     }, 600);
   }, [ticketId, fetchTicket]);
-  useSSE({ onTicketChange, enabled: Number.isFinite(ticketId) });
+  // "Also viewing" (gap plan 2 P4.1): heartbeat while open, live avatar list
+  // over the same SSE connection.
+  const { viewers: alsoViewing, onPresence } = useTicketPresence(ticketId, Number.isFinite(ticketId));
+  useSSE({ onTicketChange, onPresence, enabled: Number.isFinite(ticketId) });
   useEffect(() => () => { if (liveRefetchTimerRef.current) clearTimeout(liveRefetchTimerRef.current); }, []);
 
   const isNative = ticket?.origin === 'ticketpulse';
@@ -1122,7 +1126,7 @@ export default function TicketDetail() {
     try { setDupeDismissed(Boolean(sessionStorage.getItem(`tp_dupe_dismiss_${ticketId}`))); } catch { /* no-op */ }
     ticketsAPI.related(ticketId)
       .then((res) => { if (!cancelled) setRelated(res.data); })
-      .catch(() => { if (!cancelled) setRelated({ sameRequester: [], nearDuplicates: [] }); });
+      .catch(() => { if (!cancelled) setRelated({ sameRequester: [], nearDuplicates: [], similarByContent: [] }); });
     return () => { cancelled = true; };
   }, [ticketId]);
   const dismissDupes = () => {
@@ -1451,6 +1455,47 @@ export default function TicketDetail() {
                     )}
                     {ticket.isNoise && (
                       <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-500 border border-slate-200">Noise</span>
+                    )}
+                    {/* Requester sentiment (AI, team-safe: requester state only).
+                        Neutral is the default state — only the actionable ends
+                        get a chip, so it means something when one appears. */}
+                    {ticket.sentiment === 'frustrated' && (
+                      <span
+                        title={`Requester sounds frustrated in their recent messages (AI classification${ticket.sentimentComputedAt ? `, ${timeAgo(ticket.sentimentComputedAt)}` : ''}). Describes the requester, never the agent.`}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-50 text-red-700 border border-red-200"
+                      >
+                        <Flame className="w-3 h-3" aria-hidden="true" /> Requester frustrated
+                      </span>
+                    )}
+                    {ticket.sentiment === 'positive' && (
+                      <span
+                        title={`Requester sounds positive in their recent messages (AI classification${ticket.sentimentComputedAt ? `, ${timeAgo(ticket.sentimentComputedAt)}` : ''}).`}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200"
+                      >
+                        <Smile className="w-3 h-3" aria-hidden="true" /> Requester positive
+                      </span>
+                    )}
+                    {alsoViewing.length > 0 && (
+                      <span
+                        className="inline-flex items-center gap-1.5 pl-1 pr-2 py-0.5 rounded-full bg-violet-50 border border-violet-200 animate-fadeIn"
+                        title={`Also viewing: ${alsoViewing.map((v) => v.name).join(', ')}`}
+                      >
+                        <span className="flex -space-x-1.5" aria-hidden="true">
+                          {alsoViewing.slice(0, 4).map((v) => (
+                            <span
+                              key={v.email}
+                              className="w-4.5 h-4.5 min-w-[18px] min-h-[18px] rounded-full bg-violet-500 border border-white text-white text-[8px] font-bold flex items-center justify-center uppercase"
+                            >
+                              {(v.name || v.email).trim().split(/\s+/).slice(0, 2).map((p) => p[0]).join('')}
+                            </span>
+                          ))}
+                        </span>
+                        <span className="text-[10px] font-semibold text-violet-700">
+                          {alsoViewing.length === 1
+                            ? `${(alsoViewing[0].name || alsoViewing[0].email).split(/\s+/)[0]} is also viewing`
+                            : `${alsoViewing.length} also viewing`}
+                        </span>
+                      </span>
                     )}
                     <div
                       onMouseEnter={() => { ackChange('status'); ackChange('priority'); }}
@@ -2488,7 +2533,7 @@ export default function TicketDetail() {
                 />
 
                 {/* Related tickets: facts first, suggestions clearly labeled */}
-                {related && (related.sameRequester.length > 0 || (related.nearDuplicates.length > 0 && !dupeDismissed)) && (
+                {related && (related.sameRequester.length > 0 || (related.nearDuplicates.length > 0 && !dupeDismissed) || (related.similarByContent?.length > 0)) && (
                   <div className="tp-card rounded-xl p-4">
                     <div className="flex items-center gap-2 mb-2.5">
                       <History className="w-4 h-4 text-blue-500" aria-hidden="true" />
@@ -2545,6 +2590,36 @@ export default function TicketDetail() {
                           ))}
                         </ul>
                         <p className="mt-1 text-[10px] text-amber-600/80">Might be unrelated — treat as a hint, not a fact.</p>
+                      </div>
+                    )}
+                    {related.similarByContent?.length > 0 && (
+                      <div className={`rounded-lg border border-violet-200 bg-violet-50/50 p-2 ${related.nearDuplicates.length > 0 && !dupeDismissed ? 'mt-2' : ''}`}>
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <Sparkles className="w-3 h-3 text-violet-500" aria-hidden="true" />
+                          <span className="text-[10px] font-semibold uppercase tracking-wide text-violet-700">
+                            AI suggestion — similar by content
+                          </span>
+                        </div>
+                        <ul className="space-y-1">
+                          {related.similarByContent.map((r) => (
+                            <li key={r.id}>
+                              <Link
+                                to={`/tickets/${r.id}`}
+                                className="tp-focus-ring flex items-center gap-2 px-1.5 py-1 rounded-md hover:bg-violet-100/70"
+                              >
+                                <span className="font-mono text-[10px] font-semibold text-violet-600 whitespace-nowrap">{r.displayRef}</span>
+                                <span className="min-w-0 flex-1 text-xs text-slate-700 truncate">{r.subject || '(no subject)'}</span>
+                                <span
+                                  className="text-[10px] font-semibold text-violet-500 whitespace-nowrap"
+                                  title="Content similarity (cosine over text embeddings)"
+                                >
+                                  {Math.round((r.similarity || 0) * 100)}%
+                                </span>
+                              </Link>
+                            </li>
+                          ))}
+                        </ul>
+                        <p className="mt-1 text-[10px] text-violet-600/80">Matched on wording, not history — verify before acting.</p>
                       </div>
                     )}
                   </div>

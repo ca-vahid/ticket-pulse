@@ -105,6 +105,89 @@ class AttachmentService {
     return attachment;
   }
 
+  // ---- Scheduled-ticket staging (gap plan 2 P2) --------------------------
+  // Files uploaded before the ticket exists: blob lives under a schedule
+  // prefix; at activation the SAME blob is adopted by a real attachment row.
+
+  async stageForSchedule({ workspaceId, scheduledTicketId, fileName, contentType, buffer, uploadedBy = null }) {
+    const safeName = sanitizeFileName(fileName);
+    this.validateUpload({ fileName: safeName, sizeBytes: buffer?.length || 0 });
+    const count = await prisma.scheduledTicketAttachment.count({ where: { scheduledTicketId } });
+    if (count >= MAX_ATTACHMENTS_PER_TICKET) {
+      throw new ValidationError(`A scheduled ticket can hold at most ${MAX_ATTACHMENTS_PER_TICKET} attachments`);
+    }
+    const blobName = `ws-${workspaceId}/scheduled-${scheduledTicketId}/${crypto.randomBytes(8).toString('hex')}-${safeName}`;
+    const blockBlob = this._container().getBlockBlobClient(blobName);
+    await blockBlob.uploadData(buffer, {
+      blobHTTPHeaders: {
+        blobContentType: contentType || 'application/octet-stream',
+        blobContentDisposition: `attachment; filename="${safeName.replace(/"/g, '')}"`,
+      },
+    });
+    return prisma.scheduledTicketAttachment.create({
+      data: {
+        workspaceId,
+        scheduledTicketId,
+        fileName: safeName,
+        contentType: contentType || 'application/octet-stream',
+        sizeBytes: buffer.length,
+        blobName,
+        uploadedBy,
+      },
+    });
+  }
+
+  async listStaged(scheduledTicketId, workspaceId) {
+    return prisma.scheduledTicketAttachment.findMany({
+      where: { scheduledTicketId, workspaceId },
+      orderBy: { id: 'asc' },
+      select: { id: true, fileName: true, contentType: true, sizeBytes: true, createdAt: true },
+    });
+  }
+
+  async removeStaged(id, scheduledTicketId, workspaceId) {
+    const row = await prisma.scheduledTicketAttachment.findFirst({ where: { id, scheduledTicketId, workspaceId } });
+    if (!row) throw new NotFoundError('Staged attachment not found');
+    await this._container().getBlockBlobClient(row.blobName).deleteIfExists().catch(() => {});
+    await prisma.scheduledTicketAttachment.delete({ where: { id: row.id } });
+    return { deleted: true };
+  }
+
+  /** Activation: staged files become real attachments on the created ticket (same blob). */
+  async adoptStaged(scheduledTicketId, ticketId, workspaceId) {
+    const staged = await prisma.scheduledTicketAttachment.findMany({ where: { scheduledTicketId, workspaceId } });
+    const adopted = [];
+    for (const row of staged) {
+      const attachment = await prisma.ticketAttachment.create({
+        data: {
+          workspaceId,
+          ticketId,
+          fileName: row.fileName,
+          contentType: row.contentType,
+          sizeBytes: row.sizeBytes,
+          blobName: row.blobName,
+          source: 'scheduled',
+          uploadedBy: row.uploadedBy,
+        },
+      });
+      adopted.push(attachment);
+    }
+    if (staged.length) {
+      await prisma.scheduledTicketAttachment.deleteMany({ where: { scheduledTicketId } });
+    }
+    return adopted;
+  }
+
+  /** Cancel/delete cleanup: remove staged blobs + rows. */
+  async discardStaged(scheduledTicketId, workspaceId) {
+    const staged = await prisma.scheduledTicketAttachment.findMany({ where: { scheduledTicketId, workspaceId } });
+    for (const row of staged) {
+      await this._container().getBlockBlobClient(row.blobName).deleteIfExists().catch(() => {});
+    }
+    if (staged.length) await prisma.scheduledTicketAttachment.deleteMany({ where: { scheduledTicketId } });
+    return { discarded: staged.length };
+  }
+
   async listForTicket(ticketId, workspaceId) {
     return prisma.ticketAttachment.findMany({
       where: { ticketId, workspaceId },

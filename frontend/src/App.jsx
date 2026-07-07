@@ -28,6 +28,7 @@ import TicketDetail from './pages/TicketDetail';
 import ApprovalsInbox from './pages/ApprovalsInbox';
 import PublicApprovalDecision from './pages/PublicApprovalDecision';
 import DemoModeBanner from './components/DemoModeBanner';
+import CommandPalette from './components/CommandPalette';
 import { Activity } from 'lucide-react';
 
 /**
@@ -451,6 +452,7 @@ function App() {
                 <Route path="*" element={<HomeRedirect />} />
               </Routes>
               <DemoModeBanner />
+              <CommandPalette />
             </SettingsProvider>
           </DashboardProvider>
         </WorkspaceProvider>

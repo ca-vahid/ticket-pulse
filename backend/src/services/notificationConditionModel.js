@@ -34,6 +34,8 @@ export const CONDITION_FIELDS = Object.freeze({
   'ticket.tags': { label: 'Tags', type: 'list', path: 'ticket.tags' },
   'ticket.impact': { label: 'Impact (1-3)', type: 'number', path: 'ticket.impact' },
   'ticket.urgency': { label: 'Urgency (1-3)', type: 'number', path: 'ticket.urgency' },
+  // Requester sentiment (gap plan 2 P5.1) — the requester's state, team-safe.
+  'ticket.sentiment': { label: 'Requester sentiment', type: 'enum', path: 'ticket.sentiment', options: ['positive', 'neutral', 'frustrated'] },
   'ticket.isNoise': { label: 'Is noise/spam', type: 'boolean', path: 'ticket.isNoise' },
   'ticket.ageMinutes': { label: 'Ticket age', type: 'duration', path: 'ticket.ageMinutes' },
   'ticket.dueInMinutes': { label: 'Time until due', type: 'duration', path: 'ticket.dueInMinutes' },
