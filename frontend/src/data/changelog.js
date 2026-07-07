@@ -1,6 +1,24 @@
-export const APP_VERSION = '3.0.4-preview';
+export const APP_VERSION = '3.0.5-preview';
 
 export const changelog = [
+  {
+    version: '3.0.5-preview',
+    date: 'July 8, 2026',
+    entries: [
+      { type: 'new', html: '<strong>🏷️ Tags</strong> — a full tag system for tickets of both origins (never written to FreshService): colored chips on the queue and ticket page, a tag facet in the filter rail (any/all + untagged), admin palette management with merge under Settings → Ticket Ops, tag conditions (<em>has any / all / none</em>) and add/remove-tag actions in Mail Workflows, and a Tags column in CSV export.' },
+      { type: 'new', html: '<strong>🧬 Merge tickets</strong> — a true merge: the source conversation copies onto the target (original authors and timestamps), tags carry over, the source closes with a “merged into” banner and audit trail on both sides, with an optional requester notification. FreshService-born tickets can merge in as sources while FreshService keeps their record.' },
+      { type: 'new', html: '<strong>☑️ Bulk edit everything matching a filter</strong> — “Select all N matching” extends bulk assign/status beyond the visible page (up to 500), with a server-verified count confirmation and a per-ticket failure report.' },
+      { type: 'new', html: '<strong>🔑 API Keys settings page + fuller integration API</strong> — manage <code>/api/v1</code> keys with 8 individually-grantable scopes (notes, attachments, approvals and tags join read/write); machine-readable OpenAPI spec at <code>/api/v1/openapi.json</code> and a reference page at <code>/api/v1/docs</code>.' },
+      { type: 'new', html: '<strong>Impact & urgency fields</strong> — optional Low/Medium/High pair on the ticket sidebar, usable in workflow conditions. Plus a <strong>Print</strong> button with a clean print layout.' },
+      { type: 'improved', html: '<strong>Per-group categories</strong> — admins can map top categories to FreshService groups (Settings → Ticket Ops); category pickers then scope to the ticket’s group while unmapped categories stay visible everywhere.' },
+      { type: 'improved', html: '<strong>Approval notes go rich-text</strong> — the request-approval composer supports formatting and the approver email renders it (placeholders still work).' },
+      { type: 'improved', html: '<strong>First-response analytics unlocked</strong> — first-response times now populate from FreshService’s own stats on every sync; the Overview shows median/P90 with a coverage-gated reveal, plus a TP-born vs FS-born origin split. Run a backfill to fill history.' },
+      { type: 'improved', html: '<strong>AI email hardening</strong> — internal notes can now inform AI-drafted emails but a new guard hard-blocks quoting them verbatim; per-tool usage indicators and a smoke script prepare the evidence-tools rollout.' },
+      { type: 'fixed', html: '<strong>Sync resilience</strong> — a hung sync run can no longer silently stop ticket ingest (a 30-minute watchdog takes the lock over), and the recovery window can no longer be poisoned by unrelated background jobs — the cause of three backup-alert tickets sitting unassigned for 16 hours.' },
+      { type: 'improved', html: '<strong>Attachments reach the FreshService copy</strong> — files uploaded to a TP-born ticket now mirror to its fallback copy as a private note (15 MB cap, best-effort).' },
+      { type: 'database', html: '<strong>Database updates</strong> — new tables <code>ticket_tags</code> / <code>ticket_tag_links</code>; additive columns for approval rich notes and impact/urgency; a GIN index for activity lookups. All additive.' },
+    ],
+  },
   {
     version: '3.0.4-preview',
     date: 'July 7, 2026',

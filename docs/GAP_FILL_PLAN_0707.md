@@ -114,14 +114,14 @@ Policy decided: internal notes ARE allowed as evidence, guarded — the output g
 
 ---
 
-## Phase 6 — Wrap & ship
+## Phase 6 — Wrap & ship ✅ DONE (deploy awaits go-ahead)
 
-- [ ] Full lint + backend/frontend suites green
-- [ ] Version → next preview bump + concise changelog (fixes-first)
-- [ ] Dev self-test (no outbound email / FS writes — same guardrails as before)
-- [ ] Migrations: dev during phases; prod via `migrate deploy` at deploy
-- [ ] QA test doc for the new surfaces (tags, merge, bulk-by-query, API panel)
-- [ ] Deploy to prod on user go-ahead → verify health/version + probe new endpoints
+- [x] Full lint + backend/frontend suites green
+- [x] Version → next preview bump + concise changelog (fixes-first)
+- [x] Dev self-test (no outbound email / FS writes — same guardrails as before)
+- [x] Migrations: dev during phases; prod via `migrate deploy` at deploy
+- [x] QA test doc for the new surfaces (tags, merge, bulk-by-query, API panel)
+- [ ] Deploy to prod on user go-ahead (prod `migrate deploy` first: ticket_tags, approval rich notes, impact/urgency, GIN index) → verify health/version + probe new endpoints
 
 ---
 
