@@ -236,6 +236,44 @@ router.delete('/scheduled/:sid', requireNativeTicketing, asyncHandler(async (req
   res.json({ success: true, data: row });
 }));
 
+// Staged attachments on a schedule (gap plan 2 P2): adopted at activation.
+router.get('/scheduled/:sid/attachments', requireNativeTicketing, asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await attachmentService.listStaged(Number(req.params.sid), req.workspaceId) });
+}));
+
+router.post(
+  '/scheduled/:sid/attachments',
+  requireNativeTicketing,
+  attachmentUpload.array('files', 5),
+  asyncHandler(async (req, res) => {
+    const sid = Number(req.params.sid);
+    const row = await prisma.scheduledTicket.findFirst({ where: { id: sid, workspaceId: req.workspaceId } });
+    if (!row) throw new ValidationError('Scheduled ticket not found in this workspace');
+    if (!['pending', 'error'].includes(row.status)) throw new ValidationError(`This scheduled ticket is already ${row.status}`);
+    const files = req.files || [];
+    if (files.length === 0) throw new ValidationError('No files were uploaded');
+    const stored = [];
+    for (const file of files) {
+      stored.push(await attachmentService.stageForSchedule({
+        workspaceId: req.workspaceId,
+        scheduledTicketId: sid,
+        fileName: file.originalname,
+        contentType: file.mimetype,
+        buffer: file.buffer,
+        uploadedBy: req.ticketActor.email,
+      }));
+    }
+    res.status(201).json({ success: true, data: stored });
+  }),
+);
+
+router.delete('/scheduled/:sid/attachments/:attachmentId', requireNativeTicketing, asyncHandler(async (req, res) => {
+  res.json({
+    success: true,
+    data: await attachmentService.removeStaged(Number(req.params.attachmentId), Number(req.params.sid), req.workspaceId),
+  });
+}));
+
 router.get('/export.csv', asyncHandler(async (req, res) => {
   const result = await ticketService.listTickets(
     req.workspaceId,

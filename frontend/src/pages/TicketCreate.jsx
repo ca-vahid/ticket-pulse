@@ -247,12 +247,20 @@ export default function TicketCreate() {
 
       if (afterAction === 'schedule') {
         if (!scheduleAt) throw new Error('Pick a date and time to schedule for');
-        if (files.length > 0) throw new Error('Attachments can’t ride a scheduled ticket yet — add them once it activates');
         setSaveStep('Scheduling…');
-        await ticketsAPI.scheduleCreate(payload, new Date(scheduleAt).toISOString());
+        const schedRes = await ticketsAPI.scheduleCreate(payload, new Date(scheduleAt).toISOString());
+        // Files stage against the schedule and attach when it activates (P2).
+        if (files.length > 0 && schedRes.data?.id) {
+          setSaveStep(`Staging ${files.length} file${files.length === 1 ? '' : 's'}…`);
+          try {
+            await ticketsAPI.uploadScheduledAttachments(schedRes.data.id, files);
+          } catch (uploadErr) {
+            console.warn('Staged attachment upload failed:', uploadErr);
+          }
+        }
         setIsSaving(false);
         setSaveStep(null);
-        setSuccessNote(`Scheduled for ${new Date(scheduleAt).toLocaleString()} — it gets its TP number at activation`);
+        setSuccessNote(`Scheduled for ${new Date(scheduleAt).toLocaleString()} — it gets its TP number (and any attachments) at activation`);
         setScheduleOpen(false);
         setScheduleAt('');
         resetForm();

@@ -748,6 +748,15 @@ export const ticketsAPI = {
     return await api.delete(`/tickets/scheduled/${scheduledId}`);
   },
 
+  // Staged attachments on a schedule (gap plan 2 P2) — adopted at activation
+  uploadScheduledAttachments: async (scheduledId, files) => {
+    const form = new FormData();
+    for (const file of files) form.append('files', file, file.name);
+    return await apiLongTimeout.post(`/tickets/scheduled/${scheduledId}/attachments`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+
   // Attachments
   listAttachments: async (id) => {
     return await api.get(`/tickets/${id}/attachments`);

@@ -51,12 +51,12 @@ The v3.0.5 features exist end-to-end but not *everywhere*. Close the loops:
 - [x] Magic-link page renders requestNoteHtml (sanitized) and gives the clarification/decision note the rich composer; payloads carry noteHtml through decideByToken
 - [x] Tests: token decide with noteHtml; sanitization
 
-## Phase 2 — Scheduled-ticket attachments
+## Phase 2 — Scheduled-ticket attachments ✅ DONE
 
-- [ ] Stage uploads against the ScheduledTicket (blob storage rows keyed to the schedule, not a live ticket)
-- [ ] On activation, staged files become real ticket attachments (and ride the FS mirror like any upload)
-- [ ] Create-form: drop the "can't ride a scheduled ticket yet" error; show staged chips
-- [ ] Tests: stage → activate → attached; schedule deletion cleans blobs
+- [x] Stage uploads against the ScheduledTicket (blob storage rows keyed to the schedule, not a live ticket)
+- [x] On activation, staged files become real ticket attachments (and ride the FS mirror like any upload)
+- [x] Create-form: drop the "can't ride a scheduled ticket yet" error; show staged chips
+- [x] Tests: stage → activate → attached; schedule deletion cleans blobs
 
 ## Phase 3 — API webhooks (outbound events)
 

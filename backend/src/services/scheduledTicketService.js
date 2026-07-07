@@ -95,6 +95,20 @@ class ScheduledTicketService {
         where: { id: row.id },
         data: { status: 'activated', activatedAt: new Date(), ticketId: ticket.id, lastError: null },
       });
+      // Staged files become real attachments (same blobs) and ride the FS
+      // mirror like any upload (gap plan 2 P2). Best-effort — activation never
+      // fails on attachment adoption.
+      try {
+        const { default: attachmentService } = await import('./attachmentService.js');
+        const adopted = await attachmentService.adoptStaged(row.id, ticket.id, workspaceId);
+        if (adopted.length && ticket.origin === 'ticketpulse') {
+          const { default: mirrorService } = await import('./mirrorService.js');
+          for (const a of adopted) mirrorService.enqueueAttachment(workspaceId, ticket.id, a.id).catch(() => {});
+        }
+        if (adopted.length) logger.info(`Scheduled ticket ${row.id}: ${adopted.length} staged attachment(s) adopted onto ${ticket.displayRef}`);
+      } catch (err) {
+        logger.warn(`Staged-attachment adoption failed (non-fatal) for schedule ${row.id}: ${err.message}`);
+      }
       logger.info(`Scheduled ticket ${row.id} activated → ${ticket.displayRef} (${via})`);
       return { scheduled: updated, ticket };
     } catch (err) {
@@ -117,6 +131,10 @@ class ScheduledTicketService {
       where: { id: row.id },
       data: { status: 'cancelled' },
     });
+    // Staged files are orphans once cancelled — clean blobs + rows.
+    import('./attachmentService.js')
+      .then(({ default: attachmentService }) => attachmentService.discardStaged(row.id, workspaceId))
+      .catch(() => {});
     logger.info(`Scheduled ticket ${row.id} cancelled by ${actor?.email || 'unknown'}`);
     return updated;
   }

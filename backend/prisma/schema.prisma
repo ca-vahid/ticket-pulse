@@ -166,9 +166,29 @@ model ScheduledTicket {
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
 
+  stagedAttachments ScheduledTicketAttachment[]
+
   @@map("scheduled_tickets")
   @@index([status, scheduledForAt])
   @@index([workspaceId, status])
+}
+
+// Files staged against a schedule (gap plan 2 P2); adopted as real ticket
+// attachments (same blob, new row) at activation. Cancel/delete cleans blobs.
+model ScheduledTicketAttachment {
+  id                Int             @id @default(autoincrement())
+  workspaceId       Int             @map("workspace_id")
+  scheduledTicketId Int             @map("scheduled_ticket_id")
+  scheduledTicket   ScheduledTicket @relation(fields: [scheduledTicketId], references: [id], onDelete: Cascade)
+  fileName          String          @db.VarChar(255) @map("file_name")
+  contentType       String?         @db.VarChar(255) @map("content_type")
+  sizeBytes         Int             @default(0) @map("size_bytes")
+  blobName          String          @db.VarChar(500) @map("blob_name")
+  uploadedBy        String?         @db.VarChar(255) @map("uploaded_by")
+  createdAt         DateTime        @default(now()) @map("created_at")
+
+  @@map("scheduled_ticket_attachments")
+  @@index([scheduledTicketId])
 }
 
 // T3.3 groundwork: category↔group affinity so AP and AR can each keep their
