@@ -9,6 +9,7 @@ node_modules/
 .env.development
 .env.production
 backend/.env
+backend/scripts/.env.prod
 frontend/.env
 
 # Build outputs

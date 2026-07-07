@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.0.8-preview';
+export const APP_VERSION = '3.0.9-preview';
 
 export const changelog = [
+  {
+    version: '3.0.9-preview',
+    date: 'July 8, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>🧾 Accounting categories, rebuilt for AP</strong> — the Accounting workspace now runs on the team’s own 11 Accounts-Payable categories (Vendor Invoices, Payment Processing, Travel & Accommodation, Inbox Management, …) with no subcategories. All ~12,000 historical tickets were recategorized (deterministic mapping + AI for the ambiguous ones), technician skills were remapped, and FreshService’s lookup fields now offer exactly the new list.' },
+      { type: 'improved', html: '<strong>Categories now visible in FreshService</strong> — every Accounting ticket’s Ticket Pulse category is written to the FreshService ticket itself (first full write-back), and the assignment pipeline keeps new tickets in sync automatically.' },
+      { type: 'new', html: '<strong>Cleanup tooling</strong> — the FreshService integration can now delete custom-object records, so taxonomy changes can retire stale category records instead of leaving orphans behind.' },
+    ],
+  },
   {
     version: '3.0.8-preview',
     date: 'July 8, 2026',
