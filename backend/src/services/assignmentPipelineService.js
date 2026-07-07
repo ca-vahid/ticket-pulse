@@ -1180,15 +1180,19 @@ class AssignmentPipelineService {
         }
       }
 
-      // FreshService write-back — separate logic for assignments vs noise
+      // FreshService write-back — separate logic for assignments vs noise.
+      // The 'synced' broadcast fires AFTER the fire-and-forget sync finishes:
+      // that's when the local mirror (assignee, category fields, status) has
+      // actually changed, so live queue rows refetch once the data is real —
+      // the earlier 'completed' broadcast predates these writes.
       if (decision === 'auto_assigned' || decision === 'classified_only') {
-        freshServiceActionService.execute(runId, workspaceId, assignmentConfig?.dryRunMode ?? true).catch((err) =>
-          logger.warn('FreshService pipeline sync failed', { runId, decision, error: err.message }),
-        );
+        freshServiceActionService.execute(runId, workspaceId, assignmentConfig?.dryRunMode ?? true)
+          .catch((err) => logger.warn('FreshService pipeline sync failed', { runId, decision, error: err.message }))
+          .then(() => this._broadcastRunUpdate(workspaceId, ticketId, runId, 'synced', decision));
       } else if (decision === 'noise_dismissed' && assignmentConfig?.autoCloseNoise) {
-        freshServiceActionService.execute(runId, workspaceId, assignmentConfig?.dryRunMode ?? true).catch((err) =>
-          logger.warn('FreshService auto-close noise failed', { runId, error: err.message }),
-        );
+        freshServiceActionService.execute(runId, workspaceId, assignmentConfig?.dryRunMode ?? true)
+          .catch((err) => logger.warn('FreshService auto-close noise failed', { runId, error: err.message }))
+          .then(() => this._broadcastRunUpdate(workspaceId, ticketId, runId, 'synced', decision));
       }
 
       // Competency feedback for auto-assign
