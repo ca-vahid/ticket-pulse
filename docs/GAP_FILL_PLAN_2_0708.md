@@ -14,13 +14,13 @@
 
 ---
 
-## Phase 0 — Ship v3.0.5 to prod
+## Phase 0 — Ship v3.0.5 to prod ✅ DONE (deployed 2026-07-08, QA doc at docs/QA_Test_Plan_v3.0.5.docx)
 
-- [ ] Prod `migrate deploy` (4 additive: ticket_tags, approval rich notes, impact/urgency, activity GIN index) + schema verification
-- [ ] Rebase → PR → squash-merge → pipelines green → health shows 3.0.5-preview
-- [ ] Probe new surfaces (tags CRUD, /api/v1/openapi.json + docs, merge route 401-gated)
-- [ ] Post-deploy: run a first-response backfill for a recent range; confirm coverage climbs (baseline: 1/4,776 in 30d)
-- [ ] Hand QA `docs/QA_Test_Plan_v3.0.5.docx`
+- [x] Prod `migrate deploy` (4 additive: ticket_tags, approval rich notes, impact/urgency, activity GIN index) + schema verification
+- [x] Rebase → PR → squash-merge → pipelines green → health shows 3.0.5-preview
+- [x] Probe new surfaces (tags CRUD, /api/v1/openapi.json + docs, merge route 401-gated)
+- [x] Backfill ran (45d, set-only, 819 tickets stamped) → 30d coverage 495/4,772 (~10%; the 30% reveal gate correctly stays closed — most tickets never get a public reply; ongoing syncs keep filling)
+- [x] Hand QA `docs/QA_Test_Plan_v3.0.5.docx`
 
 ## Phase 1 — Parity fast-follows
 
