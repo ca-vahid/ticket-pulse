@@ -280,3 +280,146 @@ code {
 .animate-slide-in-right {
   animation: slideInRight 0.25s ease-out;
 }
+
+/* ---- Ticket queue live-update system ------------------------------------ */
+
+/* "N updates — refresh" pill: springy drop-in with a slight overshoot. */
+@keyframes tpPillIn {
+  0% { opacity: 0; transform: translateY(-16px) scale(0.85); }
+  60% { opacity: 1; transform: translateY(3px) scale(1.03); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+.tp-pill-enter {
+  animation: tpPillIn 0.45s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+}
+
+/* Radar ring pulsing off the pill so arrival catches the eye peripherally. */
+@keyframes tpPillPulse {
+  0% { box-shadow: 0 8px 24px rgb(37 99 235 / 0.35), 0 0 0 0 rgb(59 130 246 / 0.45); }
+  70% { box-shadow: 0 8px 24px rgb(37 99 235 / 0.35), 0 0 0 10px rgb(59 130 246 / 0); }
+  100% { box-shadow: 0 8px 24px rgb(37 99 235 / 0.35), 0 0 0 0 rgb(59 130 246 / 0); }
+}
+.tp-pill-pulse {
+  animation: tpPillPulse 2.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Success morph after a refresh lands: brief "Up to date", then fade away. */
+@keyframes tpPillDone {
+  0% { opacity: 1; transform: translateY(0) scale(1); }
+  12% { transform: translateY(0) scale(1.04); }
+  70% { opacity: 1; transform: translateY(0) scale(1); }
+  100% { opacity: 0; transform: translateY(-8px) scale(0.94); }
+}
+.tp-pill-done {
+  animation: tpPillDone 1.1s ease-in-out both;
+}
+
+/* Count badge pops every time the number changes (re-keyed per value). */
+@keyframes tpCountPop {
+  0% { opacity: 0; transform: translateY(8px) scale(0.5); }
+  55% { transform: translateY(-1px) scale(1.15); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+.tp-count-pop {
+  animation: tpCountPop 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.35) both;
+}
+
+/* Post-refresh row highlights: arrivals sweep blue, edits sweep sky. */
+@keyframes tpRowNew {
+  0% { background-color: rgb(191 219 254 / 0.9); }
+  55% { background-color: rgb(219 234 254 / 0.65); }
+  100% { background-color: transparent; }
+}
+.tp-row-flash-new {
+  animation: tpRowNew 3s ease-out both;
+}
+@keyframes tpRowUpdated {
+  0% { background-color: rgb(186 230 253 / 0.75); }
+  100% { background-color: transparent; }
+}
+.tp-row-flash-updated {
+  animation: tpRowUpdated 2.4s ease-out both;
+}
+
+/* "NEW" chip beside the subject: pop in, linger, fade with the row sweep. */
+@keyframes tpNewChip {
+  0% { opacity: 0; transform: scale(0.5); }
+  10% { opacity: 1; transform: scale(1.12); }
+  16% { transform: scale(1); }
+  80% { opacity: 1; }
+  100% { opacity: 0; }
+}
+.tp-new-chip {
+  animation: tpNewChip 3s ease-out both;
+}
+
+/* ---- AI assignment in-flight row aura ----------------------------------- */
+
+/* The whole row breathes indigo while the pipeline decides: a static tint
+   (reduced-motion fallback) + a slow light sweep + a pulsing inset ring. */
+.tp-ai-live {
+  background-color: rgb(238 242 255 / 0.55);
+  box-shadow: inset 0 0 0 1px rgb(129 140 248 / 0.35);
+  background-image: linear-gradient(
+    100deg,
+    rgb(224 231 255 / 0.0) 20%,
+    rgb(199 210 254 / 0.55) 40%,
+    rgb(221 214 254 / 0.55) 50%,
+    rgb(199 210 254 / 0.55) 60%,
+    rgb(224 231 255 / 0.0) 80%
+  );
+  background-size: 250% 100%;
+  background-repeat: no-repeat;
+  animation: tpAiSheen 2.8s linear infinite, tpAiRing 2.2s ease-in-out infinite;
+}
+@keyframes tpAiSheen {
+  from { background-position: 125% 0; }
+  to { background-position: -125% 0; }
+}
+@keyframes tpAiRing {
+  0%, 100% { box-shadow: inset 0 0 0 1px rgb(129 140 248 / 0.3); }
+  50% { box-shadow: inset 0 0 0 1.5px rgb(99 102 241 / 0.55); }
+}
+
+/* Matching left accent bar: flowing indigo→violet gradient. */
+.tp-ai-accent {
+  background-image: linear-gradient(180deg, #6366f1, #8b5cf6, #6366f1);
+  background-size: 100% 300%;
+  animation: tpAiAccentFlow 2.2s linear infinite;
+}
+@keyframes tpAiAccentFlow {
+  from { background-position: 50% 0%; }
+  to { background-position: 50% 100%; }
+}
+
+/* "AI matching…" chip: shifting gradient + soft glow. */
+.tp-ai-chip {
+  background-image: linear-gradient(90deg, #6366f1, #8b5cf6, #6366f1);
+  background-size: 200% 100%;
+  box-shadow: 0 2px 8px rgb(99 102 241 / 0.35);
+  animation: tpAiChipFlow 2.4s linear infinite;
+}
+@keyframes tpAiChipFlow {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tp-pill-enter,
+  .tp-pill-pulse,
+  .tp-pill-done,
+  .tp-count-pop,
+  .tp-row-flash-new,
+  .tp-row-flash-updated,
+  .tp-new-chip,
+  .tp-ai-live,
+  .tp-ai-accent,
+  .tp-ai-chip {
+    animation: none;
+  }
+  /* Without the sweep animation the sheen gradient would sit as a static
+     blotch — drop it and keep the tint + inset ring. */
+  .tp-ai-live {
+    background-image: none;
+  }
+}
