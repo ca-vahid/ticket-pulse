@@ -142,7 +142,9 @@ describe('matching ladder', () => {
       requesterEmail: 'rita@example.com',
       requesterName: 'Rita Requester',
       runAiTriage: true,
-    }), expect.objectContaining({ role: 'system' }));
+    }), expect.objectContaining({ role: 'system' }),
+    // Email-born tickets carry their arrival channel (QA 07-07 #1).
+    expect.objectContaining({ sourceChannel: 1 }));
     // Original message id remembered for future threading
     expect(prismaMock.ticketThreadEntry.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ emailMessageId: '<abc-123@example.com>', eventType: 'original_email' }),

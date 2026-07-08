@@ -22,6 +22,32 @@ export function isTicketPulseOrigin(ticketOrRow) {
 export const APP_NATIVE_TRIGGER_SOURCE = 'app_native';
 
 /**
+ * Ticket arrival channel (QA 07-07 #1). One numeric space across both
+ * origins: 1–10 are FreshService's own source codes (synced as-is);
+ * 100+ is the Ticket Pulse extension range so FS can never collide.
+ * TP-born tickets persist their channel at creation.
+ */
+export const TICKET_SOURCE = {
+  EMAIL: 1,
+  PORTAL: 2, // reserved for future TP portal intake
+  PHONE: 3,
+  API: 100,
+  WEBHOOK: 101, // reserved for future webhook intake
+  AGENT: 103, // created by staff inside the Ticket Pulse app
+};
+
+export const TICKET_SOURCE_LABELS = {
+  1: 'Email', 2: 'Portal', 3: 'Phone', 4: 'Chat', 5: 'Feedback widget',
+  6: 'Yammer', 7: 'AWS CloudWatch', 8: 'PagerDuty', 9: 'Walk-up', 10: 'Slack',
+  100: 'API', 101: 'Webhook', 103: 'Agent',
+};
+
+export function ticketSourceLabel(source) {
+  if (source === null || source === undefined) return null;
+  return TICKET_SOURCE_LABELS[Number(source)] || `Source ${source}`;
+}
+
+/**
  * Human-facing ticket reference: TP-born tickets show their native number
  * ("TP-1042"); FS-born tickets keep the familiar FreshService "#12345".
  */

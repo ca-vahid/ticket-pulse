@@ -65,20 +65,20 @@ Investigation: the template's full chain **is implemented** (ticket.created → 
 
 ---
 
-## Phase 3 — Ticket source channel (item 1)
+## Phase 3 — Ticket source channel (item 1) ✅ DONE
 
 Goal: workflows (and the queue) can condition on **how the ticket arrived**: Email / Portal / Phone / API / Webhook / Agent-created — across both origins, extensible for future portal intake.
 
 Current state: FS-born tickets carry FS's numeric `source` (1=Email, 2=Portal, 3=Phone… via `FS_SOURCE_LABELS`); TP-born tickets never set `source` (only `lastIngestSource: 'ticketpulse_native'`); the workflow event context exposes `origin` but not `source`.
 
-- [ ] **Persist source for TP-born tickets** at creation, reusing the FS numeric space + TP extension range (values ≥100 so FS never collides):
+- [x] **Persist source for TP-born tickets** at creation, reusing the FS numeric space + TP extension range (values ≥100 so FS never collides):
   - app/agent-created → `103 (Agent)`  · email ingest (mailbox) → `1 (Email)` · public API v1 → `100 (API)` · scheduled activation → inherits creator's channel · future portal → `2 (Portal)`, webhook intake → `101 (Webhook)`
   - one label map (`TICKET_SOURCE_LABELS`) shared by queue meta, CSV, and workflows; backfill existing TP-born rows to `103` (email-ingested ones detectable via `lastIngestSource`/mailbox provenance → `1`)
-- [ ] **Expose `ticket.sourceLabel`** in the workflow event context (buildEventContext) as the friendly enum string
-- [ ] **Condition field** `ticket.source` (enum: Email, Portal, Phone, Chat, API, Webhook, Agent, …) in both catalogs (backend `CONDITION_FIELDS` + frontend `CG_FIELDS`) — enum `is / is not / any of`
-- [ ] Queue: the existing source filter flyout + stat labels pick up the new values automatically (they read the groupBy) — verify
-- [ ] Migration: none needed for FS values; one additive backfill script for TP-born rows
-- [ ] Tests: creation channels set the right source; context exposes label; condition evaluates
+- [x] **Expose `ticket.sourceLabel`** in the workflow event context (buildEventContext) as the friendly enum string
+- [x] **Condition field** `ticket.source` (enum: Email, Portal, Phone, Chat, API, Webhook, Agent, …) in both catalogs (backend `CONDITION_FIELDS` + frontend `CG_FIELDS`) — enum `is / is not / any of`
+- [x] Queue: the existing source filter flyout + stat labels pick up the new values automatically (they read the groupBy) — verify
+- [x] Migration: none needed (source column already existed); backfill script `scripts/backfill-tp-source.mjs` run on dev (1 Email + 35 Agent); prod run at deploy
+- [x] Tests: creation channels set the right source; context exposes label; condition evaluates
 
 ---
 

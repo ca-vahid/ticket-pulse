@@ -5,6 +5,7 @@ import {
   compileConditionGroup,
   validateConditionGroup,
 } from '../src/services/notificationConditionModel.js';
+import { TICKET_SOURCE, ticketSourceLabel } from '../src/utils/ticketOrigin.js';
 
 // Mirror the engine's custom regex op so compile→evaluate parity holds here.
 jsonLogic.add_operation('regex_match', (value, pattern) => {
@@ -16,6 +17,8 @@ const scope = {
     status: 'Open',
     priorityLabel: 'Urgent',
     origin: 'freshservice',
+    source: 1,
+    sourceLabel: 'Email',
     subject: 'VPN license renewal',
     isNoise: false,
     ageMinutes: 95,
@@ -44,6 +47,28 @@ describe('condition compile → evaluate parity', () => {
     expect(evaluate({ logic: 'all', conditions: [{ field: 'ticket.isNoise', operator: 'is_false' }] })).toBe(true);
     expect(evaluate({ logic: 'all', conditions: [{ field: 'availability.isBusinessHours', operator: 'is_true' }] })).toBe(true);
     expect(evaluate({ logic: 'all', conditions: [{ field: 'ticket.subject', operator: 'matches_regex', value: 'vpn|citrix' }] })).toBe(true);
+  });
+
+  test('arrival-channel labels: FS codes pass through, TP extension range maps, unknowns degrade', () => {
+    expect(ticketSourceLabel(1)).toBe('Email');
+    expect(ticketSourceLabel(TICKET_SOURCE.AGENT)).toBe('Agent');
+    expect(ticketSourceLabel(TICKET_SOURCE.API)).toBe('API');
+    expect(ticketSourceLabel(1001)).toBe('Source 1001'); // org-custom FS code
+    expect(ticketSourceLabel(null)).toBeNull();
+    // TP extension values can never collide with FS's 1–10 space.
+    expect(Object.values(TICKET_SOURCE).filter((v) => v >= 100)).toEqual(expect.arrayContaining([100, 101, 103]));
+  });
+
+  test('ticket source (arrival channel, QA 07-07 #1) conditions evaluate', () => {
+    expect(CONDITION_FIELDS['ticket.sourceLabel']).toEqual(expect.objectContaining({
+      type: 'enum', path: 'ticket.sourceLabel',
+    }));
+    expect(CONDITION_FIELDS['ticket.sourceLabel'].options).toEqual(
+      expect.arrayContaining(['Email', 'Portal', 'Phone', 'API', 'Webhook', 'Agent']),
+    );
+    expect(evaluate({ logic: 'all', conditions: [{ field: 'ticket.sourceLabel', operator: 'is', value: 'Email' }] })).toBe(true);
+    expect(evaluate({ logic: 'all', conditions: [{ field: 'ticket.sourceLabel', operator: 'in', value: ['Phone', 'Email'] }] })).toBe(true);
+    expect(evaluate({ logic: 'all', conditions: [{ field: 'ticket.sourceLabel', operator: 'is', value: 'Agent' }] })).toBe(false);
   });
 
   test('relative-time fields: age and overdue', () => {

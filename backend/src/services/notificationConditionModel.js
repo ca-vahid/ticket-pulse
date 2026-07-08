@@ -26,6 +26,8 @@ export const CONDITION_FIELDS = Object.freeze({
   'ticket.status': { label: 'Ticket status', type: 'enum', path: 'ticket.status', options: ['Open', 'Pending', 'Resolved', 'Closed'] },
   'ticket.priorityLabel': { label: 'Priority', type: 'enum', path: 'ticket.priorityLabel', options: ['Low', 'Medium', 'High', 'Urgent'] },
   'ticket.origin': { label: 'Ticket origin', type: 'enum', path: 'ticket.origin', options: ['ticketpulse', 'freshservice'] },
+  // Arrival channel (QA 07-07 #1) — how the ticket reached the helpdesk.
+  'ticket.sourceLabel': { label: 'Ticket source', type: 'enum', path: 'ticket.sourceLabel', options: ['Email', 'Portal', 'Phone', 'Chat', 'API', 'Webhook', 'Agent'] },
   'ticket.subject': { label: 'Subject', type: 'string', path: 'ticket.subject' },
   'ticket.descriptionText': { label: 'Description', type: 'string', path: 'ticket.descriptionText' },
   'ticket.category': { label: 'Category (FS)', type: 'string', path: 'ticket.category' },

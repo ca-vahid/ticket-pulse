@@ -1,5 +1,6 @@
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
+import { ticketSourceLabel } from '../utils/ticketOrigin.js';
 import notificationWorkflowEngine from './notificationWorkflowEngine.js';
 
 const TERMINAL_STATUS_VALUES = new Set(['resolved', 'closed', '4', '5']);
@@ -336,6 +337,10 @@ function buildEventContext({ event, ticket, previousAgent, source }) {
       } : null,
       isNoise: ticket.isNoise === true,
       origin: ticket.origin || 'freshservice',
+      // Arrival channel (QA 07-07 #1): numeric code + friendly label
+      // ("Email", "Portal", "Phone", "API", "Agent"…) for conditions.
+      source: ticket.source ?? null,
+      sourceLabel: ticketSourceLabel(ticket.source),
       customFields: ticket.customFields || {},
       // Tag NAMES (lowercased for case-insensitive condition matching); also
       // exposed to templates as {{ ticket.tags }}.

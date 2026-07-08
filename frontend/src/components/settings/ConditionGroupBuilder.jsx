@@ -17,6 +17,7 @@ export const CG_FIELDS = [
   { value: 'ticket.status', label: 'Ticket status', type: 'enum', options: ['Open', 'Pending', 'Resolved', 'Closed'] },
   { value: 'ticket.priorityLabel', label: 'Priority', type: 'enum', options: ['Low', 'Medium', 'High', 'Urgent'] },
   { value: 'ticket.origin', label: 'Ticket origin', type: 'enum', options: ['ticketpulse', 'freshservice'] },
+  { value: 'ticket.sourceLabel', label: 'Ticket source (arrival channel)', type: 'enum', options: ['Email', 'Portal', 'Phone', 'Chat', 'API', 'Webhook', 'Agent'] },
   { value: 'ticket.subject', label: 'Subject', type: 'string' },
   { value: 'ticket.descriptionText', label: 'Description', type: 'string' },
   { value: 'ticket.internalCategory', label: 'Category', type: 'string' },

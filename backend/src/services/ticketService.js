@@ -2,7 +2,7 @@ import { z } from 'zod';
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { ValidationError, NotFoundError } from '../utils/errors.js';
-import { TICKET_ORIGIN, APP_NATIVE_TRIGGER_SOURCE, ticketDisplayRef } from '../utils/ticketOrigin.js';
+import { TICKET_ORIGIN, TICKET_SOURCE, TICKET_SOURCE_LABELS, APP_NATIVE_TRIGGER_SOURCE, ticketDisplayRef } from '../utils/ticketOrigin.js';
 import noiseRuleService from './noiseRuleService.js';
 import ticketActivityRepository from './ticketActivityRepository.js';
 import ticketThreadRepository from './ticketThreadRepository.js';
@@ -17,11 +17,8 @@ import { sseManager } from '../routes/sse.routes.js';
 export const NATIVE_TICKET_STATUSES = ['Open', 'Pending', 'Resolved', 'Closed'];
 const TERMINAL_STATUSES = ['Resolved', 'Closed'];
 
-// FreshService's numeric source channels; org-custom codes (1001+) fall back to "Source N".
-const FS_SOURCE_LABELS = {
-  1: 'Email', 2: 'Portal', 3: 'Phone', 4: 'Chat', 5: 'Feedback widget',
-  6: 'Yammer', 7: 'AWS CloudWatch', 8: 'PagerDuty', 9: 'Walk-up', 10: 'Slack',
-};
+// Arrival-channel labels live in utils/ticketOrigin.js (TICKET_SOURCE_LABELS):
+// FS's numeric codes 1–10 plus the TP extension range (API/Webhook/Agent).
 
 // Accepts an array or a comma/semicolon-separated string of addresses.
 const emailListSchema = z.preprocess(
@@ -1197,7 +1194,7 @@ class TicketService {
     const sources = sourceRows
       .map((row) => ({
         value: row.source,
-        label: FS_SOURCE_LABELS[row.source] || `Source ${row.source}`,
+        label: TICKET_SOURCE_LABELS[row.source] || `Source ${row.source}`,
         count: row._count._all,
       }))
       .sort((a, b) => b.count - a.count);
@@ -1423,7 +1420,7 @@ class TicketService {
 
   // ------------------------------------------------------------------ create
 
-  async createTicket(workspaceId, input, actor) {
+  async createTicket(workspaceId, input, actor, { sourceChannel = TICKET_SOURCE.AGENT } = {}) {
     const workspace = await this._getWorkspace(workspaceId);
     if (!workspace.nativeTicketingEnabled) {
       throw new ValidationError('Native ticketing is not enabled for this workspace');
@@ -1482,6 +1479,9 @@ class TicketService {
         lastRealActivityAt: now,
         isNoise,
         noiseRuleMatched: ruleId,
+        // Arrival channel (QA 07-07 #1): Agent for the app UI; email ingest
+        // and the public API pass their own channel.
+        source: sourceChannel,
         lastIngestSource: 'ticketpulse_native',
         lastIngestedAt: now,
         ...(slaDueDates.frDueBy ? { frDueBy: slaDueDates.frDueBy } : {}),
