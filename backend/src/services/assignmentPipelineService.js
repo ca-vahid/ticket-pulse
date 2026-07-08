@@ -1362,6 +1362,11 @@ class AssignmentPipelineService {
     if (this._drainTimer) return;
     const tick = async () => {
       try {
+        // Watchdog: recover runs whose analysis stalled (a hung LLM/tool call,
+        // or a restart the startup sweep somehow missed) so no ticket pins on
+        // "AI matching…" indefinitely. 15 min is well beyond a normal run (~90s).
+        await this.reconcileStuckAnalysisRuns({ olderThanMs: 15 * 60 * 1000, broadcast: true })
+          .catch((e) => logger.warn(`[stuck-run watchdog] ${e.message}`));
         const { default: workspaceRepository } = await import('./workspaceRepository.js');
         const workspaces = await workspaceRepository.getAllActive();
         for (const ws of workspaces) {
@@ -1396,6 +1401,43 @@ class AssignmentPipelineService {
       clearTimeout(this._drainKick);
       this._drainKick = null;
     }
+  }
+
+  /**
+   * Recover pipeline runs stuck in 'running'. A run only ever executes
+   * in-process, so a 'running' row whose updatedAt is stale means the process
+   * that owned it is gone (a deploy/restart) or the run wedged on a hung
+   * LLM/tool call. Left alone the ticket pins on the "AI matching…" state
+   * forever (the list reports state='analyzing' for any running row) and its
+   * live view has no stream to render — exactly the "stuck for 5+ min" symptom.
+   * Mark them 'failed' so the queue clears and the ticket can be re-run.
+   *   olderThanMs = 0  → every running row (startup: all are orphaned by the boot)
+   *   olderThanMs > 0  → only rows idle longer than that (periodic watchdog)
+   */
+  async reconcileStuckAnalysisRuns({ olderThanMs = 0, broadcast = false } = {}) {
+    const cutoff = new Date(Date.now() - Math.max(0, olderThanMs));
+    const stuck = await prisma.assignmentPipelineRun.findMany({
+      where: { status: 'running', updatedAt: { lt: cutoff } },
+      select: { id: true, ticketId: true, workspaceId: true },
+    });
+    if (stuck.length === 0) return { recovered: 0, runIds: [] };
+    const reason = olderThanMs === 0
+      ? 'Run interrupted — the server restarted before analysis completed (orphaned-run recovery).'
+      : `Analysis stalled — no progress for over ${Math.round(olderThanMs / 60000)} minutes (watchdog recovery).`;
+    await prisma.assignmentPipelineRun.updateMany({
+      where: { id: { in: stuck.map((r) => r.id) } },
+      data: { status: 'failed', errorMessage: reason },
+    });
+    logger.warn(`Recovered ${stuck.length} stuck pipeline run(s) → failed (${olderThanMs === 0 ? 'startup' : 'watchdog'})`, {
+      runIds: stuck.map((r) => r.id),
+    });
+    if (broadcast) {
+      // Nudge live queue rows so they drop the "AI matching…" state immediately.
+      for (const r of stuck) {
+        this._broadcastRunUpdate(r.workspaceId, r.ticketId, r.id, 'failed').catch(() => {});
+      }
+    }
+    return { recovered: stuck.length, runIds: stuck.map((r) => r.id) };
   }
 }
 
