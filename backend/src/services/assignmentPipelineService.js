@@ -1421,6 +1421,7 @@ class AssignmentPipelineService {
         for (const ws of workspaces) {
           try {
             await this._queueMissedTickets(ws.id).catch((e) => logger.warn(`[missed-ticket sweep] ws ${ws.id}: ${e.message}`));
+            await this._retryOrphanedSyncs(ws.id).catch((e) => logger.warn(`[orphan-sync retry] ws ${ws.id}: ${e.message}`));
             const queuedCount = await assignmentRepository.countQueuedRuns(ws.id);
             if (queuedCount === 0) continue;
             const tz = ws.defaultTimezone || 'America/Los_Angeles';
@@ -1488,6 +1489,36 @@ class AssignmentPipelineService {
       workspaceId,
       ticketIds: missed.map((r) => r.id),
     });
+  }
+
+  /**
+   * Re-drive FS write-backs whose sync never completed (null/pending after a
+   * restart, or transient failures like a FreshService 500). syncService runs
+   * the same recovery at the END of each full sync cycle — but a cycle that
+   * aborts (deploy restart, sync error) never reaches its tail: on Jul 8 five
+   * consecutive ws1 cycles died mid-flight and a decided auto-assign sat
+   * unsynced for 40+ minutes. This worker tick always completes, so recovery
+   * no longer depends on sync-cycle luck. Double-execution is safe: success
+   * flips syncStatus to 'synced' (no longer matched), failure bumps updatedAt
+   * (excluded by the 5-min cutoff until the next spaced retry), and the FS
+   * write itself is idempotent.
+   */
+  async _retryOrphanedSyncs(workspaceId) {
+    const orphans = await assignmentRepository.findOrphanedSyncRuns({ workspaceId, olderThanMinutes: 5 });
+    if (orphans.length === 0) return;
+    const config = await assignmentRepository.getConfig(workspaceId);
+    const dryRun = config?.dryRunMode ?? true;
+    logger.info(`[orphan-sync retry] re-driving ${orphans.length} incomplete FS write-back(s)`, {
+      workspaceId,
+      runIds: orphans.map((r) => r.id),
+    });
+    for (const orphan of orphans) {
+      try {
+        await freshServiceActionService.execute(orphan.id, workspaceId, dryRun);
+      } catch (err) {
+        logger.warn('[orphan-sync retry] attempt failed', { runId: orphan.id, error: err.message });
+      }
+    }
   }
 
   stopQueueDrainWorker() {
