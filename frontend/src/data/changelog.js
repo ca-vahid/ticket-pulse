@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.25-preview';
+export const APP_VERSION = '3.0.26-preview';
 
 export const changelog = [
+  {
+    version: '3.0.26-preview',
+    date: 'July 8, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>🏷️ Auto-categorization back to full strength</strong> — some recent tickets were assigned but left uncategorized. Two causes, both fixed: the upgraded AI model sometimes skipped the category fields (they were technically optional — now the model <b>must</b> answer, and if it ever names a category without the ID, the server resolves it by name); and a FreshService group lookup inside the pipeline could hang behind the API rate limit, stalling entire runs until a watchdog killed them — that lookup is now time-boxed so runs always finish.' },
+    ],
+  },
   {
     version: '3.0.25-preview',
     date: 'July 8, 2026',
