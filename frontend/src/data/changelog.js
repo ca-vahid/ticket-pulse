@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.16-preview';
+export const APP_VERSION = '3.0.17-preview';
 
 export const changelog = [
+  {
+    version: '3.0.17-preview',
+    date: 'July 8, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>🗂️ Accounting gets the full category editor</strong> — the Competencies → Categories tab in the Accounting workspace now uses the same hierarchical editor as IT: draft & publish, FreshService drift check & sync, and AI reclassification tools, replacing the old flat chip list. (The backend had supported this since the category reorg — the page just hadn’t caught up.) Which editor a workspace gets now follows the server’s capability flag instead of a hardcoded workspace check.' },
+    ],
+  },
   {
     version: '3.0.16-preview',
     date: 'July 8, 2026',

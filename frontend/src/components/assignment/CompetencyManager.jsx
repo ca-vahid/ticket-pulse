@@ -868,7 +868,7 @@ function MigrationControlsHelpModal({ onClose }) {
       icon: CheckCircle,
       title: 'Publish',
       tone: 'text-emerald-700 bg-emerald-50 border-emerald-100',
-      body: 'Makes the current draft the active Ticket Pulse category/subcategory hierarchy for the IT workspace. It remaps internal technician competencies and existing local Ticket Pulse classifications using the reviewed mappings.',
+      body: 'Makes the current draft the active Ticket Pulse category/subcategory hierarchy for this workspace. It remaps internal technician competencies and existing local Ticket Pulse classifications using the reviewed mappings.',
       safety: 'Ticket Pulse database change only. It does not backfill historical Freshservice tickets.',
     },
     {
@@ -3038,7 +3038,19 @@ export default function CompetencyManager({ deepRunId, deepAnalyzeTechId, worksp
 
   const isLiveAnalysis = !!deepAnalyzeTechId;
   const forceNew = searchParams.get('force') === 'true';
-  const isItWorkspace = Number(currentWorkspace?.id) === 1 || currentWorkspace?.slug === 'it';
+  // Which category editor this workspace gets is decided by the BACKEND
+  // (SKILL_HIERARCHY_WORKSPACE_IDS drives the draft/publish/reclassify
+  // services) — asking it keeps the UI from drifting from what the API
+  // allows. Fallback to the historical IT-only check while loading / if the
+  // config call fails.
+  const [skillHierarchyEnabled, setSkillHierarchyEnabled] = useState(null);
+  useEffect(() => {
+    setSkillHierarchyEnabled(null);
+    assignmentAPI.getConfig()
+      .then((res) => setSkillHierarchyEnabled(res?.skillHierarchyEnabled === true))
+      .catch(() => setSkillHierarchyEnabled(null));
+  }, [currentWorkspace?.id]);
+  const useHierarchyEditor = skillHierarchyEnabled ?? (Number(currentWorkspace?.id) === 1 || currentWorkspace?.slug === 'it');
 
   useEffect(() => {
     assignmentAPI.getCategorySuggestions()
@@ -3086,7 +3098,7 @@ export default function CompetencyManager({ deepRunId, deepAnalyzeTechId, worksp
       </div>
 
       {effectiveTab === 'matrix' && <MatrixTab onAnalyze={(id) => handleAnalyze(id)} />}
-      {effectiveTab === 'categories' && <CategoriesManagementTab showMigrationControls={isItWorkspace} />}
+      {effectiveTab === 'categories' && <CategoriesManagementTab showMigrationControls={useHierarchyEditor} />}
       {effectiveTab === 'suggestions' && <CategorySuggestionsTab onCountChange={setSuggestionCount} />}
       {effectiveTab === 'history' && <RunHistoryTab deepRunId={deepRunId} workspaceTimezone={workspaceTimezone} />}
       {effectiveTab === 'prompt' && <CompetencyPromptTab />}

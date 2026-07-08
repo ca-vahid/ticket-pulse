@@ -81,7 +81,7 @@ describe('analyticsService pure helpers', () => {
     expect(insight.rule).toContain('dueBy');
   });
 
-  test('categoryFilterForQuery gates canonical filters to IT workspace', () => {
+  test('categoryFilterForQuery gates canonical filters to hierarchy-enabled workspaces', () => {
     expect(categoryFilterForQuery(1, { categoryIds: '10,11', subcategoryIds: '22' })).toMatchObject({
       mode: 'canonical',
       where: {
@@ -92,7 +92,10 @@ describe('analyticsService pure helpers', () => {
       },
     });
 
-    expect(categoryFilterForQuery(2, { categoryIds: '10', legacyCategories: 'BST,GIS' })).toMatchObject({
+    // Workspace 99 is never in SKILL_HIERARCHY_WORKSPACE_IDS — the test used
+    // to pin workspace 2 here, but Accounting moved to the hierarchical
+    // taxonomy (the flag is env-driven, so ws2's mode depends on the env).
+    expect(categoryFilterForQuery(99, { categoryIds: '10', legacyCategories: 'BST,GIS' })).toMatchObject({
       mode: 'legacy',
       where: { ticketCategory: { in: ['BST', 'GIS'] } },
     });
