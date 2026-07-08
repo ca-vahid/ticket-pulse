@@ -128,6 +128,9 @@ class FreshServiceClient {
     this.apiKey = apiKey;
     this.rateLimitPriority = options.priority || 'normal';
     this.rateLimitSource = options.source || null;
+    // Optional queue-wait bound: reject (FS_QUEUE_TIMEOUT) instead of letting
+    // an interactive request sit behind a long sync queue. Null = wait forever.
+    this.rateLimitMaxWaitMs = options.queueTimeoutMs || null;
     // Handle both full domain (efusion.freshservice.com) and subdomain (efusion)
     const fullDomain = domain.includes('.freshservice.com') ? domain : `${domain}.freshservice.com`;
     // Test hook: lets integration drills point at a local FS stub. Never set in prod.
@@ -207,7 +210,11 @@ class FreshServiceClient {
   _throttledRequest(method, url, ...rest) {
     return this.limiter.enqueue(
       () => this.client[method](url, ...rest),
-      { priority: this.rateLimitPriority, source: this.rateLimitSource },
+      {
+        priority: this.rateLimitPriority,
+        source: this.rateLimitSource,
+        maxWaitMs: this.rateLimitMaxWaitMs,
+      },
     );
   }
 

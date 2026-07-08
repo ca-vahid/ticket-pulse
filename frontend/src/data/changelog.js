@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.0.21-preview';
+export const APP_VERSION = '3.0.22-preview';
 
 export const changelog = [
+  {
+    version: '3.0.22-preview',
+    date: 'July 8, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>⚡ FreshService write-backs no longer hang for minutes</strong> — changing status, assignee, priority, or category on a FreshService ticket (and sending replies/notes) used to wait at the <em>back</em> of the same queue our background sync uses, so during a busy sweep a single click could sit for 4+ minutes until the connection died with a generic “network error.” These user-facing calls now jump to the front of the FreshService queue and typically complete in a couple of seconds. If FreshService is genuinely saturated, you get a fast, honest “busy — nothing was changed, try again in a few seconds” instead of a dead spinner — and it really is safe to retry, because the request is guaranteed not to have been sent.' },
+      { type: 'improved', html: 'Opening a FreshService-born ticket refreshes its conversation thread on the priority lane too, so new requester replies show up promptly instead of minutes later.' },
+    ],
+  },
   {
     version: '3.0.21-preview',
     date: 'July 8, 2026',

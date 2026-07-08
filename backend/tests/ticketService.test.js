@@ -30,6 +30,7 @@ const mirrorServiceMock = {
   enqueueFieldSync: jest.fn().mockResolvedValue({ id: 2 }),
   enqueueThreadEntry: jest.fn().mockResolvedValue({ id: 3 }),
   getClient: jest.fn().mockResolvedValue(fsClientMock),
+  getInteractiveClient: jest.fn().mockResolvedValue(fsClientMock),
 };
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
@@ -279,6 +280,28 @@ describe('ticketService conversation + status + assignment', () => {
     await ticketService.addPrivateNote(501, 1, { bodyText: 'fs-born internal' }, actor);
 
     expect(fsClientMock.addNote).toHaveBeenCalledWith(9, expect.stringContaining('fs-born internal'), { isPrivate: true, attachments: [] });
+  });
+
+  test('FS-born sends use the high-priority interactive client, not the background mirror client', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...nativeTicket, origin: 'freshservice', freshserviceTicketId: BigInt(9) });
+    fsClientMock.createReply.mockResolvedValue({ conversation: { id: 42003 } });
+
+    await ticketService.addReply(501, 1, { bodyText: 'jump the queue' }, actor);
+
+    expect(mirrorServiceMock.getInteractiveClient).toHaveBeenCalledWith(1);
+    expect(mirrorServiceMock.getClient).not.toHaveBeenCalled();
+  });
+
+  test('a rate-limit queue timeout surfaces as an honest 503 "busy — nothing changed" error', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...nativeTicket, origin: 'freshservice', freshserviceTicketId: BigInt(9) });
+    const queueTimeout = new Error('FreshService request timed out after 15s waiting in the rate-limit queue (240 queued, 3 in-flight) — the request was never sent');
+    queueTimeout.code = 'FS_QUEUE_TIMEOUT';
+    fsClientMock.createReply.mockRejectedValue(queueTimeout);
+
+    await expect(ticketService.addReply(501, 1, { bodyText: 'busy queue' }, actor))
+      .rejects.toMatchObject({ statusCode: 503, message: expect.stringContaining('nothing was changed') });
+    // The local thread cache must not record a reply that never reached FS.
+    expect(prismaMock.ticketThreadEntry.create).not.toHaveBeenCalled();
   });
 
   test('native replies queue for the mirror', async () => {

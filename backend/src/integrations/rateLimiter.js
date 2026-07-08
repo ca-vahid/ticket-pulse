@@ -42,6 +42,7 @@ export class FreshServiceRateLimiter {
     this.processing = false;
     this.slowdownUntil = 0;   // ms timestamp for 429 Retry-After pause
     this.lastLaunchAt = 0;
+    this.queueTimeouts = 0;   // total requests rejected for exceeding maxWaitMs
   }
 
   _sleep(ms) {
@@ -75,16 +76,43 @@ export class FreshServiceRateLimiter {
     return null;
   }
 
+  /**
+   * options.maxWaitMs — bound how long the request may sit in the queue
+   * BEFORE launching. If it can't launch in time it is rejected with a
+   * FS_QUEUE_TIMEOUT error and the underlying fn is never called, so the
+   * caller knows for certain nothing reached FreshService. Used by
+   * interactive (user-facing) calls so a busy sync queue produces a fast,
+   * honest "busy, try again" instead of a request that hangs past the
+   * hosting platform's ~230s connection kill.
+   */
   async enqueue(fn, options = {}) {
     return new Promise((resolve, reject) => {
       const priority = normalizePriority(options.priority);
-      this.queues[priority].push({
+      const item = {
         fn,
         resolve,
         reject,
         priority,
         source: options.source || null,
-      });
+        expired: false,
+        expireTimer: null,
+      };
+      const maxWaitMs = Number(options.maxWaitMs);
+      if (Number.isFinite(maxWaitMs) && maxWaitMs > 0) {
+        item.expireTimer = setTimeout(() => {
+          item.expired = true;
+          this.queueTimeouts++;
+          const err = new Error(
+            `FreshService request timed out after ${Math.round(maxWaitMs / 1000)}s waiting in the rate-limit queue (${this._totalQueueDepth()} queued, ${this.inFlight} in-flight) — the request was never sent`,
+          );
+          err.code = 'FS_QUEUE_TIMEOUT';
+          logger.warn(`RateLimiter: queue-wait timeout for ${item.source || 'unknown'} request`, this.getStats());
+          reject(err);
+        }, maxWaitMs);
+        // Don't let a pending timer hold the process open.
+        if (typeof item.expireTimer.unref === 'function') item.expireTimer.unref();
+      }
+      this.queues[priority].push(item);
       this._pump().catch((e) => logger.error('RateLimiter pump error:', e));
     });
   }
@@ -105,6 +133,11 @@ export class FreshServiceRateLimiter {
         // Still have an item? (someone could have drained us)
         const item = this._dequeueNext();
         if (!item) break;
+
+        // Queue-wait timeout already rejected this one — drop it without
+        // burning a launch slot.
+        if (item.expired) continue;
+        if (item.expireTimer) clearTimeout(item.expireTimer);
 
         const now = Date.now();
         this.recentLaunches.push(now);
@@ -209,6 +242,7 @@ export class FreshServiceRateLimiter {
       highBurstLimit: this.highBurstLimit,
       slowdownActive: this.slowdownUntil > now,
       slowdownMsLeft: Math.max(0, this.slowdownUntil - now),
+      queueTimeouts: this.queueTimeouts,
     };
   }
 }
