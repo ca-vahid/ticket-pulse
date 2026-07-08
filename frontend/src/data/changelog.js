@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.29-preview';
+export const APP_VERSION = '3.0.30-preview';
 
 export const changelog = [
+  {
+    version: '3.0.30-preview',
+    date: 'July 8, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>🔁 FreshService write-backs retry themselves</strong> — when the AI picked a technician but FreshService’s API hiccuped on the hand-off (a 500/timeout), the decision stayed in Ticket Pulse and the ticket sat unassigned in FreshService. Transient write failures now retry automatically every sync cycle (for up to 24 hours) for assignments and classifications, not just noise dismissals.' },
+    ],
+  },
   {
     version: '3.0.29-preview',
     date: 'July 8, 2026',
