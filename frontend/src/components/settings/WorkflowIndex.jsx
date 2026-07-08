@@ -127,6 +127,14 @@ function IndexRow({
           {version > 0
             ? <span className="inline-flex items-center rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 ring-1 ring-slate-200">v{version}</span>
             : <span className="inline-flex items-center rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600 ring-1 ring-amber-200">Draft</span>}
+          {isArchived && (
+            <span
+              className="inline-flex items-center rounded-md bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 ring-1 ring-slate-300"
+              title={`Archived ${new Date(workflow.archivedAt).toLocaleString()}`}
+            >
+              archived · {new Date(workflow.archivedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+            </span>
+          )}
           {lastRun ? (
             <span
               className={cx('inline-flex max-w-[11rem] items-center gap-1 truncate rounded-md px-1.5 py-0.5 text-[10px] font-semibold ring-1', runChipClass(lastRun.status))}
@@ -231,9 +239,18 @@ export default function WorkflowIndex({
   );
 
   const groups = groupByTrigger(filtered);
-  const triggerTypes = [...groups.keys()];
-  const allCollapsed = triggerTypes.length > 0 && triggerTypes.every((type) => collapsed.has(type));
   const filtering = Boolean(query.trim()) || enabledOnly || failingOnly;
+  // Collapse state is judged (and toggled) against EVERY trigger group, not
+  // just the ones surviving the current filter — otherwise the button label
+  // flip-flops as filters change and "Collapse all" looks broken.
+  const allTriggerTypes = useMemo(
+    () => [...new Set(workflows.map((w) => w.triggerType || 'other'))],
+    [workflows],
+  );
+  const allCollapsed = allTriggerTypes.length > 0 && allTriggerTypes.every((type) => collapsed.has(type));
+  // A typed search auto-expands so matches are visible; the chip filters keep
+  // manual collapse intact.
+  const searching = Boolean(query.trim());
 
   return (
     <div>
@@ -282,17 +299,19 @@ export default function WorkflowIndex({
           >
             Failing{needsAttention.length > 0 ? ` (${needsAttention.length})` : ''}
           </button>
-          <button
-            type="button"
-            onClick={() => {
-              const next = allCollapsed ? new Set() : new Set(triggerTypes);
-              persist(next);
-              setCollapsed(next);
-            }}
-            className="ml-auto rounded px-1.5 py-0.5 text-[10px] font-semibold text-indigo-600 hover:bg-indigo-50"
-          >
-            {allCollapsed ? 'Expand all' : 'Collapse all'}
-          </button>
+          {!searching && (
+            <button
+              type="button"
+              onClick={() => {
+                const next = allCollapsed ? new Set() : new Set(allTriggerTypes);
+                persist(next);
+                setCollapsed(next);
+              }}
+              className="ml-auto rounded px-1.5 py-0.5 text-[10px] font-semibold text-indigo-600 hover:bg-indigo-50"
+            >
+              {allCollapsed ? 'Expand all' : 'Collapse all'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -337,7 +356,7 @@ export default function WorkflowIndex({
         {[...groups.entries()].map(([triggerType, bucket]) => {
           const total = (bucket.default ? 1 : 0) + bucket.customs.length;
           const GroupIcon = getVisuals(triggerType).icon;
-          const isCollapsed = collapsed.has(triggerType) && !filtering;
+          const isCollapsed = collapsed.has(triggerType) && !searching;
           return (
             <section key={triggerType} className="bg-white">
               <div className="sticky top-[76px] z-10 flex w-full items-center border-y border-l-4 border-indigo-100 border-l-indigo-500 bg-indigo-50 transition-colors hover:bg-indigo-100/70">

@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.0.17-preview';
+export const APP_VERSION = '3.0.18-preview';
 
 export const changelog = [
+  {
+    version: '3.0.18-preview',
+    date: 'July 8, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>➕ One clear way to create a workflow variant</strong> — “New variant” and “Duplicate” did nearly the same thing (blank draft vs. copied steps), so they’re now a single <strong>New variant</strong> button that opens a dialog: pick a <strong>name</strong> (a sensible one is pre-filled — edit it), choose <strong>Copy the selected workflow</strong> or <strong>Start blank</strong>, and confirm. Nothing is created until you say so — no more surprise “custom variant” drafts.' },
+      { type: 'improved', html: '<strong>🗃️ Archived variants are findable now</strong> — the checkbox is now <strong>“Show only archived”</strong>: flip it and the list shows just your archived variants, each with an <strong>archived · date</strong> chip. Restoring one flips you back to the live list automatically.' },
+      { type: 'fixed', html: '<strong>Collapse all actually collapses</strong> — the workflow list’s Collapse/Expand all now works against every trigger group (it used to silently do nothing while a search or filter was active, and its label flip-flopped). While you’re typing a search the button steps aside — search always shows matches.' },
+    ],
+  },
   {
     version: '3.0.17-preview',
     date: 'July 8, 2026',
