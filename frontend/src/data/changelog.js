@@ -1,6 +1,16 @@
-export const APP_VERSION = '3.0.23-preview';
+export const APP_VERSION = '3.0.24-preview';
 
 export const changelog = [
+  {
+    version: '3.0.24-preview',
+    date: 'July 8, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>🚀 Analytics is much faster — 90-day views included</strong> — three fixes under the hood: technician photos are no longer dragged through every ticket row (a 90-day load was hauling 150+&nbsp;MB per query because of embedded avatars), the seven analytics sections now share one ticket fetch instead of each re-reading the same rows, and results are cached briefly so revisits and range flips paint instantly (data refreshes in the background). A full 90-day load that used to time out now completes in a couple of seconds.' },
+      { type: 'improved', html: '<strong>Analytics loads progressively</strong> — each tab appears as soon as its own data is ready instead of waiting for the slowest section, and if one section fails you get a small retry banner instead of a dead page.' },
+      { type: 'improved', html: '<strong>🗂️ Cleaner category map for flat taxonomies</strong> — workspaces whose categories have no subcategories (like Accounting) no longer show a redundant full-size “No subcategory” tile inside every block; each category now renders as one clean tile.' },
+      { type: 'improved', html: '<strong>Settings decluttered</strong> — the left settings tree is gone; sections now sit in one horizontal bar under the header, giving every panel the full width of the page.' },
+    ],
+  },
   {
     version: '3.0.23-preview',
     date: 'July 8, 2026',

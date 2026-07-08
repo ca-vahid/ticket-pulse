@@ -12,7 +12,15 @@ const RANGE_DAYS = {
   '30d': 30,
   '90d': 90,
 };
-const CACHE_TTL_MS = 15_000;
+// Endpoint results: fresh for 60s, then served STALE (up to 10 min) while a
+// background recompute replaces them — so revisits and range flips paint
+// instantly instead of re-waiting out the full computation (QA: 90d loads
+// timed out). Shared ticket fetches (the expensive inputs several endpoints
+// have in common) use a short hard TTL — just long enough for one page load's
+// seven endpoints to share a single DB read.
+const CACHE_TTL_MS = 60_000;
+const CACHE_STALE_MAX_MS = 10 * 60_000;
+const SHARED_FETCH_TTL_MS = 45_000;
 const MAX_CACHE_ENTRIES = 100;
 const cache = new Map();
 const pendingCache = new Map();
@@ -24,7 +32,7 @@ const pendingCache = new Map();
 function sweepAnalyticsCache() {
   const now = Date.now();
   for (const [key, entry] of cache) {
-    if (now - entry.createdAt >= CACHE_TTL_MS) cache.delete(key);
+    if (now - entry.createdAt >= (entry.retainMs ?? CACHE_TTL_MS)) cache.delete(key);
   }
 }
 setInterval(sweepAnalyticsCache, 30_000).unref();
@@ -90,7 +98,11 @@ const CATEGORY_TICKET_SELECT = {
   isNoise: true,
   rejectionCount: true,
   requester: { select: { name: true, email: true } },
-  assignedTech: { select: { id: true, name: true, photoUrl: true } },
+  // photoUrl is a ~11KB base64 data URL — selecting it per ticket row made a
+  // 90-day fetch hydrate 50–150MB per call (× 5 concurrent calls per page
+  // load = the analytics timeouts). Anything needing avatars resolves them
+  // from a per-technician map instead.
+  assignedTech: { select: { id: true, name: true } },
 };
 
 function dateKeyToUtcNoon(dateKey) {
@@ -234,17 +246,26 @@ function cacheKey(workspaceId, endpoint, query) {
   return `${workspaceId}:${endpoint}:${normalized}`;
 }
 
-async function withCache(workspaceId, endpoint, query, producer) {
+async function withCache(workspaceId, endpoint, query, producer, {
+  ttlMs = CACHE_TTL_MS,
+  staleMaxMs = CACHE_STALE_MAX_MS,
+} = {}) {
   const key = cacheKey(workspaceId, endpoint, query);
   const hit = cache.get(key);
-  if (hit && Date.now() - hit.createdAt < CACHE_TTL_MS) return hit.value;
+  const age = hit ? Date.now() - hit.createdAt : Infinity;
+  if (hit && age < ttlMs) return hit.value;
 
   const pending = pendingCache.get(key);
-  if (pending) return pending;
+  if (pending) {
+    // Stale-while-revalidate: someone is already recomputing — hand back the
+    // stale copy immediately rather than making this caller wait too.
+    if (hit && age < staleMaxMs) return hit.value;
+    return pending;
+  }
 
   const pendingValue = producer()
     .then((value) => {
-      cache.set(key, { createdAt: Date.now(), value });
+      cache.set(key, { createdAt: Date.now(), value, retainMs: Math.max(ttlMs, staleMaxMs) });
       enforceAnalyticsCap();
       return value;
     })
@@ -253,6 +274,13 @@ async function withCache(workspaceId, endpoint, query, producer) {
     });
 
   pendingCache.set(key, pendingValue);
+
+  if (hit && age < staleMaxMs) {
+    // Serve stale now; the recompute above lands in the cache for the next
+    // read. Swallow its rejection — the caller already has a valid payload.
+    pendingValue.catch(() => {});
+    return hit.value;
+  }
   return pendingValue;
 }
 
@@ -758,7 +786,7 @@ function buildCategoryHierarchy(rows, mode) {
   ];
 }
 
-function buildCategoryAgentLens(createdTickets = [], workspaceId, totalCreated = 0) {
+function buildCategoryAgentLens(createdTickets = [], workspaceId, totalCreated = 0, technicianPhotos = new Map()) {
   const byAgent = new Map();
 
   const ensureAgent = (ticket) => {
@@ -768,7 +796,7 @@ function buildCategoryAgentLens(createdTickets = [], workspaceId, totalCreated =
       byAgent.set(key, {
         technicianId: techId,
         name: ticket.assignedTech?.name || 'Unassigned',
-        photoUrl: ticket.assignedTech?.photoUrl || null,
+        photoUrl: (techId && technicianPhotos.get(techId)) || null,
         totalCreated: 0,
         categories: new Map(),
         topCategories: new Map(),
@@ -883,6 +911,7 @@ export function buildCategoryIntelligence({
   previousCreatedTickets = [],
   pipelineRuns = [],
   serviceAccountNames = [],
+  technicianPhotos = new Map(),
 }) {
   const rowsByKey = new Map();
   const previousByKey = new Map();
@@ -973,7 +1002,7 @@ export function buildCategoryIntelligence({
     },
     rows,
     hierarchy: buildCategoryHierarchy(rows, categoryMode),
-    agentLens: buildCategoryAgentLens(createdTickets, workspaceId, totalCreated),
+    agentLens: buildCategoryAgentLens(createdTickets, workspaceId, totalCreated, technicianPhotos),
     trend,
     pressure: rows.map((row) => ({
       key: row.key,
@@ -1088,21 +1117,40 @@ function assignmentSource(ticket, serviceAccountNames = []) {
   return 'unknown';
 }
 
+// One analytics page load fires seven endpoints with identical params, and
+// five of them independently ran this exact range query (four ran the open-
+// tickets one) — at 90 days that was 10+ concurrent multi-JOIN reads of the
+// same rows. Route them through the cache (with pending-coalescing) so a page
+// load shares ONE fetch per shape. Short hard TTL, no stale serving: these
+// are inputs, and the arrays are the big objects the cache cap protects.
+function sharedFetchKey(rangeInfo, excludeNoise, categoryWhere) {
+  return {
+    s: rangeInfo?.start?.toISOString?.() || String(rangeInfo?.start || ''),
+    e: rangeInfo?.end?.toISOString?.() || String(rangeInfo?.end || ''),
+    n: excludeNoise ? '1' : '0',
+    w: JSON.stringify(categoryWhere || {}),
+  };
+}
+
 async function fetchRangeTickets(workspaceId, rangeInfo, excludeNoise, categoryWhere = {}) {
-  return prisma.ticket.findMany({
+  return withCache(workspaceId, 'shared:rangeTickets', sharedFetchKey(rangeInfo, excludeNoise, categoryWhere), () => prisma.ticket.findMany({
     where: assignmentRangeWhere(workspaceId, rangeInfo, excludeNoise, categoryWhere),
     select: CATEGORY_TICKET_SELECT,
-  });
+  }), { ttlMs: SHARED_FETCH_TTL_MS, staleMaxMs: 0 });
 }
 
 async function fetchCreatedTickets(workspaceId, rangeInfo, excludeNoise, categoryWhere = {}) {
-  return prisma.ticket.findMany({
+  return withCache(workspaceId, 'shared:createdTickets', sharedFetchKey(rangeInfo, excludeNoise, categoryWhere), () => prisma.ticket.findMany({
     where: ticketBaseWhere(workspaceId, rangeInfo, excludeNoise, 'createdAt', categoryWhere),
     select: CATEGORY_TICKET_SELECT,
-  });
+  }), { ttlMs: SHARED_FETCH_TTL_MS, staleMaxMs: 0 });
 }
 
 async function fetchOpenTickets(workspaceId, excludeNoise, categoryWhere = {}) {
+  return withCache(workspaceId, 'shared:openTickets', sharedFetchKey(null, excludeNoise, categoryWhere), () => _fetchOpenTicketsUncached(workspaceId, excludeNoise, categoryWhere), { ttlMs: SHARED_FETCH_TTL_MS, staleMaxMs: 0 });
+}
+
+async function _fetchOpenTicketsUncached(workspaceId, excludeNoise, categoryWhere = {}) {
   return prisma.ticket.findMany({
     where: withCategoryWhere({
       workspaceId,
@@ -1129,10 +1177,20 @@ async function fetchOpenTickets(workspaceId, excludeNoise, categoryWhere = {}) {
       internalCategoryFit: true,
       internalSubcategoryFit: true,
       taxonomyReviewNeeded: true,
-      assignedTech: { select: { id: true, name: true, photoUrl: true } },
+      assignedTech: { select: { id: true, name: true } },
       requester: { select: { name: true, email: true } },
     },
   });
+}
+
+// Small per-workspace id → photoUrl map so responses can attach avatars
+// without dragging the ~11KB data URLs through every ticket row.
+async function getTechnicianPhotoMap(workspaceId) {
+  const rows = await withCache(workspaceId, 'shared:techPhotos', {}, () => prisma.technician.findMany({
+    where: { workspaceId },
+    select: { id: true, photoUrl: true },
+  }), { ttlMs: 5 * 60_000, staleMaxMs: 0 });
+  return new Map(rows.map((t) => [t.id, t.photoUrl || null]));
 }
 
 async function periodCounts(workspaceId, rangeInfo, excludeNoise, period = 'current', categoryWhere = {}) {
@@ -1379,6 +1437,7 @@ export async function getCategoryIntelligence(workspaceId, query = {}) {
       previousCreatedTickets,
       pipelineRuns,
       serviceAccountNames,
+      technicianPhotos,
     ] = await Promise.all([
       fetchCreatedTickets(workspaceId, rangeInfo, excludeNoise, categoryFilter.where),
       fetchRangeTickets(workspaceId, rangeInfo, excludeNoise, categoryFilter.where),
@@ -1403,6 +1462,7 @@ export async function getCategoryIntelligence(workspaceId, query = {}) {
         },
       }),
       getServiceAccountNames(),
+      getTechnicianPhotoMap(workspaceId),
     ]);
 
     const categoryData = buildCategoryIntelligence({
@@ -1415,6 +1475,7 @@ export async function getCategoryIntelligence(workspaceId, query = {}) {
       previousCreatedTickets,
       pipelineRuns,
       serviceAccountNames,
+      technicianPhotos,
     });
 
     return {
