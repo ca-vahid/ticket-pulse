@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.0.12-preview';
+export const APP_VERSION = '3.0.13-preview';
 
 export const changelog = [
+  {
+    version: '3.0.13-preview',
+    date: 'July 8, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>🔁 Returned-ticket review loop</strong> — a ticket returned to the queue could re-appear in Assignment Review as a brand-new row every sync pass (one Accounting ticket collected nine duplicates overnight). Bounce detection is now deduplicated per actual return event: one review entry per return, ever.' },
+      { type: 'fixed', html: '<strong>Honest bounce history</strong> — the review card no longer claims a ticket was “rejected by N successive auto-assigned technicians” when in reality one person picked it up and later returned it. Counts now come from real assignment history, and the story names who returned it, when, and whether they had picked it up themselves. Existing duplicate rows were collapsed and the surviving entries rewritten with the accurate history.' },
+    ],
+  },
   {
     version: '3.0.12-preview',
     date: 'July 8, 2026',

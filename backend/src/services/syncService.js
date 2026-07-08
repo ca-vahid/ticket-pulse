@@ -361,14 +361,21 @@ class SyncService {
   }
 
   /**
-   * Bounce-detection: a ticket transitioned from assigned to unassigned and is
-   * still active (Open / Pending). Create a fresh pipeline run with rebound
-   * context so the coordinator sees it surface again with full history.
+   * Bounce-detection: a technician returned the ticket to the queue (verified
+   * by FreshService activity) and it is still active. Exactly ONE pipeline
+   * run is created per rejection EVENT — the trigger condition ("last episode
+   * rejected + unassigned + open") is a STATE that stays true on every sync
+   * pass, so without event-level dedupe a single unassignment used to spawn a
+   * new run per pass (the #230490 review-queue loop).
    *
    * Guards:
-   *  - Skip if there's already an open (queued/running) run for this ticket
+   *  - Skip without FS rejection-activity evidence (or without a timestamp
+   *    identifying the event — nothing to dedupe on means nothing safe to do)
    *  - Skip if assignment pipeline isn't enabled for the workspace
-   *  - Skip after MAX_AUTO_REBOUNDS_PER_TICKET to avoid infinite loops
+   *  - Skip if ANY prior run already handled this same rejection event
+   *  - Skip if there's already an open (queued/running) run for this ticket
+   *  - Past MAX_AUTO_REBOUNDS_PER_TICKET distinct returns, park ONE
+   *    "needs manual review" run instead of auto-rerouting forever
    */
   async _handleTicketRebound(upsertedTicket, existingTicket, analysis, workspaceId) {
     const MAX_AUTO_REBOUNDS_PER_TICKET = 3;
@@ -383,16 +390,50 @@ class SyncService {
         return;
       }
 
+      // Identify the rejection EVENT and the previous assignee up front —
+      // both branches need them, and the event timestamp is the dedupe key.
+      const lastEpisode = analysis?.currentEpisode;
+      let prevTechName = lastEpisode?.agentName || null;
+      let unassignedAt = lastEpisode?.endedAt || null;
+      let unassignedByName = lastEpisode?.endActorName || null;
+      if ((!unassignedAt || !unassignedByName) && analysis?.events?.length) {
+        const lastReject = [...analysis.events].reverse().find((e) => e.type === 'rejected');
+        if (lastReject) {
+          unassignedAt = unassignedAt || lastReject.timestamp;
+          unassignedByName = unassignedByName || lastReject.actorName;
+        }
+      }
+      if (!unassignedAt) {
+        logger.warn('Bounce detection skipped: rejection carries no timestamp to identify the event', {
+          ticketId: upsertedTicket.id,
+        });
+        return;
+      }
+      const rejectionKey = new Date(unassignedAt).toISOString();
+
       // Skip if assignment pipeline isn't enabled
       const { default: assignmentRepository } = await import('./assignmentRepository.js');
       const cfg = await assignmentRepository.getConfig(workspaceId);
       if (!cfg?.isEnabled) return;
 
+      // ONE run per rejection event: a prior run carrying this exact event
+      // timestamp (any status — superseded, approved, exhausted) means this
+      // sync pass is a re-detection, not a new bounce.
+      const alreadyHandled = await prisma.assignmentPipelineRun.findFirst({
+        where: {
+          ticketId: upsertedTicket.id,
+          reboundFrom: { path: ['unassignedAt'], equals: rejectionKey },
+        },
+        select: { id: true, status: true, triggerSource: true },
+      });
+      if (alreadyHandled) {
+        logger.debug('Bounce detection: rejection event already handled, skipping re-detection', {
+          ticketId: upsertedTicket.id, existingRunId: alreadyHandled.id, rejectionKey,
+        });
+        return;
+      }
+
       // Skip if there's already an in-flight (queued/running) pipeline run.
-      // We deliberately do NOT skip on existing pending_review runs — those
-      // get superseded below, because the rebound is a NEW state that
-      // invalidates the prior recommendation (the prior pick was likely the
-      // agent who just rejected the ticket).
       const openRun = await assignmentRepository.getOpenPipelineRun(upsertedTicket.id);
       if (openRun) {
         logger.debug('Bounce detection: in-flight run already exists, skipping', {
@@ -401,39 +442,75 @@ class SyncService {
         return;
       }
 
-      // Loop guard: count prior auto-rebound runs for this ticket
-      const reboundCount = await prisma.assignmentPipelineRun.count({
-        where: { ticketId: upsertedTicket.id, triggerSource: 'rebound' },
-      });
-      if (reboundCount >= MAX_AUTO_REBOUNDS_PER_TICKET) {
-        // Previously this just logged and returned, leaving the ticket in
-        // limbo with no UI surface. Now we materialize a pending_review run
-        // tagged 'rebound_exhausted' so it appears in Awaiting Decision with
-        // a clear "needs manual handling" message and full rebound context.
-        logger.warn('Bounce detection: max auto-rebounds reached, materializing pending_review run', {
-          ticketId: upsertedTicket.id, reboundCount,
+      // The REAL bounce count: distinct rejected episodes — never run rows,
+      // which historically duplicated per sync pass and inflated the story
+      // ("rejected by 3 successive technicians" after ONE return).
+      const rejectionCount = Math.max(1, await prisma.ticketAssignmentEpisode.count({
+        where: { ticketId: upsertedTicket.id, endMethod: 'rejected' },
+      }));
+
+      // Resolve the previous assignee id (snapshot first, then by name —
+      // the snapshot can miss short-lived assignments between sync ticks).
+      let prevTechId = null;
+      if (existingTicket?.assignedTechId) {
+        const prevTech = await prisma.technician.findUnique({
+          where: { id: existingTicket.assignedTechId },
+          select: { id: true, name: true },
         });
-
-        // Capture the previous-assignee snapshot from the analyzer's view
-        // (mirrors the same logic used below for normal rebounds, just
-        // inlined here because we exit before reaching that block).
-        let prevTechName = null;
-        let unassignedAt = null;
-        let unassignedByName = null;
-        const lastEpisode = analysis?.currentEpisode;
-        if (lastEpisode && lastEpisode.endMethod === 'rejected') {
-          prevTechName = lastEpisode.agentName || null;
-          unassignedAt = lastEpisode.endedAt;
-          unassignedByName = lastEpisode.endActorName || null;
+        if (prevTech) {
+          prevTechId = prevTech.id;
+          prevTechName = prevTechName || prevTech.name;
         }
-        if ((!unassignedAt || !unassignedByName) && analysis?.events?.length) {
-          const lastReject = [...analysis.events].reverse().find((e) => e.type === 'rejected');
-          if (lastReject) {
-            unassignedAt = unassignedAt || lastReject.timestamp;
-            unassignedByName = unassignedByName || lastReject.actorName;
-          }
+      } else if (prevTechName) {
+        const prevTech = await prisma.technician.findFirst({
+          where: { name: prevTechName, workspaceId },
+          select: { id: true, name: true },
+        });
+        if (prevTech) {
+          prevTechId = prevTech.id;
+          prevTechName = prevTech.name;
+        }
+      }
+
+      const reboundFrom = {
+        previousTechId: prevTechId,
+        previousTechName: prevTechName || 'Unknown',
+        unassignedAt: rejectionKey,
+        unassignedByName: unassignedByName || null,
+        reboundCount: rejectionCount,
+        verifiedByFreshserviceActivity: true,
+        source: 'freshservice_activity',
+      };
+      // Honest phrasing: a self-picked assignment that was returned is a very
+      // different story than an auto-assignment that bounced.
+      const selfPicked = lastEpisode?.startMethod === 'self_picked';
+      const returnedPhrase = `${prevTechName || 'The previous assignee'} ${selfPicked
+        ? 'picked this ticket up themselves and later returned it to the queue'
+        : 'was assigned this ticket and returned it to the queue'} on ${rejectionKey.slice(0, 10)}`;
+
+      if (rejectionCount > MAX_AUTO_REBOUNDS_PER_TICKET) {
+        // Too many real returns — park ONE "needs manual review" row instead
+        // of auto-rerouting forever. The extra guard covers legacy duplicates
+        // that predate event-level dedupe.
+        const existingExhausted = await prisma.assignmentPipelineRun.findFirst({
+          where: {
+            ticketId: upsertedTicket.id,
+            triggerSource: 'rebound_exhausted',
+            status: 'completed',
+            decision: 'pending_review',
+          },
+          select: { id: true },
+        });
+        if (existingExhausted) {
+          logger.debug('Bounce detection: an exhausted run is already awaiting review, skipping', {
+            ticketId: upsertedTicket.id, existingRunId: existingExhausted.id,
+          });
+          return;
         }
 
+        logger.warn('Bounce detection: max auto-rebounds reached, materializing pending_review run', {
+          ticketId: upsertedTicket.id, rejectionCount,
+        });
         try {
           await prisma.assignmentPipelineRun.create({
             data: {
@@ -442,22 +519,14 @@ class SyncService {
               status: 'completed',
               decision: 'pending_review',
               triggerSource: 'rebound_exhausted',
-              errorMessage: `Auto-fallback exhausted after ${reboundCount} rebound${reboundCount === 1 ? '' : 's'} — needs manual review`,
-              reboundFrom: {
-                previousTechId: null,
-                previousTechName: prevTechName || 'Unknown',
-                unassignedAt: unassignedAt ? new Date(unassignedAt).toISOString() : null,
-                unassignedByName: unassignedByName || null,
-                reboundCount: reboundCount + 1,
-                verifiedByFreshserviceActivity: true,
-                source: 'freshservice_activity',
-              },
+              errorMessage: `Returned to the queue ${rejectionCount} times — automatic re-routing stopped; assign manually`,
+              reboundFrom,
               // Synthesized empty recommendation so the Awaiting Decision UI
               // renders this as a "no candidates left to try" run rather than
               // crashing on null fields.
               recommendation: {
                 recommendations: [],
-                overallReasoning: `Auto-fallback exhausted: this ticket has been rejected by ${reboundCount} successive auto-assigned technician${reboundCount === 1 ? '' : 's'}. No further automatic re-routing will happen — please assign manually or dismiss.`,
+                overallReasoning: `${returnedPhrase}. This ticket has been returned to the queue ${rejectionCount} times — past the automatic re-routing limit of ${MAX_AUTO_REBOUNDS_PER_TICKET} — so no further automatic assignment will happen. Assign it manually or dismiss.`,
                 ticketClassification: 'needs_manual_review',
                 confidence: 'low',
               },
@@ -492,63 +561,6 @@ class SyncService {
           ticketId: upsertedTicket.id, count: superseded.count,
         });
       }
-
-      // Identify the previous assignee. Prefer the analyzer's source-of-truth
-      // (latest closed episode) over the DB snapshot, because the snapshot
-      // can miss short-lived assignments that happened between sync ticks.
-      let prevTechId = null;
-      let prevTechName = null;
-      let unassignedAt = null;
-      let unassignedByName = null;
-
-      const lastEpisode = analysis?.currentEpisode;
-      if (lastEpisode && lastEpisode.endMethod === 'rejected') {
-        prevTechName = lastEpisode.agentName || null;
-        unassignedAt = lastEpisode.endedAt;
-        unassignedByName = lastEpisode.endActorName || null;
-      }
-
-      // Find the most recent rejection event for fallback timestamp/actor
-      if ((!unassignedAt || !unassignedByName) && analysis?.events?.length) {
-        const lastReject = [...analysis.events].reverse().find((e) => e.type === 'rejected');
-        if (lastReject) {
-          unassignedAt = unassignedAt || lastReject.timestamp;
-          unassignedByName = unassignedByName || lastReject.actorName;
-        }
-      }
-
-      // If snapshot diff caught it (existingTicket.assignedTechId), use that
-      // as the canonical previous tech ID since we have it. Otherwise look
-      // up by name from the episode.
-      if (existingTicket?.assignedTechId) {
-        const prevTech = await prisma.technician.findUnique({
-          where: { id: existingTicket.assignedTechId },
-          select: { id: true, name: true },
-        });
-        if (prevTech) {
-          prevTechId = prevTech.id;
-          prevTechName = prevTechName || prevTech.name;
-        }
-      } else if (prevTechName) {
-        const prevTech = await prisma.technician.findFirst({
-          where: { name: prevTechName, workspaceId },
-          select: { id: true, name: true },
-        });
-        if (prevTech) {
-          prevTechId = prevTech.id;
-          prevTechName = prevTech.name;
-        }
-      }
-
-      const reboundFrom = {
-        previousTechId: prevTechId,
-        previousTechName: prevTechName || 'Unknown',
-        unassignedAt: unassignedAt ? new Date(unassignedAt).toISOString() : null,
-        unassignedByName: unassignedByName || null,
-        reboundCount: reboundCount + 1,
-        verifiedByFreshserviceActivity: true,
-        source: 'freshservice_activity',
-      };
 
       logger.info('Bounce detection: queueing rebound pipeline run', {
         ticketId: upsertedTicket.id,
