@@ -19,7 +19,10 @@ export const AI_OPERATIONS = [
   'requester_sentiment',
 ];
 
-export const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-4-6';
+// Sonnet 5 (launched 2026-06-30) is the default; Sonnet 4.6 stays selectable
+// in the settings dropdown for opt-back.
+export const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-5';
+export const SONNET_4_6_MODEL = 'claude-sonnet-4-6';
 export const DEFAULT_OPENAI_MODEL = 'gpt-5.5';
 export const DEFAULT_RECLASSIFICATION_MODEL = 'claude-haiku-4-5-20251001';
 export const DEFAULT_OPUS_MODEL = 'claude-opus-4-8';
@@ -27,7 +30,7 @@ export const DEFAULT_OPUS_MODEL = 'claude-opus-4-8';
 const ALL_OPERATIONS = new Set(AI_OPERATIONS);
 
 const LEGACY_MODEL_ALIASES = new Map([
-  ['claude-sonnet-4-6-20260217', DEFAULT_ANTHROPIC_MODEL],
+  ['claude-sonnet-4-6-20260217', SONNET_4_6_MODEL],
   // Preserve saved settings created before the Opus 4.8 launch.
   ['claude-opus-4-7', DEFAULT_OPUS_MODEL],
   ['gpt-5.1', DEFAULT_OPENAI_MODEL],
@@ -40,13 +43,24 @@ export const MODEL_METADATA = [
   {
     provider: AI_PROVIDER_ANTHROPIC,
     model: DEFAULT_ANTHROPIC_MODEL,
+    label: 'Claude Sonnet 5',
+    operations: AI_OPERATIONS,
+    supportsStreaming: true,
+    supportsTools: true,
+    supportsJson: true,
+    supportsThinking: false,
+    costNotes: 'Default quality model for assignment automation. Near-Opus agentic quality at Sonnet cost.',
+  },
+  {
+    provider: AI_PROVIDER_ANTHROPIC,
+    model: SONNET_4_6_MODEL,
     label: 'Claude Sonnet 4.6',
     operations: AI_OPERATIONS,
     supportsStreaming: true,
     supportsTools: true,
     supportsJson: true,
     supportsThinking: false,
-    costNotes: 'Default quality model for assignment automation.',
+    costNotes: 'Previous-generation Sonnet; kept selectable for opt-back.',
   },
   {
     provider: AI_PROVIDER_ANTHROPIC,
@@ -119,7 +133,9 @@ export function normalizeModelAlias(model) {
 export function shouldOmitAnthropicTemperature(model) {
   const normalized = normalizeModelAlias(model);
   const value = String(normalized || '').trim().toLowerCase();
-  return value === DEFAULT_OPUS_MODEL || value.startsWith(`${DEFAULT_OPUS_MODEL}-`);
+  if (value === DEFAULT_OPUS_MODEL || value.startsWith(`${DEFAULT_OPUS_MODEL}-`)) return true;
+  // Sonnet 5 also rejects non-default sampling params (400), unlike Sonnet 4.6.
+  return value === 'claude-sonnet-5' || value.startsWith('claude-sonnet-5-');
 }
 
 export function defaultModelForProvider(provider, operation = null) {

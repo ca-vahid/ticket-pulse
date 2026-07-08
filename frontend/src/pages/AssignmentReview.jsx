@@ -4312,7 +4312,7 @@ export function AiProviderSettingsPanel({ onAssignmentModelChange }) {
   const selected = settings.find((row) => row.operation === operation) || {
     operation,
     primaryProvider: 'anthropic',
-    primaryModel: 'claude-sonnet-4-6',
+    primaryModel: 'claude-sonnet-5',
     fallbackProvider: 'openai',
     fallbackModel: 'gpt-5.5',
     autoFallbackEnabled: true,
@@ -4376,7 +4376,7 @@ export function AiProviderSettingsPanel({ onAssignmentModelChange }) {
       <button
         type="button"
         onClick={() => {
-          const firstModel = modelOptions(provider)[0]?.model || (provider === 'openai' ? 'gpt-5.5' : 'claude-sonnet-4-6');
+          const firstModel = modelOptions(provider)[0]?.model || (provider === 'openai' ? 'gpt-5.5' : 'claude-sonnet-5');
           updateSelected({ [field]: provider, [field === 'primaryProvider' ? 'primaryModel' : 'fallbackModel']: firstModel });
         }}
         className={`px-3 py-1.5 text-xs font-semibold border transition-colors ${checked ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}
@@ -4530,7 +4530,7 @@ function ConfigTab({ workspaceTimezone = 'America/Los_Angeles' }) {
       const cfg = res?.data || {};
       setConfig({
         isEnabled: false, autoAssign: false, autoCloseNoise: false, dryRunMode: true,
-        llmModel: 'claude-sonnet-4-6', maxRecommendations: 3, scoringWeights: null,
+        llmModel: 'claude-sonnet-5', maxRecommendations: 3, scoringWeights: null,
         pollForUnassigned: true, pollMaxPerCycle: 5,
         monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60,
         excludedGroupIds: [],
@@ -4542,7 +4542,7 @@ function ConfigTab({ workspaceTimezone = 'America/Los_Angeles' }) {
       });
       try { const statusRes = await assignmentAPI.emailStatus(); setEmailStatus(statusRes?.data || null); } catch { /* ignore */ }
     } catch {
-      setConfig({ isEnabled: false, autoAssign: false, autoCloseNoise: false, dryRunMode: true, llmModel: 'claude-sonnet-4-6', maxRecommendations: 3, scoringWeights: null, pollForUnassigned: true, pollMaxPerCycle: 5, monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60, excludedGroupIds: [], dailyReviewEnabled: false, dailyReviewRunHour: 18, dailyReviewRunMinute: 5, dailyReviewLookbackDays: 14, dailyReviewPreheatEnabled: false, priorityAssessmentEnabled: true, priorityWritebackEnabled: true, priorityAssessmentAfterHoursEnabled: false });
+      setConfig({ isEnabled: false, autoAssign: false, autoCloseNoise: false, dryRunMode: true, llmModel: 'claude-sonnet-5', maxRecommendations: 3, scoringWeights: null, pollForUnassigned: true, pollMaxPerCycle: 5, monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60, excludedGroupIds: [], dailyReviewEnabled: false, dailyReviewRunHour: 18, dailyReviewRunMinute: 5, dailyReviewLookbackDays: 14, dailyReviewPreheatEnabled: false, priorityAssessmentEnabled: true, priorityWritebackEnabled: true, priorityAssessmentAfterHoursEnabled: false });
     } finally { setLoading(false); }
   }, []);
 

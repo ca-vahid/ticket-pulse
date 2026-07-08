@@ -573,7 +573,6 @@ export default function LivePipelineView({ ticketId, onComplete, onBack, streamP
       } catch { /* transient — keep polling */ }
     }, 5000);
     return () => clearInterval(timer);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, ticketId]);
 
   function startStream() {

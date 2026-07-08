@@ -78,7 +78,7 @@ export default function AiProviderSettingsPanel({ defaultOperation = 'notificati
   const selected = settings.find((row) => row.operation === operation) || {
     operation,
     primaryProvider: 'anthropic',
-    primaryModel: 'claude-sonnet-4-6',
+    primaryModel: 'claude-sonnet-5',
     fallbackProvider: 'openai',
     fallbackModel: 'gpt-5.5',
     autoFallbackEnabled: true,
@@ -140,7 +140,7 @@ export default function AiProviderSettingsPanel({ defaultOperation = 'notificati
       <button
         type="button"
         onClick={() => {
-          const firstModel = modelOptions(provider)[0]?.model || (provider === 'openai' ? 'gpt-5.5' : 'claude-sonnet-4-6');
+          const firstModel = modelOptions(provider)[0]?.model || (provider === 'openai' ? 'gpt-5.5' : 'claude-sonnet-5');
           updateSelected({ [field]: provider, [field === 'primaryProvider' ? 'primaryModel' : 'fallbackModel']: firstModel });
         }}
         className={`px-3 py-1.5 text-xs font-semibold border transition-colors ${checked ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}

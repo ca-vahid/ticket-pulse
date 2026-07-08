@@ -38,7 +38,8 @@ const CATEGORY_GROUPS = [
 
 const RECLASSIFICATION_MODELS = [
   { value: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5', detail: 'Default for bulk cleanup. Lower cost and fast enough for category matching.' },
-  { value: 'claude-sonnet-4-6', label: 'Sonnet 4.6', detail: 'Use only for spot checks or difficult tickets where reasoning quality matters more than cost.' },
+  { value: 'claude-sonnet-5', label: 'Sonnet 5', detail: 'Use only for spot checks or difficult tickets where reasoning quality matters more than cost.' },
+  { value: 'claude-sonnet-4-6', label: 'Sonnet 4.6', detail: 'Previous-generation Sonnet; kept for comparison runs.' },
 ];
 
 const RECLASSIFICATION_CONCURRENCY_OPTIONS = [5, 10, 20];

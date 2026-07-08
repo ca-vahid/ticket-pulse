@@ -41,6 +41,8 @@ describe('providerSettingsService', () => {
     const created = prismaMock.aiProviderSetting.createMany.mock.calls[0][0].data;
     expect(created).toHaveLength(AI_OPERATIONS.length);
     expect(created.every((row) => row.workspaceId === 7)).toBe(true);
+    // Legacy llmModel from assignmentConfig is carried over as-is; the
+    // Sonnet 5 upgrade of stored rows happens via DB migration instead.
     expect(created.find((row) => row.operation === 'assignment_pipeline')).toMatchObject({
       primaryProvider: 'anthropic',
       primaryModel: 'claude-sonnet-4-6',
@@ -55,13 +57,13 @@ describe('providerSettingsService', () => {
       primaryProvider: 'openai',
       primaryModel: 'gpt-5.5',
       fallbackProvider: 'anthropic',
-      fallbackModel: 'claude-sonnet-4-6',
+      fallbackModel: 'claude-sonnet-5',
     });
     expect(created.find((row) => row.operation === 'notification_workflow_generation')).toMatchObject({
       primaryProvider: 'openai',
       primaryModel: 'gpt-5.5',
       fallbackProvider: 'anthropic',
-      fallbackModel: 'claude-sonnet-4-6',
+      fallbackModel: 'claude-sonnet-5',
     });
   });
 });
