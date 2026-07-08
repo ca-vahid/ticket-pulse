@@ -1,6 +1,17 @@
-export const APP_VERSION = '3.0.11-preview';
+export const APP_VERSION = '3.0.12-preview';
 
 export const changelog = [
+  {
+    version: '3.0.12-preview',
+    date: 'July 8, 2026',
+    entries: [
+      { type: 'new', html: '<strong>🧭 Navigation, rebuilt</strong> — the crowded top banner is gone. Pages now live in a slim <strong>left rail</strong> that shows icons and expands with names when you hover it, so the top bar keeps only what changes: workspace, page name, live status and your account. There&rsquo;s room for every future feature without adding another mystery icon.' },
+      { type: 'improved', html: '<strong>One status pill instead of five widgets</strong> — Live/Offline, last-updated time, background sync progress, the stop button and the sync actions all live in a single pill at the top right. Green means live; it turns blue with a progress ring while syncing and red when the connection drops. Click it for details, <em>Sync now</em> and <em>Full week</em>.' },
+      { type: 'improved', html: '<strong>Real workspace switcher</strong> — the plain dropdown is now a proper menu showing each workspace with your role in it. The version chip moved into your account menu as “What&rsquo;s new”, which opens this changelog.' },
+      { type: 'improved', html: '<strong>📱 More room on phones</strong> — the mobile top bar is gone entirely; the bottom tabs are the navigation, and the live/updated status moved into the <em>More</em> sheet. Pages start at the top of the screen now.' },
+      { type: 'improved', html: '<strong>⌨️ Command palette grows</strong> — <code>Ctrl/Cmd + K</code> now also switches workspaces (“Switch to Accounting Team”), jumps to Approvals and Mail Workflows, and opens “What&rsquo;s new”.' },
+    ],
+  },
   {
     version: '3.0.11-preview',
     date: 'July 8, 2026',
