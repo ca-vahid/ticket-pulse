@@ -1357,6 +1357,46 @@ router.get('/ticket/:ticketId/latest-run', requireReviewer, asyncHandler(async (
   res.json({ success: true, data: run });
 }));
 
+// All AI runs for one ticket — powers the ticket page's "AI & Routing" tab.
+// Lean select: everything the run cards show (recommendation, decision,
+// write-backs, rebound, provider stats, step summaries) minus fullTranscript
+// and the per-step prompt/response blobs — the Assignment Review run page
+// stays the deep-dive for those.
+router.get('/ticket/:ticketId/runs', requireReviewer, asyncHandler(async (req, res) => {
+  const ticketId = parseInt(req.params.ticketId);
+  const runs = await prisma.assignmentPipelineRun.findMany({
+    where: { ticketId, workspaceId: req.workspaceId },
+    orderBy: { createdAt: 'desc' },
+    select: {
+      id: true, status: true, triggerSource: true, reboundFrom: true,
+      llmProvider: true, llmModel: true, llmFallbackUsed: true, llmFallbackReason: true, llmAttemptCount: true,
+      totalDurationMs: true, totalTokensUsed: true,
+      recommendation: true,
+      decision: true, decidedByEmail: true, decidedAt: true, overrideReason: true, decisionNote: true,
+      errorMessage: true, queuedAt: true, queuedReason: true, claimedAt: true,
+      syncStatus: true, syncedAt: true, syncError: true,
+      priorityWritebackStatus: true, priorityWritebackError: true, priorityWrittenAt: true,
+      ticketTypeWritebackStatus: true, ticketTypeWritebackError: true, ticketTypeWrittenAt: true,
+      createdAt: true,
+      assignedTechId: true,
+      assignedTech: { select: { id: true, name: true, email: true } },
+      steps: {
+        orderBy: { stepNumber: 'asc' },
+        select: { id: true, stepNumber: true, stepName: true, status: true, durationMs: true, tokensUsed: true, errorMessage: true },
+      },
+      corrections: {
+        orderBy: { createdAt: 'asc' },
+        select: {
+          id: true, reason: true, selectionSource: true, recommendationRank: true, createdByEmail: true, createdAt: true,
+          fromTechnician: { select: { id: true, name: true } },
+          toTechnician: { select: { id: true, name: true } },
+        },
+      },
+    },
+  });
+  res.json({ success: true, data: runs });
+}));
+
 router.post('/trigger/:ticketId', requireAdmin, asyncHandler(async (req, res) => {
   const ticketId = parseInt(req.params.ticketId);
   const stream = req.query.stream === 'true';

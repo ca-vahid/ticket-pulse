@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.0.20-preview';
+export const APP_VERSION = '3.0.21-preview';
 
 export const changelog = [
+  {
+    version: '3.0.21-preview',
+    date: 'July 8, 2026',
+    entries: [
+      { type: 'new', html: '<strong>🧠 New "AI &amp; Routing" tab on every ticket</strong> — the full story of how a ticket found its owner, in one place. An <strong>Assignment journey</strong> timeline shows who took it (self-picked, assigned, or automated), how long they held it, and who returned it to the queue — with a "returned N×" badge when a ticket bounced. Below it, <strong>every AI run</strong> on the ticket (not just the last few): expand any run to see who the AI considered with match scores and its reasoning, the pipeline stages it walked through, the model used, tokens and timing, write-back results, corrections, and why a re-run happened after a bounce. Deep links jump to the full run in Assignment Review.' },
+      { type: 'improved', html: '<strong>Run details are reviewer-gated</strong> — agents and viewers see the journey timeline; the AI’s candidate reasoning is visible to workspace reviewers and admins.' },
+    ],
+  },
   {
     version: '3.0.20-preview',
     date: 'July 8, 2026',
