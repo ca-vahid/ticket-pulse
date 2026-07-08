@@ -63,23 +63,6 @@ code {
       linear-gradient(180deg, rgb(248 250 252) 0%, rgb(241 245 249) 44%, rgb(248 250 252) 100%);
   }
 
-  /* SideRail labels: hidden while the rail is a 58px icon strip, revealed as
-     the rail expands on hover/keyboard focus. Kept here (not inline Tailwind)
-     so the reveal is driven by the rail container, not each row. */
-  .tp-side-rail .tp-rail-label {
-    opacity: 0;
-    transition: opacity 0.15s ease-out;
-  }
-  .tp-side-rail:hover .tp-rail-label,
-  .tp-side-rail:focus-within .tp-rail-label {
-    opacity: 1;
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .tp-side-rail .tp-rail-label {
-      transition: none;
-    }
-  }
-
   .tp-glass {
     background: rgb(255 255 255 / 0.68);
     border-color: rgb(255 255 255 / 0.62);

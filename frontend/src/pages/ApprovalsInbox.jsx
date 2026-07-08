@@ -76,7 +76,7 @@ export default function ApprovalsInbox() {
   const resubmit = (a) => act(() => ticketsAPI.resubmitApproval(a.ticketId, a.id), a.id);
 
   return (
-    <div className="tp-tickets-backdrop min-h-screen md:pl-[58px]">
+    <div className="tp-tickets-backdrop min-h-screen">
       <AppHeader activePage="approvals" />
       <main className="max-w-4xl mx-auto px-4 sm:px-6 py-6 pb-24 lg:pb-6 animate-fadeIn">
         <div className="flex items-center gap-2.5 mb-5">

@@ -22,13 +22,15 @@ import {
   useDemoMode,
 } from '../utils/demoMode';
 import { APP_VERSION } from '../data/changelog';
-import { NAV_DESTINATIONS } from './nav/navDestinations';
-import SideRail from './nav/SideRail';
+import { NAV_DESTINATIONS, NAV_ACTIVE_TILE, useNavDestinations } from './nav/navDestinations';
+import { useApprovalCount } from '../hooks/useApprovalCount';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui';
+import { cn } from '../lib/utils';
 import ChangelogModal from './ChangelogModal';
 
-// Slim top bar for desktop. Primary navigation lives in the fixed left
-// SideRail (rendered here so every AppHeader page gets it); the bar itself
-// carries only workspace, page title, page actions, one consolidated status
+// Desktop top bar. Primary navigation is the row of accent-tinted icon tiles
+// (the original pre-side-rail design, restored on request): workspace, page
+// title, then the destination tiles, page actions, one consolidated status
 // pill, and the account menu. On phones the bar disappears entirely — the
 // bottom MobileTabBar is the chrome — except for a slim inline row when a
 // page passes extraActions (or a background sync needs a stop affordance).
@@ -105,6 +107,78 @@ export default function AppHeader({
     setUserMenuOpen(false);
     navigate(path);
   };
+
+  const navDestinations = useNavDestinations(activePage);
+  const approvalCount = useApprovalCount();
+
+  // One destination tile in the desktop nav row. Inactive = accent-tinted with
+  // a lift+glow hover; active = greyed glyph + a 2px "you are here" bar.
+  const renderNavTile = (dest) => {
+    const isActive = activePage === dest.id;
+    const { Icon } = dest;
+    return (
+      <Tooltip key={dest.id}>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={() => { if (!isActive) navigate(dest.path); }}
+            aria-current={isActive ? 'page' : undefined}
+            aria-disabled={isActive ? 'true' : undefined}
+            aria-label={dest.label}
+            className={cn(
+              'relative inline-flex h-10 w-10 flex-none touch-manipulation items-center justify-center rounded-xl border transition-all duration-200 ease-out tp-focus-ring',
+              isActive
+                ? `${NAV_ACTIVE_TILE} cursor-default`
+                : `${dest.tile} ${dest.hover} hover:-translate-y-0.5 hover:shadow-soft motion-reduce:transition-none motion-reduce:hover:translate-y-0`,
+            )}
+          >
+            <Icon className="h-[22px] w-[22px]" />
+            {isActive && (
+              <span className={cn('absolute bottom-[5px] left-1/2 h-0.5 w-4 -translate-x-1/2 rounded-full', dest.bar)} />
+            )}
+            {dest.badgeKey === 'approvals' && approvalCount > 0 && (
+              <span className="absolute -top-1 -right-1 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-red-600 text-white text-[10px] font-bold shadow-sm ring-2 ring-white">
+                {approvalCount > 99 ? '99+' : approvalCount}
+              </span>
+            )}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>{dest.label}</TooltipContent>
+      </Tooltip>
+    );
+  };
+
+  // Neutral utility tile (Settings) — same shape/hover as the row, no accent.
+  const renderSettingsTile = () => (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          onClick={() => navigate('/settings')}
+          aria-label="Settings"
+          className="relative inline-flex h-10 w-10 flex-none touch-manipulation items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition-all duration-200 ease-out tp-focus-ring hover:-translate-y-0.5 hover:bg-slate-50 hover:text-slate-700 hover:shadow-soft motion-reduce:transition-none motion-reduce:hover:translate-y-0"
+        >
+          <Settings className="h-[22px] w-[22px]" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>Settings</TooltipContent>
+    </Tooltip>
+  );
+
+  const renderNavRail = () => (
+    <TooltipProvider delayDuration={200}>
+      <div className="flex flex-none items-center gap-2">
+        <div
+          className="flex items-center gap-1 rounded-2xl border border-slate-200/70 bg-white/60 p-1 shadow-subtle"
+          aria-label="Primary navigation"
+        >
+          {navDestinations.map(renderNavTile)}
+        </div>
+        <div className="h-6 w-px bg-slate-200" />
+        {renderSettingsTile()}
+      </div>
+    </TooltipProvider>
+  );
 
   const pageTitle = activePage === 'settings'
     ? 'Settings'
@@ -420,8 +494,6 @@ export default function AppHeader({
 
   return (
     <>
-      <SideRail />
-
       {/* Desktop bar — phones get no top chrome (MobileTabBar is the nav). */}
       <header className="sticky top-0 z-40 hidden border-b border-gray-200 bg-white shadow-sm md:block">
         <div className="flex items-center gap-3 px-4 py-2 lg:px-6">
@@ -436,12 +508,13 @@ export default function AppHeader({
               v{APP_VERSION}
             </button>
             {pageTitle && (
-              <h1 className="hidden truncate text-sm font-bold tracking-tight text-slate-900 lg:block">{pageTitle}</h1>
+              <h1 className="hidden truncate text-sm font-bold tracking-tight text-slate-900 xl:block">{pageTitle}</h1>
             )}
           </div>
 
           <div className="min-w-0 flex-1" />
 
+          {renderNavRail()}
           {extraActions && <div className="flex min-w-0 items-center gap-2">{extraActions}</div>}
           {renderStatusPill()}
           {renderUserMenu()}

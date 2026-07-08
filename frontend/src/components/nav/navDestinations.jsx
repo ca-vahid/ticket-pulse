@@ -99,6 +99,9 @@ export const NAV_DESTINATIONS = [
   },
 ];
 
+// Shared "current page" tile look — matches the supplied grey "clicked" artwork.
+export const NAV_ACTIVE_TILE = 'border-[#d7dade] bg-[#eef0f2] text-[#9aa0aa]';
+
 export function useWorkspaceRole() {
   const { user } = useAuth();
   const { currentWorkspace, availableWorkspaces } = useWorkspace();
