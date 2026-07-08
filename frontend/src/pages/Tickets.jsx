@@ -388,6 +388,35 @@ export default function Tickets() {
   // of the list just snapping to a new state.
   const [rowFx, setRowFx] = useState(() => new Map());
   const rowFxTimerRef = useRef(null);
+  // AI completion hold: the run-finished ping usually arrives BEFORE the
+  // assignment write-back lands on the ticket row, so a refetch at that
+  // moment shows the run gone but the assignee still empty. Flashing then
+  // celebrates an unchanged "Unassigned" cell, and the name pops in a beat
+  // later with no fanfare. Instead, rows whose run just ended without a
+  // visible outcome keep the live treatment (halo + "AI choosing…") and the
+  // completion flash plays on the refetch that actually delivers the name.
+  const [aiHoldIds, setAiHoldIds] = useState(() => new Set());
+  const aiHoldRef = useRef(new Map()); // ticketId -> hold expiry (epoch ms)
+  const aiHoldTimerRef = useRef(null);
+  const syncAiHold = useCallback(() => {
+    const now = Date.now();
+    for (const [id, expiry] of aiHoldRef.current) {
+      if (expiry <= now) aiHoldRef.current.delete(id);
+    }
+    setAiHoldIds((current) => {
+      const next = new Set(aiHoldRef.current.keys());
+      if (next.size === current.size && [...next].every((id) => current.has(id))) return current;
+      return next;
+    });
+    if (aiHoldTimerRef.current) clearTimeout(aiHoldTimerRef.current);
+    if (aiHoldRef.current.size) {
+      // Expire on schedule even if no further refetch arrives (failed or
+      // classify-only runs never deliver an assignee) — the halo must not
+      // breathe forever on a row nothing will update.
+      const nextExpiry = Math.min(...aiHoldRef.current.values());
+      aiHoldTimerRef.current = setTimeout(syncAiHold, Math.max(300, nextExpiry - now));
+    }
+  }, []);
 
   const fetchTickets = useCallback(async ({ silent = false, diffAgainst = null } = {}) => {
     if (!silent) setIsLoading(true);
@@ -402,9 +431,22 @@ export default function Tickets() {
         for (const t of items) {
           const prev = diffAgainst.get(t.id);
           if (!prev) fx.set(t.id, 'new');
-          // The AI run this row was showing just finished — play the
-          // completion moment (green flush + subject chip + slot ripple).
-          else if (prev.ai?.state === 'analyzing' && t.ai?.state !== 'analyzing') fx.set(t.id, 'aiDone');
+          // The AI run this row was showing just finished. Play the completion
+          // moment (green flush + subject chip + slot ripple) only when the
+          // outcome is already visible on the row — otherwise hold and let the
+          // refetch that delivers the name trigger it (see aiHoldRef above).
+          else if (prev.ai?.state === 'analyzing' && t.ai?.state !== 'analyzing') {
+            if (t.ai?.state === 'suggested' || t.assignedTechId != null) fx.set(t.id, 'aiDone');
+            else aiHoldRef.current.set(t.id, Date.now() + 15000);
+          }
+          else if (aiHoldRef.current.has(t.id)) {
+            if (t.ai?.state === 'analyzing') aiHoldRef.current.delete(t.id); // a newer run took over
+            else if (t.ai?.state === 'suggested' || t.assignedTechId != null) {
+              // The held outcome just landed — flash now, WITH the name showing.
+              aiHoldRef.current.delete(t.id);
+              fx.set(t.id, 'aiDone');
+            }
+          }
           else if (
             prev.updatedAt !== t.updatedAt
             || prev.lastActivityAt !== t.lastActivityAt
@@ -421,6 +463,7 @@ export default function Tickets() {
           if (rowFxTimerRef.current) clearTimeout(rowFxTimerRef.current);
           rowFxTimerRef.current = setTimeout(() => setRowFx(new Map()), 3200);
         }
+        syncAiHold();
       }
       // Hand the ordered id list to the detail page for prev/next navigation.
       try {
@@ -431,7 +474,7 @@ export default function Tickets() {
     } finally {
       if (!silent) setIsLoading(false);
     }
-  }, [queryParams]);
+  }, [queryParams, syncAiHold]);
 
   useEffect(() => { fetchTickets(); }, [fetchTickets]);
 
@@ -572,9 +615,13 @@ export default function Tickets() {
     if (rowFxTimerRef.current) clearTimeout(rowFxTimerRef.current);
     if (refreshStateTimerRef.current) clearTimeout(refreshStateTimerRef.current);
     if (aiLiveTimerRef.current) clearTimeout(aiLiveTimerRef.current);
+    if (aiHoldTimerRef.current) clearTimeout(aiHoldTimerRef.current);
   }, []);
   // A filter/page change reloads the list anyway — drop stale pending state.
-  useEffect(() => { pendingIdsRef.current = new Set(); setPendingCount(0); setRowFx(new Map()); }, [queryParams]);
+  useEffect(() => {
+    pendingIdsRef.current = new Set(); setPendingCount(0); setRowFx(new Map());
+    aiHoldRef.current = new Map(); setAiHoldIds(new Set());
+  }, [queryParams]);
 
   const refreshAfterEdit = useCallback(() => {
     lastLocalMutationRef.current = Date.now(); // swallow our own SSE echo
@@ -1140,7 +1187,9 @@ export default function Tickets() {
                           const previewing = previewId === ticket.id;
                           // The AI assignment pipeline is deciding this ticket RIGHT NOW —
                           // the row gets a live indigo aura so watchers see it happening.
-                          const aiLive = ticket.ai?.state === 'analyzing';
+                          // Held rows (run done, assignee write-back still in flight) stay
+                          // live so the treatment runs straight through to the name + flash.
+                          const aiLive = ticket.ai?.state === 'analyzing' || aiHoldIds.has(ticket.id);
                           // Post-refresh flash: this row just arrived / changed.
                           const fx = rowFx.get(ticket.id) || null;
                           // Left accent bar: blue when this row is the open preview (focus without
@@ -1268,7 +1317,7 @@ export default function Tickets() {
                                 size="sm"
                                 align="right"
                                 showAi={canReview}
-                                aiSuggestion={canReview ? ticket.ai : null}
+                                aiSuggestion={canReview ? (ticket.ai || (aiLive ? { state: 'analyzing' } : null)) : null}
                                 onAiAssign={canReview ? () => setAiTicket(ticket) : null}
                               />
                             </span>
