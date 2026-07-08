@@ -494,10 +494,32 @@ code {
   100% { opacity: 0; transform: scale(1.12); }
 }
 
-/* Matching left accent bar: flowing indigo→violet gradient. */
+/* Left accent while AI is working: not a filled bar (too heavy) — a 2px
+   glowing filament, inset and rounded, with a soft light pulse travelling
+   down it. The row halo carries the "live" feel; this is just a delicate
+   thread of activity in the accent slot. */
 .tp-ai-accent {
-  background-image: linear-gradient(180deg, #6366f1, #8b5cf6, #6366f1);
+  position: relative;
+  background: transparent;
+}
+.tp-ai-accent::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 5px;
+  bottom: 5px;
+  width: 2px;
+  border-radius: 9999px;
+  background-image: linear-gradient(
+    180deg,
+    rgb(139 92 246 / 0.15),
+    #818cf8 35%,
+    #c4b5fd 50%,
+    #818cf8 65%,
+    rgb(139 92 246 / 0.15)
+  );
   background-size: 100% 300%;
+  box-shadow: 0 0 6px rgb(139 92 246 / 0.45);
   animation: tpAiAccentFlow 2.2s linear infinite;
 }
 @keyframes tpAiAccentFlow {
@@ -528,7 +550,7 @@ code {
   .tp-ai-live::before,
   .tp-ai-think,
   .tp-ai-twinkle,
-  .tp-ai-accent,
+  .tp-ai-accent::before,
   .tp-ai-chip,
   .tp-ai-flush::after,
   .tp-ai-done-chip,
