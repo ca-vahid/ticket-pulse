@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.32-preview';
+export const APP_VERSION = '3.0.33-preview';
 
 export const changelog = [
+  {
+    version: '3.0.33-preview',
+    date: 'July 8, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>📧 Agents who reply by email no longer show as the requester</strong> — when an agent answered a ticket from their inbox (instead of FreshService), the synced message rendered on the requester side with a “From requester” tag. The conversation now checks <i>who</i> wrote the message against the team roster, not just which channel it arrived on — agent replies sit on the agent side with the right label. (And if a technician is genuinely the ticket’s requester, their messages correctly stay on the requester side.)' },
+    ],
+  },
   {
     version: '3.0.32-preview',
     date: 'July 8, 2026',

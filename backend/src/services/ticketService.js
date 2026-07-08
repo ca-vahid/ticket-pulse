@@ -1092,7 +1092,22 @@ class TicketService {
       if (!match && needsName(e) && e.actorEmail && !isRawHeader(e.actorEmail)) {
         match = byEmail.get(String(e.actorEmail).toLowerCase());
       }
-      if (match) return { ...e, actorName: match.name, actorEmail: match.email || e.actorEmail || null };
+      if (match) {
+        // Channel ≠ identity: an agent who replies by EMAIL arrives as an
+        // FS "incoming" conversation and used to render as the requester
+        // (QA 07-08, #232092/Mehdi). The roster match is authoritative —
+        // stamp authorType 'agent' so the UI sides the message correctly.
+        // Exception: when the matched technician IS the ticket's requester
+        // (agents file tickets too), their messages stay requester-side.
+        const isTicketRequester = requester?.email && match.email
+          && String(match.email).toLowerCase() === String(requester.email).toLowerCase();
+        return {
+          ...e,
+          actorName: match.name,
+          actorEmail: match.email || e.actorEmail || null,
+          authorType: isTicketRequester ? (e.authorType || 'requester') : 'agent',
+        };
+      }
       if (!needsName(e)) return e;
       // No technician match, but a raw header still holds a usable display
       // name/address — show that instead of the quoted junk.
