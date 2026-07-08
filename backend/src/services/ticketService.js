@@ -1047,15 +1047,22 @@ class TicketService {
    */
   async _resolveThreadActors(thread, workspaceId, requester) {
     if (!Array.isArray(thread) || thread.length === 0) return thread;
+    // Raw RFC-822 headers ('"Name" <addr>') stored as actor names by older
+    // syncs count as unresolved too — they render as quoted junk with a
+    // wrong avatar (QA 07-08).
+    const isRawHeader = (v) => /<[^<>]*@[^<>]*>/.test(String(v || ''));
     const needsName = (e) => {
       const n = String(e.actorName || '').trim();
-      return !n || n.toLowerCase() === 'unknown';
+      return !n || n.toLowerCase() === 'unknown' || isRawHeader(n);
     };
-    const toResolve = thread.filter(needsName);
+    // Entries carrying an FS user id get resolved against our technicians even
+    // when a name is present — the id is authoritative, and matching it also
+    // repairs actorEmail (shared-mailbox sends) so the avatar photo works.
+    const toResolve = thread.filter((e) => needsName(e) || e.actorFreshserviceId !== null);
     if (toResolve.length === 0) return thread;
 
     const fsIds = [...new Set(toResolve.map((e) => e.actorFreshserviceId).filter((v) => v !== null).map((v) => BigInt(v)))];
-    const emails = [...new Set(toResolve.map((e) => String(e.actorEmail || '').toLowerCase()).filter(Boolean))];
+    const emails = [...new Set(toResolve.filter(needsName).map((e) => String(e.actorEmail || '').toLowerCase()).filter(Boolean))];
     if (fsIds.length === 0 && emails.length === 0) {
       // Nothing to match on except requester fallback for incoming entries.
       const reqNameOnly = requester?.name || null;
@@ -1080,11 +1087,28 @@ class TicketService {
     const reqName = requester?.name || null;
 
     return thread.map((e) => {
-      if (!needsName(e)) return e;
       let match = null;
       if (e.actorFreshserviceId !== null) match = byFsId.get(String(e.actorFreshserviceId));
-      if (!match && e.actorEmail) match = byEmail.get(String(e.actorEmail).toLowerCase());
-      if (match) return { ...e, actorName: match.name, actorEmail: e.actorEmail || match.email || null };
+      if (!match && needsName(e) && e.actorEmail && !isRawHeader(e.actorEmail)) {
+        match = byEmail.get(String(e.actorEmail).toLowerCase());
+      }
+      if (match) return { ...e, actorName: match.name, actorEmail: match.email || e.actorEmail || null };
+      if (!needsName(e)) return e;
+      // No technician match, but a raw header still holds a usable display
+      // name/address — show that instead of the quoted junk.
+      if (isRawHeader(e.actorName)) {
+        const raw = String(e.actorName);
+        const headerMatch = raw.match(/^"?([^"<]*)"?\s*<([^>]+)>$/);
+        if (headerMatch) {
+          const cleanName = headerMatch[1].trim().replace(/^['"]+|['"]+$/g, '');
+          const cleanEmail = headerMatch[2].trim().toLowerCase();
+          return {
+            ...e,
+            actorName: cleanName || cleanEmail,
+            actorEmail: (e.actorEmail && !isRawHeader(e.actorEmail)) ? e.actorEmail : cleanEmail,
+          };
+        }
+      }
       if ((e.incoming === true || e.authorType === 'requester') && reqName) return { ...e, actorName: reqName };
       // TP-authored notes mirrored into FS carry the "[Ticket Pulse]" marker but
       // sync back under the FS service account (not a technician) — label them.

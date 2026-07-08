@@ -539,6 +539,26 @@ export function transformTicketThreadEntries(fsActivities, context) {
  * @param {number} context.ticketId
  * @param {number} context.workspaceId
  */
+/**
+ * FS conversation `from_email` is often a raw RFC-822 header like
+ * `"Andrii Grynik" <it@bgcengineering.ca>` — storing it verbatim made agent
+ * replies render with a quoted-junk name, a wrong avatar, and no technician
+ * match (QA 07-08). Split it into { name, email }.
+ */
+export function parseRfc822Address(raw) {
+  const value = String(raw || '').trim();
+  if (!value) return { name: null, email: null };
+  const match = value.match(/^"?([^"<]*)"?\s*<([^>]+)>$/);
+  if (match) {
+    return {
+      name: match[1].trim().replace(/^['"]+|['"]+$/g, '') || null,
+      email: match[2].trim().toLowerCase() || null,
+    };
+  }
+  if (value.includes('@')) return { name: null, email: value.toLowerCase() };
+  return { name: value, email: null };
+}
+
 export function transformTicketConversationEntry(conversation, { ticketId, workspaceId }) {
   if (!conversation || !ticketId || !workspaceId) return null;
 
@@ -567,10 +587,15 @@ export function transformTicketConversationEntry(conversation, { ticketId, works
       externalEntryId,
       source: 'freshservice_conversation',
       eventType,
-      actorName: conversation.from_email
-        || conversation.support_email
-        || (conversation.user?.name || null),
-      actorEmail: conversation.from_email || conversation.support_email || (conversation.user?.email || null),
+      // from_email can be a raw '"Name" <addr>' header — parse it; the FS user
+      // object (when present) is the most authoritative identity.
+      ...(() => {
+        const parsed = parseRfc822Address(conversation.from_email || conversation.support_email);
+        return {
+          actorName: conversation.user?.name || parsed.name || parsed.email || null,
+          actorEmail: (conversation.user?.email || parsed.email || null),
+        };
+      })(),
       actorFreshserviceId: conversation.user_id ? BigInt(conversation.user_id) : null,
       incoming: isIncoming,
       isPrivate,

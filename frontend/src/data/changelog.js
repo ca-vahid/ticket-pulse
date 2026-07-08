@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.27-preview';
+export const APP_VERSION = '3.0.28-preview';
 
 export const changelog = [
+  {
+    version: '3.0.28-preview',
+    date: 'July 8, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>👤 Agent replies now credited to the right person</strong> — replies synced from FreshService that were sent through a shared mailbox (like it@) sometimes showed a garbled name like <i>“Andrii Grynik” &lt;it@…&gt;</i> with a wrong avatar. The sync now reads the actual agent behind the reply, the conversation view resolves authors against the team roster (name <b>and</b> photo), and all ~1,400 affected messages from the last 90 days were repaired in place.' },
+    ],
+  },
   {
     version: '3.0.27-preview',
     date: 'July 8, 2026',
