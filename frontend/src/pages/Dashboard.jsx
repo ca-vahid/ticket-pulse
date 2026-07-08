@@ -1453,8 +1453,11 @@ export default function Dashboard() {
             week's shape, replacing the old per-day trend arrows. */}
         <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg shadow-lg mb-3 sm:mb-4 text-white">
 
-          {/* ---- Desktop: date · day bars · stats · self-pick · view toggle ---- */}
-          <div className="hidden md:flex min-h-[60px] items-center gap-3 px-4 py-2">
+          {/* ---- Desktop: date · day bars · stats · self-pick · view toggle ----
+              flex-wrap + flex-none segments: on narrow windows the trailing
+              pieces break onto a clean second line instead of the stat numbers
+              shrinking into each other (QA 07-08). */}
+          <div className="hidden md:flex min-h-[60px] flex-wrap items-center gap-x-2.5 gap-y-1.5 px-4 py-2 2xl:gap-x-3">
             <button
               onClick={viewMode === 'daily' ? goToPreviousDay : viewMode === 'weekly' ? goToPreviousWeek : goToPreviousMonth}
               title={viewMode === 'daily' ? 'Previous day' : viewMode === 'weekly' ? 'Previous week' : 'Previous month'}
@@ -1503,14 +1506,14 @@ export default function Dashboard() {
 
             <div className="my-1 w-px flex-none self-stretch bg-white/25" />
 
-            <div className="flex flex-none items-end gap-1" role="group" aria-label="Tickets created per day">
+            <div className="flex flex-none items-end gap-0.5 2xl:gap-1" role="group" aria-label="Tickets created per day">
               {bandDays.map((d) => (
                 <button
                   key={d.day}
                   type="button"
                   onClick={d.select}
                   title={d.tooltip}
-                  className="group relative flex w-6 flex-col items-center justify-end rounded pt-3.5 tp-focus-ring"
+                  className="group relative flex w-5 flex-col items-center justify-end rounded pt-3.5 tp-focus-ring 2xl:w-6"
                 >
                   {d.holidayInfo.isHoliday && (
                     <span className={`absolute right-0.5 top-1.5 h-1.5 w-1.5 rounded-full ${d.holidayInfo.isCanadian ? 'bg-rose-300' : d.holidayInfo.isDynamic ? 'bg-violet-300' : 'bg-indigo-300'}`} />
@@ -1529,10 +1532,10 @@ export default function Dashboard() {
 
             <div className="my-1 w-px flex-none self-stretch bg-white/25" />
 
-            <div className="flex min-w-0 flex-1 items-center justify-evenly gap-3">
+            <div className="flex flex-1 items-center justify-evenly gap-x-2.5 2xl:gap-x-3">
               {bandStats.map((s) => (
-                <div key={s.key} className="flex min-w-0 flex-col items-start gap-1">
-                  <span className="text-lg font-extrabold leading-none tabular-nums">{s.value}</span>
+                <div key={s.key} className="flex flex-none flex-col items-start gap-1">
+                  <span className="text-base font-extrabold leading-none tabular-nums 2xl:text-lg">{s.value}</span>
                   <span className="text-[8.5px] font-bold uppercase leading-none tracking-wider text-blue-100">{s.label}</span>
                 </div>
               ))}
@@ -1540,10 +1543,10 @@ export default function Dashboard() {
 
             <div className="my-1 w-px flex-none self-stretch bg-white/25" />
 
-            <div className="w-36 flex-none cursor-default" title={loadMixTitle}>
+            <div className="w-28 flex-none cursor-default 2xl:w-36" title={loadMixTitle}>
               <div className="mb-1 flex items-baseline justify-between text-[11px]">
                 <span className="font-semibold">Self-Pick <span className="font-extrabold tabular-nums">{selfPickPercentage}%</span></span>
-                <span className="font-medium opacity-75">goal 70</span>
+                <span className="hidden font-medium opacity-75 2xl:inline">goal 70</span>
               </div>
               <div className="relative h-1.5 rounded-full bg-white/20">
                 <div
@@ -1559,19 +1562,19 @@ export default function Dashboard() {
             <div className="inline-flex flex-none items-center gap-0.5 rounded-lg bg-white/20 p-0.5">
               <button
                 onClick={handleSwitchToDaily}
-                className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${viewMode === 'daily' ? 'bg-white text-blue-600 shadow-sm' : 'text-white hover:bg-white/10'}`}
+                className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors 2xl:px-3 ${viewMode === 'daily' ? 'bg-white text-blue-600 shadow-sm' : 'text-white hover:bg-white/10'}`}
               >
                 Daily
               </button>
               <button
                 onClick={handleSwitchToWeekly}
-                className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${viewMode === 'weekly' ? 'bg-white text-blue-600 shadow-sm' : 'text-white hover:bg-white/10'}`}
+                className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors 2xl:px-3 ${viewMode === 'weekly' ? 'bg-white text-blue-600 shadow-sm' : 'text-white hover:bg-white/10'}`}
               >
                 Weekly
               </button>
               <button
                 onClick={handleSwitchToMonthly}
-                className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${viewMode === 'monthly' ? 'bg-white text-blue-600 shadow-sm' : 'text-white hover:bg-white/10'}`}
+                className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors 2xl:px-3 ${viewMode === 'monthly' ? 'bg-white text-blue-600 shadow-sm' : 'text-white hover:bg-white/10'}`}
               >
                 Monthly
               </button>

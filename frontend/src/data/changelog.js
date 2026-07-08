@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.18-preview';
+export const APP_VERSION = '3.0.19-preview';
 
 export const changelog = [
+  {
+    version: '3.0.19-preview',
+    date: 'July 8, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Dashboard stats band on smaller windows</strong> — the period numbers could overlap into an unreadable jumble on narrow desktop windows. The band now tightens itself below very wide screens (slimmer day bars, compact toggle, the goal label folds into the meter tick) and, when space truly runs out, wraps onto a clean second line instead of squashing the numbers.' },
+    ],
+  },
   {
     version: '3.0.18-preview',
     date: 'July 8, 2026',
