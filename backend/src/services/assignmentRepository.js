@@ -855,6 +855,15 @@ class AssignmentRepository {
   async findOrphanedSyncRuns({ workspaceId = null, olderThanMinutes = 5 } = {}) {
     try {
       const cutoff = new Date(Date.now() - olderThanMinutes * 60 * 1000);
+      // Transient FS write errors worth re-driving for ANY finalized decision:
+      // an auto-assign whose write-back hit a FreshService 500 used to stay
+      // 'failed' forever — decided in Ticket Pulse, never assigned in FS
+      // (QA 07-08, #232094). Bounded to 24h so ancient failures aren't
+      // resurrected; the 5-min updatedAt cutoff spaces retries out.
+      const TRANSIENT_SYNC_ERRORS = [
+        'ECONNRESET', 'ETIMEDOUT', 'ECONNABORTED', 'socket hang up', 'timeout',
+        'status code 429', 'status code 500', 'status code 502', 'status code 503', 'status code 504',
+      ];
       const where = {
         status: 'completed',
         decision: { in: ['auto_assigned', 'classified_only', 'noise_dismissed'] },
@@ -862,17 +871,21 @@ class AssignmentRepository {
           { syncStatus: null },
           { syncStatus: 'pending' },
           {
+            // Noise dismissals keep their broader retry rules (incl. FS
+            // validation failures — the close path is deliberately tolerant).
             decision: 'noise_dismissed',
             syncStatus: 'failed',
             OR: [
               { syncError: { contains: 'Validation failed', mode: 'insensitive' } },
-              { syncError: { contains: 'ECONNRESET', mode: 'insensitive' } },
-              { syncError: { contains: 'ETIMEDOUT', mode: 'insensitive' } },
-              { syncError: { contains: 'ECONNABORTED', mode: 'insensitive' } },
-              { syncError: { contains: 'socket hang up', mode: 'insensitive' } },
-              { syncError: { contains: 'timeout', mode: 'insensitive' } },
+              ...TRANSIENT_SYNC_ERRORS.map((needle) => ({ syncError: { contains: needle, mode: 'insensitive' } })),
             ],
             updatedAt: { lt: cutoff },
+          },
+          {
+            syncStatus: 'failed',
+            updatedAt: { lt: cutoff },
+            decidedAt: { gt: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+            OR: TRANSIENT_SYNC_ERRORS.map((needle) => ({ syncError: { contains: needle, mode: 'insensitive' } })),
           },
         ],
         decidedAt: { lt: cutoff, not: null },
