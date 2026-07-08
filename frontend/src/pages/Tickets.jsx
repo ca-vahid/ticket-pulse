@@ -94,8 +94,8 @@ const SEGMENT_COUNT_KEY = { all: 'all', open: 'open', unassigned: 'unassigned', 
 //     that a narrow subject track caused. 7 tracks.
 //   ROOMY: the subject spans row 1 full-width; these are the row-2 meta tracks
 //     (a slim type slot, then category/assignee/status/due/updated). 7 tracks.
-const GRID_COMPACT = 'grid grid-cols-[6px_minmax(0,2.4fr)_minmax(150px,1fr)_210px_92px_88px_74px] items-center';
-const GRID_ROOMY = 'grid grid-cols-[6px_60px_minmax(150px,1fr)_210px_92px_88px_74px] items-stretch';
+const GRID_COMPACT = 'grid grid-cols-[6px_minmax(0,2.4fr)_minmax(150px,1fr)_210px_116px_88px_74px] items-center';
+const GRID_ROOMY = 'grid grid-cols-[6px_60px_minmax(150px,1fr)_210px_116px_88px_74px] items-stretch';
 // No vertical grid lines (modern list feel) — horizontal row dividers only.
 const CELL = 'px-3 self-stretch flex items-center min-w-0';
 
