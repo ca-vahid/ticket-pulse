@@ -2003,6 +2003,19 @@ router.put(
 );
 
 router.put(
+  '/:id/trigger',
+  asyncHandler(async (req, res) => {
+    const workflow = await notificationWorkflowRepository.changeWorkflowTrigger(
+      req.workspaceId,
+      req.params.id,
+      req.body?.triggerType,
+      requestActor(req),
+    );
+    res.json({ success: true, data: workflow });
+  }),
+);
+
+router.put(
   '/:id/archive',
   asyncHandler(async (req, res) => {
     const workflow = await notificationWorkflowRepository.setWorkflowArchived(
@@ -2051,6 +2064,10 @@ router.post(
       name: template.name,
       description: template.description,
       definition: template.build(),
+      // Independent automation, not a competing email variant: additive +
+      // rule-less = runs alongside the default workflow (QA 07-07 #4 — as an
+      // exclusive rule-less variant it was silently suppressed forever).
+      routingMode: 'additive',
     }, requestActor(req));
     res.status(201).json({ success: true, data: workflow });
   }),

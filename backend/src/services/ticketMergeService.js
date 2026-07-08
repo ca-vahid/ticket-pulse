@@ -32,7 +32,8 @@ class TicketMergeService {
       prisma.ticket.findFirst({ where: { id: sourceId, workspaceId } }),
       prisma.ticket.findFirst({ where: { id: targetId, workspaceId } }),
     ]);
-    if (!source || !target) throw new NotFoundError('Both tickets must exist in this workspace');
+    if (!source) throw new NotFoundError('This ticket no longer exists in the workspace');
+    if (!target) throw new NotFoundError(`Ticket ${targetId} was not found in this workspace — use its TP-#### or #FS number`);
     if (['Deleted', 'Spam'].includes(target.status)) throw new ValidationError('Cannot merge into a deleted/spam ticket');
     if (['Deleted', 'Spam'].includes(source.status)) throw new ValidationError('Cannot merge a deleted/spam ticket');
 

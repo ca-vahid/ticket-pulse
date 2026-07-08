@@ -3,6 +3,7 @@ import express from 'express';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import prisma from '../services/prisma.js';
 import ticketService from '../services/ticketService.js';
+import { TICKET_SOURCE } from '../utils/ticketOrigin.js';
 import logger from '../utils/logger.js';
 
 /**
@@ -141,7 +142,7 @@ router.post('/tickets', requireApiKey('tickets:write'), asyncHandler(async (req,
     name: req.apiKey.name,
     role: 'api',
     technicianId: null,
-  });
+  }, { sourceChannel: TICKET_SOURCE.API });
   logger.info(`API v1: ticket ${ticket.displayRef} created via key "${req.apiKey.name}"`);
   res.status(201).json({ success: true, data: publicTicketShape(ticket) });
 }));

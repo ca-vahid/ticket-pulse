@@ -36,7 +36,25 @@ const standardWorkflow = {
   id: 1,
   key: 'ticket_created',
   triggerType: 'ticket.created',
-  publishedDefinition: { metadata: { scheduleMode: 'standard' } },
+  publishedDefinition: {
+    metadata: { scheduleMode: 'standard' },
+    nodes: [{ id: 'send', type: 'send_email', data: {} }],
+  },
+};
+
+// Email-free automation on ticket.created (e.g. the AI first-reply draft
+// stager) — after-hours suppression governs email, not automation.
+const draftStagingWorkflow = {
+  id: 3,
+  key: 'ticket_created_ai_draft',
+  triggerType: 'ticket.created',
+  publishedDefinition: {
+    metadata: { scheduleMode: 'standard' },
+    nodes: [
+      { id: 'draft', type: 'llm_generate', data: {} },
+      { id: 'propose', type: 'propose_reply', data: {} },
+    ],
+  },
 };
 
 const afterHoursWorkflow = {
@@ -95,6 +113,17 @@ describe('notification workflow policy routing', () => {
 
     expect(result.mode).toBe('after_hours');
     expect(result.selected.map((workflow) => workflow.id)).toEqual([2]);
+    expect(result.suppressed.map((workflow) => workflow.id)).toEqual([1]);
+  });
+
+  test('after-hours suppression spares email-free automation workflows (QA 07-07 #4)', () => {
+    const result = selectWorkflowsForNotificationTiming(
+      [standardWorkflow, afterHoursWorkflow, draftStagingWorkflow],
+      context({ isBusinessHours: false, isAfterHours: true }),
+    );
+
+    expect(result.mode).toBe('after_hours');
+    expect(result.selected.map((workflow) => workflow.id).sort()).toEqual([2, 3]);
     expect(result.suppressed.map((workflow) => workflow.id)).toEqual([1]);
   });
 
@@ -191,6 +220,30 @@ describe('notification workflow policy routing', () => {
     expect(withDefault.selectedWorkflowIds).toEqual([1]);
     expect(withDefault.suppressed).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 9, reason: 'missing_routing_rule' }),
+    ]));
+  });
+
+  test('a rule-less ADDITIVE workflow always runs alongside the default (installed templates)', () => {
+    // QA 07-07 #4: templates install as independent automations. As exclusive
+    // rule-less variants they were suppressed forever once a default existed.
+    const aiDraftTemplate = {
+      id: 12,
+      key: 'ticket_created_ai_first_reply',
+      triggerType: 'ticket.created',
+      routingMode: 'additive',
+      routingPriority: 100,
+      routingRule: null,
+      isDefaultVariant: false,
+    };
+
+    const result = selectWorkflowVariants(
+      [{ ...standardWorkflow, isDefaultVariant: true, routingPriority: 100 }, aiDraftTemplate],
+      { event: { type: 'ticket.created' }, requester: { regionKey: 'CA-BC' } },
+    );
+
+    expect(result.selectedWorkflowIds.sort()).toEqual([1, 12]);
+    expect(result.matched).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 12, reason: 'additive_no_rule_always_runs' }),
     ]));
   });
 

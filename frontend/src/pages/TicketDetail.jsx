@@ -10,7 +10,7 @@ import AttachmentPreviewModal from '../components/tickets/AttachmentPreviewModal
 import TicketTagEditor from '../components/tickets/TicketTagEditor';
 import ApprovalTimeline from '../components/tickets/ApprovalTimeline';
 import ProposedReplyCard from '../components/tickets/ProposedReplyCard';
-import { CustomFieldsCard, MacroMenu, TicketLinksCard, TimeTrackingCard } from '../components/tickets/TicketOpsCards';
+import { CustomFieldsCard, MacroMenu, TicketLinksCard } from '../components/tickets/TicketOpsCards';
 import ThreadSummaryCard from '../components/tickets/ThreadSummaryCard';
 import RequestApprovalModal from '../components/tickets/RequestApprovalModal';
 import AppHeader from '../components/AppHeader';
@@ -1995,63 +1995,67 @@ export default function TicketDetail() {
                             </span>
                           )}
 
-                          <span ref={templatesRef} className={`relative ${composerMode === 'note' && visibleQuickNotes.length > 0 ? '' : 'ml-auto'}`}>
-                            <button
-                              onClick={() => setTemplatesOpen((v) => !v)}
-                              aria-expanded={templatesOpen}
-                              className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-500 bg-white border border-slate-200 hover:border-blue-300 hover:text-blue-700"
-                            >
-                              <FileText className="w-3.5 h-3.5" aria-hidden="true" />
-                              <span className="hidden sm:inline">Templates{templates.length > 0 ? ` (${templates.length})` : ''}</span>
-                              <span className="sm:hidden">{templates.length > 0 ? `(${templates.length})` : 'Tpl'}</span>
-                            </button>
-                            {templatesOpen && (
-                              <span className="absolute right-0 top-full mt-1 z-30 w-72 max-w-[calc(100vw-2.5rem)] tp-card rounded-lg shadow-soft p-1.5 flex flex-col animate-scaleIn">
-                                {templates.length === 0 && (
-                                  <span className="px-2 py-1.5 text-xs text-slate-400">No templates yet — write a reply below, then save it here.</span>
-                                )}
-                                <span className="max-h-52 overflow-y-auto settings-scrollbar flex flex-col">
-                                  {templates.map((template) => (
-                                    <span key={template.id} className="flex items-center gap-1 group">
-                                      <button
-                                        onClick={() => insertTemplate(template)}
-                                        className="tp-focus-ring flex-1 min-w-0 text-left px-2 py-1.5 text-sm rounded-md text-slate-700 hover:bg-blue-50"
-                                        title={template.bodyText.slice(0, 200)}
-                                      >
-                                        <span className="block truncate">{template.name}</span>
-                                        <span className="block text-[10px] text-slate-400 truncate">{template.bodyText.slice(0, 60)}</span>
-                                      </button>
-                                      <button
-                                        onClick={() => removeTemplate(template)}
-                                        aria-label={`Delete template ${template.name}`}
-                                        className="tp-focus-ring p-1 rounded text-slate-300 hover:text-red-600 hover:bg-red-50"
-                                      >
-                                        <Trash2 className="w-3 h-3" aria-hidden="true" />
-                                      </button>
-                                    </span>
-                                  ))}
-                                </span>
-                                <span className="flex items-center gap-1.5 border-t border-slate-100 mt-1 pt-1.5 px-1">
-                                  <input
-                                    type="text"
-                                    value={templateName}
-                                    onChange={(e) => setTemplateName(e.target.value)}
-                                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); saveTemplate(); } }}
-                                    placeholder="Save current draft as…"
-                                    aria-label="New template name"
-                                    className="tp-focus-ring flex-1 min-w-0 text-xs bg-white border border-input rounded-md px-2 py-1.5 placeholder:text-slate-400"
-                                  />
-                                  <button
-                                    onClick={saveTemplate}
-                                    disabled={!templateName.trim() || !composerText.trim()}
-                                    className="tp-focus-ring px-2 py-1.5 text-xs font-semibold rounded-md bg-primary text-primary-foreground hover:bg-blue-700 disabled:opacity-40"
-                                  >
+                          {/* Reply templates are requester-facing content — internal
+                              notes get Quick notes only (QA 07-07 #2). */}
+                          {composerMode !== 'note' && (
+                            <span ref={templatesRef} className="relative ml-auto">
+                              <button
+                                onClick={() => setTemplatesOpen((v) => !v)}
+                                aria-expanded={templatesOpen}
+                                className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-500 bg-white border border-slate-200 hover:border-blue-300 hover:text-blue-700"
+                              >
+                                <FileText className="w-3.5 h-3.5" aria-hidden="true" />
+                                <span className="hidden sm:inline">Templates{templates.length > 0 ? ` (${templates.length})` : ''}</span>
+                                <span className="sm:hidden">{templates.length > 0 ? `(${templates.length})` : 'Tpl'}</span>
+                              </button>
+                              {templatesOpen && (
+                                <span className="absolute right-0 top-full mt-1 z-30 w-72 max-w-[calc(100vw-2.5rem)] tp-card rounded-lg shadow-soft p-1.5 flex flex-col animate-scaleIn">
+                                  {templates.length === 0 && (
+                                    <span className="px-2 py-1.5 text-xs text-slate-400">No templates yet — write a reply below, then save it here.</span>
+                                  )}
+                                  <span className="max-h-52 overflow-y-auto settings-scrollbar flex flex-col">
+                                    {templates.map((template) => (
+                                      <span key={template.id} className="flex items-center gap-1 group">
+                                        <button
+                                          onClick={() => insertTemplate(template)}
+                                          className="tp-focus-ring flex-1 min-w-0 text-left px-2 py-1.5 text-sm rounded-md text-slate-700 hover:bg-blue-50"
+                                          title={template.bodyText.slice(0, 200)}
+                                        >
+                                          <span className="block truncate">{template.name}</span>
+                                          <span className="block text-[10px] text-slate-400 truncate">{template.bodyText.slice(0, 60)}</span>
+                                        </button>
+                                        <button
+                                          onClick={() => removeTemplate(template)}
+                                          aria-label={`Delete template ${template.name}`}
+                                          className="tp-focus-ring p-1 rounded text-slate-300 hover:text-red-600 hover:bg-red-50"
+                                        >
+                                          <Trash2 className="w-3 h-3" aria-hidden="true" />
+                                        </button>
+                                      </span>
+                                    ))}
+                                  </span>
+                                  <span className="flex items-center gap-1.5 border-t border-slate-100 mt-1 pt-1.5 px-1">
+                                    <input
+                                      type="text"
+                                      value={templateName}
+                                      onChange={(e) => setTemplateName(e.target.value)}
+                                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); saveTemplate(); } }}
+                                      placeholder="Save current draft as…"
+                                      aria-label="New template name"
+                                      className="tp-focus-ring flex-1 min-w-0 text-xs bg-white border border-input rounded-md px-2 py-1.5 placeholder:text-slate-400"
+                                    />
+                                    <button
+                                      onClick={saveTemplate}
+                                      disabled={!templateName.trim() || !composerText.trim()}
+                                      className="tp-focus-ring px-2 py-1.5 text-xs font-semibold rounded-md bg-primary text-primary-foreground hover:bg-blue-700 disabled:opacity-40"
+                                    >
                                 Save
-                                  </button>
+                                    </button>
+                                  </span>
                                 </span>
-                              </span>
-                            )}
-                          </span>
+                              )}
+                            </span>
+                          )}
 
                           {composerMode === 'reply' && (
                             <span className="text-[11px] text-slate-400 truncate">
@@ -2522,14 +2526,6 @@ export default function TicketDetail() {
                   values={ticket?.customFields || {}}
                   canWrite={canConverse}
                   onSaved={() => { lastLocalMutationRef.current = Date.now(); fetchTicket({ silent: true }); showToast('emerald', 'Custom fields saved'); }}
-                />
-
-                {/* Time tracking (TP layer, both origins) */}
-                <TimeTrackingCard
-                  ticketId={ticketId}
-                  ticket={ticket}
-                  canWrite={canConverse}
-                  onLogged={() => { lastLocalMutationRef.current = Date.now(); fetchTicket({ silent: true }); showToast('emerald', 'Time logged'); }}
                 />
 
                 {/* Related tickets: facts first, suggestions clearly labeled */}

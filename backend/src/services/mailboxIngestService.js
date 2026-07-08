@@ -4,7 +4,7 @@ import graphMailClient from '../integrations/graphMailClient.js';
 import ticketService from './ticketService.js';
 import ticketActivityRepository from './ticketActivityRepository.js';
 import mirrorService from './mirrorService.js';
-import { TICKET_ORIGIN, ticketDisplayRef } from '../utils/ticketOrigin.js';
+import { TICKET_ORIGIN, TICKET_SOURCE, ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { sseManager } from '../routes/sse.routes.js';
 
 const TICK_MS = Number(process.env.MAILBOX_INGEST_TICK_MS || 30 * 1000);
@@ -362,7 +362,7 @@ class MailboxIngestService {
       // Internal (TP-native) group routing — a mailbox can default into an internal group.
       ...(connection.defaultInternalGroupId ? { internalGroupId: connection.defaultInternalGroupId } : {}),
       ...(connection.defaultTicketType ? { ticketType: connection.defaultTicketType } : {}),
-    }, SYSTEM_ACTOR);
+    }, SYSTEM_ACTOR, { sourceChannel: TICKET_SOURCE.EMAIL });
 
     // Remember the originating message id so follow-ups thread to this ticket.
     if (email.internetMessageId) {

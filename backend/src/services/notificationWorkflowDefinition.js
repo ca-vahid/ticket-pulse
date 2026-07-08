@@ -41,6 +41,10 @@ export const NOTIFICATION_EVENT_TYPES = [
   // workspace timezone with a `digest` context (open/unassigned/overdue counts
   // + oldest open tickets) for daily/weekly digest emails.
   'schedule.time',
+  // Manual-only (QA 07-07 #3): never fired by lifecycle events or workers.
+  // Runs only via a Run-workflow node (reusable sub-workflow) or the admin
+  // run-for-ticket dispatch.
+  'manual',
 ];
 
 /** Trigger types fired by the time-trigger worker, not by lifecycle events. */
@@ -684,8 +688,10 @@ function validateGraph(definition, triggerType) {
 
   for (const node of definition.nodes.filter((candidate) => candidate.type === 'propose_reply')) {
     const upstream = upstreamNodeTypes(node.id, nodes, incoming);
-    if (!upstream.has('llm_generate')) {
-      errors.push(`Propose-reply node ${node.id} must have an upstream LLM generate node (it stages the LLM draft)`);
+    // A staged draft can come from the LLM or a rendered template — either
+    // upstream source is a legitimate human-approval flow (QA 07-07 #5).
+    if (!upstream.has('llm_generate') && !upstream.has('template_render')) {
+      errors.push(`Propose-reply node ${node.id} needs an upstream draft source — add an LLM generate or Template step before it`);
     }
   }
 
@@ -811,6 +817,7 @@ function eventLabel(triggerType) {
     'ticket.sla_pre_breach': 'SLA about to breach',
     'ticket.sla_breach': 'SLA breached',
     'schedule.time': 'On a schedule (digest)',
+    manual: 'Manual / sub-workflow only',
   }[triggerType] || triggerType;
 }
 

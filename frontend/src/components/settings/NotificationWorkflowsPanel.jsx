@@ -61,8 +61,8 @@ import {
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { notificationWorkflowAPI, ticketsAPI } from '../../services/api';
-import { useWorkspace } from '../../contexts/WorkspaceContext';
 import ConditionGroupBuilder from './ConditionGroupBuilder';
+import WorkflowIndex from './WorkflowIndex';
 
 const WORKFLOW_EDITOR_LAYOUT_ID = 'ticket-pulse-notification-workflow-editor-v3';
 
@@ -82,7 +82,53 @@ const EVENT_LABELS = {
   'ticket.sla_pre_breach': 'SLA about to breach',
   'ticket.sla_breach': 'SLA breached',
   'schedule.time': 'On a schedule (digest)',
+  manual: 'Manual / sub-workflow only',
 };
+
+// Trigger picker metadata for the create dialog + trigger editing (QA 07-07 #3).
+const TRIGGER_PICKER_GROUPS = [
+  {
+    label: 'Ticket lifecycle',
+    triggers: [
+      { value: 'ticket.created', hint: 'A new ticket lands (either origin)' },
+      { value: 'ticket.assigned', hint: 'First assignment to a member' },
+      { value: 'ticket.reassigned', hint: 'Moves between members' },
+      { value: 'ticket.status_changed', hint: 'Any status transition (from/to available in conditions)' },
+      { value: 'ticket.resolved_closed', hint: 'Ticket reaches Resolved or Closed' },
+    ],
+  },
+  {
+    label: 'Conversation',
+    triggers: [
+      { value: 'ticket.reply_received', hint: 'The requester replies' },
+      { value: 'ticket.public_reply_added', hint: 'An agent replies to the requester' },
+      { value: 'ticket.note_added', hint: 'An internal note is added' },
+    ],
+  },
+  {
+    label: 'Approvals',
+    triggers: [
+      { value: 'approval.requested', hint: 'Someone requests an approval' },
+      { value: 'approval.decided', hint: 'An approval is approved or rejected' },
+      { value: 'approval.clarification_requested', hint: 'An approver asks for more info' },
+    ],
+  },
+  {
+    label: 'Time-based',
+    triggers: [
+      { value: 'ticket.aging', hint: 'Unresolved for N hours (threshold on the trigger node)' },
+      { value: 'ticket.sla_pre_breach', hint: 'SLA due date approaching' },
+      { value: 'ticket.sla_breach', hint: 'SLA due date passed' },
+      { value: 'schedule.time', hint: 'Daily/weekly digest slot (no ticket)' },
+    ],
+  },
+  {
+    label: 'On demand',
+    triggers: [
+      { value: 'manual', hint: 'Never fires on its own — reusable sub-workflow called by Run-workflow nodes, or run manually on a ticket' },
+    ],
+  },
+];
 
 // Per-event color + icon, so the four trigger groups read as distinct zones in the
 // workflow list (and the selected-workflow header) instead of identical gray bars.
@@ -99,14 +145,6 @@ const TRIGGER_VISUALS = {
 
 function triggerVisuals(triggerType) {
   return TRIGGER_VISUALS[triggerType] || { icon: Waypoints, icon_: 'text-slate-500', chip: 'bg-slate-100 text-slate-600 ring-slate-200', rail: 'bg-slate-400' };
-}
-
-// Tone for the "last run" chip, derived loosely from the run status string.
-function lastRunChipClass(status) {
-  const s = String(status || '').toLowerCase();
-  if (/(complete|success|sent|deliver|ok)/.test(s)) return 'bg-emerald-50 text-emerald-700 ring-emerald-200';
-  if (/(fail|error|bounce|reject|block)/.test(s)) return 'bg-red-50 text-red-700 ring-red-200';
-  return 'bg-slate-100 text-slate-600 ring-slate-200';
 }
 
 const WORKFLOW_NODE_REGISTRY = {
@@ -257,6 +295,46 @@ const ADDABLE_NODE_TYPES = Object.entries(WORKFLOW_NODE_REGISTRY)
   .filter(([, config]) => config.addable)
   .map(([type]) => type);
 
+// Grouped "Add step" palette (QA 07-07 #8): same registry, organized with
+// one-line hints instead of a flat list. Unlisted addable types fall into
+// "More" so a new node type can never silently vanish from the palette.
+const NODE_PALETTE_GROUPS = [
+  {
+    label: 'Logic & flow',
+    hints: {
+      condition: 'Route true/false on ticket, requester or time facts',
+      branch: 'Split into N labeled paths',
+      delay: 'Wait minutes/hours, then continue (survives restarts)',
+      stop: 'End this path',
+    },
+  },
+  {
+    label: 'Email',
+    hints: {
+      recipient_resolver: 'Choose who the email goes to',
+      template_render: 'Compose the email from a template',
+      llm_generate: 'Let the LLM draft the email content',
+      send_email: 'Deliver the composed email',
+    },
+  },
+  {
+    label: 'Ticket actions',
+    hints: {
+      update_ticket: 'Assign / set status, priority, category or group',
+      create_child_ticket: 'Spawn a linked follow-up ticket',
+      request_approval: 'Route an approval to a category of managers',
+      propose_reply: 'Stage the draft on the ticket for human approval',
+    },
+  },
+  {
+    label: 'Integrations',
+    hints: {
+      call_webhook: 'POST JSON to an external URL',
+      run_workflow: 'Run another workflow with this context',
+    },
+  },
+];
+
 const DEFAULT_LLM_MAX_TOKENS = 10000;
 const AFTER_HOURS_WORKFLOW_KEY = 'ticket_created_after_hours';
 
@@ -403,10 +481,6 @@ const ROUTING_BEHAVIOR_OPTIONS = [
   },
 ];
 
-const ROUTING_BEHAVIOR_LABELS = Object.fromEntries(
-  ROUTING_BEHAVIOR_OPTIONS.map((option) => [option.value, option.label]),
-);
-
 const DEFAULT_ROUTING_METADATA = {
   fields: [],
   field: 'requester.regionKey',
@@ -461,6 +535,28 @@ const LLM_TOOL_POLICY_MODE_LABELS = Object.fromEntries(
 );
 
 const LLM_HELP_TOPICS = {
+  aiDraftedReplies: {
+    title: 'AI-drafted replies (human approves)',
+    summary: 'Workflows can stage a drafted reply on the ticket instead of emailing anyone — an agent approves & sends, edits it in the composer, or dismisses it.',
+    sections: [
+      {
+        heading: 'How the loop works',
+        items: [
+          'An LLM Generate (or Template) step drafts the reply; a "Stage for approval" step parks it on the ticket.',
+          'The ticket shows a "proposed reply" card above the conversation, and its queue row gets a Draft chip so staged drafts are never missed.',
+          'Approve & send goes through the normal reply path — threading, mirroring and events behave exactly like a hand-written reply.',
+          'A newer proposal supersedes an older open one on the same ticket; nothing ever emails automatically from this path.',
+        ],
+      },
+      {
+        heading: 'Fast start',
+        items: [
+          'New workflow → "Or start from a template" → "AI first-reply draft (human approves)".',
+          'Templates install as disabled drafts — review, publish, then enable.',
+        ],
+      },
+    ],
+  },
   workspacePolicy: {
     title: 'Workspace LLM evidence policy',
     summary: 'This sets the default evidence and tool policy for every Mail Workflow LLM Generate step in this workspace.',
@@ -1247,8 +1343,10 @@ function WorkflowGraphNode({ id, data }) {
   return (
     <div
       className={cls(
-        'relative min-h-[62px] w-[180px] rounded-lg border bg-white px-3 py-2 shadow-sm',
-        data.selected ? 'border-slate-950 shadow-lg' : 'border-gray-300',
+        'relative min-h-[62px] w-[180px] rounded-lg border bg-white px-3 py-2 transition-shadow duration-200',
+        data.selected
+          ? 'border-indigo-300 shadow-lg ring-2 ring-indigo-400/60'
+          : 'border-slate-200 shadow-sm hover:border-slate-300 hover:shadow-md',
       )}
       style={{ borderLeft: `5px solid ${color}` }}
     >
@@ -1260,11 +1358,11 @@ function WorkflowGraphNode({ id, data }) {
           className="!h-3 !w-3 !border-2 !border-white !bg-slate-700 transition-transform hover:!scale-150"
         />
       )}
-      <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-gray-500">
+      <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide" style={{ color }}>
         {NodeIcon && <NodeIcon className="h-3 w-3" />}
         {registry.label || data.nodeType}
       </div>
-      <div className="truncate text-sm font-semibold text-gray-900">{data.label || id}</div>
+      <div className="truncate text-sm font-semibold text-slate-900">{data.label || id}</div>
       {isCondition && (
         <>
           <Handle
@@ -1676,10 +1774,6 @@ export function describeCondition({ field, operator, value }) {
   return `${fieldLabel} ${operatorLabel} "${value}"`;
 }
 
-function routingBehaviorLabel(mode) {
-  return ROUTING_BEHAVIOR_LABELS[mode] || ROUTING_BEHAVIOR_LABELS.exclusive;
-}
-
 function isTerminalNode(node) {
   return WORKFLOW_NODE_REGISTRY[node?.type]?.terminal === true;
 }
@@ -1833,7 +1927,12 @@ export function validateWorkflowDefinitionClient(definition, triggerType = null)
   if (triggerType && triggers[0]?.data?.triggerType && triggers[0].data.triggerType !== triggerType) {
     errors.push(`Trigger node must use triggerType ${triggerType}`);
   }
-  if (!nodes.some((node) => node.type === 'send_email')) errors.push('Workflow must include at least one send email node');
+  // Mirrors the server rule: any ACTION node qualifies — a propose_reply-only
+  // workflow (e.g. the AI first-reply template) is valid without a send node.
+  const CLIENT_ACTION_NODE_TYPES = ['send_email', 'update_ticket', 'call_webhook', 'create_child_ticket', 'request_approval', 'propose_reply'];
+  if (!nodes.some((node) => CLIENT_ACTION_NODE_TYPES.includes(node.type))) {
+    errors.push('Workflow must include at least one action node (send email, update ticket, webhook, child ticket, approval, or stage-for-approval)');
+  }
 
   for (const edge of edges) {
     if (!ids.has(edge.source)) errors.push(`Edge ${edge.id || '(new edge)'} has unknown source ${edge.source}`);
@@ -1878,6 +1977,14 @@ export function validateWorkflowDefinitionClient(definition, triggerType = null)
     if (!upstream.has('recipient_resolver')) errors.push(`Send email node ${node.id} must have an upstream recipient resolver`);
     if (!upstream.has('template_render') && !upstream.has('llm_generate')) {
       errors.push(`Send email node ${node.id} must have an upstream template or LLM email source`);
+    }
+  }
+  // Same rule the server enforces — catching it here puts the message in the
+  // editor instead of a failed save (QA 07-07 #5).
+  for (const node of nodes.filter((candidate) => candidate.type === 'propose_reply')) {
+    const upstream = upstreamTypes(node.id, maps.nodes, maps.incoming);
+    if (!upstream.has('llm_generate') && !upstream.has('template_render')) {
+      errors.push(`Stage-for-approval node ${node.id} needs an upstream draft source — add an LLM generate or Template step before it`);
     }
   }
   return [...new Set(errors)];
@@ -3989,6 +4096,207 @@ function WorkflowTemplatesMenu({ saving, onInstalled, setMessage }) {
   );
 }
 
+/**
+ * Blank-start workflow creation (QA 07-07 #3): name + trigger picker with
+ * plain-language hints, a sub-workflow choice (manual trigger), and the
+ * template gallery folded in as "start from a template" (QA 07-07 #4 —
+ * templates were buried in a toolbar menu).
+ */
+function NewWorkflowDialog({ open, onClose, onCreated, setMessage, initialTrigger = null }) {
+  const [name, setName] = useState('');
+  const [mode, setMode] = useState('event'); // 'event' | 'sub'
+  const [triggerType, setTriggerType] = useState('ticket.created');
+  const [templates, setTemplates] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setName('');
+    setMode(initialTrigger === 'manual' ? 'sub' : 'event');
+    setTriggerType(initialTrigger && initialTrigger !== 'manual' ? initialTrigger : 'ticket.created');
+    if (!templates) {
+      notificationWorkflowAPI.listTemplates()
+        .then((res) => setTemplates(res.data?.data || res.data || []))
+        .catch(() => setTemplates([]));
+    }
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!open) return null;
+
+  const effectiveTrigger = mode === 'sub' ? 'manual' : triggerType;
+
+  const create = async () => {
+    setBusy(true);
+    try {
+      const fallbackName = mode === 'sub' ? 'New sub-workflow' : `${EVENT_LABELS[effectiveTrigger] || effectiveTrigger} workflow`;
+      const response = await notificationWorkflowAPI.createVariant({
+        triggerType: effectiveTrigger,
+        name: name.trim() || fallbackName,
+        // Blank-start workflows are standalone automations: additive +
+        // rule-less = they run whenever the trigger fires, alongside the
+        // default variant, instead of competing with it for one slot.
+        routingMode: 'additive',
+      });
+      setMessage({
+        type: 'success',
+        text: mode === 'sub'
+          ? 'Sub-workflow draft created — it only runs when another workflow calls it (or via run-on-ticket).'
+          : 'Workflow draft created — build it out, then publish and enable it.',
+      });
+      onClose();
+      await onCreated?.(response.data?.id);
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message || 'Workflow creation failed' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const installTemplate = async (template) => {
+    setBusy(true);
+    try {
+      const response = await notificationWorkflowAPI.installTemplate(template.key);
+      setMessage({ type: 'success', text: `Installed "${template.name}" as a disabled draft — review, publish and enable it.` });
+      onClose();
+      await onCreated?.(response.data?.data?.id || response.data?.id);
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message || 'Template install failed' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto bg-slate-900/40 px-4 py-[8vh]"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Create workflow"
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="w-full max-w-2xl rounded-xl bg-white shadow-xl">
+        <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-3.5">
+          <Plus className="h-4 w-4 text-indigo-600" />
+          <h3 className="text-sm font-bold text-slate-800">New workflow</h3>
+          <button type="button" onClick={onClose} aria-label="Close" className="ml-auto rounded p-1 text-slate-400 hover:text-slate-600">
+            <XCircle className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="space-y-4 px-5 py-4">
+          <label className="block">
+            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Name</span>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder={mode === 'sub' ? 'e.g. Notify facilities team' : 'e.g. VIP escalation on arrival'}
+              className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-indigo-300 focus:outline-none"
+              autoFocus
+            />
+          </label>
+
+          <div role="radiogroup" aria-label="Workflow kind" className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={mode === 'event'}
+              onClick={() => setMode('event')}
+              className={cls(
+                'rounded-lg border px-3 py-2.5 text-left',
+                mode === 'event' ? 'border-indigo-300 bg-indigo-50/70 ring-1 ring-indigo-200' : 'border-slate-200 hover:border-indigo-200',
+              )}
+            >
+              <span className="block text-sm font-semibold text-slate-800">Runs on an event</span>
+              <span className="mt-0.5 block text-xs text-slate-500">Fires automatically when the trigger below happens.</span>
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={mode === 'sub'}
+              onClick={() => setMode('sub')}
+              className={cls(
+                'rounded-lg border px-3 py-2.5 text-left',
+                mode === 'sub' ? 'border-indigo-300 bg-indigo-50/70 ring-1 ring-indigo-200' : 'border-slate-200 hover:border-indigo-200',
+              )}
+            >
+              <span className="block text-sm font-semibold text-slate-800">Sub-workflow (on demand)</span>
+              <span className="mt-0.5 block text-xs text-slate-500">Never fires on its own — other workflows call it with a Run-workflow step.</span>
+            </button>
+          </div>
+
+          {mode === 'event' && (
+            <div>
+              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Trigger</span>
+              <div className="mt-1 max-h-56 space-y-2 overflow-y-auto rounded-lg border border-slate-200 p-2">
+                {TRIGGER_PICKER_GROUPS.filter((group) => group.label !== 'On demand').map((group) => (
+                  <div key={group.label}>
+                    <p className="px-1 pb-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">{group.label}</p>
+                    <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+                      {group.triggers.map((trigger) => (
+                        <button
+                          key={trigger.value}
+                          type="button"
+                          role="radio"
+                          aria-checked={triggerType === trigger.value}
+                          onClick={() => setTriggerType(trigger.value)}
+                          className={cls(
+                            'rounded-md border px-2 py-1.5 text-left',
+                            triggerType === trigger.value ? 'border-indigo-300 bg-indigo-50 ring-1 ring-indigo-200' : 'border-slate-100 hover:border-indigo-200',
+                          )}
+                        >
+                          <span className="block text-xs font-semibold text-slate-700">{EVENT_LABELS[trigger.value] || trigger.value}</span>
+                          <span className="block text-[11px] leading-4 text-slate-400">{trigger.hint}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <button type="button" onClick={onClose} className="rounded-md px-3 py-2 text-sm text-slate-500 hover:bg-slate-50">Cancel</button>
+            <button
+              type="button"
+              onClick={create}
+              disabled={busy}
+              className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
+            >
+              {busy ? 'Creating…' : 'Create draft'}
+            </button>
+          </div>
+
+          {mode === 'event' && (
+            <div className="border-t border-slate-100 pt-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Or start from a template</p>
+              {templates === null && <p className="mt-1 text-xs text-slate-400">Loading…</p>}
+              <div className="mt-1.5 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                {(templates || []).map((template) => (
+                  <button
+                    key={template.key}
+                    type="button"
+                    onClick={() => installTemplate(template)}
+                    disabled={busy}
+                    className="rounded-lg border border-violet-100 bg-violet-50/50 px-2.5 py-2 text-left hover:bg-violet-50 disabled:opacity-60"
+                  >
+                    <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-800">
+                      <Sparkles className="h-3 w-3 text-violet-500" />
+                      {template.name}
+                    </span>
+                    <span className="mt-0.5 block text-[11px] leading-4 text-slate-500">{template.description}</span>
+                  </button>
+                ))}
+              </div>
+              <p className="mt-1.5 text-[10px] text-slate-400">Templates install as disabled drafts — nothing runs until you publish and enable it.</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function WorkflowHealthMenu({ health, warnings = [] }) {
   const [open, setOpen] = useState(false);
   if (!health) return null;
@@ -4579,206 +4887,7 @@ function workflowRoutingDescription(workflow) {
   return describeCondition(conditionBuilderFromRule(workflow.routingRule));
 }
 
-function buildWorkflowGroups(workflows) {
-  const groups = new Map(); // triggerType -> { default, customs: [] }
-  for (const workflow of workflows) {
-    const key = workflow.triggerType || 'other';
-    if (!groups.has(key)) groups.set(key, { default: null, customs: [] });
-    const bucket = groups.get(key);
-    if (workflow.isDefaultVariant && !bucket.default) bucket.default = workflow;
-    else bucket.customs.push(workflow);
-  }
-  for (const bucket of groups.values()) {
-    bucket.customs.sort((a, b) => (
-      Number(Boolean(a.archivedAt)) - Number(Boolean(b.archivedAt))
-      || (a.routingPriority || 1) - (b.routingPriority || 1)
-      || String(a.name || '').localeCompare(String(b.name || ''))
-    ));
-  }
-  return groups;
-}
-
-// Always-on rich card: name + status on top, a role/version line, and a chip row
-// (runs, last run) — everything is visible without hovering so the list is scannable.
-function WorkflowRow({ workflow, selectedId, onSelect, nested = false }) {
-  const isSelected = selectedId === workflow.id;
-  const isEnabled = !!workflow.isEnabled;
-  const isArchived = Boolean(workflow.archivedAt);
-  const runs = workflow._count?.runs || 0;
-  const lastRun = workflow.runs?.[0];
-  const version = workflow.publishedVersion || 0;
-  const afterHours = isAfterHoursWorkflow(workflow);
-  const roleLine = workflow.isDefaultVariant
-    ? `Default · v${version}`
-    : `${workflowVariantTypeLabel(workflow)} · Match ${workflow.routingPriority || 1} · ${routingBehaviorLabel(workflow.routingMode)} · v${version}`;
-  return (
-    <button
-      type="button"
-      onClick={() => onSelect(workflow.id)}
-      aria-current={isSelected ? 'true' : undefined}
-      className={cls(
-        'group flex w-full flex-col gap-1.5 border-l-4 px-3 py-2.5 text-left transition-colors',
-        nested && 'pl-5',
-        isSelected
-          ? 'relative z-[1] border-l-blue-600 bg-blue-50 shadow-md ring-2 ring-inset ring-blue-600 hover:bg-blue-50'
-          : isArchived
-            ? 'border-l-slate-300 bg-slate-100 hover:bg-slate-200/70'
-            : isEnabled
-              ? 'border-l-emerald-400 bg-white hover:bg-slate-50'
-              : 'border-l-slate-300 bg-slate-50 hover:bg-slate-100',
-      )}
-    >
-      <div className="flex min-w-0 items-start gap-2">
-        <span
-          className={cls(
-            'min-w-0 flex-1 text-[15px] font-semibold leading-5 line-clamp-2',
-            isArchived ? 'text-slate-500' : isEnabled ? 'text-slate-900' : 'text-slate-600',
-          )}
-          title={workflow.name}
-        >
-          {workflowDisplayName(workflow)}
-        </span>
-        <WorkflowStatus workflow={workflow} />
-      </div>
-      <div className="min-w-0 truncate text-[11px] font-medium leading-4 text-slate-500" title={roleLine}>
-        {roleLine}
-      </div>
-      <div className="flex flex-wrap items-center gap-1">
-        {workflow.isDefaultVariant ? (
-          <span className="inline-flex items-center rounded-md bg-blue-50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-blue-700 ring-1 ring-blue-200">
-            Default
-          </span>
-        ) : (
-          <span className="inline-flex items-center rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500 ring-1 ring-slate-200">
-            Variant
-          </span>
-        )}
-        {afterHours && (
-          <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 ring-1 ring-amber-200">
-            <Moon className="h-2.5 w-2.5" /> After-hours
-          </span>
-        )}
-        <span className="inline-flex items-center rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 ring-1 ring-slate-200">
-          {runs} {runs === 1 ? 'run' : 'runs'}
-        </span>
-        {lastRun ? (
-          <span
-            className={cls('inline-flex max-w-[12rem] items-center gap-1 truncate rounded-md px-1.5 py-0.5 text-[10px] font-semibold ring-1', lastRunChipClass(lastRun.status))}
-            title={`Last run: ${lastRun.status} · ${formatDate(lastRun.startedAt)}`}
-          >
-            <span className="truncate">{lastRun.status} · {formatDate(lastRun.startedAt)}</span>
-          </span>
-        ) : (
-          <span className="inline-flex items-center rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 ring-1 ring-slate-200">
-            No runs yet
-          </span>
-        )}
-      </div>
-    </button>
-  );
-}
-
-function loadCollapsedTriggers(storageKey) {
-  if (typeof window === 'undefined') return new Set();
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(storageKey));
-    return new Set(Array.isArray(parsed) ? parsed : []);
-  } catch {
-    return new Set();
-  }
-}
-
-function WorkflowList({ workflows, selectedId, onSelect }) {
-  const { currentWorkspace } = useWorkspace();
-  const storageKey = `tp_wf_collapsed_${currentWorkspace?.id ?? 'all'}`;
-  const [collapsed, setCollapsed] = useState(() => loadCollapsedTriggers(storageKey));
-
-  // Re-read remembered state when the workspace changes.
-  useEffect(() => {
-    setCollapsed(loadCollapsedTriggers(storageKey));
-  }, [storageKey]);
-
-  const persist = (nextSet) => {
-    try {
-      window.localStorage.setItem(storageKey, JSON.stringify([...nextSet]));
-    } catch {
-      /* storage may be unavailable; collapse still works for the session */
-    }
-  };
-  const toggleGroup = (triggerType) => {
-    setCollapsed((current) => {
-      const next = new Set(current);
-      if (next.has(triggerType)) next.delete(triggerType);
-      else next.add(triggerType);
-      persist(next);
-      return next;
-    });
-  };
-
-  if (!workflows.length) {
-    return (
-      <div className="px-3 py-6 text-center text-xs leading-5 text-slate-500">
-        No workflows match the current view.
-      </div>
-    );
-  }
-
-  const groups = buildWorkflowGroups(workflows);
-  const triggerTypes = [...groups.keys()];
-  const allCollapsed = triggerTypes.length > 0 && triggerTypes.every((type) => collapsed.has(type));
-  const setAllCollapsed = (collapse) => {
-    const next = collapse ? new Set(triggerTypes) : new Set();
-    persist(next);
-    setCollapsed(next);
-  };
-
-  return (
-    <div>
-      <div className="sticky top-0 z-20 flex items-center justify-end border-b border-slate-100 bg-white/95 px-3 py-1 backdrop-blur">
-        <button
-          type="button"
-          onClick={() => setAllCollapsed(!allCollapsed)}
-          className="rounded px-1.5 py-0.5 text-[11px] font-semibold text-indigo-600 transition-colors hover:bg-indigo-50 hover:text-indigo-800"
-        >
-          {allCollapsed ? 'Expand all' : 'Collapse all'}
-        </button>
-      </div>
-      <div className="divide-y divide-slate-200">
-        {[...groups.entries()].map(([triggerType, bucket]) => {
-          const total = (bucket.default ? 1 : 0) + bucket.customs.length;
-          const GroupIcon = triggerVisuals(triggerType).icon;
-          const isCollapsed = collapsed.has(triggerType);
-          return (
-            <section key={triggerType} className="bg-white">
-              {/* Unified, prominent, collapsible trigger sub-header — identical
-                  styling for every group (only the leading glyph differs). The
-                  default row is marked "Default"; everything beneath is a variant. */}
-              <button
-                type="button"
-                onClick={() => toggleGroup(triggerType)}
-                aria-expanded={!isCollapsed}
-                className="sticky top-[27px] z-10 flex w-full items-center gap-2 border-y border-l-4 border-indigo-100 border-l-indigo-500 bg-indigo-50 px-3 py-1.5 text-left transition-colors hover:bg-indigo-100/70"
-              >
-                <ChevronDown className={cls('h-4 w-4 shrink-0 text-indigo-400 transition-transform', isCollapsed && '-rotate-90')} />
-                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-white text-indigo-600 ring-1 ring-indigo-200">
-                  <GroupIcon className="h-3 w-3" />
-                </span>
-                <span className="min-w-0 flex-1 truncate text-[11px] font-bold uppercase tracking-wider text-indigo-800">{EVENT_LABELS[triggerType] || triggerType}</span>
-                <span className="shrink-0 rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-bold text-indigo-700">{total}</span>
-              </button>
-              {!isCollapsed && bucket.default && (
-                <WorkflowRow workflow={bucket.default} selectedId={selectedId} onSelect={onSelect} />
-              )}
-              {!isCollapsed && bucket.customs.map((workflow) => (
-                <WorkflowRow key={workflow.id} workflow={workflow} selectedId={selectedId} onSelect={onSelect} nested={Boolean(bucket.default)} />
-              ))}
-            </section>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
+// The list rail lives in WorkflowIndex.jsx (QA 07-07 #8 redesign).
 
 export function LlmContextToolsPanel({
   policy,
@@ -6168,34 +6277,51 @@ function NodePalette({ onAddNode, onRemoveNode, onUndo, canUndo = false, workflo
             <Plus className="h-3.5 w-3.5" />
             Add step
           </button>
-          {addOpen && (
-            <div className="absolute left-0 top-9 z-20 w-52 overflow-hidden rounded-md border border-gray-200 bg-white shadow-lg">
-              {ADDABLE_NODE_TYPES.map((type) => {
-                const Icon = WORKFLOW_NODE_REGISTRY[type]?.icon;
-                return (
-                  <button
-                    key={type}
-                    type="button"
-                    onClick={() => {
-                      onAddNode(type);
-                      setAddOpen(false);
-                    }}
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-semibold text-gray-700 hover:bg-gray-50"
-                  >
-                    {Icon ? (
-                      <Icon className="h-3.5 w-3.5" style={{ color: NODE_COLORS[type] || '#6b7280' }} />
-                    ) : (
-                      <span
-                        className="h-2.5 w-2.5 rounded-full"
-                        style={{ backgroundColor: NODE_COLORS[type] || '#6b7280' }}
-                      />
-                    )}
-                    {NODE_LABELS[type] || type}
-                  </button>
-                );
-              })}
-            </div>
-          )}
+          {addOpen && (() => {
+            const grouped = new Set(NODE_PALETTE_GROUPS.flatMap((group) => Object.keys(group.hints)));
+            const leftovers = ADDABLE_NODE_TYPES.filter((type) => !grouped.has(type));
+            const sections = [
+              ...NODE_PALETTE_GROUPS.map((group) => ({
+                label: group.label,
+                entries: Object.entries(group.hints).filter(([type]) => ADDABLE_NODE_TYPES.includes(type)),
+              })),
+              ...(leftovers.length ? [{ label: 'More', entries: leftovers.map((type) => [type, null]) }] : []),
+            ].filter((section) => section.entries.length);
+            return (
+              <div className="settings-scrollbar absolute left-0 top-9 z-20 max-h-[26rem] w-72 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1.5 shadow-lg">
+                {sections.map((section) => (
+                  <div key={section.label}>
+                    <p className="px-2 pb-0.5 pt-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">{section.label}</p>
+                    {section.entries.map(([type, hint]) => {
+                      const Icon = WORKFLOW_NODE_REGISTRY[type]?.icon;
+                      const color = NODE_COLORS[type] || '#6b7280';
+                      return (
+                        <button
+                          key={type}
+                          type="button"
+                          onClick={() => {
+                            onAddNode(type);
+                            setAddOpen(false);
+                          }}
+                          className="flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left hover:bg-violet-50"
+                        >
+                          <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md" style={{ backgroundColor: `${color}18` }}>
+                            {Icon
+                              ? <Icon className="h-3 w-3" style={{ color }} />
+                              : <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} />}
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block text-xs font-semibold text-slate-800">{NODE_LABELS[type] || type}</span>
+                            {hint && <span className="block text-[11px] leading-4 text-slate-400">{hint}</span>}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
         </div>
         <button
           type="button"
@@ -6279,6 +6405,8 @@ export default function NotificationWorkflowsPanel({
   const [routingTestResult, setRoutingTestResult] = useState(null);
   const [routingTestLoading, setRoutingTestLoading] = useState(false);
   const [archiveConfirm, setArchiveConfirm] = useState(null);
+  const [newWorkflowOpen, setNewWorkflowOpen] = useState(false);
+  const [togglingWorkflowId, setTogglingWorkflowId] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [showArchivedWorkflows, setShowArchivedWorkflows] = useState(false);
   const [message, setMessage] = useState(null);
@@ -7136,6 +7264,43 @@ export default function NotificationWorkflowsPanel({
     }
   }
 
+  async function changeTriggerType(newTriggerType) {
+    if (!selected || !newTriggerType || newTriggerType === selected.triggerType) return;
+    setSaving(true);
+    setMessage(null);
+    try {
+      const response = await notificationWorkflowAPI.changeTrigger(selected.id, newTriggerType);
+      const wasLive = selected.isEnabled === true;
+      await loadWorkflows(response.data?.id || selected.id);
+      setMessage({
+        type: 'success',
+        text: wasLive
+          ? `Trigger moved to "${EVENT_LABELS[newTriggerType] || newTriggerType}" — the workflow is paused until you review and re-publish it.`
+          : `Trigger moved to "${EVENT_LABELS[newTriggerType] || newTriggerType}".`,
+      });
+    } catch (error) {
+      const details = Array.isArray(error.details) ? error.details : [];
+      setMessage({ type: 'error', text: details[0] || error.message || 'Trigger change failed' });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // Inline list toggle (QA 07-07 #8): flip any workflow without opening it.
+  async function toggleEnabledFor(workflow) {
+    if (!workflow || togglingWorkflowId) return;
+    setTogglingWorkflowId(workflow.id);
+    try {
+      const response = await notificationWorkflowAPI.setEnabled(workflow.id, !workflow.isEnabled);
+      applyWorkflowUpdate(response.data, { shouldUpdateDraft: false });
+      await refreshHealth();
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message || 'Toggle failed' });
+    } finally {
+      setTogglingWorkflowId(null);
+    }
+  }
+
   async function duplicateVariant() {
     if (!selected) return;
     setSaving(true);
@@ -7272,7 +7437,13 @@ export default function NotificationWorkflowsPanel({
       });
       await refreshHealth();
     } catch (error) {
-      setMessage({ type: 'error', text: error.message });
+      // Validation failures carry the specific graph problems — show them
+      // instead of the generic "definition is invalid" line (QA 07-07 #5).
+      const details = Array.isArray(error.details) ? error.details : [];
+      const text = details.length
+        ? `${details.slice(0, 2).join(' · ')}${details.length > 2 ? ` (+${details.length - 2} more)` : ''}`
+        : error.message;
+      setMessage({ type: 'error', text });
     } finally {
       setSaving(false);
     }
@@ -8255,13 +8426,37 @@ export default function NotificationWorkflowsPanel({
 
     if (selectedNode.type === 'trigger') {
       const triggerType = selectedNode.data?.triggerType;
+      const triggerLocked = selected?.isDefaultVariant === true;
       return (
         <div className="space-y-3">
           <div>
-            <label className="text-xs font-medium uppercase text-gray-500">Event</label>
-            <div className="mt-1 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900">
-              {EVENT_LABELS[triggerType] || triggerType}
-            </div>
+            <label className="text-xs font-medium uppercase text-gray-500" htmlFor="trigger-event-select">Event</label>
+            {triggerLocked ? (
+              <div className="mt-1 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900">
+                {EVENT_LABELS[triggerType] || triggerType}
+              </div>
+            ) : (
+              <select
+                id="trigger-event-select"
+                value={triggerType}
+                onChange={(event) => changeTriggerType(event.target.value)}
+                disabled={saving}
+                className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900"
+              >
+                {TRIGGER_PICKER_GROUPS.map((group) => (
+                  <optgroup key={group.label} label={group.label}>
+                    {group.triggers.map((option) => (
+                      <option key={option.value} value={option.value}>{EVENT_LABELS[option.value] || option.value}</option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            )}
+            <p className="mt-1 text-[11px] text-gray-400 normal-case">
+              {triggerLocked
+                ? 'Default variants anchor their trigger group — duplicate the workflow to move it to another trigger.'
+                : 'Changing the event keeps your steps; a live workflow is paused until you re-publish on the new trigger.'}
+            </p>
           </div>
           {/* Time-trigger thresholds — read by the time-trigger worker. */}
           {triggerType === 'ticket.aging' && (
@@ -8792,14 +8987,29 @@ export default function NotificationWorkflowsPanel({
     if (selectedNode.type === 'propose_reply') {
       return (
         <div className="space-y-3">
-          <p className="text-sm text-gray-600">Stages the upstream LLM draft on the ticket as an <strong>AI proposed reply</strong>. An agent approves &amp; sends, edits it in the composer, or dismisses it — nothing is emailed automatically.</p>
-          <p className="text-[11px] text-gray-400">Requires an LLM Generate node earlier in the flow. A newer proposal supersedes an older open one on the same ticket.</p>
+          <p className="text-sm text-gray-600">Stages the upstream draft on the ticket as a <strong>proposed reply</strong>. An agent approves &amp; sends, edits it in the composer, or dismisses it — nothing is emailed automatically.</p>
+          <p className="text-[11px] text-gray-400">Needs an LLM Generate or Template step earlier in the flow (the LLM draft wins when both exist). A newer proposal supersedes an older open one on the same ticket.</p>
+          <button
+            type="button"
+            onClick={() => setLlmHelpTopic('aiDraftedReplies')}
+            className="text-xs font-medium text-indigo-600 hover:text-indigo-700"
+          >
+            How AI-drafted replies work →
+          </button>
         </div>
       );
     }
 
     if (selectedNode.type === 'run_workflow') {
       const candidates = (workflows || []).filter((w) => w.id !== selected?.id && !w.archivedAt);
+      // Purpose-built sub-workflows (manual trigger) lead the list.
+      const subWorkflows = candidates.filter((w) => w.triggerType === 'manual');
+      const eventWorkflows = candidates.filter((w) => w.triggerType !== 'manual');
+      const candidateOption = (w) => (
+        <option key={w.id} value={w.id}>
+          {workflowDisplayName(w)} {w.publishedVersion ? `(v${w.publishedVersion})` : '(never published)'}
+        </option>
+      );
       return (
         <div className="space-y-3">
           <label className="block text-xs font-medium uppercase text-gray-500">
@@ -8810,11 +9020,16 @@ export default function NotificationWorkflowsPanel({
               className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
             >
               <option value="">Choose a workflow…</option>
-              {candidates.map((w) => (
-                <option key={w.id} value={w.id}>
-                  {workflowDisplayName(w)} {w.publishedVersion ? `(v${w.publishedVersion})` : '(never published)'}
-                </option>
-              ))}
+              {subWorkflows.length > 0 && (
+                <optgroup label="Sub-workflows (manual trigger)">
+                  {subWorkflows.map(candidateOption)}
+                </optgroup>
+              )}
+              {eventWorkflows.length > 0 && (
+                <optgroup label={subWorkflows.length > 0 ? 'Event workflows' : 'Workflows'}>
+                  {eventWorkflows.map(candidateOption)}
+                </optgroup>
+              )}
             </select>
           </label>
           <label className="block text-xs font-medium uppercase text-gray-500">
@@ -9700,8 +9915,18 @@ export default function NotificationWorkflowsPanel({
                 <WorkflowTemplatesMenu saving={saving} onInstalled={loadWorkflows} setMessage={setMessage} />
                 <button
                   type="button"
-                  onClick={createVariant}
+                  onClick={() => setNewWorkflowOpen({})}
                   disabled={saving}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md bg-indigo-600 px-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+                >
+                  <Plus className="h-4 w-4" />
+                New workflow
+                </button>
+                <button
+                  type="button"
+                  onClick={createVariant}
+                  disabled={saving || !selected}
+                  title="Create a routing variant of the selected workflow (same trigger, different audience)"
                   className="inline-flex h-8 items-center gap-1.5 rounded-md border border-indigo-200 bg-indigo-50 px-2.5 text-sm font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
                 >
                   <Plus className="h-4 w-4" />
@@ -10029,7 +10254,18 @@ export default function NotificationWorkflowsPanel({
                   </div>
                 ) : (
                   <div className="settings-scrollbar min-h-0 flex-1 overflow-y-auto border-t border-slate-100">
-                    <WorkflowList workflows={visibleWorkflows} selectedId={selected?.id} onSelect={handleWorkflowSelect} />
+                    <WorkflowIndex
+                      workflows={visibleWorkflows}
+                      selectedId={selected?.id}
+                      onSelect={handleWorkflowSelect}
+                      onToggleEnabled={toggleEnabledFor}
+                      togglingId={togglingWorkflowId}
+                      onCreateForTrigger={(triggerType) => setNewWorkflowOpen({ trigger: triggerType })}
+                      getDisplayName={workflowDisplayName}
+                      getVisuals={triggerVisuals}
+                      eventLabels={EVENT_LABELS}
+                      isAfterHours={isAfterHoursWorkflow}
+                    />
                   </div>
                 )}
               </aside>
@@ -10213,6 +10449,13 @@ export default function NotificationWorkflowsPanel({
         saving={saving}
         onCancel={() => setArchiveConfirm(null)}
         onConfirm={() => toggleArchived(archiveConfirm?.archived === true)}
+      />
+      <NewWorkflowDialog
+        open={Boolean(newWorkflowOpen)}
+        initialTrigger={newWorkflowOpen?.trigger || null}
+        onClose={() => setNewWorkflowOpen(false)}
+        onCreated={async (id) => { await loadWorkflows(id); setWorkflowListCollapsed(false); }}
+        setMessage={setMessage}
       />
       <WorkflowDeleteConfirmModal
         workflow={deleteConfirm?.workflow || null}

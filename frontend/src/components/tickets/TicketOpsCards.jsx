@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Check, ChevronDown, Copy, Link2, Loader2, Timer, Wand2, X } from 'lucide-react';
+import { Check, ChevronDown, Copy, Link2, Loader2, Wand2, X } from 'lucide-react';
 import { ticketsAPI } from '../../services/api';
 
 /**
@@ -55,15 +55,17 @@ export function TicketLinksCard({ ticketId, canWrite = false, canMerge = false, 
   useEffect(() => { load(); }, [load, refreshToken]);
 
   const add = async () => {
-    const id = Number(targetId);
-    if (!Number.isFinite(id) || id <= 0 || busy) return;
+    // Accepts what people see: TP-1042, #231164, or a bare number — the
+    // backend resolves it workspace-scoped (QA 07-07 #6).
+    const ref = targetId.trim();
+    if (!ref || busy) return;
     setBusy(true); setError(null);
     try {
       if (kind === 'merge_into') {
-        await ticketsAPI.mergeTicket(ticketId, id, notifyRequester);
+        await ticketsAPI.mergeTicket(ticketId, ref, notifyRequester);
         onMerged?.();
-      } else if (kind === 'duplicate_of') await ticketsAPI.markDuplicateOf(ticketId, id);
-      else await ticketsAPI.addLink(ticketId, id, kind);
+      } else if (kind === 'duplicate_of') await ticketsAPI.markDuplicateOf(ticketId, ref);
+      else await ticketsAPI.addLink(ticketId, ref, kind);
       setTargetId(''); setAdding(false);
       await load();
     } catch (e) {
@@ -134,8 +136,8 @@ export function TicketLinksCard({ ticketId, canWrite = false, canMerge = false, 
             <input
               value={targetId}
               onChange={(e) => setTargetId(e.target.value)}
-              placeholder="Ticket id (from its URL)"
-              aria-label="Ticket id"
+              placeholder="TP-1042 or 231164"
+              aria-label="Ticket reference"
               className="tp-focus-ring flex-1 min-w-0 text-xs border border-slate-200 rounded-md px-2 py-1"
             />
             <button
@@ -152,10 +154,10 @@ export function TicketLinksCard({ ticketId, canWrite = false, canMerge = false, 
               {suggestions.map((s) => (
                 <button
                   key={s.id}
-                  onClick={() => setTargetId(String(s.id))}
+                  onClick={() => setTargetId(s.displayRef)}
                   title={`${s.subject || '(no subject)'} — ${s.why}`}
                   className={`tp-focus-ring inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[10px] font-mono font-semibold ${
-                    String(s.id) === targetId
+                    s.displayRef === targetId
                       ? 'bg-violet-100 border-violet-300 text-violet-800'
                       : 'bg-violet-50 border-violet-200 text-violet-700 hover:bg-violet-100'
                   }`}
@@ -282,81 +284,7 @@ export function CustomFieldsCard({ ticketId, values = {}, canWrite = false, onSa
   );
 }
 
-export function TimeTrackingCard({ ticketId, ticket, canWrite = false, onLogged }) {
-  const [adding, setAdding] = useState(false);
-  const [minutes, setMinutes] = useState('');
-  const [billable, setBillable] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(null);
-
-  const total = ticket?.timeSpentMinutes || 0;
-  const billableTotal = ticket?.billableMinutes || 0;
-  const fmt = (m) => (m >= 60 ? `${Math.floor(m / 60)}h ${m % 60 ? `${m % 60}m` : ''}`.trim() : `${m}m`);
-
-  const log = async () => {
-    const amount = Number(minutes);
-    if (!Number.isInteger(amount) || amount < 1 || busy) return;
-    setBusy(true); setError(null);
-    try {
-      await ticketsAPI.logTime(ticketId, { minutes: amount, billable });
-      setMinutes(''); setAdding(false);
-      onLogged?.();
-    } catch (e) {
-      setError(e.response?.data?.message || e.message || 'Log failed');
-    }
-    setBusy(false);
-  };
-
-  if (total === 0 && !canWrite) return null;
-
-  return (
-    <div className="tp-card rounded-xl p-3" data-testid="time-tracking-card">
-      <div className="flex items-center gap-1.5 mb-1.5">
-        <Timer className="w-3.5 h-3.5 text-slate-400" aria-hidden="true" />
-        <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Time tracked</span>
-        {canWrite && (
-          <button
-            onClick={() => setAdding((v) => !v)}
-            className="tp-focus-ring ml-auto text-[11px] font-medium text-blue-600 hover:text-blue-700 px-1.5 py-0.5 rounded"
-          >
-            {adding ? 'Cancel' : '+ Log time'}
-          </button>
-        )}
-      </div>
-      <p className="text-sm font-semibold text-slate-800 tabular-nums">
-        {fmt(total)}
-        {billableTotal > 0 && <span className="ml-2 text-xs font-medium text-emerald-600">{fmt(billableTotal)} billable</span>}
-      </p>
-      {adding && (
-        <div className="mt-2 space-y-1.5">
-          <div className="flex items-center gap-1.5">
-            <input
-              type="number"
-              min="1"
-              value={minutes}
-              onChange={(e) => setMinutes(e.target.value)}
-              placeholder="minutes"
-              aria-label="Minutes to log"
-              className="tp-focus-ring w-24 text-xs border border-slate-200 rounded-md px-2 py-1 tabular-nums"
-            />
-            <label className="flex items-center gap-1 text-xs text-slate-500">
-              <input type="checkbox" checked={billable} onChange={(e) => setBillable(e.target.checked)} className="tp-focus-ring" />
-              billable
-            </label>
-            <button
-              onClick={log}
-              disabled={busy || !minutes}
-              className="tp-focus-ring ml-auto px-2.5 py-1 rounded-md bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 disabled:opacity-60"
-            >
-              {busy ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" /> : 'Log'}
-            </button>
-          </div>
-          {error && <p className="text-[10px] text-red-500">{error}</p>}
-        </div>
-      )}
-    </div>
-  );
-}
+// Time tracking was retired on request (QA 07-07 #7).
 
 export function MacroMenu({ ticketId, onApplied, disabled = false }) {
   const [open, setOpen] = useState(false);

@@ -94,14 +94,14 @@ The v3.0.5 features exist end-to-end but not *everywhere*. Close the loops:
 - [x] Related-tickets card gains "similar by content" section (labeled as suggestion, with distance); merge modal suggests likely duplicates
 - [x] Tests: storage round-trip, query shape; embedding calls mocked
 
-## Phase 6 — Wrap & ship
+## Phase 6 — Wrap & ship ✅ DONE
 
 - [x] Full lint + backend/frontend suites green (backend 692/693 — only the pre-existing CC-resolver failure; frontend 69/69; both lints 0 errors)
 - [x] Version → 3.0.8-preview (renumbered — main took 3.0.6/3.0.7 for the live-update releases) + in-app changelog entry
 - [x] Dev self-test: scripts/selftest-306.mjs — 15/15 (presence lifecycle, webhook CRUD/signing/SSRF/failure accounting, 87% similar-by-content sibling match, live Haiku sentiment stored + served); throwaways cleaned up. Playwright visual pass on palette + queue peek.
 - [x] Migrations: 3 applied to dev (scheduled_ticket_attachments, webhook_subscriptions, sentiment_and_embeddings); prod via `migrate deploy` at deploy
 - [x] QA test doc: docs/QA_Test_Plan_v3.0.8.docx
-- [ ] Deploy to prod on user go-ahead → verify
+- [x] Deployed to prod as PR #108 (renumbered v3.0.8-preview — main had taken 3.0.6/3.0.7): 3 migrations via migrate deploy, health 3.0.8-preview healthy, new routes answering, frontend bundle carries the version, one-off embedding backfill run post-deploy
 
 ---
 

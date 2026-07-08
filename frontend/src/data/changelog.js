@@ -1,6 +1,20 @@
-export const APP_VERSION = '3.0.9-preview';
+export const APP_VERSION = '3.0.10-preview';
 
 export const changelog = [
+  {
+    version: '3.0.10-preview',
+    date: 'July 8, 2026',
+    entries: [
+      { type: 'new', html: '<strong>➕ Create workflows from scratch</strong> — a real “New workflow” button: name it, pick a trigger from a plain-language picker (or start from the template gallery, now front and center), and get a draft to build on. Choose <strong>Sub-workflow</strong> to make a reusable flow that only runs when another workflow calls it. Triggers are also <strong>editable</strong> now — move a workflow to a different event without rebuilding it.' },
+      { type: 'fixed', html: '<strong>🤖 AI first-reply draft template actually runs</strong> — a deep audit found the template was fully built but could never fire: after-hours routing silently suppressed it at night, and variant routing suppressed installed templates whenever a default workflow existed. Both fixed — email-free automation now runs around the clock and installed templates run alongside your default workflows. Tickets with a staged draft show a <strong>Draft</strong> chip right on the queue.' },
+      { type: 'fixed', html: '<strong>“Stage for approval” publish error</strong> — staging a <em>templated</em> reply for human approval is now supported (not just LLM drafts), and failed saves finally tell you <em>which</em> rule broke instead of “definition is invalid”. The editor also flags the problem before you save.' },
+      { type: 'new', html: '<strong>📨 Ticket source condition</strong> — workflows can route on how a ticket arrived: Email, Portal, Phone, API, Webhook or Agent-created — across both origins. Ticket Pulse–born tickets now record their channel (app, inbound email, API), ready for the portal and webhook intake we’re planning.' },
+      { type: 'improved', html: '<strong>🗂️ Workflow list, redesigned</strong> — search-as-you-type, Enabled/Failing filters, an inline on/off toggle on every row, last-run health with relative times, and a pinned “needs attention” strip for failing workflows. The “Add step” palette is grouped with one-line explanations, and canvas nodes got a visual refresh.' },
+      { type: 'fixed', html: '<strong>🔗 Link tickets by what you see</strong> — linking, duplicates and merges now accept TP-1042 / #231164 / plain numbers (workspace-scoped), with an error that names the ref when nothing matches. Suggestion chips fill the visible reference.' },
+      { type: 'improved', html: '<strong>Internal notes: Quick notes only</strong> — the note composer no longer offers requester-facing reply templates; Quick notes are the internal canned layer.' },
+      { type: 'improved', html: '<strong>Time tracking retired</strong> — the log-time card and API are gone (past entries stay readable in each ticket’s audit trail).' },
+    ],
+  },
   {
     version: '3.0.9-preview',
     date: 'July 8, 2026',

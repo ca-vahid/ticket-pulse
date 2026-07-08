@@ -2,7 +2,7 @@ import { z } from 'zod';
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { ValidationError, NotFoundError } from '../utils/errors.js';
-import { TICKET_ORIGIN, APP_NATIVE_TRIGGER_SOURCE, ticketDisplayRef } from '../utils/ticketOrigin.js';
+import { TICKET_ORIGIN, TICKET_SOURCE, TICKET_SOURCE_LABELS, APP_NATIVE_TRIGGER_SOURCE, ticketDisplayRef } from '../utils/ticketOrigin.js';
 import noiseRuleService from './noiseRuleService.js';
 import ticketActivityRepository from './ticketActivityRepository.js';
 import ticketThreadRepository from './ticketThreadRepository.js';
@@ -17,11 +17,8 @@ import { sseManager } from '../routes/sse.routes.js';
 export const NATIVE_TICKET_STATUSES = ['Open', 'Pending', 'Resolved', 'Closed'];
 const TERMINAL_STATUSES = ['Resolved', 'Closed'];
 
-// FreshService's numeric source channels; org-custom codes (1001+) fall back to "Source N".
-const FS_SOURCE_LABELS = {
-  1: 'Email', 2: 'Portal', 3: 'Phone', 4: 'Chat', 5: 'Feedback widget',
-  6: 'Yammer', 7: 'AWS CloudWatch', 8: 'PagerDuty', 9: 'Walk-up', 10: 'Slack',
-};
+// Arrival-channel labels live in utils/ticketOrigin.js (TICKET_SOURCE_LABELS):
+// FS's numeric codes 1–10 plus the TP extension range (API/Webhook/Agent).
 
 // Accepts an array or a comma/semicolon-separated string of addresses.
 const emailListSchema = z.preprocess(
@@ -554,10 +551,11 @@ class TicketService {
       }),
     ]);
 
-    const [incomingByTicket, aiByTicket, bypassByTicket] = await Promise.all([
+    const [incomingByTicket, aiByTicket, bypassByTicket, proposedTicketIds] = await Promise.all([
       this._lastPublicEntryIncoming(items.map((t) => t.id)),
       this._aiRunStateByTicket(items.map((t) => t.id)),
       this._aiBypassByTicket(items),
+      this._openProposalTicketIds(items.map((t) => t.id)),
     ]);
 
     return {
@@ -571,11 +569,28 @@ class TicketService {
         stateChip: deriveStateChip(t, incomingByTicket.get(t.id) === true),
         ai: aiByTicket.get(t.id) || null,
         aiBypass: bypassByTicket.get(t.id) || null,
+        // A workflow-drafted reply is waiting for a human (QA 07-07 #4:
+        // drafts sat unseen unless someone opened the ticket).
+        hasProposedReply: proposedTicketIds.has(t.id),
       })),
       total,
       page,
       pageSize,
     };
+  }
+
+  async _openProposalTicketIds(ticketIds) {
+    if (!ticketIds.length) return new Set();
+    try {
+      const rows = await prisma.ticketProposedReply.findMany({
+        where: { ticketId: { in: ticketIds }, status: 'proposed' },
+        select: { ticketId: true },
+      });
+      return new Set(rows.map((r) => r.ticketId));
+    } catch (err) {
+      logger.warn(`proposed-reply lookup failed (non-fatal): ${err.message}`);
+      return new Set();
+    }
   }
 
   /**
@@ -1179,7 +1194,7 @@ class TicketService {
     const sources = sourceRows
       .map((row) => ({
         value: row.source,
-        label: FS_SOURCE_LABELS[row.source] || `Source ${row.source}`,
+        label: TICKET_SOURCE_LABELS[row.source] || `Source ${row.source}`,
         count: row._count._all,
       }))
       .sort((a, b) => b.count - a.count);
@@ -1405,7 +1420,7 @@ class TicketService {
 
   // ------------------------------------------------------------------ create
 
-  async createTicket(workspaceId, input, actor) {
+  async createTicket(workspaceId, input, actor, { sourceChannel = TICKET_SOURCE.AGENT } = {}) {
     const workspace = await this._getWorkspace(workspaceId);
     if (!workspace.nativeTicketingEnabled) {
       throw new ValidationError('Native ticketing is not enabled for this workspace');
@@ -1464,6 +1479,9 @@ class TicketService {
         lastRealActivityAt: now,
         isNoise,
         noiseRuleMatched: ruleId,
+        // Arrival channel (QA 07-07 #1): Agent for the app UI; email ingest
+        // and the public API pass their own channel.
+        source: sourceChannel,
         lastIngestSource: 'ticketpulse_native',
         lastIngestedAt: now,
         ...(slaDueDates.frDueBy ? { frDueBy: slaDueDates.frDueBy } : {}),
@@ -1850,35 +1868,10 @@ class TicketService {
     }
   }
 
-  /**
-   * Log time against a ticket (TP's own tracking layer — both origins, never
-   * written to FreshService). Adds to the running totals with an audit entry.
-   */
-  async logTime(ticketId, workspaceId, { minutes, billable = false, note = null } = {}, actor) {
-    const amount = Number(minutes);
-    if (!Number.isInteger(amount) || amount < 1 || amount > 24 * 60) {
-      throw new ValidationError('Time entry must be between 1 minute and 24 hours');
-    }
-    const ticket = await prisma.ticket.findFirst({ where: { id: ticketId, workspaceId } });
-    if (!ticket) throw new NotFoundError(`Ticket ${ticketId} not found in this workspace`);
-
-    const updated = await prisma.ticket.update({
-      where: { id: ticket.id },
-      data: {
-        timeSpentMinutes: (ticket.timeSpentMinutes || 0) + amount,
-        ...(billable
-          ? { billableMinutes: (ticket.billableMinutes || 0) + amount }
-          : { nonBillableMinutes: (ticket.nonBillableMinutes || 0) + amount }),
-      },
-      select: { id: true, timeSpentMinutes: true, billableMinutes: true, nonBillableMinutes: true },
-    });
-    await this._audit(ticket.id, 'time_logged', actor, {
-      minutes: amount,
-      billable: billable === true,
-      ...(note ? { note: String(note).slice(0, 500) } : {}),
-    });
-    return updated;
-  }
+  // Time tracking was retired on request (QA 07-07 #7). The nullable
+  // time_spent/billable columns stay in the schema — dropping them is a
+  // destructive migration with no user-visible upside; old entries remain
+  // readable in the audit trail.
 
   async setNoise(ticketId, workspaceId, { noise = true, resolve = false } = {}, actor) {
     const ticket = await prisma.ticket.findFirst({ where: { id: ticketId, workspaceId } });

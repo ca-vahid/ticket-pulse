@@ -108,7 +108,15 @@ export function selectWorkflowVariants(workflows = [], context = {}, options = {
     }
 
     if (!routingRulePresent(workflow)) {
-      if (!defaultWorkflow) {
+      // Additive workflows are independent automations (draft staging,
+      // webhooks, installed templates) — no rule means "always run alongside
+      // whatever else fires". Exclusive variants COMPETE for one slot, so a
+      // rule-less one is only meaningful when there's no default to lose to.
+      // (QA 07-07 #4: installed templates were silently suppressed here.)
+      if (normalizeRoutingMode(workflow.routingMode) === WORKFLOW_ROUTING_MODES.ADDITIVE) {
+        matched.push(decisionFor(workflow, 'additive_no_rule_always_runs', true));
+        additiveMatches.push(workflow);
+      } else if (!defaultWorkflow) {
         ruleLessCandidates.push(workflow);
       } else {
         suppressed.push(decisionFor(workflow, 'missing_routing_rule'));

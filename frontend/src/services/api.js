@@ -139,6 +139,9 @@ const errorInterceptor = (error) => {
     const errorMessage = error.response.data?.message || error.message;
     const enhancedError = new Error(errorMessage);
     enhancedError.status = status;
+    // Validation errors carry a details array (e.g. workflow definition
+    // issues) — keep it so UIs can show the specific problems.
+    if (error.response.data?.details) enhancedError.details = error.response.data.details;
     throw enhancedError;
   } else if (error.request) {
     // Request made but no response
@@ -622,17 +625,17 @@ export const ticketsAPI = {
   summarize: async (id) => await apiLongTimeout.post(`/tickets/${id}/summarize`),
 
   // Time tracking
-  logTime: async (id, { minutes, billable = false, note = null }) => await api.post(`/tickets/${id}/time`, { minutes, billable, note }),
 
   // Create-form presets
   createTemplates: async () => await api.get('/tickets/create-templates'),
 
   // Explicit ticket links + duplicate-close
   links: async (id) => await api.get(`/tickets/${id}/links`),
-  addLink: async (id, relatedTicketId, kind = 'related_to') => await api.post(`/tickets/${id}/links`, { relatedTicketId, kind }),
+  // relatedTicketRef accepts what users see: TP-1042, #231164, or a bare number.
+  addLink: async (id, relatedTicketRef, kind = 'related_to') => await api.post(`/tickets/${id}/links`, { relatedTicketRef, kind }),
   removeLink: async (id, linkId) => await api.delete(`/tickets/${id}/links/${linkId}`),
-  markDuplicateOf: async (id, targetId) => await api.post(`/tickets/${id}/duplicate-of/${targetId}`),
-  mergeTicket: async (id, targetTicketId, notifyRequester = false) => await api.post(`/tickets/${id}/merge`, { targetTicketId, notifyRequester }),
+  markDuplicateOf: async (id, targetRef) => await api.post(`/tickets/${id}/duplicate-of/${encodeURIComponent(targetRef)}`),
+  mergeTicket: async (id, targetTicketRef, notifyRequester = false) => await api.post(`/tickets/${id}/merge`, { targetTicketRef, notifyRequester }),
 
   // Macros (quick-action bundles)
   macros: async () => await api.get('/tickets/macros'),
@@ -1252,6 +1255,7 @@ export const notificationWorkflowAPI = {
   createVariant: (data) => api.post('/notification-workflows', data),
   duplicateVariant: (id, data = {}) => api.post(`/notification-workflows/${id}/duplicate`, data),
   updateRouting: (id, data) => api.put(`/notification-workflows/${id}/routing`, data),
+  changeTrigger: (id, triggerType) => api.put(`/notification-workflows/${id}/trigger`, { triggerType }),
   setArchived: (id, archived) => api.put(`/notification-workflows/${id}/archive`, { archived }),
   deleteArchived: (id) => api.delete(`/notification-workflows/${id}`),
   getRuns: (id, params = {}) => api.get(`/notification-workflows/${id}/runs`, { params }),
