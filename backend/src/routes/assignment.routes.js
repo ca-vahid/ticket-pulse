@@ -30,6 +30,7 @@ import { normalizeAiModel, providerForModel } from '../utils/aiProviders.js';
 import { attachSseDisconnectAbort } from '../utils/sseDisconnect.js';
 import { requireReviewer, requireAdmin } from '../middleware/auth.js';
 import appConfig from '../config/index.js';
+import { isSkillHierarchyWorkspace } from '../utils/workspaceFeatureFlags.js';
 import prisma from '../services/prisma.js';
 import logger from '../utils/logger.js';
 
@@ -120,6 +121,10 @@ router.get('/config', requireAdmin, asyncHandler(async (req, res) => {
     anthropicConfigured: providerGateway.isConfigured('anthropic'),
     openAiConfigured: providerGateway.isConfigured('openai'),
     graphConfigured: graphMailClient.isConfigured(),
+    // Whether this workspace uses the hierarchical category editor
+    // (draft/publish/drift/reclassify) — env-driven, mirrors the backend
+    // service gates so the UI can't drift from what the API allows.
+    skillHierarchyEnabled: isSkillHierarchyWorkspace(req.workspaceId),
   });
 }));
 

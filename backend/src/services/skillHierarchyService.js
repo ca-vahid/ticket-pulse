@@ -12,7 +12,7 @@ const TP_SUBSKILL_PARENT_FIELD = 'parent_skill';
 const LEVEL_RANK = { basic: 1, intermediate: 2, advanced: 3, expert: 4 };
 function assertSkillHierarchyWorkspace(workspaceId) {
   if (!isSkillHierarchyWorkspace(workspaceId)) {
-    throw new ValidationError('Category/Subcategory migration is only enabled for the IT workspace in this phase');
+    throw new ValidationError('The category/subcategory hierarchy editor is not enabled for this workspace');
   }
 }
 
