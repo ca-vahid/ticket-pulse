@@ -4,7 +4,7 @@ import { motion } from 'motion/react';
 import {
   Activity, AlertCircle, ArrowDownWideNarrow, ArrowUpNarrowWide, CalendarDays, Check,
   CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, CornerUpRight, Download, Inbox,
-  ListFilter, Loader2, MessageSquare, Plus, Rows2, Rows3, Rows4, Search, ShieldCheck, Sparkles, Ticket, UserRound, X,
+  ListFilter, Loader2, MessageSquare, Plus, Rows2, Rows4, Search, ShieldCheck, Sparkles, Ticket, UserRound, X,
 } from 'lucide-react';
 import AppHeader from '../components/AppHeader';
 import MobileTabBar from '../components/nav/MobileTabBar';
@@ -21,7 +21,7 @@ import {
   PersonAvatar, PriorityDot, SlaChip, StateChip, StatusPill, TagChip, TypePill, UnassignedBadge,
   PRIORITY_LABELS, PRIORITY_STRIP_COLORS, ticketCategoryLabels, timeAgo,
 } from '../components/tickets/ticketUi';
-import { assignmentAPI, ticketsAPI } from '../services/api';
+import { ticketsAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useWorkspaceRole } from '../components/nav/navDestinations';
@@ -87,16 +87,15 @@ const SEGMENTS = [
 ];
 const SEGMENT_COUNT_KEY = { all: 'all', open: 'open', unassigned: 'unassigned', awaiting: 'awaiting', due_today: 'dueToday', overdue: 'overdue', resolved: 'resolved' };
 
-// Shared row-grid template: no REF column (nobody remembers the number — it
-// lives small under the subject); Type is a tiny INC/REQ code so Category
-// gets the width hierarchical names actually need.
-// Subject AND category flex with viewport width (extra space goes to the two
-// columns that hold long text); the rest stay fixed. Widening the page cap
-// (below) plus these flexible tracks kills the truncation on wide screens.
-// QA 07-06 #6: the type track was 58px — narrower than the pill + cell padding
-// (icon 18 + gap 6 + "INC"/"REQ" ~28 + px-3×2 = ~80px), so the pill overflowed
-// flush against the category text. 84px gives every column the same rhythm.
-const ROW_GRID = 'grid grid-cols-[6px_minmax(0,1.6fr)_84px_minmax(160px,1fr)_214px_86px_84px_78px] items-center';
+// Two row layouts (user picks via the toolbar toggle). No REF column — the
+// number lives small under the subject.
+//   COMPACT: the Type (INC/REQ) tag folds into the title line, so its column
+//     is gone and that width flows into the subject — kills the truncation
+//     that a narrow subject track caused. 7 tracks.
+//   ROOMY: the subject spans row 1 full-width; these are the row-2 meta tracks
+//     (a slim type slot, then category/assignee/status/due/updated). 7 tracks.
+const GRID_COMPACT = 'grid grid-cols-[6px_minmax(0,2.4fr)_minmax(150px,1fr)_210px_92px_88px_74px] items-center';
+const GRID_ROOMY = 'grid grid-cols-[6px_60px_minmax(150px,1fr)_210px_92px_88px_74px] items-stretch';
 // No vertical grid lines (modern list feel) — horizontal row dividers only.
 const CELL = 'px-3 self-stretch flex items-center min-w-0';
 
@@ -306,6 +305,7 @@ export default function Tickets() {
   const impactFilter = searchParams.get('impact') || '';
   const urgencyFilter = searchParams.get('urgency') || '';
   const view = searchParams.get('view') || '';
+  const aiState = searchParams.get('aiState') || '';
   const requesterId = searchParams.get('requesterId') || '';
   const requesterName = searchParams.get('requesterName') || '';
 
@@ -375,11 +375,12 @@ export default function Tickets() {
     }
     if (impactFilter) params.impact = impactFilter;
     if (urgencyFilter) params.urgency = urgencyFilter;
+    if (aiState) params.aiState = aiState;
     if (requesterId) params.requesterId = requesterId;
     if (debouncedSearch) params.q = debouncedSearch;
     return params;
   }, [page, statuses, assignee, priority, origin, segment, sort, dir, debouncedSearch,
-    type, category, subcategory, group, source, createdFrom, createdTo, due, noise, tag, tagMode, impactFilter, urgencyFilter, requesterId]);
+    type, category, subcategory, group, source, createdFrom, createdTo, due, noise, tag, tagMode, impactFilter, urgencyFilter, aiState, requesterId]);
 
   // Post-refresh row highlights: ticketId → 'new' | 'updated'. Set when a
   // refresh is asked to diff against the previous page (update-pill apply,
@@ -440,13 +441,22 @@ export default function Tickets() {
   const refreshTimerRef = useRef(null);
   const [pulse, setPulse] = useState(0); // bumps so an open preview re-fetches
   const pendingIdsRef = useRef(new Set());
-  // Row density — helpdesk users live in this list all day; let them trade
-  // whitespace for rows-per-screen. Persisted.
-  const [density, setDensity] = useState(() => {
-    try { return localStorage.getItem('tp_ticket_density') || 'comfortable'; } catch { return 'comfortable'; }
+  // Row layout — the two ends of the old density spectrum, each a real layout:
+  //   'compact' — type folds into the title, one tight line per ticket (scan a
+  //               big queue). 'roomy' — the title gets its own full-width line
+  //               with everything else beneath (read, nothing ever clips).
+  // Persisted; migrates the old 3-way density value in place.
+  const [layout, setLayout] = useState(() => {
+    try {
+      const v = localStorage.getItem('tp_ticket_layout');
+      if (v === 'compact' || v === 'roomy') return v;
+      // Migrate legacy density: comfortable → roomy, compact/dense → compact.
+      return localStorage.getItem('tp_ticket_density') === 'comfortable' ? 'roomy' : 'compact';
+    } catch { return 'compact'; }
   });
-  useEffect(() => { try { localStorage.setItem('tp_ticket_density', density); } catch { /* no-op */ } }, [density]);
-  const cellPad = { comfortable: 'py-3', compact: 'py-2', dense: 'py-1' }[density] || 'py-3';
+  useEffect(() => { try { localStorage.setItem('tp_ticket_layout', layout); } catch { /* no-op */ } }, [layout]);
+  const roomy = layout === 'roomy';
+  const cellPad = roomy ? 'py-1.5' : 'py-2.5';
   const [pendingCount, setPendingCount] = useState(0);
   const lastLocalMutationRef = useRef(0);
 
@@ -460,15 +470,6 @@ export default function Tickets() {
     setToast({ message, undo });
     toastTimerRef.current = setTimeout(() => setToast(null), undo ? 5000 : 3000);
   }, []);
-  const [aiReviewTotal, setAiReviewTotal] = useState(0);
-  const fetchAiReviewTotal = useCallback(async () => {
-    try {
-      const res = await assignmentAPI.getQueue({ limit: 1 });
-      setAiReviewTotal(Number(res?.total) || 0);
-    } catch { /* pipeline disabled or no reviewer rights — the chip just hides */ }
-  }, []);
-  useEffect(() => { if (workspaceId && canReview) fetchAiReviewTotal(); }, [workspaceId, canReview, fetchAiReviewTotal]);
-
   // Mirror of the rendered list for diffing/lookup inside SSE callbacks.
   const ticketsRef = useRef([]);
   useEffect(() => { ticketsRef.current = tickets; }, [tickets]);
@@ -513,7 +514,6 @@ export default function Tickets() {
     // counting toward the manual-refresh pill — AI runs aren't "unread
     // updates", they're a process the queue should show happening.
     if (data?.action === 'pipeline') {
-      fetchAiReviewTotal();
       const tid = Number(data.ticketId);
       if (tid && ticketsRef.current.some((t) => t.id === tid)) {
         if (aiLiveTimerRef.current) clearTimeout(aiLiveTimerRef.current);
@@ -534,7 +534,7 @@ export default function Tickets() {
     if (Date.now() - lastLocalMutationRef.current < 2500) return;
     pendingIdsRef.current.add(data?.ticketId ?? `evt-${Date.now()}`);
     setPendingCount(pendingIdsRef.current.size);
-  }, [fetchStats, fetchAiReviewTotal]);
+  }, [fetchStats]);
   // Presence dots (gap plan 2 P4.1): who has which ticket open right now.
   // Snapshot on load, then live deltas over the same SSE connection.
   const [presenceMap, setPresenceMap] = useState({}); // ticketId -> [{email, name}]
@@ -994,39 +994,49 @@ export default function Tickets() {
                       </div>
                     )}
                   </div>
-                  {/* Row density — trade whitespace for rows-per-screen */}
-                  <div className="hidden md:inline-flex items-center rounded-lg border border-input bg-white overflow-hidden" role="group" aria-label="Row density">
+                  {/* Row layout — Compact (tight, type folds into the title) vs
+                      Roomy (title on its own line). The two ends of density. */}
+                  <div className="hidden md:inline-flex items-center rounded-lg border border-input bg-white overflow-hidden" role="group" aria-label="Row layout">
                     {[
-                      { key: 'comfortable', Icon: Rows2, label: 'Comfortable' },
-                      { key: 'compact', Icon: Rows3, label: 'Compact' },
-                      { key: 'dense', Icon: Rows4, label: 'Dense' },
-                    ].map(({ key, Icon, label }) => (
+                      { key: 'compact', Icon: Rows4, label: 'Compact', hint: 'Type folds into the title — one tight line per ticket. Best for scanning.' },
+                      { key: 'roomy', Icon: Rows2, label: 'Roomy', hint: 'The title gets its own line, everything else beneath. Best for reading.' },
+                    ].map(({ key, Icon, label, hint }) => (
                       <button
                         key={key}
-                        onClick={() => setDensity(key)}
-                        aria-pressed={density === key}
-                        title={`${label} rows`}
-                        className={`tp-focus-ring p-2 transition-colors ${density === key ? 'bg-blue-50 text-blue-600' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'}`}
+                        onClick={() => setLayout(key)}
+                        aria-pressed={layout === key}
+                        title={hint}
+                        className={`tp-focus-ring inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold transition-colors ${layout === key ? 'bg-blue-50 text-blue-600' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'}`}
                       >
                         <Icon className="w-4 h-4" aria-hidden="true" />
+                        {label}
                       </button>
                     ))}
                   </div>
                 </div>
 
-                {/* Top pagination + Assignment Review connector — controls at both ends */}
-                {view !== 'scheduled' && !isLoading && !loadError && (tickets.length > 0 || aiReviewTotal > 0) && (
+                {/* Top pagination + AI-approval worklist connector — controls at both ends */}
+                {view !== 'scheduled' && !isLoading && !loadError && (tickets.length > 0 || (stats?.awaitingApproval || 0) > 0) && (
                   <div className="flex flex-wrap items-center gap-2 mb-2">
-                    {aiReviewTotal > 0 && (
-                      <Link
-                        to="/assignments/queue"
-                        className="tp-focus-ring inline-flex items-center gap-1.5 pl-2 pr-2.5 py-1 rounded-full border border-indigo-200 bg-indigo-50/80 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 shadow-subtle"
-                        title="AI recommendations waiting for a human decision — opens Assignment Review"
+                    {(stats?.awaitingApproval || 0) > 0 && (
+                      <button
+                        onClick={() => setParams({ aiState: aiState === 'suggested' ? null : 'suggested', segment: null })}
+                        aria-pressed={aiState === 'suggested'}
+                        className={`tp-focus-ring inline-flex items-center gap-1.5 pl-2 pr-2.5 py-1 rounded-full border text-xs font-semibold shadow-subtle transition-colors ${
+                          aiState === 'suggested'
+                            ? 'border-indigo-400 bg-indigo-100 text-indigo-800'
+                            : 'border-indigo-200 bg-indigo-50/80 text-indigo-700 hover:bg-indigo-100'
+                        }`}
+                        title={aiState === 'suggested'
+                          ? 'Showing tickets awaiting your AI-suggestion approval — click to clear'
+                          : 'Filter to tickets whose AI recommendation is waiting for your decision'}
                       >
                         <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
-                        {aiReviewTotal} AI suggestion{aiReviewTotal === 1 ? '' : 's'} awaiting review
-                        <ChevronRight className="w-3 h-3" aria-hidden="true" />
-                      </Link>
+                        {stats.awaitingApproval} awaiting AI approval
+                        {aiState === 'suggested'
+                          ? <X className="w-3 h-3" aria-hidden="true" />
+                          : <ChevronRight className="w-3 h-3" aria-hidden="true" />}
+                      </button>
                     )}
                     {tickets.length > 0 && (
                       <div className="ml-auto">
@@ -1076,24 +1086,38 @@ export default function Tickets() {
                             className="tp-focus-ring rounded border-slate-300 text-blue-600"
                           />
                         </span>
-                        <div className={`flex-1 ${ROW_GRID} text-[11px] font-semibold uppercase tracking-wide text-slate-400`}>
-                          <span aria-hidden="true" />
-                          <span className={`${CELL} ${cellPad}`}>
-                            <button onClick={() => headerSort('subject')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 rounded">
-                              Subject{sortIndicator('subject')}
-                            </button>
-                          </span>
-                          <span className={`${CELL} ${cellPad}`}>Type</span>
-                          <span className={`${CELL} ${cellPad}`}>Category</span>
-                          <span className={`${CELL} ${cellPad}`}>Assignee</span>
-                          <span className={`${CELL} ${cellPad}`}>Status</span>
-                          <span className={`${CELL} ${cellPad}`}>Due</span>
-                          <span className={`${CELL} ${cellPad} justify-end`}>
-                            <button onClick={() => headerSort('updatedAt')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 rounded text-right">
-                              Updated{sortIndicator('updatedAt')}
-                            </button>
-                          </span>
-                        </div>
+                        {roomy ? (
+                          <div className="flex-1 flex items-center text-[11px] font-semibold uppercase tracking-wide text-slate-400 py-2">
+                            <span className="px-3 flex-1">
+                              <button onClick={() => headerSort('subject')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 rounded">
+                                Ticket{sortIndicator('subject')}
+                              </button>
+                            </span>
+                            <span className="px-3 flex-shrink-0">
+                              <button onClick={() => headerSort('updatedAt')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 rounded">
+                                Status · Due · Updated{sortIndicator('updatedAt')}
+                              </button>
+                            </span>
+                          </div>
+                        ) : (
+                          <div className={`flex-1 ${GRID_COMPACT} text-[11px] font-semibold uppercase tracking-wide text-slate-400`}>
+                            <span aria-hidden="true" />
+                            <span className={`${CELL} ${cellPad}`}>
+                              <button onClick={() => headerSort('subject')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 rounded">
+                                Subject{sortIndicator('subject')}
+                              </button>
+                            </span>
+                            <span className={`${CELL} ${cellPad}`}>Category</span>
+                            <span className={`${CELL} ${cellPad}`}>Assignee</span>
+                            <span className={`${CELL} ${cellPad}`}>Status</span>
+                            <span className={`${CELL} ${cellPad}`}>Due</span>
+                            <span className={`${CELL} ${cellPad} justify-end`}>
+                              <button onClick={() => headerSort('updatedAt')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 rounded text-right">
+                                Updated{sortIndicator('updatedAt')}
+                              </button>
+                            </span>
+                          </div>
+                        )}
                       </div>
 
                       <ul className="divide-y divide-slate-100">
@@ -1122,6 +1146,253 @@ export default function Tickets() {
                           // Assignee not in the active team list = deactivated / FS-only (read-only here).
                           const assigneeReadOnly = ticket.assignedTech
                             && !(meta?.technicians || []).some((t) => t.id === ticket.assignedTechId);
+
+                          // ---- Row cell pieces, arranged per layout below (compact:
+                          //      one tight line, type folded into the title; roomy:
+                          //      title on its own line, everything else beneath). ----
+                          const typePill = <TypePill type={ticket.ticketType} />;
+                          const priorityEl = isEditable
+                            ? <InlinePriorityPicker ticket={ticket} onChanged={refreshAfterEdit} />
+                            : <span title="Synced from FreshService — read-only here"><PriorityDot priority={ticket.priority} /></span>;
+                          const subjectBtn = (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); onRowClick(ticket.id); }}
+                              onDoubleClick={(e) => { e.stopPropagation(); onRowDoubleClick(ticket.id); }}
+                              className={`tp-focus-ring rounded text-left font-medium text-slate-800 truncate min-w-0 ${roomy ? 'text-[15px]' : 'text-sm'} ${
+                                fx === 'new' ? 'tp-subject-flash-new' : fx === 'updated' ? 'tp-subject-flash-updated' : ''
+                              }`}
+                            >
+                              {ticket.subject || '(no subject)'}
+                            </button>
+                          );
+                          const subjectChips = (
+                            <>
+                              {fx === 'new' && (
+                                <span className="tp-new-chip shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full bg-blue-600 text-white text-[9px] font-extrabold tracking-widest uppercase" aria-hidden="true">
+                                  New
+                                </span>
+                              )}
+                              {aiLive && (canReview ? (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); setAiTicket(ticket); }}
+                                  onDoubleClick={(e) => e.stopPropagation()}
+                                  title="AI is picking the best technician right now — click to watch live. Assigning someone manually overrides the AI pick; category & priority detection still finish."
+                                  className="tp-focus-ring tp-ai-chip shrink-0 inline-flex items-center gap-1 pl-1.5 pr-2 py-0.5 rounded-full text-[10px] font-bold text-white"
+                                >
+                                  <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
+                                  AI matching…
+                                </button>
+                              ) : (
+                                <span
+                                  title="AI is picking the best technician right now. A manual assignment overrides the AI pick; category & priority detection still finish."
+                                  className="tp-ai-chip shrink-0 inline-flex items-center gap-1 pl-1.5 pr-2 py-0.5 rounded-full text-[10px] font-bold text-white"
+                                >
+                                  <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
+                                  AI matching…
+                                </span>
+                              ))}
+                              <StateChip state={ticket.stateChip} />
+                              {ticket.hasProposedReply && (
+                                <span
+                                  className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-indigo-50 border border-indigo-200 text-[9px] font-bold text-indigo-600 uppercase tracking-wide"
+                                  title="A workflow-drafted reply is waiting for approval on this ticket"
+                                >
+                                  <Sparkles className="w-2.5 h-2.5" aria-hidden="true" /> Draft
+                                </span>
+                              )}
+                              {presenceMap[ticket.id]?.length > 0 && (
+                                <span
+                                  className="shrink-0 w-2 h-2 rounded-full bg-violet-500 ring-2 ring-violet-200"
+                                  title={`Viewing now: ${presenceMap[ticket.id].map((v) => v.name).join(', ')}`}
+                                  role="img"
+                                  aria-label={`Being viewed by ${presenceMap[ticket.id].map((v) => v.name).join(', ')}`}
+                                />
+                              )}
+                              {(ticket.tags || []).slice(0, 3).map((tag) => (
+                                <TagChip key={tag.id} tag={tag} size="xs" className="shrink-0" />
+                              ))}
+                              {(ticket.tags || []).length > 3 && (
+                                <span className="shrink-0 text-[10px] text-slate-400" title={ticket.tags.slice(3).map((t) => t.name).join(', ')}>
+                                  +{ticket.tags.length - 3}
+                                </span>
+                              )}
+                            </>
+                          );
+                          const subjectMeta = (
+                            <span className="block w-full text-[11px] text-slate-400 truncate pl-4">
+                              <span className="font-mono">{ticket.displayRef}</span>
+                              {' · '}
+                              {ticket.requester?.name || 'Unknown requester'}
+                              {ticket.requester?.entraCity || ticket.requester?.entraOfficeLocation
+                                ? ` · ${ticket.requester.entraOfficeLocation || ticket.requester.entraCity}` : ''}
+                              {ticket.groupId && groupNames.get(String(ticket.groupId)) && (
+                                <span className="ml-1.5 text-indigo-500 font-medium">· {groupNames.get(String(ticket.groupId))}</span>
+                              )}
+                              {ticket.origin === 'ticketpulse' && <span className="ml-1.5 text-sky-600 font-medium">· TP-born</span>}
+                            </span>
+                          );
+                          // Category, leaf-first: the SUBCATEGORY is the most specific (= most
+                          // useful) piece, so it gets the primary line; parent under it.
+                          const { category: catLabel, subcategory: subLabel } = ticketCategoryLabels(ticket);
+                          const catCell = (
+                            <span
+                              className={`${CELL} ${cellPad} flex-col !items-start justify-center gap-0.5`}
+                              title={[catLabel, subLabel].filter(Boolean).join(' / ') || undefined}
+                            >
+                              {subLabel ? (
+                                <>
+                                  <span className="block w-full text-xs font-medium text-slate-700 truncate">{subLabel}</span>
+                                  {catLabel && <span className="block w-full text-[10px] text-slate-400 truncate">in {catLabel}</span>}
+                                </>
+                              ) : (
+                                <span className="block w-full text-xs text-slate-600 truncate">{catLabel || '—'}</span>
+                              )}
+                            </span>
+                          );
+                          const assigneeCell = (isEditable || fsRowEditable) ? (
+                            <span className={`${CELL} py-1 gap-1`}>
+                              {ticket.aiBypass && <BypassBadge bypass={ticket.aiBypass} />}
+                              <AssigneePicker
+                                ticketId={ticket.id}
+                                value={ticket.assignedTechId}
+                                currentTech={ticket.assignedTech}
+                                technicians={meta?.technicians || []}
+                                ticketOrigin={ticket.origin}
+                                assignFn={fsRowEditable ? ((techId) => fsAssign(ticket, techId)) : undefined}
+                                onAssigned={refreshAfterEdit}
+                                size="sm"
+                                align="right"
+                                showAi={canReview}
+                                aiSuggestion={canReview ? ticket.ai : null}
+                                onAiAssign={canReview ? () => setAiTicket(ticket) : null}
+                              />
+                            </span>
+                          ) : (
+                            <span
+                              className={`${CELL} py-1 gap-1.5`}
+                              onClick={(e) => e.stopPropagation()}
+                              onDoubleClick={(e) => e.stopPropagation()}
+                            >
+                              {canReview && ticket.ai?.state === 'suggested' && !ticket.assignedTech ? (
+                                <button
+                                  onClick={() => setAiTicket(ticket)}
+                                  title={`AI suggests ${ticket.ai.techName || 'a technician'}${typeof ticket.ai.score === 'number' ? ` — ${Math.round(ticket.ai.score * 100)}% match` : ''}${ticket.ai.count > 1 ? ` (+${ticket.ai.count - 1} more candidate${ticket.ai.count - 1 === 1 ? '' : 's'})` : ''} · awaiting your approval`}
+                                  className="tp-focus-ring group flex items-center gap-2 min-w-0 w-full pl-1 pr-2 py-1 rounded-full border border-dashed border-violet-300 bg-violet-50/60 hover:bg-violet-50 transition-colors text-left"
+                                >
+                                  <span className="relative flex-shrink-0">
+                                    <PersonAvatar name={ticket.ai.techName} photoUrl={(meta?.technicians || []).find((t) => t.id === ticket.ai.techId)?.photoUrl} size="h-6 w-6" textSize="text-[9px]" />
+                                    <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-violet-600 ring-2 ring-white inline-flex items-center justify-center" aria-hidden="true">
+                                      <Sparkles className="w-[7px] h-[7px] text-white" />
+                                    </span>
+                                  </span>
+                                  <span className="flex flex-col min-w-0 flex-1 leading-tight">
+                                    <span className="text-[9px] font-bold uppercase tracking-wider text-violet-600">
+                                      Suggested{typeof ticket.ai.score === 'number' ? ` · ${Math.round(ticket.ai.score * 100)}%` : ''}
+                                    </span>
+                                    <span className="truncate text-xs font-semibold text-slate-800">{ticket.ai.techName || 'AI pick'}</span>
+                                  </span>
+                                  {ticket.ai.count > 1 && (
+                                    <span className="text-[9px] font-medium text-violet-400 flex-shrink-0">+{ticket.ai.count - 1}</span>
+                                  )}
+                                </button>
+                              ) : (
+                                <>
+                                  <span className="flex items-center gap-2 min-w-0 flex-1" title="Synced from FreshService — read-only here">
+                                    {ticket.assignedTech ? (
+                                      <>
+                                        <PersonAvatar name={ticket.assignedTech.name} photoUrl={ticket.assignedTech.photoUrl} />
+                                        <span className="text-xs text-slate-600 truncate">{ticket.assignedTech.name}</span>
+                                      </>
+                                    ) : (
+                                      <UnassignedBadge variant="muted" />
+                                    )}
+                                  </span>
+                                  {!canReview ? null : ticket.ai?.state === 'suggested' ? (
+                                    <button
+                                      onClick={() => setAiTicket(ticket)}
+                                      title={ticket.assignedTech
+                                        ? `Already assigned to ${ticket.assignedTech.name} — AI suggested ${ticket.ai.techName || 'someone'} (informational)`
+                                        : `AI suggests ${ticket.ai.techName || 'a technician'} — review`}
+                                      aria-label={ticket.assignedTech ? 'AI suggestion (already assigned)' : 'Review AI suggestion'}
+                                      className={`tp-focus-ring p-1 rounded-md flex-shrink-0 ${
+                                        ticket.assignedTech
+                                          ? 'text-slate-300 hover:text-slate-500 hover:bg-slate-50'
+                                          : 'text-indigo-500 hover:bg-indigo-50'
+                                      }`}
+                                    >
+                                      <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
+                                    </button>
+                                  ) : ticket.ai?.state === 'queued' ? (
+                                    <button
+                                      onClick={() => setAiTicket(ticket)}
+                                      title="AI run queued for business hours"
+                                      aria-label="AI run queued"
+                                      className="tp-focus-ring p-1 rounded-md text-indigo-400 hover:bg-indigo-50 flex-shrink-0"
+                                    >
+                                      <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
+                                    </button>
+                                  ) : ticket.ai?.state === 'analyzing' ? null : !ticket.assignedTech && !resolvedLike ? (
+                                    <button
+                                      onClick={() => setAiTicket(ticket)}
+                                      title="Ask AI to assign"
+                                      aria-label="Ask AI to assign"
+                                      className="tp-focus-ring p-1 rounded-md text-slate-300 hover:text-indigo-500 hover:bg-indigo-50 flex-shrink-0"
+                                    >
+                                      <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
+                                    </button>
+                                  ) : null}
+                                </>
+                              )}
+                            </span>
+                          );
+                          const statusCell = (
+                            <span className={`${CELL} py-1`}>
+                              {(isEditable || fsRowEditable) && !removedLike ? (
+                                <StatusPicker
+                                  ticketId={ticket.id}
+                                  value={ticket.status}
+                                  fsChange={fsRowEditable ? ((next) => fsStatusChange(ticket, next)) : null}
+                                  onChanged={(next, prev) => {
+                                    refreshAfterEdit();
+                                    showToast(`${ticket.displayRef} → ${next}`, isEditable ? (async () => {
+                                      try { await ticketsAPI.setStatus(ticket.id, prev); refreshAfterEdit(); } catch { /* refresh shows truth */ }
+                                    }) : null);
+                                  }}
+                                />
+                              ) : (
+                                <StatusPill status={ticket.status} size="sm" />
+                              )}
+                            </span>
+                          );
+                          const dueCell = (
+                            <span className={`${CELL} ${cellPad}`}>
+                              {removedLike
+                                ? <span className="text-xs text-slate-300">—</span>
+                                : resolvedLike
+                                  ? <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold border bg-emerald-50 text-emerald-700 border-emerald-200">Done</span>
+                                  : ticket.dueBy
+                                    ? <SlaChip value={ticket.dueBy} className="!px-1.5 !text-[10px]" />
+                                    : <span className="text-xs text-slate-300">—</span>}
+                            </span>
+                          );
+                          const updatedCell = (
+                            <span
+                              className={`${CELL} ${cellPad} justify-end relative`}
+                              title={ticket.lastActivityAt ? new Date(ticket.lastActivityAt).toLocaleString() : ''}
+                            >
+                              <span className="text-xs text-slate-400 whitespace-nowrap transition-opacity group-hover:opacity-0">
+                                {timeAgo(ticket.lastActivityAt || ticket.updatedAt)}
+                              </span>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); onRowDoubleClick(ticket.id); }}
+                                title="Open full ticket"
+                                aria-label={`Open ${ticket.displayRef}`}
+                                className="tp-focus-ring absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-md text-slate-400 hover:text-blue-600 hover:bg-blue-50"
+                              >
+                                <ChevronRight className="w-4 h-4" aria-hidden="true" />
+                              </button>
+                            </span>
+                          );
                           return (
                             <motion.li
                               key={ticket.id}
@@ -1152,245 +1423,46 @@ export default function Tickets() {
                               </span>
                               <div className="flex-1 min-w-0">
                                 <div className="hidden md:flex">
-                                  <div className={`flex-1 ${ROW_GRID}`}>
-                                    <span aria-hidden="true" className={`self-stretch ${accent}`} />
-                                    {/* Subject block */}
-                                    <span className={`${CELL} ${cellPad} flex-col !items-start justify-center gap-0.5`}>
-                                      <span className="flex items-center gap-1.5 min-w-0 w-full">
-                                        {isEditable
-                                          ? <InlinePriorityPicker ticket={ticket} onChanged={refreshAfterEdit} />
-                                          : <span title="Synced from FreshService — read-only here"><PriorityDot priority={ticket.priority} /></span>}
-                                        <button
-                                          onClick={(e) => { e.stopPropagation(); onRowClick(ticket.id); }}
-                                          onDoubleClick={(e) => { e.stopPropagation(); onRowDoubleClick(ticket.id); }}
-                                          className={`tp-focus-ring rounded text-left text-sm font-medium text-slate-800 truncate ${
-                                            fx === 'new' ? 'tp-subject-flash-new' : fx === 'updated' ? 'tp-subject-flash-updated' : ''
-                                          }`}
-                                        >
-                                          {ticket.subject || '(no subject)'}
-                                        </button>
-                                        {fx === 'new' && (
-                                          <span className="tp-new-chip shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full bg-blue-600 text-white text-[9px] font-extrabold tracking-widest uppercase" aria-hidden="true">
-                                            New
-                                          </span>
-                                        )}
-                                        {aiLive && (canReview ? (
-                                          <button
-                                            onClick={(e) => { e.stopPropagation(); setAiTicket(ticket); }}
-                                            onDoubleClick={(e) => e.stopPropagation()}
-                                            title="AI is picking the best technician right now — click to watch live. Assigning someone manually overrides the AI pick; category & priority detection still finish."
-                                            className="tp-focus-ring tp-ai-chip shrink-0 inline-flex items-center gap-1 pl-1.5 pr-2 py-0.5 rounded-full text-[10px] font-bold text-white"
-                                          >
-                                            <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
-                                            AI matching…
-                                          </button>
-                                        ) : (
-                                          <span
-                                            title="AI is picking the best technician right now. A manual assignment overrides the AI pick; category & priority detection still finish."
-                                            className="tp-ai-chip shrink-0 inline-flex items-center gap-1 pl-1.5 pr-2 py-0.5 rounded-full text-[10px] font-bold text-white"
-                                          >
-                                            <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
-                                            AI matching…
-                                          </span>
-                                        ))}
-                                        <StateChip state={ticket.stateChip} />
-                                        {ticket.hasProposedReply && (
-                                          <span
-                                            className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-indigo-50 border border-indigo-200 text-[9px] font-bold text-indigo-600 uppercase tracking-wide"
-                                            title="A workflow-drafted reply is waiting for approval on this ticket"
-                                          >
-                                            <Sparkles className="w-2.5 h-2.5" aria-hidden="true" /> Draft
-                                          </span>
-                                        )}
-                                        {presenceMap[ticket.id]?.length > 0 && (
-                                          <span
-                                            className="shrink-0 w-2 h-2 rounded-full bg-violet-500 ring-2 ring-violet-200"
-                                            title={`Viewing now: ${presenceMap[ticket.id].map((v) => v.name).join(', ')}`}
-                                            role="img"
-                                            aria-label={`Being viewed by ${presenceMap[ticket.id].map((v) => v.name).join(', ')}`}
-                                          />
-                                        )}
-                                        {(ticket.tags || []).slice(0, 3).map((tag) => (
-                                          <TagChip key={tag.id} tag={tag} size="xs" className="shrink-0" />
-                                        ))}
-                                        {(ticket.tags || []).length > 3 && (
-                                          <span className="shrink-0 text-[10px] text-slate-400" title={ticket.tags.slice(3).map((t) => t.name).join(', ')}>
-                                            +{ticket.tags.length - 3}
-                                          </span>
-                                        )}
-                                      </span>
-                                      <span className="block w-full text-[11px] text-slate-400 truncate pl-4">
-                                        <span className="font-mono">{ticket.displayRef}</span>
-                                        {' · '}
-                                        {ticket.requester?.name || 'Unknown requester'}
-                                        {ticket.requester?.entraCity || ticket.requester?.entraOfficeLocation
-                                          ? ` · ${ticket.requester.entraOfficeLocation || ticket.requester.entraCity}` : ''}
-                                        {ticket.groupId && groupNames.get(String(ticket.groupId)) && (
-                                          <span className="ml-1.5 text-indigo-500 font-medium">· {groupNames.get(String(ticket.groupId))}</span>
-                                        )}
-                                        {ticket.origin === 'ticketpulse' && <span className="ml-1.5 text-sky-600 font-medium">· TP-born</span>}
-                                      </span>
-                                    </span>
-                                    <span className={`${CELL} ${cellPad}`}><TypePill type={ticket.ticketType} /></span>
-                                    {/* Category, leaf-first: the SUBCATEGORY is the most specific
-                                        (= most useful) piece, so it gets the primary line; the
-                                        parent sits under it and the tooltip carries the full path.
-                                        Precedence: TP taxonomy first, legacy single box last. */}
-                                    {(() => {
-                                      const { category: catLabel, subcategory: subLabel } = ticketCategoryLabels(ticket);
-                                      return (
-                                        <span
-                                          className={`${CELL} ${cellPad} flex-col !items-start justify-center gap-0.5`}
-                                          title={[catLabel, subLabel].filter(Boolean).join(' / ') || undefined}
-                                        >
-                                          {subLabel ? (
-                                            <>
-                                              <span className="block w-full text-xs font-medium text-slate-700 truncate">{subLabel}</span>
-                                              {catLabel && <span className="block w-full text-[10px] text-slate-400 truncate">in {catLabel}</span>}
-                                            </>
-                                          ) : (
-                                            <span className="block w-full text-xs text-slate-600 truncate">{catLabel || '—'}</span>
-                                          )}
+                                  {roomy ? (
+                                    <div className={`flex-1 ${GRID_ROOMY}`}>
+                                      <span aria-hidden="true" className={`self-stretch ${accent}`} style={{ gridRow: '1 / 3' }} />
+                                      {/* Roomy: the title (+ ref/requester) spans the full width on line 1 */}
+                                      <span className="px-3 py-2 flex flex-col items-start justify-center gap-0.5 min-w-0" style={{ gridColumn: '2 / -1', gridRow: 1 }}>
+                                        <span className="flex items-center gap-1.5 min-w-0 w-full">
+                                          {priorityEl}
+                                          {subjectBtn}
+                                          {subjectChips}
                                         </span>
-                                      );
-                                    })()}
-                                    {(isEditable || fsRowEditable) ? (
-                                      <span className={`${CELL} py-1 gap-1`}>
-                                        {ticket.aiBypass && <BypassBadge bypass={ticket.aiBypass} />}
-                                        <AssigneePicker
-                                          ticketId={ticket.id}
-                                          value={ticket.assignedTechId}
-                                          currentTech={ticket.assignedTech}
-                                          technicians={meta?.technicians || []}
-                                          ticketOrigin={ticket.origin}
-                                          assignFn={fsRowEditable ? ((techId) => fsAssign(ticket, techId)) : undefined}
-                                          onAssigned={refreshAfterEdit}
-                                          size="sm"
-                                          align="right"
-                                          showAi={canReview}
-                                          aiSuggestion={canReview ? ticket.ai : null}
-                                          onAiAssign={canReview ? () => setAiTicket(ticket) : null}
-                                        />
+                                        {subjectMeta}
                                       </span>
-                                    ) : (
-                                      <span
-                                        className={`${CELL} py-1 gap-1.5`}
-                                        onClick={(e) => e.stopPropagation()}
-                                        onDoubleClick={(e) => e.stopPropagation()}
-                                      >
-                                        {canReview && ticket.ai?.state === 'suggested' && !ticket.assignedTech ? (
-                                          <button
-                                            onClick={() => setAiTicket(ticket)}
-                                            title={`AI suggests ${ticket.ai.techName || 'a technician'}${typeof ticket.ai.score === 'number' ? ` — ${Math.round(ticket.ai.score * 100)}% match` : ''}${ticket.ai.count > 1 ? ` (+${ticket.ai.count - 1} more candidate${ticket.ai.count - 1 === 1 ? '' : 's'})` : ''} · click to review & approve`}
-                                            className="tp-focus-ring group flex items-center gap-2 min-w-0 w-full pl-1 pr-2 py-0.5 rounded-full border border-indigo-200/80 bg-gradient-to-r from-indigo-50 to-violet-50 hover:from-indigo-100 hover:to-violet-100 transition-colors text-left"
-                                          >
-                                            <span className="relative flex-shrink-0">
-                                              <PersonAvatar name={ticket.ai.techName} photoUrl={(meta?.technicians || []).find((t) => t.id === ticket.ai.techId)?.photoUrl} size="h-6 w-6" textSize="text-[9px]" />
-                                              <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-indigo-600 ring-2 ring-white inline-flex items-center justify-center" aria-hidden="true">
-                                                <Sparkles className="w-[7px] h-[7px] text-white" />
-                                              </span>
-                                            </span>
-                                            <span className="min-w-0 flex-1 truncate text-xs font-medium text-slate-700">{ticket.ai.techName || 'AI suggestion'}</span>
-                                            {typeof ticket.ai.score === 'number' && (
-                                              <span className="text-[10px] font-bold text-indigo-600 tabular-nums flex-shrink-0">{Math.round(ticket.ai.score * 100)}%</span>
-                                            )}
-                                            {ticket.ai.count > 1 && (
-                                              <span className="text-[9px] font-medium text-indigo-400 flex-shrink-0">+{ticket.ai.count - 1}</span>
-                                            )}
-                                          </button>
-                                        ) : (
-                                          <>
-                                            <span className="flex items-center gap-2 min-w-0 flex-1" title="Synced from FreshService — read-only here">
-                                              {ticket.assignedTech ? (
-                                                <>
-                                                  <PersonAvatar name={ticket.assignedTech.name} photoUrl={ticket.assignedTech.photoUrl} />
-                                                  <span className="text-xs text-slate-600 truncate">{ticket.assignedTech.name}</span>
-                                                </>
-                                              ) : (
-                                                <UnassignedBadge variant="muted" />
-                                              )}
-                                            </span>
-                                            {!canReview ? null : ticket.ai?.state === 'suggested' ? (
-                                              <button
-                                                onClick={() => setAiTicket(ticket)}
-                                                title={ticket.assignedTech
-                                                  ? `Already assigned to ${ticket.assignedTech.name} — AI suggested ${ticket.ai.techName || 'someone'} (informational)`
-                                                  : `AI suggests ${ticket.ai.techName || 'a technician'} — review`}
-                                                aria-label={ticket.assignedTech ? 'AI suggestion (already assigned)' : 'Review AI suggestion'}
-                                                className={`tp-focus-ring p-1 rounded-md flex-shrink-0 ${
-                                                  ticket.assignedTech
-                                                    ? 'text-slate-300 hover:text-slate-500 hover:bg-slate-50'
-                                                    : 'text-indigo-500 hover:bg-indigo-50'
-                                                }`}
-                                              >
-                                                <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
-                                              </button>
-                                            ) : ticket.ai?.state === 'queued' ? (
-                                              <button
-                                                onClick={() => setAiTicket(ticket)}
-                                                title="AI run queued for business hours"
-                                                aria-label="AI run queued"
-                                                className="tp-focus-ring p-1 rounded-md text-indigo-400 hover:bg-indigo-50 flex-shrink-0"
-                                              >
-                                                <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
-                                              </button>
-                                            ) : ticket.ai?.state === 'analyzing' ? null : !ticket.assignedTech && !resolvedLike ? (
-                                              <button
-                                                onClick={() => setAiTicket(ticket)}
-                                                title="Ask AI to assign"
-                                                aria-label="Ask AI to assign"
-                                                className="tp-focus-ring p-1 rounded-md text-slate-300 hover:text-indigo-500 hover:bg-indigo-50 flex-shrink-0"
-                                              >
-                                                <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
-                                              </button>
-                                            ) : null}
-                                          </>
-                                        )}
+                                      {/* Row 2: type, then the usual columns */}
+                                      <span className={`${CELL} ${cellPad}`}>{typePill}</span>
+                                      {catCell}
+                                      {assigneeCell}
+                                      {statusCell}
+                                      {dueCell}
+                                      {updatedCell}
+                                    </div>
+                                  ) : (
+                                    <div className={`flex-1 ${GRID_COMPACT}`}>
+                                      <span aria-hidden="true" className={`self-stretch ${accent}`} />
+                                      {/* Compact: type folds into the title line so the subject gets the width */}
+                                      <span className={`${CELL} ${cellPad} flex-col !items-start justify-center gap-0.5`}>
+                                        <span className="flex items-center gap-1.5 min-w-0 w-full">
+                                          {priorityEl}
+                                          <span className="shrink-0">{typePill}</span>
+                                          {subjectBtn}
+                                          {subjectChips}
+                                        </span>
+                                        {subjectMeta}
                                       </span>
-                                    )}
-                                    <span className={`${CELL} py-1`}>
-                                      {(isEditable || fsRowEditable) && !removedLike ? (
-                                        <StatusPicker
-                                          ticketId={ticket.id}
-                                          value={ticket.status}
-                                          fsChange={fsRowEditable ? ((next) => fsStatusChange(ticket, next)) : null}
-                                          onChanged={(next, prev) => {
-                                            refreshAfterEdit();
-                                            showToast(`${ticket.displayRef} → ${next}`, isEditable ? (async () => {
-                                              try { await ticketsAPI.setStatus(ticket.id, prev); refreshAfterEdit(); } catch { /* refresh shows truth */ }
-                                            }) : null);
-                                          }}
-                                        />
-                                      ) : (
-                                        <StatusPill status={ticket.status} size="sm" />
-                                      )}
-                                    </span>
-                                    <span className={`${CELL} ${cellPad}`}>
-                                      {removedLike
-                                        ? <span className="text-xs text-slate-300">—</span>
-                                        : resolvedLike
-                                          ? <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold border bg-emerald-50 text-emerald-700 border-emerald-200">Done</span>
-                                          : ticket.dueBy
-                                            ? <SlaChip value={ticket.dueBy} className="!px-1.5 !text-[10px]" />
-                                            : <span className="text-xs text-slate-300">—</span>}
-                                    </span>
-                                    <span
-                                      className={`${CELL} ${cellPad} justify-end relative`}
-                                      title={ticket.lastActivityAt ? new Date(ticket.lastActivityAt).toLocaleString() : ''}
-                                    >
-                                      <span className="text-xs text-slate-400 whitespace-nowrap transition-opacity group-hover:opacity-0">
-                                        {timeAgo(ticket.lastActivityAt || ticket.updatedAt)}
-                                      </span>
-                                      <button
-                                        onClick={(e) => { e.stopPropagation(); onRowDoubleClick(ticket.id); }}
-                                        title="Open full ticket"
-                                        aria-label={`Open ${ticket.displayRef}`}
-                                        className="tp-focus-ring absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-md text-slate-400 hover:text-blue-600 hover:bg-blue-50"
-                                      >
-                                        <ChevronRight className="w-4 h-4" aria-hidden="true" />
-                                      </button>
-                                    </span>
-                                  </div>
+                                      {catCell}
+                                      {assigneeCell}
+                                      {statusCell}
+                                      {dueCell}
+                                      {updatedCell}
+                                    </div>
+                                  )}
                                 </div>
 
                                 {/* Mobile card */}

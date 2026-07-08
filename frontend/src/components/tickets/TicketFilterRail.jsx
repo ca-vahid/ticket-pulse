@@ -7,7 +7,7 @@ import {
 } from 'date-fns';
 import {
   CalendarClock, CalendarDays, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight,
-  GripVertical, LayoutList, ListFilter, Plus, Search, Star, Trash2, Users, VolumeX, X,
+  GripVertical, LayoutList, ListFilter, Plus, Search, Sparkles, Star, Trash2, Users, VolumeX, X,
 } from 'lucide-react';
 import { PersonAvatar, PRIORITY_LABELS, PRIORITY_STRIP_COLORS, TagChip } from './ticketUi';
 import { ticketsAPI } from '../../services/api';
@@ -217,11 +217,12 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
   const createdTo = get('createdTo');
   const noise = get('noise');
   const view = get('view');
+  const aiState = get('aiState');
 
   const activeTotal = [
     segment && segment !== 'all', statusRaw, assignees.length, priorities.length, types.length,
     categories.length, subcategories.length, groups.length, sources.length, tags.length, impacts.length, urgencies.length, due.length,
-    origin, createdFrom || createdTo, noise, view, get('q'),
+    origin, createdFrom || createdTo, noise, view, aiState, get('q'),
   ].filter(Boolean).length;
 
   const clearAll = () => {
@@ -311,6 +312,7 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
     { key: 'all', label: 'All tickets', params: { status: 'any' } },
     ...(meta?.actor?.technicianId ? [{ key: 'mine', label: 'My open', params: { assignee: String(meta.actor.technicianId) } }] : []),
     { key: 'unassigned', label: 'Unassigned', params: { segment: 'unassigned' } },
+    { key: 'awaiting_approval', label: 'Awaiting AI approval', params: { aiState: 'suggested' }, icon: Sparkles },
     { key: 'awaiting', label: 'Awaiting reply', params: { segment: 'awaiting' } },
     { key: 'noise', label: 'Noise & spam', params: { noise: 'only', status: 'any' }, icon: VolumeX },
     { key: 'deleted', label: 'Deleted', params: { segment: 'deleted', status: 'any' }, icon: Trash2 },
@@ -333,7 +335,7 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
     && activeTotal === Object.keys(v.params).length;
 
   // Snapshot the active filter query for a new saved view.
-  const FILTER_KEYS = ['segment', 'status', 'assignee', 'priority', 'type', 'category', 'subcategory', 'group', 'source', 'tag', 'tagMode', 'impact', 'urgency', 'due', 'origin', 'createdFrom', 'createdTo', 'noise', 'q', 'view'];
+  const FILTER_KEYS = ['segment', 'status', 'assignee', 'priority', 'type', 'category', 'subcategory', 'group', 'source', 'tag', 'tagMode', 'impact', 'urgency', 'due', 'origin', 'createdFrom', 'createdTo', 'noise', 'q', 'view', 'aiState'];
   const captureParams = () => {
     const out = {};
     for (const k of FILTER_KEYS) { const val = searchParams.get(k); if (val) out[k] = val; }
@@ -392,6 +394,7 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
             {CANNED_VIEWS.map((v) => {
               const count = {
                 all: stats?.all, unassigned: stats?.unassigned, awaiting: stats?.awaiting,
+                awaiting_approval: stats?.awaitingApproval,
                 noise: stats?.noise, deleted: stats?.deleted, resolved: stats?.resolved,
               }[v.key];
               return (
@@ -983,6 +986,7 @@ export function ActiveFilterBar({ meta }) {
   if (origin) chips.push({ label: origin === 'ticketpulse' ? 'Born in Ticket Pulse' : 'From FreshService', onRemove: () => patch({ origin: null }) });
   if (get('noise') === 'only') chips.push({ label: 'Noise & spam', onRemove: () => patch({ noise: null }) });
   if (get('view') === 'scheduled') chips.push({ label: 'Scheduled view', onRemove: () => patch({ view: null }) });
+  if (get('aiState') === 'suggested') chips.push({ label: 'Awaiting AI approval', onRemove: () => patch({ aiState: null }) });
 
   if (chips.length === 0) return null;
 

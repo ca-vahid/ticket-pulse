@@ -461,6 +461,18 @@ class TicketService {
     if (query.noise === 'only') where.isNoise = true;
     else if (query.excludeNoise !== 'false') where.isNoise = false;
 
+    // "Awaiting AI approval" worklist: unassigned tickets whose pipeline produced
+    // a recommendation no human has decided yet (decision=pending_review). Same
+    // signal that renders the dashed "proposed" assignee slot in the queue, so
+    // the filter and the slot always agree.
+    if (query.aiState === 'suggested') {
+      where.AND = [
+        ...(where.AND || []),
+        { assignedTechId: null },
+        { pipelineRuns: { some: { status: 'completed', decision: 'pending_review' } } },
+      ];
+    }
+
     // Stat-card segments (single-select quick filters layered on top)
     const now = new Date();
     if (query.segment === 'open') where.status = { in: ['Open', 'Pending'] };
@@ -757,7 +769,7 @@ class TicketService {
     const endOfDay = new Date(now); endOfDay.setHours(23, 59, 59, 999);
     const open = { workspaceId, isNoise: false, status: { in: ['Open', 'Pending'] } };
 
-    const [all, openCount, unassigned, dueToday, overdue, resolved, deleted, noise, awaitingIds, technicianOpen] = await Promise.all([
+    const [all, openCount, unassigned, dueToday, overdue, resolved, deleted, noise, awaitingIds, awaitingApproval, technicianOpen] = await Promise.all([
       prisma.ticket.count({ where: { workspaceId, isNoise: false, status: { notIn: ['Deleted', 'Spam'] } } }),
       prisma.ticket.count({ where: open }),
       prisma.ticket.count({ where: { ...open, assignedTechId: null } }),
@@ -783,6 +795,11 @@ class TicketService {
       prisma.ticket.count({ where: { workspaceId, status: { in: ['Deleted', 'Spam'] } } }),
       prisma.ticket.count({ where: { workspaceId, isNoise: true } }),
       this._awaitingReplyTicketIds(workspaceId),
+      // "Awaiting AI approval": unassigned Open/Pending tickets with a pending
+      // human decision on their AI recommendation (drives the rail view count).
+      prisma.ticket.count({
+        where: { ...open, assignedTechId: null, pipelineRuns: { some: { status: 'completed', decision: 'pending_review' } } },
+      }),
       // Per-technician OPEN workload (Open/Pending, non-noise). Returned as a
       // {techId: count} map — NOT sorted/ranked; the UI keeps its own order so
       // this reads as a workload signal, not a leaderboard (team-safe rule).
@@ -803,6 +820,7 @@ class TicketService {
       open: openCount,
       unassigned,
       awaiting: awaitingIds.length,
+      awaitingApproval,
       dueToday,
       overdue,
       resolved,
