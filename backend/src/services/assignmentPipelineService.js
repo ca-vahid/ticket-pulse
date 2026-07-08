@@ -1486,6 +1486,51 @@ class AssignmentPipelineService {
         this._broadcastRunUpdate(r.workspaceId, r.ticketId, r.id, 'failed').catch(() => {});
       }
     }
+
+    // Smart restart (QA 07-08): failing the stuck run used to leave the ticket
+    // waiting for the poller to rediscover it — which can take a while, or
+    // never happen once the poll cursor has moved past (four invoice tickets
+    // sat unrun for 15+ hours during the Jul 8 incident). Re-queue eligible
+    // tickets immediately; the queue-drain tick picks them up within ~2 min
+    // in business hours, and drain-time validation re-checks eligibility.
+    // Capped at 3 total failed runs per ticket so a genuinely broken ticket
+    // can't retry-loop forever.
+    let requeued = 0;
+    for (const r of stuck) {
+      try {
+        const ticket = await prisma.ticket.findUnique({
+          where: { id: r.ticketId },
+          select: { status: true, assignedTechId: true, isNoise: true },
+        });
+        if (!ticket || ticket.assignedTechId || !['Open', 'Pending'].includes(ticket.status) || ticket.isNoise) continue;
+        const failures = await prisma.assignmentPipelineRun.count({
+          where: { ticketId: r.ticketId, status: 'failed' },
+        });
+        if (failures >= 3) {
+          logger.warn('Stuck-run auto-retry cap reached — leaving ticket for manual triage', { ticketId: r.ticketId, failures });
+          continue;
+        }
+        const open = await assignmentRepository.getOpenPipelineRun(r.ticketId);
+        if (open) continue;
+        await prisma.assignmentPipelineRun.create({
+          data: {
+            ticketId: r.ticketId,
+            workspaceId: r.workspaceId,
+            status: 'queued',
+            triggerSource: 'poll',
+            queuedAt: new Date(),
+            queuedReason: `Auto-retry after ${olderThanMs === 0 ? 'restart interruption' : 'stalled-run recovery'} (attempt ${failures + 1}/3)`,
+          },
+        });
+        requeued += 1;
+      } catch (retryError) {
+        logger.warn('Stuck-run auto-retry could not queue', { ticketId: r.ticketId, error: retryError.message });
+      }
+    }
+    if (requeued > 0) {
+      logger.info(`Stuck-run recovery re-queued ${requeued} ticket(s) for automatic retry`);
+    }
+
     return { recovered: stuck.length, runIds: stuck.map((r) => r.id) };
   }
 }
