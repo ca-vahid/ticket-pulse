@@ -550,6 +550,20 @@ function upstreamNodeTypes(nodeId, nodes, incoming) {
   return types;
 }
 
+function upstreamNodeIds(nodeId, incoming) {
+  const seen = new Set();
+  const stack = [...(incoming.get(nodeId) || []).map((edge) => edge.source)];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (seen.has(current)) continue;
+    seen.add(current);
+    for (const edge of incoming.get(current) || []) {
+      stack.push(edge.source);
+    }
+  }
+  return seen;
+}
+
 function validateGraph(definition, triggerType) {
   const errors = [];
   const ids = new Set();
@@ -692,6 +706,33 @@ function validateGraph(definition, triggerType) {
     // upstream source is a legitimate human-approval flow (QA 07-07 #5).
     if (!upstream.has('llm_generate') && !upstream.has('template_render')) {
       errors.push(`Propose-reply node ${node.id} needs an upstream draft source — add an LLM generate or Template step before it`);
+    }
+  }
+
+  // Content addressing: contentFrom (send_email / propose_reply) and llmFrom
+  // (template_render) must reference a content producer that runs BEFORE the
+  // consumer — otherwise there is nothing to consume at execution time.
+  for (const node of definition.nodes) {
+    const refs = [];
+    if (['send_email', 'propose_reply'].includes(node.type) && node.data?.contentFrom) {
+      refs.push({ ref: String(node.data.contentFrom), allowed: ['llm_generate', 'template_render'], label: 'Content source' });
+    }
+    if (node.type === 'template_render' && node.data?.llmFrom) {
+      refs.push({ ref: String(node.data.llmFrom), allowed: ['llm_generate'], label: 'LLM source' });
+    }
+    for (const { ref, allowed, label } of refs) {
+      const target = nodes.get(ref);
+      if (!target) {
+        errors.push(`${label} on node ${node.id} references a step that no longer exists ("${ref}")`);
+        continue;
+      }
+      if (!allowed.includes(target.type)) {
+        errors.push(`${label} on node ${node.id} must point at ${allowed.length > 1 ? 'an LLM generate or Template step' : 'an LLM generate step'} ("${ref}" is a ${target.type})`);
+        continue;
+      }
+      if (!upstreamNodeIds(node.id, incoming).has(ref)) {
+        errors.push(`${label} on node ${node.id} must reference a step earlier in the flow ("${ref}" does not run before it)`);
+      }
     }
   }
 

@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.0.10-preview';
+export const APP_VERSION = '3.0.11-preview';
 
 export const changelog = [
+  {
+    version: '3.0.11-preview',
+    date: 'July 8, 2026',
+    entries: [
+      { type: 'new', html: '<strong>🎯 Pin a content source</strong> — Send email and Stage for approval steps can now choose exactly <em>which</em> step’s output they use (a specific LLM draft or a specific template), instead of “whatever ran last”. Build flows with multiple AI drafts and send the one you mean; a Template step can likewise pin which LLM draft feeds it. Pinned steps show a “from: …” caption on the canvas, and AI auto-send safety gates follow the pinned draft’s confidence.' },
+      { type: 'improved', html: '<strong>Nothing changes unless you pin</strong> — existing workflows keep their exact behavior (latest output wins); the picker only appears when a flow actually has more than one content step to choose between. The editor and save both validate that a pinned step exists and runs earlier in the flow.' },
+    ],
+  },
   {
     version: '3.0.10-preview',
     date: 'July 8, 2026',
