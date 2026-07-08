@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.14-preview';
+export const APP_VERSION = '3.0.15-preview';
 
 export const changelog = [
+  {
+    version: '3.0.15-preview',
+    date: 'July 8, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Version chip is back on the top bar</strong> — the little v-number next to the workspace switcher returned with the navigation redesign cleanup, and clicking it opens this changelog again. Phones get the same thing as a <strong>What&rsquo;s new</strong> entry in the More menu.' },
+    ],
+  },
   {
     version: '3.0.14-preview',
     date: 'July 8, 2026',
