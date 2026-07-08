@@ -553,6 +553,29 @@ export default function LivePipelineView({ ticketId, onComplete, onBack, streamP
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ticketId]);
 
+  // A run owned by another process can't stream here — but it can be watched.
+  // Poll while it's running so the view flows into the result (or the
+  // watchdog's "interrupted" failure) instead of asking the user to refresh.
+  useEffect(() => {
+    if (status !== 'running_elsewhere') return undefined;
+    const timer = setInterval(async () => {
+      try {
+        const res = await assignmentAPI.getLatestRunForTicket(ticketId);
+        const run = res?.data;
+        if (!run) return;
+        if (run.status === 'completed' || run.status === 'failed') {
+          setExistingRun(run);
+          setRunId(run.id);
+          if (run.recommendation) setRecommendation(run.recommendation);
+          if (run.errorMessage) setError(run.errorMessage);
+          setStatus(run.status === 'failed' ? 'error' : 'completed');
+        }
+      } catch { /* transient — keep polling */ }
+    }, 5000);
+    return () => clearInterval(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, ticketId]);
+
   function startStream() {
     if (streaming) return;
     setStreaming(true);
@@ -725,8 +748,11 @@ export default function LivePipelineView({ ticketId, onComplete, onBack, streamP
           {status === 'running_elsewhere' && (
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center">
               <Brain className="w-8 h-8 text-blue-500 mx-auto mb-2" />
-              <h4 className="text-sm font-semibold text-blue-800 mb-1">Analysis In Progress</h4>
-              <p className="text-sm text-blue-700">This ticket is being analyzed in another session. Refresh to check for results.</p>
+              <h4 className="text-sm font-semibold text-blue-800 mb-1">Analysis in progress</h4>
+              <p className="text-sm text-blue-700">The pipeline is analyzing this ticket in the background — results appear here the moment it finishes.</p>
+              <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-blue-500">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> watching for the result…
+              </p>
             </div>
           )}
           {status === 'queued' && !streaming && existingRun && (

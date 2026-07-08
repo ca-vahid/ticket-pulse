@@ -248,6 +248,20 @@ async function initialize() {
       logger.warn('Backfill run reconciliation failed (non-fatal):', e.message);
     }
 
+    // Reconcile assignment pipeline runs left 'running' at boot. A run only
+    // executes in-process, so any 'running' row now was orphaned by this
+    // restart — otherwise the ticket pins on "AI matching…" forever and its
+    // live view has no stream to show.
+    try {
+      const { default: assignmentPipelineService } = await import('./services/assignmentPipelineService.js');
+      const rec = await assignmentPipelineService.reconcileStuckAnalysisRuns({ olderThanMs: 0 });
+      if (rec.recovered > 0) {
+        logger.warn(`Recovered ${rec.recovered} orphaned assignment pipeline run(s) as 'failed' on startup`);
+      }
+    } catch (e) {
+      logger.warn('Assignment pipeline run reconciliation failed (non-fatal):', e.message);
+    }
+
     try {
       const staleRuns = await notificationWorkflowRunWatchdogService.reconcileStaleRuns();
       if (staleRuns.runCount > 0) {
