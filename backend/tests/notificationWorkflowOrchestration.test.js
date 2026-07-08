@@ -459,6 +459,220 @@ describe('auto-send safety gates on send_email', () => {
   });
 });
 
+describe('content addressing (pin a producer\'s output)', () => {
+  // Outputs as recordLlmOutput / recordNodeOutput store them.
+  const llmOutput = (nodeId, body, confidence) => ({
+    nodeId,
+    nodeType: 'llm_generate',
+    llm: { email: { extra: { confidence } }, confidence },
+    email: { subject: `Draft ${nodeId}`, html: `<p>${body}</p>`, text: body },
+  });
+  const templateOutput = (nodeId, body) => ({
+    nodeId,
+    nodeType: 'template_render',
+    email: { subject: `Tmpl ${nodeId}`, html: `<p>${body}</p>`, text: body },
+  });
+
+  function addressedSendDefinition(sendData = {}) {
+    return {
+      version: 2,
+      metadata: {},
+      nodes: [
+        { id: 'trigger', type: 'trigger', data: { triggerType: 'ticket.created' } },
+        { id: 'recipients', type: 'recipient_resolver', data: { to: ['requester'] } },
+        { id: 'draft_a', type: 'llm_generate', data: { prompt: 'a', promoteToEmail: false } },
+        { id: 'draft_b', type: 'llm_generate', data: { prompt: 'b', promoteToEmail: false } },
+        { id: 'tmpl', type: 'template_render', data: { contentSource: 'template_only', subject: 'S', html: '<p>T</p>', text: 'T' } },
+        { id: 'send', type: 'send_email', data: { provider: 'sendgrid', includeFooter: false, ...sendData } },
+      ],
+      edges: [
+        { id: 'e1', source: 'trigger', target: 'recipients' },
+        { id: 'e2', source: 'recipients', target: 'draft_a' },
+        { id: 'e3', source: 'draft_a', target: 'draft_b' },
+        { id: 'e4', source: 'draft_b', target: 'tmpl' },
+        { id: 'e5', source: 'tmpl', target: 'send' },
+      ],
+    };
+  }
+
+  test('two LLM drafts: the send uses the PINNED one, and its confidence drives the gate', async () => {
+    const workflow = { id: 60, workspaceId: 1, triggerType: 'ticket.created', publishedVersion: 1, versions: [] };
+    const result = await executeDefinition({
+      workflow,
+      definition: addressedSendDefinition({ contentFrom: 'draft_a', minLlmConfidence: 'high' }),
+      eventContext: eventContext(),
+      executionMode: 'live',
+      resume: {
+        run: { id: 960 },
+        state: {
+          recipients: { to: ['rita@example.com'], cc: [], bcc: [] },
+          outputs: {
+            draft_a: llmOutput('draft_a', 'first draft', 'high'),
+            draft_b: llmOutput('draft_b', 'second draft', 'low'),
+          },
+          // Shared slots reflect the LAST writer (draft_b) — the pin must win.
+          llm: { promotedToEmail: false, email: { extra: { confidence: 'low' } } },
+          email: { subject: 'S', html: '<p>T</p>', text: 'T' },
+        },
+        startNodeIds: ['send'],
+      },
+    });
+
+    expect(result.status).toBe('completed');
+    const sendStep = result.steps.find((s) => s.nodeId === 'send');
+    expect(sendStep.output.downgradedToProposal).toBeUndefined();
+    expect(sendStep.output.htmlBody).toContain('first draft');
+    expect(sendStep.output.contentFrom).toBe('draft_a');
+    expect(sendStep.output.contentKind).toBe('llm');
+  });
+
+  test('a pinned LOW-confidence draft still downgrades under the gate', async () => {
+    const workflow = { id: 61, workspaceId: 1, triggerType: 'ticket.created', publishedVersion: 1, versions: [] };
+    const result = await executeDefinition({
+      workflow,
+      definition: addressedSendDefinition({ contentFrom: 'draft_b', minLlmConfidence: 'high' }),
+      eventContext: eventContext(),
+      executionMode: 'live',
+      resume: {
+        run: { id: 961 },
+        state: {
+          recipients: { to: ['rita@example.com'], cc: [], bcc: [] },
+          outputs: { draft_b: llmOutput('draft_b', 'second draft', 'low') },
+          email: { subject: 'S', html: '<p>T</p>', text: 'T' },
+        },
+        startNodeIds: ['send'],
+      },
+    });
+
+    const sendStep = result.steps.find((s) => s.nodeId === 'send');
+    expect(sendStep.output.downgradedToProposal).toBe(true);
+    expect(proposedReplyCreateMock).toHaveBeenCalledWith(expect.objectContaining({
+      source: 'auto_send_downgrade',
+      bodyHtml: '<p>second draft</p>',
+    }));
+  });
+
+  test('pinning a template output bypasses LLM gates even with a promoted low-confidence draft around', async () => {
+    const workflow = { id: 62, workspaceId: 1, triggerType: 'ticket.created', publishedVersion: 1, versions: [] };
+    const result = await executeDefinition({
+      workflow,
+      definition: addressedSendDefinition({ contentFrom: 'tmpl', minLlmConfidence: 'high' }),
+      eventContext: eventContext(),
+      executionMode: 'live',
+      resume: {
+        run: { id: 962 },
+        state: {
+          recipients: { to: ['rita@example.com'], cc: [], bcc: [] },
+          outputs: { tmpl: templateOutput('tmpl', 'templated body') },
+          llm: { promotedToEmail: true, email: { extra: { confidence: 'low' } } },
+          email: { subject: 'S', html: '<p>llm body</p>', text: 'llm body' },
+        },
+        startNodeIds: ['send'],
+      },
+    });
+
+    const sendStep = result.steps.find((s) => s.nodeId === 'send');
+    expect(sendStep.output.downgradedToProposal).toBeUndefined();
+    expect(sendStep.output.htmlBody).toContain('templated body');
+    expect(sendStep.output.contentKind).toBe('template');
+  });
+
+  test('a pinned source that never produced anything skips with a named reason', async () => {
+    const workflow = { id: 63, workspaceId: 1, triggerType: 'ticket.created', publishedVersion: 1, versions: [] };
+    const result = await executeDefinition({
+      workflow,
+      definition: addressedSendDefinition({ contentFrom: 'draft_a' }),
+      eventContext: eventContext(),
+      executionMode: 'live',
+      resume: {
+        run: { id: 963 },
+        state: {
+          recipients: { to: ['rita@example.com'], cc: [], bcc: [] },
+          email: { subject: 'S', html: '<p>T</p>', text: 'T' },
+        },
+        startNodeIds: ['send'],
+      },
+    });
+
+    const sendStep = result.steps.find((s) => s.nodeId === 'send');
+    expect(sendStep.output.skipped).toBe(true);
+    expect(sendStep.output.reason).toContain('draft_a');
+  });
+
+  test('propose_reply pinned to a template output stages it as workflow_template', async () => {
+    const definition = {
+      version: 2,
+      metadata: {},
+      nodes: [
+        { id: 'trigger', type: 'trigger', data: { triggerType: 'ticket.created' } },
+        { id: 'draft', type: 'llm_generate', data: { prompt: 'x', promoteToEmail: false } },
+        { id: 'tmpl', type: 'template_render', data: { contentSource: 'template_only', subject: 'T', html: '<p>T</p>' } },
+        { id: 'propose', type: 'propose_reply', data: { contentFrom: 'tmpl' } },
+        { id: 'end', type: 'stop', data: {} },
+      ],
+      edges: [
+        { id: 'e1', source: 'trigger', target: 'draft' },
+        { id: 'e2', source: 'draft', target: 'tmpl' },
+        { id: 'e3', source: 'tmpl', target: 'propose' },
+        { id: 'e4', source: 'propose', target: 'end' },
+      ],
+    };
+    const workflow = { id: 64, workspaceId: 1, triggerType: 'ticket.created', publishedVersion: 1, versions: [] };
+    const result = await executeDefinition({
+      workflow,
+      definition,
+      eventContext: eventContext(),
+      executionMode: 'live',
+      resume: {
+        run: { id: 964 },
+        state: {
+          outputs: { tmpl: templateOutput('tmpl', 'canned answer') },
+          // An LLM draft exists in the shared slot — the pin must ignore it.
+          llm: { email: { subject: 'L', html: '<p>llm</p>', text: 'llm' }, confidence: 'high' },
+        },
+        startNodeIds: ['propose'],
+      },
+    });
+
+    expect(result.status).toBe('completed');
+    expect(proposedReplyCreateMock).toHaveBeenCalledWith(expect.objectContaining({
+      source: 'workflow_template',
+      bodyHtml: '<p>canned answer</p>',
+      confidence: null,
+    }));
+  });
+
+  test('validation: contentFrom / llmFrom must reference an upstream producer', () => {
+    const base = addressedSendDefinition();
+    // Unknown node
+    let definition = addressedSendDefinition({ contentFrom: 'ghost' });
+    expect(validateWorkflowDefinition(definition, { triggerType: 'ticket.created' }).errors.join(' '))
+      .toMatch(/no longer exists .*ghost/i);
+    // Not a producer
+    definition = addressedSendDefinition({ contentFrom: 'recipients' });
+    expect(validateWorkflowDefinition(definition, { triggerType: 'ticket.created' }).errors.join(' '))
+      .toMatch(/must point at an LLM generate or Template step/i);
+    // Not upstream (self-forward reference: pin the send node's own id)
+    definition = addressedSendDefinition({ contentFrom: 'send' });
+    expect(validateWorkflowDefinition(definition, { triggerType: 'ticket.created' }).errors.length).toBeGreaterThan(0);
+    // Valid pins pass
+    definition = addressedSendDefinition({ contentFrom: 'draft_a' });
+    expect(validateWorkflowDefinition(definition, { triggerType: 'ticket.created' }).errors).toEqual([]);
+    // llmFrom on the template must target an llm_generate
+    definition = addressedSendDefinition();
+    definition.nodes = definition.nodes.map((n) => (n.id === 'tmpl'
+      ? { ...n, data: { ...n.data, llmFrom: 'recipients' } }
+      : n));
+    expect(validateWorkflowDefinition(definition, { triggerType: 'ticket.created' }).errors.join(' '))
+      .toMatch(/must point at an LLM generate step/i);
+    definition.nodes = definition.nodes.map((n) => (n.id === 'tmpl'
+      ? { ...n, data: { ...n.data, llmFrom: 'draft_b' } }
+      : n));
+    expect(validateWorkflowDefinition(definition, { triggerType: 'ticket.created' }).errors).toEqual([]);
+    expect(base).toBeTruthy();
+  });
+});
+
 describe('run_workflow sub-workflow node', () => {
   const childDefinition = {
     version: 2,

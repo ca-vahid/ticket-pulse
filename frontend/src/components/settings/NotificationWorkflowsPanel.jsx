@@ -1363,6 +1363,9 @@ function WorkflowGraphNode({ id, data }) {
         {registry.label || data.nodeType}
       </div>
       <div className="truncate text-sm font-semibold text-slate-900">{data.label || id}</div>
+      {data.sourceCaption && (
+        <div className="truncate text-[10px] font-medium text-indigo-500" title={data.sourceCaption}>{data.sourceCaption}</div>
+      )}
       {isCondition && (
         <>
           <Handle
@@ -1462,10 +1465,50 @@ function WorkflowGraphEdge({
   );
 }
 
+/**
+ * Content-source picker (content addressing): pin a consumer node to a
+ * specific upstream producer instead of the "latest output wins" default.
+ */
+function ContentSourcePicker({ definition, nodeId, value, onChange, allowedTypes, automaticLabel, hint = null, label = 'Content source' }) {
+  const producers = upstreamProducerNodes(definition, nodeId, allowedTypes);
+  // Nothing to pick between — the automatic behavior is the only behavior.
+  if (producers.length < 2 && !value) return null;
+  const known = producers.some((node) => node.id === value);
+  return (
+    <div>
+      <label className="text-xs font-medium uppercase text-gray-500" htmlFor={`content-source-${nodeId}`}>{label}</label>
+      <select
+        id={`content-source-${nodeId}`}
+        value={value || ''}
+        onChange={(event) => onChange(event.target.value)}
+        className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900"
+      >
+        <option value="">{automaticLabel}</option>
+        {producers.map((node) => (
+          <option key={node.id} value={node.id}>
+            {NODE_LABELS[node.type] || node.type}: {node.data?.label || node.id}
+          </option>
+        ))}
+        {value && !known && <option value={value}>Missing step: {value}</option>}
+      </select>
+      {value && !known && (
+        <p className="mt-1 text-[11px] text-red-500 normal-case">This step no longer exists upstream — pick another source or Automatic.</p>
+      )}
+      {hint && <p className="mt-1 text-[11px] text-gray-400 normal-case">{hint}</p>}
+    </div>
+  );
+}
+
 const FLOW_EDGE_TYPES = { workflowEdge: WorkflowGraphEdge };
 
 function flowNodesFromDefinition(definition, selectedNodeId) {
   const layout = computeVerticalLayout(definition);
+  const byId = new Map((definition?.nodes || []).map((node) => [node.id, node]));
+  const captionFor = (ref) => {
+    if (!ref) return null;
+    const target = byId.get(String(ref));
+    return `from: ${target?.data?.label || ref}`;
+  };
   return (definition?.nodes || []).map((node, index) => ({
     id: node.id,
     type: 'workflowNode',
@@ -1476,6 +1519,9 @@ function flowNodesFromDefinition(definition, selectedNodeId) {
       nodeType: node.type,
       label: node.data?.label || node.data?.notificationType || node.id,
       selected: selectedNodeId === node.id,
+      // Pinned content source (content addressing) — shown as a caption so
+      // "this send uses draft #2" is visible on the canvas, not just the inspector.
+      sourceCaption: captionFor(node.data?.contentFrom || node.data?.llmFrom),
     },
   }));
 }
@@ -1890,6 +1936,33 @@ function upstreamTypes(nodeId, nodes, incoming) {
   return types;
 }
 
+function upstreamIds(nodeId, incoming) {
+  const seen = new Set();
+  const stack = [...(incoming.get(nodeId) || []).map((edge) => edge.source)];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (seen.has(current)) continue;
+    seen.add(current);
+    for (const edge of incoming.get(current) || []) stack.push(edge.source);
+  }
+  return seen;
+}
+
+/**
+ * Upstream content producers for a consumer node — the option list for the
+ * "content source" pickers (content addressing). Types: llm_generate and/or
+ * template_render.
+ */
+function upstreamProducerNodes(definition, nodeId, allowedTypes) {
+  if (!definition || !nodeId) return [];
+  const incoming = new Map((definition.nodes || []).map((node) => [node.id, []]));
+  for (const edge of definition.edges || []) {
+    if (incoming.has(edge.target)) incoming.get(edge.target).push(edge);
+  }
+  const ids = upstreamIds(nodeId, incoming);
+  return (definition.nodes || []).filter((node) => ids.has(node.id) && allowedTypes.includes(node.type));
+}
+
 function graphCycleDescriptions(definition, outgoing) {
   const cycles = [];
   const visiting = new Set();
@@ -1985,6 +2058,27 @@ export function validateWorkflowDefinitionClient(definition, triggerType = null)
     const upstream = upstreamTypes(node.id, maps.nodes, maps.incoming);
     if (!upstream.has('llm_generate') && !upstream.has('template_render')) {
       errors.push(`Stage-for-approval node ${node.id} needs an upstream draft source — add an LLM generate or Template step before it`);
+    }
+  }
+  // Content addressing (mirrors the server): pinned sources must be upstream
+  // producers of the right type.
+  for (const node of nodes) {
+    const refs = [];
+    if (['send_email', 'propose_reply'].includes(node.type) && node.data?.contentFrom) {
+      refs.push({ ref: String(node.data.contentFrom), allowed: ['llm_generate', 'template_render'], label: 'Content source' });
+    }
+    if (node.type === 'template_render' && node.data?.llmFrom) {
+      refs.push({ ref: String(node.data.llmFrom), allowed: ['llm_generate'], label: 'LLM source' });
+    }
+    for (const { ref, allowed, label } of refs) {
+      const target = maps.nodes.get(ref);
+      if (!target) {
+        errors.push(`${label} on node ${node.id} references a step that no longer exists ("${ref}")`);
+      } else if (!allowed.includes(target.type)) {
+        errors.push(`${label} on node ${node.id} must point at ${allowed.length > 1 ? 'an LLM generate or Template step' : 'an LLM generate step'} ("${ref}" is a ${target.type})`);
+      } else if (!upstreamIds(node.id, maps.incoming).has(ref)) {
+        errors.push(`${label} on node ${node.id} must reference a step earlier in the flow ("${ref}" does not run before it)`);
+      }
     }
   }
   return [...new Set(errors)];
@@ -8988,7 +9082,15 @@ export default function NotificationWorkflowsPanel({
       return (
         <div className="space-y-3">
           <p className="text-sm text-gray-600">Stages the upstream draft on the ticket as a <strong>proposed reply</strong>. An agent approves &amp; sends, edits it in the composer, or dismisses it — nothing is emailed automatically.</p>
-          <p className="text-[11px] text-gray-400">Needs an LLM Generate or Template step earlier in the flow (the LLM draft wins when both exist). A newer proposal supersedes an older open one on the same ticket.</p>
+          <ContentSourcePicker
+            definition={draft}
+            nodeId={selectedNode.id}
+            value={selectedNode.data?.contentFrom || ''}
+            onChange={(ref) => updateNodeData({ contentFrom: ref || null })}
+            allowedTypes={['llm_generate', 'template_render']}
+            automaticLabel="Automatic — LLM draft, else the rendered template"
+          />
+          <p className="text-[11px] text-gray-400">Needs an LLM Generate or Template step earlier in the flow. A newer proposal supersedes an older open one on the same ticket.</p>
           <button
             type="button"
             onClick={() => setLlmHelpTopic('aiDraftedReplies')}
@@ -9526,6 +9628,19 @@ export default function NotificationWorkflowsPanel({
             </div>
           </div>
 
+          {['llm_only', 'llm_with_template_fallback'].includes(contentSource) && (
+            <ContentSourcePicker
+              definition={draft}
+              nodeId={selectedNode.id}
+              value={selectedNode.data?.llmFrom || ''}
+              onChange={(ref) => updateNodeData({ llmFrom: ref || null })}
+              allowedTypes={['llm_generate']}
+              automaticLabel="Automatic — latest LLM output"
+              label="LLM source"
+              hint="With more than one LLM step upstream, pin which draft feeds this template."
+            />
+          )}
+
           <div>
             <div className="flex items-center justify-between gap-2">
               <label className="text-xs font-medium uppercase text-gray-500">Subject</label>
@@ -9734,6 +9849,15 @@ export default function NotificationWorkflowsPanel({
       ];
       return (
         <div className="space-y-3">
+          <ContentSourcePicker
+            definition={draft}
+            nodeId={selectedNode.id}
+            value={selectedNode.data?.contentFrom || ''}
+            onChange={(ref) => updateNodeData({ contentFrom: ref || null })}
+            allowedTypes={['llm_generate', 'template_render']}
+            automaticLabel="Automatic — latest generated email"
+            hint="With several drafts in one flow, pin exactly which step's output this email sends. AI safety gates follow the pinned source."
+          />
           {linkOptions.map((option) => {
             const enabled = selectedNode.data?.[option.key] === true;
             const enabledClass = option.color === 'red'

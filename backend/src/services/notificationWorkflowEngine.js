@@ -1362,6 +1362,39 @@ function llmEmailFromState(state) {
   };
 }
 
+/**
+ * Content addressing: consumers (send_email / propose_reply / a template's
+ * LLM merge) can pin a SPECIFIC producer's output instead of the shared
+ * last-writer slots — which is what makes multiple LLM drafts in one graph
+ * usable. Refs are node ids (or an explicit data.outputKey); outputs carry
+ * their nodeId, so either form resolves.
+ */
+function resolveAddressedOutput(state, ref) {
+  const wanted = String(ref || '').trim();
+  if (!wanted) return null;
+  const outputs = state.outputs || {};
+  if (outputs[wanted]) return outputs[wanted];
+  const sanitized = wanted.replace(/[^a-zA-Z0-9_]/g, '_').replace(/^([0-9])/, '_$1');
+  if (outputs[sanitized]) return outputs[sanitized];
+  return Object.values(outputs).find((output) => output?.nodeId === wanted) || null;
+}
+
+/** Normalize an addressed output into a sendable email + its provenance. */
+function addressedEmailContent(output) {
+  if (!output) return null;
+  const kind = output.nodeType === 'llm_generate' ? 'llm' : 'template';
+  const email = output.email || {};
+  const text = email.text || null;
+  const html = email.html || (kind === 'llm' ? textToEmailHtml(text) : null) || null;
+  return {
+    kind,
+    email: (html || text) ? { subject: email.subject || null, html, text } : null,
+    confidence: kind === 'llm'
+      ? (String(output.llm?.email?.extra?.confidence || output.llm?.confidence || '').toLowerCase() || null)
+      : null,
+  };
+}
+
 const CONFIDENCE_RANK = { low: 1, medium: 2, high: 3 };
 
 /**
@@ -1371,11 +1404,22 @@ const CONFIDENCE_RANK = { low: 1, medium: 2, high: 3 };
  *  - alwaysHumanRecipients (emails and/or @domains): matching requesters
  *    ALWAYS get a human-approved reply regardless of confidence (regulated /
  *    VIP / complaint handling).
- * Gates only apply when the outgoing email actually came from the LLM
- * (state.llm.promotedToEmail) — plain template sends are unaffected.
+ * Gates only apply when the outgoing email actually came from the LLM —
+ * plain template sends are unaffected. "Came from the LLM" means: the
+ * addressed content source is an LLM node, or (legacy shared-slot path)
+ * state.llm.promotedToEmail.
  */
-function evaluateAutoSendGate(node, state, eventContext) {
-  if (state.llm?.promotedToEmail !== true) return { downgrade: false };
+function evaluateAutoSendGate(node, state, eventContext, addressedContent = null) {
+  let llmAuthored;
+  let contentConfidence;
+  if (addressedContent) {
+    llmAuthored = addressedContent.kind === 'llm';
+    contentConfidence = addressedContent.confidence;
+  } else {
+    llmAuthored = state.llm?.promotedToEmail === true;
+    contentConfidence = String(state.llm?.email?.extra?.confidence || state.llm?.confidence || '').toLowerCase() || null;
+  }
+  if (!llmAuthored) return { downgrade: false };
 
   const requesterEmail = String(eventContext.requester?.email || '').trim().toLowerCase();
   const alwaysHuman = Array.isArray(node.data?.alwaysHumanRecipients) ? node.data.alwaysHumanRecipients : [];
@@ -1390,7 +1434,7 @@ function evaluateAutoSendGate(node, state, eventContext) {
 
   const minConfidence = String(node.data?.minLlmConfidence || '').toLowerCase();
   if (CONFIDENCE_RANK[minConfidence]) {
-    const confidence = String(state.llm?.email?.extra?.confidence || state.llm?.confidence || 'low').toLowerCase();
+    const confidence = contentConfidence || 'low';
     const rank = CONFIDENCE_RANK[confidence] || 1;
     if (rank < CONFIDENCE_RANK[minConfidence]) {
       return {
@@ -1895,18 +1939,36 @@ async function executeNode({
 
   if (node.type === 'propose_reply') {
     const ticketId = Number(eventContext.ticket?.id);
-    const llmEmail = state.llm?.email || {};
-    // Draft source: LLM output first; else a rendered template (state.email)
-    // — staging templated text for human approval is valid too (QA 07-07 #5).
-    const usingTemplate = !llmEmail.html && !llmEmail.text && Boolean(state.email?.html || state.email?.text);
-    const draft = usingTemplate ? state.email : llmEmail;
+    if (!Number.isFinite(ticketId) || ticketId <= 0) return { skipped: true, reason: 'No ticket in event context' };
+
+    // Draft source: a pinned producer (contentFrom) wins; otherwise LLM
+    // output first, else the rendered template (QA 07-07 #5).
+    const contentFrom = String(node.data?.contentFrom || '').trim() || null;
+    let draft;
+    let usingTemplate;
+    let confidence;
+    let addressedLlm = null;
+    if (contentFrom) {
+      const output = resolveAddressedOutput(state, contentFrom);
+      const addressed = addressedEmailContent(output);
+      if (!addressed) return { skipped: true, reason: `Draft source "${contentFrom}" has not produced anything on this run (was the step skipped?)` };
+      if (!addressed.email) return { skipped: true, reason: `Draft source "${contentFrom}" produced no draft body` };
+      draft = addressed.email;
+      usingTemplate = addressed.kind !== 'llm';
+      confidence = addressed.confidence;
+      addressedLlm = usingTemplate ? null : output?.llm || null;
+    } else {
+      const llmEmail = state.llm?.email || {};
+      usingTemplate = !llmEmail.html && !llmEmail.text && Boolean(state.email?.html || state.email?.text);
+      draft = usingTemplate ? state.email : llmEmail;
+      confidence = usingTemplate ? null : (llmEmail.extra?.confidence || state.llm?.confidence || null);
+      addressedLlm = usingTemplate ? null : state.llm;
+    }
     const bodyHtml = draft.html || null;
     const bodyText = draft.text || null;
-    const confidence = usingTemplate ? null : (llmEmail.extra?.confidence || state.llm?.confidence || null);
-    if (!Number.isFinite(ticketId) || ticketId <= 0) return { skipped: true, reason: 'No ticket in event context' };
     if (!bodyHtml && !bodyText) return { skipped: true, reason: 'No draft to propose (no upstream LLM or template output)' };
     if (dryRun || executionMode === 'mock' || executionMode === 'preview') {
-      return { dryRun: true, wouldPropose: { subject: draft.subject || null, confidence, source: usingTemplate ? 'template' : 'llm' } };
+      return { dryRun: true, wouldPropose: { subject: draft.subject || null, confidence, source: usingTemplate ? 'template' : 'llm', ...(contentFrom ? { contentFrom } : {}) } };
     }
     const { default: ticketProposedReplyService } = await import('./ticketProposedReplyService.js');
     const proposal = await ticketProposedReplyService.create({
@@ -1918,12 +1980,12 @@ async function executeNode({
       bodyHtml,
       bodyText,
       confidence,
-      guardSummary: !usingTemplate && state.llm?.guard ? safeJson({
-        accepted: state.llm.guard.accepted !== false,
-        issues: state.llm.guard.issues || [],
+      guardSummary: addressedLlm?.guard ? safeJson({
+        accepted: addressedLlm.guard.accepted !== false,
+        issues: addressedLlm.guard.issues || [],
       }) : null,
     });
-    return { proposedReplyId: proposal.id, confidence, draftSource: usingTemplate ? 'template' : 'llm' };
+    return { proposedReplyId: proposal.id, confidence, draftSource: usingTemplate ? 'template' : 'llm', ...(contentFrom ? { contentFrom } : {}) };
   }
 
   if (node.type === 'recipient_resolver') {
@@ -1956,7 +2018,22 @@ async function executeNode({
 
   if (node.type === 'template_render') {
     const contentSource = templateContentSource(node);
-    const llmEmail = llmEmailFromState(state);
+    // llmFrom pins WHICH LLM node feeds this template's merge — with several
+    // drafts in one graph, "the latest LLM output" stops being meaningful.
+    const llmFrom = String(node.data?.llmFrom || '').trim() || null;
+    let llmEmail;
+    let llmSourceMissing = false;
+    if (llmFrom) {
+      const addressed = addressedEmailContent(resolveAddressedOutput(state, llmFrom));
+      if (addressed?.email) {
+        llmEmail = addressed.email;
+      } else {
+        llmEmail = { subject: null, html: null, text: null };
+        llmSourceMissing = true; // fall through to the template, like an LLM failure
+      }
+    } else {
+      llmEmail = llmEmailFromState(state);
+    }
     const llmHasContent = Boolean(llmEmail.html || llmEmail.text);
     // llm_only normally skips template rendering — but when the LLM produced
     // nothing (provider down, timeout, guard hard-block) render the template
@@ -1989,11 +2066,20 @@ async function executeNode({
       text: useLlm ? (llmEmail.text || text) : text,
     };
     state.email = appendWorkflowActionLinksToEmail(state.email, eventContext, node.data || {}, actionLinkAppendOptions);
+    // Content addressing: this template's composed email is addressable by
+    // downstream send/stage nodes, independent of the shared slot.
+    const outputKey = recordNodeOutput(state, node, {
+      nodeId: node.id,
+      nodeType: node.type,
+      email: { subject: state.email.subject, html: state.email.html, text: state.email.text },
+    });
     const auditEmail = compactEmailForAudit(state.email);
     return {
       email: auditEmail,
       builtinFallbackUsed,
       contentSource,
+      outputKey,
+      ...(llmFrom ? { llmFrom, llmSourceMissing } : {}),
       actionLinks: auditEmail.actionLinks || {},
       publicStatusLinkApplied: state.email.publicStatusLinkApplied === true,
       publicStatusUrl: state.email.publicStatusUrl || null,
@@ -2329,7 +2415,20 @@ async function executeNode({
 
   if (EMAIL_NODE_TYPES.has(node.type)) {
     const recipients = state.recipients || { to: [], cc: [], bcc: [] };
-    const baseEmail = state.email || {};
+    // Content addressing: a pinned source wins over the shared slot — this is
+    // what lets one graph carry several drafts and send a specific one.
+    const contentFrom = String(node.data?.contentFrom || '').trim() || null;
+    let addressedContent = null;
+    if (contentFrom) {
+      addressedContent = addressedEmailContent(resolveAddressedOutput(state, contentFrom));
+      if (!addressedContent) {
+        return { skipped: true, reason: `Content source "${contentFrom}" has not produced anything on this run (was the step skipped?)` };
+      }
+      if (!addressedContent.email) {
+        return { skipped: true, reason: `Content source "${contentFrom}" produced no email body` };
+      }
+    }
+    const baseEmail = addressedContent ? addressedContent.email : (state.email || {});
     const toRecipients = uniqueEmails(recipients.to || []);
     const ccRecipients = excludeExistingEmails(uniqueEmails(recipients.cc || []), toRecipients);
     const bccRecipients = excludeExistingEmails(uniqueEmails(recipients.bcc || []), [...toRecipients, ...ccRecipients]);
@@ -2345,7 +2444,7 @@ async function executeNode({
     // Auto-send safety gates for LLM-authored content: below-threshold
     // confidence or an always-human requester downgrades the send to a staged
     // proposal for a human to approve — the email is never silently lost.
-    const sendGate = evaluateAutoSendGate(node, state, eventContext);
+    const sendGate = evaluateAutoSendGate(node, state, eventContext, addressedContent);
     if (sendGate.downgrade) {
       if (dryRun || executionMode === 'mock' || executionMode === 'preview') {
         return { skipped: true, wouldDowngradeToProposal: true, reason: sendGate.reason };
@@ -2418,6 +2517,10 @@ async function executeNode({
       subject,
       htmlBody,
       textBody,
+      // Audit: which producer's content this send used ('shared' = the
+      // legacy last-writer slot; otherwise the addressed node + its kind).
+      contentFrom: contentFrom || null,
+      contentKind: addressedContent ? addressedContent.kind : (state.llm?.promotedToEmail === true ? 'llm' : 'template'),
       notificationType: node.data?.notificationType || eventContext.event?.type || workflow.triggerType,
       actionLinks,
       branding,
