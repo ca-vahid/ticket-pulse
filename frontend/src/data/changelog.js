@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.30-preview';
+export const APP_VERSION = '3.0.31-preview';
 
 export const changelog = [
+  {
+    version: '3.0.31-preview',
+    date: 'July 8, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>🧹 No ticket left behind</strong> — the last gap in AI-run reliability: a ticket that never received a pipeline run at all (webhook lost and the poller’s cursor moved past it, e.g. during a deploy) used to wait until someone noticed. A safety-net sweep now catches recent unassigned tickets with zero runs every couple of minutes and queues them — with a 15-minute grace so the normal path always goes first, a 48-hour horizon so old backlog is never resurrected, and the usual dedupe guards so nothing runs twice.' },
+    ],
+  },
   {
     version: '3.0.30-preview',
     date: 'July 8, 2026',

@@ -1420,6 +1420,7 @@ class AssignmentPipelineService {
         const workspaces = await workspaceRepository.getAllActive();
         for (const ws of workspaces) {
           try {
+            await this._queueMissedTickets(ws.id).catch((e) => logger.warn(`[missed-ticket sweep] ws ${ws.id}: ${e.message}`));
             const queuedCount = await assignmentRepository.countQueuedRuns(ws.id);
             if (queuedCount === 0) continue;
             const tz = ws.defaultTimezone || 'America/Los_Angeles';
@@ -1439,6 +1440,54 @@ class AssignmentPipelineService {
     this._drainTimer = setInterval(() => { tick().catch(() => {}); }, intervalMs);
     this._drainKick = setTimeout(() => { tick().catch(() => {}); }, 15000);
     logger.info(`Assignment queue-drain worker started (every ${Math.round(intervalMs / 1000)}s)`);
+  }
+
+  /**
+   * Safety net for trigger gaps: a ticket that never got ANY pipeline run
+   * (webhook lost AND the poll cursor moved past it, e.g. during a deploy
+   * restart window) used to sit unassigned until a human noticed — four
+   * invoice tickets sat 15+ hours during the Jul 8 incident. Sweep recent
+   * open/unassigned/non-noise tickets with zero runs and queue them; the
+   * drain executes during business hours with its usual validation.
+   *
+   * Deliberately bounded so it can't over-guardrail or double-run:
+   *  - 15-min grace: the normal webhook/poll path always gets first shot;
+   *  - 48h horizon: never resurrects old backlog;
+   *  - NOT EXISTS *any* run: a ticket touched once is never re-triggered here
+   *    (the stuck-run auto-retry owns that case, with its own 3-attempt cap);
+   *  - max 10/tick + drain-time eligibility re-validation + the open-run
+   *    dedupe guard prevent duplicate or concurrent runs.
+   */
+  async _queueMissedTickets(workspaceId) {
+    const config = await assignmentRepository.getConfig(workspaceId);
+    if (!config?.isEnabled) return;
+    const missed = await prisma.$queryRaw`
+      SELECT t.id FROM tickets t
+      WHERE t.workspace_id = ${workspaceId}
+        AND t.assigned_tech_id IS NULL
+        AND t.status IN ('Open', 'Pending')
+        AND COALESCE(t.is_noise, false) = false
+        AND t.created_at BETWEEN NOW() - INTERVAL '48 hours' AND NOW() - INTERVAL '15 minutes'
+        AND NOT EXISTS (SELECT 1 FROM assignment_pipeline_runs r WHERE r.ticket_id = t.id)
+      ORDER BY t.created_at
+      LIMIT 10`;
+    if (missed.length === 0) return;
+    for (const row of missed) {
+      await prisma.assignmentPipelineRun.create({
+        data: {
+          ticketId: row.id,
+          workspaceId,
+          status: 'queued',
+          triggerSource: 'poll',
+          queuedAt: new Date(),
+          queuedReason: 'Safety net: no pipeline run was ever created for this ticket',
+        },
+      });
+    }
+    logger.warn(`[missed-ticket sweep] queued ${missed.length} ticket(s) that never had a pipeline run`, {
+      workspaceId,
+      ticketIds: missed.map((r) => r.id),
+    });
   }
 
   stopQueueDrainWorker() {
