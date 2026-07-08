@@ -4885,6 +4885,155 @@ function WorkflowArchiveConfirmModal({ workflow, archived, saving, onCancel, onC
   );
 }
 
+// "New variant" and "Duplicate" both created a variant draft for the same
+// trigger — the only real difference was blank canvas vs. copied steps, which
+// nobody could tell from two toolbar buttons. This dialog merges them: one
+// entry point, an editable pre-filled name (QA 07-08), and an explicit choice
+// of starting point. Nothing is created until the user confirms.
+function WorkflowVariantDialog({ open, sourceWorkflow, saving, onCancel, onCreate }) {
+  const [name, setName] = useState('');
+  const [mode, setMode] = useState('copy');
+  const [nameEdited, setNameEdited] = useState(false);
+
+  const eventLabel = sourceWorkflow ? (EVENT_LABELS[sourceWorkflow.triggerType] || sourceWorkflow.triggerType) : '';
+  const sourceName = sourceWorkflow ? workflowDisplayName(sourceWorkflow) : '';
+  const suggestionFor = useCallback(
+    (nextMode) => (nextMode === 'copy' ? `${sourceName} (copy)` : `${eventLabel} variant`),
+    [sourceName, eventLabel],
+  );
+
+  useEffect(() => {
+    if (open) {
+      setMode('copy');
+      setName(suggestionFor('copy'));
+      setNameEdited(false);
+    }
+  }, [open, suggestionFor]);
+
+  if (!open || !sourceWorkflow) return null;
+
+  const pickMode = (nextMode) => {
+    setMode(nextMode);
+    if (!nameEdited) setName(suggestionFor(nextMode));
+  };
+  const trimmed = name.trim();
+
+  const modeCard = (value, title, description) => (
+    <button
+      type="button"
+      onClick={() => pickMode(value)}
+      aria-pressed={mode === value}
+      className={cls(
+        'flex-1 rounded-xl border px-3 py-2.5 text-left transition-colors',
+        mode === value
+          ? 'border-indigo-400 bg-indigo-50 ring-2 ring-inset ring-indigo-400'
+          : 'border-slate-200 bg-white hover:border-indigo-200 hover:bg-indigo-50/40',
+      )}
+    >
+      <span className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+        <span
+          className={cls(
+            'inline-flex h-3.5 w-3.5 items-center justify-center rounded-full border',
+            mode === value ? 'border-indigo-500 bg-indigo-500' : 'border-slate-300 bg-white',
+          )}
+        >
+          {mode === value && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
+        </span>
+        {title}
+      </span>
+      <span className="mt-1 block text-xs leading-5 text-slate-500">{description}</span>
+    </button>
+  );
+
+  return (
+    <div className="fixed inset-0 z-[96] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm">
+      <button
+        type="button"
+        aria-label="Cancel variant creation"
+        className="absolute inset-0 cursor-default"
+        onClick={saving ? undefined : onCancel}
+      />
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="workflow-variant-dialog-title"
+        className="relative z-10 w-full max-w-lg overflow-hidden rounded-2xl border border-white/70 bg-white shadow-2xl"
+      >
+        <div className="flex items-start gap-3 border-b border-indigo-100 bg-indigo-50 px-5 py-4">
+          <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-indigo-200 bg-white text-indigo-700">
+            <Plus className="h-4 w-4" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-xs font-bold uppercase tracking-wide text-slate-500">New variant</div>
+            <h3 id="workflow-variant-dialog-title" className="mt-1 break-words text-lg font-semibold text-slate-950">
+              Variant for “{eventLabel}”
+            </h3>
+            <p className="mt-1 text-sm leading-5 text-slate-600">
+              Variants answer the same trigger as the default workflow, but only for tickets that match their routing rule (a region, a group, …). Everyone else keeps getting the default.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={saving}
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-slate-500 hover:bg-white/70 disabled:opacity-50"
+            title="Cancel"
+          >
+            <XCircle className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="space-y-4 px-5 py-4">
+          <label className="block">
+            <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Name</span>
+            <input
+              autoFocus
+              value={name}
+              onChange={(e) => { setName(e.target.value); setNameEdited(true); }}
+              onFocus={(e) => e.target.select()}
+              onKeyDown={(e) => { if (e.key === 'Enter' && trimmed && !saving) onCreate({ name: trimmed, mode }); }}
+              placeholder="e.g. Brisbane office · after-hours"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+            />
+          </label>
+
+          <div>
+            <span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">Start from</span>
+            <div className="flex gap-2">
+              {modeCard('copy', `Copy “${sourceName}”`, 'Same steps, template and routing as the selected workflow — tweak from there.')}
+              {modeCard('blank', 'Start blank', 'An empty canvas for this trigger — add your own steps.')}
+            </div>
+          </div>
+
+          <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
+            Created as an <b>unpublished draft</b> — nothing runs or sends until you publish and enable it.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-4">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={saving}
+            className="inline-flex h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => onCreate({ name: trimmed, mode })}
+            disabled={saving || !trimmed}
+            className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md bg-indigo-600 px-3 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+          >
+            {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+            Create draft
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function WorkflowDeleteConfirmModal({ workflow, saving, onCancel, onConfirm }) {
   if (!workflow) return null;
 
@@ -6499,6 +6648,7 @@ export default function NotificationWorkflowsPanel({
   const [routingTestResult, setRoutingTestResult] = useState(null);
   const [routingTestLoading, setRoutingTestLoading] = useState(false);
   const [archiveConfirm, setArchiveConfirm] = useState(null);
+  const [variantDialogOpen, setVariantDialogOpen] = useState(false);
   const [newWorkflowOpen, setNewWorkflowOpen] = useState(false);
   const [togglingWorkflowId, setTogglingWorkflowId] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
@@ -6586,9 +6736,11 @@ export default function NotificationWorkflowsPanel({
     [selectedNode?.type, selectedNode?.data?.outputSchema],
   );
   const archivedWorkflowCount = workflows.filter((workflow) => Boolean(workflow.archivedAt)).length;
+  // Archived toggle shows ONLY archived variants (QA 07-08) — mixing them into
+  // the live list made them near-impossible to find among active workflows.
   const visibleWorkflows = useMemo(
     () => (showArchivedWorkflows
-      ? workflows
+      ? workflows.filter((workflow) => Boolean(workflow.archivedAt))
       : workflows.filter((workflow) => !workflow.archivedAt)),
     [showArchivedWorkflows, workflows],
   );
@@ -6788,8 +6940,10 @@ export default function NotificationWorkflowsPanel({
       setHealth(healthResponse.data || null);
       const requestedWorkflow = selectId ? items.find((item) => String(item.id) === String(selectId)) : null;
       const currentWorkflow = selected?.id ? items.find((item) => String(item.id) === String(selected.id)) : null;
-      const isVisibleWorkflow = (workflow) => workflow && (showArchivedWorkflows || !workflow.archivedAt);
-      const fallbackWorkflow = showArchivedWorkflows ? items[0] : items.find((item) => !item.archivedAt);
+      const isVisibleWorkflow = (workflow) => workflow && (showArchivedWorkflows ? Boolean(workflow.archivedAt) : !workflow.archivedAt);
+      const fallbackWorkflow = showArchivedWorkflows
+        ? items.find((item) => item.archivedAt)
+        : items.find((item) => !item.archivedAt);
       const nextWorkflow = (isVisibleWorkflow(requestedWorkflow) ? requestedWorkflow : null)
         || (isVisibleWorkflow(currentWorkflow) ? currentWorkflow : null)
         || fallbackWorkflow
@@ -7335,7 +7489,7 @@ export default function NotificationWorkflowsPanel({
     }
   }
 
-  async function createVariant() {
+  async function createVariant(customName) {
     const triggerType = selected?.triggerType || 'ticket.created';
     const eventLabel = EVENT_LABELS[triggerType] || triggerType;
     setSaving(true);
@@ -7343,7 +7497,7 @@ export default function NotificationWorkflowsPanel({
     try {
       const response = await notificationWorkflowAPI.createVariant({
         triggerType,
-        name: `${eventLabel} custom variant`,
+        name: (customName || '').trim() || `${eventLabel} custom variant`,
         routingMode: 'exclusive',
         routingPriority: 1,
         routingRule: buildConditionRule({ field: 'requester.regionKey', operator: 'equals', value: 'AU-BRISBANE' }),
@@ -7351,8 +7505,10 @@ export default function NotificationWorkflowsPanel({
       await loadWorkflows(response.data?.id);
       setWorkflowListCollapsed(false);
       setMessage({ type: 'success', text: 'Variant draft created' });
+      return true;
     } catch (error) {
       setMessage({ type: 'error', text: error.message || 'Variant creation failed' });
+      return false;
     } finally {
       setSaving(false);
     }
@@ -7395,13 +7551,13 @@ export default function NotificationWorkflowsPanel({
     }
   }
 
-  async function duplicateVariant() {
-    if (!selected) return;
+  async function duplicateVariant(customName) {
+    if (!selected) return false;
     setSaving(true);
     setMessage(null);
     try {
       const response = await notificationWorkflowAPI.duplicateVariant(selected.id, {
-        name: `${workflowDisplayName(selected)} variant`,
+        name: (customName || '').trim() || `${workflowDisplayName(selected)} variant`,
         routingMode: selected.routingMode || 'exclusive',
         routingPriority: selected.isDefaultVariant ? 1 : Math.min(999, Number(selected.routingPriority || 1) + 1),
         routingRule: selected.routingRule || buildConditionRule({ field: 'requester.regionKey', operator: 'equals', value: 'AU-BRISBANE' }),
@@ -7409,8 +7565,10 @@ export default function NotificationWorkflowsPanel({
       await loadWorkflows(response.data?.id);
       setWorkflowListCollapsed(false);
       setMessage({ type: 'success', text: 'Variant duplicated as an unpublished draft' });
+      return true;
     } catch (error) {
       setMessage({ type: 'error', text: error.message || 'Variant duplication failed' });
+      return false;
     } finally {
       setSaving(false);
     }
@@ -7448,6 +7606,9 @@ export default function NotificationWorkflowsPanel({
       if (nextArchived && !showArchivedWorkflows) {
         const nextWorkflow = workflows.find((workflow) => workflow.id !== selected.id && !workflow.archivedAt);
         if (nextWorkflow) await loadWorkflow(nextWorkflow.id, false);
+      } else if (!nextArchived && showArchivedWorkflows) {
+        // Restored out of the archived-only view — follow it back to the live list.
+        setShowArchivedWorkflows(false);
       }
     } catch (error) {
       setMessage({ type: 'error', text: error.message || 'Archive update failed' });
@@ -7458,15 +7619,17 @@ export default function NotificationWorkflowsPanel({
 
   async function updateShowArchivedWorkflows(checked) {
     setShowArchivedWorkflows(checked);
-    if (!checked && selected?.archivedAt) {
-      const nextWorkflow = workflows.find((workflow) => !workflow.archivedAt);
-      if (nextWorkflow) {
-        await loadWorkflow(nextWorkflow.id, false);
-      } else {
-        setSelected(null);
-        setDraft(null);
-        setSelectedNodeId('trigger');
-      }
+    // The list flips between "only live" and "only archived" — keep the
+    // selection inside whichever set is now visible.
+    const selectionVisible = checked ? Boolean(selected?.archivedAt) : !selected?.archivedAt;
+    if (selected && selectionVisible) return;
+    const nextWorkflow = workflows.find((workflow) => (checked ? Boolean(workflow.archivedAt) : !workflow.archivedAt));
+    if (nextWorkflow) {
+      await loadWorkflow(nextWorkflow.id, false);
+    } else {
+      setSelected(null);
+      setDraft(null);
+      setSelectedNodeId('trigger');
     }
   }
 
@@ -7479,7 +7642,7 @@ export default function NotificationWorkflowsPanel({
       await notificationWorkflowAPI.deleteArchived(target.id);
       const remaining = workflows.filter((workflow) => workflow.id !== target.id);
       const nextWorkflow = showArchivedWorkflows
-        ? remaining[0] || null
+        ? remaining.find((workflow) => workflow.archivedAt) || null
         : remaining.find((workflow) => !workflow.archivedAt) || null;
       setWorkflows(remaining);
       setDeleteConfirm(null);
@@ -10048,22 +10211,13 @@ export default function NotificationWorkflowsPanel({
                 </button>
                 <button
                   type="button"
-                  onClick={createVariant}
+                  onClick={() => setVariantDialogOpen(true)}
                   disabled={saving || !selected}
-                  title="Create a routing variant of the selected workflow (same trigger, different audience)"
+                  title="Create a variant of the selected workflow — start blank or copy its steps; you pick the name"
                   className="inline-flex h-8 items-center gap-1.5 rounded-md border border-indigo-200 bg-indigo-50 px-2.5 text-sm font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
                 >
                   <Plus className="h-4 w-4" />
                 New variant
-                </button>
-                <button
-                  type="button"
-                  onClick={duplicateVariant}
-                  disabled={saving || !selected}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                >
-                  <Clipboard className="h-4 w-4" />
-                Duplicate
                 </button>
                 <button
                   type="button"
@@ -10349,7 +10503,7 @@ export default function NotificationWorkflowsPanel({
                             onChange={(event) => updateShowArchivedWorkflows(event.target.checked)}
                             className="h-3.5 w-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                           />
-                          Show archived ({archivedWorkflowCount})
+                          Show only archived ({archivedWorkflowCount})
                         </label>
                       )}
                     </div>
@@ -10573,6 +10727,16 @@ export default function NotificationWorkflowsPanel({
         saving={saving}
         onCancel={() => setArchiveConfirm(null)}
         onConfirm={() => toggleArchived(archiveConfirm?.archived === true)}
+      />
+      <WorkflowVariantDialog
+        open={variantDialogOpen}
+        sourceWorkflow={selected}
+        saving={saving}
+        onCancel={() => setVariantDialogOpen(false)}
+        onCreate={async ({ name, mode }) => {
+          const ok = mode === 'copy' ? await duplicateVariant(name) : await createVariant(name);
+          if (ok) setVariantDialogOpen(false);
+        }}
       />
       <NewWorkflowDialog
         open={Boolean(newWorkflowOpen)}
