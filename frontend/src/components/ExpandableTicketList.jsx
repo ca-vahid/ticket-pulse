@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { Hand, CheckSquare, Star, ExternalLink } from 'lucide-react';
 import { getTicketCategoryLabel } from '../utils/ticketFilter';
 
@@ -48,22 +49,70 @@ function TicketRow({ ticket, variant = 'active', techName, viewMode = 'daily' })
     ? formatTicketTime(ticket.closedAt || ticket.resolvedAt, includeDate)
     : formatTicketTime(ticket.firstAssignedAt, includeDate);
 
+  // Ticket Pulse's own ticket page is the primary destination (migration off
+  // FreshService); FS stays one click away as the small external icon. Ref
+  // label mirrors the server's ticketDisplayRef rule.
+  const internalHref = ticket.id ? `/tickets/${ticket.id}` : null;
+  const fsUrl = ticket.freshserviceTicketId
+    ? `https://${FRESHDOMAIN}/a/tickets/${ticket.freshserviceTicketId}`
+    : null;
+  const refLabel = (ticket.origin === 'ticketpulse' && ticket.nativeNumber !== null && ticket.nativeNumber !== undefined)
+    ? `TP-${ticket.nativeNumber}`
+    : ticket.freshserviceTicketId
+      ? `#${ticket.freshserviceTicketId}`
+      : `TP-ID-${ticket.id}`;
+  const refClass = `font-semibold flex-shrink-0 ${isMuted ? 'text-gray-400 hover:text-gray-600' : 'text-blue-600 hover:text-blue-800'}`;
+
   return (
     <div className={`flex items-center gap-1.5 py-1 px-2 hover:bg-gray-50 rounded text-[11px] leading-tight ${isMuted ? 'opacity-50' : ''}`}>
       <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${priorityDot}`} title={`Priority ${ticket.priority}`} />
 
-      <a
-        href={`https://${FRESHDOMAIN}/a/tickets/${ticket.freshserviceTicketId}`}
-        target="_blank"
-        rel="noopener noreferrer"
-        className={`font-semibold flex-shrink-0 flex items-center gap-0.5 ${isMuted ? 'text-gray-400 hover:text-gray-600' : 'text-blue-600 hover:text-blue-800'}`}
-        onClick={(e) => e.stopPropagation()}
-      >
-        #{ticket.freshserviceTicketId}
-        <ExternalLink className="w-2.5 h-2.5" />
-      </a>
+      {internalHref ? (
+        <Link
+          to={internalHref}
+          title="Open in Ticket Pulse"
+          className={refClass}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {refLabel}
+        </Link>
+      ) : (
+        <a
+          href={fsUrl || '#'}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={refClass}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {refLabel}
+        </a>
+      )}
 
-      <span className={`truncate flex-1 min-w-0 ${isMuted ? 'text-gray-400' : 'text-gray-800'}`}>{ticket.subject}</span>
+      {fsUrl && internalHref && (
+        <a
+          href={fsUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Open in FreshService"
+          className={`flex-shrink-0 ${isMuted ? 'text-gray-300 hover:text-gray-500' : 'text-blue-300 hover:text-blue-600'}`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <ExternalLink className="w-2.5 h-2.5" />
+        </a>
+      )}
+
+      {internalHref ? (
+        <Link
+          to={internalHref}
+          title="Open in Ticket Pulse"
+          className={`truncate flex-1 min-w-0 hover:underline ${isMuted ? 'text-gray-400' : 'text-gray-800'}`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {ticket.subject}
+        </Link>
+      ) : (
+        <span className={`truncate flex-1 min-w-0 ${isMuted ? 'text-gray-400' : 'text-gray-800'}`}>{ticket.subject}</span>
+      )}
 
       <span className={`${statusClass} px-1 py-0.5 rounded text-[9px] font-medium flex-shrink-0`}>
         {ticket.status}
