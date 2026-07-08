@@ -803,6 +803,13 @@ class AssignmentPipelineService {
           tools,
           messages,
           maxTokens: 4096,
+          // A single tool turn normally takes 5–20s (whole runs: p99 97s over
+          // 4.4k prod runs). Without a cap, one hung LLM stream wedges the run
+          // in 'running' indefinitely — the queue then shows an "analyzing"
+          // halo until the watchdog reaps it. 2 min is generous headroom; on
+          // timeout the gateway aborts the attempt and fails over / errors the
+          // run cleanly (broadcast fires, the row clears).
+          attemptTimeoutMs: 120000,
           signal,
           emit,
           onText: (text) => {
@@ -1364,8 +1371,10 @@ class AssignmentPipelineService {
       try {
         // Watchdog: recover runs whose analysis stalled (a hung LLM/tool call,
         // or a restart the startup sweep somehow missed) so no ticket pins on
-        // "AI matching…" indefinitely. 15 min is well beyond a normal run (~90s).
-        await this.reconcileStuckAnalysisRuns({ olderThanMs: 15 * 60 * 1000, broadcast: true })
+        // "analyzing" indefinitely. Prod data (4.4k runs/30d): p99 = 97s,
+        // all-time max = 5.5 min — 7 min of zero progress is definitively dead.
+        // The per-turn attemptTimeoutMs makes this a rare backstop.
+        await this.reconcileStuckAnalysisRuns({ olderThanMs: 7 * 60 * 1000, broadcast: true })
           .catch((e) => logger.warn(`[stuck-run watchdog] ${e.message}`));
         const { default: workspaceRepository } = await import('./workspaceRepository.js');
         const workspaces = await workspaceRepository.getAllActive();
