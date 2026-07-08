@@ -9,7 +9,6 @@ import api from '../services/api';
 import { dataCache } from '../services/dataCache';
 import AutoResponseSettings from '../components/AutoResponseSettings';
 import MobileTabBar from '../components/nav/MobileTabBar';
-import SideRail from '../components/nav/SideRail';
 import NoiseRulesPanel from '../components/NoiseRulesPanel';
 import SyncOperationsPanel from '../components/settings/SyncOperationsPanel';
 import BackfillPanel from '../components/settings/BackfillPanel';
@@ -30,7 +29,7 @@ import AiProviderSettingsPanel from '../components/settings/AiProviderSettingsPa
 import PublicTicketStatusPanel from '../components/settings/PublicTicketStatusPanel';
 import FeedbackPagePanel from '../components/settings/FeedbackPagePanel';
 import UrgentEscalationPanel from '../components/settings/UrgentEscalationPanel';
-import { Button, TooltipProvider } from '../components/ui';
+import { Button, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../components/ui';
 import { cn } from '../lib/utils';
 import {
   ArrowLeft,
@@ -61,6 +60,8 @@ import {
   PhoneCall,
   Send,
   ExternalLink,
+  PanelLeftClose,
+  PanelLeftOpen,
   Siren,
   Inbox,
   Users2,
@@ -97,6 +98,14 @@ export default function Settings() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  const [isNavCollapsed, setIsNavCollapsed] = useState(() => {
+    try {
+      return window.localStorage.getItem('ticketPulse.settingsNavCollapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
   const setActiveSection = (id) => {
     setActiveSectionRaw(id);
     window.history.replaceState(null, '', `#${id}`);
@@ -180,6 +189,14 @@ export default function Settings() {
   useEffect(() => {
     fetchSettings();
   }, [fetchSettings]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('ticketPulse.settingsNavCollapsed', String(isNavCollapsed));
+    } catch {
+      // Ignore storage failures; the nav still works for the current session.
+    }
+  }, [isNavCollapsed]);
 
   useEffect(() => {
     if (settings) {
@@ -521,7 +538,7 @@ export default function Settings() {
 
   return (
     <TooltipProvider delayDuration={180}>
-      <div className="tp-page-backdrop flex h-screen flex-col overflow-hidden text-slate-950 pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0 md:pl-[58px]">
+      <div className="tp-page-backdrop flex h-screen flex-col overflow-hidden text-slate-950 pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0">
         <header className="tp-glass-strong sticky top-0 z-40 flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-white/70 px-3 py-2.5 sm:px-6">
           <div className="flex min-w-0 items-center gap-3">
             <Button
@@ -569,39 +586,89 @@ export default function Settings() {
           )}
         </header>
 
-        <div className="flex flex-1 flex-col overflow-hidden">
-          {/* Section nav: one horizontal scrollable strip at every width — the
-              old left tree doubled up with the app side rail and ate 250px. */}
-          <nav className="settings-scrollbar tp-glass-strong z-30 flex w-full shrink-0 gap-1 overflow-x-auto border-b border-white/70 p-2">
-            {navigationItems.map((item) => {
-              const isActive = activeSection === item.id;
-              const isDisabled = !!item.disabled;
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => setActiveSection(item.id)}
-                  disabled={isDisabled}
-                  className={cn(
-                    'group relative flex h-10 shrink-0 items-center gap-2 rounded-xl px-3 text-left text-[13px] font-medium transition-all',
-                    isDisabled && 'cursor-not-allowed bg-slate-100/70 text-slate-400 opacity-70',
-                    !isDisabled && isActive && 'bg-white/82 text-slate-950 shadow-subtle ring-1 ring-white/80',
-                    !isDisabled && !isActive && 'text-slate-500 hover:bg-white/58 hover:text-slate-800',
-                  )}
-                >
-                  {isActive && !isDisabled && (
-                    <span className="absolute inset-x-3 bottom-0.5 h-0.5 rounded-full bg-blue-600" />
-                  )}
-                  <item.Icon className={cn('h-4 w-4 shrink-0 transition-colors', isActive && !isDisabled ? 'text-blue-600' : 'text-slate-400 group-hover:text-slate-600')} />
-                  <span className="whitespace-nowrap">{item.label}</span>
-                  {item.status && (
-                    <span className="rounded-full bg-slate-200/80 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">
-                      {item.status}
+        <div className="flex flex-1 flex-col overflow-hidden md:flex-row">
+          <motion.aside
+            layout
+            transition={{ type: 'spring', stiffness: 360, damping: 34 }}
+            className={cn(
+              'tp-glass-strong z-30 w-full shrink-0 border-b border-white/70 md:sticky md:top-[61px] md:h-[calc(100vh-61px)] md:self-start md:border-b-0 md:border-r',
+              isNavCollapsed ? 'md:w-[76px]' : 'md:w-[250px]',
+            )}
+          >
+            <div className={cn('hidden items-center border-b border-white/65 px-3 py-3 md:flex', isNavCollapsed ? 'justify-center' : 'justify-between')}>
+              {!isNavCollapsed && (
+                <div>
+                  <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Settings</div>
+                  <div className="text-xs text-slate-400">Workspace controls</div>
+                </div>
+              )}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="iconSm"
+                    onClick={() => setIsNavCollapsed((current) => !current)}
+                    aria-label={isNavCollapsed ? 'Expand settings navigation' : 'Collapse settings navigation'}
+                  >
+                    {isNavCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="right">
+                  {isNavCollapsed ? 'Expand navigation' : 'Collapse navigation'}
+                </TooltipContent>
+              </Tooltip>
+            </div>
+            <nav className="settings-scrollbar flex gap-1 overflow-x-auto p-2 md:block md:h-[calc(100%-65px)] md:space-y-1 md:overflow-y-auto">
+              {navigationItems.map((item) => {
+                const isActive = activeSection === item.id;
+                const isDisabled = !!item.disabled;
+                const navButton = (
+                  <button
+                    key={item.id}
+                    onClick={() => setActiveSection(item.id)}
+                    disabled={isDisabled}
+                    className={cn(
+                      'group relative flex h-11 shrink-0 items-center gap-2.5 rounded-xl px-3 text-left text-[13px] font-medium transition-all md:w-full',
+                      isDisabled && 'cursor-not-allowed bg-slate-100/70 text-slate-400 opacity-70',
+                      !isDisabled && isActive && 'bg-white/82 text-slate-950 shadow-subtle ring-1 ring-white/80',
+                      !isDisabled && !isActive && 'text-slate-500 hover:bg-white/58 hover:text-slate-800',
+                      isNavCollapsed && 'md:justify-center md:px-2',
+                    )}
+                  >
+                    {isActive && !isDisabled && (
+                      <span className="absolute left-1 hidden h-6 w-1 rounded-full bg-blue-600 md:block" />
+                    )}
+                    <item.Icon className={cn('h-4 w-4 shrink-0 transition-colors', isActive && !isDisabled ? 'text-blue-600' : 'text-slate-400 group-hover:text-slate-600')} />
+                    <span
+                      className={cn(
+                        'truncate transition-all duration-200',
+                        isNavCollapsed ? 'md:w-0 md:opacity-0' : 'md:w-auto md:opacity-100',
+                      )}
+                    >
+                      {item.label}
                     </span>
-                  )}
-                </button>
-              );
-            })}
-          </nav>
+                    {item.status && !isNavCollapsed && (
+                      <span className="ml-auto hidden rounded-full bg-slate-200/80 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 md:inline">
+                        {item.status}
+                      </span>
+                    )}
+                  </button>
+                );
+
+                if (!isNavCollapsed) return navButton;
+
+                return (
+                  <Tooltip key={item.id}>
+                    <TooltipTrigger asChild>{navButton}</TooltipTrigger>
+                    <TooltipContent side="right">
+                      {isDisabled ? `${item.label} is in development` : item.label}
+                    </TooltipContent>
+                  </Tooltip>
+                );
+              })}
+            </nav>
+          </motion.aside>
 
           <main className="settings-scrollbar min-w-0 flex-1 overflow-x-hidden overflow-y-auto bg-transparent">
             <motion.div
@@ -1580,7 +1647,6 @@ export default function Settings() {
           </main>
         </div>
         <MobileTabBar />
-        <SideRail />
       </div>
     </TooltipProvider>
   );

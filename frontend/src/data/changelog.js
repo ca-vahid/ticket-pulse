@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.24-preview';
+export const APP_VERSION = '3.0.25-preview';
 
 export const changelog = [
+  {
+    version: '3.0.25-preview',
+    date: 'July 8, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>🧭 Navigation: back to the top bar</strong> — the auto-expanding left rail introduced in v3.0.12 is gone. The colorful destination tiles are back in the top bar where they used to be (with the Approvals badge and Settings gear), pages get their full width back on every screen, and the Settings page keeps its familiar left section tree.' },
+    ],
+  },
   {
     version: '3.0.24-preview',
     date: 'July 8, 2026',
