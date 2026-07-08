@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.0.13-preview';
+export const APP_VERSION = '3.0.14-preview';
 
 export const changelog = [
+  {
+    version: '3.0.14-preview',
+    date: 'July 8, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>📊 Stats band, flattened</strong> — the dashboard&rsquo;s summary band is now one slim line: date controls, a mini bar-chart of the week (the bar shapes replace the old red/green trend arrows — hover any day for its count, holidays keep their dot), the period&rsquo;s numbers in clean type, the self-pick meter with a visible <strong>70% goal tick</strong>, and the view toggle. Half the height, same information, and clicking a day still jumps into it.' },
+      { type: 'improved', html: '<strong>📱 Dashboard stats on phones: one glance, one tap</strong> — instead of a full screen of purple, phones get a compact summary strip (total, the week&rsquo;s shape, a self-pick ring) that opens a bottom sheet with the full breakdown: every stat, a tappable day grid, the self-pick meter with the team load mix, and the Daily/Weekly/Monthly switch. The team list now starts ~300px sooner.' },
+    ],
+  },
   {
     version: '3.0.13-preview',
     date: 'July 8, 2026',
