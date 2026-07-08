@@ -181,6 +181,10 @@ export default function AssigneePicker({
   // decide on. Rendered as a dashed capsule so it never reads as a committed
   // assignee.
   const proposed = !busy && !current && aiSuggestion?.state === 'suggested';
+  // The pipeline is deciding right now — the trigger becomes the "AI
+  // choosing…" shimmer slot (the answer lands here). Opening the picker still
+  // works, so a manual assignment can override the run at any time.
+  const thinking = !busy && !current && aiSuggestion?.state === 'analyzing';
   const topPct = typeof aiSuggestion?.score === 'number' ? Math.round(aiSuggestion.score * 100) : null;
 
   return (
@@ -197,11 +201,12 @@ export default function AssigneePicker({
         aria-expanded={open}
         aria-label={current ? `Assignee: ${current.name} — change` : 'Unassigned — assign a member'}
         className={`tp-focus-ring group flex items-center gap-1.5 min-w-0 w-full border transition-colors text-left ${
-          proposed ? 'rounded-full' : 'rounded-lg'
+          proposed || thinking ? 'rounded-full' : 'rounded-lg'
         } ${sm ? 'px-1.5 py-1' : 'px-2.5 py-1.5'} ${
           open ? 'border-blue-300 bg-white'
             : proposed ? 'border-dashed border-violet-300 bg-violet-50/60 hover:bg-violet-50'
-              : 'border-transparent hover:border-slate-200 hover:bg-white'
+              : thinking ? 'tp-ai-think border-transparent'
+                : 'border-transparent hover:border-slate-200 hover:bg-white'
         } disabled:cursor-not-allowed`}
       >
         {busy ? (
@@ -218,6 +223,19 @@ export default function AssigneePicker({
                 read-only
               </span>
             )}
+          </>
+        ) : thinking ? (
+          <>
+            <span
+              className={`${sm ? 'h-5 w-5' : 'h-7 w-7'} rounded-full bg-violet-100 inline-flex items-center justify-center flex-shrink-0`}
+              title="AI is choosing the best person for this ticket — assigning someone manually overrides the pick"
+            >
+              <Sparkles className={`${sm ? 'w-2.5 h-2.5' : 'w-3.5 h-3.5'} text-violet-600 tp-ai-twinkle`} aria-hidden="true" />
+            </span>
+            <span className="flex flex-col min-w-0 leading-tight">
+              <span className={`${sm ? 'text-[8px]' : 'text-[9px]'} font-bold uppercase tracking-wider text-violet-600`}>AI choosing…</span>
+              <span className={`${sm ? 'text-xs' : 'text-sm'} italic text-slate-400 truncate`}>best person for this</span>
+            </span>
           </>
         ) : proposed ? (
           // Unassigned + a pending AI pick — a dashed "proposed" slot awaiting a

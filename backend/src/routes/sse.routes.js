@@ -78,7 +78,13 @@ class SSEConnectionManager {
   }
 
   sendHeartbeat() {
-    const heartbeat = `:heartbeat ${Date.now()}\n\n`;
+    // A NAMED event, not an SSE comment: comments are invisible to the
+    // browser's EventSource API, so clients had no way to notice a half-dead
+    // connection (backend restarted behind a proxy/LB that keeps the client
+    // socket open → no error, no events, stale screen forever). A real
+    // heartbeat event lets useSSE's staleness watchdog detect the silence and
+    // force a reconnect. Clients without a 'heartbeat' listener ignore it.
+    const heartbeat = `event: heartbeat\ndata: ${Date.now()}\n\n`;
 
     for (const clients of this.channels.values()) {
       clients.forEach(client => {

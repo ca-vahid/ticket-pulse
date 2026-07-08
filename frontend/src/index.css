@@ -375,32 +375,88 @@ code {
   animation: tpNewChip 3s ease-out both;
 }
 
-/* ---- AI assignment in-flight row aura ----------------------------------- */
-
-/* The whole row breathes indigo while the pipeline decides: a static tint
-   (reduced-motion fallback) + a slow light sweep + a pulsing inset ring. */
+/* ---- AI assignment in-flight: breathing halo + cell shimmer ------------- */
+/* (Design pick "B"): while the pipeline decides, the row's left half carries
+   a soft violet halo that breathes, the accent bar flows, and an "AI
+   choosing…" shimmer slot sits in the assignee cell — where the answer will
+   land. Completion = one green flush + a "✓ Suggested" chip by the subject
+   + a ripple on the slot. */
 .tp-ai-live {
-  background-color: rgb(238 242 255 / 0.55);
-  box-shadow: inset 0 0 0 1px rgb(129 140 248 / 0.35);
-  background-image: linear-gradient(
-    100deg,
-    rgb(224 231 255 / 0.0) 20%,
-    rgb(199 210 254 / 0.55) 40%,
-    rgb(221 214 254 / 0.55) 50%,
-    rgb(199 210 254 / 0.55) 60%,
-    rgb(224 231 255 / 0.0) 80%
-  );
-  background-size: 250% 100%;
-  background-repeat: no-repeat;
-  animation: tpAiSheen 2.8s linear infinite, tpAiRing 2.2s ease-in-out infinite;
+  position: relative;
 }
-@keyframes tpAiSheen {
-  from { background-position: 125% 0; }
-  to { background-position: -125% 0; }
+.tp-ai-live::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(90deg, rgb(124 58 237 / 0.16), rgb(124 58 237 / 0.07) 45%, transparent 72%);
+  animation: tpAiHalo 2.4s ease-in-out infinite;
 }
-@keyframes tpAiRing {
-  0%, 100% { box-shadow: inset 0 0 0 1px rgb(129 140 248 / 0.3); }
-  50% { box-shadow: inset 0 0 0 1.5px rgb(99 102 241 / 0.55); }
+@keyframes tpAiHalo {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+/* "AI choosing…" shimmer slot (assignee cell) */
+.tp-ai-think {
+  border: 1.5px dashed rgb(196 181 253);
+  background: linear-gradient(100deg, #f6f4ff 30%, #e6dfff 50%, #f6f4ff 70%);
+  background-size: 220% 100%;
+  animation: tpAiThink 1.5s linear infinite;
+}
+@keyframes tpAiThink {
+  from { background-position: 130% 0; }
+  to { background-position: -130% 0; }
+}
+.tp-ai-twinkle {
+  animation: tpAiTwinkle 1.1s ease-in-out infinite;
+}
+@keyframes tpAiTwinkle {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(0.7); opacity: 0.5; }
+}
+
+/* Completion: the halo's area flushes green once… */
+.tp-ai-flush {
+  position: relative;
+}
+.tp-ai-flush::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(90deg, rgb(52 211 153 / 0.20), rgb(52 211 153 / 0.12) 55%, transparent);
+  animation: tpAiFlush 1.4s ease-out both;
+}
+@keyframes tpAiFlush {
+  0% { opacity: 0; }
+  20% { opacity: 1; }
+  100% { opacity: 0; }
+}
+/* …a chip pops next to the subject (pop → linger → fade)… */
+.tp-ai-done-chip {
+  animation: tpAiDoneChip 2.8s cubic-bezier(0.2, 0.9, 0.3, 1.3) both;
+}
+@keyframes tpAiDoneChip {
+  0% { opacity: 0; transform: scale(0.7); }
+  10% { opacity: 1; transform: scale(1.05); }
+  16% { transform: scale(1); }
+  82% { opacity: 1; }
+  100% { opacity: 0; transform: scale(0.95); }
+}
+/* …and a green ring ripples off the assignee slot. */
+.tp-ai-ripple {
+  position: absolute;
+  inset: 2px 4px;
+  border-radius: 9999px;
+  border: 2.5px solid rgb(52 211 153);
+  opacity: 0;
+  pointer-events: none;
+  animation: tpAiRipple 0.8s ease-out 0.15s both;
+}
+@keyframes tpAiRipple {
+  0% { opacity: 0.9; transform: scale(0.85); }
+  100% { opacity: 0; transform: scale(1.12); }
 }
 
 /* Matching left accent bar: flowing indigo→violet gradient. */
@@ -434,14 +490,20 @@ code {
   .tp-subject-flash-new,
   .tp-subject-flash-updated,
   .tp-new-chip,
-  .tp-ai-live,
+  .tp-ai-live::before,
+  .tp-ai-think,
+  .tp-ai-twinkle,
   .tp-ai-accent,
-  .tp-ai-chip {
+  .tp-ai-chip,
+  .tp-ai-flush::after,
+  .tp-ai-done-chip,
+  .tp-ai-ripple {
     animation: none;
   }
-  /* Without the sweep animation the sheen gradient would sit as a static
-     blotch — drop it and keep the tint + inset ring. */
-  .tp-ai-live {
-    background-image: none;
+  /* Static fallbacks: the halo/think keep their resting tint; the transient
+     completion overlays must not stick around as permanent washes. */
+  .tp-ai-flush::after,
+  .tp-ai-ripple {
+    opacity: 0;
   }
 }
