@@ -1440,7 +1440,7 @@ model AssignmentConfig {
   workspace               Workspace @relation(fields: [workspaceId], references: [id])
   isEnabled               Boolean   @default(false) @map("is_enabled")
   autoAssign              Boolean   @default(false) @map("auto_assign")
-  llmModel                String    @default("claude-sonnet-4-6") @db.VarChar(100) @map("llm_model")
+  llmModel                String    @default("claude-sonnet-5") @db.VarChar(100) @map("llm_model")
   maxRecommendations      Int       @default(3) @map("max_recommendations")
   scoringWeights          Json?     @map("scoring_weights") // { competency: 0.35, workload: 0.30, location: 0.20, recency: 0.15 }
   classificationPrompt    String?   @db.Text @map("classification_prompt")
@@ -1488,7 +1488,7 @@ model AiProviderSetting {
   workspace           Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   operation           String    @db.VarChar(60)
   primaryProvider     String    @default("anthropic") @db.VarChar(30) @map("primary_provider")
-  primaryModel        String    @default("claude-sonnet-4-6") @db.VarChar(100) @map("primary_model")
+  primaryModel        String    @default("claude-sonnet-5") @db.VarChar(100) @map("primary_model")
   fallbackProvider    String?   @default("openai") @db.VarChar(30) @map("fallback_provider")
   fallbackModel       String?   @default("gpt-5.5") @db.VarChar(100) @map("fallback_model")
   autoFallbackEnabled Boolean   @default(true) @map("auto_fallback_enabled")

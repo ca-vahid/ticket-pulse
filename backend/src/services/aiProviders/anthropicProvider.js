@@ -112,7 +112,10 @@ class AnthropicProvider {
       system: systemPrompt,
       tools,
       messages,
-      ...(extra.thinking ? { thinking: extra.thinking } : {}),
+      // Sonnet 5 runs adaptive thinking when the field is omitted (4.6 ran
+      // thinking-off); disable explicitly so pipeline latency/token behavior
+      // stays model-independent unless a caller opts in via extra.thinking.
+      thinking: extra.thinking || { type: 'disabled' },
       ...(extra.outputConfig ? { output_config: extra.outputConfig } : {}),
     }, signal ? { signal } : undefined);
 
