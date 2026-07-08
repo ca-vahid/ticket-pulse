@@ -21,7 +21,7 @@ export default function AppShell({
 }) {
   return (
     <div
-      className={`relative ${fillViewport ? 'flex h-[100dvh] flex-col overflow-hidden' : 'min-h-screen'} ${MOBILE_NAV_INSET} ${APP_BACKGROUND_CLASS} ${className}`}
+      className={`relative md:pl-[58px] ${fillViewport ? 'flex h-[100dvh] flex-col overflow-hidden' : 'min-h-screen'} ${MOBILE_NAV_INSET} ${APP_BACKGROUND_CLASS} ${className}`}
       style={APP_BACKGROUND_STYLE}
     >
       <AppHeader activePage={activePage} {...headerProps} />
