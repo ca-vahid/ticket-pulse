@@ -239,9 +239,14 @@ export function StatusPill({ status, className = '', size = 'md' }) {
       </span>
     );
   }
+  // Custom FS statuses can be long ("Waiting on Customer") — clamp to the
+  // pill's container instead of bleeding into the neighbouring column.
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap ${tone} ${className}`}>
-      {status}
+    <span
+      className={`inline-flex max-w-full min-w-0 items-center px-2 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap ${tone} ${className}`}
+      title={status}
+    >
+      <span className="truncate">{status}</span>
     </span>
   );
 }

@@ -84,14 +84,14 @@ export default function StatusPicker({
   };
 
   return (
-    <span ref={rootRef} className="relative inline-flex" onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
+    <span ref={rootRef} className="relative inline-flex max-w-full min-w-0" onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
       <button
         onClick={() => !disabled && setOpen((v) => !v)}
         disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={`Status: ${value} — change`}
-        className="tp-focus-ring group inline-flex items-center gap-1 rounded-lg px-1 py-0.5 border border-transparent hover:border-slate-200 hover:bg-white transition-colors disabled:cursor-not-allowed"
+        className="tp-focus-ring group inline-flex max-w-full min-w-0 items-center gap-1 rounded-lg px-1 py-0.5 border border-transparent hover:border-slate-200 hover:bg-white transition-colors disabled:cursor-not-allowed"
       >
         {busy ? <Loader2 className="w-4 h-4 animate-spin text-slate-400" aria-hidden="true" /> : <StatusPill status={value} size="sm" />}
         {!disabled && <ChevronDown className={`w-3 h-3 text-slate-300 group-hover:text-slate-400 ${open ? 'rotate-180' : ''} transition-transform`} aria-hidden="true" />}
