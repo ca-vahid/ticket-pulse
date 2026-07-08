@@ -98,7 +98,7 @@ function Fact({ label, children }) {
   );
 }
 
-function RunCard({ run, techById, expanded, onToggle }) {
+function RunCard({ run, techById, expanded, onToggle, returnTo }) {
   const recs = getRecommendationList(run.recommendation);
   const topScore = typeof recs[0]?.score === 'number' ? Math.round(recs[0].score * 100) : null;
   const rebound = run.reboundFrom || null;
@@ -266,6 +266,7 @@ function RunCard({ run, techById, expanded, onToggle }) {
             <WritebackChip label="Type" status={run.ticketTypeWritebackStatus} error={run.ticketTypeWritebackError} at={run.ticketTypeWrittenAt} />
             <Link
               to={`/assignments/history/${run.id}`}
+              state={{ returnTo: returnTo || null }}
               className="tp-focus-ring ml-auto inline-flex items-center gap-1 rounded text-[11px] font-semibold text-indigo-600 hover:underline"
             >
               <Bot className="h-3 w-3" aria-hidden="true" /> Full run in Assignment Review
@@ -313,8 +314,8 @@ export default function TicketAiTab({ ticket, technicians = [], canReview = fals
         if (cancelled) return;
         const data = res?.data || [];
         setRuns(data);
-        // Auto-expand when there's a single story to tell.
-        if (data.length === 1) setExpandedId(data[0].id);
+        // Newest run opens itself — it's usually why you're on this tab.
+        if (data.length > 0) setExpandedId(data[0].id);
       })
       .catch((err) => { if (!cancelled) setError(err.message || 'Could not load AI runs'); })
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -385,8 +386,45 @@ export default function TicketAiTab({ ticket, technicians = [], canReview = fals
         });
       }
     }
+    // AI assignments that haven't materialized as an ownership episode yet —
+    // the episode tracker can lag a fresh auto-assign (QA 07-08: a twice-
+    // bounced ticket's final landing was invisible here). Runs whose assignee
+    // and time match an episode are skipped so the story never doubles up.
+    const episodeMarks = episodes.map((ep) => ({
+      techId: ep.technicianId ?? ep.technician?.id ?? null,
+      at: new Date(ep.startedAt).getTime(),
+    }));
+    for (const run of Array.isArray(runs) ? runs : []) {
+      if (!run.assignedTechId) continue;
+      if (!['auto_assigned', 'approved', 'modified'].includes(run.decision || '')) continue;
+      const at = new Date(run.decidedAt || run.createdAt).getTime();
+      const coveredByEpisode = episodeMarks.some(
+        (m) => m.techId === run.assignedTechId && Math.abs(m.at - at) < 15 * 60000,
+      );
+      if (coveredByEpisode) continue;
+      const name = run.assignedTech?.name || techById.get(run.assignedTechId)?.name || 'A technician';
+      const isCurrent = ticket?.assignedTechId != null && ticket.assignedTechId === run.assignedTechId;
+      const topScore = (() => {
+        const recs = getRecommendationList(run.recommendation);
+        return typeof recs[0]?.score === 'number' ? `top match ${Math.round(recs[0].score * 100)}%` : null;
+      })();
+      nodes.push({
+        key: `run-assign-${run.id}`,
+        at,
+        icon: Bot,
+        tone: 'bg-indigo-100 text-indigo-600',
+        title: (
+          <span>
+            <b>{name}</b>
+            <span className="text-slate-500"> was assigned by the AI{run.decision === 'auto_assigned' ? '' : ` (${String(run.decision).replace(/_/g, ' ')})`}</span>
+          </span>
+        ),
+        meta: isCurrent ? `current owner${topScore ? ` · ${topScore}` : ''}` : topScore,
+        activeDot: isCurrent,
+      });
+    }
     return nodes.sort((a, b) => a.at - b.at);
-  }, [ticket?.createdAt, ticket?.activities, ticket?.assignmentEpisodes]);
+  }, [ticket?.createdAt, ticket?.activities, ticket?.assignmentEpisodes, ticket?.assignedTechId, runs, techById]);
 
   const returnCount = useMemo(
     () => (ticket?.assignmentEpisodes || []).filter((ep) => ep.endMethod === 'rejected').length,
@@ -470,6 +508,7 @@ export default function TicketAiTab({ ticket, technicians = [], canReview = fals
                 techById={techById}
                 expanded={expandedId === run.id}
                 onToggle={() => setExpandedId((cur) => (cur === run.id ? null : run.id))}
+                returnTo={ticket?.id ? `/tickets/${ticket.id}?tab=ai` : null}
               />
             ))}
           </div>
