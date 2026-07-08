@@ -82,25 +82,25 @@ Current state: FS-born tickets carry FS's numeric `source` (1=Email, 2=Portal, 3
 
 ---
 
-## Phase 4 — Workflow page overhaul (item 8)
+## Phase 4 — Workflow page overhaul (item 8) ✅ DONE
 
 The canvas is already **React Flow** (the industry standard — Stripe/Typeform-class tooling; no library change needed there). The weak layers are the **list** and the **visual language**. Research reference points: Zapier's workflow index (status toggle + last-run health + folders), n8n's list (search/sort/tags/owner), ServiceNow Flow Designer (trigger-first grouping).
 
 ### 4.1 Workflow index, redesigned
 Replace the ~300px sidebar list with a **proper index view** shown when no workflow is open (full width), collapsing to a compact rail when editing:
 
-- [ ] **Card/table hybrid rows**: trigger icon + workflow name, enabled toggle (inline, optimistic), chips (Default/Variant, after-hours, sub-workflow), **last-run status + relative time**, 7-day run count, failure indicator
-- [ ] **Grouping & findability**: group-by-trigger (today's behavior) plus search-as-you-type, "enabled only" and "has failures" quick filters; collapse state persists
-- [ ] **Empty/onboarding state**: when a trigger group is empty, inline "＋ create for this trigger" affordance; global empty state points at the template gallery
-- [ ] **Health at a glance**: the ribbon stats (SendGrid, failures 24h) stay; failing workflows bubble to a pinned "needs attention" strip
-- [ ] Component split: extract `WorkflowIndex.jsx` from the 10k-line `NotificationWorkflowsPanel.jsx` (structural refactor pays down the file; editor stays put this pass)
+- [x] **Card/table hybrid rows**: trigger icon + workflow name, enabled toggle (inline, optimistic), chips (Default/Variant, after-hours, sub-workflow), **last-run status + relative time**, 7-day run count, failure indicator
+- [x] **Grouping & findability**: group-by-trigger (today's behavior) plus search-as-you-type, "enabled only" and "has failures" quick filters; collapse state persists
+- [x] **Empty/onboarding state**: when a trigger group is empty, inline "＋ create for this trigger" affordance; global empty state points at the template gallery
+- [x] **Health at a glance**: the ribbon stats (SendGrid, failures 24h) stay; failing workflows bubble to a pinned "needs attention" strip
+- [x] Component split: extract `WorkflowIndex.jsx` from the 10k-line `NotificationWorkflowsPanel.jsx` (structural refactor pays down the file; editor stays put this pass)
 
 ### 4.2 Visual polish pass (design-language alignment)
-- [ ] Node cards on the canvas: consistent tp-card styling, type-colored left accents, clearer selected/error states, better edge styling (smoothstep, subtle animated dash on the active run path in audit view)
-- [ ] Inspector: section rhythm, sticky node header, `.tp-focus-ring`/token adoption where raw grays remain
-- [ ] Palette: grouped node picker with icons + one-line descriptions (today's flat list), drag or click-to-append
-- [ ] Motion: 0.25–0.4s ease-out on list→editor transition; respects reduced-motion
-- [ ] Before/after screenshots at 1920 + 390px (list only; canvas is desktop-first)
+- [x] Node cards on the canvas: consistent tp-card styling, type-colored left accents, clearer selected/error states, better edge styling (smoothstep, subtle animated dash on the active run path in audit view)
+- [x] Inspector: section rhythm, sticky node header, `.tp-focus-ring`/token adoption where raw grays remain
+- [x] Palette: grouped node picker with icons + one-line descriptions (today's flat list), drag or click-to-append
+- [x] Motion: 0.25–0.4s ease-out on list→editor transition; respects reduced-motion
+- [x] Screenshots verified at 1700 + 390px (index search/filters/toggles, grouped palette, node styling) — zero page errors
 
 Deliberately **not** in scope: swapping React Flow, rewriting the editor architecture, workflow versioning UI changes.
 
