@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.28-preview';
+export const APP_VERSION = '3.0.29-preview';
 
 export const changelog = [
+  {
+    version: '3.0.29-preview',
+    date: 'July 8, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>♻️ Stuck AI runs now retry themselves</strong> — when a run is interrupted (server restart) or stalls out, the ticket used to wait until the poller happened to notice it again — sometimes hours, sometimes never. Recovery now re-queues the ticket immediately (picked up within ~2 minutes in business hours), with a 3-attempt cap so nothing can loop. Four invoice tickets stranded by this were re-queued as part of the fix.' },
+    ],
+  },
   {
     version: '3.0.28-preview',
     date: 'July 8, 2026',
