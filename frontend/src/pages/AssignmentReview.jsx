@@ -135,6 +135,7 @@ function getTicketTypeMeta(ticket, recommendation = null) {
   return {
     label,
     title,
+    isIncident,
     pill: isIncident ? 'bg-rose-50 text-rose-700' : 'bg-indigo-50 text-indigo-700',
   };
 }
@@ -2416,25 +2417,27 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
             <span className="font-semibold text-slate-600">{priorityMeta.source} priority:</span> {priorityMeta.rationale}
           </p>
         )}
-        {(categoryLabel || categoryNeedsReview || ticketTypeMeta) && (
-          <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[10px] leading-none">
-            {ticketTypeMeta && (
-              <span className={`max-w-full truncate rounded px-1.5 py-0.5 font-semibold ${ticketTypeMeta.pill}`} title={ticketTypeMeta.title}>
-                {ticketTypeMeta.label}
+        {(categoryLabel || categoryNeedsReview || ticketTypeMeta?.isIncident) && (
+          <div className="mt-1.5 flex items-center gap-1.5 text-[10px] leading-none">
+            {ticketTypeMeta?.isIncident && (
+              <span className="shrink-0 rounded bg-rose-50 px-1 py-0.5 font-bold uppercase tracking-wide text-rose-700" title={ticketTypeMeta.title}>
+                INC
               </span>
             )}
             {categoryLabel && (
-              <span className="max-w-full truncate rounded bg-blue-50 px-1.5 py-0.5 font-semibold text-blue-700" title={categoryLabel}>
+              <span className="min-w-0 truncate rounded bg-blue-50 px-1.5 py-0.5 font-semibold text-blue-700" title={categoryLabel}>
                 {categoryLabel}
               </span>
             )}
             {categoryNeedsReview && (
               <span
-                className="rounded bg-amber-50 px-1.5 py-0.5 font-semibold text-amber-700"
-                title={suggestedCategoryLabel ? `Suggested: ${suggestedCategoryLabel}` : 'Category/subcategory fit should be reviewed'}
-              >
-                Review category
-              </span>
+                className="h-2 w-2 shrink-0 rounded-full bg-amber-400 ring-2 ring-amber-100"
+                role="img"
+                aria-label="Category fit needs review"
+                title={suggestedCategoryLabel
+                  ? `The AI thinks this category is a weak fit — it suggests: ${suggestedCategoryLabel}`
+                  : 'The AI thinks this category is a weak fit — worth a review'}
+              />
             )}
           </div>
         )}
@@ -2967,11 +2970,10 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                   // updates atomically with the cells below it.
                   const cols = [
                     '120px',                  // Signal (time + priority/source/return icons)
-                    'minmax(240px, 1.25fr)',  // Ticket (title + #ID)
-                    'minmax(180px, 0.85fr)',  // Category
-                    'minmax(145px, 0.75fr)',  // Requester
-                    'minmax(150px, 0.85fr)',  // AI Suggestion
-                    'minmax(135px, 0.7fr)',   // Assigned
+                    'minmax(340px, 2.1fr)',   // Ticket (title is the payload — give it the room)
+                    'minmax(150px, 0.8fr)',   // Category (single line)
+                    'minmax(140px, 0.75fr)',  // Requester
+                    'minmax(155px, 0.9fr)',   // Assignee (current owner, or the AI pick)
                     '105px',                  // Status
                     showDecision ? '120px' : null,
                     showActions ? '76px' : null,
@@ -2995,8 +2997,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                         <button type="button" onClick={() => toggleSort('requester')} className="flex items-center gap-1 px-3 py-2 hover:text-slate-700 text-left">
                           Requester <SortIcon field="requester" />
                         </button>
-                        <span className="px-3 py-2">AI Suggestion</span>
-                        <span className="px-3 py-2">Assigned</span>
+                        <span className="px-3 py-2">Assignee</span>
                         <span className="px-3 py-2">Status</span>
                         {showDecision && <span className="px-3 py-2">Decision</span>}
                         {showActions && <span className="px-3 py-2 text-right" />}
@@ -3081,17 +3082,19 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                                 <div className="mt-1">{renderSignalIcons(run, priorityMeta, ctx)}</div>
                               </div>
 
-                              {/* Ticket: title plus one muted metadata line. */}
+                              {/* Ticket: the title is what coordinators actually
+                                  read — wide column + two-line clamp before
+                                  anything gets cut. */}
                               <div className={`min-w-0 px-3 py-2 ${rowDim}`}>
-                                <div className="flex items-center gap-1.5 min-w-0">
+                                <div className="flex items-start gap-1.5 min-w-0">
                                   <span
-                                    className="font-semibold text-slate-800 text-[13px] truncate"
+                                    className="font-semibold text-slate-800 text-[13px] leading-snug line-clamp-2 break-words"
                                     title={run.ticket?.subject || 'No subject'}
                                   >
                                     {run.ticket?.subject || 'No subject'}
                                   </span>
                                   {flag === 'deleted' && (
-                                    <Trash2 className="w-3.5 h-3.5 text-red-400 flex-shrink-0" title="Deleted in FreshService" />
+                                    <Trash2 className="w-3.5 h-3.5 mt-0.5 text-red-400 flex-shrink-0" title="Deleted in FreshService" />
                                   )}
                                 </div>
                                 <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[10px] text-slate-400 leading-none">
@@ -3115,38 +3118,38 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                                 </div>
                               </div>
 
-                              {/* Category: split from Ticket so scan columns stay clean. */}
+                              {/* Category: ONE line. Service Request is the norm
+                                  and says nothing — only incidents get a chip.
+                                  The category-fit "review" signal is an amber
+                                  dot whose tooltip carries the AI's suggestion. */}
                               <div className={`min-w-0 px-3 py-2 ${rowDim}`}>
-                                {ticketTypeMeta && (
-                                  <div
-                                    className={`mb-1 inline-flex max-w-full truncate rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${ticketTypeMeta.pill}`}
-                                    title={ticketTypeMeta.title}
-                                  >
-                                    {ticketTypeMeta.label}
-                                  </div>
-                                )}
-                                {categoryLabel ? (
-                                  <div className="min-w-0" title={categoryLabel}>
-                                    <div className="truncate text-[11px] font-semibold leading-snug text-blue-700">
-                                      {categoryParts.category || categoryLabel}
-                                    </div>
-                                    {categoryParts.subcategory && (
-                                      <div className="mt-0.5 truncate text-[10px] font-medium leading-tight text-slate-500">
-                                        {categoryParts.subcategory}
-                                      </div>
-                                    )}
-                                  </div>
-                                ) : (
-                                  <span className="text-slate-300 text-[12px]">—</span>
-                                )}
-                                {categoryNeedsReview && (
-                                  <div
-                                    className="mt-1 inline-flex rounded bg-amber-50 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-700"
-                                    title={suggestedCategoryLabel ? `Suggested: ${suggestedCategoryLabel}` : 'Category/subcategory fit should be reviewed'}
-                                  >
-                                    Review
-                                  </div>
-                                )}
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  {ticketTypeMeta?.isIncident && (
+                                    <span
+                                      className="shrink-0 rounded bg-rose-50 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide text-rose-700"
+                                      title={ticketTypeMeta.title}
+                                    >
+                                      INC
+                                    </span>
+                                  )}
+                                  {categoryLabel ? (
+                                    <span className="min-w-0 truncate text-[11px] font-semibold leading-snug text-blue-700" title={categoryLabel}>
+                                      {categoryLabel}
+                                    </span>
+                                  ) : (
+                                    <span className="text-slate-300 text-[12px]">—</span>
+                                  )}
+                                  {categoryNeedsReview && (
+                                    <span
+                                      className="h-2 w-2 shrink-0 rounded-full bg-amber-400 ring-2 ring-amber-100"
+                                      role="img"
+                                      aria-label="Category fit needs review"
+                                      title={suggestedCategoryLabel
+                                        ? `The AI thinks this category is a weak fit — it suggests: ${suggestedCategoryLabel}`
+                                        : 'The AI thinks this category is a weak fit — worth a review'}
+                                    />
+                                  )}
+                                </div>
                               </div>
 
                               {/* Requester: avatar + name; secondary line shown only
@@ -3171,18 +3174,33 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                                 </div>
                               </div>
 
-                              {/* AI Suggestion: top pick + compact "+N" indicator
-                                  for additional candidates. AvatarView swaps in the
-                                  AiPicks visual stack (existing component). */}
+                              {/* Assignee: one column, like the tickets queue —
+                                  the current owner when there is one (amber),
+                                  otherwise the AI's pick (blue = suggestion,
+                                  with the +N candidate count). */}
                               <div className={`min-w-0 px-3 py-2 ${rowDim}`}>
-                                {recs.length > 0 ? (
+                                {assignee ? (
+                                  avatarView ? (
+                                    <span className="inline-flex items-center gap-1.5 min-w-0" title={assignee.name}>
+                                      <TechAvatar techId={assignee.id} name={assignee.name} size="xs" ring="ring-1 ring-amber-300" />
+                                      <span className="text-[11px] text-slate-700 truncate max-w-[110px]">{assignee.name}</span>
+                                    </span>
+                                  ) : (
+                                    <span className="block truncate text-[12px] font-medium text-amber-700" title={`Assigned to ${assignee.name}`}>
+                                      {assignee.name}
+                                    </span>
+                                  )
+                                ) : run.ticket?.assignedTechId ? (
+                                  <span className="text-[11px] text-slate-400 italic">External</span>
+                                ) : recs.length > 0 ? (
                                   avatarView ? (
                                     <AiPicks recommendations={recs} />
                                   ) : (
-                                    <div className="flex items-center gap-1.5 min-w-0 text-[12px] leading-snug">
-                                      <span className="text-blue-700 font-medium truncate" title={topRec?.techName}>
-                                        {topRec?.techName}
-                                      </span>
+                                    <div
+                                      className="flex items-center gap-1.5 min-w-0 text-[12px] leading-snug"
+                                      title={`AI suggestion: ${recs.map((r) => r.techName).filter(Boolean).join(', ')}`}
+                                    >
+                                      <span className="text-blue-700 font-medium truncate">{topRec?.techName}</span>
                                       {recs.length > 1 && (
                                         <span className="flex-shrink-0 text-[10px] text-blue-400 font-semibold">
                                           +{recs.length - 1}
@@ -3190,26 +3208,6 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                                       )}
                                     </div>
                                   )
-                                ) : (
-                                  <span className="text-slate-300 text-[12px]">—</span>
-                                )}
-                              </div>
-
-                              {/* Assigned: current FreshService owner only. */}
-                              <div className={`min-w-0 px-3 py-2 ${rowDim}`}>
-                                {assignee ? (
-                                  avatarView ? (
-                                    <span className="inline-flex items-center gap-1.5 min-w-0" title={assignee.name}>
-                                      <TechAvatar techId={assignee.id} name={assignee.name} size="xs" ring="ring-1 ring-amber-300" />
-                                      <span className="text-[11px] text-slate-700 truncate max-w-[90px]">{assignee.name}</span>
-                                    </span>
-                                  ) : (
-                                    <span className="block truncate text-[11px] font-medium text-amber-700" title={assignee.name}>
-                                      {assignee.name}
-                                    </span>
-                                  )
-                                ) : run.ticket?.assignedTechId ? (
-                                  <span className="text-[11px] text-slate-400 italic">External</span>
                                 ) : (
                                   <span className="text-[11px] text-slate-300">Unassigned</span>
                                 )}

@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.15-preview';
+export const APP_VERSION = '3.0.16-preview';
 
 export const changelog = [
+  {
+    version: '3.0.16-preview',
+    date: 'July 8, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>📐 Assignment queue, decluttered</strong> — the ticket title finally gets the room it deserves (roughly twice the width, wrapping to two lines when needed). Category is one clean line: the “Service Request” pill is gone (it said nothing — only incidents get a small <strong>INC</strong> chip), and the category-review flag shrank to an amber dot whose tooltip shows what the AI suggests instead. AI Suggestion and Assigned merged into a single <strong>Assignee</strong> column, just like the tickets queue: the current owner when there is one, otherwise the blue AI pick.' },
+    ],
+  },
   {
     version: '3.0.15-preview',
     date: 'July 8, 2026',
