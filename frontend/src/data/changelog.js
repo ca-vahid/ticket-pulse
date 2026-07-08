@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.19-preview';
+export const APP_VERSION = '3.0.20-preview';
 
 export const changelog = [
+  {
+    version: '3.0.20-preview',
+    date: 'July 8, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>🎯 Dashboard ticket links stay in Ticket Pulse</strong> — expanding a technician on the dashboard now opens tickets on <em>our</em> ticket page (number and subject both link there), instead of jumping straight to FreshService. FreshService is still one click away via the small ↗ icon next to each number — and on the ticket page itself — as we migrate off it over time.' },
+    ],
+  },
   {
     version: '3.0.19-preview',
     date: 'July 8, 2026',
