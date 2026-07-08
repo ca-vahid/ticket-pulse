@@ -790,6 +790,7 @@ export default function Analytics({ view = 'standard' }) {
   const [payload, setPayload] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [failedSections, setFailedSections] = useState([]);
 
   const params = useMemo(() => {
     const p = {
@@ -813,39 +814,54 @@ export default function Analytics({ view = 'standard' }) {
     return p;
   }, [categoryMetadata?.categoryMode, currentWorkspace?.defaultTimezone, currentWorkspace?.id, currentWorkspace?.slug, customEnd, customStart, excludeNoise, groupBy, range, selectedCanonicalCategories.categoryIds, selectedCanonicalCategories.subcategoryIds, selectedLegacyCategories]);
 
+  // Progressive fetch: each endpoint lands in the payload as soon as it
+  // resolves (the active tab paints without waiting for the slowest sibling),
+  // and one failed endpoint degrades to a per-section retry instead of
+  // nuking the whole page — the old all-or-nothing Promise.all meant a single
+  // 90-day timeout forced a full refresh.
+  const fetchSeqRef = useRef(0);
   const fetchAnalytics = useCallback(async () => {
     if (range === 'custom' && (!customStart || !customEnd)) return;
+    const seq = ++fetchSeqRef.current;
     setLoading(true);
     setError(null);
-    try {
-      const [overview, demand, categoryIntelligence, team, quality, ops, insights] = await Promise.all([
-        analyticsAPI.getOverview(params),
-        analyticsAPI.getDemandFlow(params),
-        analyticsAPI.getCategoryIntelligence(params),
-        analyticsAPI.getTeamBalance(params),
-        analyticsAPI.getQuality(params),
-        analyticsAPI.getAutomationOps(params),
-        analyticsAPI.getInsights(params),
-      ]);
-      setPayload({
-        overview: overview.data,
-        demand: demand.data,
-        categories: categoryIntelligence.data,
-        team: team.data,
-        quality: quality.data,
-        ops: ops.data,
-        insights: insights.data,
-      });
-    } catch (err) {
-      setError(err.message || 'Failed to load analytics');
-    } finally {
-      setLoading(false);
+    const requests = {
+      overview: () => analyticsAPI.getOverview(params),
+      demand: () => analyticsAPI.getDemandFlow(params),
+      categories: () => analyticsAPI.getCategoryIntelligence(params),
+      team: () => analyticsAPI.getTeamBalance(params),
+      quality: () => analyticsAPI.getQuality(params),
+      ops: () => analyticsAPI.getAutomationOps(params),
+      insights: () => analyticsAPI.getInsights(params),
+    };
+    const entries = Object.entries(requests);
+    const results = await Promise.allSettled(entries.map(async ([key, call]) => {
+      const res = await call();
+      if (fetchSeqRef.current === seq) {
+        setPayload((prev) => ({ ...prev, [key]: res.data }));
+      }
+    }));
+    if (fetchSeqRef.current !== seq) return; // params changed mid-flight
+    const failed = entries.filter((_, i) => results[i].status === 'rejected').map(([key]) => key);
+    setFailedSections(failed);
+    if (failed.length === entries.length) {
+      const reason = results[0].status === 'rejected' ? results[0].reason : null;
+      setError(reason?.message || 'Failed to load analytics');
     }
+    setLoading(false);
   }, [customEnd, customStart, params, range]);
 
   useEffect(() => {
     fetchAnalytics();
   }, [fetchAnalytics]);
+
+  // A workspace switch must not show the previous workspace's numbers while
+  // the new ones stream in; range/filter flips keep stale data visible under
+  // the refresh indicator instead (better perceived speed, same workspace).
+  useEffect(() => {
+    setPayload({});
+    setFailedSections([]);
+  }, [currentWorkspace?.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1131,7 +1147,39 @@ export default function Analytics({ view = 'standard' }) {
   }, [categories?.rows, mapFocusCategory, selectedAgentCategoryCounts.leaf, selectedCategoryAgent]);
 
   const categoryHierarchyOptions = useMemo(() => {
-    const rows = categories?.hierarchy || [];
+    // Flat taxonomies (e.g. Accounting: top categories with zero subcategories)
+    // arrive as parent + a lone synthetic "No subcategory" child that fills the
+    // whole tile with a meaningless label. Collapse those pairs: drop the only
+    // child and let the parent render as a leaf carrying the child's leaf keys.
+    const rawRows = categories?.hierarchy || [];
+    const childrenByParent = new Map();
+    for (const row of rawRows) {
+      if (!row.parent) continue;
+      if (!childrenByParent.has(row.parent)) childrenByParent.set(row.parent, []);
+      childrenByParent.get(row.parent).push(row);
+    }
+    const collapseByParent = new Map();
+    for (const [parentId, children] of childrenByParent) {
+      if (children.length === 1 && children[0].custom?.nodeType === 'categoryOnly') {
+        collapseByParent.set(parentId, children[0]);
+      }
+    }
+    const rows = collapseByParent.size === 0 ? rawRows : rawRows
+      .filter((row) => !(row.parent && collapseByParent.get(row.parent)?.id === row.id))
+      .map((row) => {
+        const onlyChild = collapseByParent.get(row.id);
+        if (!onlyChild) return row;
+        return {
+          ...row,
+          value: onlyChild.value,
+          colorValue: onlyChild.colorValue,
+          custom: {
+            ...row.custom,
+            agentLeafKeys: onlyChild.custom?.agentLeafKeys,
+            agentLeafKey: onlyChild.custom?.agentLeafKey,
+          },
+        };
+      });
     const rangeTotalCreated = Number(categories?.summary?.totalCreated)
       || rows
         .filter((row) => !row.parent)
@@ -3574,30 +3622,70 @@ export default function Analytics({ view = 'standard' }) {
     );
   };
 
+  const TAB_PAYLOAD_KEY = {
+    overview: 'overview',
+    demand: 'demand',
+    categories: 'categories',
+    team: 'team',
+    quality: 'quality',
+    ops: 'ops',
+    insights: 'insights',
+  };
+
   const renderActiveTab = () => {
-    if (loading) {
+    const tabKey = TAB_PAYLOAD_KEY[activeTab] || 'overview';
+    // Each tab renders as soon as ITS data lands — no waiting on siblings.
+    if (!payload[tabKey]) {
+      if (!loading && (error || failedSections.includes(tabKey))) {
+        return (
+          <div className="space-y-3 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+            <p>{error || 'This section failed to load.'}</p>
+            <button
+              type="button"
+              onClick={fetchAnalytics}
+              className="inline-flex items-center gap-2 rounded-lg border border-red-300 bg-white px-3 py-1.5 font-semibold text-red-700 hover:bg-red-100"
+            >
+              <RefreshCw className="h-4 w-4" />
+              Retry
+            </button>
+          </div>
+        );
+      }
       return (
         <div className="flex min-h-[28rem] items-center justify-center rounded-lg border border-slate-200 bg-white">
           <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
         </div>
       );
     }
-    if (error) {
-      return (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          {error}
-        </div>
-      );
-    }
-    switch (activeTab) {
-    case 'demand': return renderDemand();
-    case 'categories': return renderCategories();
-    case 'team': return renderTeam();
-    case 'quality': return renderQuality();
-    case 'ops': return renderOps();
-    case 'insights': return renderInsights();
-    default: return renderOverview();
-    }
+    const tabContent = (() => {
+      switch (activeTab) {
+      case 'demand': return renderDemand();
+      case 'categories': return renderCategories();
+      case 'team': return renderTeam();
+      case 'quality': return renderQuality();
+      case 'ops': return renderOps();
+      case 'insights': return renderInsights();
+      default: return renderOverview();
+      }
+    })();
+    return (
+      <>
+        {failedSections.length > 0 && !loading && (
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+            <span>Some sections didn’t load ({failedSections.join(', ')}) — the rest is up to date.</span>
+            <button
+              type="button"
+              onClick={fetchAnalytics}
+              className="inline-flex items-center gap-1.5 rounded-md border border-amber-300 bg-white px-2 py-1 text-amber-800 hover:bg-amber-100"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              Retry
+            </button>
+          </div>
+        )}
+        {tabContent}
+      </>
+    );
   };
 
   return (
@@ -3613,7 +3701,7 @@ export default function Analytics({ view = 'standard' }) {
           className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 sm:h-9 sm:w-9"
           title="Refresh analytics"
         >
-          <RefreshCw className="h-4 w-4" />
+          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin text-blue-600' : ''}`} />
         </button>
       }
     >
@@ -3692,7 +3780,7 @@ export default function Analytics({ view = 'standard' }) {
             <button
               type="button"
               onClick={() => exportAnalyticsWorkbook(payload, activeTab)}
-              disabled={loading || error}
+              disabled={Object.keys(payload).length === 0}
               className="col-span-2 inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 text-sm font-semibold text-blue-700 shadow-sm transition-colors hover:bg-blue-100 disabled:opacity-50 sm:col-span-1"
             >
               <Download className="h-4 w-4" />
