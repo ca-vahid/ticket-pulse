@@ -59,6 +59,14 @@ describe('SideRail', () => {
     expect(screen.queryByRole('button', { name: /Mail Workflows/ })).not.toBeInTheDocument();
   });
 
+  test('collapses to peek mode on tickets pages only (they carry their own filter rail)', () => {
+    renderRail('/tickets/42');
+    expect(screen.getByRole('navigation', { name: 'Primary navigation' })).toHaveClass('tp-side-rail--peek');
+    cleanup();
+    renderRail('/dashboard');
+    expect(screen.getByRole('navigation', { name: 'Primary navigation' })).not.toHaveClass('tp-side-rail--peek');
+  });
+
   test('shows the pending-approvals badge when the count is positive', () => {
     approvalCount.mockReturnValue(4);
     renderRail();

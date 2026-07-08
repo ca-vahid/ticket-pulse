@@ -317,7 +317,7 @@ export default function TicketCreate() {
 
   if (metaError) {
     return (
-      <div className="tp-tickets-backdrop min-h-screen md:pl-[58px]">
+      <div className="tp-tickets-backdrop min-h-screen md:pl-[14px]">
         <AppHeader activePage="tickets" />
         <div className="max-w-2xl mx-auto px-4 py-16 text-center">
           <AlertCircle className="w-8 h-8 text-red-500 mx-auto mb-3" aria-hidden="true" />
@@ -329,7 +329,7 @@ export default function TicketCreate() {
   }
 
   return (
-    <div className="tp-tickets-backdrop min-h-screen md:pl-[58px]">
+    <div className="tp-tickets-backdrop min-h-screen md:pl-[14px]">
       <AppHeader activePage="tickets" />
 
       {/* pb clears the sticky action bar + the mobile tab bar under it (QA 07-06 #11) */}
