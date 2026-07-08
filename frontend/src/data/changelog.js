@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.31-preview';
+export const APP_VERSION = '3.0.32-preview';
 
 export const changelog = [
+  {
+    version: '3.0.32-preview',
+    date: 'July 8, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Write-back recovery no longer depends on sync-cycle luck</strong> — the retry for incomplete FreshService write-backs used to run only at the very end of a full sync cycle; a cycle that aborts (a deploy, a sync error) never reached it, which is why one assignment sat undelivered for 40 minutes today. Recovery now also runs on the assignment worker’s own 2-minute tick, which always completes.' },
+    ],
+  },
   {
     version: '3.0.31-preview',
     date: 'July 8, 2026',
