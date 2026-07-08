@@ -2819,6 +2819,7 @@ export default function TicketDetail() {
                             </p>
                             <Link
                               to={`/assignments/history/${r.id}`}
+                              state={{ returnTo: `/tickets/${ticket.id}` }}
                               className="tp-focus-ring inline-flex items-center gap-1 mt-1 text-[11px] font-semibold text-indigo-600 hover:underline rounded"
                             >
                               <Bot className="w-3 h-3" aria-hidden="true" /> View run

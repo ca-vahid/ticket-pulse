@@ -3603,6 +3603,7 @@ function RunNowLiveOverlay({ info, onClose }) {
 
 function HistoryTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los_Angeles' }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const [runs, setRuns] = useState({ items: [], total: 0 });
   const [selectedRun, setSelectedRun] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -3655,8 +3656,25 @@ function HistoryTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/L
   };
 
   if (selectedRun) {
+    // Deep-linked run view. Links from elsewhere (e.g. the ticket page's
+    // "AI & Routing" tab) pass returnTo so Back lands where the user came
+    // from; otherwise it falls back to the run history list.
+    const returnTo = location.state?.returnTo || null;
+    const backLabel = returnTo?.startsWith('/tickets') ? 'Back to ticket' : 'Back to run history';
     return (
       <div>
+        <div className="mb-3 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => navigate(returnTo || '/assignments/history')}
+            className="tp-focus-ring flex min-h-[40px] items-center gap-1.5 rounded text-sm font-medium text-slate-600 transition-colors hover:text-slate-900"
+          >
+            <ArrowLeft className="w-4 h-4" /> {backLabel}
+          </button>
+          <div className="w-px h-5 bg-slate-200" />
+          <Brain className="w-4 h-4 text-blue-600" />
+          <h1 className="text-sm font-bold text-slate-900">Run #{selectedRun.id}</h1>
+        </div>
         <PipelineRunDetail run={selectedRun} workspaceTimezone={workspaceTimezone} onDecide={null} deciding={false} isAdmin={isAdmin} onSyncComplete={refreshSelectedRun} />
       </div>
     );
