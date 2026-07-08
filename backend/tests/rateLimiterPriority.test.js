@@ -45,6 +45,47 @@ describe('FreshServiceRateLimiter priority queues', () => {
     expect(launches).toEqual(['high-1', 'high-2', 'normal-1', 'high-3', 'low-1']);
   });
 
+  test('maxWaitMs rejects a queued request with FS_QUEUE_TIMEOUT before it ever launches', async () => {
+    const limiter = new FreshServiceRateLimiter({
+      maxRequestsPerMinute: 100,
+      minDelayMs: 0,
+      maxConcurrent: 1,
+    });
+    // Occupy the single slot with a slow job so the second request queues.
+    let releaseSlow;
+    const slowDone = limiter.enqueue(() => new Promise((r) => { releaseSlow = r; }));
+    await new Promise((r) => setTimeout(r, 10)); // let the slow job launch and hold the slot
+
+    let launched = false;
+    const bounded = limiter.enqueue(() => { launched = true; return Promise.resolve('never'); }, {
+      priority: 'high',
+      source: 'interactive-ui',
+      maxWaitMs: 30,
+    });
+
+    await expect(bounded).rejects.toMatchObject({ code: 'FS_QUEUE_TIMEOUT' });
+    expect(launched).toBe(false);
+    expect(limiter.getStats().queueTimeouts).toBe(1);
+
+    // Draining the queue afterwards must skip the expired item cleanly.
+    releaseSlow('slow');
+    await slowDone;
+    await new Promise((r) => setTimeout(r, 20));
+    expect(launched).toBe(false);
+    expect(limiter.inFlight).toBe(0);
+  });
+
+  test('maxWaitMs does not reject a request that launches in time', async () => {
+    const limiter = new FreshServiceRateLimiter({
+      maxRequestsPerMinute: 100,
+      minDelayMs: 0,
+      maxConcurrent: 5,
+    });
+    const result = await limiter.enqueue(() => Promise.resolve('ok'), { maxWaitMs: 5000 });
+    expect(result).toBe('ok');
+    expect(limiter.getStats().queueTimeouts).toBe(0);
+  });
+
   test('reports queue depth by priority', async () => {
     const limiter = new FreshServiceRateLimiter({
       maxRequestsPerMinute: 100,

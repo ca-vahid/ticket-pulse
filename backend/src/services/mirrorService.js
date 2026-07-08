@@ -41,6 +41,7 @@ class MirrorService {
     this._timer = null;
     this._draining = false;
     this._clients = new Map(); // workspaceId → client (per-process; shared rate limiter underneath)
+    this._interactiveClients = new Map(); // workspaceId → high-priority client for user-facing calls
   }
 
   isEnabled() {
@@ -172,6 +173,28 @@ class MirrorService {
   /** Public accessor — FS-born reply/note writes reuse the mirror's client. */
   async getClient(workspaceId) {
     return this._getClient(workspaceId);
+  }
+
+  /**
+   * High-priority client for calls a user is actively waiting on (field
+   * write-backs, replies, on-open thread refresh). The background mirror
+   * client runs at priority 'low' on the shared limiter, which put
+   * interactive writes behind entire sync sweeps — multi-minute hangs the
+   * hosting front-end killed at ~230s (QA: "network error" after 4 min).
+   * 'high' jumps the queue; queueTimeoutMs turns a still-congested queue
+   * into a fast, honest FS_QUEUE_TIMEOUT (nothing sent) instead of a hang.
+   */
+  async getInteractiveClient(workspaceId) {
+    if (this._interactiveClients.has(workspaceId)) return this._interactiveClients.get(workspaceId);
+    const fsConfig = await settingsRepository.getFreshServiceConfigForWorkspace(workspaceId);
+    if (!fsConfig?.domain || !fsConfig?.apiKey) return null;
+    const client = createFreshServiceClient(fsConfig.domain, fsConfig.apiKey, {
+      priority: 'high',
+      source: 'interactive-ui',
+      queueTimeoutMs: 15000,
+    });
+    this._interactiveClients.set(workspaceId, client);
+    return client;
   }
 
   async _getClient(workspaceId) {

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
-import { ValidationError, NotFoundError } from '../utils/errors.js';
+import { ValidationError, NotFoundError, ServiceBusyError } from '../utils/errors.js';
 import { TICKET_ORIGIN, TICKET_SOURCE, TICKET_SOURCE_LABELS, APP_NATIVE_TRIGGER_SOURCE, ticketDisplayRef } from '../utils/ticketOrigin.js';
 import noiseRuleService from './noiseRuleService.js';
 import ticketActivityRepository from './ticketActivityRepository.js';
@@ -16,6 +16,14 @@ import { sseManager } from '../routes/sse.routes.js';
 
 export const NATIVE_TICKET_STATUSES = ['Open', 'Pending', 'Resolved', 'Closed'];
 const TERMINAL_STATUSES = ['Resolved', 'Closed'];
+
+// The FS client wraps limiter rejections in plain Errors, so match on the
+// preserved code OR message. A queue timeout means the request never launched
+// — nothing reached FreshService, so "try again" is always safe advice.
+const FS_BUSY_MESSAGE = 'FreshService is busy with background sync right now — nothing was changed. Please try again in a few seconds.';
+function isFsQueueTimeout(err) {
+  return err?.code === 'FS_QUEUE_TIMEOUT' || /rate-limit queue/.test(err?.message || '');
+}
 
 // Arrival-channel labels live in utils/ticketOrigin.js (TICKET_SOURCE_LABELS):
 // FS's numeric codes 1–10 plus the TP extension range (API/Webhook/Agent).
@@ -1720,7 +1728,10 @@ class TicketService {
     }
 
     const workspace = await this._getWorkspace(workspaceId);
-    const client = await mirrorService.getClient(workspaceId);
+    // Interactive client: high limiter priority + bounded queue wait. The
+    // mirror's 'low'-priority client put user write-backs behind entire sync
+    // sweeps — the multi-minute hangs QA saw as "network error" after 4 min.
+    const client = await mirrorService.getInteractiveClient(workspaceId);
     if (!client) throw new ValidationError('FreshService is not configured for this workspace');
 
     const { getStatusId, getStatusString } = await import('../integrations/freshserviceTransformer.js');
@@ -1779,13 +1790,18 @@ class TicketService {
       const { default: settingsRepository } = await import('./settingsRepository.js');
       const { default: freshServiceActionService } = await import('./freshServiceActionService.js');
       const fsConfig = await settingsRepository.getFreshServiceConfigForWorkspace(workspaceId);
-      fsPayload.custom_fields = await freshServiceActionService._resolveTicketPulseLookupFields(client, {
-        localFields: { tpSkill: cat?.name || null, tpSubskill: sub?.name || null },
-        customFields: {
-          [fsConfig.tpSkillCustomField]: cat?.name || null,
-          [fsConfig.tpSubskillCustomField]: sub?.name || null,
-        },
-      }, fsConfig);
+      try {
+        fsPayload.custom_fields = await freshServiceActionService._resolveTicketPulseLookupFields(client, {
+          localFields: { tpSkill: cat?.name || null, tpSubskill: sub?.name || null },
+          customFields: {
+            [fsConfig.tpSkillCustomField]: cat?.name || null,
+            [fsConfig.tpSubskillCustomField]: sub?.name || null,
+          },
+        }, fsConfig);
+      } catch (err) {
+        if (isFsQueueTimeout(err)) throw new ServiceBusyError(FS_BUSY_MESSAGE);
+        throw err;
+      }
       Object.assign(localPatch, {
         internalCategoryId: catId ?? null,
         internalSubcategoryId: subId ?? null,
@@ -1808,10 +1824,17 @@ class TicketService {
     //    Slow write-backs are logged: the custom-field lookup resolution can
     //    take multiple FS calls on the rate-limited client (QA 231648).
     const fsWriteStartedAt = Date.now();
-    const fsTicket = await client.updateTicketFields(Number(ticket.freshserviceTicketId), fsPayload);
+    let fsTicket;
+    try {
+      fsTicket = await client.updateTicketFields(Number(ticket.freshserviceTicketId), fsPayload);
+    } catch (err) {
+      // Queue-wait timeout = the PUT never launched; nothing changed anywhere.
+      if (isFsQueueTimeout(err)) throw new ServiceBusyError(FS_BUSY_MESSAGE);
+      throw err;
+    }
     const fsWriteMs = Date.now() - fsWriteStartedAt;
     if (fsWriteMs > 10000) {
-      logger.warn(`Slow FS write-back for #${ticket.freshserviceTicketId}: ${Math.round(fsWriteMs / 1000)}s (${Object.keys(fsPayload).join(', ')})`);
+      logger.warn(`Slow FS write-back for #${ticket.freshserviceTicketId}: ${Math.round(fsWriteMs / 1000)}s (${Object.keys(fsPayload).join(', ')})`, client.limiter?.getStats?.());
     }
 
     // 2) Verify FS actually accepted each value (a 200 with silently-dropped
@@ -1870,7 +1893,10 @@ class TicketService {
    */
   async _refreshFsBornThread(ticket) {
     if (!ticket.freshserviceTicketId) return;
-    const client = await mirrorService.getClient(ticket.workspaceId);
+    // Interactive client: the reader is on the page waiting for the thread.
+    // If the queue is congested the 15s budget makes this refresh a silent
+    // skip (caller swallows the rejection) rather than minutes-late data.
+    const client = await mirrorService.getInteractiveClient(ticket.workspaceId);
     if (!client) return;
     const conversations = await client.fetchTicketConversations(Number(ticket.freshserviceTicketId), { maxEntries: 60 });
     if (!conversations?.length) return;
@@ -2088,13 +2114,21 @@ class TicketService {
 
     let externalEntryId = null;
     if (!isNative) {
-      const client = await mirrorService.getClient(workspaceId);
+      const client = await mirrorService.getInteractiveClient(workspaceId);
       if (!client) throw new ValidationError('FreshService is not configured for this workspace');
       const fsId = Number(ticket.freshserviceTicketId);
       const html = bodyHtml || `<p>${(bodyText || '').replace(/\n/g, '<br/>')}</p>`;
-      const result = isPrivate
-        ? await client.addNote(fsId, html, { isPrivate: true, attachments: fsAttachments })
-        : await client.createReply(fsId, html, { ccEmails: cc, attachments: fsAttachments });
+      let result;
+      try {
+        result = isPrivate
+          ? await client.addNote(fsId, html, { isPrivate: true, attachments: fsAttachments })
+          : await client.createReply(fsId, html, { ccEmails: cc, attachments: fsAttachments });
+      } catch (err) {
+        // Queue-wait timeout: the send never launched — safe to retry, and the
+        // composer keeps the draft, so tell the user plainly.
+        if (isFsQueueTimeout(err)) throw new ServiceBusyError(FS_BUSY_MESSAGE);
+        throw err;
+      }
       const fsEntryId = result?.conversation?.id || result?.id || null;
       externalEntryId = fsEntryId ? `fs-conv-${fsEntryId}` : null;
     }

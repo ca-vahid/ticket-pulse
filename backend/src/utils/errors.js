@@ -43,6 +43,12 @@ export class ConflictError extends AppError {
   }
 }
 
+export class ServiceBusyError extends AppError {
+  constructor(message = 'The service is busy — please try again in a moment') {
+    super(message, 503);
+  }
+}
+
 export class ExternalAPIError extends AppError {
   constructor(service, message, originalError = null) {
     super(`${service} API error: ${message}`, 502);

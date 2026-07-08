@@ -700,10 +700,11 @@ export const ticketsAPI = {
 
   /** FS-born write-back: FreshService is updated (and verified) FIRST. */
   fsUpdate: async (id, changes) => {
-    // FS write-backs can take >30s (custom-field lookup resolution on the
-    // rate-limited FS client) — the default timeout produced false "network
-    // error" failures while the write actually landed (QA 231648).
-    return await apiLongTimeout.post(`/tickets/${id}/fs-update`, changes);
+    // FS write-backs run on the high-priority interactive FS lane with a
+    // bounded queue wait, so the server answers (success or an honest 503
+    // "busy — nothing changed") well inside 2 minutes. Category changes are
+    // the slow path (custom-field lookup resolution = several FS calls).
+    return await apiLongTimeout.post(`/tickets/${id}/fs-update`, changes, { timeout: 120000 });
   },
 
   setNoise: async (id, { noise = true, resolve = false } = {}) => {
