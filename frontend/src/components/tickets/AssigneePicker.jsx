@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, ChevronDown, Loader2, Search, Sparkles, UserRound } from 'lucide-react';
+import { Check, ChevronDown, Loader2, Search, Sparkles, UserRound, X } from 'lucide-react';
 import { PersonAvatar, UnassignedBadge } from './ticketUi';
 import { assignmentAPI, ticketsAPI } from '../../services/api';
 
@@ -163,7 +163,25 @@ export default function AssigneePicker({
     setBusy(false);
   };
 
+  // Dismiss the AI proposal without assigning — the ticket stays unassigned and
+  // drops out of the "Awaiting AI approval" worklist.
+  const rejectSuggestion = async () => {
+    if (busy || !aiSuggestion?.runId) return;
+    setBusy(true);
+    try {
+      await assignmentAPI.decide(aiSuggestion.runId, { decision: 'rejected', decisionNote: 'Dismissed from the queue' });
+      setOpen(false);
+      onAssigned?.(value);
+    } catch { /* stale — the refresh shows the true state */ }
+    setBusy(false);
+  };
+
   const sm = size === 'sm';
+  // Unassigned + a pending AI pick = a "proposed" slot the coordinator must
+  // decide on. Rendered as a dashed capsule so it never reads as a committed
+  // assignee.
+  const proposed = !busy && !current && aiSuggestion?.state === 'suggested';
+  const topPct = typeof aiSuggestion?.score === 'number' ? Math.round(aiSuggestion.score * 100) : null;
 
   return (
     <span
@@ -178,9 +196,13 @@ export default function AssigneePicker({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={current ? `Assignee: ${current.name} — change` : 'Unassigned — assign a member'}
-        className={`tp-focus-ring group flex items-center gap-1.5 min-w-0 w-full rounded-lg border transition-colors text-left ${
-          sm ? 'px-1.5 py-1' : 'px-2.5 py-1.5'
-        } ${open ? 'border-blue-300 bg-white' : 'border-transparent hover:border-slate-200 hover:bg-white'} disabled:cursor-not-allowed`}
+        className={`tp-focus-ring group flex items-center gap-1.5 min-w-0 w-full border transition-colors text-left ${
+          proposed ? 'rounded-full' : 'rounded-lg'
+        } ${sm ? 'px-1.5 py-1' : 'px-2.5 py-1.5'} ${
+          open ? 'border-blue-300 bg-white'
+            : proposed ? 'border-dashed border-violet-300 bg-violet-50/60 hover:bg-violet-50'
+              : 'border-transparent hover:border-slate-200 hover:bg-white'
+        } disabled:cursor-not-allowed`}
       >
         {busy ? (
           <Loader2 className={`${sm ? 'w-4 h-4' : 'w-5 h-5'} animate-spin text-slate-400 flex-shrink-0`} aria-hidden="true" />
@@ -197,14 +219,28 @@ export default function AssigneePicker({
               </span>
             )}
           </>
-        ) : aiSuggestion?.state === 'suggested' ? (
-          // Unassigned but the AI has a pending pick — surface it at a glance.
+        ) : proposed ? (
+          // Unassigned + a pending AI pick — a dashed "proposed" slot awaiting a
+          // human decision, visually distinct from a committed assignee.
           <>
-            <span className={`${sm ? 'h-5 w-5' : 'h-7 w-7'} rounded-full border-[1.5px] border-dashed border-indigo-300 bg-indigo-50 text-indigo-500 inline-flex items-center justify-center flex-shrink-0`}>
-              <Sparkles className={sm ? 'w-2.5 h-2.5' : 'w-3.5 h-3.5'} aria-hidden="true" />
+            <span className="relative flex-shrink-0" title={`AI suggests ${aiSuggestion.techName || 'a technician'}${topPct !== null ? ` — ${topPct}% match` : ''} · awaiting your approval`}>
+              <PersonAvatar
+                name={aiSuggestion.techName || '?'}
+                photoUrl={technicians.find((t) => t.id === aiSuggestion.techId)?.photoUrl}
+                size={sm ? 'h-5 w-5' : 'h-7 w-7'}
+                textSize={sm ? 'text-[8px]' : 'text-[10px]'}
+              />
+              <span className={`absolute -bottom-0.5 -right-0.5 ${sm ? 'h-2.5 w-2.5' : 'h-3 w-3'} rounded-full bg-violet-600 ring-2 ring-white inline-flex items-center justify-center`} aria-hidden="true">
+                <Sparkles className="w-[7px] h-[7px] text-white" />
+              </span>
             </span>
-            <span className={`${sm ? 'text-xs' : 'text-sm'} font-semibold text-indigo-700 truncate`} title={`AI suggests ${aiSuggestion.techName || 'a technician'}`}>
-              AI: {aiSuggestion.techName || 'suggestion'}
+            <span className="flex flex-col min-w-0 leading-tight">
+              <span className={`${sm ? 'text-[8px]' : 'text-[9px]'} font-bold uppercase tracking-wider text-violet-600`}>
+                Suggested{topPct !== null ? ` · ${topPct}%` : ''}
+              </span>
+              <span className={`${sm ? 'text-xs' : 'text-sm'} font-semibold text-slate-800 truncate`}>
+                {aiSuggestion.techName || 'AI pick'}
+              </span>
             </span>
           </>
         ) : (
@@ -226,9 +262,12 @@ export default function AssigneePicker({
           onDoubleClick={(e) => e.stopPropagation()}
         >
           {aiSuggestion?.state === 'suggested' && !value && (
-            <div className="mb-1.5 rounded-lg border border-indigo-200 bg-gradient-to-r from-indigo-50 to-violet-50/60 p-2">
-              <p className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-indigo-500 mb-1.5">
-                <Sparkles className="w-3 h-3" aria-hidden="true" /> AI suggests
+            <div className="mb-1.5 rounded-lg border border-violet-200 bg-gradient-to-r from-indigo-50 to-violet-50/60 p-2">
+              <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-violet-600 mb-1.5">
+                <Sparkles className="w-3 h-3 flex-shrink-0" aria-hidden="true" /> Awaiting your decision
+                {aiCandidates.length > 1 && (
+                  <span className="ml-auto text-[9px] font-semibold text-slate-400 normal-case tracking-normal">{aiCandidates.length} candidates</span>
+                )}
               </p>
               <div role="radiogroup" aria-label="AI candidates" className="space-y-0.5">
                 {aiCandidates.map((c, i) => {
@@ -242,35 +281,52 @@ export default function AssigneePicker({
                       role="radio"
                       aria-checked={selected}
                       onClick={() => setSelectedAiTechId(c.techId)}
-                      className={`tp-focus-ring w-full flex items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors ${selected ? 'bg-white ring-1 ring-indigo-300' : 'hover:bg-white/70'}`}
+                      className={`tp-focus-ring w-full flex items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors ${selected ? 'bg-white ring-1 ring-violet-300' : 'hover:bg-white/70'}`}
                     >
-                      <span className={`flex-shrink-0 h-3.5 w-3.5 rounded-full border-[1.5px] inline-flex items-center justify-center ${selected ? 'border-indigo-500' : 'border-slate-300'}`} aria-hidden="true">
-                        {selected && <span className="h-1.5 w-1.5 rounded-full bg-indigo-500" />}
+                      <span className={`flex-shrink-0 h-3.5 w-3.5 rounded-full border-[1.5px] inline-flex items-center justify-center ${selected ? 'border-violet-500' : 'border-slate-300'}`} aria-hidden="true">
+                        {selected && <span className="h-1.5 w-1.5 rounded-full bg-violet-500" />}
                       </span>
                       <PersonAvatar name={c.techName || '?'} photoUrl={photoUrl} size="h-6 w-6" textSize="text-[9px]" />
-                      <span className="text-sm font-medium text-slate-800 truncate flex-1">{c.techName || 'Unknown'}</span>
-                      {pct !== null && <span className="text-[10px] tabular-nums text-slate-500 flex-shrink-0">{pct}%</span>}
-                      {i === 0 && <span className="text-[8px] font-bold uppercase tracking-wider bg-amber-100 text-amber-700 px-1 rounded flex-shrink-0">AI</span>}
+                      <span className="text-sm font-medium text-slate-800 truncate flex-1 min-w-0">{c.techName || 'Unknown'}</span>
+                      {pct !== null && (
+                        <span className="flex items-center gap-1.5 flex-shrink-0">
+                          <span className="w-9 h-1.5 rounded-full bg-violet-100 overflow-hidden" aria-hidden="true">
+                            <span className="block h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-500" style={{ width: `${pct}%` }} />
+                          </span>
+                          <span className="text-[10px] font-bold tabular-nums text-violet-600 w-7 text-right">{pct}%</span>
+                        </span>
+                      )}
                     </button>
                   );
                 })}
               </div>
-              <div className="mt-1.5 flex items-center gap-1.5">
+              <div className="mt-2 flex items-center gap-1.5">
                 <button
                   onClick={() => approveSuggestion(selectedAiTechId)}
                   disabled={busy || !selectedAiTechId}
-                  className="tp-focus-ring flex-1 px-2 py-1.5 rounded-md bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700 disabled:opacity-60"
+                  className="tp-focus-ring flex-1 inline-flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700 disabled:opacity-60"
                 >
-                  Approve
+                  <Check className="w-3.5 h-3.5" aria-hidden="true" /> Approve
                 </button>
                 {onAiAssign && (
                   <button
                     onClick={() => { setOpen(false); onAiAssign(); }}
-                    className="tp-focus-ring px-2 py-1.5 rounded-md border border-indigo-200 text-indigo-700 text-xs font-medium hover:bg-indigo-100/60"
+                    title="View the full AI analysis"
+                    aria-label="View the full AI analysis"
+                    className="tp-focus-ring h-8 w-8 inline-flex items-center justify-center rounded-md border border-indigo-200 text-indigo-600 hover:bg-indigo-100/60 flex-shrink-0"
                   >
-                    Review…
+                    <Sparkles className="w-4 h-4" aria-hidden="true" />
                   </button>
                 )}
+                <button
+                  onClick={rejectSuggestion}
+                  disabled={busy}
+                  title="Dismiss this suggestion — leaves the ticket unassigned"
+                  aria-label="Dismiss this suggestion"
+                  className="tp-focus-ring h-8 w-8 inline-flex items-center justify-center rounded-md border border-slate-200 text-slate-400 hover:text-slate-600 hover:bg-slate-50 disabled:opacity-60 flex-shrink-0"
+                >
+                  <X className="w-4 h-4" aria-hidden="true" />
+                </button>
               </div>
             </div>
           )}
