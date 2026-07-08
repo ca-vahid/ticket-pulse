@@ -22,6 +22,7 @@ import FsSyncConfirm from '../components/tickets/FsSyncConfirm';
 import RichTextEditor, { isRichContent } from '../components/tickets/RichTextEditor';
 import StagedFileChip from '../components/tickets/StagedFileChip';
 import ImageMarkupModal from '../components/tickets/ImageMarkupModal';
+import TicketAiTab from '../components/tickets/TicketAiTab';
 import {
   MirrorChip, OriginChip, PersonAvatar, PriorityDot, ProvenanceChip, SafeHtml, SlaChip, StateChip, StatusPill,
   TypePill, PRIORITY_LABELS, formatBytes, isConversationEntry, pipelineRunLabel,
@@ -471,7 +472,7 @@ export default function TicketDetail() {
     if (workspaceId !== openedWsRef.current) navigate('/tickets', { replace: true });
   }, [workspaceId, navigate]);
   const [searchParams, setSearchParams] = useSearchParams();
-  const pageTab = ['approvals', 'history'].includes(searchParams.get('tab')) ? searchParams.get('tab') : 'conversation';
+  const pageTab = ['approvals', 'history', 'ai'].includes(searchParams.get('tab')) ? searchParams.get('tab') : 'conversation';
   const setPageTab = (tab) => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
@@ -1774,6 +1775,7 @@ export default function TicketDetail() {
               {[
                 { key: 'conversation', label: 'Conversation', icon: MessageSquare, count: conversationEntries.filter(isConversationEntry).length },
                 { key: 'approvals', label: 'Approvals', icon: CheckCircle2, count: new Set((ticket.approvals || []).map((a) => a.requestGroupId || `single-${a.id}`)).size },
+                { key: 'ai', label: 'AI & Routing', icon: Sparkles, count: (ticket.pipelineRuns || []).length },
                 { key: 'history', label: 'History', icon: History, count: historyItems.length },
               ].map(({ key, label, icon: TabIcon, count }) => {
                 const selected = pageTab === key;
@@ -2204,6 +2206,14 @@ export default function TicketDetail() {
                       </p>
                     )}
                   </section>
+                )}
+
+                {pageTab === 'ai' && (
+                  <TicketAiTab
+                    ticket={ticket}
+                    technicians={meta?.technicians || []}
+                    canReview={wsRole === 'admin' || wsRole === 'reviewer'}
+                  />
                 )}
 
                 {pageTab === 'history' && (

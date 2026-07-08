@@ -1119,6 +1119,7 @@ export const assignmentAPI = {
   getPriorityAlertAudit: (params) => api.get('/assignment/audit/priority-alerts', { params }),
   getRun: (id) => api.get(`/assignment/runs/${id}`),
   getLatestRunForTicket: (ticketId) => api.get(`/assignment/ticket/${ticketId}/latest-run`),
+  getTicketRuns: (ticketId) => api.get(`/assignment/ticket/${ticketId}/runs`),
   decide: (id, data) => api.post(`/assignment/runs/${id}/decide`, data),
   reassignRun: (id, data) => api.post(`/assignment/runs/${id}/reassign`, data),
   deleteRun: (id) => api.delete(`/assignment/runs/${id}`),
