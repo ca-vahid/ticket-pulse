@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.26-preview';
+export const APP_VERSION = '3.0.27-preview';
 
 export const changelog = [
+  {
+    version: '3.0.27-preview',
+    date: 'July 8, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>🎫 More room for tickets</strong> — on ticket pages the app navigation rail now tucks away into a slim tab at the screen edge (the tickets pages already have their own filter panel, so two side bars was one too many). Hover the tab — or tab to it with the keyboard — and the full navigation slides out; every other page keeps the rail exactly as before.' },
+    ],
+  },
   {
     version: '3.0.26-preview',
     date: 'July 8, 2026',
