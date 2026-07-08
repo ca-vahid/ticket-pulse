@@ -402,6 +402,9 @@ export default function Tickets() {
         for (const t of items) {
           const prev = diffAgainst.get(t.id);
           if (!prev) fx.set(t.id, 'new');
+          // The AI run this row was showing just finished — play the
+          // completion moment (green flush + subject chip + slot ripple).
+          else if (prev.ai?.state === 'analyzing' && t.ai?.state !== 'analyzing') fx.set(t.id, 'aiDone');
           else if (
             prev.updatedAt !== t.updatedAt
             || prev.lastActivityAt !== t.lastActivityAt
@@ -535,6 +538,18 @@ export default function Tickets() {
     pendingIdsRef.current.add(data?.ticketId ?? `evt-${Date.now()}`);
     setPendingCount(pendingIdsRef.current.size);
   }, [fetchStats]);
+  // Reconnect catch-up: every backend deploy/restart drops the SSE connection,
+  // and events emitted during the gap are simply lost — without this, the page
+  // sat stale forever showing states (e.g. "AI matching…") that had long since
+  // resolved, until a manual F5. On any RE-connect, silently refetch and diff
+  // so missed changes appear with their normal highlights.
+  const sseConnectsRef = useRef(0);
+  const onSseConnected = useCallback(() => {
+    sseConnectsRef.current += 1;
+    if (sseConnectsRef.current === 1) return; // initial connect — list is fresh
+    fetchStats();
+    fetchTicketsRef.current({ silent: true, diffAgainst: new Map(ticketsRef.current.map((t) => [t.id, t])) });
+  }, [fetchStats]);
   // Presence dots (gap plan 2 P4.1): who has which ticket open right now.
   // Snapshot on load, then live deltas over the same SSE connection.
   const [presenceMap, setPresenceMap] = useState({}); // ticketId -> [{email, name}]
@@ -551,7 +566,7 @@ export default function Tickets() {
       return next;
     });
   }, []);
-  useSSE({ onTicketChange, onPresence, enabled: Boolean(workspaceId) });
+  useSSE({ onTicketChange, onPresence, onConnected: onSseConnected, enabled: Boolean(workspaceId) });
   useEffect(() => () => {
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     if (rowFxTimerRef.current) clearTimeout(rowFxTimerRef.current);
@@ -1172,25 +1187,14 @@ export default function Tickets() {
                                   New
                                 </span>
                               )}
-                              {aiLive && (canReview ? (
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); setAiTicket(ticket); }}
-                                  onDoubleClick={(e) => e.stopPropagation()}
-                                  title="AI is picking the best technician right now — click to watch live. Assigning someone manually overrides the AI pick; category & priority detection still finish."
-                                  className="tp-focus-ring tp-ai-chip shrink-0 inline-flex items-center gap-1 pl-1.5 pr-2 py-0.5 rounded-full text-[10px] font-bold text-white"
-                                >
-                                  <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
-                                  AI matching…
-                                </button>
-                              ) : (
+                              {fx === 'aiDone' && (
                                 <span
-                                  title="AI is picking the best technician right now. A manual assignment overrides the AI pick; category & priority detection still finish."
-                                  className="tp-ai-chip shrink-0 inline-flex items-center gap-1 pl-1.5 pr-2 py-0.5 rounded-full text-[10px] font-bold text-white"
+                                  className="tp-ai-done-chip shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-100 border border-emerald-200 text-[9px] font-extrabold tracking-wide uppercase text-emerald-700"
+                                  aria-hidden="true"
                                 >
-                                  <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
-                                  AI matching…
+                                  ✓ {ticket.assignedTechId ? 'Assigned' : 'Suggested'}
                                 </span>
-                              ))}
+                              )}
                               <StateChip state={ticket.stateChip} />
                               {ticket.hasProposedReply && (
                                 <span
@@ -1250,7 +1254,8 @@ export default function Tickets() {
                             </span>
                           );
                           const assigneeCell = (isEditable || fsRowEditable) ? (
-                            <span className={`${CELL} py-1 gap-1`}>
+                            <span className={`${CELL} py-1 gap-1 relative`}>
+                              {fx === 'aiDone' && <span className="tp-ai-ripple" aria-hidden="true" />}
                               {ticket.aiBypass && <BypassBadge bypass={ticket.aiBypass} />}
                               <AssigneePicker
                                 ticketId={ticket.id}
@@ -1269,11 +1274,41 @@ export default function Tickets() {
                             </span>
                           ) : (
                             <span
-                              className={`${CELL} py-1 gap-1.5`}
+                              className={`${CELL} py-1 gap-1.5 relative`}
                               onClick={(e) => e.stopPropagation()}
                               onDoubleClick={(e) => e.stopPropagation()}
                             >
-                              {canReview && ticket.ai?.state === 'suggested' && !ticket.assignedTech ? (
+                              {fx === 'aiDone' && <span className="tp-ai-ripple" aria-hidden="true" />}
+                              {aiLive && !ticket.assignedTech ? (
+                                canReview ? (
+                                  <button
+                                    onClick={() => setAiTicket(ticket)}
+                                    title="AI is choosing the best person for this ticket — click to watch live. A manual assignment overrides the pick; category & priority detection still finish."
+                                    className="tp-focus-ring tp-ai-think flex items-center gap-2 min-w-0 w-full pl-1 pr-2 py-1 rounded-full text-left"
+                                  >
+                                    <span className="h-6 w-6 rounded-full bg-violet-100 inline-flex items-center justify-center flex-shrink-0">
+                                      <Sparkles className="w-3 h-3 text-violet-600 tp-ai-twinkle" aria-hidden="true" />
+                                    </span>
+                                    <span className="flex flex-col min-w-0 leading-tight">
+                                      <span className="text-[9px] font-bold uppercase tracking-wider text-violet-600">AI choosing…</span>
+                                      <span className="text-xs italic text-slate-400 truncate">best person for this</span>
+                                    </span>
+                                  </button>
+                                ) : (
+                                  <span
+                                    title="AI is choosing the best person for this ticket"
+                                    className="tp-ai-think flex items-center gap-2 min-w-0 w-full pl-1 pr-2 py-1 rounded-full"
+                                  >
+                                    <span className="h-6 w-6 rounded-full bg-violet-100 inline-flex items-center justify-center flex-shrink-0">
+                                      <Sparkles className="w-3 h-3 text-violet-600 tp-ai-twinkle" aria-hidden="true" />
+                                    </span>
+                                    <span className="flex flex-col min-w-0 leading-tight">
+                                      <span className="text-[9px] font-bold uppercase tracking-wider text-violet-600">AI choosing…</span>
+                                      <span className="text-xs italic text-slate-400 truncate">best person for this</span>
+                                    </span>
+                                  </span>
+                                )
+                              ) : canReview && ticket.ai?.state === 'suggested' && !ticket.assignedTech ? (
                                 <button
                                   onClick={() => setAiTicket(ticket)}
                                   title={`AI suggests ${ticket.ai.techName || 'a technician'}${typeof ticket.ai.score === 'number' ? ` — ${Math.round(ticket.ai.score * 100)}% match` : ''}${ticket.ai.count > 1 ? ` (+${ticket.ai.count - 1} more candidate${ticket.ai.count - 1 === 1 ? '' : 's'})` : ''} · awaiting your approval`}
@@ -1403,7 +1438,7 @@ export default function Tickets() {
                                 aiLive ? 'tp-ai-live'
                                   : previewing ? 'bg-blue-50/50'
                                     : selectedIds.has(ticket.id) ? 'bg-blue-50/40' : 'hover:bg-slate-50'
-                              }`}
+                              } ${fx === 'aiDone' ? 'tp-ai-flush' : ''}`}
                               onClick={() => onRowClick(ticket.id)}
                               onDoubleClick={() => onRowDoubleClick(ticket.id)}
                               title="Click to preview (double-click opens)"

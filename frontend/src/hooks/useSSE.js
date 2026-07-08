@@ -38,6 +38,13 @@ export function useSSE(options = {}) {
   const retryTimerRef = useRef(null);
   const retryAttemptRef = useRef(0);
   const unmountedRef = useRef(false);
+  // Staleness watchdog: the server heartbeats every 30s, so >90s of total
+  // silence means the connection is half-dead — the classic case is a backend
+  // restart behind a proxy/LB that keeps the client socket open, which fires
+  // NO error event. Without this, the page silently stops receiving updates
+  // until a manual refresh.
+  const lastEventAtRef = useRef(Date.now());
+  const STALE_MS = 90000;
 
   useEffect(() => {
     unmountedRef.current = false;
@@ -80,19 +87,28 @@ export function useSSE(options = {}) {
       try {
         const eventSource = sseAPI.getEventSource();
         eventSourceRef.current = eventSource;
+        lastEventAtRef.current = Date.now();
 
         eventSource.onopen = () => {
           retryAttemptRef.current = 0;
+          lastEventAtRef.current = Date.now();
           setConnectionStatus('connected');
         };
 
         eventSource.addEventListener('connected', (event) => {
           // SSE connection established
           retryAttemptRef.current = 0;
+          lastEventAtRef.current = Date.now();
           setConnectionStatus('connected');
           if (onConnected) {
             onConnected(parseAndScrub(event.data));
           }
+        });
+
+        // Server liveness ping (every 30s) — its only job is to feed the
+        // staleness watchdog below.
+        eventSource.addEventListener('heartbeat', () => {
+          lastEventAtRef.current = Date.now();
         });
 
         eventSource.addEventListener('sync-completed', (event) => {
@@ -106,6 +122,7 @@ export function useSSE(options = {}) {
 
         // Native ticketing mutations (create/update/reply/status/assignment)
         eventSource.addEventListener('ticket-change', (event) => {
+          lastEventAtRef.current = Date.now();
           const data = parseAndScrub(event.data);
           setLastEvent({ type: 'ticket-change', data, timestamp: Date.now() });
           if (onTicketChange) {
@@ -159,8 +176,26 @@ export function useSSE(options = {}) {
 
     connect();
 
+    // Staleness watchdog: if the stream has been silent past the threshold,
+    // the connection is half-dead — tear it down and reconnect (which fires
+    // 'connected', letting consumers run their catch-up refetch). Also check
+    // immediately when a background tab becomes visible again, so a stale tab
+    // heals the moment the user returns instead of on the next interval tick.
+    const checkStale = () => {
+      if (unmountedRef.current || !eventSourceRef.current) return;
+      if (Date.now() - lastEventAtRef.current <= STALE_MS) return;
+      lastEventAtRef.current = Date.now(); // avoid re-firing during the retry backoff
+      closeCurrentSource();
+      scheduleReconnect();
+    };
+    const staleTimer = setInterval(checkStale, 15000);
+    const onVisible = () => { if (document.visibilityState === 'visible') checkStale(); };
+    document.addEventListener('visibilitychange', onVisible);
+
     return () => {
       unmountedRef.current = true;
+      clearInterval(staleTimer);
+      document.removeEventListener('visibilitychange', onVisible);
       clearRetryTimer();
       closeCurrentSource();
       setConnectionStatus('disconnected');
