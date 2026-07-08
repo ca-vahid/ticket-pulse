@@ -5,6 +5,7 @@ import {
   LogOut,
   MoreHorizontal,
   Settings,
+  Sparkles,
   UserCircle2,
   X,
 } from 'lucide-react';
@@ -13,6 +14,8 @@ import { useDashboard } from '../../contexts/DashboardContext';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 import { scrubFreeText as scrubDemoText, useDemoMode } from '../../utils/demoMode';
 import { cn } from '../../lib/utils';
+import { APP_VERSION } from '../../data/changelog';
+import ChangelogModal from '../ChangelogModal';
 import { NAV_DESTINATIONS, useNavDestinations } from './navDestinations';
 
 // Short labels so the fixed tabs stay legible on narrow phones.
@@ -38,6 +41,7 @@ export default function MobileTabBar() {
   const { lastUpdated, sseConnectionStatus } = useDashboard();
   const demoMode = useDemoMode();
   const [moreOpen, setMoreOpen] = useState(false);
+  const [showChangelog, setShowChangelog] = useState(false);
 
   const matchPath = (path) => location.pathname === path || location.pathname.startsWith(`${path}/`);
   const activeId = NAV_DESTINATIONS.find((dest) => matchPath(dest.path))?.id || null;
@@ -206,6 +210,18 @@ export default function MobileTabBar() {
                 </div>
               )}
 
+              <button
+                type="button"
+                onClick={() => { setMoreOpen(false); setShowChangelog(true); }}
+                className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-blue-100 bg-blue-50 text-blue-600">
+                  <Sparkles className="h-[20px] w-[20px]" />
+                </span>
+                <span className="flex-1">What&rsquo;s new</span>
+                <span className="rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-600">v{APP_VERSION}</span>
+              </button>
+
               <div className="my-1 border-t border-slate-100" />
 
               <button
@@ -222,6 +238,8 @@ export default function MobileTabBar() {
           </div>
         </div>
       )}
+
+      <ChangelogModal isOpen={showChangelog} onClose={() => setShowChangelog(false)} />
     </>
   );
 }

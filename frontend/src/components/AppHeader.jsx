@@ -427,6 +427,14 @@ export default function AppHeader({
         <div className="flex items-center gap-3 px-4 py-2 lg:px-6">
           <div className="flex min-w-0 items-center gap-3">
             {renderWorkspaceControl()}
+            <button
+              type="button"
+              onClick={() => setShowChangelog(true)}
+              title="What's new — view changelog"
+              className="flex-none rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-600 transition-colors hover:bg-blue-100 tp-focus-ring"
+            >
+              v{APP_VERSION}
+            </button>
             {pageTitle && (
               <h1 className="hidden truncate text-sm font-bold tracking-tight text-slate-900 lg:block">{pageTitle}</h1>
             )}
