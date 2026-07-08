@@ -265,9 +265,14 @@ function ThreadEntry({ entry, attachments = [], onDownload, onPreview, onImageRe
   const [confirmDelete, setConfirmDelete] = useState(false);
   const isNote = entry.eventType === 'note' || entry.isPrivate === true;
   const body = entry.bodyText || entry.content || '';
-  const incoming = entry.incoming === true || entry.authorType === 'requester';
+  // Identity beats channel: an agent replying by email syncs from FS as
+  // "incoming", but the server resolves the author against the roster and
+  // stamps authorType 'agent' — those render agent-side, not as requester.
+  const isAgentAuthor = entry.authorType === 'agent';
+  const incoming = !isAgentAuthor && (entry.incoming === true || entry.authorType === 'requester');
   const outgoing = !isNote && !incoming;
-  const viaEmail = entry.source === 'email_inbound' || Boolean(entry.emailMessageId);
+  const viaEmail = entry.source === 'email_inbound' || Boolean(entry.emailMessageId)
+    || (entry.incoming === true && isAgentAuthor);
   const apEvent = approvalEventMeta(entry);
 
   // Approval-lifecycle events read as their own compact, color-coded card so
@@ -952,7 +957,7 @@ export default function TicketDetail() {
     // Requester messages reuse the Entra photo fetched for the header.
     if (requesterPhoto && (
       (email && email === (requesterEmail || '').toLowerCase())
-      || (!email && (entry.authorType === 'requester' || entry.incoming === true))
+      || (!email && entry.authorType !== 'agent' && (entry.authorType === 'requester' || entry.incoming === true))
     )) {
       return requesterPhoto;
     }
