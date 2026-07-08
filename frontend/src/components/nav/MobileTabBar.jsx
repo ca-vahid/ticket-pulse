@@ -9,6 +9,7 @@ import {
   X,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useDashboard } from '../../contexts/DashboardContext';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 import { scrubFreeText as scrubDemoText, useDemoMode } from '../../utils/demoMode';
 import { cn } from '../../lib/utils';
@@ -34,6 +35,7 @@ export default function MobileTabBar() {
   const location = useLocation();
   const { logout } = useAuth();
   const { currentWorkspace, availableWorkspaces, switchWorkspace } = useWorkspace();
+  const { lastUpdated, sseConnectionStatus } = useDashboard();
   const demoMode = useDemoMode();
   const [moreOpen, setMoreOpen] = useState(false);
 
@@ -108,6 +110,27 @@ export default function MobileTabBar() {
           <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border-t border-slate-200 bg-white pb-[env(safe-area-inset-bottom)] shadow-soft animate-in slide-in-from-bottom-4 fade-in-0 duration-200 motion-reduce:animate-none">
             <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
               <span className="text-sm font-bold text-slate-900">Go to…</span>
+              {/* Live-data status — the phone has no top bar, so this is its home. */}
+              <span className="ml-auto mr-3 inline-flex items-center gap-1.5 text-[11px] font-semibold">
+                <span
+                  className={cn(
+                    'h-2 w-2 rounded-full',
+                    sseConnectionStatus === 'connected'
+                      ? 'bg-emerald-500'
+                      : sseConnectionStatus === 'connecting'
+                        ? 'bg-amber-400 animate-pulse'
+                        : 'bg-red-500',
+                  )}
+                />
+                <span className={sseConnectionStatus === 'connected' ? 'text-emerald-600' : sseConnectionStatus === 'connecting' ? 'text-amber-600' : 'text-red-600'}>
+                  {sseConnectionStatus === 'connected' ? 'Live' : sseConnectionStatus === 'connecting' ? 'Connecting' : 'Offline'}
+                </span>
+                {lastUpdated && (
+                  <span className="font-medium text-slate-400">
+                    · {new Date(lastUpdated).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+                  </span>
+                )}
+              </span>
               <button
                 type="button"
                 onClick={() => setMoreOpen(false)}

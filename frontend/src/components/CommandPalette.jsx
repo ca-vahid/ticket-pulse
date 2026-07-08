@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
-  BarChart3, CheckCircle2, ClipboardList, Command, Link as LinkIcon, LayoutDashboard,
-  Loader2, Map as MapIcon, Plus, Search, Settings as SettingsIcon, Ticket as TicketIcon,
-  UserCheck, Clock,
+  BarChart3, Boxes, CheckCircle2, ClipboardList, Command, Link as LinkIcon, LayoutDashboard,
+  Loader2, Mail, Map as MapIcon, Plus, Search, Settings as SettingsIcon, Sparkles,
+  Stamp, Ticket as TicketIcon, UserCheck, Clock,
 } from 'lucide-react';
 import { ticketsAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
+import { useWorkspaceRole } from './nav/navDestinations';
+import { APP_VERSION } from '../data/changelog';
+import ChangelogModal from './ChangelogModal';
 
 /**
  * Ctrl/Cmd+K command palette (gap plan 2 P4.2): jump to a page, find a ticket,
@@ -18,10 +21,12 @@ import { useWorkspace } from '../contexts/WorkspaceContext';
 const NAV_ITEMS = [
   { id: 'nav-tickets', label: 'Tickets', path: '/tickets', Icon: TicketIcon, keywords: 'queue inbox' },
   { id: 'nav-new-ticket', label: 'New ticket', path: '/tickets/new', Icon: Plus, keywords: 'create compose' },
+  { id: 'nav-approvals', label: 'Approvals', path: '/approvals', Icon: Stamp, keywords: 'pending requests decisions' },
   { id: 'nav-dashboard', label: 'Dashboard', path: '/dashboard', Icon: LayoutDashboard, keywords: 'home workload technicians', full: true },
   { id: 'nav-timeline', label: 'Timeline Explorer', path: '/timeline', Icon: Clock, keywords: 'ownership coverage history', full: true },
   { id: 'nav-analytics', label: 'Analytics & Insights', path: '/analytics', Icon: BarChart3, keywords: 'reports charts demand quality', full: true },
   { id: 'nav-assignments', label: 'Assignment Review', path: '/assignments', Icon: ClipboardList, keywords: 'ai review pipeline', full: true },
+  { id: 'nav-workflows', label: 'Mail Workflows', path: '/workflows', Icon: Mail, keywords: 'automation rules triggers templates notifications', full: true, manage: true },
   { id: 'nav-visuals', label: 'Visuals', path: '/visuals', Icon: MapIcon, keywords: 'map schedule agents', full: true },
   { id: 'nav-settings', label: 'Settings', path: '/settings', Icon: SettingsIcon, keywords: 'workflows mail admin config', full: true },
   { id: 'nav-competencies', label: 'My Competencies', path: '/my-competencies', Icon: UserCheck, keywords: 'skills profile', agent: true },
@@ -42,11 +47,13 @@ function matches(query, ...haystacks) {
 
 export default function CommandPalette() {
   const { user, isAuthenticated } = useAuth();
-  const { currentWorkspace } = useWorkspace();
+  const { currentWorkspace, availableWorkspaces, switchWorkspace } = useWorkspace();
+  const wsRole = useWorkspaceRole();
   const navigate = useNavigate();
   const location = useLocation();
 
   const [open, setOpen] = useState(false);
+  const [showChangelog, setShowChangelog] = useState(false);
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const [ticketResults, setTicketResults] = useState([]);
@@ -189,13 +196,43 @@ export default function CommandPalette() {
     }
 
     const isAgent = user?.role === 'agent';
+    const canManage = wsRole === 'admin';
     for (const nav of NAV_ITEMS) {
       if (isAgent && nav.full) continue;
       if (!isAgent && nav.agent) continue;
+      if (nav.manage && !canManage) continue;
       if (!matches(query, nav.label, nav.keywords)) continue;
       out.push({
         id: nav.id, section: 'Go to', label: nav.label, Icon: nav.Icon,
         run: () => { navigate(nav.path); close(); },
+      });
+    }
+
+    // Workspace switching — the top bar's switcher, reachable by keyboard.
+    for (const ws of availableWorkspaces || []) {
+      if (ws.id === currentWorkspace?.id) continue;
+      if (!matches(query, `switch to ${ws.name}`, 'workspace change')) continue;
+      out.push({
+        id: `ws-${ws.id}`,
+        section: 'Workspace',
+        label: `Switch to ${ws.name}`,
+        sub: ws.role ? `You are ${ws.role} there` : undefined,
+        Icon: Boxes,
+        run: () => {
+          switchWorkspace(ws.id);
+          window.location.reload();
+        },
+      });
+    }
+
+    if (matches(query, "what's new", 'changelog version release notes updates')) {
+      out.push({
+        id: 'act-whats-new',
+        section: 'App',
+        label: "What's new",
+        sub: `Changelog · v${APP_VERSION}`,
+        Icon: Sparkles,
+        run: () => { setOpen(false); setQuery(''); setShowChangelog(true); },
       });
     }
 
@@ -211,7 +248,7 @@ export default function CommandPalette() {
       });
     }
     return out;
-  }, [open, query, context, ticketResults, user?.role, navigate, close, runTicketAction]);
+  }, [open, query, context, ticketResults, user?.role, wsRole, availableWorkspaces, currentWorkspace?.id, switchWorkspace, navigate, close, runTicketAction]);
 
   useEffect(() => { setActiveIndex(0); }, [query, ticketResults.length]);
 
@@ -231,7 +268,13 @@ export default function CommandPalette() {
     }
   };
 
-  if (!ready || !open) return null;
+  if (!ready) return null;
+
+  // The changelog modal must survive the palette closing (selecting
+  // "What's new" closes the palette and opens the modal).
+  if (!open) {
+    return <ChangelogModal isOpen={showChangelog} onClose={() => setShowChangelog(false)} />;
+  }
 
   let lastSection = null;
   return (

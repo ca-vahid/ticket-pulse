@@ -9,6 +9,7 @@ import api from '../services/api';
 import { dataCache } from '../services/dataCache';
 import AutoResponseSettings from '../components/AutoResponseSettings';
 import MobileTabBar from '../components/nav/MobileTabBar';
+import SideRail from '../components/nav/SideRail';
 import NoiseRulesPanel from '../components/NoiseRulesPanel';
 import SyncOperationsPanel from '../components/settings/SyncOperationsPanel';
 import BackfillPanel from '../components/settings/BackfillPanel';
@@ -538,7 +539,7 @@ export default function Settings() {
 
   return (
     <TooltipProvider delayDuration={180}>
-      <div className="tp-page-backdrop flex h-screen flex-col overflow-hidden text-slate-950 pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0">
+      <div className="tp-page-backdrop flex h-screen flex-col overflow-hidden text-slate-950 pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0 md:pl-[58px]">
         <header className="tp-glass-strong sticky top-0 z-40 flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-white/70 px-3 py-2.5 sm:px-6">
           <div className="flex min-w-0 items-center gap-3">
             <Button
@@ -1647,6 +1648,7 @@ export default function Settings() {
           </main>
         </div>
         <MobileTabBar />
+        <SideRail />
       </div>
     </TooltipProvider>
   );
