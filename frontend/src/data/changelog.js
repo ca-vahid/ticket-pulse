@@ -5,7 +5,7 @@ export const changelog = [
     version: '3.0.25-preview',
     date: 'July 8, 2026',
     entries: [
-      { type: 'improved', html: '<strong>🧭 Navigation: back to the top bar</strong> — the auto-expanding left rail introduced in v3.0.12 is gone. The colorful destination tiles are back in the top bar where they used to be (with the Approvals badge and Settings gear), pages get their full width back on every screen, and the Settings page keeps its familiar left section tree.' },
+      { type: 'improved', html: '<strong>🧭 Settings page decluttered</strong> — the app-wide navigation rail no longer appears on the Settings page, whose own left section tree is all the navigation it needs. Everywhere else the expanding side rail stays exactly as it was.' },
     ],
   },
   {

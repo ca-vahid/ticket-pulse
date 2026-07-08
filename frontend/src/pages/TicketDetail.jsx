@@ -1365,7 +1365,7 @@ export default function TicketDetail() {
   };
 
   return (
-    <div className="tp-tickets-backdrop min-h-screen">
+    <div className="tp-tickets-backdrop min-h-screen md:pl-[58px] print:pl-0">
       <div className="print-hide"><AppHeader activePage="tickets" /></div>
 
       {/* pb clears the mobile bottom tab bar (QA 07-06 #11) */}
