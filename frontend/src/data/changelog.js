@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.22-preview';
+export const APP_VERSION = '3.0.23-preview';
 
 export const changelog = [
+  {
+    version: '3.0.23-preview',
+    date: 'July 8, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>⚡ Server slowdown fixed (memory leak)</strong> — two internal response caches kept every expired entry forever, so the server’s memory ballooned (over 1&nbsp;GB within minutes of starting under load) and everything got progressively slower — the sluggish loads and login timeouts some of you hit today. Caches now clean up after themselves and are hard-capped. If the app felt slow, it should feel dramatically snappier now.' },
+    ],
+  },
   {
     version: '3.0.22-preview',
     date: 'July 8, 2026',

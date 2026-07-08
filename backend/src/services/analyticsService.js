@@ -13,8 +13,29 @@ const RANGE_DAYS = {
   '90d': 90,
 };
 const CACHE_TTL_MS = 15_000;
+const MAX_CACHE_ENTRIES = 100;
 const cache = new Map();
 const pendingCache = new Map();
+
+// Same leak shape the dashboard read cache had: stale entries were only
+// skipped on read, never deleted, and analytics payloads embed ticket lists.
+// Sweep on an interval and cap the map so old range/dimension combinations
+// can't accumulate forever.
+function sweepAnalyticsCache() {
+  const now = Date.now();
+  for (const [key, entry] of cache) {
+    if (now - entry.createdAt >= CACHE_TTL_MS) cache.delete(key);
+  }
+}
+setInterval(sweepAnalyticsCache, 30_000).unref();
+
+function enforceAnalyticsCap() {
+  if (cache.size <= MAX_CACHE_ENTRIES) return;
+  sweepAnalyticsCache();
+  while (cache.size > MAX_CACHE_ENTRIES) {
+    cache.delete(cache.keys().next().value);
+  }
+}
 
 const PRIORITY_LABELS = {
   1: 'Low',
@@ -224,6 +245,7 @@ async function withCache(workspaceId, endpoint, query, producer) {
   const pendingValue = producer()
     .then((value) => {
       cache.set(key, { createdAt: Date.now(), value });
+      enforceAnalyticsCap();
       return value;
     })
     .finally(() => {
