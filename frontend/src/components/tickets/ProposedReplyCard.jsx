@@ -67,7 +67,9 @@ export default function ProposedReplyCard({ ticketId, refreshToken = null, canWr
         <span className="h-6 w-6 rounded-full bg-indigo-600 text-white inline-flex items-center justify-center flex-shrink-0">
           <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
         </span>
-        <p className="text-[11px] font-bold uppercase tracking-wider text-indigo-600">AI proposed reply — awaiting your approval</p>
+        <p className="text-[11px] font-bold uppercase tracking-wider text-indigo-600">
+          {proposal.source === 'workflow_template' ? 'Workflow-drafted reply — awaiting your approval' : 'AI proposed reply — awaiting your approval'}
+        </p>
         {confidence && (
           <span className={`ml-auto text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded ${CONFIDENCE_STYLE[confidence] || 'bg-slate-100 text-slate-500'}`}>
             {confidence} confidence

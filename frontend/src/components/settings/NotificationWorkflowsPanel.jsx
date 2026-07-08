@@ -1833,7 +1833,12 @@ export function validateWorkflowDefinitionClient(definition, triggerType = null)
   if (triggerType && triggers[0]?.data?.triggerType && triggers[0].data.triggerType !== triggerType) {
     errors.push(`Trigger node must use triggerType ${triggerType}`);
   }
-  if (!nodes.some((node) => node.type === 'send_email')) errors.push('Workflow must include at least one send email node');
+  // Mirrors the server rule: any ACTION node qualifies — a propose_reply-only
+  // workflow (e.g. the AI first-reply template) is valid without a send node.
+  const CLIENT_ACTION_NODE_TYPES = ['send_email', 'update_ticket', 'call_webhook', 'create_child_ticket', 'request_approval', 'propose_reply'];
+  if (!nodes.some((node) => CLIENT_ACTION_NODE_TYPES.includes(node.type))) {
+    errors.push('Workflow must include at least one action node (send email, update ticket, webhook, child ticket, approval, or stage-for-approval)');
+  }
 
   for (const edge of edges) {
     if (!ids.has(edge.source)) errors.push(`Edge ${edge.id || '(new edge)'} has unknown source ${edge.source}`);
@@ -1878,6 +1883,14 @@ export function validateWorkflowDefinitionClient(definition, triggerType = null)
     if (!upstream.has('recipient_resolver')) errors.push(`Send email node ${node.id} must have an upstream recipient resolver`);
     if (!upstream.has('template_render') && !upstream.has('llm_generate')) {
       errors.push(`Send email node ${node.id} must have an upstream template or LLM email source`);
+    }
+  }
+  // Same rule the server enforces — catching it here puts the message in the
+  // editor instead of a failed save (QA 07-07 #5).
+  for (const node of nodes.filter((candidate) => candidate.type === 'propose_reply')) {
+    const upstream = upstreamTypes(node.id, maps.nodes, maps.incoming);
+    if (!upstream.has('llm_generate') && !upstream.has('template_render')) {
+      errors.push(`Stage-for-approval node ${node.id} needs an upstream draft source — add an LLM generate or Template step before it`);
     }
   }
   return [...new Set(errors)];
@@ -7272,7 +7285,13 @@ export default function NotificationWorkflowsPanel({
       });
       await refreshHealth();
     } catch (error) {
-      setMessage({ type: 'error', text: error.message });
+      // Validation failures carry the specific graph problems — show them
+      // instead of the generic "definition is invalid" line (QA 07-07 #5).
+      const details = Array.isArray(error.details) ? error.details : [];
+      const text = details.length
+        ? `${details.slice(0, 2).join(' · ')}${details.length > 2 ? ` (+${details.length - 2} more)` : ''}`
+        : error.message;
+      setMessage({ type: 'error', text });
     } finally {
       setSaving(false);
     }
@@ -8792,8 +8811,8 @@ export default function NotificationWorkflowsPanel({
     if (selectedNode.type === 'propose_reply') {
       return (
         <div className="space-y-3">
-          <p className="text-sm text-gray-600">Stages the upstream LLM draft on the ticket as an <strong>AI proposed reply</strong>. An agent approves &amp; sends, edits it in the composer, or dismisses it — nothing is emailed automatically.</p>
-          <p className="text-[11px] text-gray-400">Requires an LLM Generate node earlier in the flow. A newer proposal supersedes an older open one on the same ticket.</p>
+          <p className="text-sm text-gray-600">Stages the upstream draft on the ticket as a <strong>proposed reply</strong>. An agent approves &amp; sends, edits it in the composer, or dismisses it — nothing is emailed automatically.</p>
+          <p className="text-[11px] text-gray-400">Needs an LLM Generate or Template step earlier in the flow (the LLM draft wins when both exist). A newer proposal supersedes an older open one on the same ticket.</p>
         </div>
       );
     }

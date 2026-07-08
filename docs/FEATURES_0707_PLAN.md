@@ -8,36 +8,36 @@ Per-phase gate: backend lint + jest, frontend lint + vitest, item-level self-tes
 
 ---
 
-## Phase 1 — Bug fixes & small asks (items 5, 6, 2, 7)
+## Phase 1 — Bug fixes & small asks (items 5, 6, 2, 7) ✅ DONE
 
 ### 1.1 (Item 5) "Stage for approval" publish error — fix both the rule and the UX  ✅ root-caused
 The validator (`notificationWorkflowDefinition.js:685`) requires `propose_reply` to have an upstream `llm_generate`; a `template_render → propose_reply` chain is rejected, and the client toast shows only the generic "Notification workflow definition is invalid" — the specific `errors` array is thrown server-side (`ValidationError` details) but never surfaced.
 
-- [ ] **Allow staging template output**: extend the `propose_reply` executor to fall back to `state.template` rendered output (subject/html/text) when no LLM draft exists; relax the validator to accept `template_render` **or** `llm_generate` upstream (staging a rendered template for human approval is a legitimate flow)
-- [ ] **Surface real errors**: include `details` in the error response for workflow save/publish; frontend toast lists the actual validation messages (first 2 + count), not the generic line
-- [ ] **Editor guardrails**: the palette's "Stage for approval" node shows an inline hint when its upstream is invalid (mirror of the backend rule) so users see the problem before save
-- [ ] Tests: template→propose staging works in the engine; validator accepts both shapes; error details serialize
+- [x] **Allow staging template output**: extend the `propose_reply` executor to fall back to `state.template` rendered output (subject/html/text) when no LLM draft exists; relax the validator to accept `template_render` **or** `llm_generate` upstream (staging a rendered template for human approval is a legitimate flow)
+- [x] **Surface real errors**: include `details` in the error response for workflow save/publish; frontend toast lists the actual validation messages (first 2 + count), not the generic line
+- [x] **Editor guardrails**: the palette's "Stage for approval" node shows an inline hint when its upstream is invalid (mirror of the backend rule) so users see the problem before save
+- [x] Tests: template→propose staging works in the engine; validator accepts both shapes; error details serialize
 
 ### 1.2 (Item 6) Ticket linking accepts real-world refs
 `ticketLinkService.link()` resolves only internal ids; users type the visible refs (`TP-1042`, `#231164`). Search already parses these (`ticketService.buildListWhere` q-handling).
 
-- [ ] Shared `resolveTicketRef(refString, workspaceId)` in ticketService: accepts internal id, `TP-####`, `#123456`, bare number (native first, then FS id) — workspace-scoped
-- [ ] Link / mark-duplicate / merge endpoints accept a `ref` (keep `relatedTicketId` for compat); clearer 404 message naming the ref that failed
-- [ ] `TicketLinksCard` placeholder → "TP-1042 or 231164"; strip `#`/whitespace client-side; likely-target chips (shipped in 3.0.8) remain the one-click path
-- [ ] Tests: resolver matrix (TP ref, FS number, plain id, cross-workspace miss)
+- [x] Shared `resolveTicketRef(refString, workspaceId)` in ticketService: accepts internal id, `TP-####`, `#123456`, bare number (native first, then FS id) — workspace-scoped
+- [x] Link / mark-duplicate / merge endpoints accept a `ref` (keep `relatedTicketId` for compat); clearer 404 message naming the ref that failed
+- [x] `TicketLinksCard` placeholder → "TP-1042 or 231164"; strip `#`/whitespace client-side; likely-target chips (shipped in 3.0.8) remain the one-click path
+- [x] Tests: resolver matrix (TP ref, FS number, plain id, cross-workspace miss)
 
 ### 1.3 (Item 2) Internal-note composer: Quick notes only
 `TicketDetail.jsx` — Quick notes already render only in note mode (L1968); Templates render in **all** modes (L1998).
 
-- [ ] Hide the Templates picker when `composerMode === 'note'` (reply templates are requester-facing content; quick notes are the internal canned layer)
-- [ ] Keep Templates for reply + forward modes; visual spacing re-check after removal
+- [x] Hide the Templates picker when `composerMode === 'note'` (reply templates are requester-facing content; quick notes are the internal canned layer)
+- [x] Keep Templates for reply + forward modes; visual spacing re-check after removal
 
 ### 1.4 (Item 7) Remove Time Tracking
 Cleanly isolated, no FK dependents, no tests. Remove the feature surface; **keep the three ticket columns** (dropping columns is a destructive migration with zero upside — they're nullable and invisible).
 
-- [ ] Frontend: remove `TimeTrackingCard` (TicketOpsCards.jsx L285–359), its render + import in TicketDetail.jsx, `api.js logTime`
-- [ ] Backend: remove `POST /:id/time` route + `ticketService.logTime`
-- [ ] Note in AGENTS.md/CLAUDE.md sync that time tracking was retired on request
+- [x] Frontend: remove `TimeTrackingCard` (TicketOpsCards.jsx L285–359), its render + import in TicketDetail.jsx, `api.js logTime`
+- [x] Backend: remove `POST /:id/time` route + `ticketService.logTime`
+- [x] Note in AGENTS.md/CLAUDE.md sync that time tracking was retired on request
 
 ---
 

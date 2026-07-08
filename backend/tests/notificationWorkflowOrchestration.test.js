@@ -294,17 +294,24 @@ describe('propose_reply node (draft-to-approve)', () => {
     };
   }
 
-  test('the graph validates (propose_reply is an action; needs upstream LLM)', () => {
+  test('the graph validates (propose_reply is an action; needs an upstream draft source)', () => {
     expect(validateWorkflowDefinition(proposeDefinition(), { triggerType: 'ticket.created' }).errors).toEqual([]);
 
-    const noLlm = proposeDefinition();
-    noLlm.nodes = noLlm.nodes.filter((n) => n.id !== 'draft');
-    noLlm.edges = [
+    // A rendered template is an equally valid draft source (QA 07-07 #5).
+    const templated = proposeDefinition();
+    templated.nodes = templated.nodes.map((n) => (
+      n.id === 'draft' ? { id: 'draft', type: 'template_render', data: { subject: 'Hi', html: '<p>Hi</p>' } } : n
+    ));
+    expect(validateWorkflowDefinition(templated, { triggerType: 'ticket.created' }).errors).toEqual([]);
+
+    const noSource = proposeDefinition();
+    noSource.nodes = noSource.nodes.filter((n) => n.id !== 'draft');
+    noSource.edges = [
       { id: 'e1', source: 'trigger', target: 'propose' },
       { id: 'e3', source: 'propose', target: 'end' },
     ];
-    expect(validateWorkflowDefinition(noLlm, { triggerType: 'ticket.created' }).errors.join(' '))
-      .toMatch(/upstream LLM/i);
+    expect(validateWorkflowDefinition(noSource, { triggerType: 'ticket.created' }).errors.join(' '))
+      .toMatch(/upstream draft source/i);
   });
 
   test('live execution stages the LLM draft as a proposal', async () => {
@@ -331,6 +338,30 @@ describe('propose_reply node (draft-to-approve)', () => {
       bodyHtml: '<p>Try this</p>',
       confidence: 'medium',
       source: 'workflow_llm',
+    }));
+  });
+
+  test('with no LLM draft, a rendered template stages instead (workflow_template)', async () => {
+    const workflow = { id: 41, workspaceId: 1, triggerType: 'ticket.created', publishedVersion: 1, versions: [] };
+    const result = await executeDefinition({
+      workflow,
+      definition: proposeDefinition(),
+      eventContext: eventContext(),
+      executionMode: 'live',
+      resume: {
+        run: { id: 951 },
+        state: { email: { subject: 'Welcome', html: '<p>Templated reply</p>', text: 'Templated reply' } },
+        startNodeIds: ['propose'],
+      },
+    });
+
+    expect(result.status).toBe('completed');
+    expect(proposedReplyCreateMock).toHaveBeenCalledWith(expect.objectContaining({
+      ticketId: 100,
+      subject: 'Welcome',
+      bodyHtml: '<p>Templated reply</p>',
+      confidence: null,
+      source: 'workflow_template',
     }));
   });
 });

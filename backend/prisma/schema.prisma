@@ -421,7 +421,7 @@ model TicketProposedReply {
   ticketId      Int       @map("ticket_id")
   ticket        Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   workflowRunId Int?      @map("workflow_run_id")
-  source        String    @default("workflow_llm") @db.VarChar(40) // workflow_llm | auto_send_downgrade
+  source        String    @default("workflow_llm") @db.VarChar(40) // workflow_llm | workflow_template | auto_send_downgrade
   subject       String?   @db.VarChar(500)
   bodyHtml      String?   @db.Text @map("body_html")
   bodyText      String?   @db.Text @map("body_text")

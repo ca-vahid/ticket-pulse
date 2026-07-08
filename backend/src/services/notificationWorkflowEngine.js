@@ -1896,30 +1896,34 @@ async function executeNode({
   if (node.type === 'propose_reply') {
     const ticketId = Number(eventContext.ticket?.id);
     const llmEmail = state.llm?.email || {};
-    const bodyHtml = llmEmail.html || null;
-    const bodyText = llmEmail.text || null;
-    const confidence = llmEmail.extra?.confidence || state.llm?.confidence || null;
+    // Draft source: LLM output first; else a rendered template (state.email)
+    // — staging templated text for human approval is valid too (QA 07-07 #5).
+    const usingTemplate = !llmEmail.html && !llmEmail.text && Boolean(state.email?.html || state.email?.text);
+    const draft = usingTemplate ? state.email : llmEmail;
+    const bodyHtml = draft.html || null;
+    const bodyText = draft.text || null;
+    const confidence = usingTemplate ? null : (llmEmail.extra?.confidence || state.llm?.confidence || null);
     if (!Number.isFinite(ticketId) || ticketId <= 0) return { skipped: true, reason: 'No ticket in event context' };
-    if (!bodyHtml && !bodyText) return { skipped: true, reason: 'No LLM draft to propose (upstream LLM produced nothing)' };
+    if (!bodyHtml && !bodyText) return { skipped: true, reason: 'No draft to propose (no upstream LLM or template output)' };
     if (dryRun || executionMode === 'mock' || executionMode === 'preview') {
-      return { dryRun: true, wouldPropose: { subject: llmEmail.subject || null, confidence } };
+      return { dryRun: true, wouldPropose: { subject: draft.subject || null, confidence, source: usingTemplate ? 'template' : 'llm' } };
     }
     const { default: ticketProposedReplyService } = await import('./ticketProposedReplyService.js');
     const proposal = await ticketProposedReplyService.create({
       workspaceId: workflow.workspaceId,
       ticketId,
       workflowRunId: run?.id || null,
-      source: 'workflow_llm',
-      subject: llmEmail.subject || null,
+      source: usingTemplate ? 'workflow_template' : 'workflow_llm',
+      subject: draft.subject || null,
       bodyHtml,
       bodyText,
       confidence,
-      guardSummary: state.llm?.guard ? safeJson({
+      guardSummary: !usingTemplate && state.llm?.guard ? safeJson({
         accepted: state.llm.guard.accepted !== false,
         issues: state.llm.guard.issues || [],
       }) : null,
     });
-    return { proposedReplyId: proposal.id, confidence };
+    return { proposedReplyId: proposal.id, confidence, draftSource: usingTemplate ? 'template' : 'llm' };
   }
 
   if (node.type === 'recipient_resolver') {

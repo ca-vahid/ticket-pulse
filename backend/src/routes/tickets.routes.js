@@ -550,8 +550,13 @@ router.post('/:id/merge', asyncHandler(async (req, res) => {
     throw new ValidationError('Merging tickets requires coordinator or admin access');
   }
   const { default: ticketMergeService } = await import('../services/ticketMergeService.js');
+  let targetTicketId = req.body?.targetTicketId;
+  if (req.body?.targetTicketRef !== undefined) {
+    const { resolveTicketRefOrThrow } = await import('../services/ticketRefResolver.js');
+    targetTicketId = (await resolveTicketRefOrThrow(req.body.targetTicketRef, req.workspaceId)).id;
+  }
   const result = await ticketMergeService.merge(parseTicketId(req), req.workspaceId, {
-    targetTicketId: req.body?.targetTicketId,
+    targetTicketId,
     notifyRequester: req.body?.notifyRequester === true,
   }, req.ticketActor);
   res.json({ success: true, data: result });
@@ -873,16 +878,6 @@ router.get('/:id/related', asyncHandler(async (req, res) => {
   res.json({ success: true, data: related });
 }));
 
-// Log time against a ticket (TP tracking layer — both origins).
-router.post('/:id/time', asyncHandler(async (req, res) => {
-  const result = await ticketService.logTime(
-    parseTicketId(req), req.workspaceId,
-    { minutes: req.body?.minutes, billable: req.body?.billable === true, note: req.body?.note },
-    req.ticketActor,
-  );
-  res.json({ success: true, data: result });
-}));
-
 // On-demand AI thread summary for the handling agent (read-only, never stored).
 router.post('/:id/summarize', asyncHandler(async (req, res) => {
   const { default: ticketSummaryService } = await import('../services/ticketSummaryService.js');
@@ -899,12 +894,20 @@ router.get('/:id/links', asyncHandler(async (req, res) => {
 
 router.post('/:id/links', asyncHandler(async (req, res) => {
   const { default: ticketLinkService } = await import('../services/ticketLinkService.js');
+  // Users type visible refs (TP-1042 / #231164), not database ids (QA 07-07 #6).
+  let relatedTicketId = req.body?.relatedTicketId;
+  let resolved = null;
+  if (req.body?.relatedTicketRef !== undefined) {
+    const { resolveTicketRefOrThrow } = await import('../services/ticketRefResolver.js');
+    resolved = await resolveTicketRefOrThrow(req.body.relatedTicketRef, req.workspaceId);
+    relatedTicketId = resolved.id;
+  }
   const link = await ticketLinkService.link(
     parseTicketId(req), req.workspaceId,
-    { relatedTicketId: req.body?.relatedTicketId, kind: req.body?.kind || 'related_to' },
+    { relatedTicketId, kind: req.body?.kind || 'related_to' },
     req.ticketActor,
   );
-  res.status(201).json({ success: true, data: link });
+  res.status(201).json({ success: true, data: { ...link, resolvedTarget: resolved } });
 }));
 
 router.delete('/:id/links/:linkId', asyncHandler(async (req, res) => {
@@ -915,10 +918,13 @@ router.delete('/:id/links/:linkId', asyncHandler(async (req, res) => {
 
 router.post('/:id/duplicate-of/:targetId', asyncHandler(async (req, res) => {
   const { default: ticketLinkService } = await import('../services/ticketLinkService.js');
+  // The path segment accepts a visible ref (TP-1042 / #231164 / bare number).
+  const { resolveTicketRefOrThrow } = await import('../services/ticketRefResolver.js');
+  const target = await resolveTicketRefOrThrow(req.params.targetId, req.workspaceId);
   const result = await ticketLinkService.markDuplicate(
-    parseTicketId(req), req.workspaceId, req.params.targetId, req.ticketActor,
+    parseTicketId(req), req.workspaceId, target.id, req.ticketActor,
   );
-  res.json({ success: true, data: result });
+  res.json({ success: true, data: { ...result, resolvedTarget: target } });
 }));
 
 // Apply a macro (quick-action bundle) to this ticket.

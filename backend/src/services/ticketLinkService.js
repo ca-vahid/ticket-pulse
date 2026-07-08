@@ -45,7 +45,8 @@ class TicketLinkService {
       prisma.ticket.findFirst({ where: { id: ticketId, workspaceId } }),
       prisma.ticket.findFirst({ where: { id: relatedId, workspaceId } }),
     ]);
-    if (!ticket || !related) throw new NotFoundError('Both tickets must exist in this workspace');
+    if (!ticket) throw new NotFoundError('This ticket no longer exists in the workspace');
+    if (!related) throw new NotFoundError(`Ticket ${relatedId} was not found in this workspace — link by its TP-#### or #FS number`);
 
     const linkRow = await prisma.ticketLink.upsert({
       where: { ticketId_relatedTicketId_kind: { ticketId, relatedTicketId: relatedId, kind } },
