@@ -1290,8 +1290,48 @@ class AssignmentPipelineService {
   async _persistInternalClassification(ticketId, workspaceId, recommendation) {
     const rawCategoryId = Number(recommendation?.internalCategoryId);
     const rawSubcategoryId = Number(recommendation?.internalSubcategoryId);
-    const categoryId = Number.isInteger(rawCategoryId) ? rawCategoryId : null;
-    const subcategoryId = Number.isInteger(rawSubcategoryId) ? rawSubcategoryId : null;
+    let categoryId = Number.isInteger(rawCategoryId) ? rawCategoryId : null;
+    let subcategoryId = Number.isInteger(rawSubcategoryId) ? rawSubcategoryId : null;
+
+    // Repair pass: some models (first seen with claude-sonnet-5) omit the
+    // explicit IDs while still naming their pick in ticketClassification
+    // ("Parent > Subcategory"). Resolve those names against the live taxonomy
+    // so the ticket doesn't silently stay uncategorized.
+    const categoryFitRaw = String(recommendation?.categoryFit || '').toLowerCase();
+    if (!categoryId && !subcategoryId && categoryFitRaw !== 'none') {
+      const names = String(recommendation?.ticketClassification || '')
+        .split('>')
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .slice(0, 2);
+      if (names.length) {
+        try {
+          const matches = await prisma.competencyCategory.findMany({
+            where: {
+              workspaceId,
+              isActive: true,
+              OR: names.map((name) => ({ name: { equals: name, mode: 'insensitive' } })),
+            },
+            select: { id: true, name: true, parentId: true },
+          });
+          const parent = matches.find((c) => !c.parentId);
+          const child = matches.find((c) => c.parentId && (!parent || c.parentId === parent.id));
+          categoryId = parent?.id || child?.parentId || null;
+          subcategoryId = child?.id || null;
+          if (categoryId || subcategoryId) {
+            logger.warn('Categorization repair: LLM omitted category IDs; resolved from ticketClassification names', {
+              ticketId, workspaceId, names, categoryId, subcategoryId,
+            });
+          } else {
+            logger.warn('Categorization missing: LLM omitted category IDs and names did not resolve', {
+              ticketId, workspaceId, ticketClassification: recommendation?.ticketClassification || null, categoryFit: categoryFitRaw,
+            });
+          }
+        } catch (resolveError) {
+          logger.warn('Categorization repair failed', { ticketId, error: resolveError.message });
+        }
+      }
+    }
 
     if (!categoryId && !subcategoryId && !recommendation?.classificationRationale) return;
 

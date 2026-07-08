@@ -307,8 +307,8 @@ Allowed HTML tags only: <b> <i> <br> <p>. No links or lists needed.
 Length: under 300 characters.`,
         },
         ticketClassification: { type: 'string', description: 'Human-readable internal classification from get_ticket_categories (e.g., "Software Support > OpenGround")' },
-        internalCategoryId: { type: 'integer', description: 'Selected internal top-level category ID from get_ticket_categories' },
-        internalSubcategoryId: { type: 'integer', description: 'Selected internal subcategory ID from get_ticket_categories, if applicable' },
+        internalCategoryId: { type: ['integer', 'null'], description: 'REQUIRED. Selected internal top-level category ID from get_ticket_categories. Set null ONLY when categoryFit is "none" (no usable top-level category exists). Never omit this field.' },
+        internalSubcategoryId: { type: ['integer', 'null'], description: 'REQUIRED. Selected internal subcategory ID from get_ticket_categories. Set null ONLY when subcategoryFit is "none". Never omit this field.' },
         classificationRationale: { type: 'string', description: 'Brief rationale for the selected internal category/subcategory. If the fit is weak, explain what is missing from the category/subcategory list.' },
         categoryFit: {
           type: 'string',
@@ -336,7 +336,12 @@ Length: under 300 characters.`,
         estimatedComplexity: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Estimated complexity of the ticket' },
         confidence: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Overall confidence in the recommendation' },
       },
-      required: ['recommendations', 'overallReasoning', 'assessedPriority', 'priorityRationale', 'priorityConfidence', 'ticketClassification', 'classificationRationale', 'categoryFit', 'subcategoryFit', 'taxonomyReviewNeeded', 'confidence'],
+      // internalCategoryId/internalSubcategoryId became required (nullable)
+      // on 2026-07-08: the claude-sonnet-5 rollout revealed that newer models
+      // omit optional fields — runs claimed categoryFit "exact" while never
+      // emitting the IDs, leaving tickets uncategorized. Required + null
+      // forces an explicit choice every run.
+      required: ['recommendations', 'overallReasoning', 'assessedPriority', 'priorityRationale', 'priorityConfidence', 'ticketClassification', 'classificationRationale', 'internalCategoryId', 'internalSubcategoryId', 'categoryFit', 'subcategoryFit', 'taxonomyReviewNeeded', 'confidence'],
     },
   },
 ];
@@ -1170,7 +1175,22 @@ async function getRoutingBoundaryContext(workspaceId, input = {}) {
       const fsConfig = await settingsRepository.getFreshServiceConfigForWorkspace(workspaceId);
       if (fsConfig?.domain && fsConfig?.apiKey) {
         const client = createFreshServiceClient(fsConfig.domain, fsConfig.apiKey);
-        group = await client.getGroup(Number(ticket.groupId));
+        // The FS client sits behind the shared rate-limiter queue; during
+        // business-hours sync bursts a queued lookup can wait for minutes and
+        // stall the whole pipeline run until the watchdog kills it (seen in
+        // prod as get_routing_boundary_context stuck "running" for 7+ min).
+        // Group detail is advisory — bound the wait and degrade gracefully.
+        const GROUP_LOOKUP_TIMEOUT_MS = 8_000;
+        group = await Promise.race([
+          client.getGroup(Number(ticket.groupId)),
+          new Promise((_, reject) => {
+            const timer = setTimeout(
+              () => reject(new Error(`group lookup exceeded ${GROUP_LOOKUP_TIMEOUT_MS / 1000}s (FreshService rate-limited) — proceeding without group detail`)),
+              GROUP_LOOKUP_TIMEOUT_MS,
+            );
+            if (typeof timer.unref === 'function') timer.unref();
+          }),
+        ]);
         groupLookup = group ? 'freshservice' : 'not_found';
       } else {
         groupLookup = 'freshservice_not_configured';
