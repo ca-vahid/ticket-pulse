@@ -30,19 +30,10 @@ import {
   Calendar,
   Eye,
   EyeOff,
-  TrendingUp,
-  TrendingDown,
-  Minus,
-  FolderOpen,
-  Hand,
-  Inbox,
-  CheckSquare,
-  Clock,
   LayoutGrid,
   List,
   VolumeX,
   Volume2,
-  Bot,
 } from 'lucide-react';
 
 export default function Dashboard() {
@@ -102,6 +93,14 @@ export default function Dashboard() {
     return stored ? JSON.parse(stored) : [];
   });
   const [showHidden, setShowHidden] = useState(false);
+  // Mobile stats bottom sheet (the summary strip's tap-to-expand detail view)
+  const [statsSheetOpen, setStatsSheetOpen] = useState(false);
+  useEffect(() => {
+    if (!statsSheetOpen) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') setStatsSheetOpen(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [statsSheetOpen]);
 
   // Search state - persisted in sessionStorage
   const [searchTerm, setSearchTerm] = useState(() => {
@@ -1182,61 +1181,107 @@ export default function Dashboard() {
   const selfPickPercentage = totalTicketsToday > 0
     ? Math.round((selfPickedToday / totalTicketsToday) * 100)
     : 0;
-  const useDenseStatsBar = appAssignedTotal > 0 && (viewMode === 'daily' || viewMode === 'weekly');
-  const statCardClass = `bg-white bg-opacity-10 backdrop-blur-sm rounded-lg flex items-center hover:bg-opacity-20 transition-all ${
-    useDenseStatsBar ? 'px-2 py-1 gap-1' : 'px-2.5 py-1.5 gap-1.5'
-  }`;
-  const statIconBoxClass = (colorClass) => `flex items-center justify-center ${useDenseStatsBar ? 'w-6 h-6 rounded-md' : 'w-7 h-7 rounded-lg'} ${colorClass} bg-opacity-30 flex-none`;
-  const statIconClass = useDenseStatsBar ? 'w-3 h-3 text-white' : 'w-3.5 h-3.5 text-white';
-  const statValueClass = `${useDenseStatsBar ? 'text-sm' : 'text-base'} font-bold leading-tight`;
-  const statLabelClass = 'text-[9px] text-blue-100 uppercase font-medium leading-tight';
-  const viewToggleButtonClass = `${useDenseStatsBar ? 'px-2.5' : 'px-3'} py-1 rounded text-xs font-medium transition-colors`;
-  const mobileStats = [
+  // ---- Stats band (flat typographic redesign) ----------------------------
+  // One list drives the desktop stat row, the mobile sheet grid, and their
+  // ordering. `dot` is the identity tick used on the light sheet cells.
+  const bandStats = [
     {
       key: 'total',
       label: viewMode === 'daily' ? 'Today' : 'Total',
       value: totalTicketsToday,
-      Icon: Inbox,
-      iconClass: 'bg-blue-400/30',
+      dot: 'bg-blue-500',
     },
     ...(viewMode === 'daily' || viewMode === 'weekly' ? [
       {
         key: 'open',
         label: 'Open',
         value: viewMode === 'weekly' ? (displayStats.weeklyOpenOnly || 0) : (displayStats.openOnlyCount || 0),
-        Icon: FolderOpen,
-        iconClass: 'bg-yellow-500/30',
+        dot: 'bg-yellow-500',
       },
       {
         key: 'pending',
         label: 'Pending',
         value: viewMode === 'weekly' ? (displayStats.weeklyPending || 0) : (displayStats.pendingCount || 0),
-        Icon: Clock,
-        iconClass: 'bg-orange-500/30',
+        dot: 'bg-orange-500',
       },
     ] : []),
     {
       key: 'closed',
       label: 'Closed',
       value: viewMode === 'monthly' ? (displayStats.monthClosed || 0) : viewMode === 'weekly' ? (displayStats.weeklyClosed || 0) : (displayStats.closedTicketsToday || 0),
-      Icon: CheckSquare,
-      iconClass: 'bg-green-500/30',
+      dot: 'bg-green-500',
     },
     {
       key: 'self',
       label: 'Self',
       value: selfPickedToday,
-      Icon: Hand,
-      iconClass: 'bg-purple-500/30',
+      dot: 'bg-purple-500',
     },
     ...(appAssignedTotal > 0 ? [{
       key: 'app',
       label: 'App',
       value: appAssignedTotal,
-      Icon: Bot,
-      iconClass: 'bg-sky-400/30',
+      dot: 'bg-sky-500',
     }] : []),
   ];
+  const maxDayCount = Math.max(1, ...(weeklyStats || []).map((d) => d?.count || 0));
+  const selfPickBarClass = selfPickPercentage >= 70 ? 'bg-green-400' : selfPickPercentage >= 50 ? 'bg-yellow-400' : 'bg-red-400';
+  const selfPickSheetBarClass = selfPickPercentage >= 70 ? 'bg-green-500' : selfPickPercentage >= 50 ? 'bg-yellow-500' : 'bg-red-500';
+  const selfPickRingStroke = selfPickPercentage >= 70 ? '#4ade80' : selfPickPercentage >= 50 ? '#facc15' : '#fca5a5';
+  const loadMixTitle = isToday
+    ? `Techs by load — light: ${displayStats.lightLoad || 0} · medium: ${displayStats.mediumLoad || 0} · heavy: ${displayStats.heavyLoad || 0}`
+    : 'Team self-pick rate for this period';
+  const bandRangeLabel = viewMode === 'daily'
+    ? selectedDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+    : viewMode === 'weekly'
+      ? (() => {
+        const weekEnd = new Date(selectedWeek);
+        weekEnd.setDate(selectedWeek.getDate() + 6);
+        return `${selectedWeek.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+      })()
+      : selectedMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+  // Per-day cells shared by the desktop micro bar-chart, the mobile strip
+  // bars, and the sheet's tappable day grid. The bar silhouette replaces the
+  // old per-day trend arrows.
+  const bandDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, index) => {
+    const currentDay = (selectedDate.getDay() + 6) % 7;
+    const count = weeklyStats?.[index]?.count ?? null;
+    let dayDate;
+    if (viewMode === 'weekly' && selectedWeek) {
+      dayDate = new Date(selectedWeek);
+      dayDate.setDate(selectedWeek.getDate() + index);
+    } else {
+      dayDate = new Date(selectedDate);
+      dayDate.setDate(dayDate.getDate() + (index - currentDay));
+    }
+    const dayDateStr = formatDateLocal(dayDate);
+    const todayStr = formatDateLocal(new Date());
+    const isSelectedDay = viewMode === 'daily' ? index === currentDay : dayDateStr === todayStr;
+    const holidayInfo = getHolidayInfo(dayDateStr);
+    const holidayTooltip = getHolidayTooltip(dayDateStr);
+    let tooltip = `${day} ${dayDate.getDate()}`;
+    if (count !== null) tooltip += ` — ${count} tickets`;
+    if (holidayTooltip) tooltip += `\n${holidayTooltip}`;
+    return {
+      day,
+      index,
+      count,
+      dayDate,
+      isSelectedDay,
+      isWeekend: index === 5 || index === 6,
+      holidayInfo,
+      tooltip,
+      select: () => {
+        setSelectedDate(new Date(dayDate));
+        if (viewMode === 'weekly') setViewMode('daily');
+      },
+    };
+  });
+  const dayBarHeight = (count, maxPx) => {
+    if (!count) return 2;
+    return Math.max(4, Math.round((count / maxDayCount) * maxPx));
+  };
 
   return (
     <AppShell
@@ -1403,467 +1448,322 @@ export default function Dashboard() {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-2 sm:px-4 py-3">
-        {/* Stats Bar: Date Navigation (left) + Stats + Self-Pick + View Toggle (right) */}
-        <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg shadow-lg p-2 sm:p-3 mb-3 sm:mb-4">
-          <div className="flex items-stretch gap-3 text-white">
+        {/* Stats Band — one flat line on desktop; a tap-to-expand summary strip on
+            phones (full breakdown lives in a bottom sheet). The day bars carry the
+            week's shape, replacing the old per-day trend arrows. */}
+        <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg shadow-lg mb-3 sm:mb-4 text-white">
 
-            {/* LEFT ZONE: Date Navigation + Day Grid */}
-            <div className="flex-none w-full md:w-80">
-              {/* Navigation Controls */}
-              <div className="flex items-center gap-1.5 mb-1.5">
+          {/* ---- Desktop: date · day bars · stats · self-pick · view toggle ---- */}
+          <div className="hidden md:flex min-h-[60px] items-center gap-3 px-4 py-2">
+            <button
+              onClick={viewMode === 'daily' ? goToPreviousDay : viewMode === 'weekly' ? goToPreviousWeek : goToPreviousMonth}
+              title={viewMode === 'daily' ? 'Previous day' : viewMode === 'weekly' ? 'Previous week' : 'Previous month'}
+              className="flex-none rounded-lg p-1.5 transition-colors hover:bg-white/20 tp-focus-ring"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <div className="flex flex-none items-center gap-1.5">
+              <Calendar className="h-3.5 w-3.5 flex-none opacity-80" />
+              {viewMode === 'daily' ? (
+                <input
+                  type="date"
+                  value={formatDateLocal(selectedDate)}
+                  onChange={(e) => setSelectedDate(new Date(e.target.value + 'T12:00:00'))}
+                  className="w-[8.5rem] rounded-md border border-white/30 bg-white/20 px-2 py-0.5 text-xs font-semibold text-white focus:outline-none focus:ring-1 focus:ring-white"
+                />
+              ) : (
+                <span className="whitespace-nowrap text-[13px] font-bold">
+                  {bandRangeLabel}{viewMode === 'weekly' ? `, ${new Date(selectedWeek.getTime() + 6 * 86400000).getFullYear()}` : ''}
+                </span>
+              )}
+            </div>
+            <button
+              onClick={viewMode === 'daily' ? goToNextDay : viewMode === 'weekly' ? goToNextWeek : goToNextMonth}
+              disabled={viewMode === 'daily' && isToday}
+              title={viewMode === 'daily' ? 'Next day' : viewMode === 'weekly' ? 'Next week' : 'Next month'}
+              className={`flex-none rounded-lg p-1.5 transition-colors tp-focus-ring ${(viewMode === 'daily' && isToday) ? 'cursor-not-allowed opacity-50' : 'hover:bg-white/20'}`}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+            {!isToday && viewMode === 'daily' && (
+              <button onClick={goToToday} className="flex-none whitespace-nowrap rounded-full bg-white/20 px-2.5 py-0.5 text-xs font-semibold transition-colors hover:bg-white/30">
+                Today
+              </button>
+            )}
+            {viewMode === 'weekly' && (
+              <button onClick={goToCurrentWeek} className="flex-none whitespace-nowrap rounded-full bg-white/20 px-2.5 py-0.5 text-xs font-semibold transition-colors hover:bg-white/30">
+                This Week
+              </button>
+            )}
+            {viewMode === 'monthly' && (
+              <button onClick={goToCurrentMonth} className="flex-none whitespace-nowrap rounded-full bg-white/20 px-2.5 py-0.5 text-xs font-semibold transition-colors hover:bg-white/30">
+                This Month
+              </button>
+            )}
+
+            <div className="my-1 w-px flex-none self-stretch bg-white/25" />
+
+            <div className="flex flex-none items-end gap-1" role="group" aria-label="Tickets created per day">
+              {bandDays.map((d) => (
                 <button
-                  onClick={viewMode === 'daily' ? goToPreviousDay : viewMode === 'weekly' ? goToPreviousWeek : goToPreviousMonth}
-                  className="p-2 sm:p-1.5 hover:bg-white hover:bg-opacity-20 rounded transition-colors flex-none touch-manipulation"
-                  title={viewMode === 'daily' ? 'Previous day' : viewMode === 'weekly' ? 'Previous week' : 'Previous month'}
+                  key={d.day}
+                  type="button"
+                  onClick={d.select}
+                  title={d.tooltip}
+                  className="group relative flex w-6 flex-col items-center justify-end rounded pt-3.5 tp-focus-ring"
                 >
-                  <ChevronLeft className="w-5 h-5 sm:w-4 sm:h-4" />
-                </button>
-                <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                  <Calendar className="w-3.5 h-3.5 flex-none opacity-80" />
-                  {viewMode === 'daily' ? (
-                    <input
-                      type="date"
-                      value={formatDateLocal(selectedDate)}
-                      onChange={(e) => setSelectedDate(new Date(e.target.value + 'T12:00:00'))}
-                      className="bg-white bg-opacity-20 border border-white border-opacity-30 rounded px-2 py-0.5 text-white text-xs focus:outline-none focus:ring-1 focus:ring-white flex-1 min-w-0"
-                    />
-                  ) : viewMode === 'weekly' ? (
-                    <div className="bg-white bg-opacity-20 border border-white border-opacity-30 rounded px-2 py-0.5 text-white text-xs flex-1 min-w-0 text-center truncate">
-                      {(() => {
-                        const weekEnd = new Date(selectedWeek);
-                        weekEnd.setDate(selectedWeek.getDate() + 6);
-                        return `${selectedWeek.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} \u2013 ${weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
-                      })()}
-                    </div>
-                  ) : (
-                    <div className="bg-white bg-opacity-20 border border-white border-opacity-30 rounded px-2 py-0.5 text-white text-xs flex-1 min-w-0 text-center">
-                      {selectedMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-                    </div>
+                  {d.holidayInfo.isHoliday && (
+                    <span className={`absolute right-0.5 top-1.5 h-1.5 w-1.5 rounded-full ${d.holidayInfo.isCanadian ? 'bg-rose-300' : d.holidayInfo.isDynamic ? 'bg-violet-300' : 'bg-indigo-300'}`} />
                   )}
-                </div>
-                <button
-                  onClick={viewMode === 'daily' ? goToNextDay : viewMode === 'weekly' ? goToNextWeek : goToNextMonth}
-                  disabled={viewMode === 'daily' && isToday}
-                  className={`p-2 sm:p-1.5 rounded transition-colors flex-none touch-manipulation ${(viewMode === 'daily' && isToday) ? 'opacity-50 cursor-not-allowed' : 'hover:bg-white hover:bg-opacity-20'}`}
-                  title={viewMode === 'daily' ? 'Next day' : viewMode === 'weekly' ? 'Next week' : 'Next month'}
-                >
-                  <ChevronRight className="w-5 h-5 sm:w-4 sm:h-4" />
+                  <span className={`text-[9px] font-bold leading-none tabular-nums transition-opacity ${d.isSelectedDay ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                    {d.count ?? ''}
+                  </span>
+                  <span
+                    className={`mt-0.5 w-3 rounded-t-[3px] transition-colors ${d.isSelectedDay ? 'bg-white' : d.isWeekend ? 'bg-white/20 group-hover:bg-white/35' : 'bg-white/45 group-hover:bg-white/70'}`}
+                    style={{ height: `${dayBarHeight(d.count, 26)}px` }}
+                  />
+                  <span className={`mt-1 text-[8px] font-bold leading-none ${d.isSelectedDay ? 'opacity-100' : 'opacity-60'}`}>{d.day[0]}</span>
                 </button>
-                {!isToday && viewMode === 'daily' && (
-                  <button
-                    onClick={goToToday}
-                    className="px-2 py-0.5 bg-white bg-opacity-20 hover:bg-opacity-30 rounded text-xs font-semibold transition-colors whitespace-nowrap"
-                  >
-                    Today
-                  </button>
-                )}
-                {viewMode === 'weekly' && (
-                  <button
-                    onClick={goToCurrentWeek}
-                    className="px-2 py-0.5 bg-white bg-opacity-20 hover:bg-opacity-30 rounded text-xs font-semibold transition-colors whitespace-nowrap"
-                  >
-                    This Week
-                  </button>
-                )}
-                {viewMode === 'monthly' && (
-                  <button
-                    onClick={goToCurrentMonth}
-                    className="px-2 py-0.5 bg-white bg-opacity-20 hover:bg-opacity-30 rounded text-xs font-semibold transition-colors whitespace-nowrap"
-                  >
-                    This Month
-                  </button>
-                )}
-              </div>
+              ))}
+            </div>
 
-              {/* Day of Week Indicators - Clickable (Monday to Sunday) -- hidden on mobile */}
-              <div className="hidden sm:flex justify-between gap-0.5">
-                {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, index) => {
-                  const currentDay = (selectedDate.getDay() + 6) % 7;
-                  const dayStats = weeklyStats?.[index];
-                  const ticketCount = dayStats?.count ?? null;
+            <div className="my-1 w-px flex-none self-stretch bg-white/25" />
 
-                  let dayDate;
-                  if (viewMode === 'weekly' && selectedWeek) {
-                    dayDate = new Date(selectedWeek);
-                    dayDate.setDate(selectedWeek.getDate() + index);
-                  } else {
-                    const dayDifference = index - currentDay;
-                    dayDate = new Date(selectedDate);
-                    dayDate.setDate(dayDate.getDate() + dayDifference);
-                  }
-                  const dayDateStr = `${dayDate.getFullYear()}-${String(dayDate.getMonth() + 1).padStart(2, '0')}-${String(dayDate.getDate()).padStart(2, '0')}`;
-
-                  const todayStr = formatDateLocal(new Date());
-                  const isActualToday = dayDateStr === todayStr;
-                  const isSelectedDay = viewMode === 'daily'
-                    ? index === currentDay
-                    : isActualToday;
-                  const isWeekendDay = index === 5 || index === 6;
-                  const holidayInfo = getHolidayInfo(dayDateStr);
-                  const isHolidayDay = holidayInfo.isHoliday;
-                  const holidayTooltip = getHolidayTooltip(dayDateStr);
-
-                  let trendIcon = null;
-                  let trendColor = '';
-                  if (weeklyStats && index > 0) {
-                    const prevDayCount = weeklyStats[index - 1]?.count ?? 0;
-                    const currentCount = ticketCount ?? 0;
-                    if (currentCount > prevDayCount) {
-                      trendIcon = <TrendingUp className="w-2.5 h-2.5" />;
-                      trendColor = 'text-red-400';
-                    } else if (currentCount < prevDayCount) {
-                      trendIcon = <TrendingDown className="w-2.5 h-2.5" />;
-                      trendColor = 'text-green-400';
-                    } else if (currentCount === prevDayCount && currentCount > 0) {
-                      trendIcon = <Minus className="w-2.5 h-2.5" />;
-                      trendColor = 'text-gray-400';
-                    }
-                  }
-
-                  const handleDayClick = () => {
-                    if (viewMode === 'weekly') {
-                      setSelectedDate(new Date(dayDate));
-                      setViewMode('daily');
-                      return;
-                    }
-                    setSelectedDate(new Date(dayDate));
-                  };
-
-                  let buttonTooltip = day;
-                  if (ticketCount !== null) buttonTooltip += ` - ${ticketCount} tickets`;
-                  if (holidayTooltip) buttonTooltip += `\n${holidayTooltip}`;
-
-                  const getButtonClasses = () => {
-                    if (isSelectedDay) {
-                      if (isHolidayDay && holidayInfo.isCanadian) return 'bg-rose-100 text-rose-700 shadow-md scale-110 ring-2 ring-rose-300';
-                      if (isHolidayDay && holidayInfo.isDynamic) return 'bg-violet-100 text-violet-700 shadow-md scale-110 ring-2 ring-violet-300';
-                      if (isHolidayDay) return 'bg-indigo-100 text-indigo-700 shadow-md scale-110 ring-2 ring-indigo-300';
-                      if (isWeekendDay) return 'bg-slate-100 text-slate-700 shadow-md scale-110';
-                      return 'bg-white text-blue-600 shadow-md scale-110';
-                    }
-                    if (viewMode === 'weekly') {
-                      if (isHolidayDay && holidayInfo.isCanadian) return 'text-rose-300 hover:text-rose-100 hover:bg-rose-400 hover:bg-opacity-30 cursor-pointer';
-                      if (isHolidayDay && holidayInfo.isDynamic) return 'text-violet-300 hover:text-violet-100 hover:bg-violet-400 hover:bg-opacity-30 cursor-pointer';
-                      if (isHolidayDay) return 'text-indigo-300 hover:text-indigo-100 hover:bg-indigo-400 hover:bg-opacity-30 cursor-pointer';
-                      if (isWeekendDay) return 'text-slate-300 hover:text-white hover:bg-slate-400 hover:bg-opacity-30 cursor-pointer';
-                      return 'text-white opacity-90 hover:opacity-100 hover:bg-white hover:bg-opacity-20 cursor-pointer';
-                    }
-                    if (isHolidayDay && holidayInfo.isCanadian) return 'text-rose-300 hover:text-rose-100 hover:bg-rose-400 hover:bg-opacity-30 cursor-pointer';
-                    if (isHolidayDay && holidayInfo.isDynamic) return 'text-violet-300 hover:text-violet-100 hover:bg-violet-400 hover:bg-opacity-30 cursor-pointer';
-                    if (isHolidayDay) return 'text-indigo-300 hover:text-indigo-100 hover:bg-indigo-400 hover:bg-opacity-30 cursor-pointer';
-                    if (isWeekendDay) return 'text-slate-300 hover:text-white hover:bg-slate-400 hover:bg-opacity-30 cursor-pointer';
-                    return 'text-white opacity-90 hover:opacity-100 hover:bg-white hover:bg-opacity-20 cursor-pointer';
-                  };
-
-                  return (
-                    <button
-                      key={day}
-                      onClick={handleDayClick}
-                      className={`text-[10px] font-semibold px-1 py-0.5 rounded transition-all flex flex-col items-center relative flex-1 ${getButtonClasses()}`}
-                      title={buttonTooltip}
-                    >
-                      {isHolidayDay && (
-                        <div className={`absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full ${holidayInfo.isCanadian ? 'bg-rose-400' : holidayInfo.isDynamic ? 'bg-violet-400' : 'bg-indigo-400'}`} />
-                      )}
-                      <span>{day}</span>
-                      <span className="text-[7px] opacity-60 -mt-0.5">{dayDate.getDate()}</span>
-                      {ticketCount !== null && (
-                        <div className="flex items-center gap-0.5">
-                          <span className="text-[9px] font-bold">{ticketCount}</span>
-                          {trendIcon && <span className={trendColor}>{trendIcon}</span>}
-                        </div>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-              <div className="grid grid-cols-7 gap-1 sm:hidden">
-                {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, index) => {
-                  const currentDay = (selectedDate.getDay() + 6) % 7;
-                  const dayStats = weeklyStats?.[index];
-                  const ticketCount = dayStats?.count ?? 0;
-
-                  let dayDate;
-                  if (viewMode === 'weekly' && selectedWeek) {
-                    dayDate = new Date(selectedWeek);
-                    dayDate.setDate(selectedWeek.getDate() + index);
-                  } else {
-                    const dayDifference = index - currentDay;
-                    dayDate = new Date(selectedDate);
-                    dayDate.setDate(dayDate.getDate() + dayDifference);
-                  }
-                  const dayDateStr = formatDateLocal(dayDate);
-                  const todayStr = formatDateLocal(new Date());
-                  const isActualToday = dayDateStr === todayStr;
-                  const isSelectedDay = viewMode === 'daily'
-                    ? index === currentDay
-                    : isActualToday;
-                  const holidayInfo = getHolidayInfo(dayDateStr);
-                  const isWeekendDay = index === 5 || index === 6;
-
-                  const handleDayClick = () => {
-                    if (viewMode === 'weekly') {
-                      setSelectedDate(new Date(dayDate));
-                      setViewMode('daily');
-                      return;
-                    }
-                    setSelectedDate(new Date(dayDate));
-                  };
-
-                  return (
-                    <button
-                      key={day}
-                      type="button"
-                      onClick={handleDayClick}
-                      className={`relative flex min-h-[48px] flex-col items-center justify-center rounded-md border text-[10px] font-semibold transition-colors touch-manipulation ${
-                        isSelectedDay
-                          ? 'border-white bg-white text-blue-600 shadow-sm'
-                          : isWeekendDay
-                            ? 'border-white/10 bg-white/10 text-slate-100'
-                            : 'border-white/10 bg-white/10 text-white'
-                      }`}
-                      title={`${day} ${dayDate.getDate()} - ${ticketCount} tickets`}
-                    >
-                      {holidayInfo.isHoliday && (
-                        <span className={`absolute right-1 top-1 h-1.5 w-1.5 rounded-full ${holidayInfo.isCanadian ? 'bg-rose-300' : 'bg-indigo-200'}`} />
-                      )}
-                      <span>{day}</span>
-                      <span className="text-[8px] opacity-70">{dayDate.getDate()}</span>
-                      <span className="text-[11px] font-bold leading-tight">{ticketCount}</span>
-                    </button>
-                  );
-                })}
-              </div>
-              {/* Mobile view toggle */}
-              <div className="mt-2 space-y-2 md:hidden">
-                <div className="grid grid-cols-3 gap-0.5 bg-white bg-opacity-20 rounded-lg p-0.5">
-                  <button onClick={handleSwitchToDaily} className={`px-3 py-1.5 rounded text-xs font-medium transition-colors touch-manipulation ${viewMode === 'daily' ? 'bg-white text-blue-600 shadow-sm' : 'text-white'}`}>Daily</button>
-                  <button onClick={handleSwitchToWeekly} className={`px-3 py-1.5 rounded text-xs font-medium transition-colors touch-manipulation ${viewMode === 'weekly' ? 'bg-white text-blue-600 shadow-sm' : 'text-white'}`}>Weekly</button>
-                  <button onClick={handleSwitchToMonthly} className={`px-3 py-1.5 rounded text-xs font-medium transition-colors touch-manipulation ${viewMode === 'monthly' ? 'bg-white text-blue-600 shadow-sm' : 'text-white'}`}>Monthly</button>
+            <div className="flex min-w-0 flex-1 items-center justify-evenly gap-3">
+              {bandStats.map((s) => (
+                <div key={s.key} className="flex min-w-0 flex-col items-start gap-1">
+                  <span className="text-lg font-extrabold leading-none tabular-nums">{s.value}</span>
+                  <span className="text-[8.5px] font-bold uppercase leading-none tracking-wider text-blue-100">{s.label}</span>
                 </div>
-                <div className="grid grid-cols-2 gap-1.5">
-                  {mobileStats.map(({ key, label, value, Icon, iconClass }) => (
-                    <div key={key} className="flex items-center gap-2 rounded-lg bg-white/10 px-2 py-2">
-                      <div className={`flex h-7 w-7 flex-none items-center justify-center rounded-lg ${iconClass}`}>
-                        <Icon className="h-3.5 w-3.5 text-white" />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="text-base font-bold leading-none">{value}</div>
-                        <div className="mt-0.5 text-[9px] font-semibold uppercase text-blue-100">{label}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div className="rounded-lg bg-white/10 px-2 py-2">
-                  <div className="mb-1 flex items-center justify-between text-xs font-semibold">
-                    <span>Team Self-Pick</span>
-                    <span>{selfPickPercentage}%</span>
-                  </div>
-                  <div className="h-2 overflow-hidden rounded-full bg-blue-950/30">
-                    <div
-                      className={`h-full rounded-full transition-all duration-500 ${
-                        selfPickPercentage >= 70 ? 'bg-green-400' :
-                          selfPickPercentage >= 50 ? 'bg-yellow-400' :
-                            'bg-red-400'
-                      }`}
-                      style={{ width: `${selfPickPercentage}%` }}
-                    />
-                  </div>
-                  <div className="mt-1 text-[10px] text-blue-100">Goal: 70%</div>
-                </div>
+              ))}
+            </div>
+
+            <div className="my-1 w-px flex-none self-stretch bg-white/25" />
+
+            <div className="w-36 flex-none cursor-default" title={loadMixTitle}>
+              <div className="mb-1 flex items-baseline justify-between text-[11px]">
+                <span className="font-semibold">Self-Pick <span className="font-extrabold tabular-nums">{selfPickPercentage}%</span></span>
+                <span className="font-medium opacity-75">goal 70</span>
+              </div>
+              <div className="relative h-1.5 rounded-full bg-white/20">
+                <div
+                  className={`absolute inset-y-0 left-0 rounded-full transition-all duration-500 ${selfPickBarClass}`}
+                  style={{ width: `${Math.min(100, selfPickPercentage)}%` }}
+                />
+                <div className="absolute -bottom-[3px] -top-[3px] w-0.5 rounded-full bg-white/85" style={{ left: '70%' }} />
               </div>
             </div>
 
-            {/* Vertical Divider */}
-            <div className="hidden md:block w-px bg-white bg-opacity-20 flex-none self-stretch" />
+            <div className="my-1 w-px flex-none self-stretch bg-white/25" />
 
-            {/* RIGHT ZONE: Stats Cards + Self-Pick + View Toggle */}
-            {/* flex-wrap + gap-y allows the row to break cleanly onto a 2nd line on
-                narrower viewports instead of overflowing into the LEFT zone. */}
-            <div className="hidden md:flex flex-wrap items-center gap-x-2 gap-y-2 flex-1 min-w-0 justify-end">
+            <div className="inline-flex flex-none items-center gap-0.5 rounded-lg bg-white/20 p-0.5">
+              <button
+                onClick={handleSwitchToDaily}
+                className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${viewMode === 'daily' ? 'bg-white text-blue-600 shadow-sm' : 'text-white hover:bg-white/10'}`}
+              >
+                Daily
+              </button>
+              <button
+                onClick={handleSwitchToWeekly}
+                className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${viewMode === 'weekly' ? 'bg-white text-blue-600 shadow-sm' : 'text-white hover:bg-white/10'}`}
+              >
+                Weekly
+              </button>
+              <button
+                onClick={handleSwitchToMonthly}
+                className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${viewMode === 'monthly' ? 'bg-white text-blue-600 shadow-sm' : 'text-white hover:bg-white/10'}`}
+              >
+                Monthly
+              </button>
+            </div>
+          </div>
 
-              {/* Stats Cards — also wrap among themselves so individual cards
-                  don't get pushed into the day grid when 6 cards are visible
-                  (Total / Open / Pending / Closed / Self / App in weekly mode). */}
-              <div className={`flex flex-wrap items-center justify-end ${useDenseStatsBar ? 'gap-1' : 'gap-1.5'}`}>
-                {/* Total */}
-                <div className={statCardClass}>
-                  <div className={statIconBoxClass('bg-blue-400')}>
-                    <Inbox className={statIconClass} />
-                  </div>
-                  <div className="min-w-0">
-                    <div className={statValueClass}>
-                      {viewMode === 'monthly' ? (displayStats.monthTotalCreated || 0) : viewMode === 'weekly' ? (displayStats.weeklyTotalCreated || 0) : (displayStats.totalTicketsToday || 0)}
-                    </div>
-                    <div className={statLabelClass}>
-                      <div className="flex items-baseline gap-1">
-                        <span>Total</span>
-                        <span className="text-[8px] opacity-70 normal-case truncate max-w-[110px]">
-                          {viewMode === 'monthly'
-                            ? selectedMonth.toLocaleDateString('en-US', { month: 'short', year: '2-digit' })
-                            : viewMode === 'weekly'
-                              ? (() => {
-                                const weekEnd = new Date(selectedWeek);
-                                weekEnd.setDate(selectedWeek.getDate() + 6);
-                                const startMonth = selectedWeek.toLocaleDateString('en-US', { month: 'short' });
-                                const endMonth = weekEnd.toLocaleDateString('en-US', { month: 'short' });
-                                // Same month? "Apr 13–19". Cross-month? "Apr 28 – May 4"
-                                return startMonth === endMonth
-                                  ? `${startMonth} ${selectedWeek.getDate()}\u2013${weekEnd.getDate()}`
-                                  : `${startMonth} ${selectedWeek.getDate()} \u2013 ${endMonth} ${weekEnd.getDate()}`;
-                              })()
-                              : selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-                          }
-                        </span>
-                      </div>
-                    </div>
-                  </div>
+          {/* ---- Mobile: summary strip — tap anywhere (except arrows) for the sheet ---- */}
+          <div className="px-3 py-2.5 md:hidden">
+            <div className="flex items-center gap-1">
+              <button
+                onClick={viewMode === 'daily' ? goToPreviousDay : viewMode === 'weekly' ? goToPreviousWeek : goToPreviousMonth}
+                aria-label={viewMode === 'daily' ? 'Previous day' : viewMode === 'weekly' ? 'Previous week' : 'Previous month'}
+                className="flex-none rounded-lg p-2 transition-colors hover:bg-white/20 touch-manipulation tp-focus-ring"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setStatsSheetOpen(true)}
+                className="flex min-w-0 flex-1 items-center justify-center gap-2 rounded-lg px-2 py-1 touch-manipulation tp-focus-ring"
+              >
+                <span className="truncate text-[13px] font-bold">{bandRangeLabel}</span>
+                <span className="flex-none rounded-full bg-white/25 px-2 py-px text-[9px] font-extrabold uppercase tracking-wide">{viewMode}</span>
+              </button>
+              <button
+                onClick={viewMode === 'daily' ? goToNextDay : viewMode === 'weekly' ? goToNextWeek : goToNextMonth}
+                disabled={viewMode === 'daily' && isToday}
+                aria-label={viewMode === 'daily' ? 'Next day' : viewMode === 'weekly' ? 'Next week' : 'Next month'}
+                className={`flex-none rounded-lg p-2 transition-colors touch-manipulation tp-focus-ring ${(viewMode === 'daily' && isToday) ? 'cursor-not-allowed opacity-50' : 'hover:bg-white/20'}`}
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setStatsSheetOpen(true)}
+              aria-haspopup="dialog"
+              aria-expanded={statsSheetOpen}
+              className="mt-1 flex w-full items-center gap-3 rounded-lg px-1 py-1 text-left touch-manipulation tp-focus-ring"
+            >
+              <span className="flex-none">
+                <span className="block text-[26px] font-extrabold leading-none tabular-nums">{totalTicketsToday}</span>
+                <span className="mt-1 block text-[8.5px] font-bold uppercase leading-none tracking-wider text-blue-100">
+                  {viewMode === 'daily' ? 'Today' : 'Tickets'}
+                </span>
+              </span>
+              <span className="flex h-10 min-w-0 flex-1 items-end justify-between gap-1 px-1">
+                {bandDays.map((d) => (
+                  <span key={d.day} className="relative flex w-5 flex-col items-center justify-end gap-1">
+                    {d.holidayInfo.isHoliday && (
+                      <span className={`absolute -top-1 right-0.5 h-1 w-1 rounded-full ${d.holidayInfo.isCanadian ? 'bg-rose-300' : d.holidayInfo.isDynamic ? 'bg-violet-300' : 'bg-indigo-300'}`} />
+                    )}
+                    <span
+                      className={`w-2.5 rounded-t-sm ${d.isSelectedDay ? 'bg-white' : d.isWeekend ? 'bg-white/20' : 'bg-white/45'}`}
+                      style={{ height: `${dayBarHeight(d.count, 22)}px` }}
+                    />
+                    <span className={`text-[7.5px] font-bold leading-none ${d.isSelectedDay ? 'opacity-100' : 'opacity-60'}`}>{d.day[0]}</span>
+                  </span>
+                ))}
+              </span>
+              <span className="relative h-10 w-10 flex-none" aria-label={`Team self-pick ${selfPickPercentage}%`}>
+                <svg viewBox="0 0 40 40" className="h-10 w-10 -rotate-90" aria-hidden="true">
+                  <circle cx="20" cy="20" r="16" fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth="5" />
+                  <circle
+                    cx="20" cy="20" r="16" fill="none"
+                    stroke={selfPickRingStroke} strokeWidth="5" strokeLinecap="round"
+                    strokeDasharray={`${(Math.min(100, selfPickPercentage) / 100) * 100.53} 100.53`}
+                  />
+                </svg>
+                <span className="absolute inset-0 grid place-items-center text-[10px] font-extrabold tabular-nums">{selfPickPercentage}%</span>
+              </span>
+              <ChevronDown className="h-4 w-4 flex-none text-blue-100" aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+
+        {/* Mobile stats sheet — the full breakdown behind the summary strip */}
+        {statsSheetOpen && (
+          <div className="fixed inset-0 z-50 md:hidden" role="dialog" aria-modal="true" aria-label="Period statistics">
+            <button
+              type="button"
+              aria-label="Close statistics"
+              onClick={() => setStatsSheetOpen(false)}
+              className="absolute inset-0 bg-slate-900/40 animate-in fade-in-0 motion-reduce:animate-none"
+            />
+            <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border-t border-slate-200 bg-white pb-[calc(1rem+env(safe-area-inset-bottom))] text-slate-900 shadow-soft animate-in slide-in-from-bottom-4 fade-in-0 duration-200 motion-reduce:animate-none">
+              <div className="mx-auto mt-2 h-1 w-9 rounded-full bg-slate-200" />
+              <div className="flex items-center justify-between gap-2 px-4 pb-1 pt-2">
+                <h3 className="min-w-0 truncate text-sm font-bold">{bandRangeLabel}</h3>
+                <div className="flex flex-none items-center gap-2">
+                  {viewMode === 'daily' && !isToday && (
+                    <button onClick={goToToday} className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-bold text-blue-700 touch-manipulation">Today</button>
+                  )}
+                  {viewMode === 'weekly' && (
+                    <button onClick={goToCurrentWeek} className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-bold text-blue-700 touch-manipulation">This Week</button>
+                  )}
+                  {viewMode === 'monthly' && (
+                    <button onClick={goToCurrentMonth} className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-bold text-blue-700 touch-manipulation">This Month</button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setStatsSheetOpen(false)}
+                    aria-label="Close"
+                    className="rounded-full p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
+                  >
+                    <ChevronDown className="h-5 w-5" />
+                  </button>
                 </div>
-
-                {/* Open - Daily and Weekly */}
-                {(viewMode === 'daily' || viewMode === 'weekly') && (
-                  <div className={statCardClass}>
-                    <div className={statIconBoxClass('bg-yellow-500')}>
-                      <FolderOpen className={statIconClass} />
-                    </div>
-                    <div>
-                      <div className={statValueClass}>
-                        {viewMode === 'weekly' ? (displayStats.weeklyOpenOnly || 0) : (displayStats.openOnlyCount || 0)}
-                      </div>
-                      <div className={statLabelClass}>Open</div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Pending - Daily and Weekly */}
-                {(viewMode === 'daily' || viewMode === 'weekly') && (
-                  <div className={statCardClass}>
-                    <div className={statIconBoxClass('bg-orange-500')}>
-                      <Clock className={statIconClass} />
-                    </div>
-                    <div>
-                      <div className={statValueClass}>
-                        {viewMode === 'weekly' ? (displayStats.weeklyPending || 0) : (displayStats.pendingCount || 0)}
-                      </div>
-                      <div className={statLabelClass}>Pending</div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Closed */}
-                <div className={statCardClass}>
-                  <div className={statIconBoxClass('bg-green-500')}>
-                    <CheckSquare className={statIconClass} />
-                  </div>
-                  <div>
-                    <div className={statValueClass}>
-                      {viewMode === 'monthly' ? (displayStats.monthClosed || 0) : viewMode === 'weekly' ? (displayStats.weeklyClosed || 0) : (displayStats.closedTicketsToday || 0)}
-                    </div>
-                    <div className={statLabelClass}>Closed</div>
-                  </div>
-                </div>
-
-                {/* Self */}
-                <div className={statCardClass}>
-                  <div className={statIconBoxClass('bg-purple-500')}>
-                    <Hand className={statIconClass} />
-                  </div>
-                  <div>
-                    <div className={statValueClass}>
-                      {viewMode === 'monthly' ? (displayStats.monthSelfPicked || 0) : viewMode === 'weekly' ? (displayStats.weeklySelfPicked || 0) : (displayStats.selfPickedToday || 0)}
-                    </div>
-                    <div className={statLabelClass}>Self</div>
-                  </div>
-                </div>
-
-                {/* App Assigned - Only show when there are app assignments */}
-                {appAssignedTotal > 0 && (
-                  <div className={statCardClass}>
-                    <div className={statIconBoxClass('bg-sky-400')}>
-                      <Bot className={statIconClass} />
-                    </div>
-                    <div>
-                      <div className={statValueClass}>{appAssignedTotal}</div>
-                      <div className={statLabelClass}>App</div>
-                    </div>
-                  </div>
-                )}
               </div>
 
-              {/* Divider — hidden on narrow widths where the row has wrapped,
-                  since a dangling vertical bar between wrapped rows looks broken. */}
-              <div className="hidden xl:block w-px h-10 bg-white bg-opacity-20 flex-none" />
-
-              {/* Self-Pick Progress */}
-              <div className={`flex-none ${useDenseStatsBar ? 'w-36' : 'w-40'}`}>
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs font-semibold">Team Self-Pick</span>
-                  <span className="text-xs font-bold">{selfPickPercentage}%</span>
-                </div>
-                <div className="w-full bg-blue-900 bg-opacity-30 rounded-full h-2 overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all duration-500 ${
-                      selfPickPercentage >= 70 ? 'bg-green-400' :
-                        selfPickPercentage >= 50 ? 'bg-yellow-400' :
-                          'bg-red-400'
-                    }`}
-                    style={{ width: `${selfPickPercentage}%` }}
+              {viewMode === 'daily' && (
+                <div className="px-4 pb-1">
+                  <input
+                    type="date"
+                    value={formatDateLocal(selectedDate)}
+                    onChange={(e) => setSelectedDate(new Date(e.target.value + 'T12:00:00'))}
+                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-semibold text-slate-700"
                   />
                 </div>
-                <div className="flex justify-between text-[10px] text-blue-200 mt-0.5">
-                  <span>Goal: 70%</span>
-                  {isToday && (
-                    <span className="flex items-center gap-1">
-                      <div className="w-2 h-2 rounded-full bg-green-500"></div>
-                      <span>{displayStats.lightLoad || 0}</span>
-                      <div className="w-2 h-2 rounded-full bg-yellow-500"></div>
-                      <span>{displayStats.mediumLoad || 0}</span>
-                      <div className="w-2 h-2 rounded-full bg-red-500"></div>
-                      <span>{displayStats.heavyLoad || 0}</span>
+              )}
+
+              <div className="grid grid-cols-3 gap-2 px-4 py-2">
+                {bandStats.map((s) => (
+                  <div key={s.key} className="rounded-xl border border-slate-100 px-2.5 py-2">
+                    <span className="flex items-center gap-1.5 text-[8.5px] font-bold uppercase tracking-wider text-slate-400">
+                      <span className={`h-1.5 w-1.5 flex-none rounded-full ${s.dot}`} />
+                      {s.label}
                     </span>
-                  )}
-                </div>
+                    <span className="mt-0.5 block text-lg font-extrabold leading-tight tabular-nums">{s.value}</span>
+                  </div>
+                ))}
               </div>
 
-              {/* Divider — see note above */}
-              <div className="hidden xl:block w-px h-10 bg-white bg-opacity-20 flex-none" />
+              {viewMode !== 'monthly' && (
+                <div className="grid grid-cols-7 gap-1 px-4 pb-2">
+                  {bandDays.map((d) => (
+                    <button
+                      key={d.day}
+                      type="button"
+                      onClick={() => { d.select(); setStatsSheetOpen(false); }}
+                      title={d.tooltip}
+                      className={`relative flex min-h-[46px] flex-col items-center justify-center rounded-lg border text-[10px] font-bold transition-colors touch-manipulation ${
+                        d.isSelectedDay
+                          ? 'border-blue-600 bg-blue-600 text-white'
+                          : d.isWeekend
+                            ? 'border-slate-100 bg-slate-50 text-slate-400'
+                            : 'border-slate-200 bg-white text-slate-600'
+                      }`}
+                    >
+                      {d.holidayInfo.isHoliday && (
+                        <span className={`absolute right-1 top-1 h-1.5 w-1.5 rounded-full ${d.holidayInfo.isCanadian ? 'bg-rose-400' : d.holidayInfo.isDynamic ? 'bg-violet-400' : 'bg-indigo-400'}`} />
+                      )}
+                      <span>{d.day[0]}</span>
+                      <span className="text-[8px] opacity-70">{d.dayDate.getDate()}</span>
+                      <span className="text-[11px] leading-tight tabular-nums">{d.count ?? 0}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
 
-              {/* View Toggle - far right */}
-              <div className={`flex-none inline-flex items-center bg-white bg-opacity-20 rounded-lg ${useDenseStatsBar ? 'gap-0.5 p-0.5' : 'gap-1 p-1'}`}>
-                <button
-                  onClick={handleSwitchToDaily}
-                  className={`${viewToggleButtonClass} ${
-                    viewMode === 'daily'
-                      ? 'bg-white text-blue-600 shadow-sm'
-                      : 'text-white hover:bg-white hover:bg-opacity-10'
-                  }`}
-                >
-                  Daily
-                </button>
-                <button
-                  onClick={handleSwitchToWeekly}
-                  className={`${viewToggleButtonClass} ${
-                    viewMode === 'weekly'
-                      ? 'bg-white text-blue-600 shadow-sm'
-                      : 'text-white hover:bg-white hover:bg-opacity-10'
-                  }`}
-                >
-                  Weekly
-                </button>
-                <button
-                  onClick={handleSwitchToMonthly}
-                  className={`${viewToggleButtonClass} ${
-                    viewMode === 'monthly'
-                      ? 'bg-white text-blue-600 shadow-sm'
-                      : 'text-white hover:bg-white hover:bg-opacity-10'
-                  }`}
-                >
-                  Monthly
-                </button>
+              <div className="px-4 py-2">
+                <div className="mb-1 flex items-baseline justify-between text-xs font-semibold text-slate-700">
+                  <span>Team Self-Pick <span className="font-extrabold tabular-nums">{selfPickPercentage}%</span></span>
+                  <span className="font-medium text-slate-400">goal 70%</span>
+                </div>
+                <div className="relative h-2 rounded-full bg-slate-100">
+                  <div
+                    className={`absolute inset-y-0 left-0 rounded-full ${selfPickSheetBarClass}`}
+                    style={{ width: `${Math.min(100, selfPickPercentage)}%` }}
+                  />
+                  <div className="absolute -bottom-[3px] -top-[3px] w-0.5 rounded-full bg-slate-400" style={{ left: '70%' }} />
+                </div>
+                {isToday && (
+                  <div className="mt-1.5 flex items-center gap-3 text-[10px] font-semibold text-slate-500">
+                    <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-green-500" />{displayStats.lightLoad || 0} light</span>
+                    <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-yellow-500" />{displayStats.mediumLoad || 0} medium</span>
+                    <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-red-500" />{displayStats.heavyLoad || 0} heavy</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="px-4 pt-1">
+                <div className="grid grid-cols-3 gap-0.5 rounded-lg bg-slate-100 p-0.5">
+                  <button onClick={handleSwitchToDaily} className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors touch-manipulation ${viewMode === 'daily' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}>Daily</button>
+                  <button onClick={handleSwitchToWeekly} className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors touch-manipulation ${viewMode === 'weekly' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}>Weekly</button>
+                  <button onClick={handleSwitchToMonthly} className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors touch-manipulation ${viewMode === 'monthly' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}>Monthly</button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
+        )}
 
         {/* Technicians List - Cascading */}
         <div>
