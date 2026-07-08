@@ -41,24 +41,27 @@ Cleanly isolated, no FK dependents, no tests. Remove the feature surface; **keep
 
 ---
 
-## Phase 2 — Workflow authoring UX (items 3, 4)
+## Phase 2 — Workflow authoring UX (items 3, 4) ✅ DONE
 
 ### 2.1 (Item 3) Create workflow / sub-workflow + editable trigger
 Today workflows can only be born from a **template install** or "**+ New variant**" of an existing workflow — there is no blank-start; the trigger event is read-only text in the inspector.
 
-- [ ] **"+ New workflow" button** (always visible in the list header): opens a creation dialog — name + trigger picker (all event types incl. time-based, grouped, with descriptions) + optional "start from template" gallery (folds item 4's discoverability in) → creates a disabled draft scaffold (trigger → stop)
-- [ ] **"Sub-workflow" creation choice** in the same dialog: creates a workflow with a `manual` trigger type (new trigger meaning "runs only when called by a Run-workflow node or manual dispatch") so reusable subflows are first-class instead of "a disabled workflow that happens to be called"
+- [x] **"+ New workflow" button** (always visible in the list header): opens a creation dialog — name + trigger picker (all event types incl. time-based, grouped, with descriptions) + optional "start from template" gallery (folds item 4's discoverability in) → creates a disabled draft scaffold (trigger → stop)
+- [x] **"Sub-workflow" creation choice** in the same dialog: creates a workflow with a `manual` trigger type (new trigger meaning "runs only when called by a Run-workflow node or manual dispatch") so reusable subflows are first-class instead of "a disabled workflow that happens to be called"
   - Engine: `manual` trigger never matches lifecycle events; `run_workflow` node dropdown lists manual-trigger workflows first
-- [ ] **Editable trigger**: the trigger inspector's event type becomes a select; changing it re-validates the graph (some nodes/conditions are event-specific — surface any resulting issues via the improved 1.1 error display), preserves nodes, resets trigger-specific params sensibly
-- [ ] Tests: scaffold creation, manual-trigger exclusion from lifecycle dispatch, trigger-change revalidation
+- [x] **Editable trigger**: the trigger inspector's event type becomes a select; changing it re-validates the graph (some nodes/conditions are event-specific — surface any resulting issues via the improved 1.1 error display), preserves nodes, resets trigger-specific params sensibly
+- [x] Tests: scaffold creation, manual-trigger exclusion from lifecycle dispatch, trigger-change revalidation
 
 ### 2.2 (Item 4) AI first-reply draft — prove it, then make it findable
 Investigation: the template's full chain **is implemented** (ticket.created → `llm_generate` → `propose_reply` → `ticket_proposed_replies` → `ProposedReplyCard` with Approve-&-send / Edit / Dismiss). It is not a placeholder. What's missing is proof and discoverability (it hides behind the toolbar "Templates" sparkles menu).
 
-- [ ] **End-to-end functional audit in dev**: install the template, enable it, create a guardrailed throwaway ticket, verify the run executes (llm_generate produces a draft; proposal row created; card renders; Approve-&-send path gated by no-email dev config; Edit-in-composer prefills; Dismiss clears) — scripted like selftest-306, kept as `scripts/selftest-ai-first-reply.mjs`
-- [ ] Fix anything the audit shakes out (e.g. confidence gating defaults, guard summary rendering, ticket.created timing vs AI triage)
-- [ ] **Discoverability**: templates move into the "New workflow" creation dialog as a first-class gallery (2.1); the ProposedReplyCard stays on the ticket— add a queue-row indicator (small sparkle dot) when a ticket has a pending proposed reply so drafts don't sit unseen
-- [ ] Docs: short "AI drafted replies" section in the workflow page's help popover
+- [x] **End-to-end functional audit in dev**: install the template, enable it, create a guardrailed throwaway ticket, verify the run executes (llm_generate produces a draft; proposal row created; card renders; Approve-&-send path gated by no-email dev config; Edit-in-composer prefills; Dismiss clears) — scripted like selftest-306, kept as `scripts/selftest-ai-first-reply.mjs`
+- [x] Fix anything the audit shakes out — it found TWO real bugs that made the template silently never run:
+  1. **After-hours suppression** dropped ALL standard ticket.created workflows at night, email or not → email-free automation (draft staging, webhooks, updates) now runs around the clock; only email-sending workflows are subject to after-hours replacement
+  2. **Variant routing** suppressed rule-less non-default variants whenever a default existed (`missing_routing_rule`) → rule-less ADDITIVE workflows now always run alongside the winner; templates + blank-start workflows install as additive
+  Also documented: creating a ticket with "Notify requester" off deliberately skips ALL lifecycle workflows (silent-creation semantics, pre-existing design) — noted for the QA response
+- [x] **Discoverability**: templates move into the "New workflow" creation dialog as a first-class gallery (2.1); the ProposedReplyCard stays on the ticket— add a queue-row indicator (small sparkle dot) when a ticket has a pending proposed reply so drafts don't sit unseen
+- [x] Docs: short "AI drafted replies" section in the workflow page's help popover
 
 ---
 

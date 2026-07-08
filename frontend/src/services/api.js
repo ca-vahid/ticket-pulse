@@ -1255,6 +1255,7 @@ export const notificationWorkflowAPI = {
   createVariant: (data) => api.post('/notification-workflows', data),
   duplicateVariant: (id, data = {}) => api.post(`/notification-workflows/${id}/duplicate`, data),
   updateRouting: (id, data) => api.put(`/notification-workflows/${id}/routing`, data),
+  changeTrigger: (id, triggerType) => api.put(`/notification-workflows/${id}/trigger`, { triggerType }),
   setArchived: (id, archived) => api.put(`/notification-workflows/${id}/archive`, { archived }),
   deleteArchived: (id) => api.delete(`/notification-workflows/${id}`),
   getRuns: (id, params = {}) => api.get(`/notification-workflows/${id}/runs`, { params }),

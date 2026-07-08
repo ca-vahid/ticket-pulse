@@ -479,6 +479,11 @@ export function isOffHoursWorkflow(workflow, policy = null) {
     || scheduleMode === 'after_hours';
 }
 
+function workflowSendsEmail(workflow) {
+  const definition = workflow?.publishedDefinition || workflow?.draftDefinition;
+  return (definition?.nodes || []).some((node) => node?.type === 'send_email');
+}
+
 export function selectWorkflowsForNotificationTiming(workflows = [], context = {}) {
   if (context.event?.type !== 'ticket.created') {
     return {
@@ -506,11 +511,18 @@ export function selectWorkflowsForNotificationTiming(workflows = [], context = {
   }
 
   if (policy.suppressStandardTicketCreated) {
+    // Suppression exists so requesters don't get the standard acknowledgment
+    // EMAIL after hours. Workflows that send no email (draft staging, ticket
+    // updates, webhooks) are automation, not correspondence — they run around
+    // the clock (QA 07-07 #4: the AI first-reply template silently never ran
+    // at night).
+    const emailFree = standard.filter((workflow) => !workflowSendsEmail(workflow));
+    const emailSending = standard.filter((workflow) => workflowSendsEmail(workflow));
     return {
-      selected: offHours,
-      suppressed: standard,
+      selected: [...offHours, ...emailFree],
+      suppressed: emailSending,
       mode: 'after_hours',
-      reason: 'After-hours/holiday routing suppressed the standard ticket-created workflow',
+      reason: 'After-hours/holiday routing suppressed the standard ticket-created email workflow',
     };
   }
 

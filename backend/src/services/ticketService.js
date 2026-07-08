@@ -554,10 +554,11 @@ class TicketService {
       }),
     ]);
 
-    const [incomingByTicket, aiByTicket, bypassByTicket] = await Promise.all([
+    const [incomingByTicket, aiByTicket, bypassByTicket, proposedTicketIds] = await Promise.all([
       this._lastPublicEntryIncoming(items.map((t) => t.id)),
       this._aiRunStateByTicket(items.map((t) => t.id)),
       this._aiBypassByTicket(items),
+      this._openProposalTicketIds(items.map((t) => t.id)),
     ]);
 
     return {
@@ -571,11 +572,28 @@ class TicketService {
         stateChip: deriveStateChip(t, incomingByTicket.get(t.id) === true),
         ai: aiByTicket.get(t.id) || null,
         aiBypass: bypassByTicket.get(t.id) || null,
+        // A workflow-drafted reply is waiting for a human (QA 07-07 #4:
+        // drafts sat unseen unless someone opened the ticket).
+        hasProposedReply: proposedTicketIds.has(t.id),
       })),
       total,
       page,
       pageSize,
     };
+  }
+
+  async _openProposalTicketIds(ticketIds) {
+    if (!ticketIds.length) return new Set();
+    try {
+      const rows = await prisma.ticketProposedReply.findMany({
+        where: { ticketId: { in: ticketIds }, status: 'proposed' },
+        select: { ticketId: true },
+      });
+      return new Set(rows.map((r) => r.ticketId));
+    } catch (err) {
+      logger.warn(`proposed-reply lookup failed (non-fatal): ${err.message}`);
+      return new Set();
+    }
   }
 
   /**

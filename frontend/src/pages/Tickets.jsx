@@ -1194,6 +1194,14 @@ export default function Tickets() {
                                           </span>
                                         ))}
                                         <StateChip state={ticket.stateChip} />
+                                        {ticket.hasProposedReply && (
+                                          <span
+                                            className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-indigo-50 border border-indigo-200 text-[9px] font-bold text-indigo-600 uppercase tracking-wide"
+                                            title="A workflow-drafted reply is waiting for approval on this ticket"
+                                          >
+                                            <Sparkles className="w-2.5 h-2.5" aria-hidden="true" /> Draft
+                                          </span>
+                                        )}
                                         {presenceMap[ticket.id]?.length > 0 && (
                                           <span
                                             className="shrink-0 w-2 h-2 rounded-full bg-violet-500 ring-2 ring-violet-200"

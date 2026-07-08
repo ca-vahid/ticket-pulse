@@ -394,6 +394,47 @@ export async function duplicateWorkflowVariant(workspaceId, id, data = {}, actor
   }, actor);
 }
 
+/**
+ * Change a workflow's trigger event (QA 07-07 #3 — triggers were read-only).
+ * Preserves the graph, retargets the trigger node (seeding slot defaults for
+ * schedule.time), and re-validates against the new event. A live workflow is
+ * disabled: its published definition still carries the old trigger, so it
+ * must be reviewed and re-published before running again.
+ */
+export async function changeWorkflowTrigger(workspaceId, id, newTriggerType, actor = null) {
+  const workflow = await getWorkflowOrThrow(workspaceId, id);
+  const triggerType = assertKnownEventType(newTriggerType);
+  if (triggerType === workflow.triggerType) return workflow;
+  if (workflow.isDefaultVariant) {
+    throw new ValidationError('Default variants anchor their trigger group — duplicate the workflow to move it to another trigger');
+  }
+  if (workflow.archivedAt) throw new ValidationError('Restore the workflow before changing its trigger');
+
+  const definition = JSON.parse(JSON.stringify(workflow.draftDefinition || buildDefaultWorkflowDefinition(triggerType)));
+  const triggerNode = (definition.nodes || []).find((node) => node.type === 'trigger');
+  if (!triggerNode) throw new ValidationError('Workflow draft has no trigger node');
+  triggerNode.data = { ...triggerNode.data, triggerType };
+  if (triggerType === 'schedule.time') {
+    // Scheduled triggers need slot config to validate before the admin tunes it.
+    triggerNode.data.frequency = triggerNode.data.frequency || 'daily';
+    triggerNode.data.time = triggerNode.data.time || '08:30';
+  }
+  const draftDefinition = assertValidWorkflowDefinition(definition, { triggerType });
+
+  const wasLive = workflow.isEnabled && workflow.publishedVersion > 0;
+  return prisma.notificationWorkflow.update({
+    where: { id: workflow.id },
+    data: {
+      triggerType,
+      draftDefinition,
+      // The published definition still targets the old event — take it out
+      // of live rotation until the admin re-publishes on the new trigger.
+      ...(wasLive ? { isEnabled: false } : {}),
+      lastChangedBy: actorEmail(actor),
+    },
+  });
+}
+
 export async function updateWorkflowRouting(workspaceId, id, data = {}, actor = null) {
   const workflow = await getWorkflowOrThrow(workspaceId, id);
   const routing = routingDataFromInput(data, workflow);
@@ -596,6 +637,7 @@ export default {
   listEnabledForEvent,
   createWorkflowVariant,
   duplicateWorkflowVariant,
+  changeWorkflowTrigger,
   updateWorkflowRouting,
   setWorkflowArchived,
   deleteArchivedWorkflowVariant,

@@ -82,7 +82,53 @@ const EVENT_LABELS = {
   'ticket.sla_pre_breach': 'SLA about to breach',
   'ticket.sla_breach': 'SLA breached',
   'schedule.time': 'On a schedule (digest)',
+  manual: 'Manual / sub-workflow only',
 };
+
+// Trigger picker metadata for the create dialog + trigger editing (QA 07-07 #3).
+const TRIGGER_PICKER_GROUPS = [
+  {
+    label: 'Ticket lifecycle',
+    triggers: [
+      { value: 'ticket.created', hint: 'A new ticket lands (either origin)' },
+      { value: 'ticket.assigned', hint: 'First assignment to a member' },
+      { value: 'ticket.reassigned', hint: 'Moves between members' },
+      { value: 'ticket.status_changed', hint: 'Any status transition (from/to available in conditions)' },
+      { value: 'ticket.resolved_closed', hint: 'Ticket reaches Resolved or Closed' },
+    ],
+  },
+  {
+    label: 'Conversation',
+    triggers: [
+      { value: 'ticket.reply_received', hint: 'The requester replies' },
+      { value: 'ticket.public_reply_added', hint: 'An agent replies to the requester' },
+      { value: 'ticket.note_added', hint: 'An internal note is added' },
+    ],
+  },
+  {
+    label: 'Approvals',
+    triggers: [
+      { value: 'approval.requested', hint: 'Someone requests an approval' },
+      { value: 'approval.decided', hint: 'An approval is approved or rejected' },
+      { value: 'approval.clarification_requested', hint: 'An approver asks for more info' },
+    ],
+  },
+  {
+    label: 'Time-based',
+    triggers: [
+      { value: 'ticket.aging', hint: 'Unresolved for N hours (threshold on the trigger node)' },
+      { value: 'ticket.sla_pre_breach', hint: 'SLA due date approaching' },
+      { value: 'ticket.sla_breach', hint: 'SLA due date passed' },
+      { value: 'schedule.time', hint: 'Daily/weekly digest slot (no ticket)' },
+    ],
+  },
+  {
+    label: 'On demand',
+    triggers: [
+      { value: 'manual', hint: 'Never fires on its own — reusable sub-workflow called by Run-workflow nodes, or run manually on a ticket' },
+    ],
+  },
+];
 
 // Per-event color + icon, so the four trigger groups read as distinct zones in the
 // workflow list (and the selected-workflow header) instead of identical gray bars.
@@ -461,6 +507,28 @@ const LLM_TOOL_POLICY_MODE_LABELS = Object.fromEntries(
 );
 
 const LLM_HELP_TOPICS = {
+  aiDraftedReplies: {
+    title: 'AI-drafted replies (human approves)',
+    summary: 'Workflows can stage a drafted reply on the ticket instead of emailing anyone — an agent approves & sends, edits it in the composer, or dismisses it.',
+    sections: [
+      {
+        heading: 'How the loop works',
+        items: [
+          'An LLM Generate (or Template) step drafts the reply; a "Stage for approval" step parks it on the ticket.',
+          'The ticket shows a "proposed reply" card above the conversation, and its queue row gets a Draft chip so staged drafts are never missed.',
+          'Approve & send goes through the normal reply path — threading, mirroring and events behave exactly like a hand-written reply.',
+          'A newer proposal supersedes an older open one on the same ticket; nothing ever emails automatically from this path.',
+        ],
+      },
+      {
+        heading: 'Fast start',
+        items: [
+          'New workflow → "Or start from a template" → "AI first-reply draft (human approves)".',
+          'Templates install as disabled drafts — review, publish, then enable.',
+        ],
+      },
+    ],
+  },
   workspacePolicy: {
     title: 'Workspace LLM evidence policy',
     summary: 'This sets the default evidence and tool policy for every Mail Workflow LLM Generate step in this workspace.',
@@ -4002,6 +4070,207 @@ function WorkflowTemplatesMenu({ saving, onInstalled, setMessage }) {
   );
 }
 
+/**
+ * Blank-start workflow creation (QA 07-07 #3): name + trigger picker with
+ * plain-language hints, a sub-workflow choice (manual trigger), and the
+ * template gallery folded in as "start from a template" (QA 07-07 #4 —
+ * templates were buried in a toolbar menu).
+ */
+function NewWorkflowDialog({ open, onClose, onCreated, setMessage }) {
+  const [name, setName] = useState('');
+  const [mode, setMode] = useState('event'); // 'event' | 'sub'
+  const [triggerType, setTriggerType] = useState('ticket.created');
+  const [templates, setTemplates] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setName('');
+    setMode('event');
+    setTriggerType('ticket.created');
+    if (!templates) {
+      notificationWorkflowAPI.listTemplates()
+        .then((res) => setTemplates(res.data?.data || res.data || []))
+        .catch(() => setTemplates([]));
+    }
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!open) return null;
+
+  const effectiveTrigger = mode === 'sub' ? 'manual' : triggerType;
+
+  const create = async () => {
+    setBusy(true);
+    try {
+      const fallbackName = mode === 'sub' ? 'New sub-workflow' : `${EVENT_LABELS[effectiveTrigger] || effectiveTrigger} workflow`;
+      const response = await notificationWorkflowAPI.createVariant({
+        triggerType: effectiveTrigger,
+        name: name.trim() || fallbackName,
+        // Blank-start workflows are standalone automations: additive +
+        // rule-less = they run whenever the trigger fires, alongside the
+        // default variant, instead of competing with it for one slot.
+        routingMode: 'additive',
+      });
+      setMessage({
+        type: 'success',
+        text: mode === 'sub'
+          ? 'Sub-workflow draft created — it only runs when another workflow calls it (or via run-on-ticket).'
+          : 'Workflow draft created — build it out, then publish and enable it.',
+      });
+      onClose();
+      await onCreated?.(response.data?.id);
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message || 'Workflow creation failed' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const installTemplate = async (template) => {
+    setBusy(true);
+    try {
+      const response = await notificationWorkflowAPI.installTemplate(template.key);
+      setMessage({ type: 'success', text: `Installed "${template.name}" as a disabled draft — review, publish and enable it.` });
+      onClose();
+      await onCreated?.(response.data?.data?.id || response.data?.id);
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message || 'Template install failed' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto bg-slate-900/40 px-4 py-[8vh]"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Create workflow"
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="w-full max-w-2xl rounded-xl bg-white shadow-xl">
+        <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-3.5">
+          <Plus className="h-4 w-4 text-indigo-600" />
+          <h3 className="text-sm font-bold text-slate-800">New workflow</h3>
+          <button type="button" onClick={onClose} aria-label="Close" className="ml-auto rounded p-1 text-slate-400 hover:text-slate-600">
+            <XCircle className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="space-y-4 px-5 py-4">
+          <label className="block">
+            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Name</span>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder={mode === 'sub' ? 'e.g. Notify facilities team' : 'e.g. VIP escalation on arrival'}
+              className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-indigo-300 focus:outline-none"
+              autoFocus
+            />
+          </label>
+
+          <div role="radiogroup" aria-label="Workflow kind" className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={mode === 'event'}
+              onClick={() => setMode('event')}
+              className={cls(
+                'rounded-lg border px-3 py-2.5 text-left',
+                mode === 'event' ? 'border-indigo-300 bg-indigo-50/70 ring-1 ring-indigo-200' : 'border-slate-200 hover:border-indigo-200',
+              )}
+            >
+              <span className="block text-sm font-semibold text-slate-800">Runs on an event</span>
+              <span className="mt-0.5 block text-xs text-slate-500">Fires automatically when the trigger below happens.</span>
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={mode === 'sub'}
+              onClick={() => setMode('sub')}
+              className={cls(
+                'rounded-lg border px-3 py-2.5 text-left',
+                mode === 'sub' ? 'border-indigo-300 bg-indigo-50/70 ring-1 ring-indigo-200' : 'border-slate-200 hover:border-indigo-200',
+              )}
+            >
+              <span className="block text-sm font-semibold text-slate-800">Sub-workflow (on demand)</span>
+              <span className="mt-0.5 block text-xs text-slate-500">Never fires on its own — other workflows call it with a Run-workflow step.</span>
+            </button>
+          </div>
+
+          {mode === 'event' && (
+            <div>
+              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Trigger</span>
+              <div className="mt-1 max-h-56 space-y-2 overflow-y-auto rounded-lg border border-slate-200 p-2">
+                {TRIGGER_PICKER_GROUPS.filter((group) => group.label !== 'On demand').map((group) => (
+                  <div key={group.label}>
+                    <p className="px-1 pb-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">{group.label}</p>
+                    <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+                      {group.triggers.map((trigger) => (
+                        <button
+                          key={trigger.value}
+                          type="button"
+                          role="radio"
+                          aria-checked={triggerType === trigger.value}
+                          onClick={() => setTriggerType(trigger.value)}
+                          className={cls(
+                            'rounded-md border px-2 py-1.5 text-left',
+                            triggerType === trigger.value ? 'border-indigo-300 bg-indigo-50 ring-1 ring-indigo-200' : 'border-slate-100 hover:border-indigo-200',
+                          )}
+                        >
+                          <span className="block text-xs font-semibold text-slate-700">{EVENT_LABELS[trigger.value] || trigger.value}</span>
+                          <span className="block text-[11px] leading-4 text-slate-400">{trigger.hint}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <button type="button" onClick={onClose} className="rounded-md px-3 py-2 text-sm text-slate-500 hover:bg-slate-50">Cancel</button>
+            <button
+              type="button"
+              onClick={create}
+              disabled={busy}
+              className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
+            >
+              {busy ? 'Creating…' : 'Create draft'}
+            </button>
+          </div>
+
+          {mode === 'event' && (
+            <div className="border-t border-slate-100 pt-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Or start from a template</p>
+              {templates === null && <p className="mt-1 text-xs text-slate-400">Loading…</p>}
+              <div className="mt-1.5 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                {(templates || []).map((template) => (
+                  <button
+                    key={template.key}
+                    type="button"
+                    onClick={() => installTemplate(template)}
+                    disabled={busy}
+                    className="rounded-lg border border-violet-100 bg-violet-50/50 px-2.5 py-2 text-left hover:bg-violet-50 disabled:opacity-60"
+                  >
+                    <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-800">
+                      <Sparkles className="h-3 w-3 text-violet-500" />
+                      {template.name}
+                    </span>
+                    <span className="mt-0.5 block text-[11px] leading-4 text-slate-500">{template.description}</span>
+                  </button>
+                ))}
+              </div>
+              <p className="mt-1.5 text-[10px] text-slate-400">Templates install as disabled drafts — nothing runs until you publish and enable it.</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function WorkflowHealthMenu({ health, warnings = [] }) {
   const [open, setOpen] = useState(false);
   if (!health) return null;
@@ -6292,6 +6561,7 @@ export default function NotificationWorkflowsPanel({
   const [routingTestResult, setRoutingTestResult] = useState(null);
   const [routingTestLoading, setRoutingTestLoading] = useState(false);
   const [archiveConfirm, setArchiveConfirm] = useState(null);
+  const [newWorkflowOpen, setNewWorkflowOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [showArchivedWorkflows, setShowArchivedWorkflows] = useState(false);
   const [message, setMessage] = useState(null);
@@ -7144,6 +7414,28 @@ export default function NotificationWorkflowsPanel({
       setMessage({ type: 'success', text: 'Variant draft created' });
     } catch (error) {
       setMessage({ type: 'error', text: error.message || 'Variant creation failed' });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function changeTriggerType(newTriggerType) {
+    if (!selected || !newTriggerType || newTriggerType === selected.triggerType) return;
+    setSaving(true);
+    setMessage(null);
+    try {
+      const response = await notificationWorkflowAPI.changeTrigger(selected.id, newTriggerType);
+      const wasLive = selected.isEnabled === true;
+      await loadWorkflows(response.data?.id || selected.id);
+      setMessage({
+        type: 'success',
+        text: wasLive
+          ? `Trigger moved to "${EVENT_LABELS[newTriggerType] || newTriggerType}" — the workflow is paused until you review and re-publish it.`
+          : `Trigger moved to "${EVENT_LABELS[newTriggerType] || newTriggerType}".`,
+      });
+    } catch (error) {
+      const details = Array.isArray(error.details) ? error.details : [];
+      setMessage({ type: 'error', text: details[0] || error.message || 'Trigger change failed' });
     } finally {
       setSaving(false);
     }
@@ -8274,13 +8566,37 @@ export default function NotificationWorkflowsPanel({
 
     if (selectedNode.type === 'trigger') {
       const triggerType = selectedNode.data?.triggerType;
+      const triggerLocked = selected?.isDefaultVariant === true;
       return (
         <div className="space-y-3">
           <div>
-            <label className="text-xs font-medium uppercase text-gray-500">Event</label>
-            <div className="mt-1 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900">
-              {EVENT_LABELS[triggerType] || triggerType}
-            </div>
+            <label className="text-xs font-medium uppercase text-gray-500" htmlFor="trigger-event-select">Event</label>
+            {triggerLocked ? (
+              <div className="mt-1 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900">
+                {EVENT_LABELS[triggerType] || triggerType}
+              </div>
+            ) : (
+              <select
+                id="trigger-event-select"
+                value={triggerType}
+                onChange={(event) => changeTriggerType(event.target.value)}
+                disabled={saving}
+                className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900"
+              >
+                {TRIGGER_PICKER_GROUPS.map((group) => (
+                  <optgroup key={group.label} label={group.label}>
+                    {group.triggers.map((option) => (
+                      <option key={option.value} value={option.value}>{EVENT_LABELS[option.value] || option.value}</option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            )}
+            <p className="mt-1 text-[11px] text-gray-400 normal-case">
+              {triggerLocked
+                ? 'Default variants anchor their trigger group — duplicate the workflow to move it to another trigger.'
+                : 'Changing the event keeps your steps; a live workflow is paused until you re-publish on the new trigger.'}
+            </p>
           </div>
           {/* Time-trigger thresholds — read by the time-trigger worker. */}
           {triggerType === 'ticket.aging' && (
@@ -8813,12 +9129,27 @@ export default function NotificationWorkflowsPanel({
         <div className="space-y-3">
           <p className="text-sm text-gray-600">Stages the upstream draft on the ticket as a <strong>proposed reply</strong>. An agent approves &amp; sends, edits it in the composer, or dismisses it — nothing is emailed automatically.</p>
           <p className="text-[11px] text-gray-400">Needs an LLM Generate or Template step earlier in the flow (the LLM draft wins when both exist). A newer proposal supersedes an older open one on the same ticket.</p>
+          <button
+            type="button"
+            onClick={() => setLlmHelpTopic('aiDraftedReplies')}
+            className="text-xs font-medium text-indigo-600 hover:text-indigo-700"
+          >
+            How AI-drafted replies work →
+          </button>
         </div>
       );
     }
 
     if (selectedNode.type === 'run_workflow') {
       const candidates = (workflows || []).filter((w) => w.id !== selected?.id && !w.archivedAt);
+      // Purpose-built sub-workflows (manual trigger) lead the list.
+      const subWorkflows = candidates.filter((w) => w.triggerType === 'manual');
+      const eventWorkflows = candidates.filter((w) => w.triggerType !== 'manual');
+      const candidateOption = (w) => (
+        <option key={w.id} value={w.id}>
+          {workflowDisplayName(w)} {w.publishedVersion ? `(v${w.publishedVersion})` : '(never published)'}
+        </option>
+      );
       return (
         <div className="space-y-3">
           <label className="block text-xs font-medium uppercase text-gray-500">
@@ -8829,11 +9160,16 @@ export default function NotificationWorkflowsPanel({
               className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
             >
               <option value="">Choose a workflow…</option>
-              {candidates.map((w) => (
-                <option key={w.id} value={w.id}>
-                  {workflowDisplayName(w)} {w.publishedVersion ? `(v${w.publishedVersion})` : '(never published)'}
-                </option>
-              ))}
+              {subWorkflows.length > 0 && (
+                <optgroup label="Sub-workflows (manual trigger)">
+                  {subWorkflows.map(candidateOption)}
+                </optgroup>
+              )}
+              {eventWorkflows.length > 0 && (
+                <optgroup label={subWorkflows.length > 0 ? 'Event workflows' : 'Workflows'}>
+                  {eventWorkflows.map(candidateOption)}
+                </optgroup>
+              )}
             </select>
           </label>
           <label className="block text-xs font-medium uppercase text-gray-500">
@@ -9719,8 +10055,18 @@ export default function NotificationWorkflowsPanel({
                 <WorkflowTemplatesMenu saving={saving} onInstalled={loadWorkflows} setMessage={setMessage} />
                 <button
                   type="button"
-                  onClick={createVariant}
+                  onClick={() => setNewWorkflowOpen(true)}
                   disabled={saving}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md bg-indigo-600 px-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+                >
+                  <Plus className="h-4 w-4" />
+                New workflow
+                </button>
+                <button
+                  type="button"
+                  onClick={createVariant}
+                  disabled={saving || !selected}
+                  title="Create a routing variant of the selected workflow (same trigger, different audience)"
                   className="inline-flex h-8 items-center gap-1.5 rounded-md border border-indigo-200 bg-indigo-50 px-2.5 text-sm font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
                 >
                   <Plus className="h-4 w-4" />
@@ -10232,6 +10578,12 @@ export default function NotificationWorkflowsPanel({
         saving={saving}
         onCancel={() => setArchiveConfirm(null)}
         onConfirm={() => toggleArchived(archiveConfirm?.archived === true)}
+      />
+      <NewWorkflowDialog
+        open={newWorkflowOpen}
+        onClose={() => setNewWorkflowOpen(false)}
+        onCreated={async (id) => { await loadWorkflows(id); setWorkflowListCollapsed(false); }}
+        setMessage={setMessage}
       />
       <WorkflowDeleteConfirmModal
         workflow={deleteConfirm?.workflow || null}
