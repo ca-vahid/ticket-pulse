@@ -106,12 +106,12 @@ Deliberately **not** in scope: swapping React Flow, rewriting the editor archite
 
 ---
 
-## Phase 5 — Wrap & ship
-- [ ] Full lint + both suites green (backend known-failure budget: 1 pre-existing CC-resolver test)
-- [ ] Version bump following prod `/health` at that moment + in-app changelog
-- [ ] Dev self-test (guardrails: no email, no FS writes, throwaway tickets, cleanup) covering 1.1/1.2/2.1/2.2/3
-- [ ] QA test doc + **response PDF** ("Features Request - 07-07 - Response.pdf") next to the request doc
-- [ ] Deploy on go-ahead → prod verify (health, bundle marker, new endpoints)
+## Phase 5 — Wrap & ship ✅ BUILT (deploy awaiting go-ahead)
+- [x] Full lint + both suites green: backend 710/711 (known CC-resolver failure only), frontend 69/69, both lints 0 errors
+- [x] Version → **3.0.10-preview** (prod was 3.0.9 at wrap) + in-app changelog entry
+- [x] Dev self-tests: `scripts/selftest-0710.mjs` 10/10 (source channel, ref linking, template staging publish, manual trigger + trigger change) and `scripts/selftest-ai-first-reply.mjs` 16/16 — guardrailed, full cleanup
+- [x] QA doc `docs/QA_Test_Plan_v3.0.10.docx` + branded `docs/Features Request - 07-07 - Response.pdf`
+- [ ] Deploy on go-ahead → prod verify (health, bundle marker, new endpoints) — **READY: everything built, tested and committed; awaiting your go-ahead** (no new migrations; one post-deploy step: `PROD=1 node scripts/backfill-tp-source.mjs`)
 
 ---
 
