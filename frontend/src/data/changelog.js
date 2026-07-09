@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.35-preview';
+export const APP_VERSION = '3.0.36-preview';
 
 export const changelog = [
+  {
+    version: '3.0.36-preview',
+    date: 'July 8, 2026',
+    entries: [
+      { type: 'new', html: '<strong>👁️ Preview attachments without downloading</strong> — clicking any attachment now opens a preview window: PDFs in a full viewer, Word documents and Excel/CSV spreadsheets rendered inline, plus text files, images (with the existing zoom), audio and video. Files that can’t be previewed (PowerPoint, archives) get a clean download card, and a Download button is always in the corner. Attachment names and icons are also larger so files don’t get missed.' },
+    ],
+  },
   {
     version: '3.0.35-preview',
     date: 'July 8, 2026',

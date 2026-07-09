@@ -238,20 +238,19 @@ function DescriptionImageStrip({ ticketId, images, onPreview }) {
   );
 }
 
-function AttachmentChip({ attachment, onDownload, onPreview }) {
+function AttachmentChip({ attachment, onPreview }) {
   const isImage = isImageAttachment(attachment);
-  const clickable = isImage ? onPreview : onDownload;
   return (
     <button
-      onClick={clickable}
-      className="tp-focus-ring inline-flex items-center gap-1.5 px-2 py-1 rounded-lg border border-slate-200 bg-white text-xs text-slate-600 hover:border-blue-300 hover:text-blue-700"
-      title={isImage ? `Preview ${attachment.fileName} (${formatBytes(attachment.sizeBytes)})` : `Download ${attachment.fileName} (${formatBytes(attachment.sizeBytes)})`}
+      onClick={onPreview}
+      className="tp-focus-ring inline-flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-sm font-medium text-slate-700 hover:border-blue-300 hover:text-blue-700 hover:bg-blue-50/40"
+      title={`Preview ${attachment.fileName} (${formatBytes(attachment.sizeBytes)})`}
     >
       {isImage
-        ? <ImageIcon className="w-3 h-3 text-slate-400" aria-hidden="true" />
-        : <Paperclip className="w-3 h-3 text-slate-400" aria-hidden="true" />}
-      <span className="truncate max-w-[180px]">{attachment.fileName}</span>
-      <span className="text-slate-400">{formatBytes(attachment.sizeBytes)}</span>
+        ? <ImageIcon className="w-4 h-4 flex-none text-slate-400" aria-hidden="true" />
+        : <Paperclip className="w-4 h-4 flex-none text-slate-400" aria-hidden="true" />}
+      <span className="truncate max-w-[260px]">{attachment.fileName}</span>
+      <span className="text-xs text-slate-400">{formatBytes(attachment.sizeBytes)}</span>
     </button>
   );
 }
@@ -261,7 +260,7 @@ function AttachmentChip({ attachment, onDownload, onPreview }) {
  * replies sit RIGHT with a blue tint (avatars + role + channel on both sides),
  * internal notes stay full-width amber so they can't be mistaken for either.
  */
-function ThreadEntry({ entry, attachments = [], onDownload, onPreview, onImageRef, photoFor, onCopy, canDelete = false, onDelete, deleting = false }) {
+function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, photoFor, onCopy, canDelete = false, onDelete, deleting = false }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const isNote = entry.eventType === 'note' || entry.isPrivate === true;
   const body = entry.bodyText || entry.content || '';
@@ -401,7 +400,6 @@ function ThreadEntry({ entry, attachments = [], onDownload, onPreview, onImageRe
               <AttachmentChip
                 key={a.id}
                 attachment={a}
-                onDownload={() => onDownload?.(a)}
                 onPreview={() => onPreview?.(a)}
               />
             ))}
@@ -1850,13 +1848,13 @@ export default function TicketDetail() {
                             {descriptionFiles.map((a) => (
                               <button
                                 key={a.id}
-                                onClick={() => downloadAttachment(a)}
-                                title={`Download ${a.fileName}`}
-                                className="tp-focus-ring inline-flex max-w-full items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+                                onClick={() => previewImage(a)}
+                                title={`Preview ${a.fileName}`}
+                                className="tp-focus-ring inline-flex max-w-full items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
                               >
-                                <Paperclip className="w-3.5 h-3.5 flex-none text-slate-400" aria-hidden="true" />
+                                <Paperclip className="w-4 h-4 flex-none text-slate-400" aria-hidden="true" />
                                 <span className="truncate">{a.fileName}</span>
-                                <span className="flex-none text-[10px] text-slate-400">{formatBytes(a.sizeBytes)}</span>
+                                <span className="flex-none text-xs text-slate-400">{formatBytes(a.sizeBytes)}</span>
                               </button>
                             ))}
                           </div>
@@ -1930,7 +1928,6 @@ export default function TicketDetail() {
                                   <ThreadEntry
                                     entry={item.e}
                                     attachments={attachmentsByEntry.get(item.e.id) || []}
-                                    onDownload={downloadAttachment}
                                     onPreview={previewImage}
                                     onImageRef={previewImageRef}
                                     photoFor={photoFor}
@@ -2711,32 +2708,34 @@ export default function TicketDetail() {
                   ) : (
                     <ul className="space-y-1.5">
                       {ticket.attachments.map((a) => (
-                        <li key={a.id} className="flex items-center gap-2 px-2.5 py-2 rounded-lg border border-slate-100 bg-slate-50/60">
+                        <li key={a.id} className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg border border-slate-100 bg-slate-50/60">
                           {isImageAttachment(a)
-                            ? <ImageIcon className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" aria-hidden="true" />
-                            : <Paperclip className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" aria-hidden="true" />}
-                          <div className="min-w-0 flex-1">
-                            <p className="text-xs font-medium text-slate-700 truncate">{a.fileName}</p>
-                            <p className="text-[10px] text-slate-400 truncate">
+                            ? <ImageIcon className="w-[18px] h-[18px] text-slate-400 flex-shrink-0" aria-hidden="true" />
+                            : <Paperclip className="w-[18px] h-[18px] text-slate-400 flex-shrink-0" aria-hidden="true" />}
+                          <button
+                            onClick={() => previewImage(a)}
+                            title={`Preview ${a.fileName}`}
+                            className="tp-focus-ring min-w-0 flex-1 text-left rounded"
+                          >
+                            <p className="text-sm font-medium text-slate-700 truncate hover:text-blue-700">{a.fileName}</p>
+                            <p className="text-[11px] text-slate-400 truncate">
                               {formatBytes(a.sizeBytes)}
                               {a.source === 'email' ? ' · from email' : a.source === 'freshservice' ? ' · from FreshService' : a.uploadedBy ? ` · ${a.uploadedBy}` : ''}
                             </p>
-                          </div>
-                          {isImageAttachment(a) && (
-                            <button
-                              onClick={() => previewImage(a)}
-                              aria-label={`Preview ${a.fileName}`}
-                              className="tp-focus-ring p-1 text-slate-400 hover:text-blue-700 hover:bg-blue-50 rounded"
-                            >
-                              <Eye className="w-3.5 h-3.5" aria-hidden="true" />
-                            </button>
-                          )}
+                          </button>
+                          <button
+                            onClick={() => previewImage(a)}
+                            aria-label={`Preview ${a.fileName}`}
+                            className="tp-focus-ring p-1 text-slate-400 hover:text-blue-700 hover:bg-blue-50 rounded"
+                          >
+                            <Eye className="w-4 h-4" aria-hidden="true" />
+                          </button>
                           <button
                             onClick={() => downloadAttachment(a)}
                             aria-label={`Download ${a.fileName}`}
                             className="tp-focus-ring p-1 text-slate-400 hover:text-blue-700 hover:bg-blue-50 rounded"
                           >
-                            <Download className="w-3.5 h-3.5" aria-hidden="true" />
+                            <Download className="w-4 h-4" aria-hidden="true" />
                           </button>
                           {canWrite && (meta?.actor?.email === a.uploadedBy || meta?.actor?.kind === 'admin' || meta?.actor?.workspaceRole === 'admin') && (
                             <button

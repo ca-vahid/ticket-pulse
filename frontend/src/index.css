@@ -564,3 +564,17 @@ code {
     opacity: 0;
   }
 }
+
+/* Attachment preview modal — mammoth (Word) and SheetJS (Excel) emit bare
+   HTML; give it readable document/table styling (QA 07-08). */
+.tp-doc-preview h1, .tp-doc-preview h2, .tp-doc-preview h3 { font-weight: 700; margin: 0.9em 0 0.4em; color: #1e293b; }
+.tp-doc-preview h1 { font-size: 1.35rem; } .tp-doc-preview h2 { font-size: 1.15rem; } .tp-doc-preview h3 { font-size: 1.02rem; }
+.tp-doc-preview p { margin: 0.45em 0; }
+.tp-doc-preview ul, .tp-doc-preview ol { margin: 0.45em 0 0.45em 1.4em; list-style: revert; }
+.tp-doc-preview table { border-collapse: collapse; margin: 0.6em 0; }
+.tp-doc-preview td, .tp-doc-preview th { border: 1px solid #e2e8f0; padding: 4px 8px; }
+.tp-doc-preview img { max-width: 100%; height: auto; }
+.tp-doc-preview a { color: #2563eb; text-decoration: underline; }
+.tp-sheet-preview table { border-collapse: collapse; width: max-content; min-width: 100%; font-variant-numeric: tabular-nums; }
+.tp-sheet-preview td { border: 1px solid #e2e8f0; padding: 3px 8px; white-space: nowrap; }
+.tp-sheet-preview tr:first-child td { background: #f8fafc; font-weight: 600; position: sticky; top: 0; }
