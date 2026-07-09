@@ -44,6 +44,7 @@ function trim(text) {
 // into one classification; in-memory is fine — a lost timer just means the
 // next requester reply triggers the refresh instead.
 const pendingRefresh = new Map();
+import('./memoryDiagnostics.js').then(({ registerGauge }) => registerGauge('sentiment.pending', () => pendingRefresh.size)).catch(() => {});
 
 class TicketSentimentService {
   /**

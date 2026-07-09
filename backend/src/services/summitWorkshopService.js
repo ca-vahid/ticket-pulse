@@ -15,6 +15,7 @@ const FEEDBACK_VOTE_TYPES = [
 const CATEGORY_RESULTS_LOCKED_MESSAGE = 'Categories & Skills is complete and read-only.';
 
 const clients = new Map();
+import('./memoryDiagnostics.js').then(({ registerGauge }) => registerGauge('summit.clients', () => clients.size)).catch(() => {});
 
 function makeId(prefix, name) {
   const slug = String(name || 'item')

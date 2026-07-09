@@ -147,6 +147,7 @@ const DEFAULT_RULES = [
 
 /** @type {Map<number, { rules: Array<object>, timestamp: number }>} */
 const rulesCacheByWorkspace = new Map();
+import('./memoryDiagnostics.js').then(({ registerGauge }) => registerGauge('noiseRules.cache', () => rulesCacheByWorkspace.size)).catch(() => {});
 const CACHE_TTL_MS = 60_000;
 
 function notFoundError() {
