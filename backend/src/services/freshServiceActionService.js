@@ -909,6 +909,33 @@ class FreshServiceActionService {
                     errorMessage: `${handledMessage} Priority and category writeback were preserved when available.`,
                   },
                 });
+                // Heal the ticket row immediately — the preflight just learned
+                // FS's real assignee, and waiting for the next full sync cycle
+                // left the queue showing a stale "Suggested" chip while FS had
+                // a real assignee for an hour (QA 07-09, #232260).
+                try {
+                  const responderId = preflightResult.details?.currentResponderId;
+                  let ticketRowId = run.ticket?.id || null;
+                  if (!ticketRowId && assignAction.ticketId) {
+                    const row = await prisma.ticket.findFirst({
+                      where: { freshserviceTicketId: BigInt(assignAction.ticketId), workspaceId: run.workspaceId },
+                      select: { id: true },
+                    });
+                    ticketRowId = row?.id || null;
+                  }
+                  if (responderId && ticketRowId) {
+                    const tech = await prisma.technician.findFirst({
+                      where: { freshserviceId: BigInt(responderId), workspaceId: run.workspaceId },
+                      select: { id: true, name: true },
+                    });
+                    if (tech) {
+                      await prisma.ticket.update({ where: { id: ticketRowId }, data: { assignedTechId: tech.id } });
+                      logger.info(`Preflight healed stale assignee: ticket ${ticketRowId} → ${tech.name}`, { runId });
+                    }
+                  }
+                } catch (healError) {
+                  logger.warn(`Preflight assignee heal failed (non-fatal): ${healError.message}`, { runId });
+                }
                 logger.info('FreshService sync handled externally by existing assignee', {
                   runId,
                   completedActions: completedActions.map((action) => action.type),
