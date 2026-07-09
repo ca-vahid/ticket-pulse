@@ -1937,17 +1937,32 @@ class TicketService {
     // skip (caller swallows the rejection) rather than minutes-late data.
     const client = await mirrorService.getInteractiveClient(ticket.workspaceId);
     if (!client) return;
-    const conversations = await client.fetchTicketConversations(Number(ticket.freshserviceTicketId), { maxEntries: 60 });
-    if (!conversations?.length) return;
-    const { transformTicketConversationEntries } = await import('../integrations/freshserviceTransformer.js');
-    const entries = transformTicketConversationEntries(conversations, {
-      ticketId: ticket.id,
-      workspaceId: ticket.workspaceId,
-    });
-    if (!entries.length) return;
-    const { upserted } = await ticketThreadRepository.bulkUpsert(entries);
-    if (upserted > 0) {
-      this._broadcast(ticket.workspaceId, 'reply', ticket, { refreshedFromFs: upserted });
+    const fsTicketId = Number(ticket.freshserviceTicketId);
+    // Ticket detail carries the ticket-level attachments (email files land on
+    // the ticket, not a conversation) — the list sync never sees them (QA
+    // 07-08: FS #232127 had a PDF while TP showed "Attachments (0)").
+    const [conversations, detail] = await Promise.all([
+      client.fetchTicketConversations(fsTicketId, { maxEntries: 60 }),
+      client.getTicket(fsTicketId).catch(() => null),
+    ]);
+    let upserted = 0;
+    if (conversations?.length) {
+      const { transformTicketConversationEntries } = await import('../integrations/freshserviceTransformer.js');
+      const entries = transformTicketConversationEntries(conversations, {
+        ticketId: ticket.id,
+        workspaceId: ticket.workspaceId,
+      });
+      if (entries.length) ({ upserted } = await ticketThreadRepository.bulkUpsert(entries));
+    }
+    let ingested = 0;
+    try {
+      const fsTicket = detail?.ticket || detail;
+      ingested = await attachmentService.ingestForFsTicket(ticket, { fsTicket, conversations });
+    } catch (err) {
+      logger.warn(`FS attachment ingest on open failed for ticket ${ticket.id} (non-fatal): ${err.message}`);
+    }
+    if (upserted > 0 || ingested > 0) {
+      this._broadcast(ticket.workspaceId, 'reply', ticket, { refreshedFromFs: upserted, attachmentsIngested: ingested });
     }
   }
 

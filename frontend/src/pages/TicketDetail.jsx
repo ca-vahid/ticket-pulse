@@ -943,6 +943,13 @@ export default function TicketDetail() {
     () => (ticket?.attachments || []).filter((a) => !a.threadEntryId && isImageAttachment(a)),
     [ticket?.attachments],
   );
+  // Non-image ticket-level files (invoices, docs) — a chip row under the
+  // description so the original message's files live with the message, not
+  // only in the sidebar (QA 07-08).
+  const descriptionFiles = useMemo(
+    () => (ticket?.attachments || []).filter((a) => !a.threadEntryId && !isImageAttachment(a)),
+    [ticket?.attachments],
+  );
 
   const techPhotoByEmail = useMemo(() => {
     const map = new Map();
@@ -1838,6 +1845,22 @@ export default function TicketDetail() {
                         </div>
                         <CollapsibleBody html={ticket.description} text={ticket.descriptionText} />
                         <DescriptionImageStrip ticketId={ticketId} images={descriptionImages} onPreview={previewImage} />
+                        {descriptionFiles.length > 0 && (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {descriptionFiles.map((a) => (
+                              <button
+                                key={a.id}
+                                onClick={() => downloadAttachment(a)}
+                                title={`Download ${a.fileName}`}
+                                className="tp-focus-ring inline-flex max-w-full items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+                              >
+                                <Paperclip className="w-3.5 h-3.5 flex-none text-slate-400" aria-hidden="true" />
+                                <span className="truncate">{a.fileName}</span>
+                                <span className="flex-none text-[10px] text-slate-400">{formatBytes(a.sizeBytes)}</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </section>
                     )}
                     {editingDescription && (
@@ -2696,7 +2719,7 @@ export default function TicketDetail() {
                             <p className="text-xs font-medium text-slate-700 truncate">{a.fileName}</p>
                             <p className="text-[10px] text-slate-400 truncate">
                               {formatBytes(a.sizeBytes)}
-                              {a.source === 'email' ? ' · from email' : a.uploadedBy ? ` · ${a.uploadedBy}` : ''}
+                              {a.source === 'email' ? ' · from email' : a.source === 'freshservice' ? ' · from FreshService' : a.uploadedBy ? ` · ${a.uploadedBy}` : ''}
                             </p>
                           </div>
                           {isImageAttachment(a) && (

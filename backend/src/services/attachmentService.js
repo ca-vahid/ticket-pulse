@@ -105,6 +105,137 @@ class AttachmentService {
     return attachment;
   }
 
+  // ---- FreshService attachment ingestion (QA 07-08) ----------------------
+  // FS attachments were never synced: FS-born tickets showed "Attachments (0)"
+  // while the FS side had files. Sync time records METADATA only (FS's
+  // attachment_url is a short-lived signed link, and eagerly downloading every
+  // file for every synced ticket would be wasteful); the first download
+  // fetches a fresh URL from FS, caches the bytes in blob storage, and streams.
+
+  /**
+   * Record an FS attachment as a metadata-only row. blobName doubles as the
+   * dedupe key (`fs/ws-<ws>/att-<fsId>-<name>`), so re-syncs are no-ops.
+   * Returns the row, or null when skipped (duplicate / blocked type).
+   */
+  async ingestFreshServiceAttachment({ workspaceId, ticketId, threadEntryId = null, fsAttachment }) {
+    const fsId = Number(fsAttachment?.id);
+    if (!fsId) return null;
+    const safeName = sanitizeFileName(fsAttachment.name);
+    if (BLOCKED_EXTENSIONS.has(fileExtension(safeName))) return null;
+    const blobName = `fs/ws-${workspaceId}/att-${fsId}-${safeName}`.slice(0, 500);
+    try {
+      return await prisma.ticketAttachment.create({
+        data: {
+          workspaceId,
+          ticketId,
+          threadEntryId,
+          fileName: safeName,
+          contentType: fsAttachment.content_type || 'application/octet-stream',
+          sizeBytes: Number(fsAttachment.size) || 0,
+          blobName,
+          source: 'freshservice',
+          uploadedBy: null,
+        },
+      });
+    } catch (err) {
+      if (err?.code === 'P2002') return null; // already ingested
+      logger.warn(`FS attachment ingest failed for ticket ${ticketId}: ${err.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Ingest every attachment from an FS ticket detail + its conversations.
+   * Conversation files attach to their thread entry (rendered inline in the
+   * conversation); ticket-level files attach to the ticket itself.
+   */
+  async ingestForFsTicket(ticket, { fsTicket = null, conversations = null } = {}) {
+    let ingested = 0;
+    for (const att of (fsTicket?.attachments || [])) {
+      const row = await this.ingestFreshServiceAttachment({
+        workspaceId: ticket.workspaceId, ticketId: ticket.id, fsAttachment: att,
+      });
+      if (row) ingested += 1;
+    }
+    if (Array.isArray(conversations) && conversations.length) {
+      const entryIds = new Map(); // fs conversation external id -> thread entry id
+      const rows = await prisma.ticketThreadEntry.findMany({
+        where: { ticketId: ticket.id, externalEntryId: { in: conversations.map((c) => `fs-conversation:${c.id}`) } },
+        select: { id: true, externalEntryId: true },
+      });
+      for (const r of rows) entryIds.set(r.externalEntryId, r.id);
+      for (const conv of conversations) {
+        const threadEntryId = entryIds.get(`fs-conversation:${conv.id}`) || null;
+        for (const att of (conv.attachments || [])) {
+          const row = await this.ingestFreshServiceAttachment({
+            workspaceId: ticket.workspaceId, ticketId: ticket.id, threadEntryId, fsAttachment: att,
+          });
+          if (row) ingested += 1;
+        }
+      }
+    }
+    return ingested;
+  }
+
+  /**
+   * Resolve a fresh signed URL for an FS attachment (they expire quickly) by
+   * re-reading the ticket and, if needed, its conversations.
+   */
+  async _resolveFsAttachmentUrl(attachment) {
+    const fsAttId = Number((attachment.blobName.match(/\/att-(\d+)-/) || [])[1]);
+    if (!fsAttId) throw new NotFoundError('FreshService attachment reference is malformed');
+    const ticket = await prisma.ticket.findUnique({
+      where: { id: attachment.ticketId },
+      select: { freshserviceTicketId: true, workspaceId: true },
+    });
+    if (!ticket?.freshserviceTicketId) throw new NotFoundError('Ticket has no FreshService copy');
+    const { default: mirrorService } = await import('./mirrorService.js');
+    const client = await mirrorService.getInteractiveClient(ticket.workspaceId);
+    if (!client) throw new ValidationError('FreshService is not configured for this workspace');
+    const fsTicketId = Number(ticket.freshserviceTicketId);
+    const detail = await client.getTicket(fsTicketId);
+    const fsTicket = detail?.ticket || detail;
+    let found = (fsTicket?.attachments || []).find((a) => Number(a.id) === fsAttId);
+    if (!found && attachment.threadEntryId) {
+      const conversations = await client.fetchTicketConversations(fsTicketId, { maxEntries: 100 });
+      for (const conv of (conversations || [])) {
+        found = (conv.attachments || []).find((a) => Number(a.id) === fsAttId);
+        if (found) break;
+      }
+    }
+    if (!found?.attachment_url) throw new NotFoundError('Attachment no longer exists in FreshService');
+    return found.attachment_url;
+  }
+
+  /**
+   * Download the FS file (signed URL needs no FS auth) and cache it in blob
+   * storage so subsequent downloads never touch FS again.
+   */
+  async _fetchAndCacheFsAttachment(attachment) {
+    const url = await this._resolveFsAttachmentUrl(attachment);
+    const { default: axios } = await import('axios');
+    const response = await axios.get(url, {
+      responseType: 'arraybuffer',
+      timeout: 60_000,
+      maxContentLength: MAX_ATTACHMENT_BYTES,
+    });
+    const buffer = Buffer.from(response.data);
+    const blockBlob = this._container().getBlockBlobClient(attachment.blobName);
+    await blockBlob.uploadData(buffer, {
+      blobHTTPHeaders: {
+        blobContentType: attachment.contentType || 'application/octet-stream',
+        blobContentDisposition: `attachment; filename="${attachment.fileName.replace(/"/g, '')}"`,
+      },
+    });
+    if (!attachment.sizeBytes && buffer.length) {
+      await prisma.ticketAttachment.update({
+        where: { id: attachment.id }, data: { sizeBytes: buffer.length },
+      }).catch(() => {});
+    }
+    logger.info(`FS attachment cached: ${attachment.fileName} (${buffer.length} bytes) → ${attachment.blobName}`);
+    return buffer;
+  }
+
   // ---- Scheduled-ticket staging (gap plan 2 P2) --------------------------
   // Files uploaded before the ticket exists: blob lives under a schedule
   // prefix; at activation the SAME blob is adopted by a real attachment row.
@@ -256,8 +387,19 @@ class AttachmentService {
     });
     if (!attachment) throw new NotFoundError('Attachment not found');
     const blob = this._container().getBlockBlobClient(attachment.blobName);
-    const response = await blob.download();
-    return { attachment, stream: response.readableStreamBody };
+    try {
+      const response = await blob.download();
+      return { attachment, stream: response.readableStreamBody };
+    } catch (err) {
+      // FS-ingested rows are metadata-only until first download — fetch a
+      // fresh signed URL from FreshService, cache the bytes, then serve.
+      if (attachment.source === 'freshservice' && err?.statusCode === 404) {
+        const buffer = await this._fetchAndCacheFsAttachment(attachment);
+        const { Readable } = await import('node:stream');
+        return { attachment, stream: Readable.from(buffer) };
+      }
+      throw err;
+    }
   }
 
   async remove(attachmentId, ticketId, workspaceId, actor) {
