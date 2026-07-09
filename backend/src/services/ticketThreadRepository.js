@@ -13,6 +13,21 @@ class TicketThreadRepository {
     // honest last_real_activity_at even when FS's updated_at is noise.
     const latestRealByTicket = new Map();
 
+    // Which of these rows already exist? Needed below to tell a NEW customer
+    // reply (should re-classify requester sentiment) from a re-synced old one
+    // (should not). Best-effort — a failed lookup only skips the refresh.
+    const keyed = entries.filter((e) => e.externalEntryId);
+    let existingKeys = new Set();
+    if (keyed.length) {
+      try {
+        const existing = await prisma.ticketThreadEntry.findMany({
+          where: { OR: keyed.map((e) => ({ ticketId: e.ticketId, externalEntryId: e.externalEntryId })) },
+          select: { ticketId: true, externalEntryId: true },
+        });
+        existingKeys = new Set(existing.map((r) => `${r.ticketId}:${r.externalEntryId}`));
+      } catch { /* detection only */ }
+    }
+
     for (const entry of entries) {
       try {
         await prisma.ticketThreadEntry.upsert({
@@ -57,6 +72,30 @@ class TicketThreadRepository {
         });
       }
     }
+
+    // FS-born tickets get requester replies via THIS sync path (there is no
+    // mailbox-ingest event for them), so the sentiment chip never refreshed on
+    // FS tickets (QA 07-08, #231930). Schedule a re-classification for tickets
+    // that just gained a genuinely new, recent customer reply. The 24h recency
+    // guard keeps historical preheats/backfills from burning AI calls, and the
+    // service's own debounce coalesces multi-entry bursts.
+    try {
+      const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+      const refreshTickets = new Map(); // ticketId -> workspaceId
+      for (const entry of keyed) {
+        if (entry.eventType !== 'customer_reply') continue;
+        if (existingKeys.has(`${entry.ticketId}:${entry.externalEntryId}`)) continue;
+        const at = entry.occurredAt ? new Date(entry.occurredAt).getTime() : 0;
+        if (!at || at < cutoff) continue;
+        refreshTickets.set(entry.ticketId, entry.workspaceId);
+      }
+      if (refreshTickets.size) {
+        const { default: ticketSentimentService } = await import('./ticketSentimentService.js');
+        for (const [ticketId, workspaceId] of refreshTickets) {
+          ticketSentimentService.scheduleRefresh(ticketId, workspaceId);
+        }
+      }
+    } catch { /* sentiment is an annotation, never a sync step */ }
 
     // GREATEST keeps re-syncs of old history from moving the timestamp back.
     for (const [ticketId, at] of latestRealByTicket) {

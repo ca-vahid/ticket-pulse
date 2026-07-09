@@ -1019,7 +1019,22 @@ router.post('/:id/mirror/retry', requireNativeTicketing, asyncHandler(async (req
   if (!ticket) throw new ValidationError('Ticket not found in this workspace');
   if (!actorIsAdmin(req.ticketActor)) throw new ValidationError('Only an admin can trigger a mirror');
   const { default: mirrorService } = await import('../services/mirrorService.js');
-  const result = await mirrorService.drainForTicket(ticketId, req.workspaceId);
+  // Mirroring calls FreshService through the shared rate limiter, whose queue
+  // wait is unbounded — under pressure the drain can outlive the client's 30s
+  // timeout, which surfaced as "network error" while the mirror kept running
+  // server-side (QA 07-08). Time-box the response: if the drain is still going
+  // after 20s, answer 202 and let it finish in the background (the per-ticket
+  // in-flight lock in mirrorService makes a follow-up click safe).
+  const drain = mirrorService.drainForTicket(ticketId, req.workspaceId);
+  drain.catch((err) => logger.warn(`Mirror-now drain failed for ticket ${ticketId}: ${err.message}`));
+  let timer;
+  const timeoutMark = new Promise((resolve) => { timer = setTimeout(() => resolve('__timeout__'), 20_000); timer.unref?.(); });
+  const result = await Promise.race([drain, timeoutMark]);
+  clearTimeout(timer);
+  if (result === '__timeout__') {
+    res.status(202).json({ success: true, data: { inProgress: true } });
+    return;
+  }
   res.json({ success: true, data: result });
 }));
 

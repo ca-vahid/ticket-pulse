@@ -1,6 +1,16 @@
-export const APP_VERSION = '3.0.33-preview';
+export const APP_VERSION = '3.0.34-preview';
 
 export const changelog = [
+  {
+    version: '3.0.34-preview',
+    date: 'July 8, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>🪞 “Mirror now” can no longer create duplicates</strong> — clicking it twice (or racing the background mirror worker) could create two FreshService copies of one Ticket Pulse ticket, and slow FreshService responses surfaced as a misleading “network error”. Mirroring is now fully idempotent (one mirror, guaranteed, no matter how many clicks), and when FreshService is slow the button reports “mirroring in the background” instead of erroring. The QA test duplicates were removed from FreshService.' },
+      { type: 'fixed', html: '<strong>🔥 “Requester frustrated” now works on FreshService tickets</strong> — the sentiment classifier only ran for replies arriving through Ticket Pulse’s own mailbox, so tickets living in FreshService never got the red chip. New requester replies synced from FreshService now trigger the same classification.' },
+      { type: 'fixed', html: '<strong>📱 Approvals page has its bottom navigation back on phones</strong> — it was the one page missing the mobile tab bar, leaving no way to navigate away.' },
+      { type: 'improved', html: '<strong>🔄 “Sync now” from any page</strong> — the Live status popover now offers a Sync now button everywhere, not just on the Dashboard.' },
+    ],
+  },
   {
     version: '3.0.33-preview',
     date: 'July 8, 2026',
