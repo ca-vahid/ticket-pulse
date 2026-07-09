@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.37-preview';
+export const APP_VERSION = '3.0.38-preview';
 
 export const changelog = [
+  {
+    version: '3.0.38-preview',
+    date: 'July 9, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>🎯 Queue no longer shows a stale AI suggestion for tickets someone already grabbed</strong> — when an agent picked up a ticket in FreshService seconds around a sync write, Ticket Pulse could show “Suggested” with no assignee for up to 15 minutes (the AI itself correctly stood down — only the display lagged). The moment the AI discovers the ticket is already taken it now updates the assignee immediately, and opening any ticket pulls the live assignee from FreshService on the spot.' },
+    ],
+  },
   {
     version: '3.0.37-preview',
     date: 'July 9, 2026',

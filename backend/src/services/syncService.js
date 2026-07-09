@@ -3707,7 +3707,52 @@ class SyncService {
     const isGone = fsTicket === null;
     const isSoftDeleted = fsTicket?.deleted === true;
     const isSpam = fsTicket?.spam === true;
-    if (!isGone && !isSoftDeleted && !isSpam) return { changed: false };
+    if (!isGone && !isSoftDeleted && !isSpam) {
+      // Assignee reconcile (QA 07-09): a mid-cycle race can leave TP's
+      // assignee stale — the FS responder was set within the same second the
+      // sync wrote pre-assignment data, so the queue kept showing an AI
+      // "Suggested" chip while FS had a real assignee (#232260/Andrii). The
+      // detail we just fetched is ground truth; heal the row on open.
+      try {
+        const fsResponder = fsTicket.responder_id ? BigInt(fsTicket.responder_id) : null;
+        const current = await prisma.ticket.findUnique({
+          where: { id: ticket.id }, select: { assignedTechId: true },
+        });
+        let targetTechId = null;
+        let targetTechName = null;
+        let mappable = true;
+        if (fsResponder) {
+          const tech = await prisma.technician.findFirst({
+            where: { freshserviceId: fsResponder, workspaceId },
+            select: { id: true, name: true },
+          });
+          if (tech) { targetTechId = tech.id; targetTechName = tech.name; } else mappable = false;
+        }
+        if (mappable && (current?.assignedTechId ?? null) !== targetTechId) {
+          await prisma.ticket.update({
+            where: { id: ticket.id },
+            data: { assignedTechId: targetTechId },
+          });
+          await ticketActivityRepository.create({
+            ticketId: ticket.id,
+            activityType: targetTechId ? 'assigned' : 'status_changed',
+            performedBy: 'FreshService',
+            performedAt: new Date(),
+            details: {
+              note: targetTechId
+                ? `Assignee reconciled from FreshService on open: ${targetTechName}`
+                : 'FreshService shows this ticket unassigned — cleared the stale local assignee',
+            },
+          });
+          logger.info(`On-open reconcile: ticket ${ticket.id} assignee → ${targetTechName || 'unassigned'} (from FS)`);
+          await this._broadcastReconcile(workspaceId, ticket, ticket.status);
+          return { changed: true, assignee: targetTechName };
+        }
+      } catch (err) {
+        logger.debug(`On-open assignee reconcile failed (non-fatal): ${err.message}`);
+      }
+      return { changed: false };
+    }
 
     const newStatus = isSpam ? 'Spam' : 'Deleted';
     const reason = isGone
