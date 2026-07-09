@@ -144,6 +144,14 @@ app.get('/health', async (req, res) => {
     heapTotalMB: heapTotal,
   };
 
+  // --- Leak-hunt instrumentation (Jul 9 OOM incident) ---
+  // Sizes of every registered in-process collection; whichever climbs in
+  // step with heapUsed across samples is the leak.
+  try {
+    const { snapshot } = await import('./services/memoryDiagnostics.js');
+    checks.memoryDiagnostics = snapshot();
+  } catch { /* diagnostics are best-effort */ }
+
   res.json({
     status: overallStatus,
     timestamp: new Date().toISOString(),
@@ -226,6 +234,29 @@ async function initialize() {
       } catch (e) {
         logger.warn('Assignment queue-drain worker failed to start (non-fatal):', e.message);
       }
+    }
+
+    // Memory-leak instrumentation (Jul 9 OOM incident): 5-minute [mem] log
+    // lines + gauges over the collections that background workers own.
+    try {
+      const { startMemoryDiagnostics, registerGauge } = await import('./services/memoryDiagnostics.js');
+      const { default: syncService } = await import('./services/syncService.js');
+      const { default: mirrorService } = await import('./services/mirrorService.js');
+      const { sseManager } = await import('./routes/sse.routes.js');
+      registerGauge('sync.embeddedRequesterNames', () => syncService._embeddedRequesterNames?.size ?? -1);
+      registerGauge('sync.tpLookupCache', () => syncService._ticketPulseLookupCache?.size ?? -1);
+      registerGauge('sync.progressByWorkspace', () => syncService.progressByWorkspace?.size ?? -1);
+      registerGauge('mirror.clients', () => (mirrorService._clients?.size ?? 0) + (mirrorService._interactiveClients?.size ?? 0));
+      registerGauge('mirror.inFlight', () => mirrorService._inFlightTickets?.size ?? -1);
+      registerGauge('sse.channels', () => sseManager.channels?.size ?? -1);
+      registerGauge('sse.clients', () => {
+        let n = 0;
+        for (const clients of sseManager.channels?.values() ?? []) n += clients.size;
+        return n;
+      });
+      startMemoryDiagnostics();
+    } catch (e) {
+      logger.warn('Memory diagnostics failed to start (non-fatal):', e.message);
     }
 
     // Reconcile any backfill runs left in 'running' state from a prior crash/restart.
@@ -335,6 +366,21 @@ app.listen(PORT, () => {
 
   // Initialize after server starts
   initialize();
+});
+
+// Crash visibility (Jul 9): Node kills the process on unhandled rejections
+// and uncaught exceptions with no app-level record of WHY. Log the cause;
+// rejections are logged-and-survived (Express keeps serving), exceptions are
+// logged then exit so the platform restarts us into a clean state.
+process.on('unhandledRejection', (reason) => {
+  logger.error('UNHANDLED REJECTION (survived — fix the missing .catch):', {
+    message: reason?.message || String(reason),
+    stack: reason?.stack,
+  });
+});
+process.on('uncaughtException', (err) => {
+  logger.error('UNCAUGHT EXCEPTION (fatal — restarting):', { message: err?.message, stack: err?.stack });
+  setTimeout(() => process.exit(1), 500).unref();
 });
 
 // Graceful shutdown

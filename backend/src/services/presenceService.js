@@ -17,6 +17,7 @@ const SWEEP_INTERVAL_MS = 30_000;
 
 // workspaceId -> Map(ticketId -> Map(email -> { name, lastSeenAt }))
 const registry = new Map();
+import('./memoryDiagnostics.js').then(({ registerGauge }) => registerGauge('presence.workspaces', () => registry.size)).catch(() => {});
 
 function viewersOf(ticketMap) {
   return [...ticketMap.entries()].map(([email, v]) => ({ email, name: v.name }));

@@ -24,6 +24,9 @@ const SHARED_FETCH_TTL_MS = 45_000;
 const MAX_CACHE_ENTRIES = 100;
 const cache = new Map();
 const pendingCache = new Map();
+import { registerGauge } from './memoryDiagnostics.js';
+registerGauge('analytics.cache', () => cache.size);
+registerGauge('analytics.pending', () => pendingCache.size);
 
 // Same leak shape the dashboard read cache had: stale entries were only
 // skipped on read, never deleted, and analytics payloads embed ticket lists.

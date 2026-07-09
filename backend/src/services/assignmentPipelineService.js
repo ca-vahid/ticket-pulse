@@ -1472,8 +1472,35 @@ class AssignmentPipelineService {
         AND NOT EXISTS (SELECT 1 FROM assignment_pipeline_runs r WHERE r.ticket_id = t.id)
       ORDER BY t.created_at
       LIMIT 10`;
-    if (missed.length === 0) return;
-    for (const row of missed) {
+    // Second net (QA 07-09): tickets that RE-ENTERED the queue after their
+    // run completed. Two IT tickets sat unassigned for a day because the AI
+    // had dismissed them as noise weeks earlier, then the dismissal was
+    // undone (reopened in FS / noise flag cleared) — and every trigger path
+    // skips tickets that already have a completed run. Detect the state
+    // mismatch (last decision says noise, ticket says not-noise) and re-run.
+    // The 12h no-recent-run guard caps re-checks at ~2/day even if the AI
+    // keeps calling it noise and something keeps clearing the flag.
+    const reentered = await prisma.$queryRaw`
+      SELECT t.id FROM tickets t
+      WHERE t.workspace_id = ${workspaceId}
+        AND t.assigned_tech_id IS NULL
+        AND t.status IN ('Open', 'Pending')
+        AND COALESCE(t.is_noise, false) = false
+        AND t.updated_at > NOW() - INTERVAL '48 hours'
+        AND (SELECT r.decision FROM assignment_pipeline_runs r
+             WHERE r.ticket_id = t.id AND r.status = 'completed'
+             ORDER BY r.id DESC LIMIT 1) = 'noise_dismissed'
+        AND NOT EXISTS (SELECT 1 FROM assignment_pipeline_runs r
+                        WHERE r.ticket_id = t.id
+                          AND (r.status IN ('running', 'queued') OR r.created_at > NOW() - INTERVAL '12 hours'))
+      LIMIT 10`;
+
+    const toQueue = [
+      ...missed.map((r) => ({ id: r.id, reason: 'Safety net: no pipeline run was ever created for this ticket' })),
+      ...reentered.map((r) => ({ id: r.id, reason: 'Re-check: ticket is back in the queue after its noise dismissal was undone' })),
+    ];
+    if (toQueue.length === 0) return;
+    for (const row of toQueue) {
       await prisma.assignmentPipelineRun.create({
         data: {
           ticketId: row.id,
@@ -1481,13 +1508,13 @@ class AssignmentPipelineService {
           status: 'queued',
           triggerSource: 'poll',
           queuedAt: new Date(),
-          queuedReason: 'Safety net: no pipeline run was ever created for this ticket',
+          queuedReason: row.reason,
         },
       });
     }
-    logger.warn(`[missed-ticket sweep] queued ${missed.length} ticket(s) that never had a pipeline run`, {
+    logger.warn(`[missed-ticket sweep] queued ${toQueue.length} ticket(s) (${missed.length} never-ran, ${reentered.length} re-entered)`, {
       workspaceId,
-      ticketIds: missed.map((r) => r.id),
+      ticketIds: toQueue.map((r) => r.id),
     });
   }
 

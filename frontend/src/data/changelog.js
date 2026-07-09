@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.0.36-preview';
+export const APP_VERSION = '3.0.37-preview';
 
 export const changelog = [
+  {
+    version: '3.0.37-preview',
+    date: 'July 9, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Hourly server crashes stopped (webhook failures)</strong> — the server was running out of memory and restarting every ~84 minutes, which dropped FreshService webhook deliveries and interrupted AI runs mid-flight. The memory ceiling is raised as an immediate stopgap, live leak instrumentation is in place to pin down the source, and every crash now logs its cause.' },
+      { type: 'fixed', html: '<strong>Tickets that re-enter the queue get a fresh AI look</strong> — two IT tickets sat unassigned because the AI had dismissed them as noise weeks ago and the dismissal was later undone (reopened / un-flagged) — no trigger ever re-ran them. The safety-net sweep now detects that mismatch and re-runs the assignment, capped at two re-checks a day.' },
+    ],
+  },
   {
     version: '3.0.36-preview',
     date: 'July 8, 2026',

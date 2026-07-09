@@ -4,6 +4,8 @@ const DEFAULT_TTL_MS = 10_000; // 10 seconds
 const MAX_ENTRIES = 200;
 
 const store = new Map();
+import { registerGauge } from './memoryDiagnostics.js';
+registerGauge('dashboardRead.store', () => store.size);
 const _stats = { hit: 0, miss: 0, invalidations: 0, evictions: 0 };
 
 // Expired entries were only ever *skipped* on read, never removed — under
