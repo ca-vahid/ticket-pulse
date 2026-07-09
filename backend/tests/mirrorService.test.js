@@ -1,7 +1,7 @@
 import { jest } from '@jest/globals';
 
 const prismaMock = {
-  mirrorJob: { create: jest.fn(), findFirst: jest.fn(), findMany: jest.fn(), update: jest.fn() },
+  mirrorJob: { create: jest.fn(), findFirst: jest.fn(), findMany: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
   ticket: { findUnique: jest.fn(), update: jest.fn(), findMany: jest.fn() },
   ticketThreadEntry: { findUnique: jest.fn(), update: jest.fn(), findFirst: jest.fn(), create: jest.fn() },
   requester: { update: jest.fn() },
@@ -75,6 +75,7 @@ beforeEach(() => {
   mirrorService._clients.clear();
   settingsMock.getFreshServiceConfigForWorkspace.mockResolvedValue({ domain: 'demo', apiKey: 'key' });
   prismaMock.mirrorJob.update.mockResolvedValue({});
+  prismaMock.mirrorJob.updateMany.mockResolvedValue({ count: 1 }); // claim succeeds by default
   prismaMock.ticket.update.mockResolvedValue({});
   prismaMock.requester.update.mockResolvedValue({});
   clientMock.addNote.mockResolvedValue({ conversation: { id: 777 } });
@@ -191,6 +192,17 @@ describe('mirrorService job processing', () => {
     expect(prismaMock.ticket.update).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ mirrorState: 'error' }),
     }));
+  });
+
+  test('a job whose claim is lost (another drain took it) is skipped without executing', async () => {
+    prismaMock.mirrorJob.updateMany.mockResolvedValue({ count: 0 }); // competing drain claimed first
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...baseTicket });
+
+    const ok = await mirrorService._processJob({ id: 7, ticketId: 501, workspaceId: 1, kind: 'create_ticket', attempts: 0 });
+
+    expect(ok).toBe(false);
+    expect(clientMock.createTicket).not.toHaveBeenCalled(); // no duplicate FS ticket
+    expect(prismaMock.mirrorJob.update).not.toHaveBeenCalled(); // job left to its owner
   });
 
   test('drain keeps per-ticket ordering: a failed job blocks later jobs for that ticket only', async () => {

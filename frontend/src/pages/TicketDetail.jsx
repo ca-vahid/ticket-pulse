@@ -999,7 +999,11 @@ export default function TicketDetail() {
       const res = await ticketsAPI.retryMirror(ticketId);
       await fetchTicket({ silent: true });
       const d = res.data || {};
-      showToast(d.remaining ? 'sky' : 'emerald', d.remaining ? `Mirror retried — ${d.remaining} still pending` : 'Mirrored to FreshService ✓');
+      if (d.inProgress) {
+        showToast('sky', 'Mirroring in the background — this can take a minute when FreshService is busy');
+      } else {
+        showToast(d.remaining ? 'sky' : 'emerald', d.remaining ? `Mirror retried — ${d.remaining} still pending` : 'Mirrored to FreshService ✓');
+      }
     } catch (err) {
       showToast('red', err.response?.data?.message || err.message || 'Mirror failed');
     } finally {

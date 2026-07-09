@@ -14,6 +14,9 @@ const MAX_ATTEMPTS = 8;
 const BASE_BACKOFF_MS = 5 * 60 * 1000; // 5m, doubling, capped at 6h
 const MAX_BACKOFF_MS = 6 * 60 * 60 * 1000;
 const DRAIN_INTERVAL_MS = Number(process.env.NATIVE_TICKET_MIRROR_INTERVAL_MS || 60 * 1000);
+// A 'processing' row idle this long means its owning process died mid-job —
+// eligible to be reclaimed by the next drain.
+const STALE_PROCESSING_MS = 10 * 60 * 1000;
 const MIRROR_MARKER = '[Ticket Pulse mirror]';
 
 function backoffMs(attempts) {
@@ -42,6 +45,12 @@ class MirrorService {
     this._draining = false;
     this._clients = new Map(); // workspaceId → client (per-process; shared rate limiter underneath)
     this._interactiveClients = new Map(); // workspaceId → high-priority client for user-facing calls
+    // Tickets whose mirror jobs are executing right now. Two concurrent drains
+    // (double-clicked "Mirror now", or manual + the 60s worker) used to both
+    // pass _mirrorCreate's freshserviceTicketId===null check before either
+    // wrote it back — producing two FS tickets for one TP ticket (QA 07-08,
+    // TP-1006 → FS #231932 + #231933).
+    this._inFlightTickets = new Set();
   }
 
   isEnabled() {
@@ -128,8 +137,24 @@ class MirrorService {
    */
   async drainForTicket(ticketId, workspaceId) {
     if (!this.isEnabled()) return { skipped: true, reason: 'disabled' };
+    if (this._inFlightTickets.has(ticketId)) {
+      // A drain (previous click, or the background worker) already owns this
+      // ticket — report progress instead of racing it.
+      const remaining = await prisma.mirrorJob.count({
+        where: { ticketId, workspaceId, status: { in: ['pending', 'failed', 'processing'] } },
+      });
+      return { processed: 0, remaining, inProgress: true };
+    }
     const jobs = await prisma.mirrorJob.findMany({
-      where: { ticketId, workspaceId, status: { in: ['pending', 'failed'] } },
+      where: {
+        ticketId,
+        workspaceId,
+        OR: [
+          { status: { in: ['pending', 'failed'] } },
+          // Crash recovery: a process that died mid-job leaves 'processing'.
+          { status: 'processing', updatedAt: { lt: new Date(Date.now() - STALE_PROCESSING_MS) } },
+        ],
+      },
       orderBy: { id: 'asc' },
     });
     if (jobs.length === 0) return { processed: 0, remaining: 0 };
@@ -140,7 +165,7 @@ class MirrorService {
       processed += 1;
     }
     const remaining = await prisma.mirrorJob.count({
-      where: { ticketId, workspaceId, status: { in: ['pending', 'failed'] } },
+      where: { ticketId, workspaceId, status: { in: ['pending', 'failed', 'processing'] } },
     });
     return { processed, remaining };
   }
@@ -150,7 +175,12 @@ class MirrorService {
     this._draining = true;
     try {
       const due = await prisma.mirrorJob.findMany({
-        where: { status: { in: ['pending', 'failed'] }, nextAttemptAt: { lte: new Date() } },
+        where: {
+          OR: [
+            { status: { in: ['pending', 'failed'] }, nextAttemptAt: { lte: new Date() } },
+            { status: 'processing', updatedAt: { lt: new Date(Date.now() - STALE_PROCESSING_MS) } },
+          ],
+        },
         orderBy: [{ ticketId: 'asc' }, { id: 'asc' }],
         take: limit,
       });
@@ -210,6 +240,24 @@ class MirrorService {
   }
 
   async _processJob(job) {
+    // Per-ticket in-flight lock (this process) + atomic DB claim (any process):
+    // exactly one drain may execute a given job. The claim flips the row to
+    // 'processing'; a competing drain's updateMany matches 0 rows and skips.
+    if (this._inFlightTickets.has(job.ticketId)) return false;
+    const claimed = await prisma.mirrorJob.updateMany({
+      where: { id: job.id, status: { in: ['pending', 'failed', 'processing'] }, updatedAt: job.updatedAt },
+      data: { status: 'processing' },
+    });
+    if (claimed.count === 0) return false; // someone else claimed it since we read it
+    this._inFlightTickets.add(job.ticketId);
+    try {
+      return await this._executeJob(job);
+    } finally {
+      this._inFlightTickets.delete(job.ticketId);
+    }
+  }
+
+  async _executeJob(job) {
     try {
       const client = await this._getClient(job.workspaceId);
       if (!client) {
@@ -330,12 +378,10 @@ class MirrorService {
     const fsTicket = await client.createTicket({ ...basePayload });
     if (!fsTicket?.id) throw new Error('FreshService did not return a ticket id');
 
-    const customFields = await this._skillCustomFields(client, ticket);
-    if (customFields) {
-      await client.updateTicket(fsTicket.id, { custom_fields: customFields })
-        .catch((err) => logger.warn(`Mirror: TP category fields not set on ${ref} (non-fatal): ${err.message}`));
-    }
-
+    // Persist the FS id IMMEDIATELY — before any other await. A failure between
+    // createTicket and this write used to leave freshserviceTicketId null, so
+    // the retry called createTicket again and produced a second FS ticket
+    // (QA 07-08: TP-1006 ended up with two orphan copies).
     await prisma.ticket.update({
       where: { id: ticket.id },
       data: {
@@ -345,6 +391,12 @@ class MirrorService {
         mirrorError: null,
       },
     });
+
+    const customFields = await this._skillCustomFields(client, ticket);
+    if (customFields) {
+      await client.updateTicket(fsTicket.id, { custom_fields: customFields })
+        .catch((err) => logger.warn(`Mirror: TP category fields not set on ${ref} (non-fatal): ${err.message}`));
+    }
 
     // Backfill the requester's FS id the first time FS tells us who they are.
     if (!ticket.requester.freshserviceId && fsTicket.requester_id) {

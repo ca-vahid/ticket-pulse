@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Stamp, Loader2, Check, X, MessageCircleQuestion, Inbox, ExternalLink, RotateCcw, ClipboardList } from 'lucide-react';
 import AppHeader from '../components/AppHeader';
+import MobileTabBar from '../components/nav/MobileTabBar';
 import { ticketsAPI } from '../services/api';
 import { useSSE } from '../hooks/useSSE';
 import { useWorkspace } from '../contexts/WorkspaceContext';
@@ -246,6 +247,7 @@ export default function ApprovalsInbox() {
           </div>
         )}
       </main>
+      <MobileTabBar />
     </div>
   );
 }

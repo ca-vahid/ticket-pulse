@@ -22,6 +22,7 @@ import {
   useDemoMode,
 } from '../utils/demoMode';
 import { APP_VERSION } from '../data/changelog';
+import { syncAPI } from '../services/api';
 import { NAV_DESTINATIONS } from './nav/navDestinations';
 import SideRail from './nav/SideRail';
 import ChangelogModal from './ChangelogModal';
@@ -48,6 +49,19 @@ export default function AppHeader({
   const { currentWorkspace, availableWorkspaces, switchWorkspace } = useWorkspace();
   const { isRefreshing, lastUpdated, sseConnectionStatus } = useDashboard();
   const [showChangelog, setShowChangelog] = useState(false);
+  const [manualSyncing, setManualSyncing] = useState(false);
+
+  // Pages without their own dashboard refresh handlers still get a "Sync now"
+  // in the Live popover (QA 07-08: it only existed on the Dashboard). Fires a
+  // workspace-wide sync; progress shows via the Background sync row (SSE).
+  const triggerManualSync = async () => {
+    setManualSyncing(true);
+    try {
+      await syncAPI.trigger();
+    } catch { /* the popover's status rows are the feedback surface */ } finally {
+      setManualSyncing(false);
+    }
+  };
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
@@ -281,7 +295,7 @@ export default function AppHeader({
             )}
           </div>
 
-          {dashboardActions && (
+          {dashboardActions ? (
             <div className="mt-2 flex gap-2 border-t border-slate-100 pt-2.5">
               <button
                 type="button"
@@ -299,6 +313,18 @@ export default function AppHeader({
                 className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2 py-1.5 font-semibold text-slate-700 transition-colors hover:border-blue-300 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <Calendar className="h-3.5 w-3.5" /> Full week
+              </button>
+            </div>
+          ) : (
+            <div className="mt-2 border-t border-slate-100 pt-2.5">
+              <button
+                type="button"
+                onClick={triggerManualSync}
+                disabled={manualSyncing || backgroundSyncRunning}
+                title="Pull the latest tickets and changes from FreshService"
+                className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2 py-1.5 font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${manualSyncing ? 'animate-spin' : ''}`} /> {manualSyncing ? 'Starting sync…' : 'Sync now'}
               </button>
             </div>
           )}
