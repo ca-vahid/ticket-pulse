@@ -28,9 +28,10 @@ class TicketThreadRepository {
       } catch { /* detection only */ }
     }
 
+    const withAttachments = []; // { entryRowId, entry } for FS attachment ingest
     for (const entry of entries) {
       try {
-        await prisma.ticketThreadEntry.upsert({
+        const row = await prisma.ticketThreadEntry.upsert({
           where: {
             ticketId_externalEntryId: {
               ticketId: entry.ticketId,
@@ -57,6 +58,9 @@ class TicketThreadRepository {
           },
         });
         upserted++;
+        if (Array.isArray(entry.rawPayload?.attachments) && entry.rawPayload.attachments.length) {
+          withAttachments.push({ entryRowId: row.id, entry });
+        }
         if ((entry.bodyText || entry.bodyHtml || entry.content) && entry.occurredAt) {
           const at = new Date(entry.occurredAt);
           if (!Number.isNaN(at.getTime())) {
@@ -70,6 +74,28 @@ class TicketThreadRepository {
           externalEntryId: entry.externalEntryId,
           error: error.message,
         });
+      }
+    }
+
+    // FS conversation attachments ride the conversation payload — record them
+    // (metadata only; bytes fetched on first download) against their thread
+    // entry so they render inline in the conversation. Dedupe lives in the
+    // ingest itself (unique blobName), so re-syncs are no-ops.
+    if (withAttachments.length) {
+      try {
+        const { default: attachmentService } = await import('./attachmentService.js');
+        for (const { entryRowId, entry } of withAttachments) {
+          for (const att of entry.rawPayload.attachments) {
+            await attachmentService.ingestFreshServiceAttachment({
+              workspaceId: entry.workspaceId,
+              ticketId: entry.ticketId,
+              threadEntryId: entryRowId,
+              fsAttachment: att,
+            });
+          }
+        }
+      } catch (error) {
+        logger.warn('FS conversation attachment ingest failed (non-fatal)', { error: error.message });
       }
     }
 

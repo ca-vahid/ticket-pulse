@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.34-preview';
+export const APP_VERSION = '3.0.35-preview';
 
 export const changelog = [
+  {
+    version: '3.0.35-preview',
+    date: 'July 8, 2026',
+    entries: [
+      { type: 'new', html: '<strong>📎 FreshService attachments now sync</strong> — files on FreshService tickets (invoices, screenshots, docs) never made it into Ticket Pulse; tickets showed “Attachments (0)” while FreshService had the file. Attachments now sync automatically: files on a conversation show <b>inline on that message</b>, files on the original email show under the description and in the sidebar (labeled “from FreshService”). Downloads fetch the file on first click and cache it, so nothing bloats storage for files nobody opens. Recent tickets were backfilled.' },
+    ],
+  },
   {
     version: '3.0.34-preview',
     date: 'July 8, 2026',
