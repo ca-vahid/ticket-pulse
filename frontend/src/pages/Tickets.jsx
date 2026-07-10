@@ -457,7 +457,7 @@ export default function Tickets() {
           // refetch that delivers the name trigger it (see aiHoldRef above).
           else if (prev.ai?.state === 'analyzing' && t.ai?.state !== 'analyzing') {
             if (t.ai?.state === 'suggested' || t.assignedTechId != null) fx.set(t.id, 'aiDone');
-            else aiHoldRef.current.set(t.id, Date.now() + 15000);
+            else aiHoldRef.current.set(t.id, Date.now() + 90000);
           }
           else if (aiHoldRef.current.has(t.id)) {
             if (t.ai?.state === 'analyzing') aiHoldRef.current.delete(t.id); // a newer run took over
@@ -598,14 +598,17 @@ export default function Tickets() {
     if (isStepPing) {
       const tid = Number(data.ticketId);
       const row = ticketsRef.current.find((t) => t.id === tid);
-      if (!row) return;
-      setAiProgress((current) => {
-        const next = new Map(current);
-        next.set(tid, { step: Number(data.step), tool: data.tool || null });
-        return next;
-      });
-      if (row.ai?.state === 'analyzing') return;
-      // fall through: first sighting of this run — refetch to arm the halo.
+      if (row) {
+        setAiProgress((current) => {
+          const next = new Map(current);
+          next.set(tid, { step: Number(data.step), tool: data.tool || null });
+          return next;
+        });
+        if (row.ai?.state === 'analyzing') return;
+      }
+      // fall through: first sighting of this run — the row is either not yet
+      // showing its halo, or (a brand-new ticket) not on the page at all.
+      // Refetch-with-diff either way so arrivals show up being processed.
     }
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     refreshTimerRef.current = setTimeout(() => {
@@ -616,6 +619,20 @@ export default function Tickets() {
     // "AI matching" aura appears/clears, the outcome flashes) instead of
     // counting toward the manual-refresh pill — AI runs aren't "unread
     // updates", they're a process the queue should show happening.
+    // Shared debounced live refetch: coalesces bursts, and background tabs
+    // route to the pill instead so nothing is silently lost.
+    const scheduleLiveRefetch = (tid) => {
+      if (aiLiveTimerRef.current) clearTimeout(aiLiveTimerRef.current);
+      aiLiveTimerRef.current = setTimeout(() => {
+        if (document.visibilityState === 'hidden') {
+          pendingIdsRef.current.add(tid ?? `evt-${Date.now()}`);
+          setPendingCount(pendingIdsRef.current.size);
+          return;
+        }
+        fetchTicketsRef.current({ silent: true, diffAgainst: new Map(ticketsRef.current.map((t) => [t.id, t])) });
+      }, 450);
+    };
+
     if (data?.action === 'pipeline') {
       const tid = Number(data.ticketId);
       if (data.status && data.status !== 'running') {
@@ -627,24 +644,27 @@ export default function Tickets() {
           return next;
         });
       }
-      if (tid && ticketsRef.current.some((t) => t.id === tid)) {
-        if (aiLiveTimerRef.current) clearTimeout(aiLiveTimerRef.current);
-        aiLiveTimerRef.current = setTimeout(() => {
-          // Background tabs skip the fetch; the change joins the pill instead
-          // so it isn't silently lost when the user comes back.
-          if (document.visibilityState === 'hidden') {
-            pendingIdsRef.current.add(tid);
-            setPendingCount(pendingIdsRef.current.size);
-            return;
-          }
-          fetchTicketsRef.current({ silent: true, diffAgainst: new Map(ticketsRef.current.map((t) => [t.id, t])) });
-        }, 450);
-      }
+      // Live-apply for VISIBLE rows and for rows not on the page yet — a
+      // pipeline ping for an unknown id usually means a brand-new ticket
+      // being processed; it should appear with its halo, not hide in the
+      // pill (QA 07-10).
+      if (tid) scheduleLiveRefetch(tid);
       return;
     }
     // Our own mutation's echo — the list is already fresh.
     if (Date.now() - lastLocalMutationRef.current < 2500) return;
-    pendingIdsRef.current.add(data?.ticketId ?? `evt-${Date.now()}`);
+    const tid = data?.ticketId ? Number(data.ticketId) : null;
+    const isVisible = tid !== null && ticketsRef.current.some((t) => t.id === tid);
+    // New arrivals and changes to rows the user is LOOKING AT apply live —
+    // that's how the auto-assign landing (which arrives as a plain
+    // ticket-change after the FS round-trip, minutes after the run finished)
+    // finally triggers the held assignee pop. Everything else — changes to
+    // tickets on other pages/filters — stays behind the refresh pill.
+    if (data?.action === 'created' || isVisible) {
+      scheduleLiveRefetch(tid);
+      return;
+    }
+    pendingIdsRef.current.add(tid ?? `evt-${Date.now()}`);
     setPendingCount(pendingIdsRef.current.size);
   }, [fetchStats]);
   // Reconnect catch-up: every backend deploy/restart drops the SSE connection,
@@ -1302,14 +1322,6 @@ export default function Tickets() {
                                   New
                                 </span>
                               )}
-                              {fx === 'aiDone' && (
-                                <span
-                                  className="tp-ai-done-chip shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-100 border border-emerald-200 text-[9px] font-extrabold tracking-wide uppercase text-emerald-700"
-                                  aria-hidden="true"
-                                >
-                                  ✓ {ticket.assignedTechId ? 'Assigned' : 'Suggested'}
-                                </span>
-                              )}
                               <StateChip state={ticket.stateChip} />
                               {ticket.hasProposedReply && (
                                 <span
@@ -1369,8 +1381,7 @@ export default function Tickets() {
                             </span>
                           );
                           const assigneeCell = (isEditable || fsRowEditable) ? (
-                            <span className={`${CELL} py-1 gap-1 relative`}>
-                              {fx === 'aiDone' && <span className="tp-ai-ripple" aria-hidden="true" />}
+                            <span className={`${CELL} py-1 gap-1 relative ${fx === 'aiDone' ? 'tp-assign-pop' : ''}`}>
                               {ticket.aiBypass && <BypassBadge bypass={ticket.aiBypass} />}
                               <AssigneePicker
                                 ticketId={ticket.id}
@@ -1389,11 +1400,10 @@ export default function Tickets() {
                             </span>
                           ) : (
                             <span
-                              className={`${CELL} py-1 gap-1.5 relative`}
+                              className={`${CELL} py-1 gap-1.5 relative ${fx === 'aiDone' ? 'tp-assign-pop' : ''}`}
                               onClick={(e) => e.stopPropagation()}
                               onDoubleClick={(e) => e.stopPropagation()}
                             >
-                              {fx === 'aiDone' && <span className="tp-ai-ripple" aria-hidden="true" />}
                               {aiLive && !ticket.assignedTech ? (
                                 canReview ? (
                                   <button
@@ -1553,7 +1563,7 @@ export default function Tickets() {
                                 aiLive ? 'tp-ai-live'
                                   : previewing ? 'bg-blue-50/50'
                                     : selectedIds.has(ticket.id) ? 'bg-blue-50/40' : 'hover:bg-slate-50'
-                              } ${fx === 'aiDone' ? 'tp-ai-flush' : ''}`}
+                              }`}
                               onClick={() => onRowClick(ticket.id)}
                               onDoubleClick={() => onRowDoubleClick(ticket.id)}
                               title="Click to preview (double-click opens)"

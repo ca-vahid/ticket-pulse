@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.0.46-preview';
+export const APP_VERSION = '3.0.47-preview';
 
 export const changelog = [
+  {
+    version: '3.0.47-preview',
+    date: 'July 10, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>🎬 The ticket queue is properly live now</strong> — new tickets appear the moment they arrive (with their “AI choosing…” halo running), and changes to tickets you’re looking at apply in place. The refresh pill still collects changes on other pages, and got a cleaner compact look while we were at it.' },
+      { type: 'fixed', html: '<strong>🎉 The assignee pop finally pops</strong> — when the AI’s pick lands, the assignee box now springs in with a lift and a green ring bloom. Two bugs hid it: the assignment’s arrival event fed the refresh pill instead of updating the row (so the flash never fired), and Windows’ “show animations” setting being off disables all app animations (it now shows a static green ring instead of nothing). The old row-wide flash and subject chip — which decorated the wrong thing — are gone.' },
+    ],
+  },
   {
     version: '3.0.46-preview',
     date: 'July 10, 2026',
