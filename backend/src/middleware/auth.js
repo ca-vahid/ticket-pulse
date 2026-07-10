@@ -121,6 +121,19 @@ export function requireAdmin(req, res, next) {
 }
 
 /**
+ * GLOBAL admins only ("super admins") — workspace-scoped admins do NOT pass.
+ * For cross-workspace surfaces like the AI usage/cost report, which exposes
+ * every workspace's data regardless of which workspace is selected.
+ */
+export function requireGlobalAdmin(req, res, next) {
+  if (req.session?.user?.role === 'admin') {
+    return next();
+  }
+  logger.warn(`Unauthorized global-admin access attempt to ${req.path} by ${req.session?.user?.email || 'anonymous'}`);
+  return next(new AuthenticationError('Super admin access required'));
+}
+
+/**
  * Middleware to verify the authenticated user has access to req.workspaceId.
  * Global admins are always allowed. Viewers must have a workspace_access row
  * (checked live against the DB, not the stale session cache).

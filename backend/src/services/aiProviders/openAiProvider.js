@@ -170,9 +170,16 @@ class OpenAiProvider {
   _usage(response) {
     const inputTokens = response.usage?.input_tokens || 0;
     const outputTokens = response.usage?.output_tokens || 0;
+    // OpenAI caches automatically on stable prefixes ≥1024 tokens; cached
+    // tokens bill at half price (Responses API reports them in
+    // input_tokens_details). input_tokens INCLUDES the cached portion.
+    const cacheReadInputTokens = response.usage?.input_tokens_details?.cached_tokens
+      || response.usage?.prompt_tokens_details?.cached_tokens
+      || 0;
     return {
       inputTokens,
       outputTokens,
+      cacheReadInputTokens,
       totalTokens: response.usage?.total_tokens || inputTokens + outputTokens,
     };
   }

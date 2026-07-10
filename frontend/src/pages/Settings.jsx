@@ -19,6 +19,7 @@ import GroupsPanel from '../components/settings/GroupsPanel';
 import ApprovalCategoriesPanel from '../components/settings/ApprovalCategoriesPanel';
 import TicketOpsPanel from '../components/settings/TicketOpsPanel';
 import ApiKeysPanel from '../components/settings/ApiKeysPanel';
+import AiUsagePanel from '../components/settings/AiUsagePanel';
 import AdminManagementPanel from '../components/settings/AdminManagementPanel';
 import VacationTrackerPanel from '../components/settings/VacationTrackerPanel';
 import CalendarLeavePanel from '../components/settings/CalendarLeavePanel';
@@ -171,6 +172,7 @@ export default function Settings() {
     { id: 'backfill', label: 'Backfill', Icon: Download, minRole: 'admin' },
     { id: 'workspaces', label: 'Workspaces', Icon: Globe, minRole: 'global' },
     { id: 'admins', label: 'Admins', Icon: Shield, minRole: 'global' },
+    { id: 'ai-usage', label: 'AI Usage & Cost', Icon: BarChart3, minRole: 'global' },
     { id: 'workspace-access', label: 'Workspace Access', Icon: KeyRound, minRole: 'admin' },
     { id: 'dashboard', label: 'Dashboard', Icon: LayoutDashboard, minRole: 'viewer' },
     { id: 'photos', label: 'Photos & Locations', Icon: Camera, minRole: 'admin' },
@@ -1220,6 +1222,13 @@ export default function Settings() {
               {activeSection === 'workspaces' && (
                 <div className="p-6">
                   <WorkspaceManagementPanel />
+                </div>
+              )}
+
+              {/* AI Usage & Cost — super admins only, spans all workspaces */}
+              {activeSection === 'ai-usage' && (
+                <div className="p-6">
+                  <AiUsagePanel />
                 </div>
               )}
 

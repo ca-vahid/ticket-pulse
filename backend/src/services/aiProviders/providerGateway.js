@@ -29,6 +29,8 @@ function attemptUpdateData({ status, usage = null, error = null, durationMs = nu
     durationMs,
     inputTokens: usage?.inputTokens || null,
     outputTokens: usage?.outputTokens || null,
+    cacheCreationInputTokens: usage?.cacheCreationInputTokens || null,
+    cacheReadInputTokens: usage?.cacheReadInputTokens || null,
     errorClass: classified?.errorClass || null,
     errorMessage: error ? sanitizeProviderErrorMessage(error) : null,
     rawMetadata: metadata || null,
