@@ -1,12 +1,12 @@
-import { Check, RefreshCw } from 'lucide-react';
+import { Check, Inbox, RefreshCw } from 'lucide-react';
 
 /**
  * "N updates — refresh" pill for the ticket queue.
  *
  * Lifecycle (driven by the parent's `state`):
- *   idle  — count > 0: springy drop-in, ambient radar pulse, count badge that
- *           pops every time the number changes (the badge is re-keyed per
- *           value so the animation replays).
+ *   idle  — count > 0: springy drop-in, ambient pulse, and a notification-style
+ *           count badge perched on the inbox icon (re-keyed per value so the
+ *           pop animation replays when the number moves).
  *   busy  — the click landed: morphs into "Refreshing…" with a spinner while
  *           the list re-fetches and diff-highlights what changed.
  *   done  — brief emerald "Up to date" confirmation, then fades itself out
@@ -26,7 +26,7 @@ export default function LiveUpdatePill({ count, state = 'idle', onApply }) {
         onClick={onApply}
         disabled={busy || done}
         title={done ? undefined : busy ? undefined : 'Load the changes into the list — new and updated rows get highlighted'}
-        className={`pointer-events-auto inline-flex items-center gap-2.5 pl-4 pr-5 py-3 rounded-full text-[15px] font-semibold text-white shadow-soft transition-all duration-200 tp-focus-ring ${
+        className={`pointer-events-auto inline-flex items-center gap-2 pl-3.5 pr-4 py-2 rounded-full text-sm font-semibold text-white shadow-soft transition-all duration-200 tp-focus-ring ${
           done
             ? 'bg-emerald-600 tp-pill-done'
             : busy
@@ -36,28 +36,28 @@ export default function LiveUpdatePill({ count, state = 'idle', onApply }) {
       >
         {done ? (
           <>
-            <Check className="w-5 h-5" aria-hidden="true" />
+            <Check className="w-4 h-4" aria-hidden="true" />
             Up to date
           </>
         ) : busy ? (
           <>
-            <RefreshCw className="w-5 h-5 animate-spin" aria-hidden="true" />
+            <RefreshCw className="w-4 h-4 animate-spin" aria-hidden="true" />
             Refreshing…
           </>
         ) : (
           <>
-            <span aria-hidden="true" className="relative flex h-3 w-3">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white/70" />
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-white" />
+            {/* Inbox wearing the count — the ring matches the pill background
+                so the badge reads punched-out, never bigger than the pill. */}
+            <span aria-hidden="true" className="relative inline-flex mr-1">
+              <Inbox className="w-[18px] h-[18px]" />
+              <span
+                key={count}
+                className="tp-count-pop absolute -top-1.5 -right-2 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-white px-1 text-[10px] font-extrabold leading-none text-blue-700 ring-2 ring-blue-600"
+              >
+                {count > 99 ? '99+' : count}
+              </span>
             </span>
-            {/* Re-keying replays the pop each time the count moves. */}
-            <span
-              key={count}
-              className="tp-count-pop inline-flex items-center justify-center min-w-[1.75rem] h-7 px-2 rounded-full bg-white text-blue-700 text-sm font-extrabold tabular-nums shadow-sm"
-            >
-              {count}
-            </span>
-            update{count === 1 ? '' : 's'} — refresh
+            {count === 1 ? 'New update' : 'New updates'} — refresh
           </>
         )}
         {/* Screen readers hear count changes without the pill stealing focus. */}

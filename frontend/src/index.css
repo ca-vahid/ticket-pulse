@@ -454,47 +454,30 @@ code {
   50% { transform: scale(0.7); opacity: 0.5; }
 }
 
-/* Completion: the halo's area flushes green once… */
-.tp-ai-flush {
-  position: relative;
+/* Completion: the assignee box itself pops — springs in with a lift, then a
+   green ring blooms off it. One effect, on the element that changed
+   (QA 07-10: earlier attempts decorated the row/subject instead). */
+.tp-assign-pop > * {
+  animation: tpAssignPop 1.1s cubic-bezier(0.2, 1.4, 0.35, 1) both;
 }
-.tp-ai-flush::after {
+@keyframes tpAssignPop {
+  0% { transform: scale(0.55); opacity: 0; }
+  55% { transform: scale(1.14) translateY(-3px); opacity: 1; }
+  78% { transform: scale(0.96) translateY(0); }
+  100% { transform: scale(1); }
+}
+.tp-assign-pop::after {
   content: '';
   position: absolute;
-  inset: 0;
+  inset: 0 2px;
+  border-radius: 12px;
   pointer-events: none;
-  background: linear-gradient(90deg, rgb(52 211 153 / 0.20), rgb(52 211 153 / 0.12) 55%, transparent);
-  animation: tpAiFlush 1.4s ease-out both;
+  box-shadow: 0 0 0 0 rgb(16 185 129 / 0.55);
+  animation: tpAssignRing 1.5s ease-out 0.35s both;
 }
-@keyframes tpAiFlush {
-  0% { opacity: 0; }
-  20% { opacity: 1; }
-  100% { opacity: 0; }
-}
-/* …a chip pops next to the subject (pop → linger → fade)… */
-.tp-ai-done-chip {
-  animation: tpAiDoneChip 2.8s cubic-bezier(0.2, 0.9, 0.3, 1.3) both;
-}
-@keyframes tpAiDoneChip {
-  0% { opacity: 0; transform: scale(0.7); }
-  10% { opacity: 1; transform: scale(1.05); }
-  16% { transform: scale(1); }
-  82% { opacity: 1; }
-  100% { opacity: 0; transform: scale(0.95); }
-}
-/* …and a green ring ripples off the assignee slot. */
-.tp-ai-ripple {
-  position: absolute;
-  inset: 2px 4px;
-  border-radius: 9999px;
-  border: 2.5px solid rgb(52 211 153);
-  opacity: 0;
-  pointer-events: none;
-  animation: tpAiRipple 0.8s ease-out 0.15s both;
-}
-@keyframes tpAiRipple {
-  0% { opacity: 0.9; transform: scale(0.85); }
-  100% { opacity: 0; transform: scale(1.12); }
+@keyframes tpAssignRing {
+  0% { box-shadow: 0 0 0 0 rgb(16 185 129 / 0.55); }
+  100% { box-shadow: 0 0 0 16px rgb(16 185 129 / 0); }
 }
 
 /* Left accent while AI is working: not a filled bar (too heavy) — a 2px
@@ -555,16 +538,14 @@ code {
   .tp-ai-twinkle,
   .tp-ai-accent::before,
   .tp-ai-chip,
-  .tp-ai-flush::after,
-  .tp-ai-done-chip,
-  .tp-ai-ripple {
+  .tp-assign-pop > *,
+  .tp-assign-pop::after {
     animation: none;
   }
-  /* Static fallbacks: the halo/think keep their resting tint; the transient
-     completion overlays must not stick around as permanent washes. */
-  .tp-ai-flush::after,
-  .tp-ai-ripple {
-    opacity: 0;
+  /* Static fallback: no motion, but the moment still shows — a steady
+     emerald ring for the few seconds the fx class is applied. */
+  .tp-assign-pop::after {
+    box-shadow: 0 0 0 3px rgb(16 185 129 / 0.45);
   }
 }
 
