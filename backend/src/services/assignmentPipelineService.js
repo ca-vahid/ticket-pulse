@@ -109,6 +109,7 @@ class AssignmentPipelineService {
         logger.info('Manual trigger claiming queued run', { runId: openRun.id, ticketId });
         const claimed = await assignmentRepository.claimQueuedRun(openRun.id);
         if (claimed) {
+          this._broadcastRunUpdate(workspaceId, ticketId, openRun.id, 'running');
           return this._executeRun(openRun.id, ticketId, workspaceId, triggerSource, pipelineStart, emit, signal);
         }
       }
@@ -235,11 +236,12 @@ class AssignmentPipelineService {
    * live-update AI run state without polling. Dynamic import keeps this free
    * of route/service import cycles; failures are best-effort silent.
    */
-  async _broadcastRunUpdate(workspaceId, ticketId, runId, status, decision = null) {
+  async _broadcastRunUpdate(workspaceId, ticketId, runId, status, decision = null, extra = null) {
     try {
       const { sseManager } = await import('../routes/sse.routes.js');
       sseManager.broadcast('ticket-change', {
         action: 'pipeline', workspaceId, ticketId, runId, status, decision,
+        ...(extra || {}),
       }, workspaceId);
     } catch { /* SSE is optional plumbing */ }
   }
@@ -606,7 +608,7 @@ class AssignmentPipelineService {
    * Process queued runs for a workspace. Called by the scheduler during business hours.
    * Returns count of processed/skipped runs.
    */
-  async drainQueuedRuns(workspaceId, maxPerTick = 5) {
+  async drainQueuedRuns(workspaceId, maxPerTick = 10, concurrency = 10) {
     const queued = await assignmentRepository.listQueuedRuns(workspaceId, maxPerTick);
     if (queued.length === 0) return { processed: 0, skipped: 0 };
 
@@ -625,12 +627,21 @@ class AssignmentPipelineService {
       });
     }
 
-    for (const run of queued) {
+    // Runs execute CONCURRENTLY (up to `concurrency`) — a serial drain at
+    // ~60-90s per run meant a 40-deep morning queue took an hour to clear.
+    // Claims are atomic (claimQueuedRun), the pipeline already tolerates
+    // parallel runs (per-ticket open-run dedupe), and LLM/FS throughput is
+    // governed by the provider gateway + shared FS limiter respectively.
+    const processOne = async (run) => {
       const claimed = await assignmentRepository.claimQueuedRun(run.id);
       if (!claimed) {
         logger.debug('Queue drain: claim failed (already claimed)', { runId: run.id });
-        continue;
+        return;
       }
+      // Tell live queue rows the run left 'queued' — without this, tickets
+      // picked up from the business-hours queue started silently and the
+      // page only learned on manual refresh.
+      this._broadcastRunUpdate(workspaceId, run.ticketId, run.id, 'running');
 
       const validation = await this.validateQueuedRun(run, {
         liveCheck: !!validationClient,
@@ -638,9 +649,10 @@ class AssignmentPipelineService {
       });
       if (!validation.valid) {
         await assignmentRepository.markRunSkippedStale(run.id, validation.reason);
+        this._broadcastRunUpdate(workspaceId, run.ticketId, run.id, 'skipped');
         logger.info('Queue drain: skipped stale run', { runId: run.id, ticketId: run.ticketId, reason: validation.reason });
         skipped++;
-        continue;
+        return;
       }
 
       try {
@@ -650,9 +662,19 @@ class AssignmentPipelineService {
       } catch (error) {
         logger.error('Queue drain: run failed', { runId: run.id, error: error.message });
       }
-    }
+    };
 
-    logger.info('Queue drain complete', { workspaceId, found: queued.length, processed, skipped });
+    const pool = Math.max(1, Math.min(concurrency, queued.length));
+    let cursor = 0;
+    await Promise.all(Array.from({ length: pool }, async () => {
+      while (cursor < queued.length) {
+        const run = queued[cursor];
+        cursor += 1;
+        await processOne(run);
+      }
+    }));
+
+    logger.info('Queue drain complete', { workspaceId, found: queued.length, processed, skipped, concurrency: pool });
     return { processed, skipped };
   }
 
@@ -885,6 +907,7 @@ class AssignmentPipelineService {
               });
 
               emit({ type: 'tool_call', name: block.name, input: block.input, toolUseId: block.id });
+              this._broadcastRunUpdate(workspaceId, ticketId, runId, 'running', null, { step: stepCounter, tool: 'submit_recommendation' });
               const toolResult = accepted ? { accepted: true, normalizedFromString } : { accepted: false, error: validationError };
               toolResultMap.set(block.id, toolResult);
               emit({ type: 'tool_result', name: block.name, data: toolResult, durationMs: 0, toolUseId: block.id });
@@ -900,6 +923,9 @@ class AssignmentPipelineService {
             });
 
             emit({ type: 'tool_call', name: block.name, input: block.input, toolUseId: block.id });
+            // Live queue progress: rows show which stage the analysis is at
+            // ("reading the ticket · step 2"). Fire-and-forget, tiny payload.
+            this._broadcastRunUpdate(workspaceId, ticketId, runId, 'running', null, { step: stepCounter, tool: block.name });
             queueHeartbeat();
 
             const toolStart = Date.now();
@@ -1468,7 +1494,7 @@ class AssignmentPipelineService {
             const bh = await availabilityService.isBusinessHours(new Date(), tz, ws.id);
             if (!bh.isBusinessHours) continue;
             logger.info(`[queue-drain] Draining ${queuedCount} queued run(s) for workspace ${ws.id} (${ws.name})`);
-            await this.drainQueuedRuns(ws.id, 5);
+            await this.drainQueuedRuns(ws.id, 10, 10);
           } catch (err) {
             logger.error(`[queue-drain] workspace ${ws.id} failed: ${err.message}`);
           }
