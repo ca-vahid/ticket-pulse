@@ -90,9 +90,15 @@ code {
   .tp-side-rail--peek:hover {
     transition-delay: 150ms;
   }
-  .tp-side-rail--peek:not(:hover):not(:focus-within) .tp-rail-content {
+  .tp-side-rail--peek:not(:hover):not(:focus-within):not(.tp-side-rail--peek-open) .tp-rail-content {
     opacity: 0;
     pointer-events: none;
+  }
+  .tp-side-rail--peek-open .tp-rail-content {
+    opacity: 1;
+  }
+  .tp-side-rail--peek-open .tp-rail-peek-hint {
+    opacity: 0;
   }
   .tp-side-rail--peek .tp-rail-content {
     transition: opacity 0.15s ease-out;
@@ -185,6 +191,23 @@ code {
   .highcharts-point.cat-cell-hot,
   .cat-cell-hot {
     animation: catCellPulse 1.7s ease-in-out infinite;
+  }
+
+  /* Email/note bodies (SafeHtml): pasted content often carries wide tables
+     with fixed widths — without containment they escape the card and paint
+     over the sidebar (QA 07-10, ticket #232372). Wide content scrolls INSIDE
+     the body instead. */
+  .tp-rich-body {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+  .tp-rich-body table {
+    max-width: 100%;
+  }
+  .tp-rich-body pre {
+    max-width: 100%;
+    overflow-x: auto;
+    white-space: pre-wrap;
   }
 
   /* Inline "[Image: name]" references in ticket note/email bodies — rendered as

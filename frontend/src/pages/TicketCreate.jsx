@@ -11,7 +11,7 @@ import CcChips from '../components/tickets/CcChips';
 import RichTextEditor, { isRichContent } from '../components/tickets/RichTextEditor';
 import StagedFileChip from '../components/tickets/StagedFileChip';
 import ImageMarkupModal from '../components/tickets/ImageMarkupModal';
-import { PRIORITY_LABELS, initials } from '../components/tickets/ticketUi';
+import { PRIORITY_LABELS, SOURCE_OPTIONS, initials } from '../components/tickets/ticketUi';
 
 const MAX_FILES = 5;
 const MAX_FILE_MB = 100;
@@ -43,6 +43,7 @@ export default function TicketCreate() {
   const [categoryId, setCategoryId] = useState('');
   const [subcategoryId, setSubcategoryId] = useState('');
   const [groupId, setGroupId] = useState('');
+  const [source, setSource] = useState(103); // arrival channel (QA 07-10 #7); Agent = logged in app
   const [tagIds, setTagIds] = useState([]); // gap plan 2 P1.3
   const [impact, setImpact] = useState('');
   const [urgency, setUrgency] = useState('');
@@ -241,6 +242,7 @@ export default function TicketCreate() {
         tagIds,
         impact: impact ? Number(impact) : null,
         urgency: urgency ? Number(urgency) : null,
+        source: Number(source),
       };
       if (assignMode === 'me' && canTakeMyself) payload.assignedTechId = meta.actor.technicianId;
       if (assignMode === 'pick' && assignTechId) payload.assignedTechId = Number(assignTechId);
@@ -317,7 +319,7 @@ export default function TicketCreate() {
 
   if (metaError) {
     return (
-      <div className="tp-tickets-backdrop min-h-screen md:pl-[14px]">
+      <div className="tp-tickets-backdrop min-h-screen md:pl-[20px]">
         <AppHeader activePage="tickets" />
         <div className="max-w-2xl mx-auto px-4 py-16 text-center">
           <AlertCircle className="w-8 h-8 text-red-500 mx-auto mb-3" aria-hidden="true" />
@@ -329,7 +331,7 @@ export default function TicketCreate() {
   }
 
   return (
-    <div className="tp-tickets-backdrop min-h-screen md:pl-[14px]">
+    <div className="tp-tickets-backdrop min-h-screen md:pl-[20px]">
       <AppHeader activePage="tickets" />
 
       {/* pb clears the sticky action bar + the mobile tab bar under it (QA 07-06 #11) */}
@@ -693,6 +695,16 @@ export default function TicketCreate() {
                       ))}
                     </select>
                   </div>
+                </div>
+
+                <div>
+                  <label htmlFor="tc-source" className={labelClass}>Source</label>
+                  <select id="tc-source" value={source} onChange={(e) => setSource(Number(e.target.value))} className={fieldClass}>
+                    {SOURCE_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-[11px] text-slate-400">How the request reached you — phone call, walk-up, Teams message…</p>
                 </div>
 
                 {(meta?.groups?.length || 0) > 0 && (

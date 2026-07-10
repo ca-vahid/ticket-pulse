@@ -31,16 +31,25 @@ export const TICKET_SOURCE = {
   EMAIL: 1,
   PORTAL: 2, // reserved for future TP portal intake
   PHONE: 3,
+  WALK_UP: 9, // FS's own walk-up code, reused for TP-born tickets
   API: 100,
   WEBHOOK: 101, // reserved for future webhook intake
+  MS_TEAMS: 102, // requests arriving via Teams chat (QA 07-10 #6/#7)
   AGENT: 103, // created by staff inside the Ticket Pulse app
 };
 
 export const TICKET_SOURCE_LABELS = {
   1: 'Email', 2: 'Portal', 3: 'Phone', 4: 'Chat', 5: 'Feedback widget',
   6: 'Yammer', 7: 'AWS CloudWatch', 8: 'PagerDuty', 9: 'Walk-up', 10: 'Slack',
-  100: 'API', 101: 'Webhook', 103: 'Agent',
+  100: 'API', 101: 'Webhook', 102: 'MS Teams', 103: 'Agent',
 };
+
+// Channels a staff member can pick when logging or editing a TP-born ticket
+// (how the request actually reached them). FS-born tickets keep FS's value.
+export const AGENT_SELECTABLE_SOURCES = [
+  TICKET_SOURCE.AGENT, TICKET_SOURCE.EMAIL, TICKET_SOURCE.PHONE,
+  TICKET_SOURCE.WALK_UP, TICKET_SOURCE.MS_TEAMS, TICKET_SOURCE.PORTAL,
+];
 
 export function ticketSourceLabel(source) {
   if (source === null || source === undefined) return null;

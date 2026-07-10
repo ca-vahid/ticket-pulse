@@ -2,7 +2,7 @@ import { z } from 'zod';
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { ValidationError, NotFoundError, ServiceBusyError } from '../utils/errors.js';
-import { TICKET_ORIGIN, TICKET_SOURCE, TICKET_SOURCE_LABELS, APP_NATIVE_TRIGGER_SOURCE, ticketDisplayRef } from '../utils/ticketOrigin.js';
+import { TICKET_ORIGIN, TICKET_SOURCE, TICKET_SOURCE_LABELS, APP_NATIVE_TRIGGER_SOURCE, AGENT_SELECTABLE_SOURCES, ticketDisplayRef } from '../utils/ticketOrigin.js';
 import noiseRuleService from './noiseRuleService.js';
 import ticketActivityRepository from './ticketActivityRepository.js';
 import ticketThreadRepository from './ticketThreadRepository.js';
@@ -63,6 +63,11 @@ const createTicketSchema = z.object({
   subject: z.string().trim().min(3).max(500),
   description: z.string().max(100000).optional().nullable(),
   priority: z.number().int().min(1).max(4).default(2),
+  // Arrival channel override (QA 07-10 #7): staff logging a phone/walk-up/
+  // Teams request record how it actually reached them.
+  source: z.number().int().refine((v) => AGENT_SELECTABLE_SOURCES.includes(v), {
+    message: 'Source must be one of the selectable arrival channels',
+  }).optional().nullable(),
   ticketType: z.enum(['Incident', 'Service Request']).default('Incident'),
   status: z.enum(['Open', 'Pending']).default('Open'),
   requesterId: z.number().int().positive().optional().nullable(),
@@ -96,6 +101,9 @@ const updateTicketSchema = z.object({
   subject: z.string().trim().min(3).max(500).optional(),
   description: z.string().max(100000).optional().nullable(),
   priority: z.number().int().min(1).max(4).optional(),
+  source: z.number().int().refine((v) => AGENT_SELECTABLE_SOURCES.includes(v), {
+    message: 'Source must be one of the selectable arrival channels',
+  }).optional(),
   ticketType: z.enum(['Incident', 'Service Request']).optional().nullable(),
   internalCategoryId: z.number().int().positive().optional().nullable(),
   internalSubcategoryId: z.number().int().positive().optional().nullable(),
@@ -1602,8 +1610,10 @@ class TicketService {
         isNoise,
         noiseRuleMatched: ruleId,
         // Arrival channel (QA 07-07 #1): Agent for the app UI; email ingest
-        // and the public API pass their own channel.
-        source: sourceChannel,
+        // and the public API pass their own channel. The create form can
+        // override it (QA 07-10 #7: phone / walk-up / Teams requests logged
+        // by staff should record how they actually arrived).
+        source: data.source ?? sourceChannel,
         lastIngestSource: 'ticketpulse_native',
         lastIngestedAt: now,
         ...(slaDueDates.frDueBy ? { frDueBy: slaDueDates.frDueBy } : {}),
@@ -1740,6 +1750,10 @@ class TicketService {
     if (data.urgency !== undefined && data.urgency !== ticket.urgency) {
       patch.urgency = data.urgency;
       changes.urgency = { from: ticket.urgency, to: data.urgency };
+    }
+    if (data.source !== undefined && data.source !== ticket.source) {
+      patch.source = data.source;
+      changes.source = { from: ticket.source, to: data.source };
     }
     if (data.internalCategoryId !== undefined && data.internalCategoryId !== ticket.internalCategoryId) {
       patch.internalCategoryId = data.internalCategoryId;
