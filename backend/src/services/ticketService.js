@@ -17,6 +17,29 @@ import { sseManager } from '../routes/sse.routes.js';
 export const NATIVE_TICKET_STATUSES = ['Open', 'Pending', 'Resolved', 'Closed'];
 const TERMINAL_STATUSES = ['Resolved', 'Closed'];
 
+// FreshService 400s carry a structured errors[] the generic message hides —
+// "Validation failed" told the user nothing about the missing department
+// (QA 07-10, #231072). Translate field errors into actionable English.
+const FS_FIELD_LABELS = {
+  department_id: 'Department',
+  category: 'Category',
+  sub_category: 'Subcategory',
+  item_category: 'Item',
+  group_id: 'Group',
+  responder_id: 'Assignee',
+  custom_fields: 'a custom field',
+};
+function fsValidationError(err) {
+  const fieldErrors = Array.isArray(err.freshserviceDetail?.errors) ? err.freshserviceDetail.errors : [];
+  if (!fieldErrors.length) return err;
+  const parts = fieldErrors.map((fe) => {
+    const label = FS_FIELD_LABELS[fe.field] || fe.field || 'a field';
+    const missing = /type Null/i.test(String(fe.message || '')) || fe.code === 'missing_field';
+    return missing ? `${label} is required but not set` : `${label}: ${fe.message || fe.code || 'rejected'}`;
+  });
+  return new ValidationError(`FreshService rejected the change — ${parts.join('; ')}. Nothing was changed in Ticket Pulse.`);
+}
+
 // The FS client wraps limiter rejections in plain Errors, so match on the
 // preserved code OR message. A queue timeout means the request never launched
 // — nothing reached FreshService, so "try again" is always safe advice.
@@ -1903,7 +1926,37 @@ class TicketService {
     } catch (err) {
       // Queue-wait timeout = the PUT never launched; nothing changed anywhere.
       if (isFsQueueTimeout(err)) throw new ServiceBusyError(FS_BUSY_MESSAGE);
-      throw err;
+      const fieldErrors = Array.isArray(err.freshserviceDetail?.errors) ? err.freshserviceDetail.errors : [];
+      // FreshService closure rules can demand a department the ticket never
+      // got (QA 07-10, #231072: closing failed with an opaque "Validation
+      // failed"). Auto-fill it from the ticket/requester — what the FS UI
+      // would default to — and retry once.
+      if (fieldErrors.some((fe) => fe.field === 'department_id')) {
+        let departmentId = null;
+        try {
+          const fsCurrent = await client.getTicket(Number(ticket.freshserviceTicketId));
+          departmentId = fsCurrent?.department_id || null;
+          if (!departmentId && fsCurrent?.requester_id) {
+            const fsRequester = await client.fetchRequester(fsCurrent.requester_id);
+            departmentId = fsRequester?.department_ids?.[0] || null;
+          }
+        } catch { /* fall through to the descriptive error below */ }
+        if (departmentId) {
+          try {
+            fsTicket = await client.updateTicketFields(
+              Number(ticket.freshserviceTicketId),
+              { ...fsPayload, department_id: Number(departmentId) },
+            );
+            logger.info(`FS write-back: auto-filled required department ${departmentId} for #${ticket.freshserviceTicketId} (requester's department)`);
+          } catch (retryErr) {
+            throw fsValidationError(retryErr);
+          }
+        } else {
+          throw new ValidationError('FreshService requires a Department before this change, and neither the ticket nor its requester has one on file — set the Department in FreshService first, then try again.');
+        }
+      } else {
+        throw fsValidationError(err);
+      }
     }
     const fsWriteMs = Date.now() - fsWriteStartedAt;
     if (fsWriteMs > 10000) {
