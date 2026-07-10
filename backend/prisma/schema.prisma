@@ -1476,6 +1476,12 @@ model AssignmentConfig {
   // recommendation, but decision is forced to pending_review for manual
   // approval — even when autoAssign=true. Empty array = no exclusions.
   excludedGroupIds        Int[]     @default([]) @map("excluded_group_ids")
+  // FreshService group IDs in OBSERVE-ONLY (mock) mode. The pipeline still
+  // runs and records what it WOULD have done (visible in the review queue),
+  // but writes NOTHING to the ticket: no assignment, no noise flag, no
+  // category/priority/type persistence, no FS write-back. Decision is forced
+  // to pending_review. Built for the AR onboarding observation window.
+  observeOnlyGroupIds     Int[]     @default([]) @map("observe_only_group_ids")
   createdAt               DateTime  @default(now()) @map("created_at")
   updatedAt               DateTime  @updatedAt @map("updated_at")
 

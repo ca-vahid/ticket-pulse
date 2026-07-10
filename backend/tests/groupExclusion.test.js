@@ -114,6 +114,56 @@ describe('isPipelineFinalDecision', () => {
   });
 });
 
+describe('resolvePipelineDecision — observe-only (mock) groups', () => {
+  test('observed group forces pending_review even with autoAssign on', () => {
+    expect(resolvePipelineDecision({
+      recommendation: { recommendations: [{ techId: 17 }] },
+      triggerSource: 'poll',
+      groupObserved: true,
+      autoAssign: true,
+    })).toBe('pending_review');
+  });
+
+  test('observed group turns a noise verdict into a pending suggestion, not a dismissal', () => {
+    // The whole point of observation: "this looks like noise" is recorded on
+    // the run, but the ticket must not be flagged or dismissed automatically.
+    expect(resolvePipelineDecision({
+      recommendation: { recommendations: [] },
+      triggerSource: 'poll',
+      isNoise: true,
+      groupObserved: true,
+      autoAssign: true,
+    })).toBe('pending_review');
+  });
+
+  test('observed group overrides priority-only finalization too', () => {
+    expect(resolvePipelineDecision({
+      recommendation: { recommendations: [] },
+      triggerSource: 'priority_assessment_after_hours',
+      isPriorityAssessmentOnly: true,
+      groupObserved: true,
+      autoAssign: true,
+    })).toBe('pending_review');
+  });
+
+  test('explicit human classification_only requests still finalize (manual intent wins)', () => {
+    expect(resolvePipelineDecision({
+      recommendation: { recommendations: [] },
+      triggerSource: 'classification_only',
+      groupObserved: true,
+    })).toBe('classified_only');
+  });
+
+  test('unobserved tickets behave exactly as before', () => {
+    expect(resolvePipelineDecision({
+      recommendation: { recommendations: [{ techId: 17 }] },
+      triggerSource: 'poll',
+      groupObserved: false,
+      autoAssign: true,
+    })).toBe('auto_assigned');
+  });
+});
+
 describe('resolvePipelineDecision', () => {
   test('noise wins over priority-only mode so after-hours passes can dismiss it', () => {
     expect(resolvePipelineDecision({

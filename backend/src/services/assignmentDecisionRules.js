@@ -48,10 +48,17 @@ export function resolvePipelineDecision({
   isNoise = false,
   llmIgnoredRebound = false,
   groupExcluded = false,
+  groupObserved = false,
   autoAssign = false,
 } = {}) {
   if (!recommendation) return null;
   if (triggerSource === 'classification_only') return 'classified_only';
+  // Observe-only (mock) groups: the run records what WOULD have happened —
+  // including "this looks like noise" — but the pipeline never finalizes
+  // anything itself. Checked before the noise branch on purpose: a noise
+  // verdict on an observed group must stay a pending suggestion, not a
+  // dismissal.
+  if (groupObserved) return 'pending_review';
   if (isNoise) return 'noise_dismissed';
   if (isPriorityAssessmentOnly) return 'priority_only';
   if (llmIgnoredRebound) return 'pending_review';

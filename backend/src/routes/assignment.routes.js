@@ -134,7 +134,7 @@ router.put('/config', requireAdmin, asyncHandler(async (req, res) => {
     scoringWeights, classificationPrompt, categorizationPrompt,
     recommendationPrompt, pollForUnassigned, pollMaxPerCycle,
     monitoredMailbox, emailPollingEnabled, emailPollingIntervalSec,
-    autoCloseNoise, dryRunMode, excludedGroupIds,
+    autoCloseNoise, dryRunMode, excludedGroupIds, observeOnlyGroupIds,
     dailyReviewEnabled, dailyReviewRunHour, dailyReviewRunMinute, dailyReviewLookbackDays,
     dailyReviewPreheatEnabled, priorityAssessmentEnabled, priorityWritebackEnabled,
     priorityAssessmentAfterHoursEnabled,
@@ -189,6 +189,11 @@ router.put('/config', requireAdmin, asyncHandler(async (req, res) => {
     // coerce to ints, dedupe. Postgres Int[] rejects non-int values.
     data.excludedGroupIds = Array.isArray(excludedGroupIds)
       ? [...new Set(excludedGroupIds.map((v) => parseInt(v)).filter((v) => Number.isInteger(v) && v > 0))]
+      : [];
+  }
+  if (observeOnlyGroupIds !== undefined) {
+    data.observeOnlyGroupIds = Array.isArray(observeOnlyGroupIds)
+      ? [...new Set(observeOnlyGroupIds.map((v) => parseInt(v)).filter((v) => Number.isInteger(v) && v > 0))]
       : [];
   }
 

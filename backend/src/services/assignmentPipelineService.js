@@ -1010,20 +1010,32 @@ class AssignmentPipelineService {
         }
       }
 
-      // Group exclusion: when the ticket's FS group is in
-      // assignmentConfig.excludedGroupIds, force pending_review even with
-      // autoAssign=true. The admin still sees the LLM recommendation, but
-      // has to click approve manually. Looks up group name for the error
-      // message and the UI strip.
+      // Group exclusion / observation: one groupId lookup feeds both.
+      // - excludedGroupIds: force pending_review even with autoAssign=true
+      //   (the admin still sees the recommendation, must approve manually).
+      // - observeOnlyGroupIds (mock mode): the run records what WOULD have
+      //   happened, but the pipeline writes NOTHING to the ticket — no
+      //   assignment, no noise flag, no category/priority/type persistence,
+      //   no FS write-back. Built for onboarding observation windows (AR).
       let groupExcluded = false;
       let excludedGroupName = null;
-      if (recommendation && !isNoise && assignmentConfig?.autoAssign) {
+      let groupObserved = false;
+      let observedGroupId = null;
+      if (recommendation) {
         try {
           const ticketRow = await prisma.ticket.findUnique({
             where: { id: ticketId },
             select: { groupId: true },
           });
-          if (isGroupExcluded(ticketRow?.groupId, assignmentConfig?.excludedGroupIds)) {
+          if (isGroupExcluded(ticketRow?.groupId, assignmentConfig?.observeOnlyGroupIds)) {
+            groupObserved = true;
+            observedGroupId = ticketRow?.groupId;
+            logger.info('Pipeline: ticket group is in observe-only mode — recording the recommendation, writing nothing', {
+              runId, ticketId, groupId: String(ticketRow.groupId),
+            });
+          }
+          if (!isNoise && assignmentConfig?.autoAssign
+            && isGroupExcluded(ticketRow?.groupId, assignmentConfig?.excludedGroupIds)) {
             groupExcluded = true;
             // Cheap name lookup: settings UI knows the names but the pipeline
             // doesn't cache them. Fall back to "#<id>" if FS lookup is slow
@@ -1034,7 +1046,7 @@ class AssignmentPipelineService {
             });
           }
         } catch (err) {
-          logger.debug('Could not check group exclusion for ticket', { runId, error: err.message });
+          logger.debug('Could not check group exclusion/observation for ticket', { runId, error: err.message });
         }
       }
 
@@ -1045,6 +1057,7 @@ class AssignmentPipelineService {
         isNoise,
         llmIgnoredRebound,
         groupExcluded,
+        groupObserved,
         autoAssign: assignmentConfig?.autoAssign,
       });
 
@@ -1052,6 +1065,8 @@ class AssignmentPipelineService {
       let errorMessage = recommendation ? null : 'Could not extract structured recommendation from LLM output';
       if (llmIgnoredRebound) {
         errorMessage = `LLM re-suggested ${topRec.techName || `tech #${topRec.techId}`}, who already rejected this ticket — downgraded to pending_review for manual handling.`;
+      } else if (groupObserved) {
+        errorMessage = `Group #${observedGroupId} is in observe-only mode — the recommendation${isNoise ? ' (looks like noise)' : ''} was recorded but nothing was changed on the ticket.`;
       } else if (groupExcluded) {
         // The "Group <X>" prefix is what the run detail page keys on to render
         // the blue "Manual approval required" strip — keep this format stable.
@@ -1079,7 +1094,14 @@ class AssignmentPipelineService {
         || decision === 'classified_only'
         || (decision === 'noise_dismissed' && assignmentConfig?.autoCloseNoise);
 
-      if (recommendation) {
+      if (recommendation && groupObserved) {
+        // Observe-only: the run carries the full recommendation (category,
+        // priority, type, noise verdict) for the review queue, but the
+        // ticket itself is left exactly as it arrived.
+        logger.info('Pipeline: observe-only group — skipped classification/priority/type/noise ticket writes', {
+          runId, ticketId, workspaceId,
+        });
+      } else if (recommendation) {
         await this._persistInternalClassification(ticketId, workspaceId, recommendation);
         if (priorityAssessmentEnabled) {
           await this._persistPriorityAssessment(ticketId, runId, recommendation);
