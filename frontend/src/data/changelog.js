@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.44-preview';
+export const APP_VERSION = '3.0.45-preview';
 
 export const changelog = [
+  {
+    version: '3.0.45-preview',
+    date: 'July 10, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>✅ Closing FreshService tickets no longer fails with a cryptic error</strong> — FreshService requires a Department to close a ticket, and tickets without one failed with just “Validation failed”. Ticket Pulse now fills the Department in automatically from the requester’s profile and retries; when that’s impossible (shared-mailbox requesters with no department), the error now says exactly what’s missing and where to set it. All FreshService rejections now report the actual field instead of a generic message.' },
+    ],
+  },
   {
     version: '3.0.44-preview',
     date: 'July 10, 2026',
