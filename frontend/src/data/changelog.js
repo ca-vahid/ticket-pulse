@@ -1,6 +1,16 @@
-export const APP_VERSION = '3.0.40-preview';
+export const APP_VERSION = '3.0.41-preview';
 
 export const changelog = [
+  {
+    version: '3.0.41-preview',
+    date: 'July 10, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>📡 The queue now shows AI runs starting live</strong> — tickets picked up from the business-hours queue began their analysis silently (the “AI choosing…” treatment only appeared after a manual refresh, and you never saw the next ticket get picked up). Queue-claimed runs now announce themselves the moment they start, so the halo, the live chip, and the completion flash all play in real time again.' },
+      { type: 'new', html: '<strong>📈 Live analysis progress on the chip</strong> — while the AI decides, the “AI choosing…” capsule now narrates where it is: <em>reading the ticket · step 2</em>, <em>matching skills · step 5</em>, <em>making the call</em>… updated in place with every analysis turn, no refresh needed.' },
+      { type: 'improved', html: '<strong>⚡ Morning queue drains up to 10× faster</strong> — queued after-hours runs used to execute strictly one at a time (a 40-deep morning queue took the better part of an hour). The drain now runs up to 10 analyses in parallel per pass.' },
+      { type: 'improved', html: 'The breathing violet halo on rows under AI analysis is a touch stronger so it actually reads as “in progress” (and respects reduced-motion preferences).' },
+    ],
+  },
   {
     version: '3.0.40-preview',
     date: 'July 10, 2026',

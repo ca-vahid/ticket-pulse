@@ -99,6 +99,22 @@ const GRID_ROOMY = 'grid grid-cols-[6px_60px_minmax(150px,1fr)_210px_116px_88px_
 // No vertical grid lines (modern list feel) — horizontal row dividers only.
 const CELL = 'px-3 self-stretch flex items-center min-w-0';
 
+// Live pipeline progress → human stage label for the "AI choosing…" chip.
+// Tool names arrive over SSE per analysis turn; buckets are coarse on purpose
+// (the run is agentic, so exact step totals don't exist ahead of time).
+const AI_STAGE_LABELS = [
+  [/submit_recommendation/, 'making the call'],
+  [/find_matching_agents|competenc/, 'matching skills'],
+  [/availability|workload|history|risk_signals|routing|site_context|ad_profile/, 'weighing the team'],
+  [/similar|search/, 'checking similar tickets'],
+  [/ticket_details|categories|requester|thread|conversation/, 'reading the ticket'],
+];
+function aiProgressLabel(progress) {
+  if (!progress?.step) return null;
+  const stage = AI_STAGE_LABELS.find(([re]) => re.test(progress.tool || ''))?.[1] || 'analyzing';
+  return `${stage} · step ${progress.step}`;
+}
+
 /** Inline priority dropdown for TP-born rows (FS-born rows stay read-only). */
 function InlinePriorityPicker({ ticket, onChanged }) {
   const [open, setOpen] = useState(false);
@@ -396,6 +412,10 @@ export default function Tickets() {
   // visible outcome keep the live treatment (halo + "AI choosing…") and the
   // completion flash plays on the refetch that actually delivers the name.
   const [aiHoldIds, setAiHoldIds] = useState(() => new Set());
+  // Live analysis progress per ticket (ticketId → { step, tool }) from the
+  // per-turn pipeline SSE pings — renders as "matching skills · step 4" in
+  // the AI-choosing chip. Updated in place; never triggers refetches.
+  const [aiProgress, setAiProgress] = useState(() => new Map());
   const aiHoldRef = useRef(new Map()); // ticketId -> hold expiry (epoch ms)
   const aiHoldTimerRef = useRef(null);
   const syncAiHold = useCallback(() => {
@@ -478,6 +498,25 @@ export default function Tickets() {
 
   useEffect(() => { fetchTickets(); }, [fetchTickets]);
 
+  // Drop progress labels for rows a refetch shows are no longer analyzing
+  // (missed terminal pings, page changes, etc.) so stale "step N" text never
+  // outlives the run it described.
+  useEffect(() => {
+    setAiProgress((current) => {
+      if (!current.size) return current;
+      let changed = false;
+      const next = new Map(current);
+      for (const id of current.keys()) {
+        const row = tickets.find((t) => t.id === id);
+        if (!row || (row.ai?.state !== 'analyzing' && !aiHoldIds.has(id))) {
+          next.delete(id);
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [tickets, aiHoldIds]);
+
   // ---- Live updates, resource-conscious ----
   // SSE changes do NOT reload the list (jarring + heavy with many users).
   // Stat cards refresh silently (7 cheap counts, debounced), an open peek
@@ -550,6 +589,24 @@ export default function Tickets() {
   }, [fetchTickets, fetchStats]);
 
   const onTicketChange = useCallback((data) => {
+    // Per-turn progress pings (running + step): update the chip's stage label
+    // in place and stop — no stats refresh, no refetch. With up to 10 runs in
+    // parallel these arrive every few seconds; refetching on them would be a
+    // sustained request storm. The one exception: a step ping for a row the
+    // page doesn't yet SHOW as analyzing falls through and arms it below.
+    const isStepPing = data?.action === 'pipeline' && data?.status === 'running' && data?.step;
+    if (isStepPing) {
+      const tid = Number(data.ticketId);
+      const row = ticketsRef.current.find((t) => t.id === tid);
+      if (!row) return;
+      setAiProgress((current) => {
+        const next = new Map(current);
+        next.set(tid, { step: Number(data.step), tool: data.tool || null });
+        return next;
+      });
+      if (row.ai?.state === 'analyzing') return;
+      // fall through: first sighting of this run — refetch to arm the halo.
+    }
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     refreshTimerRef.current = setTimeout(() => {
       fetchStats();
@@ -561,6 +618,15 @@ export default function Tickets() {
     // updates", they're a process the queue should show happening.
     if (data?.action === 'pipeline') {
       const tid = Number(data.ticketId);
+      if (data.status && data.status !== 'running') {
+        // Run left the in-flight state — drop its progress label.
+        setAiProgress((current) => {
+          if (!current.has(tid)) return current;
+          const next = new Map(current);
+          next.delete(tid);
+          return next;
+        });
+      }
       if (tid && ticketsRef.current.some((t) => t.id === tid)) {
         if (aiLiveTimerRef.current) clearTimeout(aiLiveTimerRef.current);
         aiLiveTimerRef.current = setTimeout(() => {
@@ -1340,7 +1406,7 @@ export default function Tickets() {
                                     </span>
                                     <span className="flex flex-col min-w-0 leading-tight">
                                       <span className="text-[9px] font-bold uppercase tracking-wider text-violet-600">AI choosing…</span>
-                                      <span className="text-xs italic text-slate-400 truncate">best person for this</span>
+                                      <span className="text-xs italic text-slate-400 truncate">{aiProgressLabel(aiProgress.get(ticket.id)) || 'best person for this'}</span>
                                     </span>
                                   </button>
                                 ) : (
@@ -1353,7 +1419,7 @@ export default function Tickets() {
                                     </span>
                                     <span className="flex flex-col min-w-0 leading-tight">
                                       <span className="text-[9px] font-bold uppercase tracking-wider text-violet-600">AI choosing…</span>
-                                      <span className="text-xs italic text-slate-400 truncate">best person for this</span>
+                                      <span className="text-xs italic text-slate-400 truncate">{aiProgressLabel(aiProgress.get(ticket.id)) || 'best person for this'}</span>
                                     </span>
                                   </span>
                                 )
