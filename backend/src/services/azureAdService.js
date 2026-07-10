@@ -88,6 +88,11 @@ class AzureAdService {
       return `data:${contentType};base64,${base64}`;
     } catch (error) {
       if (error.response?.status === 404) {
+        // Direct /users/{email} only resolves when the address IS the UPN.
+        // Alias domains (bgcengineering.com / .com.ca) and external guests
+        // (cambioearth.com) need a directory search first (QA 07-10).
+        const viaSearch = await this._getPhotoByDirectorySearch(email).catch(() => null);
+        if (viaSearch) return viaSearch;
         logger.info(`No photo found for ${email}`);
         return null;
       }
@@ -98,6 +103,43 @@ class AzureAdService {
       });
       return null;
     }
+  }
+
+  /**
+   * Resolve a user whose email is not their UPN: match on `mail`, then on any
+   * proxyAddress (covers alias domains), and fetch the photo by object id.
+   */
+  async _getPhotoByDirectorySearch(email) {
+    const token = await this.getAccessToken();
+    const headers = { Authorization: `Bearer ${token}`, ConsistencyLevel: 'eventual' };
+    const safe = email.replace(/'/g, "''");
+    const filters = [
+      `mail eq '${safe}'`,
+      `proxyAddresses/any(p:p eq 'smtp:${safe}')`,
+    ];
+    for (const filter of filters) {
+      try {
+        const lookup = await axios.get(
+          `${this.graphApiUrl}/users?$filter=${encodeURIComponent(filter)}&$select=id&$count=true&$top=1`,
+          { headers },
+        );
+        const userId = lookup.data?.value?.[0]?.id;
+        if (!userId) continue;
+        const response = await axios.get(`${this.graphApiUrl}/users/${userId}/photo/$value`, {
+          headers: { Authorization: `Bearer ${token}` },
+          responseType: 'arraybuffer',
+        });
+        const base64 = Buffer.from(response.data, 'binary').toString('base64');
+        const contentType = response.headers['content-type'] || 'image/jpeg';
+        logger.info(`Photo fetched via directory search for ${email}`);
+        return `data:${contentType};base64,${base64}`;
+      } catch (err) {
+        if (err.response?.status !== 404) {
+          logger.debug(`Directory-search photo lookup failed for ${email} (${filter}): ${err.message}`);
+        }
+      }
+    }
+    return null;
   }
 
   /**

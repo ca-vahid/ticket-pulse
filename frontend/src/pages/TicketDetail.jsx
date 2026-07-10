@@ -183,6 +183,10 @@ function CollapsibleBody({ html, text }) {
   );
 }
 
+// email -> Promise<dataUri|null>. Module-level so revisiting tickets (or the
+// same participant on different tickets) never re-fetches within the session.
+const participantPhotoCache = new Map();
+
 const isImageAttachment = (a) =>
   /^image\//i.test(a?.contentType || a?.mimeType || '') ||
   /\.(png|jpe?g|gif|webp|bmp|svg|heic|avif)$/i.test(a?.fileName || '');
@@ -531,6 +535,41 @@ export default function TicketDetail() {
       .catch(() => {});
     return () => { cancelled = true; };
   }, [requesterEmail]);
+
+  // ---- GAL photos for every OTHER thread participant (QA 07-10) ----
+  // Third parties (cc'd colleagues, external repliers) resolve to real names
+  // now — give them their directory photo too. Server caches per email
+  // (12h, nulls included); the module map dedupes across mounts.
+  const [participantPhotos, setParticipantPhotos] = useState({});
+  const threadEmailsKey = useMemo(() => {
+    const emails = new Set();
+    for (const e of (ticket?.thread || [])) {
+      const em = String(e.actorEmail || '').trim().toLowerCase();
+      if (em && em.includes('@') && em !== (requesterEmail || '').toLowerCase()) emails.add(em);
+    }
+    return [...emails].sort().slice(0, 20).join(',');
+  }, [ticket?.thread, requesterEmail]);
+  useEffect(() => {
+    if (!threadEmailsKey) return undefined;
+    let cancelled = false;
+    const emails = threadEmailsKey.split(',').filter(Boolean);
+    (async () => {
+      for (const email of emails) {
+        if (participantPhotoCache.has(email)) {
+          const photo = await participantPhotoCache.get(email);
+          if (!cancelled && photo) setParticipantPhotos((p) => (p[email] ? p : { ...p, [email]: photo }));
+          continue;
+        }
+        const promise = ticketsAPI.requesterPhoto(email)
+          .then((res) => res.data?.photo || null)
+          .catch(() => null);
+        participantPhotoCache.set(email, promise);
+        const photo = await promise;
+        if (!cancelled && photo) setParticipantPhotos((p) => ({ ...p, [email]: photo }));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [threadEmailsKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [composerMode, setComposerMode] = useState('note'); // default to internal note
   const [composerBody, setComposerBody] = useState(''); // sanitized html from the editor
@@ -966,8 +1005,10 @@ export default function TicketDetail() {
     )) {
       return requesterPhoto;
     }
+    // Any other known participant: their own GAL photo (QA 07-10).
+    if (email && participantPhotos[email]) return participantPhotos[email];
     return null;
-  }, [techPhotoByEmail, requesterPhoto, requesterEmail]);
+  }, [techPhotoByEmail, requesterPhoto, requesterEmail, participantPhotos]);
 
   const applyChange = useCallback(async (field, fn, { undo = null, label = 'Saved' } = {}) => {
     setSavingField(field);

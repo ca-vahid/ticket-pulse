@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.43-preview';
+export const APP_VERSION = '3.0.44-preview';
 
 export const changelog = [
+  {
+    version: '3.0.44-preview',
+    date: 'July 10, 2026',
+    entries: [
+      { type: 'new', html: '<strong>🖼️ Directory photos for every conversation participant</strong> — everyone in a thread now gets their GAL photo, not just the ticket’s requester: cc’d colleagues, third-party repliers, and people on any of our domains (bgcengineering.ca / .com / .com.ca, cambioearth.com, …). Lookups fall back to a directory search for alias domains and external guests, and photos are cached so repeat visits are instant.' },
+    ],
+  },
   {
     version: '3.0.43-preview',
     date: 'July 10, 2026',
