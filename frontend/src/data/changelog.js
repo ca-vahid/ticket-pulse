@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.41-preview';
+export const APP_VERSION = '3.0.42-preview';
 
 export const changelog = [
+  {
+    version: '3.0.42-preview',
+    date: 'July 10, 2026',
+    entries: [
+      { type: 'new', html: '<strong>👁️ Observe mode learns a middle setting: apply categories</strong> — a new carve-out toggle under Observe-Only Groups lets observed tickets receive the AI’s category (on the ticket and in FreshService via Auto-Categorize) while assignment, noise verdicts, and priority remain recorded-only suggestions. Turned on for Accounting’s AR observation: their tickets now get categorized from day one while a human still makes every assignment call.' },
+    ],
+  },
   {
     version: '3.0.41-preview',
     date: 'July 10, 2026',

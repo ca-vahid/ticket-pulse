@@ -1484,8 +1484,11 @@ model AssignmentConfig {
   observeOnlyGroupIds     Int[]     @default([]) @map("observe_only_group_ids")
   // Auto-apply AI categories to FreshService even while assignment is
   // human-gated (pending_review) or the run was priority-only (after-hours).
-  // Observe-only groups are always exempt.
   autoCategorizeEnabled   Boolean   @default(false) @map("auto_categorize_enabled")
+  // Observation carve-out: when true, observe-only groups still get the AI's
+  // CATEGORY applied (persisted on the ticket; FS write-back rides
+  // autoCategorizeEnabled) while assignment/noise/priority/type stay mocked.
+  observeCategoryWritebackEnabled Boolean @default(false) @map("observe_category_writeback_enabled")
   createdAt               DateTime  @default(now()) @map("created_at")
   updatedAt               DateTime  @updatedAt @map("updated_at")
 
