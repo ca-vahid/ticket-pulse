@@ -4532,7 +4532,7 @@ export function AssignmentConfigPanel({ workspaceTimezone = 'America/Los_Angeles
         llmModel: 'claude-sonnet-5', maxRecommendations: 3, scoringWeights: null,
         pollForUnassigned: true, pollMaxPerCycle: 5,
         monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60,
-        excludedGroupIds: [], observeOnlyGroupIds: [], autoCategorizeEnabled: false,
+        excludedGroupIds: [], observeOnlyGroupIds: [], autoCategorizeEnabled: false, observeCategoryWritebackEnabled: false,
         dailyReviewEnabled: false, dailyReviewRunHour: 18, dailyReviewRunMinute: 5, dailyReviewLookbackDays: 14,
         dailyReviewPreheatEnabled: false,
         priorityAssessmentEnabled: true, priorityWritebackEnabled: true,
@@ -4633,9 +4633,16 @@ export function AssignmentConfigPanel({ workspaceTimezone = 'America/Los_Angeles
           onChange={(ids) => setConfig({ ...config, observeOnlyGroupIds: ids })}
           countNoun="observed"
           description={(
-            <>The AI still analyzes every ticket in the selected groups and records what it <span className="font-semibold text-slate-700">would have done</span> — category, priority, type, even &ldquo;this looks like noise&rdquo; — visible in the review queue. But it <span className="font-semibold text-slate-700">changes nothing on the ticket</span>: no assignment, no noise flag, no category or priority stamps, no FreshService write-back. Ideal while onboarding a new team or mailbox: watch what the AI would do before letting it act.</>
+            <>The AI still analyzes every ticket in the selected groups and records what it <span className="font-semibold text-slate-700">would have done</span> — category, priority, type, even &ldquo;this looks like noise&rdquo; — visible in the review queue. But it <span className="font-semibold text-slate-700">changes nothing on the ticket</span>: no assignment, no noise flag, no category or priority stamps, no FreshService write-back (unless the category carve-out below is on). Ideal while onboarding a new team or mailbox: watch what the AI would do before letting it act.</>
           )}
           note="Manual actions are unaffected — reviewers can still approve a recorded suggestion to apply it deliberately."
+        />
+        <ConfigToggle
+          label="Apply categories while observing"
+          description="Carve-out: observed tickets still get the AI's category on the ticket (and in FreshService when Auto-Categorize is on) — assignment, noise, and priority stay recorded-only."
+          checked={!!config.observeCategoryWritebackEnabled}
+          onChange={() => setConfig({ ...config, observeCategoryWritebackEnabled: !config.observeCategoryWritebackEnabled })}
+          color="text-violet-600"
         />
       </ConfigSection>
 

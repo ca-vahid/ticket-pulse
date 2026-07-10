@@ -1092,7 +1092,9 @@ class AssignmentPipelineService {
       if (llmIgnoredRebound) {
         errorMessage = `LLM re-suggested ${topRec.techName || `tech #${topRec.techId}`}, who already rejected this ticket — downgraded to pending_review for manual handling.`;
       } else if (groupObserved) {
-        errorMessage = `Group #${observedGroupId} is in observe-only mode — the recommendation${isNoise ? ' (looks like noise)' : ''} was recorded but nothing was changed on the ticket.`;
+        errorMessage = assignmentConfig?.observeCategoryWritebackEnabled
+          ? `Group #${observedGroupId} is in observe-only mode — the category was applied; assignment${isNoise ? ' and the noise verdict' : ''} stayed a recorded suggestion.`
+          : `Group #${observedGroupId} is in observe-only mode — the recommendation${isNoise ? ' (looks like noise)' : ''} was recorded but nothing was changed on the ticket.`;
       } else if (groupExcluded) {
         // The "Group <X>" prefix is what the run detail page keys on to render
         // the blue "Manual approval required" strip — keep this format stable.
@@ -1120,11 +1122,17 @@ class AssignmentPipelineService {
         || decision === 'classified_only'
         || (decision === 'noise_dismissed' && assignmentConfig?.autoCloseNoise);
 
+      const observeApplyCategories = groupObserved && assignmentConfig?.observeCategoryWritebackEnabled === true;
       if (recommendation && groupObserved) {
         // Observe-only: the run carries the full recommendation (category,
         // priority, type, noise verdict) for the review queue, but the
-        // ticket itself is left exactly as it arrived.
-        logger.info('Pipeline: observe-only group — skipped classification/priority/type/noise ticket writes', {
+        // ticket itself is left exactly as it arrived — EXCEPT the category
+        // when the workspace opted into the observation carve-out (accounting
+        // wants AR tickets categorized while assignment stays mocked).
+        if (observeApplyCategories) {
+          await this._persistInternalClassification(ticketId, workspaceId, recommendation);
+        }
+        logger.info(`Pipeline: observe-only group — ${observeApplyCategories ? 'applied category only; ' : ''}skipped ${observeApplyCategories ? '' : 'classification/'}priority/type/noise ticket writes`, {
           runId, ticketId, workspaceId,
         });
       } else if (recommendation) {
@@ -1238,9 +1246,10 @@ class AssignmentPipelineService {
         // (pending_review) or the run was priority-only (after-hours escalation
         // classifies anyway), the AI's category flows to FreshService. Decisions
         // that trigger the full sync below already write categories there —
-        // this covers only the human-gated paths. Observe-only groups never
-        // persisted a category, so the writeback no-ops for them ('no_category').
-        if (assignmentConfig?.autoCategorizeEnabled && !groupObserved
+        // this covers only the human-gated paths. Observed groups join in only
+        // via the observation carve-out (otherwise they never persisted a
+        // category and the writeback would no-op with 'no_category' anyway).
+        if (assignmentConfig?.autoCategorizeEnabled && (!groupObserved || observeApplyCategories)
           && (decision === 'pending_review' || decision === 'priority_only')) {
           await freshServiceActionService.executeCategoryWriteback(
             runId,
