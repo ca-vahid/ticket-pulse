@@ -704,3 +704,107 @@ describe('freshServiceActionService group preflight remediation', () => {
     expect(client.listGroups).not.toHaveBeenCalled();
   });
 });
+
+describe('freshServiceActionService category writeback (auto-categorize)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prismaMock.assignmentPipelineRun.update.mockResolvedValue({});
+    prismaMock.ticket.update.mockResolvedValue({});
+    prismaMock.workspace.findUnique.mockResolvedValue({
+      tpSkillCustomField: 'lf_ticket_pulse_category',
+      tpSubskillCustomField: 'lf_ticket_pulse_subcategory',
+    });
+    settingsRepositoryMock.getFreshServiceConfigForWorkspace.mockResolvedValue({
+      domain: 'example.freshservice.com',
+      apiKey: 'test-key',
+      workspaceId: 4,
+      tpSkillCustomField: 'lf_ticket_pulse_category',
+      tpSubskillCustomField: 'lf_ticket_pulse_subcategory',
+    });
+  });
+
+  const categoryRun = (ticketOverrides = {}) => ({
+    id: 4201,
+    ticketId: 901,
+    workspaceId: 1,
+    ticket: {
+      id: 901,
+      freshserviceTicketId: 232281,
+      origin: 'freshservice',
+      tpSkill: null,
+      tpSubskill: null,
+      internalCategory: { name: 'Remittances' },
+      internalSubcategory: null,
+      ...ticketOverrides,
+    },
+  });
+
+  test('dry-run records the intended category without calling FreshService', async () => {
+    prismaMock.assignmentPipelineRun.findUnique.mockResolvedValue(categoryRun());
+
+    const result = await freshServiceActionService.executeCategoryWriteback(4201, 1, true);
+
+    expect(result).toEqual(expect.objectContaining({ success: true, dryRun: true }));
+    expect(freshserviceModule.createFreshServiceClient).not.toHaveBeenCalled();
+    expect(prismaMock.assignmentPipelineRun.update).toHaveBeenCalledWith({
+      where: { id: 4201 },
+      data: expect.objectContaining({
+        categoryWritebackStatus: 'dry_run',
+        categoryWritebackPayload: expect.objectContaining({
+          preview: 'Set Ticket Pulse category on #232281 to "Remittances"',
+        }),
+      }),
+    });
+  });
+
+  test('skips with no_category when the run persisted nothing (observe-only groups)', async () => {
+    prismaMock.assignmentPipelineRun.findUnique.mockResolvedValue(categoryRun({ internalCategory: null }));
+
+    const result = await freshServiceActionService.executeCategoryWriteback(4201, 1, false);
+
+    expect(result).toEqual(expect.objectContaining({ success: true, skipped: true, error: 'no_category' }));
+    expect(freshserviceModule.createFreshServiceClient).not.toHaveBeenCalled();
+  });
+
+  test('skips with already_current when FreshService already carries the category', async () => {
+    prismaMock.assignmentPipelineRun.findUnique.mockResolvedValue(categoryRun({ tpSkill: 'Remittances' }));
+
+    const result = await freshServiceActionService.executeCategoryWriteback(4201, 1, false);
+
+    expect(result).toEqual(expect.objectContaining({ success: true, skipped: true, error: 'already_current' }));
+    expect(freshserviceModule.createFreshServiceClient).not.toHaveBeenCalled();
+  });
+
+  test('resolves lookup display ids, writes custom fields, and mirrors locally', async () => {
+    const client = {
+      listCustomObjects: jest.fn().mockResolvedValue([
+        { id: 11, title: 'Ticket Pulse Skills' },
+        { id: 12, title: 'Ticket Pulse Subskills' },
+      ]),
+      listCustomObjectRecords: jest.fn((objectId) => Promise.resolve(
+        objectId === 11 ? [{ data: { name: 'Remittances', bo_display_id: 30 } }] : [],
+      )),
+      updateTicketCustomFields: jest.fn().mockResolvedValue({ id: 232281 }),
+    };
+    freshserviceModule.createFreshServiceClient.mockReturnValue(client);
+    prismaMock.assignmentPipelineRun.findUnique.mockResolvedValue(categoryRun());
+
+    const result = await freshServiceActionService.executeCategoryWriteback(4201, 1, false);
+
+    expect(result).toEqual(expect.objectContaining({ success: true }));
+    expect(client.updateTicketCustomFields).toHaveBeenCalledWith(232281, expect.objectContaining({
+      lf_ticket_pulse_category: 30,
+    }));
+    expect(prismaMock.ticket.update).toHaveBeenCalledWith({
+      where: { id: 901 },
+      data: { tpSkill: 'Remittances', tpSubskill: null },
+    });
+    expect(prismaMock.assignmentPipelineRun.update).toHaveBeenCalledWith({
+      where: { id: 4201 },
+      data: expect.objectContaining({
+        categoryWritebackStatus: 'synced',
+        categoryWrittenAt: expect.any(Date),
+      }),
+    });
+  });
+});

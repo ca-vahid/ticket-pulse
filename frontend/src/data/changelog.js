@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.0.39-preview';
+export const APP_VERSION = '3.0.40-preview';
 
 export const changelog = [
+  {
+    version: '3.0.40-preview',
+    date: 'July 10, 2026',
+    entries: [
+      { type: 'new', html: '<strong>🏷️ Auto-Categorize</strong> — a new toggle next to Auto-Assign: the AI’s category now flows to the ticket and FreshService even while the <em>assignment</em> decision waits for human approval. This also covers after-hours urgent-detection runs — since the AI classifies the ticket anyway while assessing priority, the category no longer waits for morning. Observe-only groups stay exempt, dry-run mode is respected, and each run shows exactly what was written (or would have been).' },
+      { type: 'improved', html: '<strong>⚙️ AI &amp; Routing settings moved to Settings</strong> — the assignment pipeline configuration (auto-assign, auto-categorize, priority controls, excluded &amp; observe-only groups, sync mode, detection) now lives in <em>Settings → AI &amp; Routing</em>, next to AI Providers, instead of hiding as a tab inside Assignment Review.' },
+    ],
+  },
   {
     version: '3.0.39-preview',
     date: 'July 9, 2026',

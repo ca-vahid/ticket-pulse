@@ -1482,6 +1482,10 @@ model AssignmentConfig {
   // category/priority/type persistence, no FS write-back. Decision is forced
   // to pending_review. Built for the AR onboarding observation window.
   observeOnlyGroupIds     Int[]     @default([]) @map("observe_only_group_ids")
+  // Auto-apply AI categories to FreshService even while assignment is
+  // human-gated (pending_review) or the run was priority-only (after-hours).
+  // Observe-only groups are always exempt.
+  autoCategorizeEnabled   Boolean   @default(false) @map("auto_categorize_enabled")
   createdAt               DateTime  @default(now()) @map("created_at")
   updatedAt               DateTime  @updatedAt @map("updated_at")
 
@@ -2290,6 +2294,13 @@ model AssignmentPipelineRun {
   ticketTypeWritebackPayload Json?  @map("ticket_type_writeback_payload")
   ticketTypeWritebackError String?  @db.Text @map("ticket_type_writeback_error")
   ticketTypeWrittenAt DateTime?     @map("ticket_type_written_at")
+  // Category-only FS write-back (autoCategorizeEnabled): categories flow to
+  // FreshService on pending_review / priority_only runs while assignment
+  // stays human-gated. synced | failed | dry_run | skipped.
+  categoryWritebackStatus String?   @db.VarChar(20) @map("category_writeback_status")
+  categoryWritebackPayload Json?    @map("category_writeback_payload")
+  categoryWritebackError String?    @db.Text @map("category_writeback_error")
+  categoryWrittenAt DateTime?       @map("category_written_at")
   feedbackApplied   Boolean    @default(false) @map("feedback_applied")
   createdAt         DateTime   @default(now()) @map("created_at")
   updatedAt         DateTime   @updatedAt @map("updated_at")

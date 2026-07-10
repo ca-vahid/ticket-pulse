@@ -32,7 +32,8 @@ const ALL_TABS = [
   { id: 'competencies', label: 'Competencies', icon: Award, minRole: 'admin' },
   { id: 'competency-requests', label: 'Requests', icon: MessageSquare, minRole: 'admin' },
   { id: 'prompts', label: 'Prompts', icon: FileText, minRole: 'admin' },
-  { id: 'config', label: 'Configuration', icon: Settings2, minRole: 'admin' },
+  // 'config' moved to Settings → AI & Routing (the panel is exported below as
+  // AssignmentConfigPanel); old ?tab=config deep links fall through to Queue.
 ];
 
 const PACIFIC_TIMEZONE = 'America/Los_Angeles';
@@ -4511,7 +4512,7 @@ export function AiProviderSettingsPanel({ onAssignmentModelChange }) {
   );
 }
 
-function ConfigTab({ workspaceTimezone = 'America/Los_Angeles' }) {
+export function AssignmentConfigPanel({ workspaceTimezone = 'America/Los_Angeles' }) {
   const [config, setConfig] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -4531,7 +4532,7 @@ function ConfigTab({ workspaceTimezone = 'America/Los_Angeles' }) {
         llmModel: 'claude-sonnet-5', maxRecommendations: 3, scoringWeights: null,
         pollForUnassigned: true, pollMaxPerCycle: 5,
         monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60,
-        excludedGroupIds: [], observeOnlyGroupIds: [],
+        excludedGroupIds: [], observeOnlyGroupIds: [], autoCategorizeEnabled: false,
         dailyReviewEnabled: false, dailyReviewRunHour: 18, dailyReviewRunMinute: 5, dailyReviewLookbackDays: 14,
         dailyReviewPreheatEnabled: false,
         priorityAssessmentEnabled: true, priorityWritebackEnabled: true,
@@ -4575,6 +4576,13 @@ function ConfigTab({ workspaceTimezone = 'America/Los_Angeles' }) {
       {/* Section 2: Assignment Behavior */}
       <ConfigSection icon={Settings2} title="Assignment Behavior">
         <ConfigToggle label="Auto-Assign Tickets" description="Skip admin review and auto-assign the top recommendation to the technician" checked={config.autoAssign} onChange={() => setConfig({ ...config, autoAssign: !config.autoAssign })} />
+        <ConfigToggle
+          label="Auto-Categorize Tickets"
+          description="Write the AI's category to the ticket and FreshService even while assignment waits for human approval — and on after-hours priority runs, which classify anyway. Observe-only groups are always exempt."
+          checked={!!config.autoCategorizeEnabled}
+          onChange={() => setConfig({ ...config, autoCategorizeEnabled: !config.autoCategorizeEnabled })}
+          color="text-emerald-600"
+        />
         <ConfigToggle label="Auto-Close Noise Tickets" description="Automatically close/resolve noise and spam tickets in FreshService without admin review" checked={config.autoCloseNoise} onChange={() => setConfig({ ...config, autoCloseNoise: !config.autoCloseNoise })} />
         <div className="py-3">
           <h4 className="font-medium text-sm text-slate-800 mb-1.5">Max Recommendations</h4>
@@ -5031,7 +5039,6 @@ export default function AssignmentReview() {
             {activeTab === 'competencies' && <CompetencyManager deepRunId={competencyRunId} deepAnalyzeTechId={analyzeTechId} workspaceTimezone={workspaceTimezone} />}
             {activeTab === 'competency-requests' && <CompetencyRequestsTab onPendingCountChange={setCompetencyRequestCount} />}
             {activeTab === 'prompts' && <PromptManager workspaceTimezone={workspaceTimezone} />}
-            {activeTab === 'config' && <ConfigTab workspaceTimezone={workspaceTimezone} />}
           </div>
         </div>
       </div>
