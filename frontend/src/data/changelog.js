@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.0.45-preview';
+export const APP_VERSION = '3.0.46-preview';
 
 export const changelog = [
+  {
+    version: '3.0.46-preview',
+    date: 'July 10, 2026',
+    entries: [
+      { type: 'new', html: '<strong>💰 AI Usage &amp; Cost dashboard</strong> — super admins get a new Settings section showing every AI call across all workspaces: estimated cost in CAD (configurable exchange rate), daily history, and breakdowns by workspace, operation, and model. Data goes back to late May.' },
+      { type: 'improved', html: '<strong>⚡ AI costs cut with prompt caching</strong> — the assignment AI re-sends its instructions, tools, and conversation on every turn; those repeats are now served from Anthropic’s prompt cache at 90% off instead of full price. Expected to reduce input-token spend on the assignment pipeline — the biggest cost driver — by roughly 60–80%. Watch the “Served from cache” numbers climb on the new dashboard.' },
+    ],
+  },
   {
     version: '3.0.45-preview',
     date: 'July 10, 2026',

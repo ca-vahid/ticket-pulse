@@ -10,6 +10,7 @@ import webhookRoutes from './webhook.routes.js';
 import freshserviceWebhookRoutes from './freshserviceWebhook.routes.js';
 import autoresponseRoutes from './autoresponse.routes.js';
 import llmAdminRoutes from './llmAdmin.routes.js';
+import aiUsageRoutes from './aiUsage.routes.js';
 import visualsRoutes from './visuals.routes.js';
 import noiseRoutes from './noise.routes.js';
 import vacationTrackerRoutes from './vacationTracker.routes.js';
@@ -83,6 +84,9 @@ router.use('/tickets', ticketsRoutes);
 // helpers. Mount it before global workspace enforcement so one-time global
 // settings are not blocked by a stale selected workspace.
 router.use('/settings', settingsRoutes);
+// Cross-workspace AI usage/cost report: super-admin gated inside the router,
+// deliberately NOT behind workspace enforcement (it spans all workspaces).
+router.use('/ai-usage', aiUsageRoutes);
 router.use(requireWorkspace);
 router.use(requireWorkspaceAccess);
 

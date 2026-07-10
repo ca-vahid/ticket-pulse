@@ -425,6 +425,17 @@ export const settingsAPI = {
 /**
  * Sync API
  */
+export const aiUsageAPI = {
+  report: async (params = {}) => {
+    const response = await api.get('/ai-usage', { params });
+    return response.data;
+  },
+  setUsdCadRate: async (rate) => {
+    const response = await api.put('/ai-usage/usd-cad-rate', { rate });
+    return response.data;
+  },
+};
+
 export const syncAPI = {
   trigger: async () => {
     return await apiLongTimeout.post('/sync/trigger');
