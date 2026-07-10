@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.42-preview';
+export const APP_VERSION = '3.0.43-preview';
 
 export const changelog = [
+  {
+    version: '3.0.43-preview',
+    date: 'July 10, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>👤 Known people no longer show as bare email addresses in conversations</strong> — when a colleague replied on someone else’s ticket (common with shared-mailbox tickets), the conversation showed their raw address like <i>jkugel@…</i> with a one-letter avatar, even though they exist in the system. The conversation now resolves every participant against the people directory — full name and proper initials — and a related fix stops the ticket requester’s name from ever being stamped onto a third party’s reply. Applies to all historical tickets immediately.' },
+    ],
+  },
   {
     version: '3.0.42-preview',
     date: 'July 10, 2026',
