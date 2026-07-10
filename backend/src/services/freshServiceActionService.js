@@ -640,6 +640,157 @@ class FreshServiceActionService {
     }
   }
 
+  /**
+   * Category-only FS write-back (autoCategorizeEnabled): applies the AI's
+   * category custom fields on runs whose ASSIGNMENT stayed human-gated
+   * (pending_review) or that were priority-only (after-hours escalation runs
+   * classify anyway). Sources the category from the ticket row, which
+   * _persistInternalClassification already populated — so observe-only
+   * groups naturally short-circuit here with 'no_category'.
+   */
+  async executeCategoryWriteback(runId, workspaceId, dryRun = false) {
+    const run = await prisma.assignmentPipelineRun.findUnique({
+      where: { id: runId },
+      include: {
+        ticket: {
+          select: {
+            id: true,
+            freshserviceTicketId: true,
+            origin: true,
+            tpSkill: true,
+            tpSubskill: true,
+            internalCategory: { select: { name: true } },
+            internalSubcategory: { select: { name: true } },
+          },
+        },
+      },
+    });
+
+    if (!run) {
+      logger.warn('FreshService category sync: run not found', { runId });
+      return { success: false, error: 'Run not found' };
+    }
+
+    const skip = async (reason, preview) => {
+      await prisma.assignmentPipelineRun.update({
+        where: { id: runId },
+        data: {
+          categoryWritebackStatus: 'skipped',
+          categoryWritebackError: reason,
+          categoryWritebackPayload: buildSyncPayload([], preview, dryRun, {
+            kind: 'category_writeback', skippedReason: reason,
+          }),
+        },
+      });
+      return { success: true, skipped: true, error: reason, preview, actions: [] };
+    };
+
+    if (!isSkillHierarchyWorkspace(workspaceId)) {
+      return skip('category_writeback_not_enabled_for_workspace', 'Category write-back requires the hierarchical category system for this workspace');
+    }
+    const ticket = run.ticket;
+    const fsTicketId = ticket?.freshserviceTicketId ? Number(ticket.freshserviceTicketId) : null;
+    if (!fsTicketId) {
+      return skip('missing_fs_ticket_id', 'Ticket has no FreshService ID — nothing to write back');
+    }
+    const skillName = ticket?.internalCategory?.name || null;
+    const subskillName = ticket?.internalSubcategory?.name || null;
+    if (!skillName) {
+      return skip('no_category', 'Run produced no persisted category (observe-only group or classification missing)');
+    }
+    if (skillName === ticket.tpSkill && (subskillName || null) === (ticket.tpSubskill || null)) {
+      return skip('already_current', `FreshService already carries "${skillName}${subskillName ? ` > ${subskillName}` : ''}"`);
+    }
+
+    const workspace = await prisma.workspace.findUnique({
+      where: { id: workspaceId },
+      select: { tpSkillCustomField: true, tpSubskillCustomField: true },
+    });
+    const action = {
+      type: 'update_custom_fields',
+      ticketId: fsTicketId,
+      customFields: {
+        [workspace?.tpSkillCustomField || 'lf_ticket_pulse_category']: skillName,
+        [workspace?.tpSubskillCustomField || 'lf_ticket_pulse_subcategory']: subskillName || null,
+      },
+      localFields: { tpSkill: skillName, tpSubskill: subskillName || null },
+    };
+    const preview = `Set Ticket Pulse category on #${fsTicketId} to "${skillName}${subskillName ? ` > ${subskillName}` : ''}"`;
+    const payloadData = buildSyncPayload([action], preview, dryRun, { kind: 'category_writeback' });
+
+    if (dryRun) {
+      await prisma.assignmentPipelineRun.update({
+        where: { id: runId },
+        data: { categoryWritebackStatus: 'dry_run', categoryWritebackError: null, categoryWritebackPayload: payloadData },
+      });
+      logger.info('FreshService category sync dry-run', { runId, preview });
+      return { success: true, dryRun: true, preview, actions: [action] };
+    }
+
+    try {
+      const fsConfig = await settingsRepository.getFreshServiceConfigForWorkspace(workspaceId);
+      if (!fsConfig?.domain || !fsConfig?.apiKey) {
+        throw new Error('FreshService not configured for this workspace');
+      }
+      const client = createFreshServiceClient(fsConfig.domain, fsConfig.apiKey, {
+        priority: 'high',
+        source: 'freshservice-category-writeback',
+      });
+
+      const customFields = await this._resolveTicketPulseLookupFields(client, action, fsConfig);
+      action.sentCustomFields = customFields;
+      const result = await client.updateTicketCustomFields(fsTicketId, customFields);
+      if (result?.alreadyClosed) {
+        return skip('ticket_closed_in_freshservice', `Ticket #${fsTicketId} is closed in FreshService — category not written`);
+      }
+      await prisma.ticket.update({
+        where: { id: run.ticketId },
+        data: action.localFields,
+      }).catch((updateError) => {
+        logger.warn('FreshService category sync: FS updated but local mirror failed', {
+          ticketId: run.ticketId, freshserviceTicketId: fsTicketId, runId, error: updateError.message,
+        });
+      });
+
+      await prisma.assignmentPipelineRun.update({
+        where: { id: runId },
+        data: {
+          categoryWritebackStatus: 'synced',
+          categoryWritebackError: null,
+          categoryWritebackPayload: payloadData,
+          categoryWrittenAt: new Date(),
+        },
+      });
+      logger.info('FreshService category sync completed', { runId, preview });
+      return { success: true, preview, actions: [action] };
+    } catch (err) {
+      const freshserviceError = extractFreshServiceError(err);
+      if (isFreshServiceReadOnlyError(err)) {
+        const skippedReason = readOnlyTicketSyncMessage();
+        await prisma.assignmentPipelineRun.update({
+          where: { id: runId },
+          data: {
+            categoryWritebackStatus: 'skipped',
+            categoryWritebackError: skippedReason,
+            categoryWritebackPayload: { ...payloadData, freshserviceError, skippedReason },
+          },
+        });
+        logger.info('FreshService category sync skipped for read-only ticket', { runId, preview, freshserviceError });
+        return { success: true, skipped: true, error: skippedReason, preview, freshserviceError };
+      }
+      await prisma.assignmentPipelineRun.update({
+        where: { id: runId },
+        data: {
+          categoryWritebackStatus: 'failed',
+          categoryWritebackError: err.message,
+          categoryWritebackPayload: { ...payloadData, freshserviceError },
+        },
+      });
+      logger.error('FreshService category sync failed', { runId, error: err.message, freshserviceError });
+      return { success: false, error: err.message, preview, freshserviceError };
+    }
+  }
+
   async executeDirectPriorityWriteback({
     workspaceId,
     ticketId,

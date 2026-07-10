@@ -67,7 +67,9 @@ import {
   Users2,
   Stamp,
   Wand2,
+  Brain,
 } from 'lucide-react';
+import { AssignmentConfigPanel } from './AssignmentReview';
 
 export default function Settings() {
   const navigate = useNavigate();
@@ -83,7 +85,7 @@ export default function Settings() {
   })();
   const isWsAdmin = wsRole === 'admin';
 
-  const validSections = ['freshservice', 'webhooks', 'ticket-mailboxes', 'agents', 'members', 'groups', 'approval-categories', 'ticket-ops', 'api-keys', 'notification-providers', 'public-ticket-status', 'feedback-page', 'urgent-escalation', 'ai-providers', 'sync', 'sync-ops', 'backfill', 'workspaces', 'admins', 'workspace-access', 'dashboard', 'photos', 'business-hours', 'tech-schedules', 'tech-visibility', 'noise-rules', 'vacation-tracker', 'calendar-leave'];
+  const validSections = ['freshservice', 'webhooks', 'ticket-mailboxes', 'agents', 'members', 'groups', 'approval-categories', 'ticket-ops', 'api-keys', 'notification-providers', 'public-ticket-status', 'feedback-page', 'urgent-escalation', 'ai-routing', 'ai-providers', 'sync', 'sync-ops', 'backfill', 'workspaces', 'admins', 'workspace-access', 'dashboard', 'photos', 'business-hours', 'tech-schedules', 'tech-visibility', 'noise-rules', 'vacation-tracker', 'calendar-leave'];
   const initialSection = (() => {
     const hash = window.location.hash.replace('#', '');
     return validSections.includes(hash) ? hash : 'freshservice';
@@ -162,6 +164,7 @@ export default function Settings() {
     { id: 'public-ticket-status', label: 'Public Status', Icon: ExternalLink, minRole: 'admin' },
     { id: 'feedback-page', label: 'Feedback', Icon: MessageSquare, minRole: 'admin' },
     { id: 'urgent-escalation', label: 'Urgent Escalation', Icon: Siren, minRole: 'admin' },
+    { id: 'ai-routing', label: 'AI & Routing', Icon: Brain, minRole: 'admin' },
     { id: 'ai-providers', label: 'AI Providers', Icon: Bot, minRole: 'admin' },
     { id: 'sync', label: 'Sync Settings', Icon: RefreshCw, minRole: 'admin' },
     { id: 'sync-ops', label: 'Sync Operations', Icon: BarChart3, minRole: 'admin' },
@@ -1393,6 +1396,14 @@ export default function Settings() {
               {activeSection === 'ai-providers' && (
                 <div className="p-6">
                   <AiProviderSettingsPanel />
+                </div>
+              )}
+
+              {/* AI & Routing — the assignment pipeline configuration (moved
+                  here from Assignment Review's Configuration tab). */}
+              {activeSection === 'ai-routing' && (
+                <div className="p-6">
+                  <AssignmentConfigPanel workspaceTimezone={currentWorkspace?.defaultTimezone || 'America/Los_Angeles'} />
                 </div>
               )}
 

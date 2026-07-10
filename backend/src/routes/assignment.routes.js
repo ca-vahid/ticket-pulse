@@ -134,7 +134,7 @@ router.put('/config', requireAdmin, asyncHandler(async (req, res) => {
     scoringWeights, classificationPrompt, categorizationPrompt,
     recommendationPrompt, pollForUnassigned, pollMaxPerCycle,
     monitoredMailbox, emailPollingEnabled, emailPollingIntervalSec,
-    autoCloseNoise, dryRunMode, excludedGroupIds, observeOnlyGroupIds,
+    autoCloseNoise, dryRunMode, excludedGroupIds, observeOnlyGroupIds, autoCategorizeEnabled,
     dailyReviewEnabled, dailyReviewRunHour, dailyReviewRunMinute, dailyReviewLookbackDays,
     dailyReviewPreheatEnabled, priorityAssessmentEnabled, priorityWritebackEnabled,
     priorityAssessmentAfterHoursEnabled,
@@ -157,6 +157,7 @@ router.put('/config', requireAdmin, asyncHandler(async (req, res) => {
   if (emailPollingEnabled !== undefined) data.emailPollingEnabled = emailPollingEnabled;
   if (emailPollingIntervalSec !== undefined) data.emailPollingIntervalSec = emailPollingIntervalSec;
   if (autoCloseNoise !== undefined) data.autoCloseNoise = autoCloseNoise;
+  if (autoCategorizeEnabled !== undefined) data.autoCategorizeEnabled = !!autoCategorizeEnabled;
   if (dryRunMode !== undefined) data.dryRunMode = dryRunMode;
   if (dailyReviewEnabled !== undefined) data.dailyReviewEnabled = dailyReviewEnabled;
   if (dailyReviewRunHour !== undefined) data.dailyReviewRunHour = Math.max(0, Math.min(23, parseInt(dailyReviewRunHour, 10) || 0));

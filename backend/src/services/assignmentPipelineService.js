@@ -1207,6 +1207,24 @@ class AssignmentPipelineService {
             return null;
           });
         }
+
+        // Auto-categorize: even when the ASSIGNMENT decision waits for a human
+        // (pending_review) or the run was priority-only (after-hours escalation
+        // classifies anyway), the AI's category flows to FreshService. Decisions
+        // that trigger the full sync below already write categories there —
+        // this covers only the human-gated paths. Observe-only groups never
+        // persisted a category, so the writeback no-ops for them ('no_category').
+        if (assignmentConfig?.autoCategorizeEnabled && !groupObserved
+          && (decision === 'pending_review' || decision === 'priority_only')) {
+          await freshServiceActionService.executeCategoryWriteback(
+            runId,
+            workspaceId,
+            assignmentConfig?.dryRunMode ?? true,
+          ).catch((err) => {
+            logger.warn('FreshService category writeback failed', { runId, decision, error: err.message });
+            return null;
+          });
+        }
       }
 
       // FreshService write-back — separate logic for assignments vs noise.
