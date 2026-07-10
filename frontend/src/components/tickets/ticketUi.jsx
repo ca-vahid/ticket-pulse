@@ -46,6 +46,28 @@ export function pipelineTriggerLabel(source) {
   return map[source] || String(source || '').replace(/_/g, ' ');
 }
 
+// Ticket arrival channel (QA 07-10 #6/#7). Mirrors the backend's
+// TICKET_SOURCE_LABELS numeric space: 1–10 = FreshService codes, 100+ = TP
+// extensions. SOURCE_OPTIONS = the channels an agent can pick when logging
+// or editing a TP-born ticket.
+export const TICKET_SOURCE_LABELS = {
+  1: 'Email', 2: 'Portal', 3: 'Phone', 4: 'Chat', 5: 'Feedback widget',
+  6: 'Yammer', 7: 'AWS CloudWatch', 8: 'PagerDuty', 9: 'Walk-up', 10: 'Slack',
+  100: 'API', 101: 'Webhook', 102: 'MS Teams', 103: 'Agent',
+};
+export function ticketSourceLabel(source) {
+  if (source === null || source === undefined) return null;
+  return TICKET_SOURCE_LABELS[Number(source)] || `Source ${source}`;
+}
+export const SOURCE_OPTIONS = [
+  { value: 103, label: 'Agent (logged in app)' },
+  { value: 1, label: 'Email' },
+  { value: 3, label: 'Phone' },
+  { value: 9, label: 'Walk-up' },
+  { value: 102, label: 'MS Teams' },
+  { value: 2, label: 'Portal' },
+];
+
 // Email bodies reference inline images by `cid:` (Content-ID) — those can
 // never resolve in a browser and render as broken-image icons. Drop them; the
 // actual bytes surface via the attachment strip/rail instead (QA 07-06 #9).

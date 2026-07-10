@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ChevronsRight, Settings } from 'lucide-react';
 import { cn } from '../../lib/utils';
@@ -30,6 +31,17 @@ export default function SideRail() {
     || (matchPath('/settings') ? 'settings' : null);
   const destinations = useNavDestinations(activeId);
   const peek = matchPath('/tickets');
+  // Click-to-open for the peek tab (QA 07-10 #5: hover-only was hard to hit,
+  // especially on small screens/touch). Clicking the collapsed tab pins the
+  // rail open; navigating, Escape, or the mouse leaving lets it collapse.
+  const [peekPinned, setPeekPinned] = useState(false);
+  useEffect(() => { setPeekPinned(false); }, [location.pathname]);
+  useEffect(() => {
+    if (!peekPinned) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') setPeekPinned(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [peekPinned]);
 
   const renderRow = (dest) => {
     const isActive = dest.id === activeId;
@@ -66,17 +78,21 @@ export default function SideRail() {
   return (
     <nav
       aria-label="Primary navigation"
+      onClick={peek && !peekPinned ? () => setPeekPinned(true) : undefined}
+      onMouseLeave={peekPinned ? () => setPeekPinned(false) : undefined}
       className={cn(
         'tp-side-rail fixed inset-y-0 left-0 z-50 hidden flex-col gap-1 overflow-hidden border-r border-slate-200/80 bg-white/90 py-3 shadow-subtle backdrop-blur-md transition-[width] duration-200 ease-out hover:w-[210px] focus-within:w-[210px] motion-reduce:transition-none md:flex print:hidden',
-        peek ? 'tp-side-rail--peek w-[14px]' : 'w-[58px]',
+        peek
+          ? cn('tp-side-rail--peek', peekPinned ? 'tp-side-rail--peek-open w-[210px]' : 'w-[20px] cursor-pointer')
+          : 'w-[58px]',
       )}
     >
       {peek && (
         <span
           aria-hidden="true"
-          className="tp-rail-peek-hint pointer-events-none absolute inset-y-0 left-0 flex w-[14px] items-center justify-center text-slate-400"
+          className="tp-rail-peek-hint pointer-events-none absolute inset-y-0 left-0 flex w-[20px] items-center justify-center rounded-r-md text-slate-500"
         >
-          <ChevronsRight className="h-3.5 w-3.5" />
+          <ChevronsRight className="h-4 w-4" />
         </span>
       )}
 

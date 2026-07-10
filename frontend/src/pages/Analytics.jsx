@@ -863,6 +863,27 @@ export default function Analytics({ view = 'standard' }) {
     setFailedSections([]);
   }, [currentWorkspace?.id]);
 
+  // Warm the server cache for the OTHER ranges once the current one has
+  // painted — the first flip to "Last 12 months" was a ~15s cold compute
+  // (QA 07-10 #1). One getInsights call per range suffices: the server
+  // composes all six sibling endpoints internally, so a single request
+  // pre-computes the whole range into the shared SWR cache.
+  const prefetchedRangesRef = useRef(new Set());
+  useEffect(() => {
+    if (loading || range === 'custom') return undefined;
+    const others = ['12m', '90d', '30d', '7d'].filter((r) => r !== range);
+    const filterKey = JSON.stringify([currentWorkspace?.id, params.excludeNoise, params.categoryIds, params.subcategoryIds, params.legacyCategories]);
+    const timers = others.map((r, i) => setTimeout(() => {
+      const tag = `${filterKey}:${r}`;
+      if (prefetchedRangesRef.current.has(tag)) return;
+      prefetchedRangesRef.current.add(tag);
+      analyticsAPI.getInsights({ ...params, range: r }).catch(() => {
+        prefetchedRangesRef.current.delete(tag); // let a later visit retry
+      });
+    }, 4000 + i * 6000));
+    return () => timers.forEach(clearTimeout);
+  }, [loading, range, params, currentWorkspace?.id]);
+
   useEffect(() => {
     let cancelled = false;
     analyticsAPI.getCategories()

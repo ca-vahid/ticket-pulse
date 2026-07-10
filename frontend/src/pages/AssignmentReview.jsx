@@ -2648,7 +2648,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                 <>
                   {subView === 'pending' && (queue.totals?.all ?? queue.total) > 0 && isAdmin && (
                     <button type="button" onClick={() => setShowClearConfirm(true)} className="flex touch-manipulation items-center gap-1 rounded border border-red-200 px-2 py-1 text-[10px] text-red-600 hover:bg-red-50 hover:text-red-700">
-                      <Trash2 className="h-3 w-3" /> Delete all
+                      <Trash2 className="h-3 w-3" /> Delete all ({queue.totals?.all ?? queue.total})
                     </button>
                   )}
                   <button
@@ -2776,28 +2776,49 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
           )}
         </div>
 
-        {/* Clear all confirmation */}
+        {/* Delete-all confirmation — a real modal (QA 07-10 #4: the inline
+            banner read as no safeguard at all; this cannot be missed). */}
         {showClearConfirm && (
-          <div className="bg-red-50 border-b border-red-200 px-4 py-3 flex items-center gap-3 flex-wrap">
-            <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0" />
-            <p className="text-sm text-red-800 flex-1 min-w-0">
-              Delete all <strong>{queue.totals?.all ?? queue.total}</strong> pending reviews? This permanently removes these pipeline runs from Ticket Pulse and does not change the FreshService tickets.
-            </p>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setShowClearConfirm(false)}
-                className="px-3 py-1.5 text-xs font-medium text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleClearAll}
-                disabled={clearing}
-                className="px-3 py-1.5 text-xs font-semibold text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors flex items-center gap-1.5"
-              >
-                {clearing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
-                {clearing ? 'Deleting...' : 'Yes, delete all'}
-              </button>
+          <div
+            className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/40 p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Confirm delete all pending reviews"
+            onClick={() => !clearing && setShowClearConfirm(false)}
+          >
+            <div
+              className="w-full max-w-md rounded-2xl border border-red-200 bg-white p-5 shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start gap-3">
+                <span className="mt-0.5 inline-flex h-9 w-9 flex-none items-center justify-center rounded-full bg-red-100">
+                  <Trash2 className="h-4 w-4 text-red-600" />
+                </span>
+                <div className="min-w-0">
+                  <h3 className="text-sm font-bold text-slate-900">Delete all pending reviews?</h3>
+                  <p className="mt-1.5 text-sm text-slate-600">
+                    This permanently removes <strong className="text-red-700">{queue.totals?.all ?? queue.total} pending review{(queue.totals?.all ?? queue.total) === 1 ? '' : 's'}</strong> (including those on tickets assigned outside Ticket Pulse) from the queue.
+                    The FreshService tickets themselves are not changed, and this cannot be undone.
+                  </p>
+                </div>
+              </div>
+              <div className="mt-5 flex justify-end gap-2">
+                <button
+                  onClick={() => setShowClearConfirm(false)}
+                  disabled={clearing}
+                  className="tp-focus-ring rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleClearAll}
+                  disabled={clearing}
+                  className="tp-focus-ring flex items-center gap-1.5 rounded-lg bg-red-600 px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-red-700 disabled:opacity-50"
+                >
+                  {clearing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                  {clearing ? 'Deleting…' : 'Yes, delete all'}
+                </button>
+              </div>
             </div>
           </div>
         )}

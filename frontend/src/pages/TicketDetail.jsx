@@ -25,8 +25,8 @@ import ImageMarkupModal from '../components/tickets/ImageMarkupModal';
 import TicketAiTab from '../components/tickets/TicketAiTab';
 import {
   MirrorChip, OriginChip, PersonAvatar, PriorityDot, ProvenanceChip, SafeHtml, SlaChip, StateChip, StatusPill,
-  TypePill, PRIORITY_LABELS, formatBytes, isConversationEntry, pipelineRunLabel,
-  pipelineTriggerLabel, ticketCategoryLabels, timeAgo,
+  TypePill, PRIORITY_LABELS, SOURCE_OPTIONS, formatBytes, isConversationEntry, pipelineRunLabel,
+  pipelineTriggerLabel, ticketCategoryLabels, ticketSourceLabel, timeAgo,
 } from '../components/tickets/ticketUi';
 import { FRESHSERVICE_DOMAIN } from '../components/tech-detail/constants';
 import { useWorkspaceRole } from '../components/nav/navDestinations';
@@ -1420,7 +1420,7 @@ export default function TicketDetail() {
   };
 
   return (
-    <div className="tp-tickets-backdrop min-h-screen md:pl-[14px] print:pl-0">
+    <div className="tp-tickets-backdrop min-h-screen md:pl-[20px] print:pl-0">
       <div className="print-hide"><AppHeader activePage="tickets" /></div>
 
       {/* pb clears the mobile bottom tab bar (QA 07-06 #11) */}
@@ -2015,7 +2015,10 @@ export default function TicketDetail() {
                               composerMode === 'reply' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300'
                             }`}
                           >
-                            <Mail className="w-3.5 h-3.5" aria-hidden="true" /> Reply<span className="hidden sm:inline">&nbsp;to requester</span>
+                            {/* One flex item: a separate span after the text node
+                                collected both the flex gap AND the nbsp — QA 07-10
+                                saw "Reply  to requester" with a double space. */}
+                            <Mail className="w-3.5 h-3.5" aria-hidden="true" /> <span>Reply<span className="hidden sm:inline"> to requester</span></span>
                           </button>
                           <button
                             onClick={() => switchComposerMode('note')}
@@ -2448,6 +2451,26 @@ export default function TicketDetail() {
                       {TICKET_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
                       {ticket.ticketType && !TICKET_TYPES.includes(ticket.ticketType) && (
                         <option value={ticket.ticketType}>{ticket.ticketType}</option>
+                      )}
+                    </select>
+                  </SidebarField>
+
+                  {/* Arrival channel (QA 07-10 #6): editable on TP-born tickets
+                      (staff correct how a request actually reached them);
+                      FS-born shows FreshService's value read-only. */}
+                  <SidebarField label="Source" flash={Boolean(liveChanges.source)} onAck={() => ackChange('source')}>
+                    <select
+                      value={ticket.source ?? ''}
+                      disabled={!canWrite || savingField === 'source'}
+                      onChange={(e) => applyChange('source', () => ticketsAPI.update(ticketId, { source: Number(e.target.value) }))}
+                      className={fieldClass}
+                      aria-label="Ticket source"
+                      title={canWrite ? 'How the request arrived' : 'Arrival channel — synced from FreshService'}
+                    >
+                      {ticket.source == null && <option value="">—</option>}
+                      {SOURCE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                      {ticket.source != null && !SOURCE_OPTIONS.some((o) => o.value === Number(ticket.source)) && (
+                        <option value={ticket.source}>{ticketSourceLabel(ticket.source)}</option>
                       )}
                     </select>
                   </SidebarField>
