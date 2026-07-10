@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.38-preview';
+export const APP_VERSION = '3.0.39-preview';
 
 export const changelog = [
+  {
+    version: '3.0.39-preview',
+    date: 'July 9, 2026',
+    entries: [
+      { type: 'new', html: '<strong>👁️ Observe-only mode for groups (mock mode)</strong> — in AI &amp; Routing settings you can now put specific FreshService groups under observation: the AI still analyzes every ticket and records what it <em>would</em> have done (suggested category, priority, assignee, even “this looks like noise”) in the review queue — but it changes nothing on the ticket. No assignment, no noise flag, no category stamps, no FreshService write-back. Built for onboarding new teams and mailboxes (hello, Accounts Receivable 👋): watch the AI for a couple of weeks, then let it act once you trust it. Manual actions are unaffected — approving a recorded suggestion still applies it.' },
+    ],
+  },
   {
     version: '3.0.38-preview',
     date: 'July 9, 2026',

@@ -22,7 +22,7 @@ import {
   Play, Search, Mail, Zap, FileText, Trash2, XCircle, RotateCcw, Brain,
   ArrowUpDown, ArrowUp, ArrowDown, Filter, Save, Check,
   ShieldCheck, Users, Bot, Sparkles, Clock, X, CalendarDays,
-  MessageSquare, Copy, KeyRound, Webhook,
+  MessageSquare, Copy, KeyRound, Webhook, Eye,
 } from 'lucide-react';
 
 const ALL_TABS = [
@@ -4119,7 +4119,7 @@ function WebhookConfigCard({ workspaceTimezone = 'America/Los_Angeles' }) {
  * still render the currently-selected IDs as opaque chips so the admin
  * doesn't lose their selection silently.
  */
-function ExcludedGroupsPicker({ autoAssign, excludedGroupIds, onChange }) {
+function GroupsMultiPicker({ selectedIds, onChange, description, note, countNoun = 'selected' }) {
   const [groups, setGroups] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -4144,7 +4144,7 @@ function ExcludedGroupsPicker({ autoAssign, excludedGroupIds, onChange }) {
     return () => { cancelled = true; };
   }, []);
 
-  const selectedSet = new Set((excludedGroupIds || []).map(Number));
+  const selectedSet = new Set((selectedIds || []).map(Number));
   const toggle = (id) => {
     const next = new Set(selectedSet);
     if (next.has(id)) next.delete(id); else next.add(id);
@@ -4157,14 +4157,12 @@ function ExcludedGroupsPicker({ autoAssign, excludedGroupIds, onChange }) {
 
   return (
     <div className="py-3 space-y-3">
-      <p className="text-xs text-slate-500 leading-relaxed">
-        Tickets in any of the selected groups will <span className="font-semibold text-slate-700">always require manual approval</span> in the Ticket Queue, even when Auto-Assign is on. The LLM still produces a recommendation; an admin just has to click approve before it gets written back to FreshService.
-      </p>
+      <p className="text-xs text-slate-500 leading-relaxed">{description}</p>
 
-      {!autoAssign && (
+      {note && (
         <div className="flex items-start gap-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-600">
           <AlertCircle className="w-4 h-4 text-slate-400 flex-shrink-0 mt-0.5" />
-          <span>Auto-Assign is currently off, so this list has no effect right now. Selections are still saved.</span>
+          <span>{note}</span>
         </div>
       )}
 
@@ -4207,7 +4205,7 @@ function ExcludedGroupsPicker({ autoAssign, excludedGroupIds, onChange }) {
           {selectedSet.size > 0 && (
             <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
               <Check className="w-3 h-3 text-emerald-600" />
-              <span>{selectedSet.size} group{selectedSet.size === 1 ? '' : 's'} excluded</span>
+              <span>{selectedSet.size} group{selectedSet.size === 1 ? '' : 's'} {countNoun}</span>
               <button
                 onClick={() => onChange([])}
                 className="ml-auto text-blue-600 hover:text-blue-800 hover:underline"
@@ -4533,7 +4531,7 @@ function ConfigTab({ workspaceTimezone = 'America/Los_Angeles' }) {
         llmModel: 'claude-sonnet-5', maxRecommendations: 3, scoringWeights: null,
         pollForUnassigned: true, pollMaxPerCycle: 5,
         monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60,
-        excludedGroupIds: [],
+        excludedGroupIds: [], observeOnlyGroupIds: [],
         dailyReviewEnabled: false, dailyReviewRunHour: 18, dailyReviewRunMinute: 5, dailyReviewLookbackDays: 14,
         dailyReviewPreheatEnabled: false,
         priorityAssessmentEnabled: true, priorityWritebackEnabled: true,
@@ -4542,7 +4540,7 @@ function ConfigTab({ workspaceTimezone = 'America/Los_Angeles' }) {
       });
       try { const statusRes = await assignmentAPI.emailStatus(); setEmailStatus(statusRes?.data || null); } catch { /* ignore */ }
     } catch {
-      setConfig({ isEnabled: false, autoAssign: false, autoCloseNoise: false, dryRunMode: true, llmModel: 'claude-sonnet-5', maxRecommendations: 3, scoringWeights: null, pollForUnassigned: true, pollMaxPerCycle: 5, monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60, excludedGroupIds: [], dailyReviewEnabled: false, dailyReviewRunHour: 18, dailyReviewRunMinute: 5, dailyReviewLookbackDays: 14, dailyReviewPreheatEnabled: false, priorityAssessmentEnabled: true, priorityWritebackEnabled: true, priorityAssessmentAfterHoursEnabled: false });
+      setConfig({ isEnabled: false, autoAssign: false, autoCloseNoise: false, dryRunMode: true, llmModel: 'claude-sonnet-5', maxRecommendations: 3, scoringWeights: null, pollForUnassigned: true, pollMaxPerCycle: 5, monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60, excludedGroupIds: [], observeOnlyGroupIds: [], dailyReviewEnabled: false, dailyReviewRunHour: 18, dailyReviewRunMinute: 5, dailyReviewLookbackDays: 14, dailyReviewPreheatEnabled: false, priorityAssessmentEnabled: true, priorityWritebackEnabled: true, priorityAssessmentAfterHoursEnabled: false });
     } finally { setLoading(false); }
   }, []);
 
@@ -4609,10 +4607,27 @@ function ConfigTab({ workspaceTimezone = 'America/Los_Angeles' }) {
 
       {/* Section 2b: Excluded Groups — overrides auto-assign for specific FS groups. */}
       <ConfigSection icon={ShieldCheck} title="Excluded Groups (Manual Approval)">
-        <ExcludedGroupsPicker
-          autoAssign={config.autoAssign}
-          excludedGroupIds={config.excludedGroupIds || []}
+        <GroupsMultiPicker
+          selectedIds={config.excludedGroupIds || []}
           onChange={(ids) => setConfig({ ...config, excludedGroupIds: ids })}
+          countNoun="excluded"
+          description={(
+            <>Tickets in any of the selected groups will <span className="font-semibold text-slate-700">always require manual approval</span> in the Ticket Queue, even when Auto-Assign is on. The LLM still produces a recommendation; an admin just has to click approve before it gets written back to FreshService.</>
+          )}
+          note={!config.autoAssign ? 'Auto-Assign is currently off, so this list has no effect right now. Selections are still saved.' : null}
+        />
+      </ConfigSection>
+
+      {/* Section 2c: Observe-only groups — mock mode for onboarding windows. */}
+      <ConfigSection icon={Eye} title="Observe-Only Groups (Mock Mode)">
+        <GroupsMultiPicker
+          selectedIds={config.observeOnlyGroupIds || []}
+          onChange={(ids) => setConfig({ ...config, observeOnlyGroupIds: ids })}
+          countNoun="observed"
+          description={(
+            <>The AI still analyzes every ticket in the selected groups and records what it <span className="font-semibold text-slate-700">would have done</span> — category, priority, type, even &ldquo;this looks like noise&rdquo; — visible in the review queue. But it <span className="font-semibold text-slate-700">changes nothing on the ticket</span>: no assignment, no noise flag, no category or priority stamps, no FreshService write-back. Ideal while onboarding a new team or mailbox: watch what the AI would do before letting it act.</>
+          )}
+          note="Manual actions are unaffected — reviewers can still approve a recorded suggestion to apply it deliberately."
         />
       </ConfigSection>
 
