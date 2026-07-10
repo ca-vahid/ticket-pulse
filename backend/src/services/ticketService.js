@@ -1051,9 +1051,13 @@ class TicketService {
     // syncs count as unresolved too — they render as quoted junk with a
     // wrong avatar (QA 07-08).
     const isRawHeader = (v) => /<[^<>]*@[^<>]*>/.test(String(v || ''));
+    // A bare email as the display name is just as unresolved as a raw header —
+    // FS often reports third-party repliers (cc'd colleagues on a shared-mailbox
+    // ticket) by address only, even when we know the person (QA 07-10, #34136).
+    const isBareEmail = (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v || '').trim());
     const needsName = (e) => {
       const n = String(e.actorName || '').trim();
-      return !n || n.toLowerCase() === 'unknown' || isRawHeader(n);
+      return !n || n.toLowerCase() === 'unknown' || isRawHeader(n) || isBareEmail(n);
     };
     // Entries carrying an FS user id get resolved against our technicians even
     // when a name is present — the id is authoritative, and matching it also
@@ -1083,6 +1087,22 @@ class TicketService {
     for (const t of techs) {
       if (t.freshserviceId !== null) byFsId.set(String(t.freshserviceId), t);
       if (t.email) byEmail.set(t.email.toLowerCase(), t);
+    }
+    // Non-technician participants (cc'd colleagues, third-party repliers) live
+    // in the requesters table — resolve them there so a known person never
+    // renders as a bare email address.
+    const reqByFsId = new Map();
+    const reqByEmail = new Map();
+    if (fsIds.length || emails.length) {
+      const people = await prisma.requester.findMany({
+        where: { OR: orClauses },
+        select: { freshserviceId: true, email: true, name: true },
+      });
+      for (const r of people) {
+        if (!r.name || isBareEmail(r.name)) continue; // a stored email-as-name helps nobody
+        if (r.freshserviceId !== null) reqByFsId.set(String(r.freshserviceId), r);
+        if (r.email) reqByEmail.set(r.email.toLowerCase(), r);
+      }
     }
     const reqName = requester?.name || null;
 
@@ -1124,7 +1144,21 @@ class TicketService {
           };
         }
       }
-      if ((e.incoming === true || e.authorType === 'requester') && reqName) return { ...e, actorName: reqName };
+      // Known non-technician person (requesters table) — by FS contact id,
+      // then email. Covers third-party repliers on someone else's ticket.
+      let person = null;
+      if (e.actorFreshserviceId !== null) person = reqByFsId.get(String(e.actorFreshserviceId));
+      if (!person && e.actorEmail && !isRawHeader(e.actorEmail)) {
+        person = reqByEmail.get(String(e.actorEmail).toLowerCase());
+      }
+      if (person) return { ...e, actorName: person.name, actorEmail: e.actorEmail || person.email || null };
+      // Ticket-requester fallback — ONLY when the entry isn't attributable to
+      // someone else (no email, or the requester's own email). Previously this
+      // could stamp the requester's name onto a third party's reply.
+      if ((e.incoming === true || e.authorType === 'requester') && reqName
+        && (!e.actorEmail || String(e.actorEmail).toLowerCase() === String(requester?.email || '').toLowerCase())) {
+        return { ...e, actorName: reqName };
+      }
       // TP-authored notes mirrored into FS carry the "[Ticket Pulse]" marker but
       // sync back under the FS service account (not a technician) — label them.
       if (/^\s*\[ticket pulse\]/i.test(String(e.bodyText || e.content || ''))) {
