@@ -10,6 +10,65 @@ import { createFreshServiceClient } from '../integrations/freshservice.js';
 import graphMailClient from '../integrations/graphMailClient.js';
 import logger from '../utils/logger.js';
 import { normalizeFreshServiceGroupMemberIds } from './freshServiceGroupGuard.js';
+import ticketTypeService from './ticketTypeService.js';
+
+/**
+ * Specialize the submit_recommendation ticketType fields for a workspace's
+ * ticket-type registry (per-workspace vocabulary + per-type LLM guidance).
+ *
+ * - 2+ AI-assignable types: enum = the workspace's type names, description
+ *   composed from each type's registry description.
+ * - exactly 1: the question is dropped from the schema entirely (no tokens
+ *   spent picking from a list of one) and returned as `autoType` for the
+ *   pipeline to stamp on the accepted recommendation.
+ * - 0 (nothing configured/AI-assignable): fields dropped, no stamping.
+ *
+ * Returns { tools, autoType }.
+ */
+export async function applyWorkspaceTicketTypes(tools, workspaceId) {
+  let types = [];
+  try {
+    types = await ticketTypeService.getAiAssignableTypes(workspaceId);
+  } catch (err) {
+    logger.warn('Ticket-type registry unavailable for tool schema — keeping defaults', {
+      workspaceId, error: err.message,
+    });
+    return { tools, autoType: null };
+  }
+
+  const out = tools.map((tool) => {
+    if (tool.name !== 'submit_recommendation') return tool;
+    const clone = JSON.parse(JSON.stringify(tool));
+    const props = clone.input_schema?.properties;
+    if (!props?.ticketType) return tool;
+    if (types.length >= 2) {
+      props.ticketType.enum = types.map((t) => t.name);
+      const guidance = types
+        .map((t) => `${t.name}: ${t.description || 'no description provided'}`)
+        .join(' | ');
+      props.ticketType.description = `Ticket type assessment for this workspace. ${guidance}`;
+      props.ticketTypeRationale.description = `Short admin-facing explanation of why the ticket is a ${types.map((t) => t.name).join(' vs ')}.`;
+      // Newer models omit optional tool fields (v3.0.26 lesson) — when the
+      // workspace has a real choice, the assessment must always come back.
+      if (Array.isArray(clone.input_schema.required)) {
+        for (const key of ['ticketType', 'ticketTypeRationale', 'ticketTypeConfidence']) {
+          if (!clone.input_schema.required.includes(key)) clone.input_schema.required.push(key);
+        }
+      }
+    } else {
+      delete props.ticketType;
+      delete props.ticketTypeRationale;
+      delete props.ticketTypeConfidence;
+      if (Array.isArray(clone.input_schema.required)) {
+        clone.input_schema.required = clone.input_schema.required
+          .filter((k) => !['ticketType', 'ticketTypeRationale', 'ticketTypeConfidence'].includes(k));
+      }
+    }
+    return clone;
+  });
+
+  return { tools: out, autoType: types.length === 1 ? types[0].name : null };
+}
 
 /**
  * Tool schemas for Claude tool_use. Each tool has a name, description, and input_schema.

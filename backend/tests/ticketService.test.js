@@ -11,6 +11,14 @@ const prismaMock = {
   ticketThreadEntry: { create: jest.fn() },
   notificationDelivery: { create: jest.fn() },
   ticketActivity: { findMany: jest.fn() },
+  // Per-workspace type registry (ticket-types plan): IT-style vocabulary.
+  ticketTypeDefinition: {
+    findMany: jest.fn().mockResolvedValue([
+      { id: 1, workspaceId: 1, name: 'Incident', aliases: ['incident', 'issue'], isActive: true, aiAssignable: true, isDefault: true, fsTypeValue: 'Incident', sortOrder: 0 },
+      { id: 2, workspaceId: 1, name: 'Service Request', aliases: ['service request', 'sr'], isActive: true, aiAssignable: true, isDefault: false, fsTypeValue: 'Service Request', sortOrder: 1 },
+    ]),
+  },
+  slaPolicy: { findFirst: jest.fn() },
   $queryRaw: jest.fn(),
 };
 const noiseRuleServiceMock = { evaluate: jest.fn() };

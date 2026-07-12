@@ -12,11 +12,24 @@ import RichTextEditor, { isRichContent } from '../components/tickets/RichTextEdi
 import StagedFileChip from '../components/tickets/StagedFileChip';
 import ImageMarkupModal from '../components/tickets/ImageMarkupModal';
 import { PRIORITY_LABELS, SOURCE_OPTIONS, initials } from '../components/tickets/ticketUi';
+import { useTicketTypes } from '../hooks/useTicketTypes';
 
 const MAX_FILES = 5;
 const MAX_FILE_MB = 100;
-const TICKET_TYPES = ['Incident', 'Service Request'];
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Selected-state classes per registry color token (Tailwind needs literals).
+const TYPE_SELECTED_CLASSES = {
+  slate: 'bg-slate-600 text-white border-slate-600',
+  orange: 'bg-orange-500 text-white border-orange-500',
+  violet: 'bg-violet-600 text-white border-violet-600',
+  red: 'bg-red-600 text-white border-red-600',
+  blue: 'bg-blue-600 text-white border-blue-600',
+  emerald: 'bg-emerald-600 text-white border-emerald-600',
+  amber: 'bg-amber-500 text-white border-amber-500',
+  cyan: 'bg-cyan-600 text-white border-cyan-600',
+  pink: 'bg-pink-600 text-white border-pink-600',
+};
 
 const pad2 = (n) => String(n).padStart(2, '0');
 const toLocalDatetimeInput = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
@@ -39,7 +52,13 @@ export default function TicketCreate() {
   const [description, setDescription] = useState('');
   const [descriptionText, setDescriptionText] = useState('');
   const [priority, setPriority] = useState(2);
-  const [ticketType, setTicketType] = useState('Incident');
+  // Per-workspace type registry: options, default, and pill colors all come
+  // from Settings → Ticket Ops → Ticket types ('Case' for Accounting, …).
+  const { activeTypes, defaultType } = useTicketTypes();
+  const [ticketType, setTicketType] = useState(null);
+  useEffect(() => {
+    if (ticketType === null && defaultType) setTicketType(defaultType.name);
+  }, [ticketType, defaultType]);
   const [categoryId, setCategoryId] = useState('');
   const [subcategoryId, setSubcategoryId] = useState('');
   const [groupId, setGroupId] = useState('');
@@ -193,7 +212,7 @@ export default function TicketCreate() {
     setDescription('');
     setDescriptionText('');
     setPriority(2);
-    setTicketType('Incident');
+    setTicketType(defaultType?.name ?? null);
     setCategoryId('');
     setSubcategoryId('');
     setGroupId('');
@@ -609,24 +628,41 @@ export default function TicketCreate() {
                 <div className={`grid grid-cols-1 sm:grid-cols-2 gap-4 transition-opacity ${aiDecides ? 'opacity-50' : ''}`}>
                   <div>
                     <span className={labelClass}>Type</span>
-                    <div role="group" aria-label="Ticket type" className="grid grid-cols-2 gap-1.5">
-                      {TICKET_TYPES.map((t) => (
-                        <button
-                          key={t}
-                          type="button"
-                          disabled={aiDecides}
-                          onClick={() => setTicketType(t)}
-                          aria-pressed={ticketType === t}
-                          className={`tp-focus-ring px-2 py-2 rounded-lg text-xs font-semibold border transition-colors disabled:cursor-not-allowed ${
-                            ticketType === t
-                              ? t === 'Incident' ? 'bg-orange-500 text-white border-orange-500' : 'bg-violet-600 text-white border-violet-600'
-                              : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'
-                          }`}
-                        >
-                          {t}
-                        </button>
-                      ))}
-                    </div>
+                    {activeTypes.length > 4 ? (
+                      <select
+                        value={ticketType ?? ''}
+                        disabled={aiDecides}
+                        onChange={(e) => setTicketType(e.target.value)}
+                        aria-label="Ticket type"
+                        className="tp-focus-ring w-full rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs font-semibold text-slate-600 disabled:cursor-not-allowed"
+                      >
+                        {activeTypes.map((t) => <option key={t.id} value={t.name}>{t.name}</option>)}
+                      </select>
+                    ) : (
+                      <div
+                        role="group"
+                        aria-label="Ticket type"
+                        className={`grid gap-1.5 ${['grid-cols-1', 'grid-cols-1', 'grid-cols-2', 'grid-cols-3', 'grid-cols-2'][activeTypes.length] || 'grid-cols-2'}`}
+                      >
+                        {activeTypes.map((t) => (
+                          <button
+                            key={t.id}
+                            type="button"
+                            disabled={aiDecides}
+                            onClick={() => setTicketType(t.name)}
+                            aria-pressed={ticketType === t.name}
+                            title={t.description || undefined}
+                            className={`tp-focus-ring px-2 py-2 rounded-lg text-xs font-semibold border transition-colors disabled:cursor-not-allowed ${
+                              ticketType === t.name
+                                ? (TYPE_SELECTED_CLASSES[t.color] || TYPE_SELECTED_CLASSES.slate)
+                                : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'
+                            }`}
+                          >
+                            {t.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <div>
                     <span className={labelClass}>Priority</span>

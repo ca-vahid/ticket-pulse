@@ -10,6 +10,7 @@ import { isSkillHierarchyWorkspace } from '../utils/workspaceFeatureFlags.js';
 import logger from '../utils/logger.js';
 import { PRIORITY_ID_TO_LABEL } from './priorityAssessment.js';
 import { normalizeTicketType } from './ticketTypeAssessment.js';
+import ticketTypeService from './ticketTypeService.js';
 import notificationPreferenceService from './notificationPreferenceService.js';
 import ticketLifecycleNotificationService from './ticketLifecycleNotificationService.js';
 import { TICKET_ORIGIN, ticketDisplayRef } from '../utils/ticketOrigin.js';
@@ -314,6 +315,7 @@ class FreshServiceActionService {
   }
 
   async buildTicketTypeWritebackAction(run) {
+    const workspaceId = run.workspaceId;
     const ticket = run.ticket || await prisma.ticket.findUnique({
       where: { id: run.ticketId },
       select: {
@@ -330,14 +332,26 @@ class FreshServiceActionService {
 
     let ticketType;
     try {
-      ticketType = normalizeTicketType(ticket?.assessedTicketType || run.recommendation?.ticketType);
+      ticketType = await normalizeTicketType(ticket?.assessedTicketType || run.recommendation?.ticketType, workspaceId);
     } catch (error) {
-      return { actions: [], preview: 'Cannot sync ticket type: ticket has no assessed type', error: 'missing_assessed_ticket_type' };
+      return { actions: [], preview: 'Cannot sync ticket type: ticket has no assessed type recognized by this workspace', error: 'missing_assessed_ticket_type' };
+    }
+
+    // Only registry types with an FS mapping are ever written to FreshService.
+    // TP-native-only types (fsTypeValue null) stay TP-side by design.
+    const definition = await ticketTypeService.resolveType(workspaceId, ticketType);
+    if (!definition?.fsTypeValue) {
+      return {
+        actions: [],
+        preview: `Type "${ticketType}" is Ticket Pulse–native (no FreshService mapping) — nothing to write back`,
+        error: null,
+        skippedReason: 'not_mapped_to_freshservice',
+      };
     }
 
     if (ticket?.ticketType) {
       try {
-        if (normalizeTicketType(ticket.ticketType) === ticketType) {
+        if (await normalizeTicketType(ticket.ticketType, workspaceId) === ticketType) {
           return {
             actions: [],
             preview: `Ticket #${fsTicketId} already has type ${ticketType}`,
@@ -353,7 +367,8 @@ class FreshServiceActionService {
     const actions = [{
       type: 'update_ticket_type',
       ticketId: fsTicketId,
-      ticketType,
+      // FS receives the mapped choice value; TP keeps the canonical name.
+      ticketType: definition.fsTypeValue,
       localFields: {
         ticketType,
       },
@@ -518,8 +533,14 @@ class FreshServiceActionService {
       return { success: false, error: 'Run not found' };
     }
 
-    if (!isSkillHierarchyWorkspace(workspaceId)) {
-      const preview = 'FreshService ticket type writeback is only enabled for the IT skill hierarchy workspace';
+    // Per-workspace gate (Settings → AI & Routing). Replaced the old
+    // SKILL_HIERARCHY_WORKSPACE_IDS env gate — migration seeded ws1 true.
+    const assignmentConfig = await prisma.assignmentConfig.findUnique({
+      where: { workspaceId },
+      select: { typeWritebackEnabled: true },
+    });
+    if (!assignmentConfig?.typeWritebackEnabled) {
+      const preview = 'FreshService ticket type write-back is disabled for this workspace (Settings → AI & Routing)';
       await prisma.assignmentPipelineRun.update({
         where: { id: runId },
         data: {
@@ -531,7 +552,7 @@ class FreshServiceActionService {
           }),
         },
       });
-      logger.info('FreshService ticket type sync skipped by workspace feature flag', { runId, workspaceId });
+      logger.info('FreshService ticket type sync skipped by workspace setting', { runId, workspaceId });
       return { success: true, skipped: true, error: 'ticket_type_writeback_not_enabled_for_workspace', preview, actions: [] };
     }
 

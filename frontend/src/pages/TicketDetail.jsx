@@ -34,9 +34,9 @@ import { useWorkspace } from '../contexts/WorkspaceContext';
 import { assignmentAPI, ticketsAPI } from '../services/api';
 import { useSSE } from '../hooks/useSSE';
 import { useTicketPresence } from '../hooks/useTicketPresence';
+import { useTicketTypes } from '../hooks/useTicketTypes';
 
 const STATUSES = ['Open', 'Pending', 'Resolved', 'Closed'];
-const TICKET_TYPES = ['Incident', 'Service Request'];
 const CONVERSATION_TABS = [
   { key: 'all', label: 'All' },
   { key: 'replies', label: 'Replies' },
@@ -735,6 +735,8 @@ export default function TicketDetail() {
   const isNative = ticket?.origin === 'ticketpulse';
   const ticketingOn = meta?.nativeTicketingEnabled !== false;
   const canWrite = isNative && ticketingOn;
+  // Per-workspace type registry: sidebar Type options ('Case' for Accounting…).
+  const { activeTypes: activeTicketTypes } = useTicketTypes();
   const canConverse = ticketingOn && (isNative || Boolean(ticket?.freshserviceTicketId));
   // FS-born tickets take confirmed write-backs for assignee/status/priority/category.
   const fsEditable = !isNative && Boolean(ticket?.freshserviceTicketId);
@@ -2448,8 +2450,8 @@ export default function TicketDetail() {
                       aria-label="Ticket type"
                     >
                       <option value="">—</option>
-                      {TICKET_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-                      {ticket.ticketType && !TICKET_TYPES.includes(ticket.ticketType) && (
+                      {activeTicketTypes.map((t) => <option key={t.id} value={t.name} title={t.description || undefined}>{t.name}</option>)}
+                      {ticket.ticketType && !activeTicketTypes.some((t) => t.name === ticket.ticketType) && (
                         <option value={ticket.ticketType}>{ticket.ticketType}</option>
                       )}
                     </select>

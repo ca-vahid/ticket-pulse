@@ -391,7 +391,15 @@ export const settingsAPI = {
   // Ticket ops (enterprise): SLA policies, macros, custom field definitions
   getSlaPolicies: () => api.get('/settings/sla-policies'),
   upsertSlaPolicy: (data) => api.put('/settings/sla-policies', data),
-  deleteSlaPolicy: (priority) => api.delete(`/settings/sla-policies/${priority}`),
+  deleteSlaPolicy: (priority, ticketTypeId = null) => api.delete(`/settings/sla-policies/${priority}`, {
+    params: ticketTypeId ? { ticketTypeId } : {},
+  }),
+  // Ticket-type registry (per-workspace type catalogue)
+  getTicketTypes: () => api.get('/settings/ticket-types'),
+  createTicketType: (data) => api.post('/settings/ticket-types', data),
+  updateTicketType: (id, data) => api.patch(`/settings/ticket-types/${id}`, data),
+  retireTicketType: (id) => api.delete(`/settings/ticket-types/${id}`),
+  syncTicketTypes: () => api.post('/settings/ticket-types/sync'),
   getMacros: () => api.get('/settings/macros'),
   createMacro: (data) => api.post('/settings/macros', data),
   updateMacro: (id, data) => api.patch(`/settings/macros/${id}`, data),

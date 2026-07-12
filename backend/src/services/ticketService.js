@@ -4,6 +4,7 @@ import logger from '../utils/logger.js';
 import { ValidationError, NotFoundError, ServiceBusyError } from '../utils/errors.js';
 import { TICKET_ORIGIN, TICKET_SOURCE, TICKET_SOURCE_LABELS, APP_NATIVE_TRIGGER_SOURCE, AGENT_SELECTABLE_SOURCES, ticketDisplayRef } from '../utils/ticketOrigin.js';
 import noiseRuleService from './noiseRuleService.js';
+import ticketTypeService from './ticketTypeService.js';
 import ticketActivityRepository from './ticketActivityRepository.js';
 import ticketThreadRepository from './ticketThreadRepository.js';
 import ticketLifecycleNotificationService from './ticketLifecycleNotificationService.js';
@@ -68,7 +69,10 @@ const createTicketSchema = z.object({
   source: z.number().int().refine((v) => AGENT_SELECTABLE_SOURCES.includes(v), {
     message: 'Source must be one of the selectable arrival channels',
   }).optional().nullable(),
-  ticketType: z.enum(['Incident', 'Service Request']).default('Incident'),
+  // Validated against the workspace's ticket-type registry in createTicket
+  // (per-workspace vocabulary — 'Case' for Accounting, 'Incident'/'Service
+  // Request'/'Major Incident' for IT…). Omitted -> workspace default type.
+  ticketType: z.string().trim().min(1).max(40).optional().nullable(),
   status: z.enum(['Open', 'Pending']).default('Open'),
   requesterId: z.number().int().positive().optional().nullable(),
   requesterEmail: z.string().trim().email().optional().nullable(),
@@ -104,7 +108,7 @@ const updateTicketSchema = z.object({
   source: z.number().int().refine((v) => AGENT_SELECTABLE_SOURCES.includes(v), {
     message: 'Source must be one of the selectable arrival channels',
   }).optional(),
-  ticketType: z.enum(['Incident', 'Service Request']).optional().nullable(),
+  ticketType: z.string().trim().min(1).max(40).optional().nullable(),
   internalCategoryId: z.number().int().positive().optional().nullable(),
   internalSubcategoryId: z.number().int().positive().optional().nullable(),
   groupId: z.union([z.number().int(), z.string().regex(/^\d+$/)]).optional().nullable(),
@@ -419,7 +423,20 @@ class TicketService {
       const rid = Number(query.requesterId);
       if (Number.isFinite(rid) && rid > 0) where.requesterId = rid;
     }
-    if (query.type) where.ticketType = { in: asList(query.type) };
+    if (query.type) {
+      // Multi-select over the workspace's type names, plus the literal 'none'
+      // for type-less tickets (FS leaves type optional).
+      const values = asList(query.type);
+      const names = values.filter((v) => v.toLowerCase() !== 'none');
+      const wantsNone = values.some((v) => v.toLowerCase() === 'none');
+      if (wantsNone && names.length) {
+        where.AND = [...(where.AND || []), { OR: [{ ticketType: null }, { ticketType: { in: names } }] }];
+      } else if (wantsNone) {
+        where.ticketType = null;
+      } else {
+        where.ticketType = { in: names };
+      }
+    }
     if (query.internalCategoryId) {
       const ids = asList(query.internalCategoryId).map(Number).filter(Number.isFinite);
       if (ids.length) where.internalCategoryId = { in: ids };
@@ -1560,6 +1577,14 @@ class TicketService {
     if (!parsed.success) throw new ValidationError(zodMessage(parsed.error));
     const data = parsed.data;
 
+    // Resolve type against the workspace's registry: explicit value must be
+    // a known (or aliased) type; omitted falls back to the workspace default.
+    if (data.ticketType) {
+      data.ticketType = await ticketTypeService.normalizeTypeName(workspaceId, data.ticketType);
+    } else {
+      data.ticketType = (await ticketTypeService.getDefaultType(workspaceId))?.name ?? null;
+    }
+
     await this._validateTaxonomy(workspaceId, data.internalCategoryId, data.internalSubcategoryId);
     const groupId = await this._validateGroup(workspaceId, data.groupId ?? null);
     const internalGroupId = await this._validateInternalGroup(workspaceId, data.internalGroupId ?? null);
@@ -1579,7 +1604,7 @@ class TicketService {
     let slaDueDates = { frDueBy: null, dueBy: null };
     try {
       const { default: slaPolicyService } = await import('./slaPolicyService.js');
-      slaDueDates = await slaPolicyService.dueDatesFor(workspaceId, data.priority, now);
+      slaDueDates = await slaPolicyService.dueDatesFor(workspaceId, data.priority, now, { typeName: data.ticketType });
     } catch { /* no policy — no clocks */ }
 
     const ticket = await prisma.ticket.create({
@@ -1717,6 +1742,12 @@ class TicketService {
     if (!parsed.success) throw new ValidationError(zodMessage(parsed.error));
     const data = parsed.data;
     if (Object.keys(data).length === 0) throw new ValidationError('Nothing to update');
+
+    // Per-workspace type vocabulary (registry): normalize aliases/case; null
+    // clears the type (FS allows type-less tickets).
+    if (data.ticketType) {
+      data.ticketType = await ticketTypeService.normalizeTypeName(workspaceId, data.ticketType);
+    }
 
     if (data.internalCategoryId !== undefined || data.internalSubcategoryId !== undefined) {
       const catId = data.internalCategoryId !== undefined ? data.internalCategoryId : ticket.internalCategoryId;

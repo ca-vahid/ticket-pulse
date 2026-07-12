@@ -35,6 +35,7 @@ import { clearReadCache } from './dashboardReadCache.js';
 import { ExternalAPIError } from '../utils/errors.js';
 import { TICKET_ORIGIN, isTicketPulseOrigin } from '../utils/ticketOrigin.js';
 import groupSyncService from './groupSyncService.js';
+import ticketTypeService from './ticketTypeService.js';
 
 // Cap how much thread-preheat work runs per scheduled sync cycle so we keep
 // budget headroom on the shared FS rate limiter (110/min). At ~24% already
@@ -2306,6 +2307,34 @@ class SyncService {
    * Perform a full sync of both technicians and tickets
    * @returns {Promise<Object>} Sync summary
    */
+  /**
+   * Reconcile the per-workspace ticket-type registry against FreshService's
+   * ticket_type form-field choices (auto-register new FS types, bump
+   * fsDetectedAt for drift display). One FS request, throttled to ~6h.
+   */
+  async _syncTicketTypeRegistry(workspaceId) {
+    this._ticketTypeSyncAt = this._ticketTypeSyncAt || new Map();
+    const last = this._ticketTypeSyncAt.get(workspaceId) || 0;
+    if (Date.now() - last < 6 * 60 * 60 * 1000) return { skipped: true };
+    this._ticketTypeSyncAt.set(workspaceId, Date.now());
+
+    const workspace = await prisma.workspace.findUnique({
+      where: { id: workspaceId },
+      select: { freshserviceWorkspaceId: true },
+    });
+    const fsConfig = await settingsRepository.getFreshServiceConfigForWorkspace(workspaceId);
+    if (!workspace || !fsConfig?.domain || !fsConfig?.apiKey) return { skipped: true };
+    const client = createFreshServiceClient(fsConfig.domain, fsConfig.apiKey, {
+      priority: 'low',
+      source: 'ticket-type-sync',
+    });
+    const result = await ticketTypeService.syncFromFreshService(workspaceId, client, workspace.freshserviceWorkspaceId);
+    if (result.registered > 0) {
+      logger.info(`Ticket-type registry: auto-registered ${result.registered} new FS type(s) for workspace ${workspaceId}`);
+    }
+    return result;
+  }
+
   async performFullSync(options = {}) {
     const workspaceId = options.workspaceId || 1;
 
@@ -2347,6 +2376,13 @@ class SyncService {
 
       // Sync technicians first (needed for ticket assignment mapping)
       const techniciansSynced = await this.syncTechnicians(workspaceId);
+
+      // Ticket-type registry drift check (FS form-field choices), throttled to
+      // ~6h per workspace — cheap (1 request) but has no business running
+      // every 5-min cycle. Non-fatal.
+      this._syncTicketTypeRegistry(workspaceId).catch((err) => {
+        logger.warn('Ticket-type registry sync failed (non-fatal)', { workspaceId, error: err.message });
+      });
 
       // Sync tickets with options (including fullSync flag and workspaceId)
       const ticketsSynced = await this.syncTickets({ ...options, workspaceId });

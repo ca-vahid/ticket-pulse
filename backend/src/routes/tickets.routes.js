@@ -355,8 +355,12 @@ async function resolveMailboxRouting(req) {
   if (req.body?.defaultTicketType !== undefined) {
     const type = req.body.defaultTicketType;
     if (type === null || type === '') out.defaultTicketType = null;
-    else if (['Incident', 'Service Request'].includes(type)) out.defaultTicketType = type;
-    else throw new ValidationError('defaultTicketType must be Incident or Service Request');
+    else {
+      // Validated against the workspace's ticket-type registry (normalizes
+      // aliases/case to the canonical name; throws with the valid list).
+      const { default: ticketTypeService } = await import('../services/ticketTypeService.js');
+      out.defaultTicketType = await ticketTypeService.normalizeTypeName(req.workspaceId, type);
+    }
   }
   return out;
 }

@@ -341,6 +341,8 @@ function buildEventContext({ event, ticket, previousAgent, source }) {
       // ("Email", "Portal", "Phone", "API", "Agent"…) for conditions.
       source: ticket.source ?? null,
       sourceLabel: ticketSourceLabel(ticket.source),
+      // Per-workspace ticket type ("Incident", "Case", …) for conditions.
+      ticketType: ticket.ticketType || null,
       customFields: ticket.customFields || {},
       // Tag NAMES (lowercased for case-insensitive condition matching); also
       // exposed to templates as {{ ticket.tags }}.

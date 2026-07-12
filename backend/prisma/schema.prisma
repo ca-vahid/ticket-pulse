@@ -100,6 +100,7 @@ model Workspace {
   ticketTags             TicketTag[]
   webhookSubscriptions   WebhookSubscription[]
   ticketEmbeddings       TicketEmbedding[]
+  ticketTypeDefinitions  TicketTypeDefinition[]
 
   @@map("workspaces")
 }
@@ -463,6 +464,12 @@ model SlaPolicy {
   id                   Int      @id @default(autoincrement())
   workspaceId          Int      @map("workspace_id")
   priority             Int      // 1..4
+  // null = fallback row: applies to tickets of ANY type (including type-less
+  // ones). A type-specific row overrides the fallback for that type only.
+  // Single-fallback-per-priority is enforced by a partial unique index in the
+  // migration (Postgres treats NULLs as distinct in the composite unique).
+  ticketTypeId         Int?     @map("ticket_type_id")
+  ticketType           TicketTypeDefinition? @relation(fields: [ticketTypeId], references: [id], onDelete: Cascade)
   firstResponseMinutes Int?     @map("first_response_minutes")
   resolveMinutes       Int?     @map("resolve_minutes")
   isActive             Boolean  @default(true) @map("is_active")
@@ -470,8 +477,42 @@ model SlaPolicy {
   updatedAt            DateTime @updatedAt @map("updated_at")
   createdAt            DateTime @default(now()) @map("created_at")
 
-  @@unique([workspaceId, priority])
+  @@unique([workspaceId, priority, ticketTypeId])
   @@map("sla_policies")
+  @@index([workspaceId, isActive])
+}
+
+// Per-workspace ticket-type catalogue. TP-native; optionally mapped to a
+// FreshService ticket_type form-field choice. Retire (isActive=false), never
+// delete — historical tickets keep their string value in tickets.ticket_type.
+model TicketTypeDefinition {
+  id            Int      @id @default(autoincrement())
+  workspaceId   Int      @map("workspace_id")
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name          String   @db.VarChar(40)          // canonical value stored on tickets.ticket_type
+  description   String?  @db.Text                  // LLM classification guidance + human tooltip
+  aliases       String[] @default([])              // normalizer inputs ("sr", "issue", "breakfix")
+
+  // FreshService mapping. null = TP-native-only type: kept on TP tickets,
+  // never written to FS (mirror + write-back skip with an explicit status).
+  fsTypeValue   String?  @db.VarChar(40) @map("fs_type_value")
+  fsChoiceId    BigInt?  @map("fs_choice_id")      // ticket_form_fields choice id; drift detection
+  fsDetectedAt  DateTime? @map("fs_detected_at")   // last time FS still offered this choice
+
+  aiAssignable  Boolean  @default(true)  @map("ai_assignable")  // LLM may pick it (Major Incident: false)
+  isDefault     Boolean  @default(false) @map("is_default")     // preselected on TP-born create
+  color         String   @default("slate") @db.VarChar(20)      // pill accent token
+  abbreviation  String?  @db.VarChar(6)                          // pill text ("INC","SR","CASE")
+  sortOrder     Int      @default(0) @map("sort_order")
+  isActive      Boolean  @default(true) @map("is_active")
+  source        String   @default("fs_sync") @db.VarChar(20)    // fs_sync | manual
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  slaPolicies   SlaPolicy[]
+
+  @@unique([workspaceId, name])
+  @@map("ticket_type_definitions")
   @@index([workspaceId, isActive])
 }
 
@@ -1489,6 +1530,11 @@ model AssignmentConfig {
   // CATEGORY applied (persisted on the ticket; FS write-back rides
   // autoCategorizeEnabled) while assignment/noise/priority/type stay mocked.
   observeCategoryWritebackEnabled Boolean @default(false) @map("observe_category_writeback_enabled")
+  // FS write-back of the LLM's assessed ticket TYPE. Replaces the old
+  // SKILL_HIERARCHY_WORKSPACE_IDS env gate for type (migration seeds ws1
+  // true to preserve behavior). Only types with an fsTypeValue mapping in
+  // ticket_type_definitions are ever sent.
+  typeWritebackEnabled    Boolean   @default(false) @map("type_writeback_enabled")
   createdAt               DateTime  @default(now()) @map("created_at")
   updatedAt               DateTime  @updatedAt @map("updated_at")
 

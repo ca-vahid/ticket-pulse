@@ -112,6 +112,7 @@ router.get('/config', requireAdmin, asyncHandler(async (req, res) => {
       dailyReviewPreheatEnabled: false,
       priorityAssessmentEnabled: true,
       priorityWritebackEnabled: true,
+      typeWritebackEnabled: false,
       priorityAssessmentAfterHoursEnabled: false,
       afterHoursUrgentEscalationEnabled: false,
       afterHoursUrgentEscalationChannels: [],
@@ -138,6 +139,7 @@ router.put('/config', requireAdmin, asyncHandler(async (req, res) => {
     observeCategoryWritebackEnabled,
     dailyReviewEnabled, dailyReviewRunHour, dailyReviewRunMinute, dailyReviewLookbackDays,
     dailyReviewPreheatEnabled, priorityAssessmentEnabled, priorityWritebackEnabled,
+    typeWritebackEnabled,
     priorityAssessmentAfterHoursEnabled,
     afterHoursUrgentEscalationEnabled, afterHoursUrgentEscalationChannels,
     afterHoursUrgentEscalationEmails, afterHoursUrgentEscalationPhones,
@@ -171,6 +173,9 @@ router.put('/config', requireAdmin, asyncHandler(async (req, res) => {
   }
   if (priorityWritebackEnabled !== undefined) {
     data.priorityWritebackEnabled = !!priorityWritebackEnabled;
+  }
+  if (typeWritebackEnabled !== undefined) {
+    data.typeWritebackEnabled = !!typeWritebackEnabled;
   }
   if (priorityAssessmentAfterHoursEnabled !== undefined) {
     data.priorityAssessmentAfterHoursEnabled = !!priorityAssessmentAfterHoursEnabled;

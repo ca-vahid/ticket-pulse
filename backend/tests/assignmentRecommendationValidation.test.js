@@ -1,8 +1,22 @@
-import {
+import { jest } from '@jest/globals';
+
+// The type normalizer now reads the per-workspace ticket-type registry.
+jest.unstable_mockModule('../src/services/prisma.js', () => ({
+  default: {
+    ticketTypeDefinition: {
+      findMany: jest.fn().mockResolvedValue([
+        { id: 1, workspaceId: 1, name: 'Incident', aliases: ['incident', 'issue', 'outage'], isActive: true, aiAssignable: true, fsTypeValue: 'Incident', sortOrder: 0 },
+        { id: 2, workspaceId: 1, name: 'Service Request', aliases: ['service request', 'service_request', 'request', 'sr'], isActive: true, aiAssignable: true, fsTypeValue: 'Service Request', sortOrder: 1 },
+      ]),
+    },
+  },
+}));
+
+const {
   normalizeSubmitRecommendationPayload,
   parseLeadingJsonArray,
-} from '../src/services/assignmentRecommendationValidation.js';
-import { buildAnthropicMessageFromOpenAiResponse } from '../src/services/aiProviders/openAiConverters.js';
+} = await import('../src/services/assignmentRecommendationValidation.js');
+const { buildAnthropicMessageFromOpenAiResponse } = await import('../src/services/aiProviders/openAiConverters.js');
 
 const basePayload = {
   recommendations: [
@@ -27,8 +41,8 @@ const basePayload = {
 };
 
 describe('assignment recommendation validation', () => {
-  test('accepts and normalizes a valid submit_recommendation payload', () => {
-    const normalized = normalizeSubmitRecommendationPayload({
+  test('accepts and normalizes a valid submit_recommendation payload', async () => {
+    const normalized = await normalizeSubmitRecommendationPayload({
       ...basePayload,
       recommendations: [{ ...basePayload.recommendations[0], techId: '648411', score: '0.72' }],
       taxonomyReviewNeeded: 'false',
@@ -47,9 +61,9 @@ describe('assignment recommendation validation', () => {
     expect(normalized.ticketTypeConfidence).toBe('high');
   });
 
-  test('recovers Anthropic parameter text accidentally embedded after a recommendations JSON string', () => {
+  test('recovers Anthropic parameter text accidentally embedded after a recommendations JSON string', async () => {
     const rawRecommendations = `${JSON.stringify(basePayload.recommendations)}\n<parameter name="overallReasoning">Recovered internal rationale`;
-    const normalized = normalizeSubmitRecommendationPayload({
+    const normalized = await normalizeSubmitRecommendationPayload({
       ...basePayload,
       recommendations: rawRecommendations,
       overallReasoning: undefined,
@@ -60,16 +74,16 @@ describe('assignment recommendation validation', () => {
     expect(normalized.overallReasoning).toBe('Recovered internal rationale');
   });
 
-  test('rejects malformed recommendation shapes before a run can auto-assign', () => {
-    expect(() => normalizeSubmitRecommendationPayload({
+  test('rejects malformed recommendation shapes before a run can auto-assign', async () => {
+    await expect(normalizeSubmitRecommendationPayload({
       ...basePayload,
       recommendations: '{"rank":1,"techId":648411}',
-    })).toThrow(/recommendations must be an array/);
+    })).rejects.toThrow(/recommendations must be an array/);
 
-    expect(() => normalizeSubmitRecommendationPayload({
+    await expect(normalizeSubmitRecommendationPayload({
       ...basePayload,
       recommendations: [{ ...basePayload.recommendations[0], techId: null }],
-    })).toThrow(/techId/);
+    })).rejects.toThrow(/techId/);
   });
 
   test('parses only the leading JSON array and leaves following parameter text as tail', () => {
@@ -78,7 +92,7 @@ describe('assignment recommendation validation', () => {
     expect(parsed.tail).toBe('<parameter name="overallReasoning">text');
   });
 
-  test('normalizes malformed recommendations from the OpenAI function-call adapter path', () => {
+  test('normalizes malformed recommendations from the OpenAI function-call adapter path', async () => {
     const rawRecommendations = `${JSON.stringify(basePayload.recommendations)}\n<parameter name="overallReasoning">OpenAI adapter recovered rationale`;
     const response = {
       id: 'resp_test',
@@ -97,7 +111,7 @@ describe('assignment recommendation validation', () => {
 
     const message = buildAnthropicMessageFromOpenAiResponse(response);
     const toolInput = message.content.find((block) => block.name === 'submit_recommendation').input;
-    const normalized = normalizeSubmitRecommendationPayload(toolInput);
+    const normalized = await normalizeSubmitRecommendationPayload(toolInput);
 
     expect(message.stop_reason).toBe('tool_use');
     expect(normalized.recommendations).toEqual(basePayload.recommendations);
