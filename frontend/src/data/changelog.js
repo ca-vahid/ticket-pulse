@@ -1,6 +1,38 @@
-export const APP_VERSION = '3.0.47-preview';
+export const APP_VERSION = '3.0.51-preview';
 
 export const changelog = [
+  {
+    version: '3.0.51-preview',
+    date: 'July 12, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>🔢 The version badge tells the truth again</strong> — the in-app version and this changelog fell behind the last few releases (the badge said 3.0.47 while the app was at 3.0.50). Entries for those releases are below.' },
+    ],
+  },
+  {
+    version: '3.0.50-preview',
+    date: 'July 12, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>⏸️ Pending tickets pause the SLA clock</strong> — a ticket waiting on its requester no longer counts as overdue anywhere: no red chips on queue rows, the Due today / Overdue cards and filters count Open tickets only, SLA-breach workflow nags skip Pending tickets, and the Due column shows a calm “Paused” pill instead of a countdown.' },
+      { type: 'improved', html: '<strong>🎯 SLAs are now defined per ticket type</strong> — Settings → Ticket Ops sets first-response/resolution clocks per type (a Major Incident can demand 30 minutes while a Case gets two days). The old one-size-fits-all scope is gone; existing clocks were carried over to every type unchanged.' },
+    ],
+  },
+  {
+    version: '3.0.49-preview',
+    date: 'July 12, 2026',
+    entries: [
+      { type: 'new', html: '<strong>🏷️ Every workspace gets its own ticket types</strong> — Accounting tickets are finally a “Case”, IT gains “Major Incident”, and Settings → Ticket Ops → Ticket types lets admins describe each type (that description is exactly what the AI uses to classify), pick pill colors, set the default for new tickets, and map each type to FreshService — or keep a type Ticket Pulse–only. New FreshService types are detected automatically.' },
+      { type: 'improved', html: '<strong>🤖 The AI classifies in your workspace’s language</strong> — type assessment now offers the AI only your workspace’s types with your descriptions; single-type workspaces skip the question entirely. FreshService type write-back is a per-workspace toggle under Settings → AI &amp; Routing.' },
+      { type: 'new', html: '<strong>🔀 Workflows can route on ticket type</strong> — a new “Ticket type” condition in the workflow builder, with your workspace’s types as options.' },
+    ],
+  },
+  {
+    version: '3.0.48-preview',
+    date: 'July 10, 2026',
+    entries: [
+      { type: 'new', html: '<strong>📞 Ticket source is now visible and editable</strong> — the new-ticket form and the ticket sidebar gained a Source field (Agent, Email, Phone, Walk-up, MS Teams, Portal) so walk-ups and phone calls are recorded as such.' },
+      { type: 'improved', html: '<strong>🧹 QA 07-10 batch</strong> — “Delete all” pending reviews now shows a count and asks for confirmation in a proper dialog; the collapsed tickets-page rail is wider and clicking pins it open; wide tables pasted into notes no longer overlap the sidebar; the Analytics “Last 12 months” switch is pre-computed in the background instead of taking ~15 seconds; and a stray double space in “Reply to requester” is gone.' },
+    ],
+  },
   {
     version: '3.0.47-preview',
     date: 'July 10, 2026',

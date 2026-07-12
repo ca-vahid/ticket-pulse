@@ -1,8 +1,13 @@
 # Ticket Types Plan — per-workspace type registry, LLM descriptions, type-aware SLAs
 
-**Status: PROPOSED (not started).** Written 2026-07-12 from a live FreshService probe of all four
-workspaces plus an exhaustive code audit of every place ticket type is read, written, stored,
-displayed, filtered, or reasoned about.
+**Status: IMPLEMENTED — v3.0.49-preview (PR #160) + v3.0.50-preview (PR #161, 2026-07-12).**
+All phases landed; migration + seed applied to dev and prod; live type write-back verified in
+all four workspaces. v3.0.50 went further than the plan: SLAs are now **per-type only** (the
+'All types' fallback was removed per product direction — the ws1 generic Urgent row was
+replicated per-type and deleted) and **Pending pauses the SLA clock** (no overdue chips/counts/
+segments/triggers for pending tickets). Remaining follow-ups: analytics type dimension
+(deferred, §5) and the team's answer on Accounting's future types (open question #1).
+Originally written 2026-07-12 from a live FS probe + exhaustive code audit.
 
 ---
 
