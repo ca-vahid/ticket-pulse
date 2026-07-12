@@ -307,7 +307,7 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
               <TypePill type={ticket.ticketType} full />
               <StatusPill status={ticket.status} />
               <PriorityDot priority={ticket.priority} withLabel />
-              {(ticket.frDueBy && !ticket.firstPublicAgentReplyAt && !['Resolved', 'Closed', 'Deleted', 'Spam'].includes(ticket.status)) && <SlaChip value={ticket.frDueBy} />}
+              {(ticket.frDueBy && !ticket.firstPublicAgentReplyAt && !['Resolved', 'Closed', 'Deleted', 'Spam'].includes(ticket.status)) && <SlaChip value={ticket.frDueBy} paused={ticket.status === 'Pending'} />}
               {(ticket.tags || []).map((tag) => <TagChip key={tag.id} tag={tag} size="xs" />)}
               {(ticket.impact || ticket.urgency) && (
                 <span className="text-[10px] text-slate-400">
@@ -522,7 +522,7 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                       <span className="text-slate-600">{new Date(ticket.frDueBy).toLocaleString(undefined, DAY_TIME)}</span>
                       {ticket.firstPublicAgentReplyAt
                         ? <span className="inline-flex px-1.5 py-0.5 rounded-full text-[10px] font-semibold border bg-emerald-50 text-emerald-700 border-emerald-200">Responded</span>
-                        : <SlaChip value={ticket.frDueBy} className="!px-1.5 !text-[10px]" />}
+                        : <SlaChip value={ticket.frDueBy} paused={ticket.status === 'Pending'} className="!px-1.5 !text-[10px]" />}
                     </dd>
                   </div>
                 )}
@@ -533,7 +533,7 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                       <span className="text-slate-600">{new Date(ticket.dueBy).toLocaleString(undefined, DAY_TIME)}</span>
                       {['Resolved', 'Closed'].includes(ticket.status)
                         ? <span className="inline-flex px-1.5 py-0.5 rounded-full text-[10px] font-semibold border bg-emerald-50 text-emerald-700 border-emerald-200">Done</span>
-                        : <SlaChip value={ticket.dueBy} className="!px-1.5 !text-[10px]" />}
+                        : <SlaChip value={ticket.dueBy} paused={ticket.status === 'Pending'} className="!px-1.5 !text-[10px]" />}
                     </dd>
                   </div>
                 )}

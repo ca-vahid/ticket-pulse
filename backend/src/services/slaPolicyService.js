@@ -30,12 +30,14 @@ class SlaPolicyService {
     const resolve = normalizedMinutes(resolveMinutes, 'Resolution');
     if (fr === null && resolve === null) throw new ValidationError('Set at least one SLA window');
 
-    let typeId = null;
-    if (ticketTypeId !== null && ticketTypeId !== undefined && ticketTypeId !== '') {
-      typeId = Number(ticketTypeId);
-      const type = await prisma.ticketTypeDefinition.findFirst({ where: { id: typeId, workspaceId } });
-      if (!type) throw new ValidationError('Unknown ticket type for this workspace');
+    // Product rule: SLAs are defined PER TYPE — no generic rows anymore
+    // (existing generic rows were replicated per-type and removed).
+    if (ticketTypeId === null || ticketTypeId === undefined || ticketTypeId === '') {
+      throw new ValidationError('SLA policies are per ticket type — pick a type');
     }
+    const typeId = Number(ticketTypeId);
+    const type = await prisma.ticketTypeDefinition.findFirst({ where: { id: typeId, workspaceId } });
+    if (!type) throw new ValidationError('Unknown ticket type for this workspace');
 
     // The composite unique treats NULL type as distinct rows in Postgres, so
     // fallback-row upserts go through findFirst+update instead of upsert().

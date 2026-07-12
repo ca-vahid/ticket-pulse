@@ -235,10 +235,15 @@ class NotificationTimeTriggerService {
       return 0;
     }
 
+    // SLA triggers fire for Open tickets only — Pending pauses the clock, so
+    // pre-breach/breach nags must not chase tickets waiting on the requester.
+    // The generic aging trigger keeps Open+Pending (workflows legitimately
+    // target "pending too long" with it).
+    const slaTrigger = workflow.triggerType !== 'ticket.aging';
     const tickets = await prisma.ticket.findMany({
       where: {
         workspaceId: workflow.workspaceId,
-        status: { in: OPEN_STATUSES },
+        status: slaTrigger ? 'Open' : { in: OPEN_STATUSES },
         isNoise: false,
         ...where,
       },

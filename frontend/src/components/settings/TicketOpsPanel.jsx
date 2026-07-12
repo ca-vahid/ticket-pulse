@@ -31,19 +31,22 @@ function SectionCard({ icon: Icon, title, hint, children }) {
 function SlaSection() {
   const { activeTypes } = useTicketTypes();
   const [policies, setPolicies] = useState([]);
-  const [busyKey, setBusyKey] = useState(null); // `${priority}:${typeId ?? 'all'}`
-  const [typeTab, setTypeTab] = useState('all'); // 'all' | type id
+  const [busyKey, setBusyKey] = useState(null); // `${priority}:${typeId}`
+  const [typeTab, setTypeTab] = useState(null); // type id (string); no generic scope
   const load = useCallback(() => {
     settingsAPI.getSlaPolicies().then((res) => setPolicies(res.data?.data || res.data || [])).catch(() => {});
   }, []);
   useEffect(() => { load(); }, [load]);
+  // SLAs are defined PER TYPE (no generic fallback) — land on the first type.
+  useEffect(() => {
+    if (typeTab === null && activeTypes.length) setTypeTab(String(activeTypes[0].id));
+  }, [typeTab, activeTypes]);
 
-  const currentTypeId = typeTab === 'all' ? null : Number(typeTab);
-  const forTab = new Map(policies.filter((p) => (p.ticketTypeId ?? null) === currentTypeId).map((p) => [p.priority, p]));
-  const fallback = new Map(policies.filter((p) => (p.ticketTypeId ?? null) === null).map((p) => [p.priority, p]));
+  const currentTypeId = typeTab === null ? null : Number(typeTab);
+  const forTab = new Map(policies.filter((p) => p.ticketTypeId === currentTypeId).map((p) => [p.priority, p]));
 
   const save = async (priority, fr, resolve) => {
-    setBusyKey(`${priority}:${currentTypeId ?? 'all'}`);
+    setBusyKey(`${priority}:${currentTypeId}`);
     try {
       await settingsAPI.upsertSlaPolicy({ priority, ticketTypeId: currentTypeId, firstResponseMinutes: fr || null, resolveMinutes: resolve || null });
       load();
@@ -52,19 +55,14 @@ function SlaSection() {
   };
 
   return (
-    <SectionCard icon={Timer} title="SLA policies (Ticket Pulse tickets)" hint="Clocks applied when a TP-born ticket is created. 'All types' is the fallback; a type tab overrides it for that type only (e.g. a tighter Major Incident response). Build escalation ladders as workflows on the SLA-breach triggers.">
+    <SectionCard icon={Timer} title="SLA policies (Ticket Pulse tickets)" hint="Per-type, per-priority clocks applied when a TP-born ticket is created (e.g. a tighter Major Incident response than a Service Request). The clock pauses while a ticket is Pending. Build escalation ladders as workflows on the SLA-breach triggers.">
+      {activeTypes.length === 0 && (
+        <p className="text-xs text-slate-400 italic">Configure ticket types above first — SLAs are defined per type.</p>
+      )}
       {activeTypes.length > 1 && (
-        <div className="flex flex-wrap gap-1 mb-2.5" role="tablist" aria-label="SLA scope">
-          <button
-            role="tab"
-            aria-selected={typeTab === 'all'}
-            onClick={() => setTypeTab('all')}
-            className={`tp-focus-ring px-2.5 py-1 rounded-full text-[11px] font-semibold border ${typeTab === 'all' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-500 border-slate-200 hover:border-blue-300'}`}
-          >
-            All types
-          </button>
+        <div className="flex flex-wrap gap-1 mb-2.5" role="tablist" aria-label="SLA ticket type">
           {activeTypes.map((t) => {
-            const overrides = policies.filter((p) => p.ticketTypeId === t.id).length;
+            const count = policies.filter((p) => p.ticketTypeId === t.id).length;
             return (
               <button
                 key={t.id}
@@ -73,30 +71,31 @@ function SlaSection() {
                 onClick={() => setTypeTab(String(t.id))}
                 className={`tp-focus-ring px-2.5 py-1 rounded-full text-[11px] font-semibold border ${typeTab === String(t.id) ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-500 border-slate-200 hover:border-blue-300'}`}
               >
-                {t.name}{overrides > 0 && <span className="ml-1 opacity-70">({overrides})</span>}
+                {t.name}{count > 0 && <span className="ml-1 opacity-70">({count})</span>}
               </button>
             );
           })}
         </div>
       )}
-      <div className="space-y-1.5">
-        {[4, 3, 2, 1].map((priority) => (
-          <SlaRow
-            key={`${priority}:${typeTab}`}
-            priority={priority}
-            policy={forTab.get(priority)}
-            inherited={currentTypeId !== null ? fallback.get(priority) : null}
-            busy={busyKey === `${priority}:${currentTypeId ?? 'all'}`}
-            onSave={save}
-            onDelete={async () => { await settingsAPI.deleteSlaPolicy(priority, currentTypeId).catch(() => {}); load(); }}
-          />
-        ))}
-      </div>
+      {currentTypeId !== null && (
+        <div className="space-y-1.5">
+          {[4, 3, 2, 1].map((priority) => (
+            <SlaRow
+              key={`${priority}:${typeTab}`}
+              priority={priority}
+              policy={forTab.get(priority)}
+              busy={busyKey === `${priority}:${currentTypeId}`}
+              onSave={save}
+              onDelete={async () => { await settingsAPI.deleteSlaPolicy(priority, currentTypeId).catch(() => {}); load(); }}
+            />
+          ))}
+        </div>
+      )}
     </SectionCard>
   );
 }
 
-function SlaRow({ priority, policy, inherited = null, busy, onSave, onDelete }) {
+function SlaRow({ priority, policy, busy, onSave, onDelete }) {
   const [fr, setFr] = useState(policy?.firstResponseMinutes ?? '');
   const [resolve, setResolve] = useState(policy?.resolveMinutes ?? '');
   useEffect(() => { setFr(policy?.firstResponseMinutes ?? ''); setResolve(policy?.resolveMinutes ?? ''); }, [policy]);
@@ -107,17 +106,14 @@ function SlaRow({ priority, policy, inherited = null, busy, onSave, onDelete }) 
       <span className="w-16 font-semibold text-slate-600">{PRIORITY_LABELS[priority]}</span>
       <label className="flex items-center gap-1 text-slate-400">
         first response
-        <input type="number" min="5" value={fr} onChange={(e) => setFr(e.target.value)} placeholder={inherited?.firstResponseMinutes ? `${inherited.firstResponseMinutes}` : '—'} aria-label={`${PRIORITY_LABELS[priority]} first-response minutes`} className="tp-focus-ring w-20 border border-slate-200 rounded-md px-1.5 py-1 tabular-nums" />
+        <input type="number" min="5" value={fr} onChange={(e) => setFr(e.target.value)} placeholder="—" aria-label={`${PRIORITY_LABELS[priority]} first-response minutes`} className="tp-focus-ring w-20 border border-slate-200 rounded-md px-1.5 py-1 tabular-nums" />
         m
       </label>
       <label className="flex items-center gap-1 text-slate-400">
         resolve
-        <input type="number" min="5" value={resolve} onChange={(e) => setResolve(e.target.value)} placeholder={inherited?.resolveMinutes ? `${inherited.resolveMinutes}` : '—'} aria-label={`${PRIORITY_LABELS[priority]} resolve minutes`} className="tp-focus-ring w-24 border border-slate-200 rounded-md px-1.5 py-1 tabular-nums" />
+        <input type="number" min="5" value={resolve} onChange={(e) => setResolve(e.target.value)} placeholder="—" aria-label={`${PRIORITY_LABELS[priority]} resolve minutes`} className="tp-focus-ring w-24 border border-slate-200 rounded-md px-1.5 py-1 tabular-nums" />
         m
       </label>
-      {!policy && inherited && (inherited.firstResponseMinutes || inherited.resolveMinutes) && (
-        <span className="text-[10px] text-slate-300 italic">inherits All types</span>
-      )}
       {dirty && (
         <button onClick={() => onSave(priority, Number(fr) || null, Number(resolve) || null)} disabled={busy} className="tp-focus-ring inline-flex items-center gap-1 px-2 py-1 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-60">
           {busy ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" /> : <Check className="w-3 h-3" aria-hidden="true" />} Save
