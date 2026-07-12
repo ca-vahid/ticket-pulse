@@ -152,8 +152,12 @@ export function deriveStateChip(ticket, awaitingReply = false) {
   const fr = ticket.frDueBy ? new Date(ticket.frDueBy).getTime() : null;
   const due = ticket.dueBy ? new Date(ticket.dueBy).getTime() : null;
   const noFirstReply = !ticket.firstPublicAgentReplyAt;
-  if ((due && due < now) || (fr && fr < now && noFirstReply)) return 'overdue';
-  if (fr && fr >= now && noFirstReply) return 'response_due';
+  // Pending = the clock is stopped (waiting on the requester/a third party):
+  // no overdue or response-due nags. A requester reply flips it back to Open
+  // via the normal status flow, so the SLA chips resume naturally.
+  const slaPaused = ticket.status === 'Pending';
+  if (!slaPaused && ((due && due < now) || (fr && fr < now && noFirstReply))) return 'overdue';
+  if (!slaPaused && fr && fr >= now && noFirstReply) return 'response_due';
   if (awaitingReply) return 'requester_responded';
   if (!ticket.assignedTechId && noFirstReply) return 'new';
   return null;
@@ -484,9 +488,11 @@ class TicketService {
       const dueWeekOut = new Date(dueNow.getTime() + 7 * 24 * 3600 * 1000);
       const buckets = asList(query.due);
       const or = [];
-      if (buckets.includes('overdue')) or.push({ dueBy: { lt: dueNow } });
-      if (buckets.includes('today')) or.push({ dueBy: { gte: dueNow, lte: dueEndOfDay } });
-      if (buckets.includes('week')) or.push({ dueBy: { gte: dueNow, lte: dueWeekOut } });
+      // Due buckets only apply to Open tickets — Pending pauses the SLA clock
+      // (and Resolved/Closed obviously don't nag).
+      if (buckets.includes('overdue')) or.push({ dueBy: { lt: dueNow }, status: 'Open' });
+      if (buckets.includes('today')) or.push({ dueBy: { gte: dueNow, lte: dueEndOfDay }, status: 'Open' });
+      if (buckets.includes('week')) or.push({ dueBy: { gte: dueNow, lte: dueWeekOut }, status: 'Open' });
       if (buckets.includes('none')) or.push({ dueBy: null });
       if (or.length) where.AND = [...(where.AND || []), { OR: or }];
     }
@@ -536,7 +542,8 @@ class TicketService {
       where.status = { in: ['Open', 'Pending'] };
       where.assignedTechId = null;
     } else if (query.segment === 'due_today') {
-      where.status = { in: ['Open', 'Pending'] };
+      // SLA segments are Open-only: Pending pauses the clock (no nags).
+      where.status = 'Open';
       const endOfDay = new Date(now); endOfDay.setHours(23, 59, 59, 999);
       where.AND = [...(where.AND || []), {
         OR: [
@@ -545,7 +552,7 @@ class TicketService {
         ],
       }];
     } else if (query.segment === 'overdue') {
-      where.status = { in: ['Open', 'Pending'] };
+      where.status = 'Open';
       where.AND = [...(where.AND || []), {
         OR: [
           { dueBy: { lt: now } },
@@ -829,9 +836,12 @@ class TicketService {
       prisma.ticket.count({ where: { workspaceId, isNoise: false, status: { notIn: ['Deleted', 'Spam'] } } }),
       prisma.ticket.count({ where: open }),
       prisma.ticket.count({ where: { ...open, assignedTechId: null } }),
+      // dueToday/overdue count Open tickets only: Pending pauses the SLA
+      // clock, so a pending ticket is never "due" or "overdue".
       prisma.ticket.count({
         where: {
           ...open,
+          status: 'Open',
           OR: [
             { dueBy: { gte: now, lte: endOfDay } },
             { frDueBy: { gte: now, lte: endOfDay }, firstPublicAgentReplyAt: null },
@@ -841,6 +851,7 @@ class TicketService {
       prisma.ticket.count({
         where: {
           ...open,
+          status: 'Open',
           OR: [
             { dueBy: { lt: now } },
             { frDueBy: { lt: now }, firstPublicAgentReplyAt: null },

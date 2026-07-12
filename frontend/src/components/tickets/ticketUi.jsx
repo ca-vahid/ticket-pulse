@@ -216,7 +216,17 @@ export function dueIn(value) {
   return { label: `${span} left`, state: 'ok' };
 }
 
-export function SlaChip({ value, className = '' }) {
+export function SlaChip({ value, paused = false, className = '' }) {
+  // Pending tickets pause the SLA clock: neutral "Paused" chip, no countdown,
+  // no overdue red — the requester (or a third party) holds the ball.
+  if (paused) {
+    return (
+      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap bg-slate-100 text-slate-500 ${className}`} title="SLA paused while the ticket is pending">
+        <span className="w-1.5 h-1.5 rounded-full bg-slate-400" aria-hidden="true" />
+        Paused
+      </span>
+    );
+  }
   const info = dueIn(value);
   if (!info) return null;
   // Softer, borderless urgency pills with a leading colored dot (mockup style):

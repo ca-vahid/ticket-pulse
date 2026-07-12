@@ -2400,7 +2400,7 @@ export default function TicketDetail() {
                           <span className="ml-auto text-slate-400">{new Date(ticket.frDueBy).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
                           {ticket.firstPublicAgentReplyAt
                             ? <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold border bg-emerald-50 text-emerald-700 border-emerald-200">Responded</span>
-                            : <SlaChip value={ticket.frDueBy} />}
+                            : <SlaChip value={ticket.frDueBy} paused={ticket.status === 'Pending'} />}
                         </div>
                       )}
                       {ticket.dueBy && (
@@ -2409,7 +2409,7 @@ export default function TicketDetail() {
                           <span className="ml-auto text-slate-400">{new Date(ticket.dueBy).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
                           {['Resolved', 'Closed'].includes(ticket.status)
                             ? <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold border bg-emerald-50 text-emerald-700 border-emerald-200">Done</span>
-                            : <SlaChip value={ticket.dueBy} />}
+                            : <SlaChip value={ticket.dueBy} paused={ticket.status === 'Pending'} />}
                         </div>
                       )}
                     </div>

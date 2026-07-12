@@ -1531,7 +1531,7 @@ export default function Tickets() {
                                 : resolvedLike
                                   ? <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold border bg-emerald-50 text-emerald-700 border-emerald-200">Done</span>
                                   : ticket.dueBy
-                                    ? <SlaChip value={ticket.dueBy} className="!px-1.5 !text-[10px]" />
+                                    ? <SlaChip value={ticket.dueBy} paused={ticket.status === 'Pending'} className="!px-1.5 !text-[10px]" />
                                     : <span className="text-xs text-slate-300">—</span>}
                             </span>
                           );
