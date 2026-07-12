@@ -1,6 +1,7 @@
 import DOMPurify from 'dompurify';
 import { Ticket as TicketIcon, Ban, ClipboardList, Cloud, CloudOff, CloudUpload, Sparkles, UserCog, UserPlus, UserRound, Zap } from 'lucide-react';
 import { PRIORITY_STRIP_COLORS, PRIORITY_LABELS, STATUS_COLORS } from '../tech-detail/constants';
+import { useTicketTypes } from '../../hooks/useTicketTypes';
 
 export { PRIORITY_STRIP_COLORS, PRIORITY_LABELS, STATUS_COLORS };
 
@@ -116,30 +117,50 @@ export function StateChip({ state, className = '' }) {
   );
 }
 
+// Registry color tokens → tile/text tones. Keep keys in sync with the backend
+// ticketTypeService COLORS whitelist.
+export const TYPE_COLOR_TONES = {
+  slate: { tile: 'bg-slate-100 text-slate-600', text: 'text-slate-600' },
+  orange: { tile: 'bg-orange-100 text-orange-600', text: 'text-orange-600' },
+  violet: { tile: 'bg-violet-100 text-violet-600', text: 'text-violet-600' },
+  red: { tile: 'bg-red-100 text-red-600', text: 'text-red-600' },
+  blue: { tile: 'bg-blue-100 text-blue-600', text: 'text-blue-600' },
+  emerald: { tile: 'bg-emerald-100 text-emerald-600', text: 'text-emerald-600' },
+  amber: { tile: 'bg-amber-100 text-amber-700', text: 'text-amber-700' },
+  cyan: { tile: 'bg-cyan-100 text-cyan-600', text: 'text-cyan-600' },
+  pink: { tile: 'bg-pink-100 text-pink-600', text: 'text-pink-600' },
+};
+
 /**
  * Ticket type as a Linear-style glyph tile + plain text — no pill (pills wrap
  * and read as noise at row density; a small colored glyph scans faster).
+ * Styling (color + abbreviation) comes from the workspace's ticket-type
+ * registry; unknown/legacy values fall back to the old INC/REQ heuristic so
+ * historical strings still render.
  */
 export function TypePill({ type, full = false }) {
+  const { typeByName } = useTicketTypes();
   if (!type) return null;
+  const def = typeByName(type);
   const isIncident = /incident/i.test(type);
-  const Icon = isIncident ? Zap : ClipboardList;
-  // Rows use ITSM codes (INC/REQ) so the column stays tiny; the glyph and
-  // tooltip carry the meaning. `full` spells it out where space allows.
-  const label = full ? type : (isIncident ? 'INC' : 'REQ');
+  const tone = TYPE_COLOR_TONES[def?.color]
+    || (isIncident ? TYPE_COLOR_TONES.orange : TYPE_COLOR_TONES.violet);
+  const Icon = (def ? def.color === 'orange' || def.color === 'red' : isIncident) ? Zap : ClipboardList;
+  // Rows use short codes (INC/CASE/REQ…) so the column stays tiny; the glyph
+  // and tooltip carry the meaning. `full` spells it out where space allows.
+  const abbrev = def?.abbreviation || (isIncident ? 'INC' : 'REQ');
+  const label = full ? type : abbrev;
   return (
     <span className="inline-flex items-center gap-1.5 min-w-0 whitespace-nowrap" title={type}>
       <span
         aria-hidden="true"
-        className={`inline-flex items-center justify-center w-[18px] h-[18px] rounded-[5px] flex-shrink-0 ${
-          isIncident ? 'bg-orange-100 text-orange-600' : 'bg-violet-100 text-violet-600'
-        }`}
+        className={`inline-flex items-center justify-center w-[18px] h-[18px] rounded-[5px] flex-shrink-0 ${tone.tile}`}
       >
         <Icon className="w-3 h-3" strokeWidth={2.4} />
       </span>
       <span className={full
         ? 'truncate text-[11px] font-medium text-slate-600'
-        : `text-[10px] font-bold tracking-widest ${isIncident ? 'text-orange-600' : 'text-violet-600'}`}
+        : `text-[10px] font-bold tracking-widest ${tone.text}`}
       >
         {label}
       </span>

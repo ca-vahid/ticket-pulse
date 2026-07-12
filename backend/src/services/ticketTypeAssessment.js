@@ -1,29 +1,17 @@
 import { ValidationError } from '../utils/errors.js';
-
-export const FRESHSERVICE_TICKET_TYPES = Object.freeze(['Incident', 'Service Request']);
-
-const TICKET_TYPE_ALIASES = Object.freeze({
-  incident: 'Incident',
-  incidents: 'Incident',
-  issue: 'Incident',
-  outage: 'Incident',
-  'service request': 'Service Request',
-  service_request: 'Service Request',
-  servicerequest: 'Service Request',
-  request: 'Service Request',
-  requests: 'Service Request',
-  sr: 'Service Request',
-});
+import ticketTypeService from './ticketTypeService.js';
 
 const CONFIDENCE_VALUES = new Set(['low', 'medium', 'high']);
 
-export function normalizeTicketType(value) {
-  const key = String(value ?? '').trim().toLowerCase();
-  const label = TICKET_TYPE_ALIASES[key];
-  if (!label) {
-    throw new ValidationError('ticketType must be Incident or Service Request');
-  }
-  return label;
+/**
+ * Normalize a raw type value to the workspace's canonical type name using
+ * the ticket-type registry (names + aliases, retired types allowed — an
+ * assessment recorded before a retire must still resolve for write-back).
+ */
+export async function normalizeTicketType(value, workspaceId) {
+  const key = String(value ?? '').trim();
+  if (!key) throw new ValidationError('ticketType is required');
+  return ticketTypeService.normalizeTypeName(workspaceId, key, { allowInactive: true });
 }
 
 export function normalizeTicketTypeConfidence(value) {
@@ -35,13 +23,13 @@ export function normalizeTicketTypeConfidence(value) {
   return confidence;
 }
 
-export function normalizeTicketTypeAssessment(payload = {}) {
+export async function normalizeTicketTypeAssessment(payload = {}, workspaceId) {
   const rawType = payload.ticketType ?? payload.assessedTicketType;
   if (rawType === undefined || rawType === null || String(rawType).trim() === '') {
     return null;
   }
 
-  const ticketType = normalizeTicketType(rawType);
+  const ticketType = await normalizeTicketType(rawType, workspaceId);
   const rationale = String(payload.ticketTypeRationale || payload.ticketTypeReasoning || '').trim();
 
   return {
@@ -51,13 +39,13 @@ export function normalizeTicketTypeAssessment(payload = {}) {
   };
 }
 
-export function validateRecommendationTicketTypeFields(payload = {}) {
-  normalizeTicketTypeAssessment(payload);
+export async function validateRecommendationTicketTypeFields(payload = {}, workspaceId) {
+  await normalizeTicketTypeAssessment(payload, workspaceId);
   return true;
 }
 
-export function buildTicketTypeTicketUpdateFields(payload, sourceRunId, assessedAt = new Date()) {
-  const assessment = normalizeTicketTypeAssessment(payload);
+export async function buildTicketTypeTicketUpdateFields(payload, sourceRunId, assessedAt = new Date(), workspaceId) {
+  const assessment = await normalizeTicketTypeAssessment(payload, workspaceId);
   if (!assessment) return null;
 
   return {

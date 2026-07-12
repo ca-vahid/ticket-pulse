@@ -2,6 +2,14 @@
 import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+
+// The builder reads the workspace ticket-type registry for the ticket.ticketType
+// enum options — stub it (no WorkspaceProvider in this unit test).
+vi.mock('../../hooks/useTicketTypes', () => ({
+  useTicketTypes: () => ({ types: [], activeTypes: [], defaultType: null, typeByName: () => null, loading: false, refresh: () => {} }),
+  invalidateTicketTypesCache: () => {},
+}));
+
 import ConditionGroupBuilder, { emptyGroup } from './ConditionGroupBuilder';
 
 afterEach(cleanup);

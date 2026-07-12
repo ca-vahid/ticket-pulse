@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Plus, Trash2, X } from 'lucide-react';
 import { ticketsAPI } from '../../services/api';
+import { useTicketTypes } from '../../hooks/useTicketTypes';
 
 /**
  * AND/OR condition-group builder for workflow condition nodes. Edits the
@@ -18,6 +19,9 @@ export const CG_FIELDS = [
   { value: 'ticket.priorityLabel', label: 'Priority', type: 'enum', options: ['Low', 'Medium', 'High', 'Urgent'] },
   { value: 'ticket.origin', label: 'Ticket origin', type: 'enum', options: ['ticketpulse', 'freshservice'] },
   { value: 'ticket.sourceLabel', label: 'Ticket source (arrival channel)', type: 'enum', options: ['Email', 'Portal', 'Phone', 'Chat', 'API', 'Webhook', 'Agent'] },
+  // Per-workspace vocabulary (registry-driven) — string on the backend; the
+  // builder swaps in the workspace's type names as enum options at runtime.
+  { value: 'ticket.ticketType', label: 'Ticket type', type: 'string' },
   { value: 'ticket.subject', label: 'Subject', type: 'string' },
   { value: 'ticket.descriptionText', label: 'Description', type: 'string' },
   { value: 'ticket.internalCategory', label: 'Category', type: 'string' },
@@ -71,6 +75,7 @@ const LIST_OPERATORS = new Set(['in', 'not_in', 'has_any', 'has_all', 'has_none'
 // (mirrors the backend's dynamic fieldSpec). Fetched once per session.
 let customFieldCache = null;
 function useConditionFields() {
+  const { activeTypes } = useTicketTypes();
   const [fields, setFields] = useState(customFieldCache
     ? [...CG_FIELDS, ...customFieldCache]
     : CG_FIELDS);
@@ -85,6 +90,13 @@ function useConditionFields() {
       })
       .catch(() => { customFieldCache = []; });
   }, []);
+  // The ticket-type field is a per-workspace enum once the registry loads —
+  // the backend keeps it a string, so any stored value still evaluates.
+  if (activeTypes.length) {
+    return fields.map((f) => (f.value === 'ticket.ticketType'
+      ? { ...f, type: 'enum', options: activeTypes.map((t) => t.name) }
+      : f));
+  }
   return fields;
 }
 

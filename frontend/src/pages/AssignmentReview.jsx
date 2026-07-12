@@ -4556,13 +4556,13 @@ export function AssignmentConfigPanel({ workspaceTimezone = 'America/Los_Angeles
         excludedGroupIds: [], observeOnlyGroupIds: [], autoCategorizeEnabled: false, observeCategoryWritebackEnabled: false,
         dailyReviewEnabled: false, dailyReviewRunHour: 18, dailyReviewRunMinute: 5, dailyReviewLookbackDays: 14,
         dailyReviewPreheatEnabled: false,
-        priorityAssessmentEnabled: true, priorityWritebackEnabled: true,
+        priorityAssessmentEnabled: true, priorityWritebackEnabled: true, typeWritebackEnabled: false,
         priorityAssessmentAfterHoursEnabled: false,
         ...cfg,
       });
       try { const statusRes = await assignmentAPI.emailStatus(); setEmailStatus(statusRes?.data || null); } catch { /* ignore */ }
     } catch {
-      setConfig({ isEnabled: false, autoAssign: false, autoCloseNoise: false, dryRunMode: true, llmModel: 'claude-sonnet-5', maxRecommendations: 3, scoringWeights: null, pollForUnassigned: true, pollMaxPerCycle: 5, monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60, excludedGroupIds: [], observeOnlyGroupIds: [], dailyReviewEnabled: false, dailyReviewRunHour: 18, dailyReviewRunMinute: 5, dailyReviewLookbackDays: 14, dailyReviewPreheatEnabled: false, priorityAssessmentEnabled: true, priorityWritebackEnabled: true, priorityAssessmentAfterHoursEnabled: false });
+      setConfig({ isEnabled: false, autoAssign: false, autoCloseNoise: false, dryRunMode: true, llmModel: 'claude-sonnet-5', maxRecommendations: 3, scoringWeights: null, pollForUnassigned: true, pollMaxPerCycle: 5, monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60, excludedGroupIds: [], observeOnlyGroupIds: [], dailyReviewEnabled: false, dailyReviewRunHour: 18, dailyReviewRunMinute: 5, dailyReviewLookbackDays: 14, dailyReviewPreheatEnabled: false, priorityAssessmentEnabled: true, priorityWritebackEnabled: true, typeWritebackEnabled: false, priorityAssessmentAfterHoursEnabled: false });
     } finally { setLoading(false); }
   }, []);
 
@@ -4632,6 +4632,13 @@ export function AssignmentConfigPanel({ workspaceTimezone = 'America/Los_Angeles
             After-hours priority-only runs, priority backfills, local assessed-priority persistence, and FreshService priority writeback are disabled for this workspace.
           </div>
         )}
+        <ConfigToggle
+          label="FreshService Type Writeback"
+          description="Write the AI's assessed ticket type (from Settings → Ticket Ops → Ticket types) to FreshService. Only types mapped to an FS choice are ever sent; Ticket Pulse–native types stay local."
+          checked={!!config.typeWritebackEnabled}
+          onChange={() => setConfig({ ...config, typeWritebackEnabled: !config.typeWritebackEnabled })}
+          color="text-violet-600"
+        />
       </ConfigSection>
 
       {/* Section 2b: Excluded Groups — overrides auto-assign for specific FS groups. */}

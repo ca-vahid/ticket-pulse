@@ -22,6 +22,10 @@ const prismaMock = {
   ticketAssignmentEpisode: {
     findFirst: jest.fn(),
   },
+  // Per-workspace type registry (ticket-types plan).
+  ticketTypeDefinition: {
+    findMany: jest.fn(),
+  },
 };
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({
@@ -420,10 +424,18 @@ describe('freshServiceActionService priority writeback', () => {
 });
 
 describe('freshServiceActionService ticket type writeback', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     jest.clearAllMocks();
     prismaMock.assignmentPipelineRun.update.mockResolvedValue({});
     prismaMock.ticket.update.mockResolvedValue({});
+    // Write-back is gated per workspace (Settings → AI & Routing).
+    prismaMock.assignmentConfig.findUnique.mockResolvedValue({ typeWritebackEnabled: true });
+    prismaMock.ticketTypeDefinition.findMany.mockResolvedValue([
+      { id: 1, workspaceId: 1, name: 'Incident', aliases: ['incident'], isActive: true, aiAssignable: true, fsTypeValue: 'Incident', sortOrder: 0 },
+      { id: 2, workspaceId: 1, name: 'Service Request', aliases: ['sr'], isActive: true, aiAssignable: true, fsTypeValue: 'Service Request', sortOrder: 1 },
+    ]);
+    const { invalidateTicketTypeCache } = await import('../src/services/ticketTypeService.js');
+    invalidateTicketTypeCache();
     settingsRepositoryMock.getFreshServiceConfigForWorkspace.mockResolvedValue({
       domain: 'example.freshservice.com',
       apiKey: 'test-key',
@@ -482,7 +494,8 @@ describe('freshServiceActionService ticket type writeback', () => {
     });
   });
 
-  test('skips ticket type writeback outside the IT skill hierarchy workspace', async () => {
+  test('skips ticket type writeback when the workspace setting is off', async () => {
+    prismaMock.assignmentConfig.findUnique.mockResolvedValue({ typeWritebackEnabled: false });
     prismaMock.assignmentPipelineRun.findUnique.mockResolvedValue(ticketTypeRun({ workspaceId: 2 }));
 
     const result = await freshServiceActionService.executeTicketTypeWriteback(4101, 2, false);

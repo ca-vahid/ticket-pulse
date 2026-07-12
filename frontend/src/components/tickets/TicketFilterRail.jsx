@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { PersonAvatar, PRIORITY_LABELS, PRIORITY_STRIP_COLORS, TagChip } from './ticketUi';
 import { ticketsAPI } from '../../services/api';
+import { useTicketTypes } from '../../hooks/useTicketTypes';
 import 'react-day-picker/style.css';
 
 const csvList = (s) => (s ? String(s).split(',').filter(Boolean) : []);
@@ -34,7 +35,8 @@ const DUE_OPTIONS = [
 ];
 
 const STATUS_OPTIONS = ['Open', 'Pending', 'Resolved', 'Closed'];
-const TYPE_OPTIONS = ['Incident', 'Service Request'];
+// Legacy fallback while the per-workspace type registry loads.
+const TYPE_OPTIONS_FALLBACK = ['Incident', 'Service Request'];
 
 /** One collapsible facet group in the rail. */
 function Section({ title, icon: Icon, activeCount = 0, onClear, defaultOpen = false, children }) {
@@ -127,6 +129,7 @@ function SortableFacet({ id, order, dragKey, setDragKey, onDropOn, children }) {
  */
 export default function TicketFilterRail({ meta, stats = null, mobileOpen = false, onMobileClose, sheet = false }) {
   const [searchParams, setSearchParams] = useSearchParams();
+  const { activeTypes: registryTypes } = useTicketTypes();
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem('tp_filter_rail') === 'collapsed'; } catch { return false; }
   });
@@ -584,12 +587,16 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
           </Section>
         </SortableFacet>
 
-        {/* Type */}
+        {/* Type — the workspace's registry vocabulary + "No type" (FS leaves
+            type optional, so type-less tickets are a real population). */}
         <SortableFacet {...facetProps('type')}>
           <Section title="Type" activeCount={types.length} onClear={() => setParams({ type: null })}>
-            {TYPE_OPTIONS.map((t) => (
+            {(registryTypes.length ? registryTypes.map((t) => t.name) : TYPE_OPTIONS_FALLBACK).map((t) => (
               <Facet key={t} checked={types.includes(t)} onToggle={() => toggleCsv('type', t)}>{t}</Facet>
             ))}
+            <Facet checked={types.includes('none')} onToggle={() => toggleCsv('type', 'none')}>
+              <span className="italic text-slate-400">No type</span>
+            </Facet>
           </Section>
         </SortableFacet>
 

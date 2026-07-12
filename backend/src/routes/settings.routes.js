@@ -635,7 +635,82 @@ router.delete(
   requireAdmin,
   asyncHandler(async (req, res) => {
     const { default: slaPolicyService } = await import('../services/slaPolicyService.js');
-    res.json({ success: true, data: await slaPolicyService.remove(req.workspaceId, req.params.priority) });
+    res.json({ success: true, data: await slaPolicyService.remove(req.workspaceId, req.params.priority, req.query.ticketTypeId ?? null) });
+  }),
+);
+
+// Ticket-type registry: the per-workspace catalogue of ticket types (names,
+// LLM descriptions, FS mapping, pill styling). Read is open to any workspace
+// member (create/detail/filter UIs need it); writes are admin-only.
+router.get(
+  '/ticket-types',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  asyncHandler(async (req, res) => {
+    const { default: ticketTypeService } = await import('../services/ticketTypeService.js');
+    res.json({ success: true, data: await ticketTypeService.listTypes(req.workspaceId) });
+  }),
+);
+
+router.post(
+  '/ticket-types',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { default: ticketTypeService } = await import('../services/ticketTypeService.js');
+    const created = await ticketTypeService.createType(req.workspaceId, req.body || {}, req.session?.user?.email);
+    res.status(201).json({ success: true, data: created });
+  }),
+);
+
+router.patch(
+  '/ticket-types/:id',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { default: ticketTypeService } = await import('../services/ticketTypeService.js');
+    const updated = await ticketTypeService.updateType(req.workspaceId, req.params.id, req.body || {}, req.session?.user?.email);
+    res.json({ success: true, data: updated });
+  }),
+);
+
+// Retire (never delete) — historical tickets keep the type string.
+router.delete(
+  '/ticket-types/:id',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { default: ticketTypeService } = await import('../services/ticketTypeService.js');
+    const retired = await ticketTypeService.retireType(req.workspaceId, req.params.id, req.session?.user?.email);
+    res.json({ success: true, data: retired });
+  }),
+);
+
+// On-demand FS drift check (Settings "Check FreshService now" button).
+router.post(
+  '/ticket-types/sync',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { default: ticketTypeService } = await import('../services/ticketTypeService.js');
+    const { default: prisma } = await import('../services/prisma.js');
+    const { default: settingsRepository } = await import('../services/settingsRepository.js');
+    const { createFreshServiceClient } = await import('../integrations/freshservice.js');
+    const workspace = await prisma.workspace.findUnique({
+      where: { id: req.workspaceId },
+      select: { freshserviceWorkspaceId: true },
+    });
+    const fsConfig = await settingsRepository.getFreshServiceConfigForWorkspace(req.workspaceId);
+    if (!workspace || !fsConfig?.domain || !fsConfig?.apiKey) {
+      return res.status(400).json({ success: false, message: 'FreshService is not configured for this workspace' });
+    }
+    const client = createFreshServiceClient(fsConfig.domain, fsConfig.apiKey, { priority: 'high', source: 'ticket-type-sync-ui' });
+    const result = await ticketTypeService.syncFromFreshService(req.workspaceId, client, workspace.freshserviceWorkspaceId);
+    res.json({ success: true, data: { ...result, types: await ticketTypeService.listTypes(req.workspaceId) } });
   }),
 );
 

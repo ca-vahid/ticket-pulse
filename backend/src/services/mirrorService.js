@@ -5,6 +5,7 @@ import ticketActivityRepository from './ticketActivityRepository.js';
 import attachmentService from './attachmentService.js';
 import { createFreshServiceClient } from '../integrations/freshservice.js';
 import { TICKET_ORIGIN, ticketDisplayRef } from '../utils/ticketOrigin.js';
+import ticketTypeService from './ticketTypeService.js';
 import { sseManager } from '../routes/sse.routes.js';
 
 // TP status labels → FreshService status codes
@@ -371,6 +372,13 @@ class MirrorService {
       group_id: ticket.groupId ? Number(ticket.groupId) : undefined,
       responder_id: ticket.assignedTech?.freshserviceId ? Number(ticket.assignedTech.freshserviceId) : undefined,
     };
+    // Ticket type rides along only when the registry maps it to an FS choice
+    // for this workspace — TP-native-only types (fsTypeValue null) stay
+    // TP-side; sending an unknown value would render inconsistently in FS.
+    if (ticket.ticketType) {
+      const typeDef = await ticketTypeService.resolveType(ticket.workspaceId, ticket.ticketType);
+      if (typeDef?.fsTypeValue) basePayload.type = typeDef.fsTypeValue;
+    }
     // The Ticket Pulse category fields (lf_ticket_pulse_*) are LOOKUP fields that
     // FreshService validates strictly on CREATE ("should be of type Number") but
     // accepts on UPDATE — and they need the record ID, not the category name. So

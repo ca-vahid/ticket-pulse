@@ -28,6 +28,9 @@ export const CONDITION_FIELDS = Object.freeze({
   'ticket.origin': { label: 'Ticket origin', type: 'enum', path: 'ticket.origin', options: ['ticketpulse', 'freshservice'] },
   // Arrival channel (QA 07-07 #1) — how the ticket reached the helpdesk.
   'ticket.sourceLabel': { label: 'Ticket source', type: 'enum', path: 'ticket.sourceLabel', options: ['Email', 'Portal', 'Phone', 'Chat', 'API', 'Webhook', 'Agent'] },
+  // Ticket type — per-workspace vocabulary (registry-driven), so the builder
+  // treats it as free text; the UI offers the workspace's types as hints.
+  'ticket.ticketType': { label: 'Ticket type', type: 'string', path: 'ticket.ticketType' },
   'ticket.subject': { label: 'Subject', type: 'string', path: 'ticket.subject' },
   'ticket.descriptionText': { label: 'Description', type: 'string', path: 'ticket.descriptionText' },
   'ticket.category': { label: 'Category (FS)', type: 'string', path: 'ticket.category' },

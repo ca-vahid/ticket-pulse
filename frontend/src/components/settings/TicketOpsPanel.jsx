@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Check, FileText, Loader2, Plus, StickyNote, Tag as TagGlyph, Timer, Trash2, Wand2 } from 'lucide-react';
+import { AlertTriangle, Archive, Check, FileText, Layers, Loader2, Plus, RefreshCw, Sparkles, Star, StickyNote, Tag as TagGlyph, Timer, Trash2, Wand2 } from 'lucide-react';
 import { settingsAPI, ticketsAPI } from '../../services/api';
-import { TAG_CHIP_TONES } from '../tickets/ticketUi';
+import { TAG_CHIP_TONES, TYPE_COLOR_TONES } from '../tickets/ticketUi';
+import { useTicketTypes, invalidateTicketTypesCache } from '../../hooks/useTicketTypes';
 
 /**
  * Admin config for the enterprise ticket ops shipped with the workflow revamp:
@@ -28,46 +29,74 @@ function SectionCard({ icon: Icon, title, hint, children }) {
 }
 
 function SlaSection() {
+  const { activeTypes } = useTicketTypes();
   const [policies, setPolicies] = useState([]);
-  const [busyPriority, setBusyPriority] = useState(null);
+  const [busyKey, setBusyKey] = useState(null); // `${priority}:${typeId ?? 'all'}`
+  const [typeTab, setTypeTab] = useState('all'); // 'all' | type id
   const load = useCallback(() => {
     settingsAPI.getSlaPolicies().then((res) => setPolicies(res.data?.data || res.data || [])).catch(() => {});
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  const byPriority = new Map(policies.map((p) => [p.priority, p]));
+  const currentTypeId = typeTab === 'all' ? null : Number(typeTab);
+  const forTab = new Map(policies.filter((p) => (p.ticketTypeId ?? null) === currentTypeId).map((p) => [p.priority, p]));
+  const fallback = new Map(policies.filter((p) => (p.ticketTypeId ?? null) === null).map((p) => [p.priority, p]));
 
   const save = async (priority, fr, resolve) => {
-    setBusyPriority(priority);
+    setBusyKey(`${priority}:${currentTypeId ?? 'all'}`);
     try {
-      await settingsAPI.upsertSlaPolicy({ priority, firstResponseMinutes: fr || null, resolveMinutes: resolve || null });
+      await settingsAPI.upsertSlaPolicy({ priority, ticketTypeId: currentTypeId, firstResponseMinutes: fr || null, resolveMinutes: resolve || null });
       load();
     } catch { /* validation message is in the response; keep simple */ }
-    setBusyPriority(null);
+    setBusyKey(null);
   };
 
   return (
-    <SectionCard icon={Timer} title="SLA policies (Ticket Pulse tickets)" hint="Per-priority clocks applied when a TP-born ticket is created. Build escalation ladders as workflows on the SLA-breach triggers.">
+    <SectionCard icon={Timer} title="SLA policies (Ticket Pulse tickets)" hint="Clocks applied when a TP-born ticket is created. 'All types' is the fallback; a type tab overrides it for that type only (e.g. a tighter Major Incident response). Build escalation ladders as workflows on the SLA-breach triggers.">
+      {activeTypes.length > 1 && (
+        <div className="flex flex-wrap gap-1 mb-2.5" role="tablist" aria-label="SLA scope">
+          <button
+            role="tab"
+            aria-selected={typeTab === 'all'}
+            onClick={() => setTypeTab('all')}
+            className={`tp-focus-ring px-2.5 py-1 rounded-full text-[11px] font-semibold border ${typeTab === 'all' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-500 border-slate-200 hover:border-blue-300'}`}
+          >
+            All types
+          </button>
+          {activeTypes.map((t) => {
+            const overrides = policies.filter((p) => p.ticketTypeId === t.id).length;
+            return (
+              <button
+                key={t.id}
+                role="tab"
+                aria-selected={typeTab === String(t.id)}
+                onClick={() => setTypeTab(String(t.id))}
+                className={`tp-focus-ring px-2.5 py-1 rounded-full text-[11px] font-semibold border ${typeTab === String(t.id) ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-500 border-slate-200 hover:border-blue-300'}`}
+              >
+                {t.name}{overrides > 0 && <span className="ml-1 opacity-70">({overrides})</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
       <div className="space-y-1.5">
-        {[4, 3, 2, 1].map((priority) => {
-          const policy = byPriority.get(priority);
-          return (
-            <SlaRow
-              key={priority}
-              priority={priority}
-              policy={policy}
-              busy={busyPriority === priority}
-              onSave={save}
-              onDelete={async () => { await settingsAPI.deleteSlaPolicy(priority).catch(() => {}); load(); }}
-            />
-          );
-        })}
+        {[4, 3, 2, 1].map((priority) => (
+          <SlaRow
+            key={`${priority}:${typeTab}`}
+            priority={priority}
+            policy={forTab.get(priority)}
+            inherited={currentTypeId !== null ? fallback.get(priority) : null}
+            busy={busyKey === `${priority}:${currentTypeId ?? 'all'}`}
+            onSave={save}
+            onDelete={async () => { await settingsAPI.deleteSlaPolicy(priority, currentTypeId).catch(() => {}); load(); }}
+          />
+        ))}
       </div>
     </SectionCard>
   );
 }
 
-function SlaRow({ priority, policy, busy, onSave, onDelete }) {
+function SlaRow({ priority, policy, inherited = null, busy, onSave, onDelete }) {
   const [fr, setFr] = useState(policy?.firstResponseMinutes ?? '');
   const [resolve, setResolve] = useState(policy?.resolveMinutes ?? '');
   useEffect(() => { setFr(policy?.firstResponseMinutes ?? ''); setResolve(policy?.resolveMinutes ?? ''); }, [policy]);
@@ -78,14 +107,17 @@ function SlaRow({ priority, policy, busy, onSave, onDelete }) {
       <span className="w-16 font-semibold text-slate-600">{PRIORITY_LABELS[priority]}</span>
       <label className="flex items-center gap-1 text-slate-400">
         first response
-        <input type="number" min="5" value={fr} onChange={(e) => setFr(e.target.value)} placeholder="—" aria-label={`${PRIORITY_LABELS[priority]} first-response minutes`} className="tp-focus-ring w-20 border border-slate-200 rounded-md px-1.5 py-1 tabular-nums" />
+        <input type="number" min="5" value={fr} onChange={(e) => setFr(e.target.value)} placeholder={inherited?.firstResponseMinutes ? `${inherited.firstResponseMinutes}` : '—'} aria-label={`${PRIORITY_LABELS[priority]} first-response minutes`} className="tp-focus-ring w-20 border border-slate-200 rounded-md px-1.5 py-1 tabular-nums" />
         m
       </label>
       <label className="flex items-center gap-1 text-slate-400">
         resolve
-        <input type="number" min="5" value={resolve} onChange={(e) => setResolve(e.target.value)} placeholder="—" aria-label={`${PRIORITY_LABELS[priority]} resolve minutes`} className="tp-focus-ring w-24 border border-slate-200 rounded-md px-1.5 py-1 tabular-nums" />
+        <input type="number" min="5" value={resolve} onChange={(e) => setResolve(e.target.value)} placeholder={inherited?.resolveMinutes ? `${inherited.resolveMinutes}` : '—'} aria-label={`${PRIORITY_LABELS[priority]} resolve minutes`} className="tp-focus-ring w-24 border border-slate-200 rounded-md px-1.5 py-1 tabular-nums" />
         m
       </label>
+      {!policy && inherited && (inherited.firstResponseMinutes || inherited.resolveMinutes) && (
+        <span className="text-[10px] text-slate-300 italic">inherits All types</span>
+      )}
       {dirty && (
         <button onClick={() => onSave(priority, Number(fr) || null, Number(resolve) || null)} disabled={busy} className="tp-focus-ring inline-flex items-center gap-1 px-2 py-1 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-60">
           {busy ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" /> : <Check className="w-3 h-3" aria-hidden="true" />} Save
@@ -97,6 +129,183 @@ function SlaRow({ priority, policy, busy, onSave, onDelete }) {
         </button>
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------- ticket types
+
+const TYPE_COLOR_KEYS = Object.keys(TYPE_COLOR_TONES);
+
+function TicketTypesSection() {
+  const { types, refresh } = useTicketTypes();
+  const [draft, setDraft] = useState(null); // create/edit form state
+  const [editingId, setEditingId] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [error, setError] = useState(null);
+  const [confirmRetire, setConfirmRetire] = useState(null);
+
+  const reload = useCallback(() => {
+    invalidateTicketTypesCache();
+    refresh({ force: true });
+  }, [refresh]);
+
+  const save = async () => {
+    setBusy(true); setError(null);
+    try {
+      const payload = {
+        name: draft.name,
+        description: draft.description || null,
+        color: draft.color,
+        abbreviation: draft.abbreviation || null,
+        aiAssignable: draft.aiAssignable,
+        isDefault: draft.isDefault,
+        fsTypeValue: draft.fsMapped ? (draft.fsTypeValue || draft.name) : null,
+        aliases: String(draft.aliases || '').split(',').map((a) => a.trim()).filter(Boolean),
+      };
+      if (editingId) {
+        delete payload.name; // renames are retire+create by design
+        await settingsAPI.updateTicketType(editingId, payload);
+      } else {
+        await settingsAPI.createTicketType(payload);
+      }
+      setDraft(null); setEditingId(null);
+      reload();
+    } catch (e) { setError(e.response?.data?.message || e.message); }
+    setBusy(false);
+  };
+
+  const retire = async (id) => {
+    setError(null);
+    try { await settingsAPI.retireTicketType(id); reload(); } catch (e) { setError(e.response?.data?.message || e.message); }
+    setConfirmRetire(null);
+  };
+
+  const syncNow = async () => {
+    setSyncing(true); setError(null);
+    try { await settingsAPI.syncTicketTypes(); reload(); } catch (e) { setError(e.response?.data?.message || e.message); }
+    setSyncing(false);
+  };
+
+  const startEdit = (t) => {
+    setEditingId(t.id);
+    setDraft({
+      name: t.name,
+      description: t.description || '',
+      color: t.color || 'slate',
+      abbreviation: t.abbreviation || '',
+      aiAssignable: t.aiAssignable !== false,
+      isDefault: Boolean(t.isDefault),
+      fsMapped: Boolean(t.fsTypeValue),
+      fsTypeValue: t.fsTypeValue || '',
+      aliases: (t.aliases || []).join(', '),
+    });
+  };
+
+  // FS drift: a mapped type FS hasn't offered in >48h probably got removed.
+  const fsStale = (t) => t.fsTypeValue && t.fsDetectedAt && (Date.now() - new Date(t.fsDetectedAt).getTime() > 48 * 60 * 60 * 1000);
+
+  return (
+    <SectionCard icon={Layers} title="Ticket types" hint="This workspace's ticket-type vocabulary: what agents pick, what the AI classifies against (the description IS its guidance), what SLAs key on, and how each type maps to FreshService. Types are retired, never deleted.">
+      <div className="space-y-1.5 mb-2">
+        {types.map((t) => {
+          const tone = TYPE_COLOR_TONES[t.color] || TYPE_COLOR_TONES.slate;
+          return (
+            <div key={t.id} className={`rounded-lg border px-2.5 py-1.5 ${t.isActive ? 'border-slate-100' : 'border-slate-100 opacity-50'}`}>
+              <div className="flex items-center gap-2 text-xs">
+                <span aria-hidden="true" className={`inline-flex items-center justify-center min-w-[30px] h-[18px] px-1 rounded-[5px] text-[9px] font-bold tracking-wider ${tone.tile}`}>
+                  {t.abbreviation || t.name.slice(0, 4).toUpperCase()}
+                </span>
+                <span className={`font-semibold ${t.isActive ? 'text-slate-700' : 'text-slate-400 line-through'}`}>{t.name}</span>
+                {t.isDefault && <span title="Default for new tickets"><Star className="w-3 h-3 text-amber-400 fill-amber-400" aria-label="Default type" /></span>}
+                {t.aiAssignable !== false
+                  ? <span className="inline-flex items-center gap-0.5 text-[10px] text-indigo-500" title="The AI may classify tickets as this type"><Sparkles className="w-3 h-3" aria-hidden="true" />AI</span>
+                  : <span className="text-[10px] text-slate-400" title="Human-only: the AI never assigns this type">human-only</span>}
+                {t.fsTypeValue
+                  ? <span className="text-[10px] text-slate-400" title={`Written to FreshService as "${t.fsTypeValue}"`}>FS: {t.fsTypeValue}</span>
+                  : <span className="text-[10px] text-cyan-600 font-medium" title="Ticket Pulse–native: never written to FreshService">TP-only</span>}
+                {fsStale(t) && (
+                  <span className="inline-flex items-center gap-0.5 text-[10px] text-amber-600" title="FreshService hasn't offered this type choice recently — it may have been removed in FS admin">
+                    <AlertTriangle className="w-3 h-3" aria-hidden="true" /> FS drift
+                  </span>
+                )}
+                {t.isActive && !t.description && (
+                  <span className="text-[10px] text-amber-500 italic" title="Add a description so the AI knows when to pick this type">needs description</span>
+                )}
+                <span className="flex-1" />
+                {t.isActive && (
+                  <>
+                    <button onClick={() => startEdit(t)} className="tp-focus-ring text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 hover:bg-slate-50">Edit</button>
+                    {confirmRetire === t.id ? (
+                      <button onClick={() => retire(t.id)} className="tp-focus-ring inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-red-600 text-white font-semibold">
+                        <Archive className="w-3 h-3" aria-hidden="true" /> Confirm retire
+                      </button>
+                    ) : (
+                      <button onClick={() => setConfirmRetire(t.id)} aria-label={`Retire type ${t.name}`} className="tp-focus-ring text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-400 hover:text-red-500 hover:border-red-200">Retire</button>
+                    )}
+                  </>
+                )}
+                {!t.isActive && <span className="text-[10px] text-slate-300 italic">retired</span>}
+              </div>
+              {t.description && <p className="mt-1 ml-9 text-[11px] text-slate-400 line-clamp-2">{t.description}</p>}
+            </div>
+          );
+        })}
+        {types.length === 0 && <p className="text-xs text-slate-400 italic">No ticket types configured — &ldquo;Check FreshService&rdquo; imports this workspace&apos;s FS type choices.</p>}
+      </div>
+      {error && <p className="text-xs text-red-500 mb-1.5">{error}</p>}
+      {draft ? (
+        <div className="rounded-lg border border-slate-200 p-2.5 space-y-1.5 text-xs">
+          <div className="grid grid-cols-2 gap-1.5">
+            <input value={draft.name} disabled={Boolean(editingId)} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Type name (e.g. Breakfix)" aria-label="Type name" title={editingId ? 'Types cannot be renamed — retire and create a new one' : undefined} className="tp-focus-ring border border-slate-200 rounded-md px-2 py-1 disabled:bg-slate-50 disabled:text-slate-400" />
+            <input value={draft.abbreviation} onChange={(e) => setDraft({ ...draft, abbreviation: e.target.value.toUpperCase().slice(0, 6) })} placeholder="Pill code (e.g. BRK)" aria-label="Abbreviation" className="tp-focus-ring border border-slate-200 rounded-md px-2 py-1 uppercase" />
+          </div>
+          <textarea
+            value={draft.description}
+            onChange={(e) => setDraft({ ...draft, description: e.target.value })}
+            placeholder="Description — this is the AI's classification guidance. Say when a ticket IS this type (e.g. “Something that used to work is broken or degraded…”)."
+            aria-label="Type description (AI guidance)"
+            className="tp-focus-ring w-full h-16 border border-slate-200 rounded-md px-2 py-1"
+          />
+          <div className="flex flex-wrap items-center gap-3">
+            <select value={draft.color} onChange={(e) => setDraft({ ...draft, color: e.target.value })} aria-label="Pill color" className="tp-focus-ring border border-slate-200 rounded-md px-1.5 py-1">
+              {TYPE_COLOR_KEYS.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <label className="flex items-center gap-1.5 text-slate-500">
+              <input type="checkbox" checked={draft.aiAssignable} onChange={(e) => setDraft({ ...draft, aiAssignable: e.target.checked })} className="tp-focus-ring" />
+              AI may pick this type
+            </label>
+            <label className="flex items-center gap-1.5 text-slate-500">
+              <input type="checkbox" checked={draft.isDefault} onChange={(e) => setDraft({ ...draft, isDefault: e.target.checked })} className="tp-focus-ring" />
+              Default for new tickets
+            </label>
+            <label className="flex items-center gap-1.5 text-slate-500" title="Unmapped types stay Ticket Pulse–only: never written to FreshService">
+              <input type="checkbox" checked={draft.fsMapped} onChange={(e) => setDraft({ ...draft, fsMapped: e.target.checked })} className="tp-focus-ring" />
+              Maps to FreshService
+            </label>
+            {draft.fsMapped && (
+              <input value={draft.fsTypeValue} onChange={(e) => setDraft({ ...draft, fsTypeValue: e.target.value })} placeholder={draft.name || 'FS value'} aria-label="FreshService type value" className="tp-focus-ring w-36 border border-slate-200 rounded-md px-2 py-1" />
+            )}
+          </div>
+          <input value={draft.aliases} onChange={(e) => setDraft({ ...draft, aliases: e.target.value })} placeholder="Aliases, comma-separated (e.g. breakfix, break-fix) — accepted as input and normalized to the name" aria-label="Aliases" className="tp-focus-ring w-full border border-slate-200 rounded-md px-2 py-1" />
+          <div className="flex gap-1.5">
+            <button onClick={save} disabled={busy || (!editingId && !draft.name.trim())} className="tp-focus-ring px-2.5 py-1 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-60">
+              {busy ? <Loader2 className="w-3 h-3 animate-spin inline" aria-hidden="true" /> : (editingId ? 'Save' : 'Create')}
+            </button>
+            <button onClick={() => { setDraft(null); setEditingId(null); setError(null); }} className="tp-focus-ring px-2.5 py-1 rounded-md text-slate-500 hover:bg-slate-50">Cancel</button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center gap-3">
+          <button onClick={() => setDraft({ name: '', description: '', color: 'slate', abbreviation: '', aiAssignable: true, isDefault: false, fsMapped: false, fsTypeValue: '', aliases: '' })} className="tp-focus-ring inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700">
+            <Plus className="w-3.5 h-3.5" aria-hidden="true" /> New type
+          </button>
+          <button onClick={syncNow} disabled={syncing} className="tp-focus-ring inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-slate-700 disabled:opacity-60" title="Re-read this workspace's Type choices from FreshService; new FS types are added automatically">
+            {syncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <RefreshCw className="w-3.5 h-3.5" aria-hidden="true" />} Check FreshService
+          </button>
+        </div>
+      )}
+    </SectionCard>
   );
 }
 
@@ -609,6 +818,7 @@ function CategoryGroupSection() {
 export default function TicketOpsPanel() {
   return (
     <div className="space-y-4 animate-fadeIn">
+      <TicketTypesSection />
       <SlaSection />
       <TagsSection />
       <CategoryGroupSection />

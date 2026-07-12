@@ -3,7 +3,7 @@ import promptRepository from './promptRepository.js';
 import availabilityService from './availabilityService.js';
 import settingsRepository from './settingsRepository.js';
 import ticketActivityRepository from './ticketActivityRepository.js';
-import { TOOL_SCHEMAS, executeTool } from './assignmentTools.js';
+import { TOOL_SCHEMAS, executeTool, applyWorkspaceTicketTypes } from './assignmentTools.js';
 import freshServiceActionService from './freshServiceActionService.js';
 import competencyFeedbackService from './competencyFeedbackService.js';
 import afterHoursUrgentEscalationService from './afterHoursUrgentEscalationService.js';
@@ -783,6 +783,12 @@ class AssignmentPipelineService {
     let tools = TOOL_SCHEMAS
       .filter((t) => !toolAllowlist || toolAllowlist.includes(t.name));
 
+    // Per-workspace ticket-type vocabulary: the submit_recommendation
+    // ticketType enum + guidance come from the workspace's type registry.
+    // Single-type workspaces skip the question; the type is stamped below.
+    const { tools: wsTools, autoType: autoTicketType } = await applyWorkspaceTicketTypes(tools, workspaceId);
+    tools = wsTools;
+
     const enableWebSearch = promptVersion.toolConfig?.enableWebSearch !== false;
     if (enableWebSearch) {
       tools = [
@@ -882,9 +888,17 @@ class AssignmentPipelineService {
               let validationError = null;
               let normalizedFromString = false;
               try {
-                recommendation = normalizeSubmitRecommendationPayload(block.input);
+                recommendation = await normalizeSubmitRecommendationPayload(block.input, workspaceId);
                 normalizedFromString = Boolean(recommendation.__normalizedFromString);
                 delete recommendation.__normalizedFromString;
+                // Single-type workspace: the schema never asked for a type —
+                // stamp the only configured one so persistence/write-back and
+                // review surfaces stay uniform.
+                if (autoTicketType && !recommendation.ticketType) {
+                  recommendation.ticketType = autoTicketType;
+                  recommendation.ticketTypeRationale = 'Only ticket type configured for this workspace';
+                  recommendation.ticketTypeConfidence = 'high';
+                }
               } catch (err) {
                 accepted = false;
                 validationError = err.message;
@@ -1146,7 +1160,7 @@ class AssignmentPipelineService {
             workspaceId,
           });
         }
-        await this._persistTicketTypeAssessment(ticketId, runId, recommendation);
+        await this._persistTicketTypeAssessment(ticketId, runId, recommendation, workspaceId);
         if (decision === 'noise_dismissed') {
           await prisma.ticket.update({
             where: { id: ticketId },
@@ -1344,8 +1358,16 @@ class AssignmentPipelineService {
     }
   }
 
-  async _persistTicketTypeAssessment(ticketId, runId, recommendation) {
-    const data = buildTicketTypeTicketUpdateFields(recommendation, runId, new Date());
+  async _persistTicketTypeAssessment(ticketId, runId, recommendation, workspaceId) {
+    let data = null;
+    try {
+      data = await buildTicketTypeTicketUpdateFields(recommendation, runId, new Date(), workspaceId);
+    } catch (err) {
+      logger.warn('Assessed ticket type not in workspace registry — skipping persist', {
+        ticketId, runId, workspaceId, error: err.message,
+      });
+      return;
+    }
     if (!data) return;
 
     try {

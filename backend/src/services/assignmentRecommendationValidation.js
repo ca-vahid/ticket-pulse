@@ -168,7 +168,7 @@ function normalizeRecommendations(rawRecommendations) {
   };
 }
 
-export function normalizeSubmitRecommendationPayload(payload = {}) {
+export async function normalizeSubmitRecommendationPayload(payload = {}, workspaceId = null) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw new ValidationError('submit_recommendation input must be an object');
   }
@@ -186,7 +186,7 @@ export function normalizeSubmitRecommendationPayload(payload = {}) {
   };
 
   validateRecommendationPriorityFields(normalized);
-  validateRecommendationTicketTypeFields(normalized);
+  await validateRecommendationTicketTypeFields(normalized, workspaceId);
 
   normalized.overallReasoning = requiredText(normalized, 'overallReasoning');
   normalized.ticketClassification = requiredText(normalized, 'ticketClassification');
@@ -210,7 +210,7 @@ export function normalizeSubmitRecommendationPayload(payload = {}) {
   const subcategoryId = parseOptionalInteger(normalized.internalSubcategoryId, 'internalSubcategoryId');
   if (categoryId) normalized.internalCategoryId = categoryId;
   if (subcategoryId) normalized.internalSubcategoryId = subcategoryId;
-  const ticketTypeAssessment = normalizeTicketTypeAssessment(normalized);
+  const ticketTypeAssessment = await normalizeTicketTypeAssessment(normalized, workspaceId);
   if (ticketTypeAssessment) {
     normalized.ticketType = ticketTypeAssessment.assessedTicketType;
     normalized.ticketTypeRationale = ticketTypeAssessment.ticketTypeRationale;

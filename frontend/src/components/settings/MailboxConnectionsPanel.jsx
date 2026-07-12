@@ -3,6 +3,7 @@ import {
   AlertCircle, CheckCircle, Inbox, Loader2, Mail, Plus, Send, Trash2, Wifi,
 } from 'lucide-react';
 import { ticketsAPI } from '../../services/api';
+import { useTicketTypes } from '../../hooks/useTicketTypes';
 
 const MODE_LABEL = {
   ingest: 'Ingest only',
@@ -27,6 +28,7 @@ export default function MailboxConnectionsPanel() {
   const [routeGroup, setRouteGroup] = useState('');
   const [routeType, setRouteType] = useState('');
   const [groups, setGroups] = useState([]);
+  const { activeTypes } = useTicketTypes(); // workspace type registry
 
   const load = useCallback(async () => {
     try {
@@ -222,8 +224,7 @@ export default function MailboxConnectionsPanel() {
           className="text-sm border border-gray-200 rounded-lg px-2.5 py-2"
         >
           <option value="">Type: AI-detected</option>
-          <option value="Incident">Force type: Incident</option>
-          <option value="Service Request">Force type: Service Request</option>
+          {activeTypes.map((t) => <option key={t.id} value={t.name}>Force type: {t.name}</option>)}
         </select>
         <button
           type="submit"
@@ -299,8 +300,10 @@ export default function MailboxConnectionsPanel() {
                 className="text-xs border border-gray-200 rounded-lg px-2 py-1.5"
               >
                 <option value="">Type: default</option>
-                <option value="Incident">Incident</option>
-                <option value="Service Request">Service Request</option>
+                {activeTypes.map((t) => <option key={t.id} value={t.name}>{t.name}</option>)}
+                {mb.defaultTicketType && !activeTypes.some((t) => t.name === mb.defaultTicketType) && (
+                  <option value={mb.defaultTicketType}>{mb.defaultTicketType}</option>
+                )}
               </select>
               <button
                 onClick={() => test(mb)}

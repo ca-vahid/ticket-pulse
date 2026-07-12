@@ -65,6 +65,7 @@ jest.unstable_mockModule('../src/services/ticketActivityRepository.js', () => ({
 jest.unstable_mockModule('../src/services/assignmentTools.js', () => ({
   TOOL_SCHEMAS: [],
   executeTool: jest.fn(),
+  applyWorkspaceTicketTypes: jest.fn(async (tools) => ({ tools, autoType: null })),
 }));
 
 jest.unstable_mockModule('../src/services/freshServiceActionService.js', () => ({

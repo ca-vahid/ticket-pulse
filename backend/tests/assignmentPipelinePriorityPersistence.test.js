@@ -4,6 +4,13 @@ const prismaMock = {
   ticket: {
     update: jest.fn(),
   },
+  // Per-workspace type registry backing the workspace-aware normalizer.
+  ticketTypeDefinition: {
+    findMany: jest.fn().mockResolvedValue([
+      { id: 1, workspaceId: 1, name: 'Incident', aliases: ['incident', 'issue'], isActive: true, aiAssignable: true, fsTypeValue: 'Incident', sortOrder: 0 },
+      { id: 2, workspaceId: 1, name: 'Service Request', aliases: ['sr'], isActive: true, aiAssignable: true, fsTypeValue: 'Service Request', sortOrder: 1 },
+    ]),
+  },
 };
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({
@@ -43,6 +50,7 @@ jest.unstable_mockModule('../src/services/ticketActivityRepository.js', () => ({
 jest.unstable_mockModule('../src/services/assignmentTools.js', () => ({
   TOOL_SCHEMAS: [],
   executeTool: jest.fn(),
+  applyWorkspaceTicketTypes: jest.fn(async (tools) => ({ tools, autoType: null })),
 }));
 
 jest.unstable_mockModule('../src/services/freshServiceActionService.js', () => ({
@@ -104,7 +112,7 @@ describe('assignmentPipelineService priority persistence', () => {
       ticketType: 'incident',
       ticketTypeRationale: 'A previously working VPN is now unavailable.',
       ticketTypeConfidence: 'high',
-    });
+    }, 1);
 
     expect(prismaMock.ticket.update).toHaveBeenCalledWith({
       where: { id: 501 },
