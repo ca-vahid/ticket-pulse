@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.51-preview';
+export const APP_VERSION = '3.0.52-preview';
 
 export const changelog = [
+  {
+    version: '3.0.52-preview',
+    date: 'July 12, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>⚠️ Auto-Categorize now warns about its after-hours blind spot</strong> — when Auto-Categorize is on but after-hours AI runs are off, the toggle shows exactly why overnight and weekend tickets stay uncategorized until the next business morning, and where to enable around-the-clock coverage (Settings → Urgent Escalation → Automatic urgent detection).' },
+    ],
+  },
   {
     version: '3.0.51-preview',
     date: 'July 12, 2026',
