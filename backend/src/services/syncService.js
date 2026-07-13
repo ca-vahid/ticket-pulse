@@ -1706,6 +1706,17 @@ class SyncService {
         }
       }
 
+      // Auto-enrich photo + location for technicians missing them — new
+      // agents used to render as initials until an admin remembered the
+      // manual "Sync Photos & Locations" button (QA 07-12, Alexa). Keys off
+      // photoUrl IS NULL so it covers every creation path, self-heals prior
+      // failures, and is fire-and-forget so agent sync never waits on Graph.
+      if (workspaceId) {
+        this._enrichNewTechnicians(workspaceId).catch((err) => {
+          logger.warn(`Technician photo auto-enrich failed (non-fatal): ${err.message}`);
+        });
+      }
+
       // Refresh the FS group cache alongside agents (self-throttled, non-fatal).
       if (workspaceId) {
         await groupSyncService.syncWorkspaceGroups(workspaceId, wsConfig.workspaceId, client);
@@ -1717,6 +1728,52 @@ class SyncService {
     } catch (error) {
       logger.error('Error syncing technicians:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Fill photo + location from Entra for active technicians missing them
+   * (runs after each agent sync). Mirrors the manual "Sync Photos &
+   * Locations" button's rules: photo always welcome, location only when the
+   * DB value is empty (manual edits win). Each email is retried at most once
+   * per 24h so people with no GAL photo don't cost Graph calls every cycle.
+   */
+  async _enrichNewTechnicians(workspaceId, { max = 10 } = {}) {
+    const { default: azureAdService } = await import('./azureAdService.js');
+    if (!azureAdService.isConfigured()) return;
+    if (!this._photoEnrichAttempts) this._photoEnrichAttempts = new Map(); // email -> last attempt ms
+    const RETRY_MS = 24 * 60 * 60 * 1000;
+
+    const candidates = await prisma.technician.findMany({
+      where: { workspaceId, isActive: true, photoUrl: null, email: { not: null } },
+      select: { id: true, email: true, name: true, location: true },
+      take: 50,
+    });
+    const now = Date.now();
+    const due = candidates
+      .filter((t) => now - (this._photoEnrichAttempts.get(t.email.toLowerCase()) || 0) > RETRY_MS)
+      .slice(0, max);
+    if (due.length === 0) return;
+
+    for (const tech of due) {
+      this._photoEnrichAttempts.set(tech.email.toLowerCase(), now);
+      try {
+        const [photo, profile] = await Promise.all([
+          azureAdService.getUserPhoto(tech.email),
+          azureAdService.getUserProfile(tech.email).catch(() => null),
+        ]);
+        const data = {};
+        if (photo) data.photoUrl = photo;
+        const adLocation = profile?.officeLocation || profile?.city || null;
+        if (adLocation && !tech.location) data.location = adLocation;
+        if (Object.keys(data).length > 0) {
+          await prisma.technician.update({ where: { id: tech.id }, data });
+          clearReadCache();
+          logger.info(`Auto-enriched technician ${tech.name}: ${Object.keys(data).join(' + ')} from Entra`);
+        }
+      } catch (err) {
+        logger.debug(`Auto-enrich skipped for ${tech.email}: ${err.message}`);
+      }
     }
   }
 
