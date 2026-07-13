@@ -1,6 +1,18 @@
-export const APP_VERSION = '3.0.54-preview';
+export const APP_VERSION = '3.0.55-preview';
 
 export const changelog = [
+  {
+    version: '3.0.55-preview',
+    date: 'July 13, 2026',
+    entries: [
+      { type: 'new', html: '<strong>🔀 Merge tickets — properly this time</strong> — a Merge button now sits in the ticket toolbar (it was hiding inside the links card). Pick as many tickets as you like, choose which one survives, and merge with one confirmation: conversations are copied into the primary with original authors and timestamps, the others are closed with pointer notes, and likely duplicates (same subject, same requester) come pre-suggested and pre-checked. Optional email tells each merged ticket’s requester where their conversation went.' },
+      { type: 'new', html: '<strong>🔁 Recurring scheduled tickets</strong> — the scheduler now repeats weekly, monthly, or yearly (the FreshService Scheduler’s monthly/annual jobs can move over). Pick the first date and time and a Repeat option — the pattern anchors to it, day-31 schedules clamp to shorter months, and times stay in local wall-clock across DST. The Scheduled view shows each repeat with its next run.' },
+      { type: 'improved', html: '<strong>🧭 Tickets-page navigation is back to full icons</strong> — with a collapse control at the rail’s foot for those who want the thin edge back (your choice sticks). No more hunting for a 20px sliver.' },
+      { type: 'new', html: '<strong>🏢 Department on the ticket sidebar</strong> — a read-only field showing the requester’s Entra ID department and office (e.g. “Engineering · Vancouver”).' },
+      { type: 'improved', html: '<strong>✍️ System notes no longer say “Unknown”</strong> — automation-authored internal notes (FreshService workflows, the legacy Ticket Analyzer, our own pipeline) are now labeled “Ticket Pulse”.' },
+      { type: 'improved', html: '<strong>🧹 New-ticket form declutter</strong> — Impact and Urgency are gone from the create form (still editable on the ticket itself).' },
+    ],
+  },
   {
     version: '3.0.54-preview',
     date: 'July 13, 2026',

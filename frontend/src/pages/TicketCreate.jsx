@@ -64,8 +64,6 @@ export default function TicketCreate() {
   const [groupId, setGroupId] = useState('');
   const [source, setSource] = useState(103); // arrival channel (QA 07-10 #7); Agent = logged in app
   const [tagIds, setTagIds] = useState([]); // gap plan 2 P1.3
-  const [impact, setImpact] = useState('');
-  const [urgency, setUrgency] = useState('');
   const [assignMode, setAssignMode] = useState('none'); // ai | me | pick | none
   const [assignTechId, setAssignTechId] = useState('');
   const [aiClassify, setAiClassify] = useState(true); // AI classifies + assesses priority/type (independent of assignment)
@@ -82,6 +80,9 @@ export default function TicketCreate() {
   const [submitMenuOpen, setSubmitMenuOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [scheduleAt, setScheduleAt] = useState('');
+  // Repeat pattern: the picked first date/time anchors it (its weekday /
+  // day-of-month / month) — no extra pickers needed (QA 07-13 #2).
+  const [scheduleRepeat, setScheduleRepeat] = useState('none');
   const fileInputRef = useRef(null);
   const pasteCountRef = useRef(0);
 
@@ -217,8 +218,6 @@ export default function TicketCreate() {
     setSubcategoryId('');
     setGroupId('');
     setTagIds([]);
-    setImpact('');
-    setUrgency('');
     setAssignMode('ai');
     setAssignTechId('');
     setCc([]);
@@ -259,8 +258,6 @@ export default function TicketCreate() {
         notifyRequester,
         ccEmails: cc,
         tagIds,
-        impact: impact ? Number(impact) : null,
-        urgency: urgency ? Number(urgency) : null,
         source: Number(source),
       };
       if (assignMode === 'me' && canTakeMyself) payload.assignedTechId = meta.actor.technicianId;
@@ -269,9 +266,11 @@ export default function TicketCreate() {
       if (afterAction === 'schedule') {
         if (!scheduleAt) throw new Error('Pick a date and time to schedule for');
         setSaveStep('Scheduling…');
-        const schedRes = await ticketsAPI.scheduleCreate(payload, new Date(scheduleAt).toISOString());
+        const schedRes = await ticketsAPI.scheduleCreate(payload, new Date(scheduleAt).toISOString(), { recurrence: scheduleRepeat });
         // Files stage against the schedule and attach when it activates (P2).
-        if (files.length > 0 && schedRes.data?.id) {
+        // Repeating schedules skip staged files (they'd only reach the first
+        // spawn) — the composer hides the hint for them.
+        if (scheduleRepeat === 'none' && files.length > 0 && schedRes.data?.id) {
           setSaveStep(`Staging ${files.length} file${files.length === 1 ? '' : 's'}…`);
           try {
             await ticketsAPI.uploadScheduledAttachments(schedRes.data.id, files);
@@ -281,9 +280,12 @@ export default function TicketCreate() {
         }
         setIsSaving(false);
         setSaveStep(null);
-        setSuccessNote(`Scheduled for ${new Date(scheduleAt).toLocaleString()} — it gets its TP number (and any attachments) at activation`);
+        setSuccessNote(scheduleRepeat === 'none'
+          ? `Scheduled for ${new Date(scheduleAt).toLocaleString()} — it gets its TP number (and any attachments) at activation`
+          : `Repeating ${scheduleRepeat} — first ticket ${new Date(scheduleAt).toLocaleString()}, then every ${scheduleRepeat === 'weekly' ? 'week' : scheduleRepeat === 'monthly' ? 'month' : 'year'} at the same local time`);
         setScheduleOpen(false);
         setScheduleAt('');
+        setScheduleRepeat('none');
         resetForm();
         return;
       }
@@ -338,7 +340,7 @@ export default function TicketCreate() {
 
   if (metaError) {
     return (
-      <div className="tp-tickets-backdrop min-h-screen md:pl-[20px]">
+      <div className="tp-tickets-backdrop min-h-screen md:pl-[var(--tp-rail-w,58px)]">
         <AppHeader activePage="tickets" />
         <div className="max-w-2xl mx-auto px-4 py-16 text-center">
           <AlertCircle className="w-8 h-8 text-red-500 mx-auto mb-3" aria-hidden="true" />
@@ -350,7 +352,7 @@ export default function TicketCreate() {
   }
 
   return (
-    <div className="tp-tickets-backdrop min-h-screen md:pl-[20px]">
+    <div className="tp-tickets-backdrop min-h-screen md:pl-[var(--tp-rail-w,58px)]">
       <AppHeader activePage="tickets" />
 
       {/* pb clears the sticky action bar + the mobile tab bar under it (QA 07-06 #11) */}
@@ -767,7 +769,9 @@ export default function TicketCreate() {
                 )}
               </div>
 
-              {/* Tags + impact/urgency at creation (gap plan 2 P1.3) */}
+              {/* Tags at creation (gap plan 2 P1.3). Impact/Urgency removed
+                  from the form per QA 07-13 #5 — still editable on the detail
+                  sidebar for the rare ticket that needs them. */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {(meta?.tags?.length || 0) > 0 && (
                   <div>
@@ -791,22 +795,6 @@ export default function TicketCreate() {
                     </div>
                   </div>
                 )}
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label htmlFor="tc-impact" className={labelClass}>Impact</label>
-                    <select id="tc-impact" value={impact} onChange={(e) => setImpact(e.target.value)} className={fieldClass}>
-                      <option value="">—</option>
-                      {[1, 2, 3].map((v) => <option key={v} value={v}>{['Low', 'Medium', 'High'][v - 1]}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label htmlFor="tc-urgency" className={labelClass}>Urgency</label>
-                    <select id="tc-urgency" value={urgency} onChange={(e) => setUrgency(e.target.value)} className={fieldClass}>
-                      <option value="">—</option>
-                      {[1, 2, 3].map((v) => <option key={v} value={v}>{['Low', 'Medium', 'High'][v - 1]}</option>)}
-                    </select>
-                  </div>
-                </div>
               </div>
 
               {error && (
@@ -926,6 +914,18 @@ export default function TicketCreate() {
                       aria-label="Schedule ticket for"
                       className="tp-focus-ring flex-1 text-sm bg-white border border-input rounded-lg px-2.5 py-2 text-slate-700"
                     />
+                    <select
+                      value={scheduleRepeat}
+                      onChange={(e) => setScheduleRepeat(e.target.value)}
+                      aria-label="Repeat"
+                      title="Repeats at the picked time — weekly on that weekday, monthly on that day, yearly on that date"
+                      className="tp-focus-ring text-sm bg-white border border-input rounded-lg px-2 py-2 text-slate-700"
+                    >
+                      <option value="none">One time</option>
+                      <option value="weekly">Weekly</option>
+                      <option value="monthly">Monthly</option>
+                      <option value="yearly">Yearly</option>
+                    </select>
                     <button
                       onClick={(e) => submit(e, 'schedule')}
                       type="button"
@@ -936,7 +936,7 @@ export default function TicketCreate() {
                       Schedule
                     </button>
                     <button
-                      onClick={() => { setScheduleOpen(false); setScheduleAt(''); }}
+                      onClick={() => { setScheduleOpen(false); setScheduleAt(''); setScheduleRepeat('none'); }}
                       type="button"
                       aria-label="Cancel scheduling"
                       className="tp-focus-ring p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"

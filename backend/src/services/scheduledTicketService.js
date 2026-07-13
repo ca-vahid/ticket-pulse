@@ -1,3 +1,4 @@
+import { toZonedTime, fromZonedTime } from 'date-fns-tz';
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { ValidationError, NotFoundError } from '../utils/errors.js';
@@ -5,6 +6,37 @@ import ticketService from './ticketService.js';
 
 const TICK_MS = 60 * 1000;
 const MAX_ACTIVATIONS_PER_TICK = 20;
+const RECURRENCES = new Set(['none', 'weekly', 'monthly', 'yearly']);
+
+/**
+ * Next fire after `from` for a recurring schedule, computed on the wall clock
+ * in `tz` (a 5:00 AM monthly check stays 5:00 AM across DST). Day 29-31
+ * clamps to the target month's last day.
+ */
+export function nextOccurrence(from, { recurrence, recurrenceDay, recurrenceMonth }, tz) {
+  if (!RECURRENCES.has(recurrence) || recurrence === 'none') return null;
+  const local = toZonedTime(from, tz);
+  const H = local.getHours();
+  const Mi = local.getMinutes();
+  const clampDay = (y, monthIdx, d) => Math.min(d, new Date(y, monthIdx + 1, 0).getDate());
+  let next;
+  if (recurrence === 'weekly') {
+    next = new Date(local);
+    next.setDate(local.getDate() + 7);
+  } else if (recurrence === 'monthly') {
+    const day = recurrenceDay || local.getDate();
+    let y = local.getFullYear();
+    let m = local.getMonth() + 1;
+    if (m > 11) { m = 0; y += 1; }
+    next = new Date(y, m, clampDay(y, m, day), H, Mi, 0, 0);
+  } else { // yearly
+    const day = recurrenceDay || local.getDate();
+    const monthIdx = (recurrenceMonth ? recurrenceMonth - 1 : local.getMonth());
+    const y = local.getFullYear() + 1;
+    next = new Date(y, monthIdx, clampDay(y, monthIdx, day), H, Mi, 0, 0);
+  }
+  return fromZonedTime(next, tz);
+}
 
 /**
  * Scheduled tickets (T3.4). A scheduled ticket is a stored createTicket
@@ -35,14 +67,35 @@ class ScheduledTicketService {
     this._timer = null;
   }
 
-  async schedule(workspaceId, { payload, scheduledForAt }, actor) {
+  async schedule(workspaceId, { payload, scheduledForAt, recurrence = 'none', endAt = null }, actor) {
     const when = new Date(scheduledForAt);
     if (Number.isNaN(when.getTime())) throw new ValidationError('scheduledForAt must be a valid date');
     if (when.getTime() <= Date.now() + 60 * 1000) {
       throw new ValidationError('Schedule at least a minute into the future');
     }
+    if (!RECURRENCES.has(recurrence)) throw new ValidationError('recurrence must be none, weekly, monthly, or yearly');
+    const end = endAt ? new Date(endAt) : null;
+    if (end && (Number.isNaN(end.getTime()) || end <= when)) {
+      throw new ValidationError('End date must be after the first occurrence');
+    }
     // Fail-fast on bad input at schedule time, not at 6am on activation day.
     await ticketService.validateCreateInput(workspaceId, payload);
+
+    // The FIRST fire anchors the pattern: its wall clock (workspace timezone)
+    // provides the weekday / day-of-month / month — no extra pickers needed.
+    let recurrenceFields = {};
+    if (recurrence !== 'none') {
+      const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { defaultTimezone: true } });
+      const tz = workspace?.defaultTimezone || 'America/Los_Angeles';
+      const local = toZonedTime(when, tz);
+      recurrenceFields = {
+        recurrence,
+        timezone: tz,
+        recurrenceDay: recurrence === 'weekly' ? null : local.getDate(),
+        recurrenceMonth: recurrence === 'yearly' ? local.getMonth() + 1 : null,
+        endAt: end,
+      };
+    }
 
     const row = await prisma.scheduledTicket.create({
       data: {
@@ -51,9 +104,10 @@ class ScheduledTicketService {
         scheduledForAt: when,
         createdBy: actor?.email || null,
         createdByName: actor?.name || null,
+        ...recurrenceFields,
       },
     });
-    logger.info(`Ticket scheduled for ${when.toISOString()} (id ${row.id}, ws ${workspaceId}) by ${actor?.email || 'unknown'}`);
+    logger.info(`Ticket scheduled for ${when.toISOString()}${recurrence !== 'none' ? ` (repeats ${recurrence})` : ''} (id ${row.id}, ws ${workspaceId}) by ${actor?.email || 'unknown'}`);
     return row;
   }
 
@@ -91,25 +145,49 @@ class ScheduledTicketService {
         email: actor?.email || row.createdBy,
         name: actor?.name || row.createdByName || 'Scheduled ticket',
       });
-      const updated = await prisma.scheduledTicket.update({
-        where: { id: row.id },
-        data: { status: 'activated', activatedAt: new Date(), ticketId: ticket.id, lastError: null },
-      });
+
+      const isRecurring = row.recurrence && row.recurrence !== 'none';
+      let updated;
+      if (isRecurring) {
+        // Re-arm: advance to the next occurrence (rolling forward past any
+        // missed ones — a row stuck in 'error' for weeks must not machine-gun
+        // catch-up tickets), or complete when the end date is passed.
+        const tz = row.timezone || 'America/Los_Angeles';
+        let next = nextOccurrence(row.scheduledForAt, row, tz);
+        while (next && next.getTime() <= Date.now()) next = nextOccurrence(next, row, tz);
+        const done = !next || (row.endAt && next > row.endAt);
+        updated = await prisma.scheduledTicket.update({
+          where: { id: row.id },
+          data: done
+            ? { status: 'completed', activatedAt: new Date(), lastSpawnedAt: new Date(), ticketId: ticket.id, lastError: null }
+            : { status: 'pending', scheduledForAt: next, activatedAt: new Date(), lastSpawnedAt: new Date(), ticketId: ticket.id, lastError: null },
+        });
+      } else {
+        updated = await prisma.scheduledTicket.update({
+          where: { id: row.id },
+          data: { status: 'activated', activatedAt: new Date(), ticketId: ticket.id, lastError: null },
+        });
+      }
+
       // Staged files become real attachments (same blobs) and ride the FS
       // mirror like any upload (gap plan 2 P2). Best-effort — activation never
-      // fails on attachment adoption.
-      try {
-        const { default: attachmentService } = await import('./attachmentService.js');
-        const adopted = await attachmentService.adoptStaged(row.id, ticket.id, workspaceId);
-        if (adopted.length && ticket.origin === 'ticketpulse') {
-          const { default: mirrorService } = await import('./mirrorService.js');
-          for (const a of adopted) mirrorService.enqueueAttachment(workspaceId, ticket.id, a.id).catch(() => {});
+      // fails on attachment adoption. Recurring schedules skip adoption:
+      // adoptStaged MOVES the files, so only the first spawn would get them —
+      // confusing; the schedule UI hides uploads for repeating schedules.
+      if (!isRecurring) {
+        try {
+          const { default: attachmentService } = await import('./attachmentService.js');
+          const adopted = await attachmentService.adoptStaged(row.id, ticket.id, workspaceId);
+          if (adopted.length && ticket.origin === 'ticketpulse') {
+            const { default: mirrorService } = await import('./mirrorService.js');
+            for (const a of adopted) mirrorService.enqueueAttachment(workspaceId, ticket.id, a.id).catch(() => {});
+          }
+          if (adopted.length) logger.info(`Scheduled ticket ${row.id}: ${adopted.length} staged attachment(s) adopted onto ${ticket.displayRef}`);
+        } catch (err) {
+          logger.warn(`Staged-attachment adoption failed (non-fatal) for schedule ${row.id}: ${err.message}`);
         }
-        if (adopted.length) logger.info(`Scheduled ticket ${row.id}: ${adopted.length} staged attachment(s) adopted onto ${ticket.displayRef}`);
-      } catch (err) {
-        logger.warn(`Staged-attachment adoption failed (non-fatal) for schedule ${row.id}: ${err.message}`);
       }
-      logger.info(`Scheduled ticket ${row.id} activated → ${ticket.displayRef} (${via})`);
+      logger.info(`Scheduled ticket ${row.id} activated → ${ticket.displayRef} (${via}${isRecurring ? `, repeats ${row.recurrence}, next ${updated.scheduledForAt?.toISOString?.() || 'done'}` : ''})`);
       return { scheduled: updated, ticket };
     } catch (err) {
       // Auto path parks in 'error' (visible, no retry loop); manual retries land back the same way.

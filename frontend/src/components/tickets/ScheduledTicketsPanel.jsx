@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Activity, AlertCircle, CalendarClock, Check, Loader2, Play, Trash2 } from 'lucide-react';
+import { Activity, AlertCircle, CalendarClock, Check, Loader2, Play, Repeat, Trash2 } from 'lucide-react';
 import { ticketsAPI } from '../../services/api';
 import { timeAgo } from './ticketUi';
 
@@ -107,6 +107,15 @@ export default function ScheduledTicketsPanel({ ticketingOn = true }) {
                   {new Date(row.scheduledForAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
                   <span className="font-normal">· {inFuture(row.scheduledForAt)}</span>
                 </span>
+                {row.recurrence && row.recurrence !== 'none' && (
+                  <span
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold border whitespace-nowrap bg-cyan-50 text-cyan-700 border-cyan-200"
+                    title={`Repeats ${row.recurrence} at the same local time${row.lastSpawnedAt ? ` — last spawned ${timeAgo(row.lastSpawnedAt)}` : ''}`}
+                  >
+                    <Repeat className="w-3 h-3" aria-hidden="true" />
+                    {row.recurrence}
+                  </span>
+                )}
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm font-medium text-slate-800 truncate">{row.payload?.subject || '(no subject)'}</span>
                   <span className="block text-xs text-slate-400 truncate">
@@ -127,7 +136,7 @@ export default function ScheduledTicketsPanel({ ticketingOn = true }) {
                 )}
                 {ticketingOn && confirmable(
                   `cancel:${row.id}`,
-                  'Cancel',
+                  row.recurrence && row.recurrence !== 'none' ? 'Stop repeating' : 'Cancel',
                   <Trash2 className="w-3 h-3" aria-hidden="true" />,
                   {
                     idle: 'bg-white text-slate-500 border-slate-200 hover:border-red-300 hover:text-red-600',

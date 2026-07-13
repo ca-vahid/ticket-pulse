@@ -655,6 +655,8 @@ export const ticketsAPI = {
   removeLink: async (id, linkId) => await api.delete(`/tickets/${id}/links/${linkId}`),
   markDuplicateOf: async (id, targetRef) => await api.post(`/tickets/${id}/duplicate-of/${encodeURIComponent(targetRef)}`),
   mergeTicket: async (id, targetTicketRef, notifyRequester = false) => await api.post(`/tickets/${id}/merge`, { targetTicketRef, notifyRequester }),
+  // Multi-merge (QA 07-13 #1): primaryId survives; ticketIds fold into it.
+  mergeMany: async (primaryId, ticketIds, notifyRequester = false) => await api.post(`/tickets/${primaryId}/merge-many`, { ticketIds, notifyRequester }),
 
   // Macros (quick-action bundles)
   macros: async () => await api.get('/tickets/macros'),
@@ -770,8 +772,8 @@ export const ticketsAPI = {
     return await api.get('/tickets/scheduled');
   },
 
-  scheduleCreate: async (payload, scheduledForAt) => {
-    return await api.post('/tickets/scheduled', { payload, scheduledForAt });
+  scheduleCreate: async (payload, scheduledForAt, { recurrence = 'none', endAt = null } = {}) => {
+    return await api.post('/tickets/scheduled', { payload, scheduledForAt, recurrence, endAt });
   },
 
   activateScheduled: async (scheduledId) => {

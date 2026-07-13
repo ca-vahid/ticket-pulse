@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   Activity, AlertCircle, ArrowLeft, Bell, BellRing, Bot, Building2, Check, CheckCircle2,
   ChevronDown, ChevronLeft, ChevronRight, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Flame, Forward, Hand,
-  History, Image as ImageIcon, Link2, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, Paperclip, Pencil, Phone, Plus,
+  GitMerge, History, Image as ImageIcon, Link2, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, Paperclip, Pencil, Phone, Plus,
   RefreshCw, Send, ShieldCheck, Smartphone, Smile, Sparkles, Stamp, StickyNote, Trash2, UserRound, VolumeX, X, XCircle,
 } from 'lucide-react';
 import AttachmentPreviewModal from '../components/tickets/AttachmentPreviewModal';
@@ -35,6 +35,7 @@ import { assignmentAPI, ticketsAPI } from '../services/api';
 import { useSSE } from '../hooks/useSSE';
 import { useTicketPresence } from '../hooks/useTicketPresence';
 import { useTicketTypes } from '../hooks/useTicketTypes';
+import MergeTicketsModal from '../components/tickets/MergeTicketsModal';
 
 const STATUSES = ['Open', 'Pending', 'Resolved', 'Closed'];
 const CONVERSATION_TABS = [
@@ -335,7 +336,7 @@ function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, photoFor,
         }`}
       >
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pb-2.5 mb-3 border-b border-slate-900/5">
-          <span className="text-sm font-bold text-slate-800">{entry.actorName || 'Unknown'}</span>
+          <span className="text-sm font-bold text-slate-800">{entry.actorName || (entry.isPrivate ? 'Ticket Pulse' : 'Unknown')}</span>
           {isNote ? (
             <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-700 bg-amber-100 border border-amber-200 rounded-full px-1.5 py-0.5">
               <Lock className="w-2.5 h-2.5" aria-hidden="true" /> Internal note
@@ -578,6 +579,7 @@ export default function TicketDetail() {
   const [composerFiles, setComposerFiles] = useState([]);
   const [editFile, setEditFile] = useState(null);
   const [cloneConfirm, setCloneConfirm] = useState(false);
+  const [mergeOpen, setMergeOpen] = useState(false); // multi-merge modal (QA 07-13 #1)
   const [isSending, setIsSending] = useState(false);
   const [requestApprovalOpen, setRequestApprovalOpen] = useState(false);
   const [deleteApprovalTarget, setDeleteApprovalTarget] = useState(null); // approval group pending delete-confirm
@@ -1422,7 +1424,7 @@ export default function TicketDetail() {
   };
 
   return (
-    <div className="tp-tickets-backdrop min-h-screen md:pl-[20px] print:pl-0">
+    <div className="tp-tickets-backdrop min-h-screen md:pl-[var(--tp-rail-w,58px)] print:pl-0">
       <div className="print-hide"><AppHeader activePage="tickets" /></div>
 
       {/* pb clears the mobile bottom tab bar (QA 07-06 #11) */}
@@ -1667,6 +1669,16 @@ export default function TicketDetail() {
                       >
                         {savingField === 'clone' ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <CopyPlus className="w-3.5 h-3.5" aria-hidden="true" />}
                     Clone
+                      </button>
+                    )}
+                    {ticketingOn && isNative && meta?.actor?.kind !== 'agent' && ['Open', 'Pending'].includes(ticket.status) && (
+                      <button
+                        onClick={() => setMergeOpen(true)}
+                        title="Merge duplicate or related tickets into this one"
+                        className="tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-white text-slate-600 border border-slate-200 hover:border-violet-300 hover:text-violet-700"
+                      >
+                        <GitMerge className="w-3.5 h-3.5" aria-hidden="true" />
+                        Merge
                       </button>
                     )}
                     {isNative && canReview && (
@@ -2568,6 +2580,21 @@ export default function TicketDetail() {
                     </SidebarField>
                   )}
 
+                  {/* Requester's department — Entra ID is the source of truth
+                      (FS "departments" are office names here); read-only since
+                      we have no Entra write access (QA 07-13 #4). */}
+                  <SidebarField label="Department">
+                    <div
+                      className="px-3 py-2 text-sm text-slate-600 bg-slate-50 border border-slate-100 rounded-lg truncate"
+                      title="From Entra ID — read-only"
+                    >
+                      {[
+                        ticket.requester?.entraDepartment || ticket.requester?.department,
+                        ticket.requester?.entraOfficeLocation,
+                      ].filter(Boolean).join(' · ') || '—'}
+                    </div>
+                  </SidebarField>
+
                   {/* Tags — TP-side layer, editable on BOTH origins */}
                   <TicketTagEditor
                     ticketId={ticketId}
@@ -3142,6 +3169,23 @@ export default function TicketDetail() {
             </div>
           </div>
         </div>
+      )}
+
+      {mergeOpen && ticket && (
+        <MergeTicketsModal
+          ticket={ticket}
+          onClose={() => setMergeOpen(false)}
+          onMerged={(result) => {
+            setMergeOpen(false);
+            lastLocalMutationRef.current = Date.now();
+            if (result?.primaryId && result.primaryId !== ticket.id) {
+              navigate(`/tickets/${result.primaryId}`);
+            } else {
+              fetchTicket({ silent: true });
+            }
+            showToast('emerald', `Merged ${result?.merged?.length || 0} ticket${(result?.merged?.length || 0) === 1 ? '' : 's'} into ${result?.primaryRef || 'this ticket'} — ${result?.messagesCopied || 0} messages copied`);
+          }}
+        />
       )}
 
       <div className="print-hide"><MobileTabBar /></div>

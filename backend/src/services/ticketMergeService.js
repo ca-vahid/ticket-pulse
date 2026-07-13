@@ -147,6 +147,56 @@ class TicketMergeService {
     return { merged: true, sourceId, targetId, copied, sourceClosed, requesterNotified, targetRef: tgtRef };
   }
 
+  /**
+   * Multi-merge (QA 07-13 #1): merge several tickets into one chosen primary
+   * in a single confirmed action. Validates the whole batch up front, then
+   * runs the proven single merges sequentially (idempotent provenance stamps
+   * make a retry after a mid-batch failure safe). The primary must be an
+   * open/pending TP-born ticket — it's about to carry the live conversation.
+   */
+  async mergeMany(primaryId, workspaceId, { ticketIds, notifyRequester = false }, actor) {
+    const primary = await prisma.ticket.findFirst({ where: { id: Number(primaryId), workspaceId } });
+    if (!primary) throw new NotFoundError('Primary ticket not found');
+    if (primary.origin !== 'ticketpulse') {
+      throw new ValidationError('The primary must be a Ticket Pulse–born ticket (FreshService owns FS-born conversations — merge those in FreshService)');
+    }
+    if (!['Open', 'Pending'].includes(primary.status)) {
+      throw new ValidationError('The primary ticket must be Open or Pending');
+    }
+
+    const ids = [...new Set((ticketIds || []).map(Number).filter((n) => Number.isFinite(n) && n !== primary.id))];
+    if (!ids.length) throw new ValidationError('Pick at least one ticket to merge');
+    if (ids.length > 20) throw new ValidationError('Merge at most 20 tickets at once');
+    const sources = await prisma.ticket.findMany({ where: { id: { in: ids }, workspaceId } });
+    if (sources.length !== ids.length) throw new NotFoundError('One or more selected tickets were not found in this workspace');
+    for (const s of sources) {
+      if (['Deleted', 'Spam'].includes(s.status)) {
+        throw new ValidationError(`${ticketDisplayRef(s)} is ${s.status} and cannot be merged`);
+      }
+    }
+
+    const merged = [];
+    const failed = [];
+    // Oldest first so the primary's copied thread interleaves naturally.
+    sources.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+    for (const s of sources) {
+      try {
+        const result = await this.merge(s.id, workspaceId, { targetTicketId: primary.id, notifyRequester }, actor);
+        merged.push({ id: s.id, ref: ticketDisplayRef(s), copied: result.copied });
+      } catch (err) {
+        failed.push({ id: s.id, ref: ticketDisplayRef(s), error: err.message });
+        logger.warn(`Multi-merge: ${ticketDisplayRef(s)} -> ${ticketDisplayRef(primary)} failed: ${err.message}`);
+      }
+    }
+    return {
+      primaryId: primary.id,
+      primaryRef: ticketDisplayRef(primary),
+      merged,
+      failed,
+      messagesCopied: merged.reduce((n, m) => n + (m.copied || 0), 0),
+    };
+  }
+
   /** The target this ticket was merged into, if any (for the detail banner). */
   async mergedInto(ticketId, workspaceId) {
     const link = await prisma.ticketLink.findFirst({
