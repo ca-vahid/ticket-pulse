@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.52-preview';
+export const APP_VERSION = '3.0.53-preview';
 
 export const changelog = [
+  {
+    version: '3.0.53-preview',
+    date: 'July 12, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>📸 New agents get their photo automatically</strong> — profile photos and office locations used to wait until an admin pressed “Sync Photos &amp; Locations” in Settings (new Accounting members showed initials for days). Every agent sync now fills in missing photos and locations from Entra on its own — the manual button remains for bulk refreshes and overwriting locations.' },
+    ],
+  },
   {
     version: '3.0.52-preview',
     date: 'July 12, 2026',
