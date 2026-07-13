@@ -4,7 +4,7 @@ import { motion } from 'motion/react';
 import {
   Activity, AlertCircle, ArrowDownWideNarrow, ArrowUpNarrowWide, CalendarDays, Check,
   CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, CornerUpRight, Download, Inbox,
-  ListFilter, Loader2, MessageSquare, Plus, Rows2, Rows4, Search, ShieldCheck, Sparkles, Ticket, UserRound, X,
+  ListFilter, Loader2, MessageSquare, Plus, RefreshCw, Rows2, Rows4, Search, ShieldCheck, Sparkles, Ticket, UserRound, X,
 } from 'lucide-react';
 import AppHeader from '../components/AppHeader';
 import MobileTabBar from '../components/nav/MobileTabBar';
@@ -282,6 +282,7 @@ export default function Tickets() {
   const [isExporting, setIsExporting] = useState(false);
   const [mobileFilters, setMobileFilters] = useState(false);
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
+  const [manualRefreshing, setManualRefreshing] = useState(false); // force-refresh button
   const sortMenuRef = useRef(null);
   useEffect(() => {
     if (!sortMenuOpen) return undefined;
@@ -1108,6 +1109,17 @@ export default function Tickets() {
                       </button>
                     )}
                   </div>
+                  {/* Force refresh — belt-and-suspenders next to the live/SSE
+                      machinery: refetches the list + stat cards right now. */}
+                  <button
+                    onClick={() => { if (!manualRefreshing) { setManualRefreshing(true); Promise.allSettled([fetchTickets({ silent: true }), fetchStats()]).finally(() => setManualRefreshing(false)); } }}
+                    disabled={manualRefreshing}
+                    aria-label="Refresh tickets now"
+                    title="Refresh now"
+                    className="tp-focus-ring order-2 sm:order-3 inline-flex items-center justify-center bg-white border border-input rounded-lg px-2.5 min-h-[44px] py-2 text-slate-500 hover:text-blue-600 hover:border-blue-300 disabled:opacity-60"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${manualRefreshing ? 'animate-spin' : ''}`} aria-hidden="true" />
+                  </button>
                   <div ref={sortMenuRef} className="relative order-2 sm:order-3">
                     <button
                       onClick={() => setSortMenuOpen((v) => !v)}

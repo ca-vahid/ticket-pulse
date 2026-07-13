@@ -581,11 +581,14 @@ class TicketService {
         { subject: { contains: q, mode: 'insensitive' } },
         { requester: { is: { name: { contains: q, mode: 'insensitive' } } } },
       ];
+      // Ticket refs: "TP-1042", "1042", "#232558", "232558" — the leading '#'
+      // people copy from FreshService must not defeat the numeric match.
       const tpMatch = q.match(/^tp-?(\d+)$/i);
+      const numeric = q.replace(/^#/, '');
       if (tpMatch) or.push({ nativeNumber: Number(tpMatch[1]) });
-      else if (/^\d+$/.test(q)) {
-        or.push({ nativeNumber: Number(q) });
-        or.push({ freshserviceTicketId: BigInt(q) });
+      else if (/^\d+$/.test(numeric)) {
+        or.push({ nativeNumber: Number(numeric) });
+        or.push({ freshserviceTicketId: BigInt(numeric) });
       }
       // AND-composed so it can't collide with segment OR clauses
       where.AND = [...(where.AND || []), { OR: or }];

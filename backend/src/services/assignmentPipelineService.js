@@ -140,6 +140,30 @@ class AssignmentPipelineService {
       return { skipped: true, reason: 'priority_assessment_after_hours_disabled' };
     }
 
+    // ── Duplicate-burst guard (automatic triggers only) ─────────────────
+    // Same requester + same normalized subject within a 15-minute window ⇒
+    // link as duplicate of the first copy and skip the LLM entirely (one
+    // triage per burst, not one per click — see the 2026-07-13 MS Teams app
+    // storm: 12 identical tickets in 84s, 12 full AI runs). Manual triggers
+    // bypass the guard so an admin can always force a real run.
+    if (!isManual && !reboundFrom) {
+      try {
+        const { default: duplicateBurstService } = await import('./duplicateBurstService.js');
+        const original = await duplicateBurstService.detectBurstDuplicate(ticketId, workspaceId);
+        if (original) {
+          const run = await duplicateBurstService.dismissAsDuplicate(ticketId, workspaceId, original, triggerSource);
+          this._broadcastRunUpdate(workspaceId, ticketId, run.id, 'completed');
+          emit({ type: 'error', message: `Duplicate of ticket #${original.freshserviceTicketId || original.nativeNumber} — AI run skipped` });
+          emit({ type: 'complete', runId: run.id });
+          return { skipped: true, reason: 'duplicate_burst', duplicateOfTicketId: original.id, runId: run.id };
+        }
+      } catch (err) {
+        logger.warn('Duplicate-burst guard failed (non-fatal, continuing with run)', {
+          ticketId, workspaceId, error: err.message,
+        });
+      }
+    }
+
     // ── Business hours gate (automatic triggers only) ───────────────────
     if (!isManual && !isClassificationOnly && !isPriorityAssessmentOnly) {
       // Queue-time validation: never queue a ticket that is already closed,

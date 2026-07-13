@@ -561,6 +561,7 @@ const DECISION_BADGES = {
   rejected: { label: 'Rejected', style: 'bg-red-100 text-red-800' },
   auto_assigned: { label: 'Auto-Assigned', style: 'bg-purple-100 text-purple-800' },
   noise_dismissed: { label: 'Noise Dismissed', style: 'bg-gray-100 text-gray-600' },
+  duplicate_dismissed: { label: 'Duplicate Dismissed', style: 'bg-cyan-50 text-cyan-700' },
   priority_only: { label: 'Priority Only', style: 'bg-blue-100 text-blue-800' },
 };
 
