@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.55-preview';
+export const APP_VERSION = '3.0.56-preview';
 
 export const changelog = [
+  {
+    version: '3.0.56-preview',
+    date: 'July 13, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>🤝 Manual assignment beats the AI, instantly</strong> — assigning a ticket yourself while the AI was still choosing used to leave the row glowing “AI choosing…” until the run finished minutes later. Now the moment you pick someone, the analysis visuals vanish and the assign pop plays for <b>your</b> pick right away. The background run still completes quietly for the history books (it stands down without touching your assignment) — and its finish no longer replays any celebration.' },
+    ],
+  },
   {
     version: '3.0.55-preview',
     date: 'July 13, 2026',
