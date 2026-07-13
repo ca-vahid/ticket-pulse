@@ -1444,7 +1444,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
           ticketStatus: assignedTicketStatus,
           ...commonFilters,
         }),
-        assignmentAPI.getRuns({ decisions: 'noise_dismissed', since, sinceField: 'decidedAt', limit: nonPendingLimit, ticketStatus: dismissedTicketStatus, ...commonFilters }),
+        assignmentAPI.getRuns({ decisions: 'noise_dismissed,duplicate_dismissed', since, sinceField: 'decidedAt', limit: nonPendingLimit, ticketStatus: dismissedTicketStatus, ...commonFilters }),
         assignmentAPI.getRuns({ decisions: 'rejected', since, sinceField: 'decidedAt', limit: nonPendingLimit, ticketStatus: rejectedTicketStatus, ...commonFilters }),
         assignmentAPI.getRuns({ since, sinceField: 'createdAt', limit: nonPendingLimit, ticketStatus: 'deleted', ...commonFilters }),
         assignmentAPI.getQueuedRuns().catch(() => queuedSnapshotFallback),
@@ -2080,8 +2080,8 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
       return 0;
     });
 
-  const DECISION_LABELS = { approved: 'Approved', modified: 'Override', auto_assigned: 'Auto', noise_dismissed: 'Noise', rejected: 'Rejected', pending_review: 'Pending' };
-  const DECISION_PILL = { approved: 'bg-green-100 text-green-800', modified: 'bg-blue-100 text-blue-800', auto_assigned: 'bg-purple-100 text-purple-800', noise_dismissed: 'bg-slate-100 text-slate-500', rejected: 'bg-red-100 text-red-800' };
+  const DECISION_LABELS = { approved: 'Approved', modified: 'Override', auto_assigned: 'Auto', noise_dismissed: 'Noise', duplicate_dismissed: 'Duplicate', rejected: 'Rejected', pending_review: 'Pending' };
+  const DECISION_PILL = { approved: 'bg-green-100 text-green-800', modified: 'bg-blue-100 text-blue-800', auto_assigned: 'bg-purple-100 text-purple-800', noise_dismissed: 'bg-slate-100 text-slate-500', duplicate_dismissed: 'bg-cyan-50 text-cyan-700', rejected: 'bg-red-100 text-red-800' };
 
   // Contextual decision label. A run's `decision` may be 'pending_review'
   // even though no human action is needed in our app — the ticket has
@@ -3717,6 +3717,7 @@ function HistoryTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/L
     rejected: 'bg-red-100 text-red-800',
     auto_assigned: 'bg-purple-100 text-purple-800',
     noise_dismissed: 'bg-gray-100 text-gray-600',
+    duplicate_dismissed: 'bg-cyan-50 text-cyan-700',
     deferred: 'bg-orange-100 text-orange-800',
   };
   const STATUS_BADGES = {
@@ -3783,6 +3784,7 @@ function HistoryTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/L
                 <option value="pending_review">Pending review</option>
                 <option value="approved">Approved</option>
                 <option value="noise_dismissed">Noise dismissed</option>
+                <option value="duplicate_dismissed">Duplicate dismissed</option>
                 <option value="auto_assigned">Auto assigned</option>
                 <option value="rejected">Rejected</option>
                 <option value="modified">Modified</option>

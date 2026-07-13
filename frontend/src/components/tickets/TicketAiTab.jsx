@@ -34,6 +34,7 @@ const DECISION_CHIPS = {
   rejected: 'bg-red-50 text-red-700 ring-red-200',
   auto_assigned: 'bg-indigo-50 text-indigo-700 ring-indigo-200',
   noise_dismissed: 'bg-slate-100 text-slate-500 ring-slate-200',
+  duplicate_dismissed: 'bg-cyan-50 text-cyan-700 ring-cyan-200',
   priority_only: 'bg-violet-50 text-violet-700 ring-violet-200',
 };
 

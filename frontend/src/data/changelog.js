@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.0.53-preview';
+export const APP_VERSION = '3.0.54-preview';
 
 export const changelog = [
+  {
+    version: '3.0.54-preview',
+    date: 'July 13, 2026',
+    entries: [
+      { type: 'new', html: '<strong>🛡️ Duplicate-burst guard</strong> — when the same requester files near-identical tickets within 15 minutes (like this morning’s MS Teams app storm: 12 copies of one request in 84 seconds), later copies are auto-linked as duplicates of the first and their AI runs are skipped. One visible request, one triage. Dismissals appear in the review queue’s Dismissed tab as “Duplicate”.' },
+      { type: 'new', html: '<strong>🔄 Force-refresh button on the tickets page</strong> — next to the sort control: refetches the list and stat cards immediately, no waiting for the live stream or the update pill.' },
+      { type: 'fixed', html: '<strong>🔍 Searching “#232558” now finds FreshService tickets</strong> — the leading # people copy from FreshService defeated the ticket-number matcher; bare numbers worked, hash-prefixed ones didn’t. Both work now, for FS ids and TP numbers alike.' },
+    ],
+  },
   {
     version: '3.0.53-preview',
     date: 'July 12, 2026',
