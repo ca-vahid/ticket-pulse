@@ -417,6 +417,13 @@ export default function Tickets() {
   // per-turn pipeline SSE pings — renders as "matching skills · step 4" in
   // the AI-choosing chip. Updated in place; never triggers refetches.
   const [aiProgress, setAiProgress] = useState(() => new Map());
+  // Manual assignment beat the AI to it (QA 07-13): the human's pick takes
+  // the row over INSTANTLY — analysis visuals drop, the assign pop plays with
+  // the chosen person — while the background run finishes untouched (it
+  // stands down at preflight and keeps the history). Rows in this set render
+  // no AI treatment and their run's eventual completion plays no fanfare.
+  const manualWinRef = useRef(new Set());
+  const [manualWinIds, setManualWinIds] = useState(() => new Set());
   const aiHoldRef = useRef(new Map()); // ticketId -> hold expiry (epoch ms)
   const aiHoldTimerRef = useRef(null);
   const syncAiHold = useCallback(() => {
@@ -457,7 +464,12 @@ export default function Tickets() {
           // outcome is already visible on the row — otherwise hold and let the
           // refetch that delivers the name trigger it (see aiHoldRef above).
           else if (prev.ai?.state === 'analyzing' && t.ai?.state !== 'analyzing') {
-            if (t.ai?.state === 'suggested' || t.assignedTechId != null) fx.set(t.id, 'aiDone');
+            if (manualWinRef.current.has(t.id)) {
+              // The human already had their moment — the run's completion is
+              // bookkeeping, not news. Release the override quietly.
+              manualWinRef.current.delete(t.id);
+              setManualWinIds(new Set(manualWinRef.current));
+            } else if (t.ai?.state === 'suggested' || t.assignedTechId != null) fx.set(t.id, 'aiDone');
             else aiHoldRef.current.set(t.id, Date.now() + 90000);
           }
           else if (aiHoldRef.current.has(t.id)) {
@@ -708,6 +720,7 @@ export default function Tickets() {
   useEffect(() => {
     pendingIdsRef.current = new Set(); setPendingCount(0); setRowFx(new Map());
     aiHoldRef.current = new Map(); setAiHoldIds(new Set());
+    manualWinRef.current = new Set(); setManualWinIds(new Set());
   }, [queryParams]);
 
   const refreshAfterEdit = useCallback(() => {
@@ -715,6 +728,36 @@ export default function Tickets() {
     fetchTickets({ silent: true });
     fetchStats();
     setPulse((p) => p + 1); // keeps an open preview in sync
+  }, [fetchTickets, fetchStats]);
+
+  // Manual assignment from the queue (row picker or mobile sheet). If the AI
+  // was mid-analysis on this row, the human wins the UI immediately: halo,
+  // capsule and progress vanish now, and once the refetch shows the chosen
+  // name the assign pop plays for THAT person — not for whatever the run
+  // decides minutes later.
+  const onManualAssigned = useCallback(async (ticketId, techId) => {
+    lastLocalMutationRef.current = Date.now();
+    const row = ticketsRef.current.find((t) => t.id === ticketId);
+    const aiWasLive = row?.ai?.state === 'analyzing' || row?.ai?.state === 'queued' || aiHoldRef.current.has(ticketId);
+    if (aiWasLive) {
+      manualWinRef.current.add(ticketId);
+      setManualWinIds(new Set(manualWinRef.current));
+      aiHoldRef.current.delete(ticketId);
+      setAiProgress((current) => {
+        if (!current.has(ticketId)) return current;
+        const next = new Map(current);
+        next.delete(ticketId);
+        return next;
+      });
+    }
+    await fetchTickets({ silent: true });
+    fetchStats();
+    setPulse((p) => p + 1);
+    if (techId != null) {
+      setRowFx((current) => new Map([...current, [ticketId, 'aiDone']]));
+      if (rowFxTimerRef.current) clearTimeout(rowFxTimerRef.current);
+      rowFxTimerRef.current = setTimeout(() => setRowFx(new Map()), 3200);
+    }
   }, [fetchTickets, fetchStats]);
 
   // ---- FS-born reassignment from the list: confirmed FreshService write-back ----
@@ -1287,7 +1330,7 @@ export default function Tickets() {
                           // the row gets a live indigo aura so watchers see it happening.
                           // Held rows (run done, assignee write-back still in flight) stay
                           // live so the treatment runs straight through to the name + flash.
-                          const aiLive = ticket.ai?.state === 'analyzing' || aiHoldIds.has(ticket.id);
+                          const aiLive = (ticket.ai?.state === 'analyzing' || aiHoldIds.has(ticket.id)) && !manualWinIds.has(ticket.id);
                           // Post-refresh flash: this row just arrived / changed.
                           const fx = rowFx.get(ticket.id) || null;
                           // Left accent bar: blue when this row is the open preview (focus without
@@ -1402,7 +1445,7 @@ export default function Tickets() {
                                 technicians={meta?.technicians || []}
                                 ticketOrigin={ticket.origin}
                                 assignFn={fsRowEditable ? ((techId) => fsAssign(ticket, techId)) : undefined}
-                                onAssigned={refreshAfterEdit}
+                                onAssigned={(techId) => onManualAssigned(ticket.id, techId)}
                                 size="sm"
                                 align="right"
                                 showAi={canReview}
@@ -1799,7 +1842,7 @@ export default function Tickets() {
         assignFn={assignSheetTicket && assignSheetTicket.origin !== 'ticketpulse' && assignSheetTicket.freshserviceTicketId
           ? ((techId) => fsAssign(assignSheetTicket, techId))
           : null}
-        onAssigned={refreshAfterEdit}
+        onAssigned={(techId) => assignSheetTicket && onManualAssigned(assignSheetTicket.id, techId)}
         canReview={canReview}
         onAiAssign={canReview && assignSheetTicket ? () => setAiTicket(assignSheetTicket) : null}
       />
