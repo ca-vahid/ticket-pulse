@@ -4599,11 +4599,20 @@ export function AssignmentConfigPanel({ workspaceTimezone = 'America/Los_Angeles
         <ConfigToggle label="Auto-Assign Tickets" description="Skip admin review and auto-assign the top recommendation to the technician" checked={config.autoAssign} onChange={() => setConfig({ ...config, autoAssign: !config.autoAssign })} />
         <ConfigToggle
           label="Auto-Categorize Tickets"
-          description="Write the AI's category to the ticket and FreshService even while assignment waits for human approval — and on after-hours priority runs, which classify anyway. Observe-only groups are always exempt."
+          description="Write the AI's category to the ticket and FreshService even while assignment waits for human approval — and on after-hours priority runs, which classify anyway. Observe-only groups are always exempt (unless their category carve-out is on)."
           checked={!!config.autoCategorizeEnabled}
           onChange={() => setConfig({ ...config, autoCategorizeEnabled: !config.autoCategorizeEnabled })}
           color="text-emerald-600"
         />
+        {!!config.autoCategorizeEnabled && !config.priorityAssessmentAfterHoursEnabled && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            <span className="font-semibold">Nights &amp; weekends are not covered yet:</span> Auto-Categorize rides the AI runs,
+            and no runs execute outside business hours while after-hours priority assessment is off — tickets arriving overnight
+            or on weekends stay uncategorized until the next business morning&apos;s queue drain. To categorize around the clock,
+            enable <span className="font-semibold">Automatic urgent detection</span> under Settings → Urgent Escalation
+            (it turns on after-hours AI runs for this workspace).
+          </div>
+        )}
         <ConfigToggle label="Auto-Close Noise Tickets" description="Automatically close/resolve noise and spam tickets in FreshService without admin review" checked={config.autoCloseNoise} onChange={() => setConfig({ ...config, autoCloseNoise: !config.autoCloseNoise })} />
         <div className="py-3">
           <h4 className="font-medium text-sm text-slate-800 mb-1.5">Max Recommendations</h4>
