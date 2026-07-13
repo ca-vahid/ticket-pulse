@@ -221,7 +221,12 @@ router.get('/scheduled', asyncHandler(async (req, res) => {
 router.post('/scheduled', requireNativeTicketing, asyncHandler(async (req, res) => {
   const row = await scheduledTicketService.schedule(
     req.workspaceId,
-    { payload: req.body?.payload || {}, scheduledForAt: req.body?.scheduledForAt },
+    {
+      payload: req.body?.payload || {},
+      scheduledForAt: req.body?.scheduledForAt,
+      recurrence: req.body?.recurrence || 'none',
+      endAt: req.body?.endAt || null,
+    },
     req.ticketActor,
   );
   res.status(201).json({ success: true, data: row });
@@ -561,6 +566,20 @@ router.post('/:id/merge', asyncHandler(async (req, res) => {
   }
   const result = await ticketMergeService.merge(parseTicketId(req), req.workspaceId, {
     targetTicketId,
+    notifyRequester: req.body?.notifyRequester === true,
+  }, req.ticketActor);
+  res.json({ success: true, data: result });
+}));
+
+// Multi-merge (QA 07-13 #1): :id is the PRIMARY that survives; body.ticketIds
+// are merged into it one by one (validated as a batch first).
+router.post('/:id/merge-many', asyncHandler(async (req, res) => {
+  if (req.ticketActor.kind === 'agent') {
+    throw new ValidationError('Merging tickets requires coordinator or admin access');
+  }
+  const { default: ticketMergeService } = await import('../services/ticketMergeService.js');
+  const result = await ticketMergeService.mergeMany(parseTicketId(req), req.workspaceId, {
+    ticketIds: Array.isArray(req.body?.ticketIds) ? req.body.ticketIds : [],
     notifyRequester: req.body?.notifyRequester === true,
   }, req.ticketActor);
   res.json({ success: true, data: result });

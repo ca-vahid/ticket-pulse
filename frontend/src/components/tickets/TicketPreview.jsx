@@ -602,7 +602,7 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
               {conversation.map((e) => (
                 <li key={e.id} className={`rounded-lg border p-2.5 ${e.isPrivate ? 'bg-amber-50/70 border-amber-200' : (e.incoming || e.authorType === 'requester') ? 'bg-indigo-50/60 border-indigo-100' : 'bg-white border-slate-200'}`}>
                   <div className="flex items-center gap-1.5 mb-1">
-                    <span className="text-xs font-semibold text-slate-700 truncate">{e.actorName || 'Unknown'}</span>
+                    <span className="text-xs font-semibold text-slate-700 truncate">{e.actorName || (e.isPrivate ? 'Ticket Pulse' : 'Unknown')}</span>
                     {e.isPrivate
                       ? <Lock className="w-2.5 h-2.5 text-amber-600" aria-label="Internal note" />
                       : <Mail className="w-2.5 h-2.5 text-blue-500" aria-label="Public reply" />}

@@ -1226,6 +1226,13 @@ class TicketService {
       if (/^\s*\[ticket pulse\]/i.test(String(e.bodyText || e.content || ''))) {
         return { ...e, actorName: 'Ticket Pulse' };
       }
+      // System-authored private notes with no actor identity at all — FS
+      // workflow automations, the legacy Ticket Analyzer, our own pipeline
+      // notes — used to render as "Unknown" (QA 07-13 #3, e.g. #179369).
+      // They're the product speaking; label them so.
+      if (e.isPrivate === true && !e.actorEmail && e.actorFreshserviceId === null) {
+        return { ...e, actorName: 'Ticket Pulse', authorType: e.authorType || 'system' };
+      }
       return e;
     });
   }

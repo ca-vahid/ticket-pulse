@@ -159,8 +159,19 @@ model ScheduledTicket {
   workspaceId    Int       @map("workspace_id")
   workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   payload        Json
+  // For recurring rows this is always the NEXT fire; the sweep re-arms it
+  // after each spawn instead of completing the row.
   scheduledForAt DateTime  @map("scheduled_for_at")
-  status         String    @default("pending") @db.VarChar(20) // pending | activated | cancelled | error
+  status         String    @default("pending") @db.VarChar(20) // pending | activated | completed | cancelled | error
+  // Recurrence (QA 07-13 #2): none | weekly | monthly | yearly. The first
+  // fire's wall-clock in `timezone` anchors the pattern (weekday for weekly,
+  // day-of-month for monthly, month+day for yearly; 29-31 clamp to month end).
+  recurrence      String    @default("none") @db.VarChar(10)
+  recurrenceDay   Int?      @map("recurrence_day")
+  recurrenceMonth Int?      @map("recurrence_month")
+  timezone        String?   @db.VarChar(50)
+  endAt           DateTime? @map("end_at")
+  lastSpawnedAt   DateTime? @map("last_spawned_at")
   createdBy      String?   @db.VarChar(255) @map("created_by")
   createdByName  String?   @db.VarChar(255) @map("created_by_name")
   activatedAt    DateTime? @map("activated_at")

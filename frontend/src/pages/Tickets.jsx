@@ -959,7 +959,7 @@ export default function Tickets() {
   ].filter(Boolean).length;
 
   return (
-    <div className="tp-tickets-backdrop min-h-screen md:pl-[20px]">
+    <div className="tp-tickets-backdrop min-h-screen md:pl-[var(--tp-rail-w,58px)]">
       <AppHeader activePage="tickets" />
 
       {/* pb clears the mobile bottom tab bar (QA 07-06 #11) */}

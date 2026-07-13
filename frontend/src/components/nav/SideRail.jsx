@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ChevronsRight, Settings } from 'lucide-react';
+import { ChevronsLeft, ChevronsRight, Settings } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { NAV_DESTINATIONS, useNavDestinations } from './navDestinations';
 import { useApprovalCount } from '../../hooks/useApprovalCount';
@@ -16,11 +16,14 @@ import { useApprovalCount } from '../../hooks/useApprovalCount';
 // accent; everything at rest stays quiet slate. Chrome roots that host the
 // rail reserve its width with `md:pl-[58px]`.
 //
-// PEEK MODE (/tickets*): those pages already carry their own left filter rail,
-// so a second 58px icon bar read as double chrome. There the rail collapses to
-// a 14px edge tab (chevron hint, `.tp-side-rail--peek`) and only expands to
-// the full labeled rail on hover/keyboard focus; the pages reserve just
-// `md:pl-[14px]`, giving the ticket table the width back.
+// TICKETS PAGES (/tickets*): these carry their own left filter rail, so the
+// nav rail is COLLAPSIBLE there (QA 07-13 #6 — the always-thin peek edge was
+// too hard to hit, so full icons are now the default). A chevron at the rail
+// foot shrinks it to a 20px edge tab (`.tp-side-rail--peek`: hover or click
+// expands it temporarily); the choice persists per user. The pages reserve
+// the right gutter via the `--tp-rail-w` CSS variable this component owns.
+const RAIL_COLLAPSED_KEY = 'tp_ticketsRailCollapsed';
+
 export default function SideRail() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -30,9 +33,26 @@ export default function SideRail() {
   const activeId = NAV_DESTINATIONS.find((dest) => matchPath(dest.path))?.id
     || (matchPath('/settings') ? 'settings' : null);
   const destinations = useNavDestinations(activeId);
-  const peek = matchPath('/tickets');
-  // Click-to-open for the peek tab (QA 07-10 #5: hover-only was hard to hit,
-  // especially on small screens/touch). Clicking the collapsed tab pins the
+  const onTickets = matchPath('/tickets');
+  const [railCollapsed, setRailCollapsed] = useState(() => {
+    try { return localStorage.getItem(RAIL_COLLAPSED_KEY) === 'true'; } catch { return false; }
+  });
+  const setCollapsed = (next) => {
+    setRailCollapsed(next);
+    try { localStorage.setItem(RAIL_COLLAPSED_KEY, String(next)); } catch { /* no-op */ }
+  };
+  const peek = onTickets && railCollapsed;
+
+  // Tickets pages reserve the rail gutter via --tp-rail-w so collapsing the
+  // rail gives the table the width back without hardcoded paddings.
+  useEffect(() => {
+    const root = document.documentElement;
+    if (onTickets) root.style.setProperty('--tp-rail-w', peek ? '20px' : '58px');
+    else root.style.removeProperty('--tp-rail-w');
+    return () => root.style.removeProperty('--tp-rail-w');
+  }, [onTickets, peek]);
+
+  // Click-to-open for the collapsed edge tab (QA 07-10 #5). Clicking pins the
   // rail open; navigating, Escape, or the mouse leaving lets it collapse.
   const [peekPinned, setPeekPinned] = useState(false);
   useEffect(() => { setPeekPinned(false); }, [location.pathname]);
@@ -128,6 +148,22 @@ export default function SideRail() {
           </span>
           <span className="tp-rail-label flex-1 truncate">Settings</span>
         </button>
+
+        {/* Tickets pages only: collapse/expand the rail out of the way of the
+            filter rail. The preference sticks (localStorage). */}
+        {onTickets && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setPeekPinned(false); setCollapsed(!railCollapsed); }}
+            title={railCollapsed ? 'Keep the navigation expanded' : 'Collapse the navigation to a thin edge'}
+            className="mx-[9px] mt-1 flex h-9 flex-none items-center gap-3 overflow-hidden whitespace-nowrap rounded-xl border border-transparent px-[8px] text-left text-[12px] font-semibold text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 tp-focus-ring"
+          >
+            <span className="inline-flex h-5 w-5 flex-none items-center justify-center">
+              {railCollapsed ? <ChevronsRight className="h-[18px] w-[18px]" /> : <ChevronsLeft className="h-[18px] w-[18px]" />}
+            </span>
+            <span className="tp-rail-label flex-1 truncate">{railCollapsed ? 'Keep expanded' : 'Collapse rail'}</span>
+          </button>
+        )}
       </div>
     </nav>
   );
