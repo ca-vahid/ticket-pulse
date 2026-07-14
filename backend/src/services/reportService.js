@@ -150,7 +150,13 @@ class ReportService {
       byStatus: byStatusRaw.map((r) => ({ name: r.status, count: r._count })),
       byPriority: byPriorityRaw.map((r) => ({ name: { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Urgent' }[r.priority] || String(r.priority), count: r._count })).sort((a, b) => b.count - a.count),
       byCategory: scope.kind === 'all' || scope.kind === 'noise' || scope.kind === 'tag' ? top(byCategory) : undefined,
-      bySubcategory: scope.kind !== 'subcategory' ? top(bySubcategory) : undefined,
+      bySubcategory: (() => {
+        if (scope.kind === 'subcategory') return undefined;
+        const t = top(bySubcategory);
+        // Flat taxonomies (Accounting) put everything in '(no subcategory)' —
+        // a one-bucket breakdown is noise, not information.
+        return t.length === 1 && t[0].name === '(no subcategory)' ? undefined : t;
+      })(),
       byRequesterDomain: top(byDomain, 6),
       topRequesters: top(byRequester, 6),
       // ALL in-scope tickets (bounded by the 2000-row aggregate cap): the
@@ -166,19 +172,44 @@ class ReportService {
       truncated: rows.length >= 2000 ? 'aggregates computed from the first 2000 tickets in range' : null,
     };
 
-    // ---- AI narrative ------------------------------------------------------
+    // ---- save immediately; the AI narrative is written in the BACKGROUND --
+    // The LLM takes 15-40s on big scopes: holding the HTTP response open that
+    // long trips reverse-proxy timeouts (and duplicated reports back when the
+    // analytics client retried timed-out POSTs). The dataset is ready in well
+    // under a second — return it, and let the UI poll for the narrative.
+    const row = await prisma.analyticsReport.create({
+      data: {
+        workspaceId,
+        title: (title || `${label} — last ${days} days`).slice(0, 200),
+        scope: { ...scope, label },
+        rangeStart,
+        rangeEnd,
+        dataset: { ...dataset, narrativeStatus: 'pending' },
+        narrative: null,
+        createdBy: actor?.email || null,
+      },
+    });
+    const subjects = rows.slice(0, MAX_SUBJECTS_FOR_LLM).map((t) => String(t.subject || '').slice(0, 140));
+    this._writeNarrative(row.id, workspaceId, {
+      label, days, rangeStart, rangeEnd, dataset, subjects, sampleCount: Math.min(rows.length, MAX_SUBJECTS_FOR_LLM),
+    }).catch((err) => logger.warn(`Report narrative background task failed: ${err.message}`));
+    logger.info(`Analytics report dataset saved: "${row.title}" (ws ${workspaceId}, ${total} tickets; narrative queued)`);
+    return row;
+  }
+
+  /** Background: write the AI narrative onto a saved report. */
+  async _writeNarrative(reportId, workspaceId, { label, days, rangeStart, rangeEnd, dataset, subjects, sampleCount }) {
     let narrative = null;
     let llmModel = null;
     try {
-      const subjectSample = rows.slice(0, MAX_SUBJECTS_FOR_LLM).map((t) => `- ${String(t.subject || '').slice(0, 140)}`).join('\n');
       const userMessage = [
         `Report scope: ${label} · last ${days} days (${rangeStart.toISOString().slice(0, 10)} → ${rangeEnd.toISOString().slice(0, 10)})`,
         '',
         'DATASET (exact figures — quote only these):',
         JSON.stringify({ ...dataset, samples: undefined }, null, 1).slice(0, 6000),
         '',
-        `SAMPLE SUBJECTS (${Math.min(rows.length, MAX_SUBJECTS_FOR_LLM)} most recent — cluster these into themes):`,
-        subjectSample || '(none)',
+        `SAMPLE SUBJECTS (${sampleCount} most recent — cluster these into themes):`,
+        subjects.map((t) => `- ${t}`).join('\n') || '(none)',
       ].join('\n');
 
       const response = await providerGateway.sendJson({
@@ -195,24 +226,17 @@ class ReportService {
         llmModel = response.model || null;
       }
     } catch (err) {
-      logger.warn(`Report narrative generation failed (dataset still saved): ${err.message}`);
+      logger.warn(`Report narrative generation failed (dataset already saved): ${err.message}`);
     }
-
-    const row = await prisma.analyticsReport.create({
+    await prisma.analyticsReport.update({
+      where: { id: reportId },
       data: {
-        workspaceId,
-        title: (title || `${label} — last ${days} days`).slice(0, 200),
-        scope: { ...scope, label },
-        rangeStart,
-        rangeEnd,
-        dataset,
         narrative,
         llmModel,
-        createdBy: actor?.email || null,
+        dataset: { ...dataset, narrativeStatus: narrative ? 'ok' : 'failed' },
       },
-    });
-    logger.info(`Analytics report generated: "${row.title}" (ws ${workspaceId}, ${total} tickets, narrative ${narrative ? 'ok' : 'skipped'})`);
-    return row;
+    }).catch((err) => logger.warn(`Report narrative save failed for #${reportId}: ${err.message}`));
+    logger.info(`Analytics report narrative ${narrative ? 'written' : 'FAILED'} for #${reportId}`);
   }
 
   async list(workspaceId, take = 30) {

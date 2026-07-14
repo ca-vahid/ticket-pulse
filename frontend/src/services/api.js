@@ -110,8 +110,11 @@ const analyticsRetryInterceptor = async (error) => {
   const status = error.response?.status;
   const retryableNetworkError = !error.response || error.code === 'ECONNABORTED' || error.code === 'ERR_NETWORK';
   const retryableServerError = status === 502 || status === 503 || status === 504;
+  // Only idempotent requests may retry — a timed-out POST (e.g. report
+  // generation) that gets re-fired duplicates its side effects.
+  const idempotent = ['get', 'head', 'options'].includes(String(config.method || 'get').toLowerCase());
 
-  if ((retryableNetworkError || retryableServerError) && (config._analyticsRetryCount || 0) < 3) {
+  if (idempotent && (retryableNetworkError || retryableServerError) && (config._analyticsRetryCount || 0) < 3) {
     config._analyticsRetryCount = (config._analyticsRetryCount || 0) + 1;
     const backoffMs = [1500, 3500, 7000][config._analyticsRetryCount - 1] || 7000;
     await delay(backoffMs);
