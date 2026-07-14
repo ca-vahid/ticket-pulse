@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.56-preview';
+export const APP_VERSION = '3.0.57-preview';
 
 export const changelog = [
+  {
+    version: '3.0.57-preview',
+    date: 'July 14, 2026',
+    entries: [
+      { type: 'new', html: '<strong>🧠 AI routing notes per team member</strong> — some people intentionally carry fewer tickets, and the AI kept picking them precisely because their open count was low. Settings → Members now has a brain icon on every member: write a standing instruction (“reduced capacity — only recommend for a significantly stronger skill match or their specialty categories”) and the AI sees it on every run, weighed above the workload numbers. Applied to Ben and Zoe in Accounting per Kirsten’s request.' },
+    ],
+  },
   {
     version: '3.0.56-preview',
     date: 'July 13, 2026',

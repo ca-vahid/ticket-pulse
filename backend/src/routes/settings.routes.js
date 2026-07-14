@@ -1340,6 +1340,7 @@ router.get(
         origin: t.origin, // 'freshservice' | 'local'
         location: t.location,
         timezone: t.timezone,
+        routingGuidance: t.routingGuidance || null,
       })),
     });
   }),
@@ -1402,16 +1403,21 @@ router.patch(
     if (!existing || existing.workspaceId !== req.workspaceId) {
       return res.status(404).json({ success: false, message: 'Technician not found in this workspace' });
     }
-    if (existing.origin !== 'local') {
+    const { name, email, timezone, location, isActive, routingGuidance } = req.body || {};
+    // routingGuidance is Ticket Pulse's own annotation (the AI reads it when
+    // ranking candidates) — editable for ANY origin. Identity fields stay
+    // sync-managed for FreshService agents.
+    const identityEdit = [name, email, timezone, location, isActive].some((v) => v !== undefined);
+    if (existing.origin !== 'local' && identityEdit) {
       return res.status(400).json({ success: false, message: 'FreshService agents are managed by sync and cannot be edited here.' });
     }
-    const { name, email, timezone, location, isActive } = req.body || {};
     const tech = await technicianRepository.update(id, {
       ...(name !== undefined ? { name: name.trim() } : {}),
       ...(email !== undefined ? { email: email?.trim()?.toLowerCase() || null } : {}),
       ...(timezone !== undefined ? { timezone } : {}),
       ...(location !== undefined ? { location: location?.trim() || null } : {}),
       ...(isActive !== undefined ? { isActive: !!isActive } : {}),
+      ...(routingGuidance !== undefined ? { routingGuidance: String(routingGuidance || '').trim().slice(0, 500) || null } : {}),
     });
     clearReadCache();
     res.json({ success: true, data: { id: tech.id, name: tech.name, email: tech.email, origin: tech.origin, isActive: tech.isActive } });
