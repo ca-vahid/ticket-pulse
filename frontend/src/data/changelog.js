@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.0.62-preview';
+export const APP_VERSION = '3.0.63-preview';
 
 export const changelog = [
+  {
+    version: '3.0.63-preview',
+    date: 'July 14, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>📆 Report windows are now complete days — and reproducible</strong> — “last 7 days” means the 7 full days ending yesterday (workspace timezone), so two people generating the same report on the same day get identical numbers. The old now-anchored rolling windows drifted by the minute. The header states the exact window (“Jul 7 – Jul 13 · 7 complete days”).' },
+      { type: 'improved', html: '<strong>🏢 Reports say which workspace they cover</strong> — a workspace badge on every report header. The “different numbers” mystery was two people running the same template in different workspaces (IT vs Accounting) with nothing on the report saying so.' },
+    ],
+  },
   {
     version: '3.0.62-preview',
     date: 'July 14, 2026',

@@ -11,6 +11,7 @@
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { ValidationError, NotFoundError } from '../utils/errors.js';
+import { toZonedTime, fromZonedTime, formatInTimeZone } from 'date-fns-tz';
 import providerGateway from './aiProviders/providerGateway.js';
 
 const SCOPE_KINDS = new Set(['all', 'noise', 'category', 'subcategory', 'tag']);
@@ -49,6 +50,8 @@ Write the brief FROM the data. Rules:
 - Be concrete and discussion-ready: what changed, what stands out, what deserves a decision.
 - Neutral, professional tone. No praise/blame of individual people — this team reviews workload as a team.`;
 
+const tzOf = (dataset) => dataset?.window?.timezone || 'America/Los_Angeles';
+
 function domainOf(email) {
   const at = String(email || '').lastIndexOf('@');
   return at > 0 ? String(email).slice(at + 1).toLowerCase() : null;
@@ -60,9 +63,23 @@ class ReportService {
       throw new ValidationError(`scope.kind must be one of: ${[...SCOPE_KINDS].join(', ')}`);
     }
     const days = Math.max(1, Math.min(90, Number(rangeDays) || 7));
-    const rangeEnd = new Date();
-    const rangeStart = new Date(rangeEnd.getTime() - days * 24 * 3600 * 1000);
-    const prevStart = new Date(rangeStart.getTime() - days * 24 * 3600 * 1000);
+    const workspace = await prisma.workspace.findUnique({
+      where: { id: workspaceId },
+      select: { name: true, defaultTimezone: true },
+    });
+    const tz = workspace?.defaultTimezone || 'America/Los_Angeles';
+    // COMPLETE-DAY window, anchored to last midnight in the workspace
+    // timezone (feedback 07-14): "last 7 days" = the 7 full days ending
+    // yesterday. Two people generating the same scope on the same day get an
+    // IDENTICAL window — and identical numbers — instead of now-anchored
+    // rolling windows that drift by the minute.
+    const nowLocal = toZonedTime(new Date(), tz);
+    const midnightLocal = new Date(nowLocal.getFullYear(), nowLocal.getMonth(), nowLocal.getDate(), 0, 0, 0, 0);
+    const startLocal = new Date(midnightLocal); startLocal.setDate(midnightLocal.getDate() - days);
+    const prevStartLocal = new Date(midnightLocal); prevStartLocal.setDate(midnightLocal.getDate() - days * 2);
+    const rangeEnd = fromZonedTime(midnightLocal, tz);
+    const rangeStart = fromZonedTime(startLocal, tz);
+    const prevStart = fromZonedTime(prevStartLocal, tz);
 
     // Resolve scope → where-clause + label
     let scopeWhere = {};
@@ -114,7 +131,7 @@ class ReportService {
     let resolvedCount = 0;
     let resolutionMsSum = 0;
     for (const t of rows) {
-      const day = t.createdAt.toISOString().slice(0, 10);
+      const day = formatInTimeZone(t.createdAt, tz, 'yyyy-MM-dd');
       byDay[day] = (byDay[day] || 0) + 1;
       const cat = t.internalCategory?.name || '(uncategorized)';
       byCategory[cat] = (byCategory[cat] || 0) + 1;
@@ -132,13 +149,14 @@ class ReportService {
     const top = (m, n = 8) => Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, n).map(([name, count]) => ({ name, count }));
     // Dense daily series (zero-filled) so charts show quiet days honestly.
     const days_ = [];
-    for (let d = new Date(rangeStart); d < rangeEnd; d = new Date(d.getTime() + 24 * 3600 * 1000)) {
-      const key = d.toISOString().slice(0, 10);
+    for (let d = new Date(startLocal); d < midnightLocal; d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)) {
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
       days_.push({ date: key, count: byDay[key] || 0 });
     }
 
     const dataset = {
       rangeDays: days,
+      window: { timezone: tz, completeDays: true, workspaceName: workspace?.name || null },
       totals: {
         created: total,
         previousPeriod: prevTotal,
@@ -181,7 +199,7 @@ class ReportService {
       data: {
         workspaceId,
         title: (title || `${label} — last ${days} days`).slice(0, 200),
-        scope: { ...scope, label },
+        scope: { ...scope, label, workspaceName: workspace?.name || null },
         rangeStart,
         rangeEnd,
         dataset: { ...dataset, narrativeStatus: 'pending' },
@@ -198,13 +216,13 @@ class ReportService {
     return row;
   }
 
-  /** Background: write the AI narrative onto a saved report. */
+/** Background: write the AI narrative onto a saved report. */
   async _writeNarrative(reportId, workspaceId, { label, days, rangeStart, rangeEnd, dataset, subjects, sampleCount }) {
     let narrative = null;
     let llmModel = null;
     try {
       const userMessage = [
-        `Report scope: ${label} · last ${days} days (${rangeStart.toISOString().slice(0, 10)} → ${rangeEnd.toISOString().slice(0, 10)})`,
+        `Report scope: ${label} · ${days} complete days (${formatInTimeZone(rangeStart, tzOf(dataset), 'yyyy-MM-dd')} → ${formatInTimeZone(new Date(rangeEnd.getTime() - 1), tzOf(dataset), 'yyyy-MM-dd')} inclusive)`,
         '',
         'DATASET (exact figures — quote only these):',
         JSON.stringify({ ...dataset, samples: undefined }, null, 1).slice(0, 6000),
