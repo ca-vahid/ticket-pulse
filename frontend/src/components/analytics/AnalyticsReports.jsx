@@ -293,7 +293,26 @@ function ReportView({ report, onDelete, onRename = null }) {
             </h2>
           )}
           <p className="text-xs text-slate-400">
-            {new Date(report.rangeStart).toLocaleDateString()} → {new Date(report.rangeEnd).toLocaleDateString()}
+            {report.scope?.workspaceName && (
+              <span className="mr-1.5 inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-blue-700">
+                {report.scope.workspaceName}
+              </span>
+            )}
+            {d.window?.completeDays ? (
+              <>
+                {new Date(report.rangeStart).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                {' – '}
+                {new Date(new Date(report.rangeEnd).getTime() - 1).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                {` · ${d.rangeDays} complete day${d.rangeDays === 1 ? '' : 's'} (${d.window.timezone})`}
+              </>
+            ) : (
+              <>
+                {new Date(report.rangeStart).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                {' → '}
+                {new Date(report.rangeEnd).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                {' · rolling window'}
+              </>
+            )}
             {' · '}generated {new Date(report.createdAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
             {(report.createdByName || report.createdBy) ? ` by ${report.createdByName || report.createdBy}` : ''}
           </p>
