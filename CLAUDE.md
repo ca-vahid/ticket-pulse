@@ -48,7 +48,7 @@ The MVP roadmap in old docs is **complete and stale** — ignore it as a plan. T
 - **Dashboard** (`/dashboard`) — all technicians + workload breakdown; daily/weekly/monthly views; search + category filter; compact mode; hidden techs; date navigation; SSE live updates.
 - **Technician Detail** (`/technician/:id`) — per-tech tickets and stats (daily/weekly/monthly). **Live page is `TechnicianDetailNew.jsx`**; `TechnicianDetail.jsx` is legacy — design against the `New` one.
 - **Timeline Explorer** (`/timeline`) — ownership/coverage timeline.
-- **Analytics & Insights** (`/analytics`, `/analytics/category-map`) — Overview, Demand & Flow, Team Balance, Quality, Automation Ops, Insights. Deterministic, explainable v1 — **no LLM summaries, predictions, or scheduled reports.**
+- **Analytics & Insights** (`/analytics`, `/analytics/category-map`) — Overview, Demand & Flow, Team Balance, Quality, Automation Ops, Insights, **Reports**. The six core tabs are deterministic and explainable — **no LLM summaries or predictions there**. The Reports tab (Jul 2026) is the sanctioned exception: saved snapshots pairing a deterministic dataset with a clearly-banner-labeled AI narrative for weekly meetings.
 - **Assignment Review** (`/assignments`, with tab/run/history/live/competency sub-routes) — review queue, history, daily review, competencies, prompts, AI provider config.
 - **Settings** (`/settings`) — incl. **Mail Workflows** (JSON-graph workflow editor — since v3.0.3 a real automation engine: AND/OR condition builder, branch/delay/webhook/child-ticket/approval/sub-workflow nodes, time-based + SLA triggers, origin-aware assign/update actions, AI proposed-reply staging with confidence-gated auto-send, installable templates) and **Ticket Ops** (SLA policies for TP-born due dates, macros, custom fields, ticket links). Full node/trigger list: `AGENTS.md` → "Custom Mail Notification Workflows".
 - **Visuals** (`/visuals`) — agent map/location/visibility/schedule.
@@ -94,7 +94,7 @@ Defined in `index.css` `@layer components` — reach for them before inventing n
 - **Origin-aware editing.** FS-born tickets stay read-mostly (fields are FreshService-owned; assignment write-back + replies-via-FS-API are the exceptions). **TP-born tickets (native ticketing, `origin='ticketpulse'`) are fully editable in-app** where the workspace flag is on — design full editing affordances for them, and read-only affordances (with the "FreshService owns this" banner) for FS-born ones.
 - **CSAT / survey-based metrics must always show response/sample count** (coverage is low — never imply a rate is more reliable than its N).
 - **Don't surface analytics the data can't support** — e.g., first-response metrics until `firstPublicAgentReplyAt` is populated; respect the "sparse field" caveats in `AGENTS.md`.
-- Analytics is **deterministic and explainable** — no AI-generated summaries in that surface.
+- Analytics core tabs are **deterministic and explainable** — no AI-generated summaries there. The Reports tab is the exception: its AI narrative must always render under an explicit "AI narrative" banner and never state numbers absent from its dataset.
 
 ### Accessibility & responsiveness
 - Target **WCAG AA**: sufficient contrast on glass/translucent surfaces (verify text over `.tp-glass`), visible focus (`.tp-focus-ring`), keyboard operability, semantic roles/labels, respect `prefers-reduced-motion`.

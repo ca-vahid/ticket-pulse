@@ -69,7 +69,7 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 ### Analytics and Insights
 - **Route**: `/analytics`
 - **API**: `/api/analytics/*`
-- **Approach**: Deterministic, explainable v1 analytics; no LLM summaries, predictions, scheduled reports, or automated remediation.
+- **Approach**: Deterministic, explainable analytics in the six core tabs; no predictions or automated remediation. Exception (Jul 2026): the **Reports** tab generates saved report snapshots — a deterministic dataset plus a clearly-banner-labeled AI narrative (executive summary, subject clusters, discussion points) for weekly meetings. The narrative is written FROM the dataset and never invents numbers; the core tabs stay LLM-free.
 - **Views**: Overview, Demand & Flow, Team Balance, Quality, Automation Ops, and Insights.
 - **Data Rules**:
   - Default range is last 30 days in selected workspace timezone.

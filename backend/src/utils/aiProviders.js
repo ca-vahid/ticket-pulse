@@ -17,6 +17,8 @@ export const AI_OPERATIONS = [
   'ticket_thread_summary',
   // Requester-sentiment classification (gap plan 2 P5.1) — cheap tier.
   'requester_sentiment',
+  // Analytics Reports narrative (feedback 07-14) — meeting-brief writing.
+  'analytics_report',
 ];
 
 // Sonnet 5 (launched 2026-06-30) is the default; Sonnet 4.6 stays selectable

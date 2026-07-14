@@ -1319,6 +1319,11 @@ export const analyticsAPI = {
   getQuality: (params = {}) => apiAnalytics.get('/analytics/quality', { params }),
   getAutomationOps: (params = {}) => apiAnalytics.get('/analytics/automation-ops', { params }),
   getInsights: (params = {}) => apiAnalytics.get('/analytics/insights', { params }),
+  // Reports (feedback 07-14): saved snapshots; generation runs the LLM (10-20s)
+  listReports: () => apiAnalytics.get('/analytics/reports'),
+  getReport: (id) => apiAnalytics.get(`/analytics/reports/${id}`),
+  generateReport: (payload) => apiAnalytics.post('/analytics/reports', payload, { timeout: 90000 }),
+  deleteReport: (id) => apiAnalytics.delete(`/analytics/reports/${id}`),
 };
 
 /**

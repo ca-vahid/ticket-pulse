@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.0.57-preview';
+export const APP_VERSION = '3.0.58-preview';
 
 export const changelog = [
+  {
+    version: '3.0.58-preview',
+    date: 'July 14, 2026',
+    entries: [
+      { type: 'new', html: '<strong>📊 Analytics gains a Reports tab</strong> — generate discussion-ready briefs for the weekly meeting: pick a template (“Phishing &amp; spam — weekly”) or any category/tag/noise scope and range, and get exact counts with prior-period deltas, a daily trend chart, breakdowns — plus a clearly-labeled <b>AI narrative</b> that clusters what the tickets actually were (“the ‘Oops! Here’s the correct link’ resend, roughly a third”), calls out the trend, and proposes discussion points. Reports save as snapshots; Print/PDF for the meeting. The AI writes only from the computed dataset — the six core analytics tabs stay fully deterministic.' },
+      { type: 'improved', html: '<strong>🛡️ Phishing / Spam Reports moved to Security</strong> — it lived under Account &amp; Access; it now sits where you’d look for it, and all historical tickets (198) plus FreshService fields on live ones were updated to match.' },
+    ],
+  },
   {
     version: '3.0.57-preview',
     date: 'July 14, 2026',
