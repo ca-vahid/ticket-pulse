@@ -23,7 +23,9 @@ import {
   Tags,
   Users,
   XCircle,
+  FileText,
 } from 'lucide-react';
+import AnalyticsReports from '../components/analytics/AnalyticsReports';
 import { Link, useLocation } from 'react-router-dom';
 import Highcharts from 'highcharts';
 import 'highcharts/highcharts-more';
@@ -61,6 +63,7 @@ const TABS = [
   { id: 'quality', label: 'Quality', Icon: CheckCircle2 },
   { id: 'ops', label: 'Automation Ops', Icon: RefreshCw },
   { id: 'insights', label: 'Insights', Icon: Sparkles },
+  { id: 'reports', label: 'Reports', Icon: FileText },
 ];
 
 const HEADER_CONTROL_LABEL_CLASS = 'mb-1.5 block text-[10px] font-bold uppercase tracking-normal text-slate-500';
@@ -3654,6 +3657,9 @@ export default function Analytics({ view = 'standard' }) {
   };
 
   const renderActiveTab = () => {
+    // Reports is its own surface (saved snapshots + AI narrative) — it does
+    // not ride the deterministic analytics payload machinery.
+    if (activeTab === 'reports') return <AnalyticsReports />;
     const tabKey = TAB_PAYLOAD_KEY[activeTab] || 'overview';
     // Each tab renders as soon as ITS data lands — no waiting on siblings.
     if (!payload[tabKey]) {

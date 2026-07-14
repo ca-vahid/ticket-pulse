@@ -101,8 +101,30 @@ model Workspace {
   webhookSubscriptions   WebhookSubscription[]
   ticketEmbeddings       TicketEmbedding[]
   ticketTypeDefinitions  TicketTypeDefinition[]
+  analyticsReports       AnalyticsReport[]
 
   @@map("workspaces")
+}
+
+// Saved analytics reports (feedback 07-14): a deterministic aggregate
+// snapshot + a clearly-labeled AI narrative, generated on demand for weekly
+// meetings. Snapshots are immutable — regenerate to get fresh numbers.
+model AnalyticsReport {
+  id          Int       @id @default(autoincrement())
+  workspaceId Int       @map("workspace_id")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  title       String    @db.VarChar(200)
+  scope       Json      // { kind: 'all'|'noise'|'category'|'subcategory'|'tag', id?, label }
+  rangeStart  DateTime  @map("range_start")
+  rangeEnd    DateTime  @map("range_end")
+  dataset     Json      // deterministic aggregates + samples
+  narrative   Json?     // AI sections (null when generation failed/skipped)
+  llmModel    String?   @db.VarChar(100) @map("llm_model")
+  createdBy   String?   @db.VarChar(255) @map("created_by")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@map("analytics_reports")
+  @@index([workspaceId, createdAt])
 }
 
 // Ticket attachments stored in Azure Blob Storage. Dev and prod isolate into

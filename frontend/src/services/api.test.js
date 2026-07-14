@@ -36,6 +36,8 @@ describe('api auth/workspace helpers', () => {
   test('exports analytics client methods', async () => {
     const { analyticsAPI } = await import('./api');
     expect(Object.keys(analyticsAPI).sort()).toEqual([
+      'deleteReport',
+      'generateReport',
       'getAutomationOps',
       'getCategories',
       'getCategoryIntelligence',
@@ -43,7 +45,9 @@ describe('api auth/workspace helpers', () => {
       'getInsights',
       'getOverview',
       'getQuality',
+      'getReport',
       'getTeamBalance',
+      'listReports',
     ]);
   });
 

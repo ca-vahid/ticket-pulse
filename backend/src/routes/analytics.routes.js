@@ -44,4 +44,31 @@ router.get('/insights', asyncHandler(async (req, res) => {
   res.json({ success: true, data });
 }));
 
+// ---- Reports (feedback 07-14): saved snapshots — deterministic dataset +
+// clearly-labeled AI narrative for weekly meetings.
+router.get('/reports', asyncHandler(async (req, res) => {
+  const { default: reportService } = await import('../services/reportService.js');
+  res.json({ success: true, data: await reportService.list(req.workspaceId) });
+}));
+
+router.post('/reports', asyncHandler(async (req, res) => {
+  const { default: reportService } = await import('../services/reportService.js');
+  const row = await reportService.generate(req.workspaceId, {
+    scope: req.body?.scope,
+    rangeDays: req.body?.rangeDays,
+    title: req.body?.title,
+  }, req.session?.user || null);
+  res.status(201).json({ success: true, data: row });
+}));
+
+router.get('/reports/:id', asyncHandler(async (req, res) => {
+  const { default: reportService } = await import('../services/reportService.js');
+  res.json({ success: true, data: await reportService.get(req.params.id, req.workspaceId) });
+}));
+
+router.delete('/reports/:id', asyncHandler(async (req, res) => {
+  const { default: reportService } = await import('../services/reportService.js');
+  res.json({ success: true, data: await reportService.remove(req.params.id, req.workspaceId) });
+}));
+
 export default router;
