@@ -673,6 +673,10 @@ model Technician {
   isMapManager    Boolean   @default(false) @map("is_map_manager")
   workStartTime   String?   @db.VarChar(5) @map("work_start_time")
   workEndTime     String?   @db.VarChar(5) @map("work_end_time")
+  // Standing instruction the assignment AI sees whenever this person is a
+  // candidate (e.g. "Reduced ticket capacity — only recommend for a
+  // significantly stronger skill match or their specialty categories").
+  routingGuidance String?   @db.Text @map("routing_guidance")
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 

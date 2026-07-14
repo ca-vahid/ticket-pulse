@@ -132,7 +132,7 @@ export const TOOL_SCHEMAS = [
   },
   {
     name: 'find_matching_agents',
-    description: 'Find agents that match specific criteria. Combines competency matching, availability, location, workload, and recent rejection/capacity risk into a single ranked result. Use this after you have classified the ticket and determined requirements.',
+    description: 'Find agents that match specific criteria. Combines competency matching, availability, location, workload, and recent rejection/capacity risk into a single ranked result. Use this after you have classified the ticket and determined requirements. When a candidate carries a routingGuidance note, treat it as a standing instruction from the team lead that OVERRIDES workload-based preference — e.g. someone marked as reduced-capacity must not be ranked up just because their open-ticket count is low.',
     input_schema: {
       type: 'object',
       properties: {
@@ -1700,7 +1700,7 @@ async function findMatchingAgents(workspaceId, criteria, ticketId = null) {
   const [techs, competencies, leaves, openTickets, todayTickets, assignmentConfig] = await Promise.all([
     prisma.technician.findMany({
       where: { workspaceId, isActive: true },
-      select: { id: true, name: true, location: true, timezone: true, workStartTime: true, workEndTime: true },
+      select: { id: true, name: true, location: true, timezone: true, workStartTime: true, workEndTime: true, routingGuidance: true },
     }),
     prisma.technicianCompetency.findMany({
       where: { workspaceId },
@@ -1803,6 +1803,10 @@ async function findMatchingAgents(workspaceId, criteria, ticketId = null) {
       locationMatch,
       openTickets: open,
       todayAssigned: today,
+      // Admin-set standing instruction (QA 07-14): overrides workload-based
+      // preference. A low open-ticket count must NOT promote a candidate
+      // whose guidance says they run at reduced capacity.
+      routingGuidance: t.routingGuidance || undefined,
     });
   }
 
@@ -2319,7 +2323,7 @@ async function getWorkloadStats(workspaceId) {
 
   const techs = await prisma.technician.findMany({
     where: { workspaceId, isActive: true },
-    select: { id: true, name: true },
+    select: { id: true, name: true, routingGuidance: true },
   });
   const techIds = techs.map((t) => t.id);
 
@@ -2353,6 +2357,9 @@ async function getWorkloadStats(workspaceId) {
       openTickets: openMap[t.id] || 0,
       todayAssigned: todayMap[t.id] || 0,
       todaySelfPicked: selfMap[t.id] || 0,
+      // Low counts here can be BY DESIGN — a guidance note explains it and
+      // outranks the load numbers (QA 07-14).
+      routingGuidance: t.routingGuidance || undefined,
     })).sort((a, b) => a.openTickets - b.openTickets),
   };
 }

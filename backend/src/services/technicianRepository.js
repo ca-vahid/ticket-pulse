@@ -223,6 +223,7 @@ class TechnicianRepository {
       if (data.timezone !== undefined) updateData.timezone = data.timezone;
       if (data.location !== undefined) updateData.location = data.location;
       if (data.isActive !== undefined) updateData.isActive = data.isActive;
+      if (data.routingGuidance !== undefined) updateData.routingGuidance = data.routingGuidance;
       if (data.showOnMap !== undefined) updateData.showOnMap = data.showOnMap;
       if (data.isMapManager !== undefined) updateData.isMapManager = data.isMapManager;
       if (data.workStartTime !== undefined) updateData.workStartTime = data.workStartTime;

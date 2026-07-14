@@ -3,7 +3,7 @@ import { settingsAPI } from '../../services/api';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 import {
   Users, Loader, Cloud, Home, Power, PowerOff, Pencil, Check, X,
-  AlertCircle, CheckCircle2, MapPin, Mail, Search, UserPlus, Ban,
+  AlertCircle, CheckCircle2, MapPin, Mail, Search, UserPlus, Ban, Brain,
 } from 'lucide-react';
 
 const COMMON_TIMEZONES = [
@@ -201,6 +201,26 @@ export default function MembersPanel() {
     finally { setTogglingId(null); }
   }, [load]);
 
+  // AI routing guidance (QA 07-14): a standing instruction the assignment AI
+  // reads whenever this person is a candidate — e.g. reduced capacity.
+  const [guidanceId, setGuidanceId] = useState(null);
+  const [guidanceDraft, setGuidanceDraft] = useState('');
+  const [guidanceSaving, setGuidanceSaving] = useState(false);
+  const openGuidance = useCallback((t) => {
+    setGuidanceId(t.id);
+    setGuidanceDraft(t.routingGuidance || '');
+  }, []);
+  const saveGuidance = useCallback(async () => {
+    setGuidanceSaving(true); setError(null);
+    try {
+      await settingsAPI.updateTechnician(guidanceId, { routingGuidance: guidanceDraft });
+      flash(guidanceDraft.trim() ? 'AI routing note saved — it applies from the next run.' : 'AI routing note removed.');
+      setGuidanceId(null);
+      await load();
+    } catch (err) { setError(err.message || 'Failed to save routing note'); }
+    finally { setGuidanceSaving(false); }
+  }, [guidanceId, guidanceDraft, load]);
+
   const localActive = local.filter((t) => t.isActive).length;
   const localDisabled = local.length - localActive;
 
@@ -262,6 +282,13 @@ export default function MembersPanel() {
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-2">
                 {local.map((t) => (
                   <MemberRow
+                    guidanceOpen={guidanceId === t.id}
+                    guidanceDraft={guidanceDraft}
+                    setGuidanceDraft={setGuidanceDraft}
+                    onOpenGuidance={() => openGuidance(t)}
+                    onCloseGuidance={() => setGuidanceId(null)}
+                    onSaveGuidance={saveGuidance}
+                    guidanceSaving={guidanceSaving}
                     key={t.id}
                     t={t}
                     editable
@@ -287,7 +314,19 @@ export default function MembersPanel() {
             </div>
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-2">
               {fs.map((t) => (
-                <MemberRow key={t.id} t={t} onToggle={() => toggleActive(t)} toggling={togglingId === t.id} />
+                <MemberRow
+                  key={t.id}
+                  t={t}
+                  onToggle={() => toggleActive(t)}
+                  toggling={togglingId === t.id}
+                  guidanceOpen={guidanceId === t.id}
+                  guidanceDraft={guidanceDraft}
+                  setGuidanceDraft={setGuidanceDraft}
+                  onOpenGuidance={() => openGuidance(t)}
+                  onCloseGuidance={() => setGuidanceId(null)}
+                  onSaveGuidance={saveGuidance}
+                  guidanceSaving={guidanceSaving}
+                />
               ))}
             </div>
           </section>
@@ -297,7 +336,7 @@ export default function MembersPanel() {
   );
 }
 
-function MemberRow({ t, editable, editing, editForm, setEditForm, onStartEdit, onCancelEdit, onSaveEdit, onToggle, saving, toggling }) {
+function MemberRow({ t, editable, editing, editForm, setEditForm, onStartEdit, onCancelEdit, onSaveEdit, onToggle, saving, toggling, guidanceOpen = false, guidanceDraft = '', setGuidanceDraft, onOpenGuidance, onCloseGuidance, onSaveGuidance, guidanceSaving = false }) {
   if (editing) {
     return (
       <div className="tp-card p-3 border-blue-200 ring-1 ring-blue-100 xl:col-span-2">
@@ -347,8 +386,41 @@ function MemberRow({ t, editable, editing, editForm, setEditForm, onStartEdit, o
           {t.email && <span className="inline-flex items-center gap-1 truncate"><Mail className="w-3 h-3 shrink-0" />{t.email}</span>}
           {t.location && <span className="inline-flex items-center gap-1 shrink-0"><MapPin className="w-3 h-3" />{t.location}</span>}
         </div>
+        {t.routingGuidance && !guidanceOpen && (
+          <div className="mt-1 flex items-start gap-1 text-[11px] text-violet-700 bg-violet-50 border border-violet-100 rounded-md px-1.5 py-0.5" title="The assignment AI reads this note whenever this person is a candidate">
+            <Brain className="w-3 h-3 mt-0.5 shrink-0" aria-hidden="true" />
+            <span className="line-clamp-2">{t.routingGuidance}</span>
+          </div>
+        )}
+        {guidanceOpen && (
+          <div className="mt-1.5" onClick={(e) => e.stopPropagation()}>
+            <textarea
+              value={guidanceDraft}
+              onChange={(e) => setGuidanceDraft?.(e.target.value)}
+              rows={2}
+              maxLength={500}
+              placeholder="e.g. Reduced ticket capacity — only recommend for a significantly stronger skill match or their specialty categories."
+              className="w-full px-2.5 py-1.5 border border-violet-200 rounded-lg text-xs tp-focus-ring"
+              autoFocus
+            />
+            <div className="flex items-center gap-2 mt-1">
+              <button onClick={onSaveGuidance} disabled={guidanceSaving}
+                className="inline-flex items-center gap-1 px-2.5 py-1 bg-violet-600 text-white rounded-lg text-[11px] font-semibold hover:bg-violet-700 disabled:opacity-60 tp-focus-ring">
+                {guidanceSaving ? <Loader className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />} Save note
+              </button>
+              <button onClick={onCloseGuidance} className="text-[11px] text-gray-500 hover:text-gray-800 tp-focus-ring rounded px-1.5 py-1">Cancel</button>
+              <span className="ml-auto text-[10px] text-gray-400">The AI treats this as a standing instruction from the team lead</span>
+            </div>
+          </div>
+        )}
       </div>
       <div className="flex items-center gap-0.5 shrink-0">
+        {onOpenGuidance && !disabled && !guidanceOpen && (
+          <button onClick={onOpenGuidance} title={t.routingGuidance ? 'Edit AI routing note' : 'Add AI routing note (e.g. reduced capacity)'}
+            className={`p-1.5 rounded-lg tp-focus-ring ${t.routingGuidance ? 'text-violet-600 hover:text-violet-800' : 'text-gray-400 hover:text-violet-600'}`}>
+            <Brain className="w-4 h-4" />
+          </button>
+        )}
         {editable && !disabled && (
           <button onClick={onStartEdit} title="Edit" className="p-1.5 text-gray-400 hover:text-blue-600 rounded-lg tp-focus-ring">
             <Pencil className="w-4 h-4" />
