@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  AlertCircle, FileText, Loader2, Plus, Printer, Sparkles, Trash2, TrendingDown, TrendingUp, X,
+  AlertCircle, FileText, Loader2, Pencil, Plus, Printer, Sparkles, Trash2, TrendingDown, TrendingUp, X,
 } from 'lucide-react';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { analyticsAPI, ticketsAPI } from '../../services/api';
@@ -12,7 +12,7 @@ import { analyticsAPI, ticketsAPI } from '../../services/api';
  * (summary, subject clusters, discussion points). Deliberately a separate
  * surface from the six deterministic tabs.
  */
-export default function AnalyticsReports() {
+export default function AnalyticsReports({ initialReportId = null, onReportSelected = null }) {
   const [reports, setReports] = useState(null);
   const [selected, setSelected] = useState(null); // full report row
   const [loadingReport, setLoadingReport] = useState(false);
@@ -26,7 +26,12 @@ export default function AnalyticsReports() {
       const res = await analyticsAPI.listReports();
       const rows = res?.data || [];
       setReports(rows);
-      if (rows.length && !selected) openReport(rows[0].id);
+      if (rows.length && !selected) {
+        const wanted = initialReportId && rows.some((r) => String(r.id) === String(initialReportId))
+          ? Number(initialReportId)
+          : rows[0].id;
+        openReport(wanted);
+      }
     } catch (err) {
       setError(err.response?.data?.message || err.message);
       setReports([]);
@@ -45,6 +50,7 @@ export default function AnalyticsReports() {
     try {
       const res = await analyticsAPI.getReport(id);
       setSelected(res?.data || null);
+      onReportSelected?.(res?.data?.id ?? null);
       setError(null);
     } catch (err) {
       setError(err.response?.data?.message || err.message);
@@ -68,7 +74,7 @@ export default function AnalyticsReports() {
   const remove = async (id) => {
     try {
       await analyticsAPI.deleteReport(id);
-      if (selected?.id === id) setSelected(null);
+      if (selected?.id === id) { setSelected(null); onReportSelected?.(null); }
       load();
     } catch (err) { setError(err.response?.data?.message || err.message); }
   };
@@ -152,7 +158,15 @@ export default function AnalyticsReports() {
             <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
           </div>
         ) : selected ? (
-          <ReportView report={selected} onDelete={() => remove(selected.id)} />
+          <ReportView
+            report={selected}
+            onDelete={() => remove(selected.id)}
+            onRename={async (title) => {
+              const res = await analyticsAPI.renameReport(selected.id, title);
+              setSelected((prev) => (prev ? { ...prev, title: res?.data?.title ?? title } : prev));
+              load();
+            }}
+          />
         ) : (
           <div className="flex min-h-[24rem] flex-col items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white text-slate-400">
             <FileText className="h-8 w-8" aria-hidden="true" />
@@ -206,10 +220,21 @@ function BreakdownList({ title, rows }) {
 
 const SAMPLES_PER_PAGE = 15;
 
-function ReportView({ report, onDelete }) {
+function ReportView({ report, onDelete, onRename = null }) {
   const d = report.dataset || {};
   const n = report.narrative;
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [nameDraft, setNameDraft] = useState(report.title);
+  const [savingName, setSavingName] = useState(false);
+  useEffect(() => { setRenaming(false); setNameDraft(report.title); }, [report.id, report.title]);
+  const saveName = async () => {
+    const next = nameDraft.trim();
+    if (!next || next === report.title) { setRenaming(false); setNameDraft(report.title); return; }
+    setSavingName(true);
+    try { await onRename?.(next); setRenaming(false); } catch { /* error shows via list reload */ }
+    setSavingName(false);
+  };
   const [samplePage, setSamplePage] = useState(1);
   useEffect(() => { setSamplePage(1); }, [report.id]);
   const samples = d.samples || [];
@@ -218,8 +243,37 @@ function ReportView({ report, onDelete }) {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-2 print:hidden">
-        <div className="min-w-0">
-          <h2 className="text-lg font-bold text-slate-900">{report.title}</h2>
+        <div className="min-w-0 flex-1">
+          {renaming ? (
+            <div className="flex items-center gap-1.5">
+              <input
+                value={nameDraft}
+                onChange={(e) => setNameDraft(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') saveName(); if (e.key === 'Escape') { setRenaming(false); setNameDraft(report.title); } }}
+                autoFocus
+                maxLength={200}
+                aria-label="Report name"
+                className="tp-focus-ring w-full max-w-md rounded-lg border border-blue-300 px-2 py-1 text-lg font-bold text-slate-900"
+              />
+              <button onClick={saveName} disabled={savingName} className="tp-focus-ring rounded-lg bg-blue-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
+                {savingName ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : 'Save'}
+              </button>
+            </div>
+          ) : (
+            <h2 className="group flex items-center gap-1.5 text-lg font-bold text-slate-900">
+              <span className="truncate">{report.title}</span>
+              {onRename && (
+                <button
+                  onClick={() => setRenaming(true)}
+                  aria-label="Rename report"
+                  title="Rename"
+                  className="tp-focus-ring rounded p-1 text-slate-300 hover:text-blue-600 group-hover:text-slate-400"
+                >
+                  <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+                </button>
+              )}
+            </h2>
+          )}
           <p className="text-xs text-slate-400">
             {new Date(report.rangeStart).toLocaleDateString()} → {new Date(report.rangeEnd).toLocaleDateString()}
             {' · '}generated {new Date(report.createdAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
@@ -400,6 +454,7 @@ function ReportView({ report, onDelete }) {
 }
 
 function ReportBuilder({ meta, templates, generating, onGenerate, onClose }) {
+  const [customTitle, setCustomTitle] = useState('');
   const [kind, setKind] = useState('all');
   const [catId, setCatId] = useState('');
   const [tagId, setTagId] = useState('');
@@ -419,6 +474,7 @@ function ReportBuilder({ meta, templates, generating, onGenerate, onClose }) {
     }
     return { scope: { kind }, rangeDays: Number(rangeDays) };
   };
+  const withTitle = (payload) => (customTitle.trim() ? { ...payload, title: customTitle.trim() } : payload);
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-[2px] print:hidden" role="dialog" aria-modal="true" aria-label="New report" onClick={generating ? undefined : onClose}>
@@ -428,12 +484,20 @@ function ReportBuilder({ meta, templates, generating, onGenerate, onClose }) {
           <button onClick={onClose} disabled={generating} aria-label="Close" className="tp-focus-ring rounded p-1 text-slate-400 hover:text-slate-600"><X className="h-4 w-4" /></button>
         </div>
 
+        <input
+          value={customTitle}
+          onChange={(e) => setCustomTitle(e.target.value)}
+          maxLength={200}
+          placeholder="Report name (optional — e.g. “Phishing wave review, Jul 14 meeting”)"
+          aria-label="Report name"
+          className="tp-focus-ring mb-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+        />
         <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Templates</p>
         <div className="space-y-1.5">
           {templates.map((t) => (
             <button
               key={t.label}
-              onClick={() => onGenerate(t.payload)}
+              onClick={() => onGenerate(withTitle(t.payload))}
               disabled={generating}
               className="tp-focus-ring block w-full rounded-lg border border-slate-200 px-3 py-2 text-left hover:border-blue-300 hover:bg-blue-50/40 disabled:opacity-50"
             >
@@ -476,7 +540,7 @@ function ReportBuilder({ meta, templates, generating, onGenerate, onClose }) {
             <option value="30">Last 30 days</option>
           </select>
           <button
-            onClick={() => { const p = customPayload(); if (p) onGenerate(p); }}
+            onClick={() => { const p = customPayload(); if (p) onGenerate(withTitle(p)); }}
             disabled={generating || !customPayload()}
             className="tp-focus-ring ml-auto inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
           >

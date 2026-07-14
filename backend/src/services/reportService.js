@@ -230,6 +230,14 @@ class ReportService {
     return row;
   }
 
+  async rename(id, workspaceId, title) {
+    const clean = String(title || '').trim();
+    if (!clean) throw new ValidationError('Give the report a name');
+    const row = await prisma.analyticsReport.findFirst({ where: { id: Number(id), workspaceId }, select: { id: true } });
+    if (!row) throw new NotFoundError('Report not found');
+    return prisma.analyticsReport.update({ where: { id: row.id }, data: { title: clean.slice(0, 200) } });
+  }
+
   async remove(id, workspaceId) {
     const row = await prisma.analyticsReport.findFirst({ where: { id: Number(id), workspaceId }, select: { id: true } });
     if (!row) throw new NotFoundError('Report not found');
