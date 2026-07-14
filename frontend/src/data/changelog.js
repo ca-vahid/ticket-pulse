@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.0.61-preview';
+export const APP_VERSION = '3.0.62-preview';
 
 export const changelog = [
+  {
+    version: '3.0.62-preview',
+    date: 'July 14, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>👤 Reports show who and when, properly</strong> — the saved-reports list now shows the creation time, and creators appear by full name (“Vahid Haeri”, not “vhaeri”).' },
+      { type: 'fixed', html: '<strong>🔋 No more phantom polling</strong> — a report whose AI narrative got orphaned by a deploy restart used to be re-polled for 2½ minutes every time you opened it (that creeping slowness when switching reports). Stale ones now show the retry note immediately, and polling pauses while the tab is in the background.' },
+    ],
+  },
   {
     version: '3.0.61-preview',
     date: 'July 14, 2026',

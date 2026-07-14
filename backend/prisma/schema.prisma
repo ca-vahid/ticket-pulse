@@ -121,6 +121,7 @@ model AnalyticsReport {
   narrative   Json?     // AI sections (null when generation failed/skipped)
   llmModel    String?   @db.VarChar(100) @map("llm_model")
   createdBy   String?   @db.VarChar(255) @map("created_by")
+  createdByName String? @db.VarChar(255) @map("created_by_name")
   createdAt   DateTime  @default(now()) @map("created_at")
 
   @@map("analytics_reports")
