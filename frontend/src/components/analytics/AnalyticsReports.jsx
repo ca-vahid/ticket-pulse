@@ -62,7 +62,14 @@ export default function AnalyticsReports({ initialReportId = null, onReportSelec
   // open report until it lands (or gives up), so the brief appears in place.
   useEffect(() => {
     if (selected?.dataset?.narrativeStatus !== 'pending') return undefined;
-    const timer = setInterval(() => openReport(selected.id, { silent: true }), 3000);
+    // A report stuck 'pending' long past generation means the background
+    // writer died (e.g. a deploy restart) — don't poll a corpse.
+    const ageMs = Date.now() - new Date(selected.createdAt).getTime();
+    if (ageMs > 3 * 60 * 1000) return undefined;
+    const timer = setInterval(() => {
+      if (document.hidden) return; // don't poll a backgrounded tab
+      openReport(selected.id, { silent: true });
+    }, 3000);
     const giveUp = setTimeout(() => clearInterval(timer), 150000);
     return () => { clearInterval(timer); clearTimeout(giveUp); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -145,8 +152,8 @@ export default function AnalyticsReports({ initialReportId = null, onReportSelec
                   >
                     <span className="block truncate text-sm font-medium text-slate-700">{r.title}</span>
                     <span className="block text-xs text-slate-400">
-                      {new Date(r.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-                      {r.createdBy ? ` · ${r.createdBy.split('@')[0]}` : ''}
+                      {new Date(r.createdAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                      {(r.createdByName || r.createdBy) ? ` · ${r.createdByName || r.createdBy.split('@')[0]}` : ''}
                     </span>
                   </button>
                 </li>
@@ -288,7 +295,7 @@ function ReportView({ report, onDelete, onRename = null }) {
           <p className="text-xs text-slate-400">
             {new Date(report.rangeStart).toLocaleDateString()} → {new Date(report.rangeEnd).toLocaleDateString()}
             {' · '}generated {new Date(report.createdAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
-            {report.createdBy ? ` by ${report.createdBy}` : ''}
+            {(report.createdByName || report.createdBy) ? ` by ${report.createdByName || report.createdBy}` : ''}
           </p>
         </div>
         <div className="flex gap-2">
@@ -347,13 +354,13 @@ function ReportView({ report, onDelete, onRename = null }) {
       )}
 
       {/* AI narrative — explicitly labeled; written in the background */}
-      {!n && d.narrativeStatus === 'pending' && (
+      {!n && d.narrativeStatus === 'pending' && (Date.now() - new Date(report.createdAt).getTime() < 3 * 60 * 1000) && (
         <div className="flex items-center gap-2.5 rounded-lg border border-violet-200 bg-violet-50/50 p-4 text-sm text-violet-700">
           <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
           The AI narrative is being written from the dataset — it will appear here in a few seconds.
         </div>
       )}
-      {!n && d.narrativeStatus === 'failed' && (
+      {!n && (d.narrativeStatus === 'failed' || (d.narrativeStatus === 'pending' && Date.now() - new Date(report.createdAt).getTime() >= 3 * 60 * 1000)) && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
           The AI narrative couldn&apos;t be generated for this snapshot — the numbers above are complete; regenerate the report to retry the brief.
         </div>

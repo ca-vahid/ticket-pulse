@@ -187,6 +187,7 @@ class ReportService {
         dataset: { ...dataset, narrativeStatus: 'pending' },
         narrative: null,
         createdBy: actor?.email || null,
+        createdByName: actor?.name || null,
       },
     });
     const subjects = rows.slice(0, MAX_SUBJECTS_FOR_LLM).map((t) => String(t.subject || '').slice(0, 140));
@@ -242,7 +243,7 @@ class ReportService {
   async list(workspaceId, take = 30) {
     return prisma.analyticsReport.findMany({
       where: { workspaceId },
-      select: { id: true, title: true, scope: true, rangeStart: true, rangeEnd: true, createdBy: true, createdAt: true, llmModel: true },
+      select: { id: true, title: true, scope: true, rangeStart: true, rangeEnd: true, createdBy: true, createdByName: true, createdAt: true, llmModel: true },
       orderBy: { createdAt: 'desc' },
       take,
     });
