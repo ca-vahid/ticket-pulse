@@ -204,10 +204,17 @@ function BreakdownList({ title, rows }) {
   );
 }
 
+const SAMPLES_PER_PAGE = 15;
+
 function ReportView({ report, onDelete }) {
   const d = report.dataset || {};
   const n = report.narrative;
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [samplePage, setSamplePage] = useState(1);
+  useEffect(() => { setSamplePage(1); }, [report.id]);
+  const samples = d.samples || [];
+  const pageCount = Math.max(1, Math.ceil(samples.length / SAMPLES_PER_PAGE));
+  const pageRows = samples.slice((samplePage - 1) * SAMPLES_PER_PAGE, samplePage * SAMPLES_PER_PAGE);
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-2 print:hidden">
@@ -331,17 +338,31 @@ function ReportView({ report, onDelete }) {
         <BreakdownList title="By priority" rows={d.byPriority} />
       </div>
 
-      {/* samples */}
-      {d.samples?.length > 0 && (
+      {/* samples — full in-scope list, paginated; refs open the ticket page */}
+      {samples.length > 0 && (
         <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-          <p className="border-b border-slate-100 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Most recent tickets in scope ({d.samples.length})</p>
+          <p className="border-b border-slate-100 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            Tickets in scope ({samples.length})
+          </p>
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <tbody className="divide-y divide-slate-100">
-                {d.samples.map((s) => (
-                  <tr key={s.ref} className="hover:bg-slate-50">
-                    <td className="whitespace-nowrap px-3 py-1.5 font-mono text-slate-400">{s.ref}</td>
-                    <td className="max-w-[26rem] truncate px-3 py-1.5 text-slate-700">{s.subject}</td>
+                {pageRows.map((s) => (
+                  <tr key={s.id || s.ref} className="hover:bg-slate-50">
+                    <td className="whitespace-nowrap px-3 py-1.5 font-mono">
+                      {s.id ? (
+                        <a href={`/tickets/${s.id}`} target="_blank" rel="noopener noreferrer" className="tp-focus-ring rounded text-blue-600 hover:underline">{s.ref}</a>
+                      ) : (
+                        <span className="text-slate-400">{s.ref}</span>
+                      )}
+                    </td>
+                    <td className="max-w-[26rem] truncate px-3 py-1.5">
+                      {s.id ? (
+                        <a href={`/tickets/${s.id}`} target="_blank" rel="noopener noreferrer" className="tp-focus-ring rounded text-slate-700 hover:text-blue-700 hover:underline">{s.subject}</a>
+                      ) : (
+                        <span className="text-slate-700">{s.subject}</span>
+                      )}
+                    </td>
                     <td className="whitespace-nowrap px-3 py-1.5 text-slate-400">{s.status}</td>
                     <td className="whitespace-nowrap px-3 py-1.5 text-slate-400">{new Date(s.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</td>
                   </tr>
@@ -349,6 +370,28 @@ function ReportView({ report, onDelete }) {
               </tbody>
             </table>
           </div>
+          {pageCount > 1 && (
+            <div className="flex items-center justify-between border-t border-slate-100 px-3 py-2 text-xs text-slate-500 print:hidden">
+              <span>{(samplePage - 1) * SAMPLES_PER_PAGE + 1}–{Math.min(samplePage * SAMPLES_PER_PAGE, samples.length)} of {samples.length}</span>
+              <div className="flex gap-1.5">
+                <button
+                  onClick={() => setSamplePage((p) => Math.max(1, p - 1))}
+                  disabled={samplePage <= 1}
+                  className="tp-focus-ring rounded-lg border border-slate-200 px-2.5 py-1 font-medium hover:border-blue-300 disabled:opacity-40"
+                >
+                  Prev
+                </button>
+                <span className="px-1 py-1 tabular-nums">page {samplePage} / {pageCount}</span>
+                <button
+                  onClick={() => setSamplePage((p) => Math.min(pageCount, p + 1))}
+                  disabled={samplePage >= pageCount}
+                  className="tp-focus-ring rounded-lg border border-slate-200 px-2.5 py-1 font-medium hover:border-blue-300 disabled:opacity-40"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
       {d.truncated && <p className="text-xs italic text-slate-400">{d.truncated}</p>}

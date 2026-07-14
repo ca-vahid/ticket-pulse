@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.58-preview';
+export const APP_VERSION = '3.0.59-preview';
 
 export const changelog = [
+  {
+    version: '3.0.59-preview',
+    date: 'July 14, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>📊 Report ticket lists got richer</strong> — new reports capture <b>every</b> ticket in scope (not just the 30 most recent), the table paginates, and each row links straight to its Ticket Pulse ticket page in a new tab. Reports generated before this update keep their original 30-row sample.' },
+    ],
+  },
   {
     version: '3.0.58-preview',
     date: 'July 14, 2026',

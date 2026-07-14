@@ -14,7 +14,6 @@ import { ValidationError, NotFoundError } from '../utils/errors.js';
 import providerGateway from './aiProviders/providerGateway.js';
 
 const SCOPE_KINDS = new Set(['all', 'noise', 'category', 'subcategory', 'tag']);
-const MAX_SAMPLES = 30;
 const MAX_SUBJECTS_FOR_LLM = 60;
 
 const NARRATIVE_SCHEMA = {
@@ -154,7 +153,11 @@ class ReportService {
       bySubcategory: scope.kind !== 'subcategory' ? top(bySubcategory) : undefined,
       byRequesterDomain: top(byDomain, 6),
       topRequesters: top(byRequester, 6),
-      samples: rows.slice(0, MAX_SAMPLES).map((t) => ({
+      // ALL in-scope tickets (bounded by the 2000-row aggregate cap): the
+      // snapshot stays self-contained, the UI paginates, and each row links
+      // to its Ticket Pulse page via `id`.
+      samples: rows.map((t) => ({
+        id: t.id,
         ref: t.origin === 'ticketpulse' && t.nativeNumber ? `TP-${t.nativeNumber}` : `#${t.freshserviceTicketId ?? t.id}`,
         subject: t.subject || '(no subject)',
         status: t.status,
