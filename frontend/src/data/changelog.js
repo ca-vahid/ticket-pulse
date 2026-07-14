@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.0.59-preview';
+export const APP_VERSION = '3.0.60-preview';
 
 export const changelog = [
+  {
+    version: '3.0.60-preview',
+    date: 'July 14, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>🔗 Analytics remembers where you are</strong> — the tab, date range, filters, and even which report you had open now live in the URL: F5 lands you exactly back, and the address bar is shareable with a colleague.' },
+      { type: 'new', html: '<strong>✏️ Reports can be renamed</strong> — click the pencil next to a report’s title (or name it upfront in the New report dialog), so “Noise & spam — last 7 days” can become “Spam wave review — Jul 14 meeting”.' },
+    ],
+  },
   {
     version: '3.0.59-preview',
     date: 'July 14, 2026',

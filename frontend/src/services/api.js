@@ -1323,6 +1323,7 @@ export const analyticsAPI = {
   listReports: () => apiAnalytics.get('/analytics/reports'),
   getReport: (id) => apiAnalytics.get(`/analytics/reports/${id}`),
   generateReport: (payload) => apiAnalytics.post('/analytics/reports', payload, { timeout: 90000 }),
+  renameReport: (id, title) => apiAnalytics.patch(`/analytics/reports/${id}`, { title }),
   deleteReport: (id) => apiAnalytics.delete(`/analytics/reports/${id}`),
 };
 

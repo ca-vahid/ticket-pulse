@@ -66,6 +66,11 @@ router.get('/reports/:id', asyncHandler(async (req, res) => {
   res.json({ success: true, data: await reportService.get(req.params.id, req.workspaceId) });
 }));
 
+router.patch('/reports/:id', asyncHandler(async (req, res) => {
+  const { default: reportService } = await import('../services/reportService.js');
+  res.json({ success: true, data: await reportService.rename(req.params.id, req.workspaceId, req.body?.title) });
+}));
+
 router.delete('/reports/:id', asyncHandler(async (req, res) => {
   const { default: reportService } = await import('../services/reportService.js');
   res.json({ success: true, data: await reportService.remove(req.params.id, req.workspaceId) });

@@ -48,6 +48,7 @@ describe('api auth/workspace helpers', () => {
       'getReport',
       'getTeamBalance',
       'listReports',
+      'renameReport',
     ]);
   });
 

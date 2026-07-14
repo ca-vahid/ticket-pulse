@@ -790,7 +790,33 @@ export default function Analytics({ view = 'standard' }) {
     categoryIds: parseCsvParam(initialParams.get('categoryIds')),
     subcategoryIds: parseCsvParam(initialParams.get('subcategoryIds')),
   }));
+  const [selectedReportId, setSelectedReportId] = useState(() => initialParams.get('report') || null);
   const [payload, setPayload] = useState({});
+
+  // Keep the URL in lockstep with the current tab + selections so F5 and
+  // shared links land exactly here (feedback 07-14). replaceState avoids
+  // history spam and router remounts; init above already reads every key.
+  useEffect(() => {
+    if (isCategoryMapPage) return; // the map page manages its own deep links
+    const p = new URLSearchParams(window.location.search);
+    const put = (k, v, def = null) => {
+      if (v === undefined || v === null || v === '' || v === def) p.delete(k);
+      else p.set(k, String(v));
+    };
+    put('tab', activeTab, 'overview');
+    put('range', range, '30d');
+    put('groupBy', groupBy, 'day');
+    p.set('excludeNoise', excludeNoise ? 'true' : 'false');
+    put('start', range === 'custom' ? customStart : '', '');
+    put('end', range === 'custom' ? customEnd : '', '');
+    put('legacyCategories', selectedLegacyCategories.join(','), '');
+    put('categoryIds', selectedCanonicalCategories.categoryIds.join(','), '');
+    put('subcategoryIds', selectedCanonicalCategories.subcategoryIds.join(','), '');
+    put('report', activeTab === 'reports' ? selectedReportId : '', '');
+    const qs = p.toString();
+    window.history.replaceState(null, '', qs ? `${window.location.pathname}?${qs}` : window.location.pathname);
+  }, [isCategoryMapPage, activeTab, range, groupBy, excludeNoise, customStart, customEnd,
+    selectedLegacyCategories, selectedCanonicalCategories, selectedReportId]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [failedSections, setFailedSections] = useState([]);
@@ -3659,7 +3685,7 @@ export default function Analytics({ view = 'standard' }) {
   const renderActiveTab = () => {
     // Reports is its own surface (saved snapshots + AI narrative) — it does
     // not ride the deterministic analytics payload machinery.
-    if (activeTab === 'reports') return <AnalyticsReports />;
+    if (activeTab === 'reports') return <AnalyticsReports initialReportId={selectedReportId} onReportSelected={setSelectedReportId} />;
     const tabKey = TAB_PAYLOAD_KEY[activeTab] || 'overview';
     // Each tab renders as soon as ITS data lands — no waiting on siblings.
     if (!payload[tabKey]) {
