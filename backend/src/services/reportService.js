@@ -216,7 +216,7 @@ class ReportService {
     return row;
   }
 
-/** Background: write the AI narrative onto a saved report. */
+  /** Background: write the AI narrative onto a saved report. */
   async _writeNarrative(reportId, workspaceId, { label, days, rangeStart, rangeEnd, dataset, subjects, sampleCount }) {
     let narrative = null;
     let llmModel = null;
