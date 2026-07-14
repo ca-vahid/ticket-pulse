@@ -45,18 +45,28 @@ export default function AnalyticsReports({ initialReportId = null, onReportSelec
       .catch(() => setMeta({ categoryTree: [], tags: [] }));
   }, []);
 
-  const openReport = async (id) => {
-    setLoadingReport(true);
+  const openReport = async (id, { silent = false } = {}) => {
+    if (!silent) setLoadingReport(true);
     try {
       const res = await analyticsAPI.getReport(id);
       setSelected(res?.data || null);
       onReportSelected?.(res?.data?.id ?? null);
       setError(null);
     } catch (err) {
-      setError(err.response?.data?.message || err.message);
+      if (!silent) setError(err.response?.data?.message || err.message);
     }
-    setLoadingReport(false);
+    if (!silent) setLoadingReport(false);
   };
+
+  // The narrative is written in the background after generation — poll the
+  // open report until it lands (or gives up), so the brief appears in place.
+  useEffect(() => {
+    if (selected?.dataset?.narrativeStatus !== 'pending') return undefined;
+    const timer = setInterval(() => openReport(selected.id, { silent: true }), 3000);
+    const giveUp = setTimeout(() => clearInterval(timer), 150000);
+    return () => { clearInterval(timer); clearTimeout(giveUp); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.id, selected?.dataset?.narrativeStatus]);
 
   const generate = async (payload) => {
     setGenerating(true); setError(null);
@@ -82,12 +92,13 @@ export default function AnalyticsReports({ initialReportId = null, onReportSelec
   // Template shortcuts — the phishing one resolves its subcategory by name so
   // it keeps working if ids ever change.
   const phishingNode = useMemo(() => {
-    for (const cat of meta?.categoryTree || []) {
-      for (const sub of cat.subcategories || cat.children || []) {
-        if (/phishing/i.test(sub.name || '')) return sub;
-      }
-    }
-    return null;
+    const subs = (meta?.categoryTree || []).flatMap((c) => c.subcategories || []);
+    // Exact home first; otherwise any phishing/spam subcategory that is NOT
+    // the awareness-training one (the old /phishing/i match grabbed
+    // "Simulated Phishing / Training" and produced a useless report).
+    return subs.find((sub) => /phishing\s*\/\s*spam/i.test(sub.name || ''))
+      || subs.find((sub) => /phish|spam/i.test(sub.name || '') && !/simulat|training/i.test(sub.name || ''))
+      || null;
   }, [meta]);
 
   const TEMPLATES = [
@@ -335,7 +346,18 @@ function ReportView({ report, onDelete, onRename = null }) {
         </div>
       )}
 
-      {/* AI narrative — explicitly labeled */}
+      {/* AI narrative — explicitly labeled; written in the background */}
+      {!n && d.narrativeStatus === 'pending' && (
+        <div className="flex items-center gap-2.5 rounded-lg border border-violet-200 bg-violet-50/50 p-4 text-sm text-violet-700">
+          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+          The AI narrative is being written from the dataset — it will appear here in a few seconds.
+        </div>
+      )}
+      {!n && d.narrativeStatus === 'failed' && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+          The AI narrative couldn&apos;t be generated for this snapshot — the numbers above are complete; regenerate the report to retry the brief.
+        </div>
+      )}
       {n && (
         <div className="rounded-lg border border-violet-200 bg-violet-50/50 p-4">
           <p className="mb-2 inline-flex items-center gap-1.5 rounded-full bg-violet-100 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-violet-700">
@@ -385,7 +407,7 @@ function ReportView({ report, onDelete, onRename = null }) {
       {/* breakdowns */}
       <div className="grid gap-3 sm:grid-cols-2">
         <BreakdownList title="By category" rows={d.byCategory} />
-        <BreakdownList title="By subcategory" rows={d.bySubcategory} />
+        <BreakdownList title="By subcategory" rows={(d.bySubcategory || []).length === 1 && d.bySubcategory[0].name === '(no subcategory)' ? null : d.bySubcategory} />
         <BreakdownList title="By requester domain" rows={d.byRequesterDomain} />
         <BreakdownList title="Top requesters" rows={d.topRequesters} />
         <BreakdownList title="By status" rows={d.byStatus} />
@@ -456,21 +478,25 @@ function ReportView({ report, onDelete, onRename = null }) {
 function ReportBuilder({ meta, templates, generating, onGenerate, onClose }) {
   const [customTitle, setCustomTitle] = useState('');
   const [kind, setKind] = useState('all');
-  const [catId, setCatId] = useState('');
+  const [taxPick, setTaxPick] = useState(''); // 'category:ID' | 'subcategory:ID'
   const [tagId, setTagId] = useState('');
   const [rangeDays, setRangeDays] = useState(7);
 
   const cats = meta?.categoryTree || [];
-  const subs = cats.flatMap((c) => (c.subcategories || c.children || []).map((s) => ({ ...s, parentName: c.name })));
+  // One hierarchical picker serves both taxonomy styles: IT picks a whole
+  // category or drills to a subcategory; Accounting's flat tree just lists
+  // its top-level categories.
+  const hasSubs = cats.some((c) => (c.subcategories || []).length > 0);
 
   const customPayload = () => {
-    if (kind === 'category' || kind === 'subcategory') {
-      if (!catId) return null;
-      return { scope: { kind, id: Number(catId) }, rangeDays: Number(rangeDays) };
+    if (kind === 'taxonomy') {
+      if (!taxPick) return null;
+      const [k, id] = taxPick.split(':');
+      return { scope: { kind: k, id: Number(id) }, rangeDays: Number(rangeDays) };
     }
     if (kind === 'tag') {
       if (!tagId) return null;
-      return { scope: { kind, id: Number(tagId) }, rangeDays: Number(rangeDays) };
+      return { scope: { kind: 'tag', id: Number(tagId) }, rangeDays: Number(rangeDays) };
     }
     return { scope: { kind }, rangeDays: Number(rangeDays) };
   };
@@ -512,20 +538,24 @@ function ReportBuilder({ meta, templates, generating, onGenerate, onClose }) {
           <select value={kind} onChange={(e) => setKind(e.target.value)} aria-label="Report scope" className="tp-focus-ring rounded-lg border border-slate-200 px-2 py-1.5">
             <option value="all">All tickets</option>
             <option value="noise">Noise & spam</option>
-            <option value="category">A category</option>
-            <option value="subcategory">A subcategory</option>
+            <option value="taxonomy">{hasSubs ? 'A category / subcategory' : 'A category'}</option>
             <option value="tag">A tag</option>
           </select>
-          {kind === 'category' && (
-            <select value={catId} onChange={(e) => setCatId(e.target.value)} aria-label="Category" className="tp-focus-ring max-w-[15rem] rounded-lg border border-slate-200 px-2 py-1.5">
+          {kind === 'taxonomy' && (
+            <select value={taxPick} onChange={(e) => setTaxPick(e.target.value)} aria-label="Category or subcategory" className="tp-focus-ring max-w-[17rem] rounded-lg border border-slate-200 px-2 py-1.5">
               <option value="">Pick…</option>
-              {cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          )}
-          {kind === 'subcategory' && (
-            <select value={catId} onChange={(e) => setCatId(e.target.value)} aria-label="Subcategory" className="tp-focus-ring max-w-[15rem] rounded-lg border border-slate-200 px-2 py-1.5">
-              <option value="">Pick…</option>
-              {subs.map((s) => <option key={s.id} value={s.id}>{s.parentName} › {s.name}</option>)}
+              {cats.map((c) => (
+                (c.subcategories || []).length > 0 ? (
+                  <optgroup key={c.id} label={c.name}>
+                    <option value={`category:${c.id}`}>{c.name} — whole category</option>
+                    {c.subcategories.map((sub) => (
+                      <option key={sub.id} value={`subcategory:${sub.id}`}>&nbsp;&nbsp;{sub.name}</option>
+                    ))}
+                  </optgroup>
+                ) : (
+                  <option key={c.id} value={`category:${c.id}`}>{c.name}</option>
+                )
+              ))}
             </select>
           )}
           {kind === 'tag' && (

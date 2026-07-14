@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.0.60-preview';
+export const APP_VERSION = '3.0.61-preview';
 
 export const changelog = [
+  {
+    version: '3.0.61-preview',
+    date: 'July 14, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>🎯 The phishing report template targets the right subcategory</strong> — in IT it was grabbing “Simulated Phishing / Training” (the awareness-testing bucket) instead of “Phishing / Spam Reports”, producing a near-empty, misleading report. It now resolves the real one.' },
+      { type: 'improved', html: '<strong>⚡ Report generation is instant</strong> — the numbers appear immediately and the AI narrative writes itself in the background (a violet “being written…” card fills in within ~30s). Big IT-sized reports no longer risk gateway timeouts, and a timed-out generation can no longer be silently retried into duplicates.' },
+      { type: 'improved', html: '<strong>🗂 One picker for both taxonomy styles</strong> — the report builder now shows a single hierarchical category picker: IT drills from a category into its subcategories (or takes the whole category), Accounting’s flat list just shows its top-level categories. Single-bucket “(no subcategory)” breakdowns are hidden for flat taxonomies.' },
+    ],
+  },
   {
     version: '3.0.60-preview',
     date: 'July 14, 2026',
