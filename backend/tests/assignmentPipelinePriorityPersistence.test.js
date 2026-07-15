@@ -3,6 +3,8 @@ import { jest } from '@jest/globals';
 const prismaMock = {
   ticket: {
     update: jest.fn(),
+    // Origin lookup for the TP-born type promotion (QA 07-14 #3); FS-born here.
+    findUnique: jest.fn().mockResolvedValue({ origin: 'freshservice' }),
   },
   // Per-workspace type registry backing the workspace-aware normalizer.
   ticketTypeDefinition: {
@@ -124,6 +126,37 @@ describe('assignmentPipelineService priority persistence', () => {
         ticketTypeAssessedAt: expect.any(Date),
       }),
     });
+  });
+
+  test('promotes the assessed type to the visible ticketType on TP-born tickets (QA 07-14 #3)', async () => {
+    prismaMock.ticket.findUnique.mockResolvedValueOnce({ origin: 'ticketpulse' });
+
+    await assignmentPipelineService._persistTicketTypeAssessment(501, 3103, {
+      ticketType: 'incident',
+      ticketTypeRationale: 'Broken keyboard.',
+      ticketTypeConfidence: 'high',
+    }, 1);
+
+    expect(prismaMock.ticket.update).toHaveBeenCalledWith({
+      where: { id: 501 },
+      data: expect.objectContaining({
+        assessedTicketType: 'Incident',
+        ticketType: 'Incident',
+      }),
+    });
+  });
+
+  test('does NOT touch the visible ticketType on FS-born tickets (FS owns the field)', async () => {
+    prismaMock.ticket.findUnique.mockResolvedValueOnce({ origin: 'freshservice' });
+
+    await assignmentPipelineService._persistTicketTypeAssessment(501, 3104, {
+      ticketType: 'incident',
+      ticketTypeConfidence: 'high',
+    }, 1);
+
+    const { data } = prismaMock.ticket.update.mock.calls.at(-1)[0];
+    expect(data.assessedTicketType).toBe('Incident');
+    expect(data.ticketType).toBeUndefined();
   });
 
   test('skips FreshService priority writeback for external priority-change reassessments', () => {

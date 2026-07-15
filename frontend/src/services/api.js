@@ -873,8 +873,8 @@ export const ticketsAPI = {
     return await api.post(`/tickets/${id}/approvals/${approvalId}/clarify`, { note });
   },
 
-  resubmitApproval: async (id, approvalId) => {
-    return await api.post(`/tickets/${id}/approvals/${approvalId}/resubmit`);
+  resubmitApproval: async (id, approvalId, { note = null } = {}) => {
+    return await api.post(`/tickets/${id}/approvals/${approvalId}/resubmit`, { note });
   },
 
   cancelApproval: async (id, approvalId) => {

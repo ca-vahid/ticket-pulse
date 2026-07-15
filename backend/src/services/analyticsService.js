@@ -2,6 +2,7 @@ import { formatInTimeZone } from 'date-fns-tz';
 import prisma from './prisma.js';
 import competencyRepository from './competencyRepository.js';
 import { getTodayRange } from '../utils/timezone.js';
+import { ticketSourceLabel, ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { getCategoryMode, normalizeTicketCategory } from '../utils/ticketCategoryNormalizer.js';
 
 const DEFAULT_TIMEZONE = 'America/Los_Angeles';
@@ -55,21 +56,10 @@ const PRIORITY_LABELS = {
   4: 'Urgent',
 };
 
-const SOURCE_LABELS = {
-  1: 'Email',
-  2: 'Portal',
-  3: 'Phone',
-  4: 'Chat',
-  9: 'Feedback Widget',
-  14: 'Bot',
-  15: 'Marketplace',
-  1001: 'System',
-  1002: 'Workflow',
-};
-
 const CATEGORY_TICKET_SELECT = {
   id: true,
   freshserviceTicketId: true,
+  nativeNumber: true,
   subject: true,
   status: true,
   priority: true,
@@ -1039,6 +1029,7 @@ function compactTicket(ticket, workspaceId) {
   return {
     id: ticket.id,
     freshserviceTicketId: ticket.freshserviceTicketId ? String(ticket.freshserviceTicketId) : null,
+    displayRef: ticketDisplayRef(ticket),
     subject: ticket.subject || '(no subject)',
     status: ticket.status,
     priority: ticket.priority,
@@ -1379,7 +1370,7 @@ export async function getDemandFlow(workspaceId, query = {}) {
       row.net += 1;
       trendMap.set(key, row);
       increment(priorityMap, PRIORITY_LABELS[ticket.priority] || `P${ticket.priority || 'Unknown'}`);
-      increment(sourceMap, SOURCE_LABELS[ticket.source] || `Source ${ticket.source || 'Unknown'}`);
+      increment(sourceMap, ticket.source !== null && ticket.source !== undefined ? ticketSourceLabel(ticket.source) : 'Unknown');
       increment(requesterMap, ticket.requester?.name || ticket.requester?.email || 'Unknown requester');
       const dow = formatInTimeZone(ticket.createdAt, rangeInfo.timezone, 'EEE');
       const hour = formatInTimeZone(ticket.createdAt, rangeInfo.timezone, 'HH');

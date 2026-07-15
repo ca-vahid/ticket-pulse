@@ -411,6 +411,8 @@ model TicketApproval {
   // Holds the clarification question while info_requested; the decision note otherwise.
   decisionNote  String?   @db.Text @map("decision_note")
   decisionNoteHtml String? @db.Text @map("decision_note_html")
+  // Q&A history that survives resubmits: [{question, askedBy, askedAt, answer, answeredBy, answeredAt}]
+  clarificationLog Json?  @map("clarification_log")
   decidedAt     DateTime? @map("decided_at")
   decidedVia    String?   @db.VarChar(20) @map("decided_via") // link | app
   tokenHash     String    @unique @db.VarChar(64) @map("token_hash")

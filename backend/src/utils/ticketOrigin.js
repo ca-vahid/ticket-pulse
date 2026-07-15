@@ -41,7 +41,12 @@ export const TICKET_SOURCE = {
 export const TICKET_SOURCE_LABELS = {
   1: 'Email', 2: 'Portal', 3: 'Phone', 4: 'Chat', 5: 'Feedback widget',
   6: 'Yammer', 7: 'AWS CloudWatch', 8: 'PagerDuty', 9: 'Walk-up', 10: 'Slack',
+  // 11–19 and 1000+ are this FS instance's custom source choices (QA 07-14 #5;
+  // names read from FS /ticket_form_fields on 2026-07-14).
+  13: 'Employee Onboarding', 14: 'Alerts', 15: 'MS Teams (FS)',
+  18: 'Employee Offboarding', 19: 'Journey',
   100: 'API', 101: 'Webhook', 102: 'MS Teams', 103: 'Agent',
+  1001: 'API (FreshService)', 1002: 'Company Portal',
 };
 
 // Channels a staff member can pick when logging or editing a TP-born ticket

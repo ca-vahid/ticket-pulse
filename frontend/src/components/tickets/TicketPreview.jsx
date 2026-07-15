@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Activity, Bot, CalendarDays, Check, ChevronDown, ChevronUp, ExternalLink, Hand, Inbox,
-  Loader2, Lock, Mail, MapPin, Phone, Sparkles, Trash2, X,
+  Loader2, Lock, Mail, MapPin, Phone, Sparkles, Trash2, VolumeX, X,
 } from 'lucide-react';
 import {
   MirrorChip, OriginChip, PersonAvatar, PriorityDot, ProvenanceChip, SafeHtml, SlaChip, StateChip, StatusPill,
@@ -221,11 +221,16 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
       {/* Header */}
       <div className="p-3.5 border-b border-slate-100 bg-slate-50/60">
         <div className="flex items-center gap-2 mb-1">
-          <span className="font-mono text-xs font-bold text-slate-500">{ticket?.displayRef || '…'}</span>
-          {ticket && <OriginChip origin={ticket.origin} />}
-          {ticket && <MirrorChip ticket={ticket} />}
-          {ticket && <ProvenanceChip ticket={ticket} />}
-          <span className="ml-auto flex items-center gap-0.5">
+          {/* min-w-0 + overflow-hidden lets the chip cluster shrink; the action
+              cluster is flex-shrink-0 so the close X can never be pushed out
+              of the panel (QA 07-14 #9). */}
+          <span className="flex items-center gap-2 min-w-0 overflow-hidden">
+            <span className="font-mono text-xs font-bold text-slate-500 whitespace-nowrap">{ticket?.displayRef || '…'}</span>
+            {ticket && <OriginChip origin={ticket.origin} />}
+            {ticket && <MirrorChip ticket={ticket} />}
+            {ticket && <ProvenanceChip ticket={ticket} />}
+          </span>
+          <span className="ml-auto flex items-center gap-0.5 flex-shrink-0">
             {onStep && (
               <>
                 <button
@@ -403,6 +408,21 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                 </div>
               )}
             </div>
+
+            {ticket.isNoise && canWrite && (
+              <div className="flex flex-wrap items-center gap-2 p-2 bg-violet-50 border border-violet-200 rounded-lg text-[11px] text-violet-800">
+                <VolumeX className="w-3.5 h-3.5 text-violet-500 flex-shrink-0" aria-hidden="true" />
+                <span>Flagged as noise</span>
+                <button
+                  onClick={() => act('noise', () => ticketsAPI.setNoise(ticketId, { noise: false }))}
+                  disabled={saving === 'noise'}
+                  className="tp-focus-ring ml-auto inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold rounded-lg bg-white text-violet-700 border border-violet-300 hover:bg-violet-100 disabled:opacity-50"
+                >
+                  {saving === 'noise' ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" /> : null}
+                  Not noise — restore
+                </button>
+              </div>
+            )}
 
             {/* Quick edits */}
             <div className="grid grid-cols-2 gap-2">

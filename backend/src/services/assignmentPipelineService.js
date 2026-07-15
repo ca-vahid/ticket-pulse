@@ -8,6 +8,7 @@ import freshServiceActionService from './freshServiceActionService.js';
 import competencyFeedbackService from './competencyFeedbackService.js';
 import afterHoursUrgentEscalationService from './afterHoursUrgentEscalationService.js';
 import { formatDateInTimezone } from '../utils/timezone.js';
+import { TICKET_ORIGIN } from '../utils/ticketOrigin.js';
 import { formatInTimeZone } from 'date-fns-tz';
 import { createFreshServiceClient } from '../integrations/freshservice.js';
 import prisma from './prisma.js';
@@ -1395,6 +1396,18 @@ class AssignmentPipelineService {
     if (!data) return;
 
     try {
+      // TP-born tickets have no FreshService owner for the Type field, and the
+      // FS write-back path (the only other place ticketType is set from an AI
+      // answer) skips TP-native types entirely — so without this promotion a
+      // custom registry type like "QA Test" could never become the ticket's
+      // visible type, only its assessment.
+      const ticket = await prisma.ticket.findUnique({
+        where: { id: ticketId },
+        select: { origin: true },
+      });
+      if (ticket?.origin === TICKET_ORIGIN.TICKETPULSE && data.assessedTicketType) {
+        data.ticketType = data.assessedTicketType;
+      }
       await prisma.ticket.update({
         where: { id: ticketId },
         data,

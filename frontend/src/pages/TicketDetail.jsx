@@ -1737,6 +1737,21 @@ export default function TicketDetail() {
                     </span>
                   </div>
 
+                  {ticket.isNoise && (
+                    <div className="mt-3 flex flex-wrap items-center gap-2 p-2.5 bg-violet-50 border border-violet-200 rounded-lg text-xs text-violet-800">
+                      <VolumeX className="w-3.5 h-3.5 text-violet-500 flex-shrink-0" aria-hidden="true" />
+                      <span>Flagged as noise — hidden from the default queue (Views → Noise &amp; spam).</span>
+                      <button
+                        onClick={() => setNoiseFlag(false)}
+                        disabled={savingField === 'noise'}
+                        className="tp-focus-ring ml-auto inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-white text-violet-700 border border-violet-300 hover:bg-violet-100 disabled:opacity-50"
+                      >
+                        {savingField === 'noise' ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" /> : null}
+                        Not noise — restore
+                      </button>
+                    </div>
+                  )}
+
                   {ticket.mergedInto && (
                     <div className="mt-3 flex flex-wrap items-center gap-2 p-2.5 bg-violet-50 border border-violet-200 rounded-lg text-xs text-violet-800">
                       <CopyPlus className="w-3.5 h-3.5 text-violet-500 flex-shrink-0" aria-hidden="true" />
@@ -2270,7 +2285,7 @@ export default function TicketDetail() {
                         setClarifyNote={setClarifyNote}
                         onDecide={(apId, decision) => applyChange(`approval-${apId}`, () => ticketsAPI.decideApproval(ticketId, apId, decision))}
                         onClarify={(apId, note) => applyChange(`approval-${apId}`, async () => { await ticketsAPI.clarifyApproval(ticketId, apId, note); setClarifyingId(null); setClarifyNote(''); })}
-                        onResubmit={(apId) => applyChange(`approval-${apId}`, () => ticketsAPI.resubmitApproval(ticketId, apId))}
+                        onResubmit={(apId, note) => applyChange(`approval-${apId}`, () => ticketsAPI.resubmitApproval(ticketId, apId, { note }))}
                         onCancel={(apId) => applyChange(`approval-${apId}`, () => ticketsAPI.cancelApproval(ticketId, apId))}
                         onChangeDecision={(target) => { setChangeNote(''); setChangeApprovalTarget(target); }}
                         onDeleteRequest={(group) => setDeleteApprovalTarget(group)}
@@ -3027,9 +3042,9 @@ export default function TicketDetail() {
           technicians={meta?.technicians || []}
           busy={savingField === 'approval-request'}
           onClose={() => setRequestApprovalOpen(false)}
-          onSubmit={({ approvalCategoryId, note, noteHtml }) => {
+          onSubmit={({ approvalCategoryId, note, noteHtml, notifyApprover }) => {
             applyChange('approval-request', async () => {
-              await ticketsAPI.requestApproval(ticketId, { approvalCategoryId, note, noteHtml });
+              await ticketsAPI.requestApproval(ticketId, { approvalCategoryId, note, noteHtml, notifyApprover });
               setRequestApprovalOpen(false);
             });
           }}
