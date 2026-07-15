@@ -54,7 +54,11 @@ export function pipelineTriggerLabel(source) {
 export const TICKET_SOURCE_LABELS = {
   1: 'Email', 2: 'Portal', 3: 'Phone', 4: 'Chat', 5: 'Feedback widget',
   6: 'Yammer', 7: 'AWS CloudWatch', 8: 'PagerDuty', 9: 'Walk-up', 10: 'Slack',
+  // 11–19 and 1000+ are this FS instance's custom source choices (QA 07-14 #5).
+  13: 'Employee Onboarding', 14: 'Alerts', 15: 'MS Teams (FS)',
+  18: 'Employee Offboarding', 19: 'Journey',
   100: 'API', 101: 'Webhook', 102: 'MS Teams', 103: 'Agent',
+  1001: 'API (FreshService)', 1002: 'Company Portal',
 };
 export function ticketSourceLabel(source) {
   if (source === null || source === undefined) return null;

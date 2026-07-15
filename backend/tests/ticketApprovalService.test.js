@@ -152,4 +152,37 @@ describe('ticketApprovalService.resubmit', () => {
     await expect(ticketApprovalService.resubmit(501, 1, 2, { email: 'someone@x.io' }))
       .rejects.toThrow(/only the requester/i);
   });
+
+  test('a reply answers the clarification, writes a thread note, and travels in the email (QA 07-14 #1)', async () => {
+    prismaMock.ticketApproval.findFirst.mockResolvedValue({
+      id: 2, ticketId: 501, workspaceId: 1, status: 'info_requested', approverEmail: 'alice@x.io', requestedBy: 'req@x.io',
+      approvalCategoryId: 9, decisionNote: 'Which budget code?',
+      clarificationLog: [{ question: 'Which budget code?', askedBy: 'alice@x.io', askedAt: '2026-07-14T00:00:00.000Z' }],
+    });
+    prismaMock.approvalCategory.findUnique.mockResolvedValue({ name: 'Laptop purchase' });
+
+    await ticketApprovalService.resubmit(501, 1, 2, { email: 'req@x.io' }, { note: 'IT-204' });
+
+    const { data } = prismaMock.ticketApproval.update.mock.calls[0][0];
+    expect(data.clarificationLog).toHaveLength(1);
+    expect(data.clarificationLog[0]).toMatchObject({ question: 'Which budget code?', answer: 'IT-204', answeredBy: 'req@x.io' });
+    expect(prismaMock.ticketThreadEntry.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ bodyText: expect.stringContaining('IT-204'), isPrivate: true }),
+    }));
+    const email = sendgridMock.sendEmail.mock.calls[0][0];
+    expect(email.html).toContain('IT-204');
+    expect(email.html).toContain('Which budget code?');
+  });
+});
+
+describe('ticketApprovalService.request notifyApprover toggle (QA 07-14 #2)', () => {
+  test('notifyApprover: false suppresses the approver email but still creates the request', async () => {
+    prismaMock.approvalCategory.findFirst.mockResolvedValue({ id: 9, name: 'Laptop purchase', managerEmails: ['alice@x.io'] });
+    prismaMock.ticketApproval.findFirst.mockResolvedValue(null);
+
+    const res = await ticketApprovalService.request(501, 1, { approvalCategoryId: 9, notifyApprover: false }, { email: 'req@x.io' });
+
+    expect(res.count).toBe(1);
+    expect(sendgridMock.sendEmail).not.toHaveBeenCalled();
+  });
 });

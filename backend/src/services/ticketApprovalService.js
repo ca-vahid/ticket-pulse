@@ -75,7 +75,7 @@ class TicketApprovalService {
    * (sharing requestGroupId) — any one can approve. Each manager gets a personal
    * magic link. TP-only (no FreshService involvement).
    */
-  async request(ticketId, workspaceId, { approvalCategoryId, note = null, noteHtml = null }, actor) {
+  async request(ticketId, workspaceId, { approvalCategoryId, note = null, noteHtml = null, notifyApprover = true }, actor) {
     const ticket = await prisma.ticket.findFirst({
       where: { id: ticketId, workspaceId },
       include: { requester: { select: { name: true, email: true } } },
@@ -117,8 +117,10 @@ class TicketApprovalService {
           expiresAt: new Date(Date.now() + APPROVAL_EXPIRY_DAYS * 24 * 60 * 60 * 1000),
         },
       });
-      const decisionUrl = `${publicBaseUrl()}/approval/${encodeURIComponent(token)}`;
-      await this._emailApprover(ticket, approval, decisionUrl, category.name);
+      if (notifyApprover !== false) {
+        const decisionUrl = `${publicBaseUrl()}/approval/${encodeURIComponent(token)}`;
+        await this._emailApprover(ticket, approval, decisionUrl, category.name);
+      }
       created.push({ id: approval.id, approverEmail: email });
     }
 
@@ -127,7 +129,7 @@ class TicketApprovalService {
       activityType: 'approval_requested',
       performedBy: actor?.name || actor?.email || 'Ticket Pulse',
       performedAt: new Date(),
-      details: { requestGroupId, category: category.name, approvers: managers, note: note || null },
+      details: { requestGroupId, category: category.name, approvers: managers, note: note || null, notified: notifyApprover !== false },
     }).catch(() => {});
 
     await emitApprovalEvent('approval.requested', ticketId, {
@@ -235,9 +237,15 @@ class TicketApprovalService {
     if (!question) throw new ValidationError('Add a note describing what clarification is needed');
 
     const actorLabel = actor?.name || actor?.email || approval.approverName || approval.approverEmail;
+    const priorLog = Array.isArray(approval.clarificationLog) ? approval.clarificationLog : [];
     const updated = await prisma.ticketApproval.update({
       where: { id: approval.id },
-      data: { status: 'info_requested', decisionNote: question, approverName: approval.approverName || actorLabel },
+      data: {
+        status: 'info_requested',
+        decisionNote: question,
+        approverName: approval.approverName || actorLabel,
+        clarificationLog: [...priorLog, { question, askedBy: approval.approverEmail, askedAt: new Date().toISOString() }],
+      },
     });
 
     const ticket = await prisma.ticket.findFirst({
@@ -286,9 +294,11 @@ class TicketApprovalService {
 
   /**
    * Requester provides more info and re-submits — flips info_requested back to
-   * pending with a fresh magic link and re-notifies the approver.
+   * pending with a fresh magic link and re-notifies the approver. The reply
+   * (QA 07-14 #1) is kept on the approval's clarificationLog so the Q&A
+   * survives the resubmit, and travels in the approver's email.
    */
-  async resubmit(ticketId, workspaceId, approvalId, actor) {
+  async resubmit(ticketId, workspaceId, approvalId, actor, { note = null } = {}) {
     const approval = await prisma.ticketApproval.findFirst({
       where: { id: approvalId, ticketId, workspaceId },
     });
@@ -302,12 +312,28 @@ class TicketApprovalService {
       throw new ValidationError('This approval is not awaiting more info');
     }
 
+    const answer = String(note || '').trim().slice(0, 4000) || null;
+    const question = approval.decisionNote || null;
+    const log = Array.isArray(approval.clarificationLog) ? [...approval.clarificationLog] : [];
+    if (answer) {
+      const answeredAt = new Date().toISOString();
+      const answeredBy = actor?.email || approval.requestedBy;
+      const last = log.length > 0 ? log[log.length - 1] : null;
+      if (last && !last.answer) {
+        log[log.length - 1] = { ...last, answer, answeredAt, answeredBy };
+      } else {
+        // Legacy rows asked before the log existed — reconstruct from decisionNote.
+        log.push({ question, askedBy: approval.approverEmail, answer, answeredAt, answeredBy });
+      }
+    }
+
     const token = newToken();
     const updated = await prisma.ticketApproval.update({
       where: { id: approval.id },
       data: {
         status: 'pending',
         decisionNote: null,
+        clarificationLog: log,
         tokenHash: hashToken(token),
         expiresAt: new Date(Date.now() + APPROVAL_EXPIRY_DAYS * 24 * 60 * 60 * 1000),
       },
@@ -328,13 +354,34 @@ class TicketApprovalService {
       activityType: 'approval_resubmitted',
       performedBy: actor?.name || actor?.email || 'Ticket Pulse',
       performedAt: new Date(),
-      details: { approvalId: approval.id, approverEmail: approval.approverEmail },
+      details: { approvalId: approval.id, approverEmail: approval.approverEmail, note: answer },
     }).catch(() => {});
 
     if (ticket) {
+      if (answer) {
+        const actorLabel = actor?.name || actor?.email || approval.requestedBy;
+        await prisma.ticketThreadEntry.create({
+          data: {
+            ticketId: ticket.id,
+            workspaceId: ticket.workspaceId,
+            source: 'ticketpulse_user',
+            eventType: 'note',
+            actorName: actorLabel,
+            actorEmail: actor?.email || approval.requestedBy,
+            authorType: 'system',
+            incoming: false,
+            isPrivate: true,
+            visibility: 'private',
+            bodyText: `Clarification reply from ${actorLabel}${question ? ` (asked: "${question}")` : ''} — "${answer}"`,
+            content: `Clarification reply from ${actorLabel}${question ? ` (asked: "${question}")` : ''} — "${answer}"`,
+            occurredAt: new Date(),
+            mirrorState: null,
+          },
+        }).catch((err) => logger.warn(`Clarification reply note write failed (non-fatal): ${err.message}`));
+      }
       const decisionUrl = `${publicBaseUrl()}/approval/${encodeURIComponent(token)}`;
       // approval has the unchanged email fields (approverEmail/requestNote/requestedBy).
-      await this._emailApprover(ticket, approval, decisionUrl, categoryName);
+      await this._emailApprover(ticket, approval, decisionUrl, categoryName, { question, answer });
       await emitApprovalEvent('approval.requested', ticket.id, {
         approvalId: approval.id, approverEmail: approval.approverEmail, requestedBy: approval.requestedBy,
       });
@@ -641,7 +688,7 @@ class TicketApprovalService {
     return updated;
   }
 
-  async _emailApprover(ticket, approval, decisionUrl, categoryName = null) {
+  async _emailApprover(ticket, approval, decisionUrl, categoryName = null, clarification = null) {
     if (process.env.TP_SUPPRESS_APPROVAL_EMAIL === '1') {
       logger.info(`[approval] email suppressed (TP_SUPPRESS_APPROVAL_EMAIL) → ${approval.approverEmail}`);
       return { sent: false, reason: 'suppressed' };
@@ -668,9 +715,18 @@ class TicketApprovalService {
         .replace(/\n/g, '<br/>');
     }
 
+    const escHtml = (s) => String(s || '').replace(/</g, '&lt;');
+    const clarificationHtml = clarification?.answer
+      ? `<div style="border-left:3px solid #8b5cf6;padding:6px 10px;margin:8px 0;background:#f5f3ff">${
+        clarification.question ? `<p style="margin:0 0 4px">You asked: “${escHtml(clarification.question)}”</p>` : ''
+      }<p style="margin:0">Reply from ${escHtml(approval.requestedBy)}: “${escHtml(clarification.answer)}”</p></div>`
+      : '';
     const html = [
-      `<p>Your approval was requested on ticket <b>${ref}</b>${ticket.requester?.name ? ` (requested for ${ticket.requester.name})` : ''}.</p>`,
+      clarification?.answer
+        ? `<p>Your approval was re-requested on ticket <b>${ref}</b> with the clarification you asked for.</p>`
+        : `<p>Your approval was requested on ticket <b>${ref}</b>${ticket.requester?.name ? ` (requested for ${ticket.requester.name})` : ''}.</p>`,
       `<p><b>${(ticket.subject || '').replace(/</g, '&lt;')}</b></p>`,
+      clarificationHtml,
       noteHtml ? `<p>Note from ${approval.requestedBy}: ${noteHtml}</p>` : '',
       `<p><a href="${decisionUrl}">Review and decide</a> (approve or reject with an optional note).</p>`,
       '<p style="color:#64748b;font-size:12px">This link is personal to you and expires in 30 days.</p>',

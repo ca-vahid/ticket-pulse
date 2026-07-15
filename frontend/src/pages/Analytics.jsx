@@ -2969,8 +2969,24 @@ export default function Analytics({ view = 'standard' }) {
           <SimpleTable
             rows={selectedRows}
             columns={[
-              { key: 'freshserviceTicketId', label: 'Ticket' },
-              { key: 'subject', label: 'Subject' },
+              {
+                key: 'freshserviceTicketId',
+                label: 'Ticket',
+                render: (row) => (row.id ? (
+                  <a href={`/tickets/${row.id}`} target="_blank" rel="noopener noreferrer" className="tp-focus-ring rounded text-blue-600 hover:underline">
+                    {row.displayRef || row.freshserviceTicketId || '—'}
+                  </a>
+                ) : (row.freshserviceTicketId || '—')),
+              },
+              {
+                key: 'subject',
+                label: 'Subject',
+                render: (row) => (row.id ? (
+                  <a href={`/tickets/${row.id}`} target="_blank" rel="noopener noreferrer" className="tp-focus-ring rounded hover:text-blue-700 hover:underline">
+                    {row.subject}
+                  </a>
+                ) : row.subject),
+              },
               { key: 'status', label: 'Status' },
               { key: 'assignedTechName', label: 'Owner', render: (row) => row.assignedTechName || 'Unassigned' },
               { key: 'requesterName', label: 'Requester', render: (row) => row.requesterName || row.requesterEmail || 'Unknown' },

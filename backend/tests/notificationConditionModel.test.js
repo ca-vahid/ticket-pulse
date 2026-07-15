@@ -53,7 +53,8 @@ describe('condition compile → evaluate parity', () => {
     expect(ticketSourceLabel(1)).toBe('Email');
     expect(ticketSourceLabel(TICKET_SOURCE.AGENT)).toBe('Agent');
     expect(ticketSourceLabel(TICKET_SOURCE.API)).toBe('API');
-    expect(ticketSourceLabel(1001)).toBe('Source 1001'); // org-custom FS code
+    expect(ticketSourceLabel(1001)).toBe('API (FreshService)'); // org-custom FS code, named (QA 07-14 #5)
+    expect(ticketSourceLabel(9999)).toBe('Source 9999'); // truly unknown still degrades
     expect(ticketSourceLabel(null)).toBeNull();
     // TP extension values can never collide with FS's 1–10 space.
     expect(Object.values(TICKET_SOURCE).filter((v) => v >= 100)).toEqual(expect.arrayContaining([100, 101, 103]));

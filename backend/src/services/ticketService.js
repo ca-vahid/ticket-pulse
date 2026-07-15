@@ -986,6 +986,7 @@ class TicketService {
         select: {
           id: true, status: true, approverEmail: true, approverName: true,
           requestedBy: true, requestNote: true, requestNoteHtml: true, decisionNote: true, decisionNoteHtml: true,
+          clarificationLog: true,
           decidedAt: true, decidedVia: true, createdAt: true,
           requestGroupId: true,
           approvalCategory: { select: { id: true, name: true } },

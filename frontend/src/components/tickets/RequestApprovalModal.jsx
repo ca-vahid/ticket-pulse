@@ -17,6 +17,7 @@ export default function RequestApprovalModal({ categories = [], technicians = []
   const [note, setNote] = useState(''); // plain text (canonical fallback)
   const [noteHtml, setNoteHtml] = useState(''); // sanitized rich variant (P2.4)
   const [query, setQuery] = useState('');
+  const [notifyApprover, setNotifyApprover] = useState(true); // QA 07-14 #2: suppressible, on by default
 
   const showSearch = categories.length > SEARCH_THRESHOLD;
   const filtered = useMemo(() => {
@@ -50,6 +51,7 @@ export default function RequestApprovalModal({ categories = [], technicians = []
       approvalCategoryId: Number(categoryId),
       note: note.trim() || null,
       noteHtml: note.trim() && isRichContent(noteHtml) ? noteHtml : null,
+      notifyApprover,
     });
   };
 
@@ -145,11 +147,28 @@ export default function RequestApprovalModal({ categories = [], technicians = []
           </div>
 
           {selected && (
-            <div className="flex items-start gap-2 rounded-xl bg-slate-50 border border-slate-100 px-3 py-2.5">
-              <Mail className="w-3.5 h-3.5 text-slate-400 mt-0.5 flex-shrink-0" aria-hidden="true" />
-              <p className="text-[11px] text-slate-500 leading-relaxed">
+            <div className="space-y-2">
+              <label className="flex items-start gap-2 rounded-xl bg-slate-50 border border-slate-100 px-3 py-2.5 cursor-pointer hover:border-blue-200 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={notifyApprover}
+                  onChange={(e) => setNotifyApprover(e.target.checked)}
+                  className="tp-focus-ring mt-0.5"
+                />
+                <span className="min-w-0">
+                  <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-700">
+                    <Mail className="w-3.5 h-3.5 text-slate-400" aria-hidden="true" /> Email the approver{selected.managerCount === 1 ? '' : 's'} a decision link
+                  </span>
+                  <span className="block text-[11px] text-slate-500 leading-relaxed mt-0.5">
+                    {notifyApprover
+                      ? 'Each manager gets a personal email link to approve or reject without signing in (sent from ticketpulse@ — may land in Junk on first use).'
+                      : 'No email — approvers will only see the request in-app under Approvals.'}
+                  </span>
+                </span>
+              </label>
+              <p className="text-[11px] text-slate-500 leading-relaxed px-1">
                 The <span className="font-medium text-slate-600">{selected.managerCount}</span> manager{selected.managerCount === 1 ? '' : 's'} of
-                <span className="font-medium text-slate-600"> {selected.name}</span> are notified in-app and by email. The first to respond decides;
+                <span className="font-medium text-slate-600"> {selected.name}</span> are notified in-app{notifyApprover ? ' and by email' : ''}. The first to respond decides;
                 the rest auto-cancel. <span className="inline-flex items-center gap-0.5 text-slate-400"><ShieldCheck className="w-3 h-3" aria-hidden="true" /> Approvals stay inside Ticket Pulse.</span>
               </p>
             </div>

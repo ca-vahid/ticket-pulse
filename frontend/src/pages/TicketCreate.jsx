@@ -905,92 +905,99 @@ export default function TicketCreate() {
               {/* Create actions — on mobile the sticky bottom bar owns this, so hide here */}
               <div className="tp-card rounded-2xl p-4 hidden lg:block">
                 {scheduleOpen && (
-                  <div className="mb-3 flex items-center gap-2">
+                  <div className="mb-3 p-2.5 rounded-lg border border-violet-200 bg-violet-50/50">
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <span className="text-[11px] font-semibold uppercase tracking-wide text-violet-600">Schedule for later</span>
+                      <button
+                        onClick={() => { setScheduleOpen(false); setScheduleAt(''); setScheduleRepeat('none'); }}
+                        type="button"
+                        aria-label="Cancel scheduling"
+                        className="tp-focus-ring p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-white"
+                      >
+                        <X className="w-4 h-4" aria-hidden="true" />
+                      </button>
+                    </div>
                     <input
                       type="datetime-local"
                       value={scheduleAt}
                       min={toLocalDatetimeInput(new Date(Date.now() + 5 * 60 * 1000))}
                       onChange={(e) => setScheduleAt(e.target.value)}
                       aria-label="Schedule ticket for"
-                      className="tp-focus-ring flex-1 text-sm bg-white border border-input rounded-lg px-2.5 py-2 text-slate-700"
+                      className="tp-focus-ring w-full text-sm bg-white border border-input rounded-lg px-2.5 py-2 text-slate-700"
                     />
                     <select
                       value={scheduleRepeat}
                       onChange={(e) => setScheduleRepeat(e.target.value)}
                       aria-label="Repeat"
                       title="Repeats at the picked time — weekly on that weekday, monthly on that day, yearly on that date"
-                      className="tp-focus-ring text-sm bg-white border border-input rounded-lg px-2 py-2 text-slate-700"
+                      className="tp-focus-ring w-full mt-2 text-sm bg-white border border-input rounded-lg px-2 py-2 text-slate-700"
                     >
                       <option value="none">One time</option>
-                      <option value="weekly">Weekly</option>
-                      <option value="monthly">Monthly</option>
-                      <option value="yearly">Yearly</option>
+                      <option value="weekly">Repeat weekly</option>
+                      <option value="monthly">Repeat monthly</option>
+                      <option value="yearly">Repeat yearly</option>
                     </select>
-                    <button
-                      onClick={(e) => submit(e, 'schedule')}
-                      type="button"
-                      disabled={submitDisabled || !scheduleAt}
-                      className="tp-focus-ring inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold rounded-lg bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50"
-                    >
-                      {isSaving ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : null}
-                      Schedule
-                    </button>
-                    <button
-                      onClick={() => { setScheduleOpen(false); setScheduleAt(''); setScheduleRepeat('none'); }}
-                      type="button"
-                      aria-label="Cancel scheduling"
-                      className="tp-focus-ring p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
-                    >
-                      <X className="w-4 h-4" aria-hidden="true" />
-                    </button>
                   </div>
                 )}
                 <div className="flex">
-                  <button
-                    onClick={(e) => submit(e, 'open')}
-                    disabled={submitDisabled}
-                    className="tp-focus-ring flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-primary text-primary-foreground text-sm font-semibold rounded-l-lg shadow-subtle hover:bg-blue-700 disabled:opacity-50 transition-colors"
-                  >
-                    {isSaving ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Send className="w-4 h-4" aria-hidden="true" />}
-                    {isSaving ? (saveStep || 'Creating…') : 'Create ticket'}
-                  </button>
-                  <div className="relative">
+                  {scheduleOpen ? (
                     <button
-                      type="button"
-                      onClick={() => setSubmitMenuOpen((v) => !v)}
-                      disabled={submitDisabled}
-                      aria-label="More create options"
-                      aria-expanded={submitMenuOpen}
-                      className="tp-focus-ring h-full px-2 py-2.5 bg-primary text-primary-foreground rounded-r-lg border-l border-blue-500/60 hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                      onClick={(e) => submit(e, 'schedule')}
+                      disabled={submitDisabled || !scheduleAt}
+                      className="tp-focus-ring flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-violet-600 text-white text-sm font-semibold rounded-lg shadow-subtle hover:bg-violet-700 disabled:opacity-50 transition-colors"
                     >
-                      <ChevronDown className="w-4 h-4" aria-hidden="true" />
+                      {isSaving ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Clock className="w-4 h-4" aria-hidden="true" />}
+                      {isSaving ? (saveStep || 'Scheduling…') : (scheduleAt ? 'Schedule ticket' : 'Pick a date to schedule')}
                     </button>
-                    {submitMenuOpen && (
-                      <div className="absolute right-0 top-full mt-1 w-56 tp-card rounded-lg shadow-soft p-1 animate-scaleIn z-20" role="menu">
-                        <button
-                          onClick={(e) => submit(e, 'new')}
-                          role="menuitem"
-                          className="tp-focus-ring w-full text-left px-2.5 py-1.5 text-sm rounded-md text-slate-600 hover:bg-blue-50 hover:text-blue-700"
-                        >
+                  ) : (
+                    <button
+                      onClick={(e) => submit(e, 'open')}
+                      disabled={submitDisabled}
+                      className="tp-focus-ring flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-primary text-primary-foreground text-sm font-semibold rounded-l-lg shadow-subtle hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                    >
+                      {isSaving ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Send className="w-4 h-4" aria-hidden="true" />}
+                      {isSaving ? (saveStep || 'Creating…') : 'Create ticket'}
+                    </button>
+                  )}
+                  {!scheduleOpen && (
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setSubmitMenuOpen((v) => !v)}
+                        disabled={submitDisabled}
+                        aria-label="More create options"
+                        aria-expanded={submitMenuOpen}
+                        className="tp-focus-ring h-full px-2 py-2.5 bg-primary text-primary-foreground rounded-r-lg border-l border-blue-500/60 hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                      >
+                        <ChevronDown className="w-4 h-4" aria-hidden="true" />
+                      </button>
+                      {submitMenuOpen && (
+                        <div className="absolute right-0 top-full mt-1 w-56 tp-card rounded-lg shadow-soft p-1 animate-scaleIn z-20" role="menu">
+                          <button
+                            onClick={(e) => submit(e, 'new')}
+                            role="menuitem"
+                            className="tp-focus-ring w-full text-left px-2.5 py-1.5 text-sm rounded-md text-slate-600 hover:bg-blue-50 hover:text-blue-700"
+                          >
                           Create & start another
-                        </button>
-                        <button
-                          onClick={(e) => submit(e, 'resolve')}
-                          role="menuitem"
-                          className="tp-focus-ring w-full text-left px-2.5 py-1.5 text-sm rounded-md text-slate-600 hover:bg-emerald-50 hover:text-emerald-700"
-                        >
+                          </button>
+                          <button
+                            onClick={(e) => submit(e, 'resolve')}
+                            role="menuitem"
+                            className="tp-focus-ring w-full text-left px-2.5 py-1.5 text-sm rounded-md text-slate-600 hover:bg-emerald-50 hover:text-emerald-700"
+                          >
                           Create & resolve (walk-up log)
-                        </button>
-                        <button
-                          onClick={() => { setScheduleOpen(true); setSubmitMenuOpen(false); }}
-                          role="menuitem"
-                          className="tp-focus-ring w-full text-left px-2.5 py-1.5 text-sm rounded-md text-slate-600 hover:bg-violet-50 hover:text-violet-700 flex items-center gap-2"
-                        >
-                          <Clock className="w-3.5 h-3.5" aria-hidden="true" /> Schedule for later…
-                        </button>
-                      </div>
-                    )}
-                  </div>
+                          </button>
+                          <button
+                            onClick={() => { setScheduleOpen(true); setSubmitMenuOpen(false); }}
+                            role="menuitem"
+                            className="tp-focus-ring w-full text-left px-2.5 py-1.5 text-sm rounded-md text-slate-600 hover:bg-violet-50 hover:text-violet-700 flex items-center gap-2"
+                          >
+                            <Clock className="w-3.5 h-3.5" aria-hidden="true" /> Schedule for later…
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
                 <button onClick={goBack} type="button" className="tp-focus-ring w-full mt-2 px-4 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50">
                   Cancel

@@ -1,6 +1,20 @@
-export const APP_VERSION = '3.0.63-preview';
+export const APP_VERSION = '3.0.64-preview';
 
 export const changelog = [
+  {
+    version: '3.0.64-preview',
+    date: 'July 14, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>✅ Approvals: reply to “needs info” right in the timeline</strong> — when an approver asks for clarification, a reply box now sits under the question. Your answer is kept on the request (the Q&A trail shows on the card), posted as a private note, and included in the approver’s re-request email.' },
+      { type: 'improved', html: '<strong>📧 Approvals: “email the approver” toggle</strong> — the request dialog now has a checkbox (on by default) controlling the emailed decision link. The email pipeline itself was verified working end-to-end in production — if a link doesn’t arrive, check Junk: it’s sent via SendGrid as ticketpulse@bgcengineering.ca.' },
+      { type: 'fixed', html: '<strong>🏷️ Custom ticket types now stick</strong> — the AI already picked custom types like “QA Test” but only recorded them as an assessment; the visible Type stayed “Incident”. On TP-born tickets the AI’s choice is now promoted to the ticket’s actual type. (FS-born tickets still respect FreshService ownership.)' },
+      { type: 'fixed', html: '<strong>📅 Scheduling can no longer be silently lost</strong> — with the schedule panel open, the primary button IS “Schedule ticket” (Create is hidden), so picking Monthly and submitting can’t accidentally create the ticket immediately anymore. The panel also no longer overflows its card.' },
+      { type: 'improved', html: '<strong>🔊 “Not noise — restore”</strong> — noise-flagged tickets show a banner with a one-click restore, on both the full ticket page and the peek panel (the action-bar button flips to “Unmark noise” too).' },
+      { type: 'improved', html: '<strong>📡 Sources named</strong> — Source 14/15/1001/1002 are this FreshService instance’s custom channels: Alerts, MS Teams, API, and Company Portal. They now show their names in filters, ticket fields, and Analytics’ Source Mix (which previously guessed wrong names).' },
+      { type: 'improved', html: '<strong>🔗 Analytics: recent tickets are links</strong> — the “Recent Tickets in Selected Category” list opens each ticket in a new tab.' },
+      { type: 'fixed', html: '<strong>❌ Peek panel close button can’t vanish</strong> — long chip rows squeezed the X out of the header; the action cluster no longer shrinks.' },
+    ],
+  },
   {
     version: '3.0.63-preview',
     date: 'July 14, 2026',

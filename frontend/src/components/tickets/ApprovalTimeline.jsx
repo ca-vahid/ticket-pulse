@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   Ban, CheckCircle2, ChevronRight, Clock, MessageCircleQuestion, RefreshCw, Send, Stamp, Trash2, XCircle,
 } from 'lucide-react';
@@ -40,6 +40,8 @@ export default function ApprovalTimeline({
 }) {
   const actorEmail = String(meta?.actor?.email || '').toLowerCase();
   const actorIsAdmin = meta?.actor?.kind === 'admin' || meta?.actor?.workspaceRole === 'admin';
+  // Requester replies to a needs-info question, keyed per approval row (QA 07-14 #1).
+  const [resubmitNotes, setResubmitNotes] = useState({});
   const groups = useMemo(() => {
     const map = new Map();
     for (const ap of approvals) {
@@ -194,6 +196,18 @@ export default function ApprovalTimeline({
                             ? ap.decisionNote && <p className={`text-xs mt-0.5 ${sm.text}`}>Clarification needed: “{ap.decisionNote}”</p>
                             : ap.decisionNote && <p className="text-xs text-slate-500 mt-0.5">{ap.decisionNote}</p>}
 
+                          {/* Answered clarifications survive resubmits — show the Q&A trail. */}
+                          {Array.isArray(ap.clarificationLog) && ap.clarificationLog.some((c) => c?.answer) && (
+                            <div className="mt-1.5 space-y-1">
+                              {ap.clarificationLog.filter((c) => c?.answer).map((c, i) => (
+                                <div key={i} className="text-[11px] rounded-lg border border-violet-100 bg-violet-50/50 px-2 py-1.5">
+                                  {c.question && <p className="text-violet-700">Asked: “{c.question}”</p>}
+                                  <p className="text-slate-600">Reply: “{c.answer}”</p>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
                           {/* Approver actions (pending) */}
                           {ap.status === 'pending' && isApprover && (
                             clarifyingId === ap.id ? (
@@ -244,17 +258,27 @@ export default function ApprovalTimeline({
                             )
                           )}
 
-                          {/* Requester actions */}
+                          {/* Requester actions: type the requested info right here,
+                              it travels with the resubmit (QA 07-14 #1). */}
                           {ap.status === 'info_requested' && isRequester && (
-                            <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-                              <button
-                                onClick={() => onResubmit(ap.id)}
-                                disabled={busy}
-                                className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-primary text-primary-foreground hover:bg-blue-700 disabled:opacity-50"
-                              >
-                                <ChevronRight className="w-3 h-3" aria-hidden="true" /> Resubmit for approval
-                              </button>
-                              <span className="text-[11px] text-slate-400">Add the info to the ticket first.</span>
+                            <div className="mt-2 space-y-1.5">
+                              <textarea
+                                rows={2}
+                                value={resubmitNotes[ap.id] || ''}
+                                onChange={(e) => setResubmitNotes((m) => ({ ...m, [ap.id]: e.target.value }))}
+                                placeholder="Reply with the requested info — sent to the approver with the resubmit…"
+                                className="tp-focus-ring w-full text-xs bg-white border border-violet-200 rounded-lg px-2.5 py-1.5 placeholder:text-slate-400 resize-y"
+                              />
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <button
+                                  onClick={() => onResubmit(ap.id, (resubmitNotes[ap.id] || '').trim() || null)}
+                                  disabled={busy}
+                                  className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-primary text-primary-foreground hover:bg-blue-700 disabled:opacity-50"
+                                >
+                                  <ChevronRight className="w-3 h-3" aria-hidden="true" /> Resubmit for approval
+                                </button>
+                                <span className="text-[11px] text-slate-400">Your reply is kept on the request and emailed to the approver.</span>
+                              </div>
                             </div>
                           )}
                         </div>

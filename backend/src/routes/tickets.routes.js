@@ -1202,6 +1202,7 @@ router.post('/:id/approvals/:approvalId/resubmit', asyncHandler(async (req, res)
   const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');
   const approval = await ticketApprovalService.resubmit(
     parseTicketId(req), req.workspaceId, Number(req.params.approvalId), req.ticketActor,
+    { note: req.body?.note },
   );
   res.json({ success: true, data: approval });
 }));
