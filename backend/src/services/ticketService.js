@@ -1706,8 +1706,10 @@ class TicketService {
     }
 
     await this._notifyLifecycle(null, ticket, { allow: data.notifyRequester });
-    // Category/group watchers (fire-and-forget; creation never blocks on it).
+    // Category/group watchers + custom agent alerts (both fire-and-forget;
+    // creation never blocks on them).
     watcherNotificationService.notify('created', ticket.id).catch(() => {});
+    import('./agentAlertService.js').then(({ default: s }) => s.evaluate('created', ticket.id)).catch(() => {});
     this._broadcast(workspaceId, 'created', ticket);
     await mirrorService.enqueueTicketCreate(ticket);
 

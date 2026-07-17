@@ -3,13 +3,14 @@ import {
   Archive, CheckCircle2, Clock3, LogOut, Search, ShieldCheck, UserRound,
   XCircle, Loader2, AlertCircle, BriefcaseBusiness, PlusCircle,
   X, Send, Sparkles, Undo2, ChevronLeft, ChevronRight,
-  Bell, LayoutDashboard,
+  Bell, BellRing, LayoutDashboard,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { agentAPI } from '../services/api';
 import ItSummitFeedbackPanel from '../components/ItSummitFeedbackPanel';
 import ItSummitCategoriesPanel from '../components/ItSummitCategoriesPanel';
 import NotificationSettingsPanel from '../components/agent/NotificationSettingsPanel';
+import AgentAlertsPanel from '../components/agent/AgentAlertsPanel';
 
 const LEVELS = [
   { value: '', label: 'No experience', short: '-', rank: 0, className: 'bg-slate-100 text-slate-400 border-slate-200' },
@@ -700,6 +701,16 @@ export default function MyCompetencies() {
               <Bell className="h-4 w-4" />
               Notifications
             </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('alerts')}
+              className={`inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition hover:-translate-y-0.5 ${
+                activeTab === 'alerts' ? 'bg-blue-600 text-white shadow-sm shadow-blue-100' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              <BellRing className="h-4 w-4" />
+              My Alerts
+            </button>
             {showSummitTab && (
               <button
                 type="button"
@@ -1077,6 +1088,10 @@ export default function MyCompetencies() {
 
         {!loading && activeTab === 'notifications' && (
           <NotificationSettingsPanel workspaceId={workspaceId} />
+        )}
+
+        {!loading && activeTab === 'alerts' && (
+          <AgentAlertsPanel workspaceId={workspaceId} />
         )}
       </main>
     </div>

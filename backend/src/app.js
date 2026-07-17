@@ -338,6 +338,14 @@ async function initialize() {
       logger.warn('Notification time-trigger worker failed to start (non-fatal):', e.message);
     }
 
+    // Custom agent alerts: coalescing flush worker (storm protection).
+    try {
+      const { default: agentAlertService } = await import('./services/agentAlertService.js');
+      agentAlertService.start();
+    } catch (e) {
+      logger.warn('Agent-alert flush worker failed to start (non-fatal):', e.message);
+    }
+
     logger.info('Server initialization complete');
   } catch (error) {
     logger.error('Server initialization failed:', error);

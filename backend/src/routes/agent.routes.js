@@ -3,6 +3,7 @@ import { asyncHandler } from '../middleware/errorHandler.js';
 import agentCompetencyService from '../services/agentCompetencyService.js';
 import summitWorkshopService from '../services/summitWorkshopService.js';
 import notificationPreferenceService from '../services/notificationPreferenceService.js';
+import agentAlertService from '../services/agentAlertService.js';
 
 const router = express.Router();
 
@@ -67,6 +68,37 @@ router.post('/notifications/phone-verification/confirm', asyncHandler(async (req
     req.session?.user?.email,
     req.body || {},
   );
+  res.json({ success: true, data: result });
+}));
+
+// Custom agent alerts (per-agent subscriptions). Identity from the SSO session.
+router.get('/alerts', asyncHandler(async (req, res) => {
+  const result = await agentAlertService.list(req.session?.user?.email, req.query.workspaceId);
+  res.json({ success: true, data: result });
+}));
+
+router.get('/alerts-options', asyncHandler(async (req, res) => {
+  const result = await agentAlertService.options(req.session?.user?.email, req.query.workspaceId);
+  res.json({ success: true, data: result });
+}));
+
+router.post('/alerts', asyncHandler(async (req, res) => {
+  const result = await agentAlertService.create(req.session?.user?.email, req.body?.workspaceId || req.query.workspaceId, req.body || {});
+  res.status(201).json({ success: true, data: result });
+}));
+
+router.patch('/alerts/:id', asyncHandler(async (req, res) => {
+  const result = await agentAlertService.update(req.session?.user?.email, req.body?.workspaceId || req.query.workspaceId, req.params.id, req.body || {});
+  res.json({ success: true, data: result });
+}));
+
+router.delete('/alerts/:id', asyncHandler(async (req, res) => {
+  const result = await agentAlertService.remove(req.session?.user?.email, req.query.workspaceId, req.params.id);
+  res.json({ success: true, data: result });
+}));
+
+router.put('/alerts-quiet-hours', asyncHandler(async (req, res) => {
+  const result = await agentAlertService.saveQuietHours(req.session?.user?.email, req.body?.workspaceId || req.query.workspaceId, req.body || {});
   res.json({ success: true, data: result });
 }));
 

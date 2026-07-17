@@ -64,6 +64,7 @@ model Workspace {
   skillHierarchyDrafts              SkillHierarchyDraft[]
   ticketReclassificationRuns        TicketReclassificationRun[]
   technicianNotificationPreferences TechnicianNotificationPreference[]
+  agentAlertSubscriptions           AgentAlertSubscription[]
   notificationDeliveries            NotificationDelivery[]
   notificationWorkflows             NotificationWorkflow[]
   notificationWorkflowPolicy        NotificationWorkflowPolicy?
@@ -756,6 +757,7 @@ model Technician {
   urgentEscalationRecipients UrgentEscalationRecipient[]
   groupMemberships           GroupMember[]
   ticketTasks                TicketTask[]
+  agentAlertSubscriptions    AgentAlertSubscription[]
 
   @@unique([freshserviceId, workspaceId])
   @@index([freshserviceId])
@@ -1770,6 +1772,13 @@ model TechnicianNotificationPreference {
   phoneVerifiedAt              DateTime?  @map("phone_verified_at")
   phoneVerificationCode        String?    @map("phone_verification_code") @db.VarChar(20)
   phoneVerificationRequestedAt DateTime?  @map("phone_verification_requested_at")
+  // Quiet hours for custom agent alerts (local wall-clock in the tech's tz).
+  // While inside the window, alerts queue and deliver when it ends, unless
+  // quietHoursAllowUrgent lets an Urgent-priority alert through.
+  quietHoursEnabled            Boolean    @default(false) @map("quiet_hours_enabled")
+  quietHoursStart              String?    @map("quiet_hours_start") @db.VarChar(5) // "HH:MM"
+  quietHoursEnd                String?    @map("quiet_hours_end") @db.VarChar(5)
+  quietHoursAllowUrgent        Boolean    @default(true) @map("quiet_hours_allow_urgent")
   createdAt                    DateTime   @default(now()) @map("created_at")
   updatedAt                    DateTime   @updatedAt @map("updated_at")
 
@@ -1777,6 +1786,66 @@ model TechnicianNotificationPreference {
   @@index([workspaceId])
   @@index([technicianId])
   @@map("technician_notification_preferences")
+}
+
+// Custom per-agent alert subscriptions (agent portal). An agent subscribes to
+// a scope (category/subcategory + optional tag + minimum priority) and picks
+// which events fire and which channels deliver. Matching events are buffered
+// into AgentAlertEvent and coalesced by the flush worker (storm protection).
+model AgentAlertSubscription {
+  id               Int        @id @default(autoincrement())
+  workspaceId      Int        @map("workspace_id")
+  workspace        Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  technicianId     Int        @map("technician_id")
+  technician       Technician @relation(fields: [technicianId], references: [id], onDelete: Cascade)
+  label            String?    @db.VarChar(120) // optional friendly name (auto-derived if blank)
+  // Match filter (ANDed; null = "any"). categoryId matches either the ticket's
+  // internal top category OR its subcategory. tagId matches a tag on the ticket.
+  categoryId       Int?       @map("category_id")
+  tagId            Int?       @map("tag_id")
+  priorityMin      Int?       @map("priority_min") // 1..4 (FS scale, 4=Urgent); null = any
+  // Trigger flags — which events fire this subscription.
+  onCreated        Boolean    @default(true) @map("on_created")
+  onPriorityRaised Boolean    @default(false) @map("on_priority_raised")
+  onRecategorized  Boolean    @default(false) @map("on_recategorized")
+  // Delivery channels (contact info comes from TechnicianNotificationPreference).
+  channelEmail     Boolean    @default(true) @map("channel_email")
+  channelSms       Boolean    @default(false) @map("channel_sms")
+  channelWhatsapp  Boolean    @default(false) @map("channel_whatsapp")
+  channelPhone     Boolean    @default(false) @map("channel_phone")
+  isActive         Boolean    @default(true) @map("is_active")
+  createdAt        DateTime   @default(now()) @map("created_at")
+  updatedAt        DateTime   @updatedAt @map("updated_at")
+
+  events AgentAlertEvent[]
+
+  @@index([workspaceId, isActive])
+  @@index([technicianId])
+  @@index([categoryId])
+  @@index([tagId])
+  @@map("agent_alert_subscriptions")
+}
+
+// One row per (subscription, ticket, trigger) match — serves as BOTH the dedup
+// guard (unique constraint) and the coalescing buffer (sentAt null = pending).
+// The flush worker gathers a subscription's pending rows into one alert.
+model AgentAlertEvent {
+  id             Int                    @id @default(autoincrement())
+  workspaceId    Int                    @map("workspace_id")
+  subscriptionId Int                    @map("subscription_id")
+  subscription   AgentAlertSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  technicianId   Int                    @map("technician_id")
+  ticketId       Int                    @map("ticket_id")
+  trigger        String                 @db.VarChar(20) // created | priority_raised | recategorized
+  priority       Int? // ticket priority at match time (for quiet-hours urgent bypass)
+  matchedAt      DateTime               @default(now()) @map("matched_at")
+  sentAt         DateTime?              @map("sent_at")
+  deliveryResult Json?                  @map("delivery_result")
+
+  @@unique([subscriptionId, ticketId, trigger])
+  @@index([subscriptionId, sentAt])
+  @@index([workspaceId, sentAt])
+  @@map("agent_alert_events")
 }
 
 model NotificationWorkflow {

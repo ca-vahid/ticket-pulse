@@ -1497,6 +1497,11 @@ class AssignmentPipelineService {
         || ['weak', 'none'].includes(subcategoryFit)
         || Boolean(suggestedSubcategoryName);
 
+      const priorClassification = await prisma.ticket.findUnique({
+        where: { id: ticketId },
+        select: { internalCategoryId: true, internalSubcategoryId: true },
+      });
+
       await prisma.ticket.update({
         where: { id: ticketId },
         data: {
@@ -1511,6 +1516,15 @@ class AssignmentPipelineService {
           suggestedInternalSubcategoryName: suggestedSubcategoryName,
         },
       });
+
+      // Custom agent alerts: fire 're-categorized' only when the internal
+      // category/subcategory actually changed (fire-and-forget).
+      const changed = priorClassification
+        && (priorClassification.internalCategoryId !== safeCategoryId
+          || priorClassification.internalSubcategoryId !== (safeSubcategoryId || null));
+      if (changed) {
+        import('./agentAlertService.js').then(({ default: s }) => s.evaluate('recategorized', ticketId)).catch(() => {});
+      }
     } catch (err) {
       logger.warn('Failed to persist internal ticket classification', { ticketId, workspaceId, error: err.message });
     }
