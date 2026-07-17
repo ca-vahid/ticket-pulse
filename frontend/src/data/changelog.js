@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.0.64-preview';
+export const APP_VERSION = '3.0.65-preview';
 
 export const changelog = [
+  {
+    version: '3.0.65-preview',
+    date: 'July 16, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>🔗 Merge a FreshService ticket into a Ticket Pulse ticket</strong> — the merge dialog now finds FS-born tickets (search by their FreshService number, e.g. 233398 or #233398) and folds them into a Ticket Pulse ticket: the conversation is copied in and the FreshService ticket is closed with a pointer note. The survivor still must be a Ticket Pulse ticket (FreshService owns FS-born conversations), and FS-born candidates carry a green “FreshService” badge.' },
+      { type: 'fixed', html: '<strong>📊 Dashboard rows fit on laptops</strong> — on 1366–1536px screens the rightmost columns (Assigned-by, CSAT) no longer spill past the row card; the compact table now compresses its columns at laptop widths.' },
+    ],
+  },
   {
     version: '3.0.64-preview',
     date: 'July 14, 2026',

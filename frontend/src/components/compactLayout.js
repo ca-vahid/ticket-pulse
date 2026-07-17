@@ -9,14 +9,17 @@
 // Weekly: name column stays a flexible minmax so long names can use extra
 // space; week heatmap column is also flexible so it stretches across the
 // middle of the row.
-export const COMPACT_GRID_WEEKLY =
-  '28px minmax(240px, 1.6fr) minmax(290px, 1.4fr) 64px 56px 56px 56px 56px 56px 64px 110px';
+//
+// The actual track sizes live in CSS custom properties (index.css) so a
+// media query can compress the fixed columns on laptop widths — with the
+// former hardcoded ~1220px minimum, the trailing Asgn/CSAT/assigner cells
+// spilled past the row card on 1366–1536px screens (QA 07-16 #1).
+export const COMPACT_GRID_WEEKLY = 'var(--tp-compact-grid-weekly)';
 
 // Daily: no week heatmap, so we lock the name column to a fixed width
 // (otherwise it grows and pushes all the metrics far to the right). The
 // last column (assigners) takes whatever space is left.
-export const COMPACT_GRID_DAILY =
-  '28px 260px 72px 72px 56px 56px 56px 56px 56px 64px 1fr';
+export const COMPACT_GRID_DAILY = 'var(--tp-compact-grid-daily)';
 
 export function getCompactGridTemplate(viewMode) {
   return viewMode === 'weekly' ? COMPACT_GRID_WEEKLY : COMPACT_GRID_DAILY;
