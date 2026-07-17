@@ -661,6 +661,18 @@ export const ticketsAPI = {
   // Multi-merge (QA 07-13 #1): primaryId survives; ticketIds fold into it.
   mergeMany: async (primaryId, ticketIds, notifyRequester = false) => await api.post(`/tickets/${primaryId}/merge-many`, { ticketIds, notifyRequester }),
 
+  // Parent / child tickets (QA 07-16 #4). Refs accept TP-1042 / #231164 / bare number.
+  family: async (id) => await api.get(`/tickets/${id}/family`),
+  setParent: async (id, parentTicketRef) => await api.post(`/tickets/${id}/parent`, { parentTicketRef }),
+  removeParent: async (id) => await api.delete(`/tickets/${id}/parent`),
+  addChild: async (id, childTicketRef) => await api.post(`/tickets/${id}/children`, { childTicketRef }),
+
+  // Ticket tasks (QA 07-16 #3).
+  tasks: async (id) => await api.get(`/tickets/${id}/tasks`),
+  addTask: async (id, payload) => await api.post(`/tickets/${id}/tasks`, payload),
+  updateTask: async (id, taskId, patch) => await api.patch(`/tickets/${id}/tasks/${taskId}`, patch),
+  removeTask: async (id, taskId) => await api.delete(`/tickets/${id}/tasks/${taskId}`),
+
   // Macros (quick-action bundles)
   macros: async () => await api.get('/tickets/macros'),
   applyMacro: async (id, macroId) => await api.post(`/tickets/${id}/macros/${macroId}/apply`),

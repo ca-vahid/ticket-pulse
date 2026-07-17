@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   Activity, AlertCircle, ArrowLeft, Bell, BellRing, Bot, Building2, Check, CheckCircle2,
-  ChevronDown, ChevronLeft, ChevronRight, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Flame, Forward, Hand,
+  CheckSquare, ChevronDown, ChevronLeft, ChevronRight, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Flame, Forward, Hand,
   GitMerge, History, Image as ImageIcon, Link2, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, Paperclip, Pencil, Phone, Plus,
   RefreshCw, Send, ShieldCheck, Smartphone, Smile, Sparkles, Stamp, StickyNote, Trash2, UserRound, VolumeX, X, XCircle,
 } from 'lucide-react';
@@ -23,6 +23,8 @@ import RichTextEditor, { isRichContent } from '../components/tickets/RichTextEdi
 import StagedFileChip from '../components/tickets/StagedFileChip';
 import ImageMarkupModal from '../components/tickets/ImageMarkupModal';
 import TicketAiTab from '../components/tickets/TicketAiTab';
+import TicketTasksTab from '../components/tickets/TicketTasksTab';
+import TicketFamilyCard from '../components/tickets/TicketFamilyCard';
 import {
   MirrorChip, OriginChip, PersonAvatar, PriorityDot, ProvenanceChip, SafeHtml, SlaChip, StateChip, StatusPill,
   TypePill, PRIORITY_LABELS, SOURCE_OPTIONS, formatBytes, isConversationEntry, pipelineRunLabel,
@@ -480,7 +482,7 @@ export default function TicketDetail() {
     if (workspaceId !== openedWsRef.current) navigate('/tickets', { replace: true });
   }, [workspaceId, navigate]);
   const [searchParams, setSearchParams] = useSearchParams();
-  const pageTab = ['approvals', 'history', 'ai'].includes(searchParams.get('tab')) ? searchParams.get('tab') : 'conversation';
+  const pageTab = ['approvals', 'history', 'ai', 'tasks'].includes(searchParams.get('tab')) ? searchParams.get('tab') : 'conversation';
   const setPageTab = (tab) => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
@@ -488,6 +490,7 @@ export default function TicketDetail() {
       return next;
     }, { replace: true });
   };
+  const [taskOpenCount, setTaskOpenCount] = useState(0); // drives the Tasks tab badge
 
   const [ticket, setTicket] = useState(null);
   const [meta, setMeta] = useState(null);
@@ -1860,6 +1863,7 @@ export default function TicketDetail() {
                 { key: 'conversation', label: 'Conversation', icon: MessageSquare, count: conversationEntries.filter(isConversationEntry).length },
                 { key: 'approvals', label: 'Approvals', icon: CheckCircle2, count: new Set((ticket.approvals || []).map((a) => a.requestGroupId || `single-${a.id}`)).size },
                 { key: 'ai', label: 'AI & Routing', icon: Sparkles, count: (ticket.pipelineRuns || []).length },
+                { key: 'tasks', label: 'Tasks', icon: CheckSquare, count: taskOpenCount },
                 { key: 'history', label: 'History', icon: History, count: historyItems.length },
               ].map(({ key, label, icon: TabIcon, count }) => {
                 const selected = pageTab === key;
@@ -2318,6 +2322,16 @@ export default function TicketDetail() {
                   />
                 )}
 
+                {pageTab === 'tasks' && (
+                  <TicketTasksTab
+                    ticketId={ticketId}
+                    technicians={meta?.technicians || []}
+                    canWrite={canConverse}
+                    ticketOrigin={ticket.origin}
+                    onCountChange={setTaskOpenCount}
+                  />
+                )}
+
                 {pageTab === 'history' && (
                   <section className="tp-card rounded-xl p-4 sm:p-5" aria-label="Ticket history">
                     <div className="flex items-center gap-2 mb-4">
@@ -2658,6 +2672,13 @@ export default function TicketDetail() {
                 </div>
 
                 {/* Explicit ticket links (duplicate/related/parent) + merge */}
+                <TicketFamilyCard
+                  ticketId={ticketId}
+                  canWrite={meta?.actor?.kind !== 'agent'}
+                  refreshToken={ticket?.updatedAt}
+                  onNavigate={(id) => navigate(`/tickets/${id}`)}
+                />
+
                 <TicketLinksCard
                   ticketId={ticketId}
                   canWrite={canConverse}

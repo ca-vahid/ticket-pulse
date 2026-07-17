@@ -950,6 +950,70 @@ router.post('/:id/duplicate-of/:targetId', asyncHandler(async (req, res) => {
   res.json({ success: true, data: { ...result, resolvedTarget: target } });
 }));
 
+// Parent / child ticket relationship (QA 07-16 #4).
+router.get('/:id/family', asyncHandler(async (req, res) => {
+  const { default: ticketLinkService } = await import('../services/ticketLinkService.js');
+  const family = await ticketLinkService.family(parseTicketId(req), req.workspaceId);
+  res.json({ success: true, data: family });
+}));
+
+router.post('/:id/parent', asyncHandler(async (req, res) => {
+  if (req.ticketActor.kind === 'agent') throw new ValidationError('Linking tickets requires coordinator or admin access');
+  const { default: ticketLinkService } = await import('../services/ticketLinkService.js');
+  let parentTicketId = req.body?.parentTicketId;
+  if (req.body?.parentTicketRef !== undefined) {
+    const { resolveTicketRefOrThrow } = await import('../services/ticketRefResolver.js');
+    parentTicketId = (await resolveTicketRefOrThrow(req.body.parentTicketRef, req.workspaceId)).id;
+  }
+  const family = await ticketLinkService.setParent(parseTicketId(req), req.workspaceId, { parentTicketId }, req.ticketActor);
+  res.status(201).json({ success: true, data: family });
+}));
+
+router.delete('/:id/parent', asyncHandler(async (req, res) => {
+  if (req.ticketActor.kind === 'agent') throw new ValidationError('Linking tickets requires coordinator or admin access');
+  const { default: ticketLinkService } = await import('../services/ticketLinkService.js');
+  const result = await ticketLinkService.removeParent(parseTicketId(req), req.workspaceId, req.ticketActor);
+  res.json({ success: true, data: result });
+}));
+
+// Add a child to THIS (parent) ticket by its visible ref.
+router.post('/:id/children', asyncHandler(async (req, res) => {
+  if (req.ticketActor.kind === 'agent') throw new ValidationError('Linking tickets requires coordinator or admin access');
+  const { default: ticketLinkService } = await import('../services/ticketLinkService.js');
+  let childTicketId = req.body?.childTicketId;
+  if (req.body?.childTicketRef !== undefined) {
+    const { resolveTicketRefOrThrow } = await import('../services/ticketRefResolver.js');
+    childTicketId = (await resolveTicketRefOrThrow(req.body.childTicketRef, req.workspaceId)).id;
+  }
+  const family = await ticketLinkService.addChild(parseTicketId(req), req.workspaceId, { childTicketId }, req.ticketActor);
+  res.status(201).json({ success: true, data: family });
+}));
+
+// Ticket tasks (QA 07-16 #3).
+router.get('/:id/tasks', asyncHandler(async (req, res) => {
+  const { default: ticketTaskService } = await import('../services/ticketTaskService.js');
+  const tasks = await ticketTaskService.listForTicket(parseTicketId(req), req.workspaceId);
+  res.json({ success: true, data: tasks });
+}));
+
+router.post('/:id/tasks', asyncHandler(async (req, res) => {
+  const { default: ticketTaskService } = await import('../services/ticketTaskService.js');
+  const task = await ticketTaskService.create(parseTicketId(req), req.workspaceId, req.body || {}, req.ticketActor);
+  res.status(201).json({ success: true, data: task });
+}));
+
+router.patch('/:id/tasks/:taskId', asyncHandler(async (req, res) => {
+  const { default: ticketTaskService } = await import('../services/ticketTaskService.js');
+  const task = await ticketTaskService.update(Number(req.params.taskId), req.workspaceId, req.body || {}, req.ticketActor);
+  res.json({ success: true, data: task });
+}));
+
+router.delete('/:id/tasks/:taskId', asyncHandler(async (req, res) => {
+  const { default: ticketTaskService } = await import('../services/ticketTaskService.js');
+  const result = await ticketTaskService.remove(Number(req.params.taskId), req.workspaceId, req.ticketActor);
+  res.json({ success: true, data: result });
+}));
+
 // Apply a macro (quick-action bundle) to this ticket.
 router.post('/:id/macros/:macroId/apply', asyncHandler(async (req, res) => {
   const { default: ticketMacroService } = await import('../services/ticketMacroService.js');

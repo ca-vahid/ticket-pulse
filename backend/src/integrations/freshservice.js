@@ -1163,6 +1163,31 @@ class FreshServiceClient {
     }
   }
 
+  // ---- Ticket tasks (QA 07-16 #3) --------------------------------------
+  // FreshService ticket tasks: id, agent_id (assignee), status (1 Open /
+  // 2 In Progress / 3 Completed), due_date, notify_before, title, description.
+  // baseURL already includes /api/v2, so paths are '/tickets/...'.
+
+  async listTicketTasks(ticketId) {
+    const response = await this._get(`/tickets/${ticketId}/tasks`);
+    return response.data?.tasks || [];
+  }
+
+  async createTicketTask(ticketId, task) {
+    const response = await this._post(`/tickets/${ticketId}/tasks`, task);
+    return response.data?.task || response.data;
+  }
+
+  async updateTicketTask(ticketId, taskId, patch) {
+    const response = await this._put(`/tickets/${ticketId}/tasks/${taskId}`, patch);
+    return response.data?.task || response.data;
+  }
+
+  async deleteTicketTask(ticketId, taskId) {
+    const response = await this._delete(`/tickets/${ticketId}/tasks/${taskId}`);
+    return response.data;
+  }
+
   /**
    * Get current rate limiter stats (for diagnostics).
    */

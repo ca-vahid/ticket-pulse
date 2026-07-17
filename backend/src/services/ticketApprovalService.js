@@ -732,27 +732,8 @@ class TicketApprovalService {
       '<p style="color:#64748b;font-size:12px">This link is personal to you and expires in 30 days.</p>',
     ].join('');
 
-    try {
-      const connection = await prisma.mailboxConnection.findFirst({
-        where: { workspaceId: ticket.workspaceId, isEnabled: true, mode: { in: ['send', 'both'] } },
-        orderBy: { id: 'asc' },
-      });
-      if (connection) {
-        const { default: graphMailClient } = await import('../integrations/graphMailClient.js');
-        if (graphMailClient.isConfigured()) {
-          await graphMailClient.sendMailAsMailbox(connection.address, {
-            to: [approval.approverEmail], subject, html,
-          });
-          return { sent: true, via: 'msgraph' };
-        }
-      }
-      const { default: sendgrid } = await import('./sendgridNotificationService.js');
-      await sendgrid.sendEmail({ to: [approval.approverEmail], subject, html });
-      return { sent: true, via: 'sendgrid' };
-    } catch (err) {
-      logger.warn(`Approval email failed for approval ${approval.id} (non-fatal): ${err.message}`);
-      return { sent: false, error: err.message };
-    }
+    const { sendTransactionalEmail } = await import('./transactionalEmailService.js');
+    return sendTransactionalEmail({ workspaceId: ticket.workspaceId, to: approval.approverEmail, subject, html, label: 'approval' });
   }
 
   /** Notify the requester that an approver needs more info before deciding. */
@@ -773,25 +754,8 @@ class TicketApprovalService {
       `<p>Their question: “${esc(question)}”</p>`,
       `<p>Add the requested details on the ticket, then <a href="${ticketUrl}">open it</a> and hit <b>Resubmit</b> to send it back for approval.</p>`,
     ].join('');
-    try {
-      const connection = await prisma.mailboxConnection.findFirst({
-        where: { workspaceId: ticket.workspaceId, isEnabled: true, mode: { in: ['send', 'both'] } },
-        orderBy: { id: 'asc' },
-      });
-      if (connection) {
-        const { default: graphMailClient } = await import('../integrations/graphMailClient.js');
-        if (graphMailClient.isConfigured()) {
-          await graphMailClient.sendMailAsMailbox(connection.address, { to: [to], subject, html });
-          return { sent: true, via: 'msgraph' };
-        }
-      }
-      const { default: sendgrid } = await import('./sendgridNotificationService.js');
-      await sendgrid.sendEmail({ to: [to], subject, html });
-      return { sent: true, via: 'sendgrid' };
-    } catch (err) {
-      logger.warn(`Clarification email failed for approval ${approval.id} (non-fatal): ${err.message}`);
-      return { sent: false, error: err.message };
-    }
+    const { sendTransactionalEmail } = await import('./transactionalEmailService.js');
+    return sendTransactionalEmail({ workspaceId: ticket.workspaceId, to, subject, html, label: 'approval clarification' });
   }
 
   _broadcast(ticket, action) {
