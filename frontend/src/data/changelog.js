@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.0.65-preview';
+export const APP_VERSION = '3.0.66-preview';
 
 export const changelog = [
+  {
+    version: '3.0.66-preview',
+    date: 'July 16, 2026',
+    entries: [
+      { type: 'added', html: '<strong>✅ Tasks tab on tickets</strong> — break a ticket into discrete tasks, assign each to an agent, set a due date, and notify the assignee. On Ticket Pulse tickets the tasks are ours (and mirror to the FreshService copy when the agent has a FreshService seat); on FreshService tickets they proxy to FreshService’s own Tasks API, which sends the assignee’s email. Mark tasks Start / Finish, reassign, or delete inline.' },
+      { type: 'added', html: '<strong>🌳 Parent / child tickets</strong> — link a ticket to a parent and give it children (each an independent ticket with its own assignee). A “Parent / child” card in the sidebar shows the parent and children with one-click navigation; the relationship is noted on the FreshService copies too. Loops and multiple parents are prevented.' },
+    ],
+  },
   {
     version: '3.0.65-preview',
     date: 'July 16, 2026',
