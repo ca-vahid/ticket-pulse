@@ -1456,6 +1456,12 @@ class SyncService {
       waitForSync: options.waitForNoiseSync === true,
     });
 
+    // Custom agent alerts for genuinely-new FS-born tickets (fire-and-forget).
+    // TP-born mirror snapshots short-circuit earlier, so they don't double-fire.
+    if (!existingTicket) {
+      import('./agentAlertService.js').then(({ default: s }) => s.evaluate('created', upsertedTicket.id)).catch(() => {});
+    }
+
     if (existingTicket && existingTicket.assignedTechId !== upsertedTicket.assignedTechId) {
       const details = {
         fromTechId: existingTicket.assignedTechId,

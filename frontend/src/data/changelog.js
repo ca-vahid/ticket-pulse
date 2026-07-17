@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.0.66-preview';
+export const APP_VERSION = '3.0.67-preview';
 
 export const changelog = [
+  {
+    version: '3.0.67-preview',
+    date: 'July 16, 2026',
+    entries: [
+      { type: 'added', html: '<strong>🔔 Custom alerts, per agent</strong> — a new <b>My Alerts</b> tab in the agent portal. Subscribe to any category/subcategory, tag, or priority threshold and get alerted when a matching ticket <b>arrives</b>, is <b>escalated</b> (priority raised), or is <b>re-categorized</b> into your scope — via email, SMS, WhatsApp, or phone call. Alerts cover any matching ticket in your workspace, not just your own.' },
+      { type: 'added', html: '<strong>🛡️ Storm-safe + quiet hours</strong> — when a burst of tickets hits the same scope at once, they’re grouped into a single alert instead of ten. Optional quiet hours mute alerts overnight (they queue and deliver afterward), with an option to let Urgent through.' },
+    ],
+  },
   {
     version: '3.0.66-preview',
     date: 'July 16, 2026',

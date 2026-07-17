@@ -1312,6 +1312,13 @@ export const agentAPI = {
   saveNotificationPreferences: (data) => api.put('/agent/notifications/preferences', data),
   requestPhoneVerification: (data) => api.post('/agent/notifications/phone-verification', data),
   confirmPhoneVerification: (data) => api.post('/agent/notifications/phone-verification/confirm', data),
+  // Custom agent alerts
+  getAlerts: (params = {}) => api.get('/agent/alerts', { params }),
+  getAlertOptions: (params = {}) => api.get('/agent/alerts-options', { params }),
+  createAlert: (data) => api.post('/agent/alerts', data),
+  updateAlert: (id, data) => api.patch(`/agent/alerts/${id}`, data),
+  deleteAlert: (id, params = {}) => api.delete(`/agent/alerts/${id}`, { params }),
+  saveAlertQuietHours: (data) => api.put('/agent/alerts-quiet-hours', data),
   getSummitWorkshop: () => api.get('/agent/summit-2026/workshop'),
   voteSummitCategory: (data) => api.post('/agent/summit-2026/votes', data),
   getSummitWorkshopEventSource: () => new EventSource(`${API_BASE_URL}/agent/summit-2026/workshop/events${_authToken ? `?token=${encodeURIComponent(_authToken)}` : ''}`, { withCredentials: true }),

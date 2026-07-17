@@ -159,6 +159,12 @@ class TicketPriorityEventService {
         notificationStatus = notificationResult.queued > 0 ? 'queued' : 'skipped';
       }
 
+      // Custom agent alerts fire on ANY upward priority move — the per-agent
+      // priorityMin filter decides eligibility (fire-and-forget).
+      if (event.direction === 'raised' && event.ticketId) {
+        import('./agentAlertService.js').then(({ default: s }) => s.evaluate('priority_raised', event.ticketId)).catch(() => {});
+      }
+
       const rememberReassessmentRun = (runId) => {
         if (!runId) return;
         prisma.ticketPriorityEvent.update({
