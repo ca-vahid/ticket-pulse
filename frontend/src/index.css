@@ -29,6 +29,22 @@
     --radius-md: 0.5rem;
     --radius-lg: 0.75rem;
     --radius-xl: 1rem;
+
+    /* Dashboard compact-table grid tracks (TechCompactHeader + TechCardCompact
+       read these via getCompactGridTemplate). Wide desktop keeps the roomy
+       layout; laptop widths compress the fixed metric/name columns so the
+       trailing Asgn/CSAT/assigner cells stop spilling past the row card
+       (QA 07-16 #1). */
+    --tp-compact-grid-weekly: 28px minmax(240px, 1.6fr) minmax(290px, 1.4fr) 64px 56px 56px 56px 56px 56px 64px 110px;
+    --tp-compact-grid-daily: 28px 260px 72px 72px 56px 56px 56px 56px 56px 64px 1fr;
+  }
+
+  /* ≤1536px (laptops): tighten name/heatmap minimums and metric columns. */
+  @media (max-width: 1536px) {
+    :root {
+      --tp-compact-grid-weekly: 24px minmax(150px, 1.2fr) minmax(250px, 1fr) 52px 44px 44px 44px 46px 44px 52px 84px;
+      --tp-compact-grid-daily: 24px minmax(150px, 1fr) 60px 60px 46px 46px 46px 48px 46px 54px minmax(72px, 1fr);
+    }
   }
 
   * {

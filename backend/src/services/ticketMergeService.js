@@ -112,10 +112,11 @@ class TicketMergeService {
       ].filter(Boolean).join(' '),
     }, actor).catch((err) => logger.warn(`Merge target note failed (non-fatal): ${err.message}`));
 
-    // 5. Optional requester notification BEFORE closing (TP-born source only —
-    //    FreshService owns comms on FS-born tickets).
+    // 5. Optional requester notification BEFORE closing. addReply routes a
+    //    public reply through FreshService for an FS-born source (which emails
+    //    the requester), and through the TP mirror for a TP-born source.
     let requesterNotified = false;
-    if (notifyRequester && source.origin === 'ticketpulse') {
+    if (notifyRequester) {
       try {
         await ticketService.addReply(sourceId, workspaceId, {
           bodyText: `Your ticket has been consolidated into ${tgtRef} ("${target.subject || ''}"). All further updates will come from that ticket.`,
@@ -126,14 +127,26 @@ class TicketMergeService {
       }
     }
 
-    // 6. Close out the source.
+    // 6. Close out the source. addPrivateNote routes to FreshService for an
+    //    FS-born source, so the pointer note lands on the FS ticket too.
     await ticketService.addPrivateNote(sourceId, workspaceId, {
       bodyText: `Merged into ${tgtRef} by ${actorLabel}. The conversation continues there.`,
     }, actor).catch(() => null);
     let sourceClosed = false;
-    if (source.origin === 'ticketpulse' && !['Resolved', 'Closed'].includes(source.status)) {
-      await ticketService.changeStatus(sourceId, workspaceId, 'Closed', actor);
-      sourceClosed = true;
+    if (!['Resolved', 'Closed'].includes(source.status)) {
+      if (source.origin === 'ticketpulse') {
+        await ticketService.changeStatus(sourceId, workspaceId, 'Closed', actor);
+        sourceClosed = true;
+      } else {
+        // FS-born source (QA 07-16 #5): close it in FreshService via the
+        // origin-aware writeback path (interactive client + FS status map).
+        try {
+          await ticketService.updateFsTicket(sourceId, workspaceId, { status: 'Closed' }, actor);
+          sourceClosed = true;
+        } catch (err) {
+          logger.warn(`Merge could not close FS-born source ${srcRef} in FreshService (non-fatal): ${err.message}`);
+        }
+      }
     }
 
     // 7. Audit both sides.

@@ -13,6 +13,7 @@ const ticketServiceMock = {
   addPrivateNote: jest.fn().mockResolvedValue({}),
   addReply: jest.fn().mockResolvedValue({}),
   changeStatus: jest.fn().mockResolvedValue({}),
+  updateFsTicket: jest.fn().mockResolvedValue({}),
 };
 const activityMock = { create: jest.fn().mockResolvedValue({}) };
 
@@ -66,24 +67,42 @@ describe('ticketMergeService.merge', () => {
     expect(activityMock.create).toHaveBeenCalledTimes(2);
   });
 
-  test('FS-born source: entries copied but status untouched (FreshService owns it)', async () => {
+  test('FS-born source: entries copied and the FS ticket is closed via writeback, not changeStatus (QA 07-16 #5)', async () => {
     prismaMock.ticket.findFirst
       .mockResolvedValueOnce(FS_SOURCE)
       .mockResolvedValueOnce(TARGET);
     const result = await ticketMergeService.merge(11, 1, { targetTicketId: 20 }, null);
-    expect(result.sourceClosed).toBe(false);
+    // Conversation still copied into the TP-born target.
+    expect(prismaMock.ticketThreadEntry.createMany).toHaveBeenCalled();
+    // FS-born sources close through the origin-aware FS writeback path, never
+    // the TP-only changeStatus.
     expect(ticketServiceMock.changeStatus).not.toHaveBeenCalled();
+    expect(ticketServiceMock.updateFsTicket).toHaveBeenCalledWith(11, 1, { status: 'Closed' }, null);
+    expect(result.sourceClosed).toBe(true);
   });
 
-  test('notifyRequester sends a public reply on TP-born sources only', async () => {
+  test('notifyRequester sends a public reply on TP-born and FS-born sources (QA 07-16 #5)', async () => {
     prismaMock.ticket.findFirst
       .mockResolvedValueOnce(TP_SOURCE)
       .mockResolvedValueOnce(TARGET);
-    const result = await ticketMergeService.merge(10, 1, { targetTicketId: 20, notifyRequester: true }, null);
-    expect(result.requesterNotified).toBe(true);
+    const tp = await ticketMergeService.merge(10, 1, { targetTicketId: 20, notifyRequester: true }, null);
+    expect(tp.requesterNotified).toBe(true);
     expect(ticketServiceMock.addReply).toHaveBeenCalledWith(10, 1, expect.objectContaining({
       bodyText: expect.stringContaining('consolidated into TP-20'),
     }), null);
+
+    // FS-born source: addReply routes the reply through FreshService (emailing
+    // the requester); notification still fires.
+    jest.clearAllMocks();
+    prismaMock.ticketLink.findFirst.mockResolvedValue(null);
+    prismaMock.ticketThreadEntry.findMany.mockResolvedValue(ENTRIES);
+    prismaMock.ticketThreadEntry.createMany.mockResolvedValue({ count: 2 });
+    prismaMock.ticket.findFirst
+      .mockResolvedValueOnce(FS_SOURCE)
+      .mockResolvedValueOnce(TARGET);
+    const fs = await ticketMergeService.merge(11, 1, { targetTicketId: 20, notifyRequester: true }, null);
+    expect(fs.requesterNotified).toBe(true);
+    expect(ticketServiceMock.addReply).toHaveBeenCalledWith(11, 1, expect.any(Object), null);
   });
 
   test('rejects self-merge and circular merges', async () => {

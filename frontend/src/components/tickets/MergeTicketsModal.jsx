@@ -13,7 +13,9 @@ const refOf = (t) => t?.displayRef
  * one primary: candidates are pre-suggested (same requester's open tickets +
  * near-duplicates by subject/content), the oldest ticket is pre-selected as
  * primary, and the consequences are spelled out before the one-click merge.
- * TP-born tickets only — FreshService owns FS-born conversations.
+ * The SURVIVOR must be TP-born (its conversation is TP-owned); FS-born
+ * tickets can be folded IN as sources — their conversation is copied and the
+ * FreshService ticket is closed with a pointer note (QA 07-16 #5).
  */
 export default function MergeTicketsModal({ ticket, onClose, onMerged }) {
   const [candidates, setCandidates] = useState(null); // [{...ticket, why}]
@@ -26,7 +28,9 @@ export default function MergeTicketsModal({ ticket, onClose, onMerged }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
-  const isMergeable = (t) => t.origin === 'ticketpulse' && ['Open', 'Pending'].includes(t.status) && t.id !== ticket.id;
+  // Sources may be TP- or FS-born; only the surviving primary must be TP-born.
+  const isMergeable = (t) => ['Open', 'Pending'].includes(t.status) && t.id !== ticket.id;
+  const isFsBorn = (t) => t.origin !== 'ticketpulse';
 
   // Pre-suggestions: near-duplicates (same subject / similar content) plus the
   // requester's other open TP-born tickets. Suggested rows come pre-checked
@@ -49,7 +53,7 @@ export default function MergeTicketsModal({ ticket, onClose, onMerged }) {
       } catch { /* suggestions are best-effort */ }
       try {
         if (ticket.requester?.id) {
-          const res = await ticketsAPI.list({ requesterId: ticket.requester.id, status: 'Open,Pending', origin: 'ticketpulse', pageSize: 10 });
+          const res = await ticketsAPI.list({ requesterId: ticket.requester.id, status: 'Open,Pending', pageSize: 10 });
           for (const t of res?.data?.items || []) {
             if (isMergeable(t) && !seen.has(t.id)) { seen.add(t.id); out.push({ ...t, why: 'same requester' }); }
           }
@@ -75,7 +79,7 @@ export default function MergeTicketsModal({ ticket, onClose, onMerged }) {
     const timer = setTimeout(async () => {
       setSearching(true);
       try {
-        const res = await ticketsAPI.list({ q, status: 'Open,Pending', origin: 'ticketpulse', pageSize: 8 });
+        const res = await ticketsAPI.list({ q, status: 'Open,Pending', pageSize: 8 });
         setSearchResults((res?.data?.items || []).filter((t) => isMergeable(t)));
       } catch { setSearchResults([]); }
       setSearching(false);
@@ -97,7 +101,8 @@ export default function MergeTicketsModal({ ticket, onClose, onMerged }) {
 
   const group = useMemo(() => [...selected.values()].sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0)), [selected]);
   const secondaries = group.filter((t) => t.id !== primaryId);
-  const canMerge = group.length >= 2 && group.some((t) => t.id === primaryId);
+  const primary = group.find((t) => t.id === primaryId);
+  const canMerge = group.length >= 2 && !!primary && !isFsBorn(primary);
 
   const doMerge = useCallback(async () => {
     setBusy(true); setError(null);
@@ -135,6 +140,11 @@ export default function MergeTicketsModal({ ticket, onClose, onMerged }) {
             {why && <span className="ml-1 inline-flex items-center gap-0.5 text-violet-500"><Sparkles className="h-3 w-3" aria-hidden="true" />{why}</span>}
           </span>
         </span>
+        {isFsBorn(t) && (
+          <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700" title="FreshService-born — can be folded in; it will be closed in FreshService with a pointer note">
+            FreshService
+          </span>
+        )}
         <StatusPill status={t.status} />
       </li>
     );
@@ -207,12 +217,21 @@ export default function MergeTicketsModal({ ticket, onClose, onMerged }) {
                       name="merge-primary"
                       checked={primaryId === t.id}
                       onChange={() => setPrimaryId(t.id)}
+                      disabled={isFsBorn(t)}
+                      title={isFsBorn(t) ? 'FreshService owns this ticket’s conversation — it can be folded in, but the survivor must be a Ticket Pulse ticket' : undefined}
                       aria-label={`Keep ${refOf(t)} as the primary`}
-                      className="tp-focus-ring h-4 w-4"
+                      className="tp-focus-ring h-4 w-4 disabled:opacity-40"
                     />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium text-slate-700">{t.subject || '(no subject)'}</span>
-                      <span className="block text-xs text-slate-400">{refOf(t)}{primaryId === t.id ? ' · stays open, receives every conversation' : ' · will be closed with a pointer note'}</span>
+                      <span className="block text-xs text-slate-400">
+                        {refOf(t)}
+                        {primaryId === t.id
+                          ? ' · stays open, receives every conversation'
+                          : isFsBorn(t)
+                            ? ' · will be closed in FreshService with a pointer note'
+                            : ' · will be closed with a pointer note'}
+                      </span>
                     </span>
                   </li>
                 ))}
@@ -235,8 +254,10 @@ export default function MergeTicketsModal({ ticket, onClose, onMerged }) {
         <div className="flex items-center justify-between gap-2 border-t border-slate-100 px-5 py-3.5">
           <p className="text-xs text-slate-400">
             {canMerge
-              ? `${secondaries.length} ticket${secondaries.length === 1 ? '' : 's'} → ${refOf(group.find((t) => t.id === primaryId) || ticket)} · cannot be undone`
-              : 'Select at least one other ticket'}
+              ? `${secondaries.length} ticket${secondaries.length === 1 ? '' : 's'} → ${refOf(primary || ticket)} · cannot be undone`
+              : group.length >= 2 && primary && isFsBorn(primary)
+                ? 'Pick a Ticket Pulse ticket as the survivor'
+                : 'Select at least one other ticket'}
           </p>
           <div className="flex gap-2">
             <button onClick={onClose} disabled={busy} className="tp-focus-ring rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50">
