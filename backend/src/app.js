@@ -346,6 +346,16 @@ async function initialize() {
       logger.warn('Agent-alert flush worker failed to start (non-fatal):', e.message);
     }
 
+    // Public API: durable outbound-webhook delivery worker + housekeeping sweep.
+    try {
+      const { start: startWebhookWorker } = await import('./services/webhookDispatchService.js');
+      startWebhookWorker();
+      const { default: apiMaintenanceService } = await import('./services/apiMaintenanceService.js');
+      apiMaintenanceService.start();
+    } catch (e) {
+      logger.warn('Public-API workers failed to start (non-fatal):', e.message);
+    }
+
     logger.info('Server initialization complete');
   } catch (error) {
     logger.error('Server initialization failed:', error);

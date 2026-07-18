@@ -158,22 +158,77 @@ model TicketAttachment {
 // The raw key ("tpk_<random>") is shown once at creation; only its sha256
 // hash is stored. Scopes: tickets:read, tickets:write.
 model ApiKey {
-  id           Int       @id @default(autoincrement())
-  workspaceId  Int       @map("workspace_id")
-  workspace    Workspace @relation(fields: [workspaceId], references: [id])
-  name         String    @db.VarChar(120)
-  keyHash      String    @unique @map("key_hash") @db.VarChar(64)
-  keyPrefix    String    @map("key_prefix") @db.VarChar(16)
-  scopes       String[]  @default([])
-  isEnabled    Boolean   @default(true) @map("is_enabled")
-  lastUsedAt   DateTime? @map("last_used_at")
-  requestCount Int       @default(0) @map("request_count")
-  createdBy    String?   @map("created_by") @db.VarChar(255)
-  createdAt    DateTime  @default(now()) @map("created_at")
-  updatedAt    DateTime  @updatedAt @map("updated_at")
+  id              Int       @id @default(autoincrement())
+  workspaceId     Int       @map("workspace_id")
+  workspace       Workspace @relation(fields: [workspaceId], references: [id])
+  name            String    @db.VarChar(120)
+  keyHash         String    @unique @map("key_hash") @db.VarChar(64)
+  keyPrefix       String    @map("key_prefix") @db.VarChar(24)
+  scopes          String[]  @default([])
+  mode            String    @default("live") @db.VarChar(10) // live | test
+  isEnabled       Boolean   @default(true) @map("is_enabled")
+  expiresAt       DateTime? @map("expires_at")
+  revokedAt       DateTime? @map("revoked_at")
+  rotatedFromId   Int?      @map("rotated_from_id")
+  ipAllowlist     String[]  @default([]) @map("ip_allowlist")
+  rateLimitPerMin Int?      @map("rate_limit_per_min")
+  lastUsedAt      DateTime? @map("last_used_at")
+  lastUsedIp      String?   @map("last_used_ip") @db.VarChar(64)
+  requestCount    Int       @default(0) @map("request_count")
+  createdBy       String?   @map("created_by") @db.VarChar(255)
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
 
   @@index([workspaceId, isEnabled])
   @@map("api_keys")
+}
+
+// Idempotency-Key replay cache for POST/PATCH writes on /api/v1 (24h TTL sweep).
+model ApiIdempotencyKey {
+  id           Int      @id @default(autoincrement())
+  apiKeyId     Int      @map("api_key_id")
+  idemKey      String   @map("idem_key") @db.VarChar(255)
+  method       String   @db.VarChar(10)
+  path         String   @db.VarChar(500)
+  requestHash  String   @map("request_hash") @db.VarChar(64)
+  statusCode   Int      @map("status_code")
+  responseBody Json     @map("response_body")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@unique([apiKeyId, idemKey])
+  @@index([createdAt])
+  @@map("api_idempotency_keys")
+}
+
+// Durable fixed-window counter for /api/v1 rate limiting (per key + per IP).
+model ApiRateWindow {
+  id          Int      @id @default(autoincrement())
+  bucketKey   String   @map("bucket_key") @db.VarChar(120)
+  windowEpoch Int      @map("window_epoch")
+  count       Int      @default(0)
+
+  @@unique([bucketKey, windowEpoch])
+  @@index([windowEpoch])
+  @@map("api_rate_windows")
+}
+
+// Per-request usage + audit log for the public API (powers per-key analytics).
+model ApiRequestLog {
+  id          Int      @id @default(autoincrement())
+  workspaceId Int?     @map("workspace_id")
+  apiKeyId    Int?     @map("api_key_id")
+  method      String   @db.VarChar(10)
+  path        String   @db.VarChar(500)
+  scope       String?  @db.VarChar(60)
+  statusCode  Int      @map("status_code")
+  ip          String?  @db.VarChar(64)
+  requestId   String?  @map("request_id") @db.VarChar(64)
+  durationMs  Int?     @map("duration_ms")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([apiKeyId, createdAt])
+  @@index([workspaceId, createdAt])
+  @@map("api_request_logs")
 }
 
 // Tickets scheduled for a future date. The payload is a verbatim createTicket
@@ -296,8 +351,11 @@ model WebhookSubscription {
   workspace        Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   url              String    @db.VarChar(1000)
   secret           String    @db.VarChar(64)
+  secretPrevious   String?   @map("secret_previous") @db.VarChar(64)
+  secretRotatedAt  DateTime? @map("secret_rotated_at")
   events           String[]  @default([])
   isEnabled        Boolean   @default(true) @map("is_enabled")
+  disabledReason   String?   @map("disabled_reason") @db.VarChar(200)
   failureCount     Int       @default(0) @map("failure_count")
   lastDeliveryAt   DateTime? @map("last_delivery_at")
   lastError        String?   @map("last_error") @db.Text
@@ -306,8 +364,33 @@ model WebhookSubscription {
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
 
+  deliveries       WebhookDelivery[]
+
   @@index([workspaceId, isEnabled])
   @@map("webhook_subscriptions")
+}
+
+// Durable outbound-webhook delivery queue (survives restarts; backoff + DLQ).
+model WebhookDelivery {
+  id             Int                 @id @default(autoincrement())
+  subscriptionId Int                 @map("subscription_id")
+  subscription   WebhookSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  workspaceId    Int                 @map("workspace_id")
+  eventId        String              @map("event_id") @db.VarChar(64) // webhook-id (idempotency for consumer)
+  eventType      String              @map("event_type") @db.VarChar(60)
+  payload        Json
+  status         String              @default("pending") @db.VarChar(20) // pending | success | failed | dead
+  attempts       Int                 @default(0)
+  maxAttempts    Int                 @default(8) @map("max_attempts")
+  nextAttemptAt  DateTime?           @map("next_attempt_at")
+  lastStatusCode Int?                @map("last_status_code")
+  lastError      String?             @map("last_error") @db.Text
+  createdAt      DateTime            @default(now()) @map("created_at")
+  deliveredAt    DateTime?           @map("delivered_at")
+
+  @@index([status, nextAttemptAt])
+  @@index([subscriptionId, createdAt])
+  @@map("webhook_deliveries")
 }
 
 // Tags (gap plan Phase 1) — a TP-owned annotation layer for BOTH ticket

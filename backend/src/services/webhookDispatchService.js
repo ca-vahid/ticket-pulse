@@ -4,12 +4,15 @@ import logger from '../utils/logger.js';
 import { webhookUrlProblem } from './notificationWorkflowActionNodes.js';
 
 /**
- * Outbound webhooks (gap plan 2, Phase 3). Integrations subscribe per
- * workspace to ticket events; each delivery is an HMAC-SHA256-signed JSON
- * POST. Delivery is fire-and-forget with in-process retries (0s / 30s / 2m) —
- * documented as at-least-effort, not durable across restarts. Sustained
- * failure (20 consecutive) auto-disables the subscription with the error
- * visible in the admin UI.
+ * Outbound webhooks — durable, Standard-Webhooks-signed delivery.
+ *
+ * dispatchWebhookEvent() enqueues one row per matching subscription into the
+ * `webhook_deliveries` outbox; a background worker drains due rows with
+ * exponential backoff (survives restarts) and dead-letters after maxAttempts.
+ * Each delivery is signed per the Standard Webhooks spec (webhook-id /
+ * -timestamp / -signature over `id.timestamp.body`), with the legacy
+ * X-TicketPulse-Signature sent in parallel during migration. Sustained failure
+ * (20 consecutive across a subscription) auto-disables it.
  */
 
 export const WEBHOOK_EVENTS = [
@@ -23,24 +26,38 @@ export const WEBHOOK_EVENTS = [
   'approval.decided',
 ];
 
-const RETRY_DELAYS_MS = [0, 30_000, 120_000];
+// Backoff per attempt index (seconds): immediate, 15s, 1m, 5m, 30m, 2h, 6h, 12h.
+const BACKOFF_SEC = [0, 15, 60, 300, 1800, 7200, 21600, 43200];
+const MAX_ATTEMPTS = 8;
 const AUTO_DISABLE_AFTER = 20;
-const DELIVERY_TIMEOUT_MS = 10_000;
+const DELIVERY_TIMEOUT_MS = 15_000;
 const CACHE_TTL_MS = 30_000;
+const TICK_MS = 5_000;
+const BATCH = 20;
 
 const subsCache = new Map(); // workspaceId -> { at, rows }
 import('./memoryDiagnostics.js').then(({ registerGauge }) => registerGauge('webhookDispatch.subs', () => subsCache.size)).catch(() => {});
 
+// Legacy HMAC (hex over raw body) — kept for one migration cycle.
 export function signWebhookPayload(secret, body) {
   return `sha256=${crypto.createHmac('sha256', secret).update(body).digest('hex')}`;
+}
+
+// Standard Webhooks signature: base64 HMAC-SHA256 over `id.timestamp.body`,
+// keyed by the base64-decoded bytes of the `whsec_`-prefixed secret.
+export function signStandardWebhook(secret, msgId, timestampSec, body) {
+  const raw = String(secret || '').replace(/^whsec_/, '');
+  let key;
+  try { key = Buffer.from(raw, 'base64'); } catch { key = Buffer.from(raw); }
+  if (!key.length) key = Buffer.from(raw);
+  const sig = crypto.createHmac('sha256', key).update(`${msgId}.${timestampSec}.${body}`).digest('base64');
+  return `v1,${sig}`;
 }
 
 async function enabledSubscriptions(workspaceId) {
   const hit = subsCache.get(workspaceId);
   if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.rows;
-  const rows = await prisma.webhookSubscription.findMany({
-    where: { workspaceId, isEnabled: true },
-  });
+  const rows = await prisma.webhookSubscription.findMany({ where: { workspaceId, isEnabled: true } });
   subsCache.set(workspaceId, { at: Date.now(), rows });
   return rows;
 }
@@ -49,8 +66,61 @@ export function invalidateWebhookCache(workspaceId) {
   subsCache.delete(workspaceId);
 }
 
-async function recordOutcome(sub, { ok, status = null, error = null }) {
-  const entry = { at: new Date().toISOString(), ok, status, error: error ? String(error).slice(0, 200) : null };
+/** Enqueue an event to every matching subscription (durable). Fire-and-forget. */
+export function dispatchWebhookEvent(workspaceId, eventType, payload) {
+  if (!WEBHOOK_EVENTS.includes(eventType)) return;
+  enabledSubscriptions(workspaceId)
+    .then(async (subs) => {
+      const matching = subs.filter((s) => s.events.includes(eventType));
+      if (!matching.length) return;
+      const occurredAt = new Date().toISOString();
+      await prisma.webhookDelivery.createMany({
+        data: matching.map((sub) => ({
+          subscriptionId: sub.id,
+          workspaceId,
+          eventId: `msg_${crypto.randomBytes(12).toString('base64url')}`,
+          eventType,
+          payload: { type: eventType, event: eventType, timestamp: occurredAt, workspaceId, data: payload },
+          status: 'pending',
+          nextAttemptAt: new Date(),
+          maxAttempts: MAX_ATTEMPTS,
+        })),
+      });
+      setTimeout(() => { processDue().catch(() => {}); }, 50);
+    })
+    .catch((err) => logger.warn(`Webhook enqueue failed (non-fatal): ${err.message}`));
+}
+
+async function sendHttp(sub, delivery) {
+  const ts = Math.floor(Date.now() / 1000);
+  const body = JSON.stringify(delivery.payload);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), DELIVERY_TIMEOUT_MS);
+  try {
+    const res = await fetch(sub.url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'TicketPulse-Webhook/2.0',
+        'webhook-id': delivery.eventId,
+        'webhook-timestamp': String(ts),
+        'webhook-signature': signStandardWebhook(sub.secret, delivery.eventId, ts, body),
+        'X-TicketPulse-Event': delivery.eventType,
+        'X-TicketPulse-Signature': signWebhookPayload(sub.secret, body),
+      },
+      body,
+      signal: controller.signal,
+    });
+    return { ok: res.ok, status: res.status, error: res.ok ? null : `HTTP ${res.status}` };
+  } catch (err) {
+    return { ok: false, status: null, error: err.name === 'AbortError' ? 'timeout' : err.message };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function recordSubOutcome(sub, { ok, status, error }) {
+  const entry = { at: new Date().toISOString(), ok, status: status || null, error: error ? String(error).slice(0, 200) : null };
   const recent = [entry, ...(Array.isArray(sub.recentDeliveries) ? sub.recentDeliveries : [])].slice(0, 10);
   const failureCount = ok ? 0 : (sub.failureCount || 0) + 1;
   const disable = !ok && failureCount >= AUTO_DISABLE_AFTER;
@@ -61,77 +131,55 @@ async function recordOutcome(sub, { ok, status = null, error = null }) {
       lastError: ok ? null : String(error || `HTTP ${status}`).slice(0, 500),
       failureCount,
       recentDeliveries: recent,
-      ...(disable ? { isEnabled: false } : {}),
+      ...(disable ? { isEnabled: false, disabledReason: `Auto-disabled after ${failureCount} consecutive failures` } : {}),
     },
   }).catch(() => {});
   if (disable) {
     invalidateWebhookCache(sub.workspaceId);
     logger.warn(`Webhook subscription ${sub.id} auto-disabled after ${failureCount} consecutive failures`);
   }
-  // Keep the in-memory copy's counter honest for retries within this process.
-  sub.failureCount = failureCount;
 }
 
-async function deliverOnce(sub, body, eventType) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), DELIVERY_TIMEOUT_MS);
+async function processOne(delivery) {
+  const sub = await prisma.webhookSubscription.findUnique({ where: { id: delivery.subscriptionId } });
+  if (!sub) { await prisma.webhookDelivery.update({ where: { id: delivery.id }, data: { status: 'dead', lastError: 'subscription deleted' } }).catch(() => {}); return; }
+  const result = await sendHttp(sub, delivery);
+  const attempts = delivery.attempts + 1;
+  if (result.ok) {
+    await prisma.webhookDelivery.update({ where: { id: delivery.id }, data: { status: 'success', attempts, lastStatusCode: result.status, deliveredAt: new Date() } });
+    await recordSubOutcome(sub, result);
+    return;
+  }
+  if (attempts >= (delivery.maxAttempts || MAX_ATTEMPTS)) {
+    await prisma.webhookDelivery.update({ where: { id: delivery.id }, data: { status: 'dead', attempts, lastStatusCode: result.status, lastError: String(result.error || '').slice(0, 500) } });
+    await recordSubOutcome(sub, result);
+    return;
+  }
+  const delaySec = BACKOFF_SEC[Math.min(attempts, BACKOFF_SEC.length - 1)];
+  await prisma.webhookDelivery.update({
+    where: { id: delivery.id },
+    data: { status: 'pending', attempts, lastStatusCode: result.status, lastError: String(result.error || '').slice(0, 500), nextAttemptAt: new Date(Date.now() + delaySec * 1000) },
+  });
+  // Only count toward auto-disable on a fully-dead delivery, not each retry.
+}
+
+let running = false;
+export async function processDue() {
+  if (running) return;
+  running = true;
   try {
-    const res = await fetch(sub.url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'User-Agent': 'TicketPulse-Webhook/1.0',
-        'X-TicketPulse-Event': eventType,
-        'X-TicketPulse-Signature': signWebhookPayload(sub.secret, body),
-      },
-      body,
-      signal: controller.signal,
+    const due = await prisma.webhookDelivery.findMany({
+      where: { status: 'pending', nextAttemptAt: { lte: new Date() } },
+      orderBy: { nextAttemptAt: 'asc' },
+      take: BATCH,
     });
-    if (res.ok) {
-      await recordOutcome(sub, { ok: true, status: res.status });
-      return true;
+    for (const d of due) {
+      // eslint-disable-next-line no-await-in-loop
+      await processOne(d).catch((err) => logger.debug(`Webhook delivery ${d.id} error: ${err.message}`));
     }
-    await recordOutcome(sub, { ok: false, status: res.status, error: `HTTP ${res.status}` });
-    return false;
-  } catch (err) {
-    await recordOutcome(sub, { ok: false, error: err.name === 'AbortError' ? 'timeout' : err.message });
-    return false;
   } finally {
-    clearTimeout(timer);
+    running = false;
   }
-}
-
-async function deliverWithRetries(sub, body, eventType) {
-  for (let attempt = 0; attempt < RETRY_DELAYS_MS.length; attempt++) {
-    if (RETRY_DELAYS_MS[attempt] > 0) {
-      await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]));
-    }
-    if (await deliverOnce(sub, body, eventType)) return;
-    if (sub.failureCount >= AUTO_DISABLE_AFTER) return; // disabled mid-retry
-  }
-}
-
-/**
- * Fan an event out to matching subscriptions. Fire-and-forget: callers never
- * wait on integration endpoints.
- */
-export function dispatchWebhookEvent(workspaceId, eventType, payload) {
-  if (!WEBHOOK_EVENTS.includes(eventType)) return;
-  enabledSubscriptions(workspaceId)
-    .then((subs) => {
-      const matching = subs.filter((s) => s.events.includes(eventType));
-      if (!matching.length) return;
-      const body = JSON.stringify({
-        event: eventType,
-        occurredAt: new Date().toISOString(),
-        workspaceId,
-        data: payload,
-      });
-      for (const sub of matching) {
-        deliverWithRetries({ ...sub }, body, eventType).catch(() => {});
-      }
-    })
-    .catch((err) => logger.warn(`Webhook dispatch lookup failed (non-fatal): ${err.message}`));
 }
 
 /** Admin test-ping: one immediate signed delivery, result returned inline. */
@@ -140,15 +188,37 @@ export async function testWebhookSubscription(id, workspaceId) {
   if (!sub) return { ok: false, error: 'Subscription not found' };
   const problem = webhookUrlProblem(sub.url);
   if (problem) return { ok: false, error: problem };
-  const body = JSON.stringify({
-    event: 'ping',
-    occurredAt: new Date().toISOString(),
-    workspaceId,
-    data: { message: 'Ticket Pulse webhook test' },
-  });
-  const ok = await deliverOnce(sub, body, 'ping');
+  const delivery = { eventId: `msg_${crypto.randomBytes(12).toString('base64url')}`, eventType: 'ping', payload: { type: 'ping', event: 'ping', timestamp: new Date().toISOString(), workspaceId, data: { message: 'Ticket Pulse webhook test' } } };
+  const result = await sendHttp(sub, delivery);
+  await recordSubOutcome(sub, result);
   invalidateWebhookCache(workspaceId);
-  return { ok, lastError: ok ? null : sub.lastError || 'delivery failed' };
+  return { ok: result.ok, lastError: result.ok ? null : (result.error || 'delivery failed') };
+}
+
+export async function listDeliveries(subscriptionId, workspaceId, limit = 25) {
+  const sub = await prisma.webhookSubscription.findFirst({ where: { id: subscriptionId, workspaceId }, select: { id: true } });
+  if (!sub) return [];
+  return prisma.webhookDelivery.findMany({
+    where: { subscriptionId }, orderBy: { createdAt: 'desc' }, take: Math.min(Number(limit) || 25, 100),
+    select: { id: true, eventId: true, eventType: true, status: true, attempts: true, lastStatusCode: true, lastError: true, createdAt: true, deliveredAt: true, nextAttemptAt: true },
+  });
+}
+
+export async function redeliver(deliveryId, workspaceId) {
+  const delivery = await prisma.webhookDelivery.findFirst({ where: { id: deliveryId, workspaceId } });
+  if (!delivery) return { ok: false, error: 'Delivery not found' };
+  await prisma.webhookDelivery.update({ where: { id: delivery.id }, data: { status: 'pending', attempts: 0, nextAttemptAt: new Date(), lastError: null } });
+  setTimeout(() => { processDue().catch(() => {}); }, 50);
+  return { ok: true };
+}
+
+let timer = null;
+export function start() {
+  if (timer) return;
+  timer = setInterval(() => { processDue().catch((err) => logger.debug(`Webhook worker tick failed: ${err.message}`)); }, TICK_MS);
+  timer.unref?.();
+  logger.info('Webhook delivery worker started');
 }
 
 export { webhookUrlProblem };
+export default { dispatchWebhookEvent, testWebhookSubscription, listDeliveries, redeliver, processDue, start, WEBHOOK_EVENTS };

@@ -696,17 +696,23 @@ export const ticketsAPI = {
   presenceHeartbeat: async (id, leaving = false) => await api.post(`/tickets/${id}/presence`, leaving ? { leaving: true } : {}),
   presenceSnapshot: async () => await api.get('/tickets/presence'),
 
-  // Outbound webhooks (admin; gap plan 2 P3)
+  // Outbound webhooks (admin)
   listWebhooks: async () => await api.get('/tickets/webhook-subscriptions'),
   createWebhook: async ({ url, events }) => await api.post('/tickets/webhook-subscriptions', { url, events }),
   updateWebhook: async (id, data) => await api.patch(`/tickets/webhook-subscriptions/${id}`, data),
   deleteWebhook: async (id) => await api.delete(`/tickets/webhook-subscriptions/${id}`),
   testWebhook: async (id) => await api.post(`/tickets/webhook-subscriptions/${id}/test`),
+  listWebhookDeliveries: async (id) => await api.get(`/tickets/webhook-subscriptions/${id}/deliveries`),
+  redeliverWebhook: async (deliveryId) => await api.post(`/tickets/webhook-deliveries/${deliveryId}/redeliver`),
 
-  // Integration API keys (admin; gap plan P3.1)
+  // Integration API keys (admin)
   listApiKeys: async () => await api.get('/tickets/api-keys'),
-  createApiKey: async ({ name, scopes }) => await api.post('/tickets/api-keys', { name, scopes }),
+  getApiKeyScopes: async () => await api.get('/tickets/api-keys/scopes'),
+  createApiKey: async (data) => await api.post('/tickets/api-keys', data),
   updateApiKey: async (keyId, data) => await api.patch(`/tickets/api-keys/${keyId}`, data),
+  rotateApiKey: async (keyId) => await api.post(`/tickets/api-keys/${keyId}/rotate`),
+  revokeApiKey: async (keyId) => await api.post(`/tickets/api-keys/${keyId}/revoke`),
+  getApiKeyUsage: async (keyId) => await api.get(`/tickets/api-keys/${keyId}/usage`),
   deleteApiKey: async (keyId) => await api.delete(`/tickets/api-keys/${keyId}`),
 
   // Custom fields
