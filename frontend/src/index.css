@@ -578,7 +578,11 @@ code {
   .tp-ai-accent::before,
   .tp-ai-chip,
   .tp-assign-pop > *,
-  .tp-assign-pop::after {
+  .tp-assign-pop::after,
+  .animate-fadeIn,
+  .animate-slideInLeft,
+  .animate-scaleIn,
+  .animate-slide-in-right {
     animation: none;
   }
   /* Static fallback: no motion, but the moment still shows — a steady

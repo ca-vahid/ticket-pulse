@@ -1517,12 +1517,19 @@ class AssignmentPipelineService {
         },
       });
 
-      // Custom agent alerts: fire 're-categorized' only when the internal
-      // category/subcategory actually changed (fire-and-forget).
+      // Custom agent alerts (fire-and-forget). Category-scoped "new ticket"
+      // alerts evaluate at sync/create time — before AI categorization — so on
+      // the FS route they'd never match. When a ticket gets its FIRST category
+      // here, fire 'created' so those alerts work; when an existing category
+      // actually changes, fire 're-categorized'. (Coalescing dedups the common
+      // case where the sync-time 'created' is still buffered.)
+      const hadCategory = priorClassification?.internalCategoryId !== null && priorClassification?.internalCategoryId !== undefined;
       const changed = priorClassification
         && (priorClassification.internalCategoryId !== safeCategoryId
           || priorClassification.internalSubcategoryId !== (safeSubcategoryId || null));
-      if (changed) {
+      if (!hadCategory && safeCategoryId) {
+        import('./agentAlertService.js').then(({ default: s }) => s.evaluate('created', ticketId)).catch(() => {});
+      } else if (changed) {
         import('./agentAlertService.js').then(({ default: s }) => s.evaluate('recategorized', ticketId)).catch(() => {});
       }
     } catch (err) {

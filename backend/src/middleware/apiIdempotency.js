@@ -17,45 +17,69 @@ function stableStringify(value) {
   return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(value[k])}`).join(',')}}`;
 }
 
-export function withIdempotency(req, res, next) {
+function principalBucket(req) {
+  if (req.apiKey?.id) return `key:${req.apiKey.id}`;
+  if (req.apiKey?.oauthClientId) return `oauth:${req.apiKey.oauthClientId}`;
+  return null;
+}
+
+export async function withIdempotency(req, res, next) {
   const idemKey = String(req.headers['idempotency-key'] || '').trim();
   if (!idemKey) return next(); // opt-in
   if (idemKey.length > 255) return next(problems.badRequest('Idempotency-Key must be 255 characters or fewer'));
-  if (!req.apiKey) return next();
+  const principal = principalBucket(req);
+  if (!principal) return next(); // no credential context (shouldn't happen post-auth)
 
   const requestHash = crypto.createHash('sha256')
     .update(`${req.method} ${req.originalUrl} ${stableStringify(req.body || {})}`)
     .digest('hex');
+  const where = { principal_idemKey: { principal, idemKey } };
 
-  prisma.apiIdempotencyKey.findUnique({
-    where: { apiKeyId_idemKey: { apiKeyId: req.apiKey.id, idemKey } },
-  }).then((existing) => {
-    if (existing) {
+  try {
+    // Reserve the key BEFORE executing so a concurrent duplicate collides here
+    // instead of both running the write.
+    try {
+      await prisma.apiIdempotencyKey.create({
+        data: {
+          principal, apiKeyId: req.apiKey?.id ?? null, idemKey, method: req.method,
+          path: String(req.originalUrl).slice(0, 500), requestHash, statusCode: null, responseBody: null,
+        },
+      });
+    } catch {
+      // Unique clash: a prior (completed) or concurrent (in-flight) request holds it.
+      const existing = await prisma.apiIdempotencyKey.findUnique({ where });
+      if (!existing) return next(); // swept between create and read — just proceed
       if (existing.requestHash !== requestHash) {
         return next(new ApiProblem({
           status: 422, code: 'idempotency_key_reused', title: 'Idempotency-Key reused',
           detail: 'This Idempotency-Key was already used with a different request body.',
         }));
       }
+      if (existing.statusCode === null) {
+        return next(new ApiProblem({
+          status: 409, code: 'idempotency_in_flight', title: 'Request already in progress',
+          detail: 'A request with this Idempotency-Key is still being processed. Retry shortly.',
+        }));
+      }
       res.set('Idempotent-Replayed', 'true');
       return res.status(existing.statusCode).json(existing.responseBody);
     }
-    // First time: capture the response body, persist on a successful finish.
+
+    // We hold the reservation — capture the body and finalize (or release) on finish.
     const origJson = res.json.bind(res);
     res.json = (body) => { res._idemBody = body; return origJson(body); };
     res.on('finish', () => {
       if (res.statusCode >= 200 && res.statusCode < 300 && res._idemBody !== undefined) {
-        prisma.apiIdempotencyKey.create({
-          data: {
-            apiKeyId: req.apiKey.id, idemKey, method: req.method,
-            path: String(req.originalUrl).slice(0, 500), requestHash,
-            statusCode: res.statusCode, responseBody: res._idemBody,
-          },
-        }).catch(() => {}); // unique clash on concurrent retry → ignore
+        prisma.apiIdempotencyKey.update({ where, data: { statusCode: res.statusCode, responseBody: res._idemBody } }).catch(() => {});
+      } else {
+        // Non-2xx or no JSON: release the reservation so the client can retry.
+        prisma.apiIdempotencyKey.delete({ where }).catch(() => {});
       }
     });
     return next();
-  }).catch(() => next());
+  } catch {
+    return next(); // fail-open on unexpected idempotency errors — never block the write
+  }
 }
 
 export default { withIdempotency };

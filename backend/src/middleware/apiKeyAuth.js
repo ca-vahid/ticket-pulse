@@ -17,8 +17,12 @@ const DEFAULT_KEY_LIMIT = Number(process.env.API_V1_RATE_LIMIT_PER_MINUTE || 120
 const IP_LIMIT = Number(process.env.API_V1_IP_RATE_LIMIT_PER_MINUTE || 300);
 
 export function clientIp(req) {
-  const fwd = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
-  return (fwd || req.socket?.remoteAddress || '').replace(/^::ffff:/, '') || null;
+  // `trust proxy` is set (app.js), so Express resolves req.ip to the right-most
+  // UNTRUSTED hop — the real client IP the platform proxy appends. Never parse
+  // X-Forwarded-For by hand: its left-most entry is fully client-spoofable, and
+  // trusting it defeats the IP allowlist and every per-IP throttle keyed here.
+  const ip = req.ip || req.socket?.remoteAddress || '';
+  return ip.replace(/^::ffff:/, '') || null;
 }
 
 function ipv4ToInt(ip) {
@@ -121,6 +125,13 @@ export const requireApiKey = (scope) => async (req, res, next) => {
     const required = Array.isArray(scope) ? scope : (scope ? [scope] : []);
     if (required.length && !required.some((s) => scopeSatisfies(principal.scopes, s))) {
       throw problems.forbidden(`This credential is missing the '${required.join("' or '")}' scope`, 'insufficient_scope');
+    }
+    // Test-mode keys are READ-ONLY until a sandbox data partition exists — a
+    // write with a `tp_test_` key would hit live tickets and email real
+    // requesters. (The docs advertise test keys for "building against"; keep
+    // them safe rather than let that footgun fire.)
+    if (principal.mode === 'test' && required.some((s) => /:(write|manage)$/.test(s))) {
+      throw problems.forbidden('Test-mode keys are read-only — create a live key to make changes', 'test_mode_read_only');
     }
 
     const limit = principal.rateLimitPerMin || DEFAULT_KEY_LIMIT;

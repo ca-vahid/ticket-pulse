@@ -218,7 +218,7 @@ pre{background:#0f172a;color:#e2e8f0;border-radius:8px;padding:.7rem .9rem;overf
 <p>Key-authenticated, workspace-scoped. Machine-readable spec: <a href="openapi.json">openapi.json</a>.</p>
 <div class="card">
 <b>Authentication — two options, both workspace-scoped</b><br>
-<b>1. API key</b> (simplest). Issue one per workspace in <b>Settings → API Keys</b>, scoped to exactly what the integration needs; use <code>tp_test_…</code> while building.
+<b>1. API key</b> (simplest). Issue one per workspace in <b>Settings → API Keys</b>, scoped to exactly what the integration needs. A <code>tp_test_…</code> key is <b>read-only</b> — safe to build against; switch to a <code>tp_live_…</code> key to make changes (writes with a test key return <code>403 test_mode_read_only</code>).
 <pre>curl ${baseUrl}/api/v1/me \\
   -H "Authorization: Bearer tp_live_xxx"</pre>
 <b>2. OAuth2 client-credentials</b> (for apps). Create a client in <b>Settings → API Keys → OAuth clients</b>, then exchange it for a short-lived token:

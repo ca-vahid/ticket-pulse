@@ -77,7 +77,12 @@ export default function EmailHealthCard() {
   useEffect(() => { load(); }, [load]);
 
   const status = health?.status || 'unknown';
-  const meta = STATUS_META[status] || STATUS_META.unknown;
+  // Until the first load resolves, show a neutral "Checking…" badge rather than
+  // asserting "No recent sends" (the unknown-state label) before we actually know.
+  const checking = loading && !health;
+  const meta = checking
+    ? { label: 'Checking…', badge: 'bg-slate-100 text-slate-500', dot: 'bg-slate-300' }
+    : (STATUS_META[status] || STATUS_META.unknown);
   const failures = health?.recentFailures || [];
   const unhealthy = status === 'down' || status === 'degraded';
 

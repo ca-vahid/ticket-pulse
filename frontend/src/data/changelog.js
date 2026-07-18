@@ -1,6 +1,16 @@
-export const APP_VERSION = '3.0.71-preview';
+export const APP_VERSION = '3.0.72-preview';
 
 export const changelog = [
+  {
+    version: '3.0.72-preview',
+    date: 'July 18, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>🛡️ Hardening pass across the recent releases</strong> — a security &amp; reliability sweep over the last batch of features. Notable fixes: the public-API IP allowlist and rate limits now use the verified client IP (a spoofed <code>X-Forwarded-For</code> can no longer bypass them); <b>Idempotency-Key</b> now survives concurrent retries (a duplicate in-flight request gets <code>409</code> instead of creating a second record) and works for OAuth callers too; rotating a <b>revoked</b> API key/OAuth client is refused instead of silently re-enabling it; and login endpoints are now rate-limited.' },
+      { type: 'fixed', html: '<strong>🔀 Merge &amp; ticket links, tightened</strong> — merging now always requires an open, Ticket-Pulse-born survivor (so a conversation can’t be stranded), and it moves the source’s open tasks and child tickets onto the survivor and cancels its pending approvals. Parent/child links can no longer bypass the single-parent / no-loop / coordinator-only rules through the generic links tool.' },
+      { type: 'fixed', html: '<strong>🔔 Alerts that don’t miss (or spam)</strong> — a further escalation on the same ticket (e.g. High → Urgent) now alerts again instead of being permanently suppressed; a category alert fires once the ticket is categorized (AI or manual); an alert that fails to send is retried rather than silently dropped; and SMS/voice send failures now show up in delivery health too.' },
+      { type: 'changed', html: '<strong>🔒 Safer credentials &amp; webhooks</strong> — <b>Test-mode API keys are now read-only</b> (build against the API with zero risk to live data); deleting or rotating a key/client asks for confirmation; webhooks support <b>signing-secret rotation</b> with a 24-hour dual-sign grace window, sign with standard base64 (so strict verifier libraries validate them), and refuse to deliver to private/internal addresses or follow redirects onto them.' },
+    ],
+  },
   {
     version: '3.0.71-preview',
     date: 'July 18, 2026',

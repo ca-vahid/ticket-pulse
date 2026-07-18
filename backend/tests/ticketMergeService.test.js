@@ -4,10 +4,19 @@ import { jest } from '@jest/globals';
 
 const prismaMock = {
   ticket: { findFirst: jest.fn() },
-  ticketLink: { findFirst: jest.fn(), upsert: jest.fn().mockResolvedValue({}) },
+  ticketLink: {
+    findFirst: jest.fn(),
+    findMany: jest.fn().mockResolvedValue([]),
+    upsert: jest.fn().mockResolvedValue({}),
+    update: jest.fn().mockResolvedValue({}),
+    delete: jest.fn().mockResolvedValue({}),
+    deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+  },
   ticketThreadEntry: { findMany: jest.fn(), createMany: jest.fn() },
   ticketTagLink: { findMany: jest.fn().mockResolvedValue([]), createMany: jest.fn().mockResolvedValue({ count: 0 }) },
   ticketAttachment: { count: jest.fn().mockResolvedValue(0) },
+  ticketTask: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
+  ticketApproval: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
 };
 const ticketServiceMock = {
   addPrivateNote: jest.fn().mockResolvedValue({}),
@@ -39,10 +48,14 @@ const ENTRIES = [
 beforeEach(() => {
   jest.clearAllMocks();
   prismaMock.ticketLink.findFirst.mockResolvedValue(null);
+  prismaMock.ticketLink.findMany.mockResolvedValue([]);
+  prismaMock.ticketLink.deleteMany.mockResolvedValue({ count: 0 });
   prismaMock.ticketThreadEntry.findMany.mockResolvedValue(ENTRIES);
   prismaMock.ticketThreadEntry.createMany.mockResolvedValue({ count: 2 });
   prismaMock.ticketTagLink.findMany.mockResolvedValue([{ tagId: 5 }]);
   prismaMock.ticketAttachment.count.mockResolvedValue(1);
+  prismaMock.ticketTask.updateMany.mockResolvedValue({ count: 0 });
+  prismaMock.ticketApproval.updateMany.mockResolvedValue({ count: 0 });
 });
 
 describe('ticketMergeService.merge', () => {
@@ -119,5 +132,60 @@ describe('ticketMergeService.merge', () => {
       .mockResolvedValueOnce(TP_SOURCE)
       .mockResolvedValueOnce({ ...TARGET, status: 'Deleted' });
     await expect(ticketMergeService.merge(10, 1, { targetTicketId: 20 }, null)).rejects.toThrow(/deleted/);
+  });
+
+  test('survivor gate: refuses an FS-born target (would strand messages in a TP shadow)', async () => {
+    prismaMock.ticket.findFirst
+      .mockResolvedValueOnce(TP_SOURCE)
+      .mockResolvedValueOnce({ ...TARGET, origin: 'freshservice', freshserviceTicketId: 5n });
+    await expect(ticketMergeService.merge(10, 1, { targetTicketId: 20 }, null)).rejects.toThrow(/Ticket Pulse–born/);
+    expect(prismaMock.ticketThreadEntry.createMany).not.toHaveBeenCalled();
+  });
+
+  test('survivor gate: refuses a Resolved/Closed target husk', async () => {
+    prismaMock.ticket.findFirst
+      .mockResolvedValueOnce(TP_SOURCE)
+      .mockResolvedValueOnce({ ...TARGET, status: 'Closed' });
+    await expect(ticketMergeService.merge(10, 1, { targetTicketId: 20 }, null)).rejects.toThrow(/Open or Pending/);
+  });
+
+  test('refuses a chained merge into a ticket already merged away', async () => {
+    prismaMock.ticket.findFirst
+      .mockResolvedValueOnce(TP_SOURCE)
+      .mockResolvedValueOnce(TARGET);
+    // circular check returns null, then the merged-away check returns a link.
+    prismaMock.ticketLink.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: 7, kind: 'merged_into' });
+    await expect(ticketMergeService.merge(10, 1, { targetTicketId: 20 }, null)).rejects.toThrow(/surviving ticket/);
+  });
+
+  test('reconciles the source: moves open tasks, re-parents children, cancels pending approvals', async () => {
+    prismaMock.ticket.findFirst
+      .mockResolvedValueOnce(TP_SOURCE)
+      .mockResolvedValueOnce(TARGET);
+    prismaMock.ticketTask.updateMany.mockResolvedValue({ count: 3 });
+    prismaMock.ticketApproval.updateMany.mockResolvedValue({ count: 2 });
+    prismaMock.ticketLink.findMany.mockResolvedValue([
+      { id: 51, ticketId: 10, relatedTicketId: 30, kind: 'parent_of' },
+      { id: 52, ticketId: 10, relatedTicketId: 20, kind: 'parent_of' }, // child == survivor → dropped
+    ]);
+
+    const result = await ticketMergeService.merge(10, 1, { targetTicketId: 20 }, { email: 'c@bgc.ca' });
+
+    // Open TP-born tasks move to the survivor.
+    expect(prismaMock.ticketTask.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ ticketId: 10, origin: 'ticketpulse', status: { not: 'done' } }),
+      data: { ticketId: 20 },
+    }));
+    // The non-self child link is re-parented; the self-referential one is deleted.
+    expect(prismaMock.ticketLink.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 51 }, data: { ticketId: 20 } }));
+    expect(prismaMock.ticketLink.delete).toHaveBeenCalledWith({ where: { id: 52 } });
+    // Pending approvals on the husk are cancelled.
+    expect(prismaMock.ticketApproval.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ ticketId: 10, status: { in: ['pending', 'info_requested'] } }),
+      data: expect.objectContaining({ status: 'cancelled' }),
+    }));
+    expect(result.swept).toEqual({ tasks: 3, children: 1, approvals: 2 });
   });
 });
