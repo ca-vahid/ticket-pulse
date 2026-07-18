@@ -9,7 +9,9 @@ import logger from '../utils/logger.js';
 import {
   API_KEY_SCOPES, generateApiKey, hashApiKey,
 } from '../services/apiKeyService.js';
-import { requireApiKey, apiRequestContext } from '../middleware/apiKeyAuth.js';
+import { requireApiKey, apiRequestContext, clientIp } from '../middleware/apiKeyAuth.js';
+import { verifyClientCredentials, issueAccessToken } from '../services/oauthClientService.js';
+import rateLimiter from '../services/apiRateLimitService.js';
 import { withIdempotency } from '../middleware/apiIdempotency.js';
 import { apiProblemHandler, problems } from '../utils/apiProblem.js';
 import { buildOpenApiSpec, renderDocsPage } from './apiV1.openapi.js';
@@ -78,6 +80,34 @@ function contactShape(r) {
   };
 }
 
+// ---------------------------------------------- OAuth2 token (client_credentials)
+// RFC 6749 shapes (error/error_description). Accepts client_id/secret in the
+// form body or via HTTP Basic. Rate-limited per IP to blunt secret guessing.
+
+router.post('/oauth/token', express.urlencoded({ extended: false }), asyncHandler(async (req, res) => {
+  const ip = clientIp(req);
+  if (ip) {
+    const r = await rateLimiter.hit(`oauthtoken:${ip}`, 30);
+    if (!r.allowed) {
+      return res.status(429).set('Retry-After', String(Math.max(1, r.reset - Math.floor(Date.now() / 1000))))
+        .json({ error: 'temporarily_unavailable', error_description: 'Too many token requests' });
+    }
+  }
+  if (req.body?.grant_type !== 'client_credentials') {
+    return res.status(400).json({ error: 'unsupported_grant_type', error_description: 'Only client_credentials is supported' });
+  }
+  let clientId = req.body?.client_id;
+  let clientSecret = req.body?.client_secret;
+  const authz = req.headers.authorization || '';
+  if (authz.startsWith('Basic ')) {
+    const [u, p] = Buffer.from(authz.slice(6), 'base64').toString('utf8').split(':');
+    clientId = clientId || u; clientSecret = clientSecret || p;
+  }
+  const client = await verifyClientCredentials(clientId, clientSecret);
+  if (!client) return res.status(401).json({ error: 'invalid_client', error_description: 'Invalid client credentials' });
+  return res.json(issueAccessToken(client));
+}));
+
 // ------------------------------------------------------- discovery: me/meta
 
 router.get('/me', S(), asyncHandler(async (req, res) => {
@@ -85,9 +115,10 @@ router.get('/me', S(), asyncHandler(async (req, res) => {
   res.json({
     success: true,
     data: {
+      authType: req.apiKey.oauthClientId ? 'oauth' : 'api_key',
       key: { name: req.apiKey.name, prefix: req.apiKey.keyPrefix, mode: req.apiKey.mode, scopes: req.apiKey.scopes },
       workspace: ws,
-      rateLimit: { perMinute: req.apiKey.rateLimitPerMin || Number(process.env.API_V1_RATE_LIMIT_PER_MINUTE || 120) },
+      rateLimit: { perMinute: Number(process.env.API_V1_RATE_LIMIT_PER_MINUTE || 120) },
     },
   });
 }));

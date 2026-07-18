@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.0.70-preview';
+export const APP_VERSION = '3.0.71-preview';
 
 export const changelog = [
+  {
+    version: '3.0.71-preview',
+    date: 'July 18, 2026',
+    entries: [
+      { type: 'added', html: '<strong>🔑 OAuth2 for the API</strong> — app-to-app integrations can now authenticate with built-in <b>OAuth2 client-credentials</b>: create a workspace-scoped client in <b>Settings → API Keys → OAuth clients</b>, exchange it at <code>POST /api/v1/oauth/token</code> for a short-lived bearer token. The API accepts these tokens anywhere an API key works; disabling a client revokes its tokens immediately. Every credential stays scoped to a single workspace.' },
+      { type: 'changed', html: '<strong>📖 Friendlier API docs</strong> — <code>/api/v1/docs</code> now opens with a copy-paste quickstart for both auth methods (API key and OAuth2), and the OpenAPI spec documents the token endpoint and both security schemes.' },
+    ],
+  },
   {
     version: '3.0.70-preview',
     date: 'July 18, 2026',

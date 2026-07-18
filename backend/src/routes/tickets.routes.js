@@ -706,6 +706,42 @@ router.delete('/api-keys/:keyId', requireTicketingAdmin, asyncHandler(async (req
   res.json({ success: true, data: await apiKeyService.remove(Number(req.params.keyId), req.workspaceId) });
 }));
 
+// ----------------------------------------- OAuth2 clients (admin)
+
+router.get('/oauth-clients', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const { default: oauthClientService } = await import('../services/oauthClientService.js');
+  res.json({ success: true, data: await oauthClientService.list(req.workspaceId) });
+}));
+
+router.post('/oauth-clients', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const { default: oauthClientService } = await import('../services/oauthClientService.js');
+  const client = await oauthClientService.create(req.workspaceId, {
+    name: req.body?.name, scopes: req.body?.scopes, expiresInDays: req.body?.expiresInDays,
+  }, req.ticketActor);
+  // client_secret returned exactly once.
+  res.status(201).json({ success: true, data: client });
+}));
+
+router.patch('/oauth-clients/:clientId', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const { default: oauthClientService } = await import('../services/oauthClientService.js');
+  res.json({ success: true, data: await oauthClientService.update(Number(req.params.clientId), req.workspaceId, req.body || {}) });
+}));
+
+router.post('/oauth-clients/:clientId/rotate', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const { default: oauthClientService } = await import('../services/oauthClientService.js');
+  res.json({ success: true, data: await oauthClientService.rotate(Number(req.params.clientId), req.workspaceId) });
+}));
+
+router.post('/oauth-clients/:clientId/revoke', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const { default: oauthClientService } = await import('../services/oauthClientService.js');
+  res.json({ success: true, data: await oauthClientService.revoke(Number(req.params.clientId), req.workspaceId) });
+}));
+
+router.delete('/oauth-clients/:clientId', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const { default: oauthClientService } = await import('../services/oauthClientService.js');
+  res.json({ success: true, data: await oauthClientService.remove(Number(req.params.clientId), req.workspaceId) });
+}));
+
 // ------------------------------------- outbound webhooks (gap plan 2 P3)
 
 router.get('/webhook-subscriptions', requireTicketingAdmin, asyncHandler(async (req, res) => {

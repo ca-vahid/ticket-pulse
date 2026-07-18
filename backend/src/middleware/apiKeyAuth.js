@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import prisma from '../services/prisma.js';
 import { hashApiKey, scopeSatisfies, keyUsable } from '../services/apiKeyService.js';
+import { verifyAccessToken, clientUsable } from '../services/oauthClientService.js';
 import rateLimiter from '../services/apiRateLimitService.js';
 import { problems } from '../utils/apiProblem.js';
 
@@ -76,35 +77,57 @@ export function apiRequestContext(req, res, next) {
   next();
 }
 
-/** Factory: `requireApiKey('tickets:write')` — auth + scope + rate limit. */
+/**
+ * Resolve a bearer credential (API key OR OAuth access token) into a uniform
+ * principal. Both are workspace-scoped; the OAuth path is a stateless JWT
+ * re-checked against the live client so revocation is immediate.
+ * @returns {{ workspaceId, scopes, name, prefix, mode, ipAllowlist, rateLimitPerMin, keyId, bucket }}
+ */
+async function resolvePrincipal(raw) {
+  if (/^tp_(live|test)_/.test(raw) || raw.startsWith('tpk_')) {
+    const key = await prisma.apiKey.findUnique({ where: { keyHash: hashApiKey(raw) } });
+    if (!keyUsable(key)) throw problems.unauthorized('Unknown, disabled, revoked, or expired API key', 'invalid_api_key');
+    return {
+      workspaceId: key.workspaceId, scopes: key.scopes, name: key.name, prefix: key.keyPrefix, mode: key.mode,
+      ipAllowlist: key.ipAllowlist, rateLimitPerMin: key.rateLimitPerMin, keyId: key.id, bucket: `key:${key.id}`,
+    };
+  }
+  // OAuth2 access token (JWT).
+  let claims;
+  try { claims = verifyAccessToken(raw); } catch { throw problems.unauthorized('Invalid or expired access token', 'invalid_token'); }
+  const client = await prisma.oAuthClient.findUnique({ where: { clientId: claims.cid } });
+  if (!clientUsable(client)) throw problems.unauthorized('OAuth client disabled or revoked', 'invalid_token');
+  return {
+    workspaceId: client.workspaceId, scopes: client.scopes, name: client.name, prefix: client.clientId, mode: 'live',
+    ipAllowlist: [], rateLimitPerMin: null, keyId: null, oauthClientId: client.id, bucket: `oauth:${client.clientId}`,
+  };
+}
+
+/** Factory: `requireApiKey('tickets:write')` — auth (key or OAuth) + scope + rate limit. */
 export const requireApiKey = (scope) => async (req, res, next) => {
   try {
     const header = req.headers.authorization || '';
     const raw = header.startsWith('Bearer ') ? header.slice(7).trim() : null;
-    const looksLikeKey = raw && (/^tp_(live|test)_/.test(raw) || raw.startsWith('tpk_'));
-    if (!looksLikeKey) {
-      throw problems.unauthorized('Provide an API key: Authorization: Bearer tp_live_…', 'api_key_required');
+    if (!raw) {
+      throw problems.unauthorized('Provide an API key or OAuth token: Authorization: Bearer …', 'api_key_required');
     }
-    const key = await prisma.apiKey.findUnique({ where: { keyHash: hashApiKey(raw) } });
-    if (!keyUsable(key)) {
-      throw problems.unauthorized('Unknown, disabled, revoked, or expired API key', 'invalid_api_key');
-    }
+    const principal = await resolvePrincipal(raw);
 
     const ip = clientIp(req);
-    if (key.ipAllowlist?.length && !ipAllowed(ip, key.ipAllowlist)) {
+    if (principal.ipAllowlist?.length && !ipAllowed(ip, principal.ipAllowlist)) {
       throw problems.forbidden('Request IP is not in this key’s allowlist', 'ip_not_allowed');
     }
     // `scope` may be a single scope or an array (any-of).
     const required = Array.isArray(scope) ? scope : (scope ? [scope] : []);
-    if (required.length && !required.some((s) => scopeSatisfies(key.scopes, s))) {
-      throw problems.forbidden(`This key is missing the '${required.join("' or '")}' scope`, 'insufficient_scope');
+    if (required.length && !required.some((s) => scopeSatisfies(principal.scopes, s))) {
+      throw problems.forbidden(`This credential is missing the '${required.join("' or '")}' scope`, 'insufficient_scope');
     }
 
-    const limit = key.rateLimitPerMin || DEFAULT_KEY_LIMIT;
-    const rk = await rateLimiter.hit(`key:${key.id}`, limit);
+    const limit = principal.rateLimitPerMin || DEFAULT_KEY_LIMIT;
+    const rk = await rateLimiter.hit(principal.bucket, limit);
     setRateHeaders(res, rk);
     if (!rk.allowed) {
-      throw problems.rateLimited(`Rate limit is ${limit} requests/minute for this key`, Math.max(1, rk.reset - Math.floor(Date.now() / 1000)));
+      throw problems.rateLimited(`Rate limit is ${limit} requests/minute for this credential`, Math.max(1, rk.reset - Math.floor(Date.now() / 1000)));
     }
     if (ip) {
       const ri = await rateLimiter.hit(`ip:${ip}`, IP_LIMIT);
@@ -113,15 +136,19 @@ export const requireApiKey = (scope) => async (req, res, next) => {
       }
     }
 
-    req.apiKey = key;
-    req.workspaceId = key.workspaceId;
-    req.apiMode = key.mode;
+    req.apiKey = { id: principal.keyId, keyPrefix: principal.prefix, name: principal.name, scopes: principal.scopes, mode: principal.mode, oauthClientId: principal.oauthClientId || null };
+    req.workspaceId = principal.workspaceId;
+    req.apiMode = principal.mode;
     req.apiScope = (Array.isArray(scope) ? scope.join('|') : scope) || null;
     req.clientIp = ip;
-    prisma.apiKey.update({
-      where: { id: key.id },
-      data: { lastUsedAt: new Date(), lastUsedIp: ip?.slice(0, 64) || null, requestCount: { increment: 1 } },
-    }).catch(() => {});
+    if (principal.keyId) {
+      prisma.apiKey.update({
+        where: { id: principal.keyId },
+        data: { lastUsedAt: new Date(), lastUsedIp: ip?.slice(0, 64) || null, requestCount: { increment: 1 } },
+      }).catch(() => {});
+    } else if (principal.oauthClientId) {
+      prisma.oAuthClient.update({ where: { id: principal.oauthClientId }, data: { lastUsedIp: ip?.slice(0, 64) || null } }).catch(() => {});
+    }
     next();
   } catch (err) {
     next(err);

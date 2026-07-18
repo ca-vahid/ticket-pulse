@@ -87,6 +87,7 @@ model Workspace {
   aiProviderAttempts                AiProviderAttempt[]
   aiProviderHealthEvents            AiProviderHealthEvent[]
   channelHealthEvents               NotificationChannelHealthEvent[]
+  oauthClients                      OAuthClient[]
   webhookConfig                     WorkspaceWebhookConfig?
   groups                            Group[]
   mirrorJobs                        MirrorJob[]
@@ -181,6 +182,32 @@ model ApiKey {
 
   @@index([workspaceId, isEnabled])
   @@map("api_keys")
+}
+
+// Built-in OAuth2 client-credentials app (workspace-scoped). Exchanges a
+// client_id + client_secret at /api/v1/oauth/token for a short-lived bearer
+// access token carrying this workspace + these scopes.
+model OAuthClient {
+  id               Int       @id @default(autoincrement())
+  workspaceId      Int       @map("workspace_id")
+  workspace        Workspace @relation(fields: [workspaceId], references: [id])
+  name             String    @db.VarChar(120)
+  clientId         String    @unique @map("client_id") @db.VarChar(40)
+  clientSecretHash String    @map("client_secret_hash") @db.VarChar(64)
+  secretPrefix     String    @map("secret_prefix") @db.VarChar(16)
+  scopes           String[]  @default([])
+  isEnabled        Boolean   @default(true) @map("is_enabled")
+  revokedAt        DateTime? @map("revoked_at")
+  expiresAt        DateTime? @map("expires_at")
+  lastUsedAt       DateTime? @map("last_used_at")
+  lastUsedIp       String?   @map("last_used_ip") @db.VarChar(64)
+  tokenCount       Int       @default(0) @map("token_count")
+  createdBy        String?   @map("created_by") @db.VarChar(255)
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  @@index([workspaceId, isEnabled])
+  @@map("oauth_clients")
 }
 
 // Idempotency-Key replay cache for POST/PATCH writes on /api/v1 (24h TTL sweep).
