@@ -86,6 +86,7 @@ model Workspace {
   aiProviderSettings                AiProviderSetting[]
   aiProviderAttempts                AiProviderAttempt[]
   aiProviderHealthEvents            AiProviderHealthEvent[]
+  channelHealthEvents               NotificationChannelHealthEvent[]
   webhookConfig                     WorkspaceWebhookConfig?
   groups                            Group[]
   mirrorJobs                        MirrorJob[]
@@ -1704,6 +1705,31 @@ model AiProviderHealthEvent {
   @@index([workspaceId, operation, createdAt])
   @@index([success, createdAt])
   @@map("ai_provider_health_events")
+}
+
+/// Lightweight per-send health log for outbound notification transports
+/// (email now; channel field lets SMS/WhatsApp/voice join later). Mirrors
+/// AiProviderHealthEvent: one row per delivery attempt, success or failure,
+/// so the app can surface "email delivery is failing" instead of swallowing it.
+model NotificationChannelHealthEvent {
+  id               Int        @id @default(autoincrement())
+  workspaceId      Int?       @map("workspace_id")
+  workspace        Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  channel          String     @db.VarChar(20)
+  context          String?    @db.VarChar(60)
+  provider         String?    @db.VarChar(40)
+  success          Boolean
+  errorClass       String?    @map("error_class") @db.VarChar(50)
+  statusCode       Int?       @map("status_code")
+  recipientDomain  String?    @map("recipient_domain") @db.VarChar(120)
+  durationMs       Int?       @map("duration_ms")
+  sanitizedMessage String?    @map("sanitized_message") @db.VarChar(500)
+  createdAt        DateTime   @default(now()) @map("created_at")
+
+  @@index([channel, createdAt])
+  @@index([success, createdAt])
+  @@index([workspaceId, createdAt])
+  @@map("notification_channel_health_events")
 }
 
 model CompetencyCategory {

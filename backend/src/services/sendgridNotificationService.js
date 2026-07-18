@@ -1,6 +1,7 @@
 import axios from 'axios';
 import nodemailer from 'nodemailer';
 import settingsRepository from './settingsRepository.js';
+import emailHealthService from './emailHealthService.js';
 import { ExternalAPIError, ValidationError } from '../utils/errors.js';
 
 function trim(value) {
@@ -181,6 +182,8 @@ export async function sendEmail({
   html = null,
   text = null,
   customArgs = null,
+  context = null,
+  workspaceId = null,
 }) {
   const toRecipients = normalizeEmailList(to);
   const ccRecipients = normalizeEmailList(cc);
@@ -196,6 +199,9 @@ export async function sendEmail({
     throw new ValidationError('SendGrid is not configured');
   }
 
+  const smtpMode = !hasApiConfig(sendgridConfig) && hasSmtpConfig(sendgridConfig);
+  const provider = smtpMode ? 'sendgrid_smtp' : 'sendgrid';
+  const startedAt = Date.now();
   try {
     const deliveryParams = {
       sendgridConfig,
@@ -209,25 +215,34 @@ export async function sendEmail({
       textBody,
       customArgs,
     };
-    return hasApiConfig(sendgridConfig)
-      ? sendViaSendgridApi(deliveryParams)
-      : sendViaSmtp(deliveryParams);
+    const result = smtpMode
+      ? await sendViaSmtp(deliveryParams)
+      : await sendViaSendgridApi(deliveryParams);
+    await emailHealthService.recordSuccess({
+      workspaceId, channel: 'email', context, provider,
+      durationMs: Date.now() - startedAt, recipients: toRecipients,
+    });
+    return result;
   } catch (error) {
-    const smtpMode = !hasApiConfig(sendgridConfig) && hasSmtpConfig(sendgridConfig);
     const classified = smtpMode ? classifySmtpError(error) : classifySendgridError(error);
     const wrapped = new ExternalAPIError(smtpMode ? 'SendGrid SMTP' : 'SendGrid', smtpMode ? smtpErrorMessage(error) : sendgridErrorMessage(error), error);
     wrapped.providerStatus = classified.status;
     wrapped.retryable = classified.retryable;
     wrapped.errorClass = classified.errorClass;
+    await emailHealthService.recordFailure({
+      workspaceId, channel: 'email', context, provider,
+      error: wrapped, durationMs: Date.now() - startedAt, recipients: toRecipients,
+    });
     throw wrapped;
   }
 }
 
-export async function sendAssignmentEmail({ to, subject, body }) {
+export async function sendAssignmentEmail({ to, subject, body, context = 'assignment' }) {
   return sendEmail({
     to,
     subject: subject || 'Ticket Pulse priority assignment',
     text: body,
+    context,
   });
 }
 

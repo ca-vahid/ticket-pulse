@@ -13,6 +13,7 @@ import syncService from '../services/syncService.js';
 import scheduledSyncService from '../services/scheduledSyncService.js';
 import { clearReadCache } from '../services/dashboardReadCache.js';
 import { sendAssignmentEmail } from '../services/sendgridNotificationService.js';
+import emailHealthService from '../services/emailHealthService.js';
 import { placeVoiceCall, sendSms, sendWhatsApp } from '../services/twilioNotificationService.js';
 import {
   buildPublicTicketStatusUrl,
@@ -1143,6 +1144,24 @@ router.post(
 );
 
 /**
+ * GET /api/settings/email-health
+ * Delivery-health summary for outbound email: current status, last success/
+ * failure, 24h counts, an actionable hint, and recent failures. Powers the
+ * Settings health card and the admin "email delivery failing" banner.
+ */
+router.get(
+  '/email-health',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const [status, recentFailures] = await Promise.all([
+      emailHealthService.getStatus({ channel: 'email' }),
+      emailHealthService.getRecentFailures({ channel: 'email', limit: 10 }),
+    ]);
+    res.json({ success: true, data: { ...status, recentFailures } });
+  }),
+);
+
+/**
  * POST /api/settings/notification-providers/test
  * Send a real provider test using the saved global provider configuration.
  */
@@ -1162,6 +1181,7 @@ router.post(
         to: recipient,
         subject: 'Ticket Pulse notification provider test',
         body: 'This is a Ticket Pulse SendGrid test email. If you received it, email notifications are configured.',
+        context: 'test',
       });
     } else if (channel === 'twilio_sms') {
       validateE164(recipient, 'Test recipient');

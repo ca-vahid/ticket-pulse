@@ -43,6 +43,10 @@ class TicketTaskService {
     const ticket = await this._ticket(ticketId, workspaceId);
     if (ticket.origin === TICKET_ORIGIN.FRESHSERVICE && ticket.freshserviceTicketId) {
       await this._syncFromFs(ticket).catch((err) => logger.warn(`FS task sync failed for ${ticketDisplayRef(ticket)} (serving cache): ${err.message}`));
+    } else if (ticket.freshserviceTicketId) {
+      // TP-born but mirrored to FS: pull back status changes made on the
+      // FreshService copy so "mark done in FS" reflects here too (QA 07-17 #7).
+      await this._syncMirroredStatusFromFs(ticket).catch((err) => logger.warn(`FS mirror status sync failed for ${ticketDisplayRef(ticket)} (serving cache): ${err.message}`));
     }
     const rows = await prisma.ticketTask.findMany({
       where: { ticketId, workspaceId },
@@ -90,7 +94,7 @@ class TicketTaskService {
     return shape(updated || row);
   }
 
-  async update(taskId, workspaceId, patch) {
+  async update(taskId, workspaceId, patch, actor = null) {
     const task = await prisma.ticketTask.findFirst({ where: { id: Number(taskId), workspaceId }, select: TASK_SELECT });
     if (!task) throw new NotFoundError('Task not found');
     const ticket = await this._ticket(task.ticketId, workspaceId);
@@ -122,10 +126,36 @@ class TicketTaskService {
       await this._fsUpdate(ticket, task, data).catch((err) => logger.warn(`FS task update failed (non-fatal): ${err.message}`));
     }
     let row = await prisma.ticketTask.update({ where: { id: task.id }, data, select: TASK_SELECT });
+    if (data.status !== undefined && data.status !== task.status) {
+      await this._logStatusChange(ticket, task, task.status, data.status, actor);
+    }
     if (reassignedTo && ticket.origin === TICKET_ORIGIN.TICKETPULSE) {
       row = (await this._maybeNotify(ticket, row, reassignedTo)) || row;
     }
     return shape(row);
+  }
+
+  /** Record a task status change on the ticket's Activity timeline. */
+  async _logStatusChange(ticket, task, oldStatus, newStatus, actor) {
+    const label = { open: 'Open', in_progress: 'In progress', done: 'Done' };
+    try {
+      await prisma.ticketActivity.create({
+        data: {
+          ticketId: ticket.id,
+          activityType: 'task_status_changed',
+          performedBy: actor?.name || actor?.email || 'System',
+          performedAt: new Date(),
+          details: {
+            oldStatus: label[oldStatus] || oldStatus,
+            newStatus: label[newStatus] || newStatus,
+            note: `Task: ${task.title}`,
+            actorName: actor?.name || null,
+          },
+        },
+      });
+    } catch (err) {
+      logger.warn(`Failed to log task status change (non-fatal): ${err.message}`);
+    }
   }
 
   async remove(taskId, workspaceId) {
@@ -226,6 +256,29 @@ class TicketTaskService {
       subject: `New task on ${ref}: ${row.title}`, html,
     });
     return prisma.ticketTask.update({ where: { id: row.id }, data: { notifiedAt: new Date() }, select: TASK_SELECT });
+  }
+
+  /** TP-born mirrored ticket: pull status-only changes back from the FS copy.
+   *  We own title/description/assignee/due here, so this touches status only. */
+  async _syncMirroredStatusFromFs(ticket) {
+    const mirrored = await prisma.ticketTask.findMany({
+      where: { ticketId: ticket.id, workspaceId: ticket.workspaceId, fsTaskId: { not: null } },
+      select: { id: true, fsTaskId: true, status: true, title: true },
+    });
+    if (!mirrored.length) return;
+    const client = await this._fsClient(ticket.workspaceId);
+    if (!client) return;
+    const fsTasks = await client.listTicketTasks(Number(ticket.freshserviceTicketId));
+    const statusByFsId = new Map(fsTasks.map((t) => [String(t.id), FROM_FS_STATUS[t.status] || 'open']));
+    for (const local of mirrored) {
+      const fsStatus = statusByFsId.get(String(local.fsTaskId));
+      if (!fsStatus || fsStatus === local.status) continue;
+      await prisma.ticketTask.update({
+        where: { id: local.id },
+        data: { status: fsStatus, completedAt: fsStatus === 'done' ? new Date() : null },
+      });
+      await this._logStatusChange(ticket, local, local.status, fsStatus, { name: 'FreshService' });
+    }
   }
 
   /** Reconcile FS-born ticket's tasks into the local shadow cache. */

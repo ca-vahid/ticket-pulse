@@ -72,6 +72,7 @@ const HISTORY_STYLES = {
   noise_cleared: { icon: VolumeX, tone: 'bg-slate-100 text-slate-500' },
   ai_triage: { icon: Sparkles, tone: 'bg-indigo-100 text-indigo-600' },
   fields_updated: { icon: Pencil, tone: 'bg-slate-100 text-slate-500' },
+  task_status_changed: { icon: CheckSquare, tone: 'bg-amber-100 text-amber-600' },
   rejected: { icon: X, tone: 'bg-red-100 text-red-600' },
   group_changed: { icon: Building2, tone: 'bg-sky-100 text-sky-600' },
   default: { icon: History, tone: 'bg-slate-100 text-slate-500' },
@@ -1864,7 +1865,7 @@ export default function TicketDetail() {
                 { key: 'approvals', label: 'Approvals', icon: CheckCircle2, count: new Set((ticket.approvals || []).map((a) => a.requestGroupId || `single-${a.id}`)).size },
                 { key: 'ai', label: 'AI & Routing', icon: Sparkles, count: (ticket.pipelineRuns || []).length },
                 { key: 'tasks', label: 'Tasks', icon: CheckSquare, count: taskOpenCount },
-                { key: 'history', label: 'History', icon: History, count: historyItems.length },
+                { key: 'history', label: 'Activity', icon: History, count: historyItems.length },
               ].map(({ key, label, icon: TabIcon, count }) => {
                 const selected = pageTab === key;
                 return (

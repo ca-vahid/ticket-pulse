@@ -74,6 +74,7 @@ export default function MyCompetencies() {
   const [highlightCategoryId, setHighlightCategoryId] = useState(null);
   const [cancellingRequestId, setCancellingRequestId] = useState(null);
   const [activeTab, setActiveTab] = useState('competencies');
+  const [notifSubtab, setNotifSubtab] = useState('preferences'); // within the Notifications tab: 'preferences' | 'alerts'
   const [activeSummitTab, setActiveSummitTab] = useState('categories');
   const [matrixScrollLeft, setMatrixScrollLeft] = useState(0);
   const [matrixMaxScrollLeft, setMatrixMaxScrollLeft] = useState(0);
@@ -701,16 +702,6 @@ export default function MyCompetencies() {
               <Bell className="h-4 w-4" />
               Notifications
             </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('alerts')}
-              className={`inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition hover:-translate-y-0.5 ${
-                activeTab === 'alerts' ? 'bg-blue-600 text-white shadow-sm shadow-blue-100' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
-              }`}
-            >
-              <BellRing className="h-4 w-4" />
-              My Alerts
-            </button>
             {showSummitTab && (
               <button
                 type="button"
@@ -1087,11 +1078,33 @@ export default function MyCompetencies() {
         )}
 
         {!loading && activeTab === 'notifications' && (
-          <NotificationSettingsPanel workspaceId={workspaceId} />
-        )}
-
-        {!loading && activeTab === 'alerts' && (
-          <AgentAlertsPanel workspaceId={workspaceId} />
+          <div className="space-y-4">
+            <div className="inline-flex rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+              <button
+                type="button"
+                onClick={() => setNotifSubtab('preferences')}
+                className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-semibold transition ${
+                  notifSubtab === 'preferences' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                <Bell className="h-4 w-4" />
+                Notification preferences
+              </button>
+              <button
+                type="button"
+                onClick={() => setNotifSubtab('alerts')}
+                className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-semibold transition ${
+                  notifSubtab === 'alerts' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                <BellRing className="h-4 w-4" />
+                My alerts
+              </button>
+            </div>
+            {notifSubtab === 'preferences'
+              ? <NotificationSettingsPanel workspaceId={workspaceId} />
+              : <AgentAlertsPanel workspaceId={workspaceId} />}
+          </div>
         )}
       </main>
     </div>

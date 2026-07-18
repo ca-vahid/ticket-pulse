@@ -27,6 +27,7 @@ import TechnicianVisibilityPanel from '../components/settings/TechnicianVisibili
 import WorkspaceAccessPanel from '../components/settings/WorkspaceAccessPanel';
 import FreshServiceWebhookCard from '../components/settings/FreshServiceWebhookCard';
 import AiProviderSettingsPanel from '../components/settings/AiProviderSettingsPanel';
+import EmailHealthCard from '../components/settings/EmailHealthCard';
 import PublicTicketStatusPanel from '../components/settings/PublicTicketStatusPanel';
 import FeedbackPagePanel from '../components/settings/FeedbackPagePanel';
 import UrgentEscalationPanel from '../components/settings/UrgentEscalationPanel';
@@ -806,6 +807,7 @@ export default function Settings() {
               {/* Notification Provider Configuration */}
               {activeSection === 'notification-providers' && (
                 <form onSubmit={handleSave} className="p-6 space-y-5">
+                  <EmailHealthCard />
                   <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
                     <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-4">
                       <div>
