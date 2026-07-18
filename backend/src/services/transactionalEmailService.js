@@ -1,5 +1,6 @@
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
+import emailHealthService from './emailHealthService.js';
 
 /**
  * Shared one-off ("transactional") email transport. Prefers sending as a
@@ -21,12 +22,27 @@ export async function sendTransactionalEmail({ workspaceId, to, subject, html, l
     if (connection) {
       const { default: graphMailClient } = await import('../integrations/graphMailClient.js');
       if (graphMailClient.isConfigured()) {
-        await graphMailClient.sendMailAsMailbox(connection.address, { to: recipients, subject, html });
-        return { sent: true, via: 'msgraph' };
+        // Graph bypasses sendgridNotificationService, so record its health here.
+        const startedAt = Date.now();
+        try {
+          await graphMailClient.sendMailAsMailbox(connection.address, { to: recipients, subject, html });
+          await emailHealthService.recordSuccess({
+            workspaceId, channel: 'email', context: label, provider: 'msgraph',
+            durationMs: Date.now() - startedAt, recipients,
+          });
+          return { sent: true, via: 'msgraph' };
+        } catch (graphErr) {
+          await emailHealthService.recordFailure({
+            workspaceId, channel: 'email', context: label, provider: 'msgraph',
+            error: graphErr, durationMs: Date.now() - startedAt, recipients,
+          });
+          throw graphErr;
+        }
       }
     }
+    // sendgridNotificationService.sendEmail records its own health event.
     const { default: sendgrid } = await import('./sendgridNotificationService.js');
-    await sendgrid.sendEmail({ to: recipients, subject, html });
+    await sendgrid.sendEmail({ to: recipients, subject, html, context: label, workspaceId });
     return { sent: true, via: 'sendgrid' };
   } catch (err) {
     logger.warn(`Transactional ${label} send failed (non-fatal): ${err.message}`);

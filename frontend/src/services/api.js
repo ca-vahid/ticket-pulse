@@ -353,6 +353,10 @@ export const settingsAPI = {
     return await api.post('/settings/notification-providers/test', data);
   },
 
+  getEmailHealth: async () => {
+    return await api.get('/settings/email-health');
+  },
+
   initialize: async () => {
     return await api.post('/settings/initialize');
   },

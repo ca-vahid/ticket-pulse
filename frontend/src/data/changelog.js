@@ -1,6 +1,23 @@
-export const APP_VERSION = '3.0.67-preview';
+export const APP_VERSION = '3.0.69-preview';
 
 export const changelog = [
+  {
+    version: '3.0.69-preview',
+    date: 'July 18, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>✉️ Email delivery restored</strong> — approval emails, task-assignment emails, merge “email each requester”, and My Alerts emails weren’t arriving because SendGrid was dropping our production server’s (rotating) outbound IP. That’s resolved, and the new <b>Email delivery health</b> card (Settings → Notifications) now catches it if it ever recurs.' },
+      { type: 'added', html: '<strong>✅ Task status dropdown + editing</strong> — every task now has an <b>Open / In progress / Done</b> status dropdown and an inline edit for its description. Status changes are recorded on the ticket’s <b>Activity</b> tab and sync both ways with FreshService (mark done in either place and the other follows).' },
+      { type: 'changed', html: '<strong>🏷️ Clearer tasks + consistent naming</strong> — the Tasks add-form fields now have labels (<b>Task Description</b>, <b>Assign To</b>, <b>Due Date</b>), and the ticket detail “History” tab is now called “<b>Activity</b>” to match the preview drawer.' },
+      { type: 'changed', html: '<strong>🔔 Notifications, unified</strong> — in the agent portal, <b>Notifications</b> and <b>My Alerts</b> are now one “Notifications” tab with two sub-sections, instead of two separate tabs under My Competencies.' },
+    ],
+  },
+  {
+    version: '3.0.68-preview',
+    date: 'July 18, 2026',
+    entries: [
+      { type: 'added', html: '<strong>📬 Email delivery health</strong> — Ticket Pulse now checks every outbound email and surfaces the result. A new <b>Email delivery health</b> card in Settings → Notifications shows whether email is sending, the last successful send, recent failures, and a plain-English fix hint. If delivery starts failing, global admins get an in-app banner instead of finding out from missing mail — built after a SendGrid IP-allowlist change silently blocked production sends.' },
+    ],
+  },
   {
     version: '3.0.67-preview',
     date: 'July 16, 2026',
