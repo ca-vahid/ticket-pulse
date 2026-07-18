@@ -764,7 +764,10 @@ router.post('/webhook-subscriptions', requireTicketingAdmin, asyncHandler(async 
   const events = (Array.isArray(req.body?.events) ? req.body.events : []).filter((e) => WEBHOOK_EVENTS.includes(e));
   if (events.length === 0) throw new ValidationError(`Pick at least one event: ${WEBHOOK_EVENTS.join(', ')}`);
   const crypto = await import('node:crypto');
-  const secret = `whsec_${crypto.randomBytes(24).toString('base64url')}`;
+  // Standard base64 (not base64url): the Standard Webhooks convention decodes
+  // the portion after `whsec_` as standard base64, so a base64url secret with
+  // `-`/`_` fails verification in strict consumer libs (e.g. Python).
+  const secret = `whsec_${crypto.randomBytes(24).toString('base64')}`;
   const sub = await prisma.webhookSubscription.create({
     data: { workspaceId: req.workspaceId, url, secret, events, createdBy: req.ticketActor.email },
     select: { id: true, url: true, events: true, isEnabled: true, createdAt: true },
@@ -815,6 +818,24 @@ router.delete('/webhook-subscriptions/:subId', requireTicketingAdmin, asyncHandl
 router.post('/webhook-subscriptions/:subId/test', requireTicketingAdmin, asyncHandler(async (req, res) => {
   const { testWebhookSubscription } = await import('../services/webhookDispatchService.js');
   res.json({ success: true, data: await testWebhookSubscription(Number(req.params.subId), req.workspaceId) });
+}));
+
+// Rotate the signing secret with a 24h grace window: the old secret keeps
+// signing alongside the new one so consumers can switch without dropped events.
+router.post('/webhook-subscriptions/:subId/rotate-secret', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const { invalidateWebhookCache } = await import('../services/webhookDispatchService.js');
+  const id = Number(req.params.subId);
+  const existing = await prisma.webhookSubscription.findFirst({ where: { id, workspaceId: req.workspaceId } });
+  if (!existing) throw new ValidationError('Webhook subscription not found');
+  const crypto = await import('node:crypto');
+  const secret = `whsec_${crypto.randomBytes(24).toString('base64')}`;
+  await prisma.webhookSubscription.update({
+    where: { id: existing.id },
+    data: { secret, secretPrevious: existing.secret, secretRotatedAt: new Date() },
+  });
+  invalidateWebhookCache(req.workspaceId);
+  // The new secret is returned exactly once; both sign for the next 24h.
+  res.json({ success: true, data: { id: existing.id, secret, graceHours: 24 } });
 }));
 
 router.get('/webhook-subscriptions/:subId/deliveries', requireTicketingAdmin, asyncHandler(async (req, res) => {
@@ -1046,13 +1067,13 @@ router.post('/:id/tasks', asyncHandler(async (req, res) => {
 
 router.patch('/:id/tasks/:taskId', asyncHandler(async (req, res) => {
   const { default: ticketTaskService } = await import('../services/ticketTaskService.js');
-  const task = await ticketTaskService.update(Number(req.params.taskId), req.workspaceId, req.body || {}, req.ticketActor);
+  const task = await ticketTaskService.update(Number(req.params.taskId), req.workspaceId, req.body || {}, req.ticketActor, parseTicketId(req));
   res.json({ success: true, data: task });
 }));
 
 router.delete('/:id/tasks/:taskId', asyncHandler(async (req, res) => {
   const { default: ticketTaskService } = await import('../services/ticketTaskService.js');
-  const result = await ticketTaskService.remove(Number(req.params.taskId), req.workspaceId, req.ticketActor);
+  const result = await ticketTaskService.remove(Number(req.params.taskId), req.workspaceId, req.ticketActor, parseTicketId(req));
   res.json({ success: true, data: result });
 }));
 

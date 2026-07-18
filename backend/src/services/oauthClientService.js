@@ -14,6 +14,13 @@ import { validateScopes } from './apiKeyService.js';
  * (the token is re-checked against the live client on every request).
  */
 
+// Prefer a dedicated secret. Falling back to a SESSION_SECRET derivative means
+// rotating the session secret silently invalidates every live access token, so
+// warn loudly in production when the dedicated secret is unset.
+if (process.env.NODE_ENV === 'production' && !process.env.API_OAUTH_SECRET) {
+  // eslint-disable-next-line no-console
+  console.warn('[oauth] API_OAUTH_SECRET is unset — deriving from SESSION_SECRET. Set API_OAUTH_SECRET in production so session-secret rotation does not invalidate API tokens.');
+}
 const OAUTH_SECRET = process.env.API_OAUTH_SECRET || `${config.session.secret}:tp-api-oauth`;
 const TOKEN_TTL_SEC = Number(process.env.API_OAUTH_TOKEN_TTL_SEC || 3600);
 const TOKEN_TYP = 'tp_api_oauth';
@@ -110,12 +117,15 @@ class OAuthClientService {
     return shape(updated);
   }
 
+  /** Rotate the client secret in place. Refuses a revoked client (rotating used
+   *  to silently un-revoke + re-enable it); preserves the enabled/disabled state. */
   async rotate(id, workspaceId) {
     const client = await prisma.oAuthClient.findFirst({ where: { id: Number(id), workspaceId } });
     if (!client) throw new NotFoundError('OAuth client not found');
+    if (client.revokedAt) throw new ValidationError('This client was revoked and cannot be rotated — create a new client instead');
     const { secret, secretHash, secretPrefix } = generateClient();
     const updated = await prisma.oAuthClient.update({
-      where: { id: client.id }, data: { clientSecretHash: secretHash, secretPrefix, revokedAt: null, isEnabled: true },
+      where: { id: client.id }, data: { clientSecretHash: secretHash, secretPrefix },
     });
     return shape(updated, secret);
   }

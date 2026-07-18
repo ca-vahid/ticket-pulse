@@ -53,7 +53,9 @@ describe('EmailHealthCard', () => {
     });
     render(<EmailHealthCard />);
 
-    await waitFor(() => expect(screen.getByText('No recent sends')).toBeInTheDocument());
-    expect(screen.getByText(/No email sends recorded yet/i)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('No recent sends')).toBeInTheDocument();
+      expect(screen.getByText(/No email sends recorded yet/i)).toBeInTheDocument();
+    });
   });
 });

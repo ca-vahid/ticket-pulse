@@ -126,14 +126,18 @@ class ApiKeyService {
     return shape(updated);
   }
 
-  /** Rotate: mint a new secret on the same key, keeping id/scopes; raw shown once. */
+  /** Rotate: mint a new secret on the same key, keeping id/scopes; raw shown once.
+   *  Refuses to rotate a REVOKED key — rotating used to silently un-revoke +
+   *  re-enable it, re-arming a credential an admin had killed. Create a fresh key
+   *  instead. The key's current enabled/disabled state is preserved. */
   async rotate(id, workspaceId) {
     const key = await prisma.apiKey.findFirst({ where: { id: Number(id), workspaceId } });
     if (!key) throw new NotFoundError('API key not found');
+    if (key.revokedAt) throw new ValidationError('This key was revoked and cannot be rotated — create a new key instead');
     const { raw, hash, prefix } = generateApiKey(key.mode);
     const updated = await prisma.apiKey.update({
       where: { id: key.id },
-      data: { keyHash: hash, keyPrefix: prefix, revokedAt: null, isEnabled: true },
+      data: { keyHash: hash, keyPrefix: prefix },
     });
     return shape(updated, raw);
   }

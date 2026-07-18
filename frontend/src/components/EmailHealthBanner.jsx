@@ -37,12 +37,15 @@ export default function EmailHealthBanner() {
 
   if (!isGlobalAdmin) return null;
   if (health?.status !== 'down') return null;
+  // Key the dismissal on the failure timestamp, falling back to a constant when
+  // it's absent — otherwise a `down` status with no lastFailureAt is undismissable.
+  const failureKey = health.lastFailureAt || 'down';
   // Re-show if a newer failure arrives after a dismissal.
-  if (dismissedAt && dismissedAt === health.lastFailureAt) return null;
+  if (dismissedAt === failureKey) return null;
 
   return (
     <div
-      className="fixed bottom-3 left-3 z-[9998] max-w-sm animate-slide-in-right"
+      className="fixed bottom-3 left-3 z-[9998] max-w-sm animate-fadeIn"
       role="alert"
       aria-live="assertive"
     >
@@ -65,8 +68,8 @@ export default function EmailHealthBanner() {
         </div>
         <button
           type="button"
-          onClick={() => setDismissedAt(health.lastFailureAt)}
-          className="flex-shrink-0 rounded p-0.5 text-red-100 hover:bg-red-500 hover:text-white"
+          onClick={() => setDismissedAt(failureKey)}
+          className="tp-focus-ring flex-shrink-0 rounded p-0.5 text-red-100 hover:bg-red-500 hover:text-white"
           aria-label="Dismiss"
         >
           <X className="h-4 w-4" />

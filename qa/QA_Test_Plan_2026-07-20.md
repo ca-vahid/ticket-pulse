@@ -14,6 +14,12 @@ Use a **QA TEST** prefix on any tickets you create and clean them up as usual.
 Report anything that deviates from the ✅ expected result, with the ticket ref and
 (for API items) the `X-Request-Id` from the response.
 
+> This revision folds in a **hardening pass** over the whole batch (security, data
+> integrity, and reliability). Steps updated by that pass are flagged inline — notably
+> test-mode keys are now read-only (§4.8), repeat escalations re-alert (§1.4), idempotency
+> handles concurrent retries (§4.5), and webhooks support secret rotation + private-target
+> guards (§4.10).
+
 ---
 
 ## 1. Custom Agent Alerts
@@ -39,7 +45,12 @@ see §3.4 for that change).
 ### 1.4 Escalation & re-categorization
 1. Edit the subscription: check **is escalated** and **is re-categorized into scope**.
 2. Raise a matching ticket's priority to High/Urgent → ✅ escalation alert.
-3. Move a ticket's category into your watched category → ✅ re-categorized alert.
+3. Move a ticket's category into your watched category → ✅ re-categorized alert. This
+   fires whether the category change is made **by AI or manually** (a coordinator editing
+   the category counts).
+4. **Repeat escalation:** raise the *same* ticket again (e.g. High → Urgent after the first
+   alert was delivered). ✅ you get a **second** alert for the new escalation — a further
+   raise on the same ticket is no longer permanently suppressed.
 
 ### 1.5 Priority filter, channels, quiet hours
 1. Set **Priority = Urgent only**: a Medium ticket in scope → ✅ no alert; an Urgent → ✅ alert.
@@ -52,8 +63,11 @@ see §3.4 for that change).
 - ✅ Pausing stops alerts until resumed; edit changes scope/triggers/channels; delete removes it.
 
 > **Note:** there's a deliberate grouping delay (up to ~60–90s) so bursts collapse;
-> a single ticket alerts within about a minute, not instantly. The same ticket never
-> alerts twice for the same trigger on the same subscription.
+> a single ticket alerts within about a minute, not instantly. Within a single grouping
+> window the same ticket won't alert twice for the same trigger — but a **new** event on
+> that ticket later (e.g. a further escalation, or a re-categorization after the first
+> alert was sent) will alert again. Alerts that fail to deliver (e.g. email outage) are
+> retried rather than silently consumed.
 
 ---
 
@@ -83,6 +97,12 @@ fixed. Please re-run each and confirm the email now arrives:
 
 > If any email doesn't arrive, open the health card first — its status + hint point
 > straight at the cause. (Admins also get an app-wide banner if delivery is failing.)
+
+### 2.4 SMS/voice health (if Twilio is configured)
+1. With an alert subscription that has **SMS** (or WhatsApp/Phone) enabled and a verified
+   phone, trigger an alert.
+2. ✅ SMS send attempts are now tracked in delivery health too (channel `sms`), so a
+   silent Twilio drop is visible rather than swallowed — the same protection email got.
 
 ---
 
@@ -160,6 +180,10 @@ API keys**, **OAuth clients**, and **Outbound webhooks**.
    identical body. ✅ **one** ticket is created; the second response is the same as the
    first (header `Idempotent-Replayed: true`), no duplicate.
 2. Reuse `Idempotency-Key: qa-123` with a **different** body. ✅ **422** (`idempotency_key_reused`).
+3. **Concurrent duplicates:** fire two identical `POST /tickets` with the same fresh
+   `Idempotency-Key` at the same moment (e.g. two parallel curls). ✅ exactly **one**
+   ticket is created; the loser returns **409** (`idempotency_in_flight`) rather than a
+   second ticket. (Idempotency also works for OAuth-token callers now, not just API keys.)
 
 ### 4.6 Rate limiting
 1. Rapidly send >120 requests in a minute with one key (a quick loop against `/me`).
@@ -182,13 +206,22 @@ API keys**, **OAuth clients**, and **Outbound webhooks**.
 5. **Disable** the OAuth client in Settings, then reuse the token. ✅ **401** (revocation
    is immediate — the token is re-checked against the live client).
 
-### 4.8 Test-mode key
-1. Create a key in **Test** mode (`tp_test_…`). ✅ it works the same but is clearly
-   labeled **Test** in the list, so you can build against it without touching live data flows.
+### 4.8 Test-mode key (read-only)
+1. Create a key in **Test** mode (`tp_test_…`). ✅ clearly labeled **Test** in the list.
+2. Use it for a **read**, e.g. `GET /api/v1/tickets`. ✅ works.
+3. Use it for a **write**, e.g. `POST /api/v1/tickets`. ✅ **403 problem+json**
+   (`code: test_mode_read_only`) — test keys are read-only, so you can build against the
+   API without any risk of touching live tickets or emailing real requesters. Switch to a
+   `tp_live_…` key to make changes.
 
 ### 4.9 Key rotation & expiry
-1. **Rotate** a key. ✅ a new secret is shown once; the old secret stops working.
-2. Create a key that **expires in 30 days**. ✅ the list shows the expiry date.
+1. **Rotate** a key. ✅ a new secret is shown once; the old secret stops working; the
+   key keeps its enabled/disabled state.
+2. **Revoke** a key (Disable), then try to **Rotate** it. ✅ rotation is **refused** with a
+   clear message — rotating no longer silently re-arms a revoked key (create a new one).
+3. Create a key that **expires in 30 days**. ✅ the list shows the expiry date.
+4. Deleting or rotating a key/client now asks for **confirmation** first (guarding against
+   an accidental one-click on the trash/rotate icon).
 
 ### 4.10 Outbound webhooks (durable + signed)
 1. **Outbound webhooks → New webhook**. Point the URL at a request-capture tool
@@ -197,10 +230,19 @@ API keys**, **OAuth clients**, and **Outbound webhooks**.
    `webhook-timestamp`, `webhook-signature` (`v1,<hmac>`) — and a legacy
    `X-TicketPulse-Signature` alongside during migration.
 3. Create a **QA TEST** ticket. ✅ a `ticket.created` delivery arrives with the full
-   ticket embedded (no need to re-fetch).
+   ticket embedded (no need to re-fetch). The `webhook-signature` verifies with a standard
+   Standard-Webhooks library (the secret is now standard base64, so strict verifiers — e.g.
+   Python — validate it correctly).
 4. Point a webhook at a URL that returns 500, trigger an event, then open the webhook's
    **Log**. ✅ you see the failed attempts with backoff; click **Redeliver** to retry.
-   ✅ 20 consecutive failures auto-disable the hook (with the reason shown).
+   ✅ 20 consecutive dead deliveries auto-disable the hook (with the reason shown).
+5. **Secret rotation:** rotate the webhook's signing secret. ✅ a new secret is shown once;
+   for the next **24h** deliveries carry **both** signatures (space-separated in
+   `webhook-signature`) so you can roll consumers over without dropping events.
+6. **Private-target guard:** try to save a webhook pointing at an internal address
+   (e.g. `http://169.254.169.254/…`, `http://127.0.0.1`, or the decimal form
+   `http://2130706433/`). ✅ rejected as a private/internal address; deliveries also refuse
+   to follow a redirect that lands on one.
 
 ---
 

@@ -89,7 +89,27 @@ export async function applyWorkflowAssignment(ticket, techId) {
 
 // ------------------------------------------------------------------ webhook
 
-const PRIVATE_HOST_PATTERN = /^(localhost|127\.|0\.0\.0\.0|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|\[?::1\]?$)/i;
+const PRIVATE_HOST_PATTERN = /^(localhost|127\.|0\.0\.0\.0|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|\[?::1\]?$)/i;
+// IPv6 loopback/link-local/unique-local, incl. IPv4-mapped forms.
+const PRIVATE_IPV6_PATTERN = /^(::1|f[cd][0-9a-f]{2}:|fe80:|::ffff:(0*:)?(127\.|10\.|192\.168\.|169\.254\.))/i;
+
+/** Detect private/internal targets given as a non-dotted-quad IP literal:
+ *  decimal (2130706433), hex (0x7f000001), or octal (0177.0.0.1). These bypass
+ *  the dotted-decimal prefix checks above. */
+function isNumericPrivateHost(hostname) {
+  const h = hostname.replace(/^\[|\]$/g, '');
+  let n = null;
+  if (/^0x[0-9a-f]+$/i.test(h)) n = parseInt(h, 16);
+  else if (/^0[0-7]+$/.test(h)) n = parseInt(h, 8);
+  else if (/^\d+$/.test(h)) n = Number(h);
+  if (n === null || !Number.isFinite(n) || n < 0 || n > 0xffffffff) return false;
+  const oct = [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255];
+  return oct[0] === 127 || oct[0] === 10 || oct[0] === 0
+    || (oct[0] === 192 && oct[1] === 168)
+    || (oct[0] === 169 && oct[1] === 254)
+    || (oct[0] === 172 && oct[1] >= 16 && oct[1] <= 31)
+    || (oct[0] === 100 && oct[1] >= 64 && oct[1] <= 127);
+}
 
 export function webhookUrlProblem(rawUrl) {
   let url;
@@ -99,8 +119,11 @@ export function webhookUrlProblem(rawUrl) {
     return 'Webhook URL is not a valid URL';
   }
   if (!['http:', 'https:'].includes(url.protocol)) return 'Webhook URL must be http(s)';
-  if (process.env.NOTIFICATION_WEBHOOK_ALLOW_PRIVATE !== 'true' && PRIVATE_HOST_PATTERN.test(url.hostname)) {
-    return 'Webhook URL points at a private/internal address';
+  if (process.env.NOTIFICATION_WEBHOOK_ALLOW_PRIVATE !== 'true') {
+    const host = url.hostname;
+    if (PRIVATE_HOST_PATTERN.test(host) || PRIVATE_IPV6_PATTERN.test(host) || isNumericPrivateHost(host)) {
+      return 'Webhook URL points at a private/internal address';
+    }
   }
   return null;
 }

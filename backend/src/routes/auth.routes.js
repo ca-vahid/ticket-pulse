@@ -7,9 +7,27 @@ import { ValidationError, AuthenticationError } from '../utils/errors.js';
 import workspaceRepository from '../services/workspaceRepository.js';
 import settingsRepository from '../services/settingsRepository.js';
 import agentCompetencyService from '../services/agentCompetencyService.js';
+import rateLimiter from '../services/apiRateLimitService.js';
+import { clientIp } from '../middleware/apiKeyAuth.js';
 import logger from '../utils/logger.js';
 
 const router = express.Router();
+
+// Per-IP throttle for the credential-validating login endpoints. Uses the same
+// durable fixed-window limiter as the public API (fails open on store error, so
+// login never hard-breaks). Blunts brute-forcing / token-spraying.
+const LOGIN_ATTEMPTS_PER_MIN = Number(process.env.AUTH_LOGIN_RATE_LIMIT_PER_MINUTE || 20);
+async function throttleLogin(req, res, next) {
+  const ip = clientIp(req);
+  if (!ip) return next();
+  const r = await rateLimiter.hit(`login:${ip}`, LOGIN_ATTEMPTS_PER_MIN);
+  if (!r.allowed) {
+    return res.status(429)
+      .set('Retry-After', String(Math.max(1, r.reset - Math.floor(Date.now() / 1000))))
+      .json({ success: false, message: 'Too many login attempts — please wait a minute and try again.' });
+  }
+  return next();
+}
 
 const TENANT_ID = process.env.AZURE_AD_TENANT_ID;
 const CLIENT_ID = process.env.AZURE_AD_CLIENT_ID;
@@ -190,6 +208,7 @@ async function resolveLoginAccess({ email, role, selectedWorkspaceId }) {
  */
 router.post(
   '/sso',
+  throttleLogin,
   asyncHandler(async (req, res) => {
     const { idToken } = req.body;
 
@@ -316,6 +335,7 @@ router.post(
  */
 router.post(
   '/dev-login',
+  throttleLogin,
   asyncHandler(async (req, res) => {
     if (config.isProduction || !config.devAuth.enabled || !isLocalDevRequest(req)) {
       throw new AuthenticationError('Development auth bypass is not available');

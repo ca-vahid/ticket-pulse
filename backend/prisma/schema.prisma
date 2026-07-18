@@ -190,7 +190,7 @@ model ApiKey {
 model OAuthClient {
   id               Int       @id @default(autoincrement())
   workspaceId      Int       @map("workspace_id")
-  workspace        Workspace @relation(fields: [workspaceId], references: [id])
+  workspace        Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   name             String    @db.VarChar(120)
   clientId         String    @unique @map("client_id") @db.VarChar(40)
   clientSecretHash String    @map("client_secret_hash") @db.VarChar(64)
@@ -213,16 +213,17 @@ model OAuthClient {
 // Idempotency-Key replay cache for POST/PATCH writes on /api/v1 (24h TTL sweep).
 model ApiIdempotencyKey {
   id           Int      @id @default(autoincrement())
-  apiKeyId     Int      @map("api_key_id")
+  principal    String   @db.VarChar(120) // credential bucket: key:<id> | oauth:<clientId>
+  apiKeyId     Int?     @map("api_key_id")
   idemKey      String   @map("idem_key") @db.VarChar(255)
   method       String   @db.VarChar(10)
   path         String   @db.VarChar(500)
   requestHash  String   @map("request_hash") @db.VarChar(64)
-  statusCode   Int      @map("status_code")
-  responseBody Json     @map("response_body")
+  statusCode   Int?     @map("status_code") // NULL = reservation (in-flight), set on completion
+  responseBody Json?    @map("response_body")
   createdAt    DateTime @default(now()) @map("created_at")
 
-  @@unique([apiKeyId, idemKey])
+  @@unique([principal, idemKey])
   @@index([createdAt])
   @@map("api_idempotency_keys")
 }
@@ -1976,9 +1977,13 @@ model AgentAlertEvent {
   priority       Int? // ticket priority at match time (for quiet-hours urgent bypass)
   matchedAt      DateTime               @default(now()) @map("matched_at")
   sentAt         DateTime?              @map("sent_at")
+  attempts       Int                    @default(0) // delivery attempts (retry cap)
   deliveryResult Json?                  @map("delivery_result")
 
-  @@unique([subscriptionId, ticketId, trigger])
+  // Uniqueness is a PARTIAL unique index (… WHERE sent_at IS NULL) defined in
+  // migration 20260727000000 — it dedups only pending events so a later
+  // escalation on the same ticket can alert again after the prior send. Prisma
+  // can't express the WHERE clause, so it lives in raw SQL, not @@unique here.
   @@index([subscriptionId, sentAt])
   @@index([workspaceId, sentAt])
   @@map("agent_alert_events")

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Check, Copy, KeyRound, Loader2, Lock, Plus, RefreshCw, Send, Trash2, Webhook,
 } from 'lucide-react';
@@ -30,11 +30,19 @@ const WEBHOOK_EVENTS = [
 
 const fmtDate = (d) => new Date(d).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 
+// Guard irreversible credential actions (delete / rotate) behind a confirm —
+// the trash icon sits a few px from Enable/Disable and the secret is shown once.
+const confirmDestructive = (message) => typeof window === 'undefined' || window.confirm(message);
+// A swallowed load error must not render as an empty list on a credentials page
+// (an admin could conclude their keys were wiped). Surface it instead.
+const loadErrorMessage = (e) => e?.response?.data?.detail || e?.response?.data?.message || e?.message || 'Could not load — check your connection and retry.';
+
 function DeliveryLog({ subId }) {
   const [rows, setRows] = useState(null);
   const load = useCallback(() => { ticketsAPI.listWebhookDeliveries(subId).then((r) => setRows(r.data || [])).catch(() => setRows([])); }, [subId]);
-  useEffect(() => { load(); }, [load]);
-  const redeliver = async (id) => { await ticketsAPI.redeliverWebhook(id).catch(() => {}); setTimeout(load, 300); };
+  const reloadTimer = useRef(null);
+  useEffect(() => { load(); return () => clearTimeout(reloadTimer.current); }, [load]);
+  const redeliver = async (id) => { await ticketsAPI.redeliverWebhook(id).catch(() => {}); reloadTimer.current = setTimeout(load, 300); };
   if (rows === null) return <p className="mt-1.5 text-[11px] text-slate-400">Loading deliveries…</p>;
   if (!rows.length) return <p className="mt-1.5 text-[11px] text-slate-400">No deliveries yet.</p>;
   const tone = { success: 'text-emerald-600', pending: 'text-amber-600', failed: 'text-red-600', dead: 'text-red-600' };
@@ -69,9 +77,10 @@ function WebhooksSection() {
   const [error, setError] = useState(null);
   const [testResult, setTestResult] = useState(null);
   const [openLog, setOpenLog] = useState(null);
+  const [loadError, setLoadError] = useState(null);
 
   const load = useCallback(() => {
-    ticketsAPI.listWebhooks().then((res) => setSubs(res.data || [])).catch(() => {});
+    ticketsAPI.listWebhooks().then((res) => { setSubs(res.data || []); setLoadError(null); }).catch((e) => setLoadError(loadErrorMessage(e)));
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -128,7 +137,7 @@ function WebhooksSection() {
               <button onClick={() => setOpenLog(openLog === sub.id ? null : sub.id)} className="tp-focus-ring text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 hover:bg-slate-50">Log</button>
               <button onClick={() => ping(sub.id)} className="tp-focus-ring inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 hover:bg-slate-50"><Send className="w-3 h-3" aria-hidden="true" /> Test</button>
               <button onClick={() => act(() => ticketsAPI.updateWebhook(sub.id, { isEnabled: !sub.isEnabled }))} className="tp-focus-ring text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 hover:bg-slate-50">{sub.isEnabled ? 'Disable' : 'Enable'}</button>
-              <button onClick={() => act(() => ticketsAPI.deleteWebhook(sub.id))} aria-label={`Delete webhook ${sub.url}`} className="tp-focus-ring p-1 rounded text-slate-300 hover:text-red-500"><Trash2 className="w-3.5 h-3.5" aria-hidden="true" /></button>
+              <button onClick={() => { if (confirmDestructive(`Delete the webhook for ${sub.url}? Delivery to this endpoint stops immediately.`)) act(() => ticketsAPI.deleteWebhook(sub.id)); }} aria-label={`Delete webhook ${sub.url}`} className="tp-focus-ring p-1 rounded text-slate-300 hover:text-red-500"><Trash2 className="w-3.5 h-3.5" aria-hidden="true" /></button>
             </div>
             {testResult?.id === sub.id && (
               <p className={`mt-1 text-[11px] ${testResult.pending ? 'text-slate-400' : testResult.ok ? 'text-emerald-600' : 'text-red-600'}`}>
@@ -139,7 +148,11 @@ function WebhooksSection() {
             {openLog === sub.id && <DeliveryLog subId={sub.id} />}
           </li>
         ))}
-        {subs.length === 0 && <li className="text-xs text-slate-400 italic">No webhooks yet.</li>}
+        {subs.length === 0 && (
+          loadError
+            ? <li className="text-xs text-red-500">Couldn’t load webhooks: {loadError}</li>
+            : <li className="text-xs text-slate-400 italic">No webhooks yet.</li>
+        )}
       </ul>
 
       {error && <p className="text-xs text-red-500 mb-1.5">{error}</p>}
@@ -172,8 +185,9 @@ function OAuthClientsSection() {
   const [fresh, setFresh] = useState(null); // { clientId, clientSecret } — shown once
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const [loadError, setLoadError] = useState(null);
 
-  const load = useCallback(() => { ticketsAPI.listOauthClients().then((r) => setClients(r.data || [])).catch(() => {}); }, []);
+  const load = useCallback(() => { ticketsAPI.listOauthClients().then((r) => { setClients(r.data || []); setLoadError(null); }).catch((e) => setLoadError(loadErrorMessage(e))); }, []);
   useEffect(() => { load(); }, [load]);
 
   const create = async () => {
@@ -182,7 +196,11 @@ function OAuthClientsSection() {
     catch (e) { setError(e.response?.data?.detail || e.response?.data?.message || e.message); }
     setBusy(false);
   };
-  const rotate = async (c) => { setError(null); try { const r = await ticketsAPI.rotateOauthClient(c.id); setFresh({ name: `${r.data.name} (rotated)`, clientId: r.data.clientId, clientSecret: r.data.clientSecret }); load(); } catch (e) { setError(e.response?.data?.detail || e.message); } };
+  const rotate = async (c) => {
+    if (!confirmDestructive(`Rotate the secret for “${c.name}”? The current secret stops working immediately and any integration using it must be updated.`)) return;
+    setError(null);
+    try { const r = await ticketsAPI.rotateOauthClient(c.id); setFresh({ name: `${r.data.name} (rotated)`, clientId: r.data.clientId, clientSecret: r.data.clientSecret }); load(); } catch (e) { setError(e.response?.data?.detail || e.message); }
+  };
   const act = async (fn) => { setError(null); try { await fn(); load(); } catch (e) { setError(e.response?.data?.detail || e.response?.data?.message || e.message); } };
 
   return (
@@ -222,10 +240,14 @@ function OAuthClientsSection() {
             <span className="ml-auto text-slate-400 tabular-nums">{c.tokenCount || 0} tokens{c.lastUsedAt ? ` · last ${new Date(c.lastUsedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` : ''}</span>
             <button onClick={() => rotate(c)} title="Rotate secret" className="tp-focus-ring inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 hover:bg-slate-50"><RefreshCw className="w-3 h-3" aria-hidden="true" /> Rotate</button>
             <button onClick={() => act(() => ticketsAPI.updateOauthClient(c.id, { isEnabled: !c.isEnabled }))} className="tp-focus-ring text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 hover:bg-slate-50">{c.isEnabled ? 'Disable' : 'Enable'}</button>
-            <button onClick={() => act(() => ticketsAPI.deleteOauthClient(c.id))} aria-label={`Delete client ${c.name}`} className="tp-focus-ring p-1 rounded text-slate-300 hover:text-red-500"><Trash2 className="w-3.5 h-3.5" aria-hidden="true" /></button>
+            <button onClick={() => { if (confirmDestructive(`Delete OAuth client “${c.name}”? Any integration using it loses access immediately.`)) act(() => ticketsAPI.deleteOauthClient(c.id)); }} aria-label={`Delete client ${c.name}`} className="tp-focus-ring p-1 rounded text-slate-300 hover:text-red-500"><Trash2 className="w-3.5 h-3.5" aria-hidden="true" /></button>
           </li>
         ))}
-        {clients.length === 0 && <li className="text-xs text-slate-400 italic">No OAuth clients yet.</li>}
+        {clients.length === 0 && (
+          loadError
+            ? <li className="text-xs text-red-500">Couldn’t load OAuth clients: {loadError}</li>
+            : <li className="text-xs text-slate-400 italic">No OAuth clients yet.</li>
+        )}
       </ul>
 
       {error && <p className="text-xs text-red-500 mb-1.5">{error}</p>}
@@ -271,8 +293,9 @@ export default function ApiKeysPanel() {
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const [loadError, setLoadError] = useState(null);
 
-  const load = useCallback(() => { ticketsAPI.listApiKeys().then((res) => setKeys(res.data || [])).catch(() => {}); }, []);
+  const load = useCallback(() => { ticketsAPI.listApiKeys().then((res) => { setKeys(res.data || []); setLoadError(null); }).catch((e) => setLoadError(loadErrorMessage(e))); }, []);
   useEffect(() => { load(); }, [load]);
 
   const create = async () => {
@@ -285,6 +308,7 @@ export default function ApiKeysPanel() {
     setBusy(false);
   };
   const rotate = async (k) => {
+    if (!confirmDestructive(`Rotate the secret for “${k.name}”? The current key stops working immediately and any integration using it must be updated.`)) return;
     setError(null);
     try { const res = await ticketsAPI.rotateApiKey(k.id); setFreshKey({ name: `${res.data.name} (rotated)`, apiKey: res.data.apiKey }); load(); } catch (e) { setError(e.response?.data?.detail || e.message); }
   };
@@ -302,6 +326,7 @@ export default function ApiKeysPanel() {
         </div>
         <p className="text-xs text-slate-400 mb-3">
           Keys authenticate the public <code className="bg-slate-100 rounded px-1">/api/v1</code> API (Bearer <code className="bg-slate-100 rounded px-1">tp_live_…</code> / <code className="bg-slate-100 rounded px-1">tp_test_…</code>), scoped to this workspace.
+          {' '}<span className="text-amber-700">Test keys are read-only</span> — use them to build against the API safely; a live key is required to make changes.
           {' '}Full reference: <a href="/api/v1/docs" target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">/api/v1/docs</a>.
         </p>
 
@@ -332,10 +357,14 @@ export default function ApiKeysPanel() {
               </span>
               <button onClick={() => rotate(k)} title="Rotate secret" className="tp-focus-ring inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 hover:bg-slate-50"><RefreshCw className="w-3 h-3" aria-hidden="true" /> Rotate</button>
               <button onClick={() => act(() => ticketsAPI.updateApiKey(k.id, { isEnabled: !k.isEnabled }))} className="tp-focus-ring text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 hover:bg-slate-50">{k.isEnabled ? 'Disable' : 'Enable'}</button>
-              <button onClick={() => act(() => ticketsAPI.deleteApiKey(k.id))} aria-label={`Revoke key ${k.name}`} className="tp-focus-ring p-1 rounded text-slate-300 hover:text-red-500"><Trash2 className="w-3.5 h-3.5" aria-hidden="true" /></button>
+              <button onClick={() => { if (confirmDestructive(`Delete API key “${k.name}”? Any integration using it stops working immediately and this can’t be undone.`)) act(() => ticketsAPI.deleteApiKey(k.id)); }} aria-label={`Revoke key ${k.name}`} className="tp-focus-ring p-1 rounded text-slate-300 hover:text-red-500"><Trash2 className="w-3.5 h-3.5" aria-hidden="true" /></button>
             </li>
           ))}
-          {keys.length === 0 && <li className="text-xs text-slate-400 italic">No API keys yet.</li>}
+          {keys.length === 0 && (
+            loadError
+              ? <li className="text-xs text-red-500">Couldn’t load API keys: {loadError}</li>
+              : <li className="text-xs text-slate-400 italic">No API keys yet.</li>
+          )}
         </ul>
 
         {error && <p className="text-xs text-red-500 mb-1.5">{error}</p>}

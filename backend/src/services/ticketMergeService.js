@@ -37,11 +37,29 @@ class TicketMergeService {
     if (['Deleted', 'Spam'].includes(target.status)) throw new ValidationError('Cannot merge into a deleted/spam ticket');
     if (['Deleted', 'Spam'].includes(source.status)) throw new ValidationError('Cannot merge a deleted/spam ticket');
 
+    // Survivor gate: the target carries the live conversation forward, so it
+    // must be a TP-born Open/Pending ticket. Copying messages onto an FS-born
+    // target would strand them in a TP shadow FreshService never sees; a
+    // Resolved/Closed target is a husk nobody watches. (Previously this only
+    // guarded the batch path — the single-merge endpoint bypassed it.)
+    if (target.origin !== 'ticketpulse') {
+      throw new ValidationError('You can only merge into a Ticket Pulse–born ticket (FreshService owns FS-born conversations — merge those in FreshService)');
+    }
+    if (!['Open', 'Pending'].includes(target.status)) {
+      throw new ValidationError('The ticket you merge into must be Open or Pending');
+    }
+
     // Refuse circular merges (target already merged into source).
     const circular = await prisma.ticketLink.findFirst({
       where: { workspaceId, ticketId: targetId, relatedTicketId: sourceId, kind: 'merged_into' },
     });
     if (circular) throw new ValidationError('That ticket was already merged into this one');
+    // Refuse chained-merge black holes: never merge into a ticket that has
+    // itself already been merged away (A→B, then C→A). Point at the survivor.
+    const targetMergedAway = await prisma.ticketLink.findFirst({
+      where: { workspaceId, ticketId: targetId, kind: 'merged_into' },
+    });
+    if (targetMergedAway) throw new ValidationError('That ticket was already merged into another ticket — merge into the surviving ticket instead');
 
     const srcRef = ticketDisplayRef(source);
     const tgtRef = ticketDisplayRef(target);
@@ -101,12 +119,61 @@ class TicketMergeService {
       create: { workspaceId, ticketId: sourceId, relatedTicketId: targetId, kind: 'merged_into', createdBy: actor?.email || null },
     });
 
+    // 3b. Reconcile the source's dependents so nothing is stranded on the husk:
+    //     open work and children follow the conversation to the survivor, and
+    //     pending approvals are cancelled so their 30-day magic links die.
+    const swept = { tasks: 0, children: 0, approvals: 0 };
+    try {
+      // Open TP-born tasks move to the survivor. FS-born tasks belong to the
+      // FreshService ticket (closed there separately) — leave them be.
+      const movedTasks = await prisma.ticketTask.updateMany({
+        where: { ticketId: sourceId, workspaceId, origin: 'ticketpulse', status: { not: 'done' } },
+        data: { ticketId: targetId },
+      });
+      swept.tasks = movedTasks.count;
+    } catch (err) {
+      logger.warn(`Merge task reconciliation failed (non-fatal): ${err.message}`);
+    }
+    try {
+      // Re-parent the source's children onto the survivor; drop any link that
+      // would point the survivor at itself or duplicate an existing parent.
+      const childLinks = await prisma.ticketLink.findMany({
+        where: { workspaceId, ticketId: sourceId, kind: 'parent_of' },
+      });
+      for (const cl of childLinks) {
+        if (cl.relatedTicketId === targetId) { await prisma.ticketLink.delete({ where: { id: cl.id } }); continue; }
+        try {
+          await prisma.ticketLink.update({ where: { id: cl.id }, data: { ticketId: targetId } });
+          swept.children += 1;
+        } catch { await prisma.ticketLink.delete({ where: { id: cl.id } }); }
+      }
+      // The husk no longer needs its own parent link.
+      await prisma.ticketLink.deleteMany({ where: { workspaceId, relatedTicketId: sourceId, kind: 'parent_of' } });
+    } catch (err) {
+      logger.warn(`Merge child reconciliation failed (non-fatal): ${err.message}`);
+    }
+    try {
+      const cancelled = await prisma.ticketApproval.updateMany({
+        where: { ticketId: sourceId, workspaceId, status: { in: ['pending', 'info_requested'] } },
+        data: { status: 'cancelled', decidedAt: new Date(), decidedVia: 'app', decisionNote: `Auto-cancelled: ${srcRef} merged into ${tgtRef}` },
+      });
+      swept.approvals = cancelled.count;
+    } catch (err) {
+      logger.warn(`Merge approval reconciliation failed (non-fatal): ${err.message}`);
+    }
+
     // 4. System note on the target describing what arrived.
     const attachmentCount = await prisma.ticketAttachment.count({ where: { ticketId: sourceId } });
     const { default: ticketService } = await import('./ticketService.js');
+    const sweptBits = [
+      swept.tasks ? `${swept.tasks} open task${swept.tasks === 1 ? '' : 's'}` : null,
+      swept.children ? `${swept.children} child ticket${swept.children === 1 ? '' : 's'}` : null,
+    ].filter(Boolean);
     await ticketService.addPrivateNote(targetId, workspaceId, {
       bodyText: [
         `Merged ${srcRef} ("${source.subject || 'no subject'}") into this ticket — ${copied} message${copied === 1 ? '' : 's'} copied in.`,
+        sweptBits.length ? `${sweptBits.join(' and ')} moved over.` : null,
+        swept.approvals ? `${swept.approvals} pending approval${swept.approvals === 1 ? '' : 's'} on ${srcRef} cancelled.` : null,
         attachmentCount > 0 ? `${attachmentCount} attachment${attachmentCount === 1 ? '' : 's'} remain on ${srcRef}.` : null,
         `Merged by ${actorLabel}.`,
       ].filter(Boolean).join(' '),
@@ -150,14 +217,14 @@ class TicketMergeService {
     }
 
     // 7. Audit both sides.
-    const details = { sourceId, targetId, srcRef, tgtRef, copied, requesterNotified };
+    const details = { sourceId, targetId, srcRef, tgtRef, copied, requesterNotified, swept };
     await Promise.all([
       ticketActivityRepository.create({ ticketId: sourceId, activityType: 'merged_into', performedBy: actor?.email || 'system', details }),
       ticketActivityRepository.create({ ticketId: targetId, activityType: 'merged_from', performedBy: actor?.email || 'system', details }),
     ]).catch(() => null);
 
     logger.info(`Merged ticket ${srcRef} -> ${tgtRef} (${copied} entries copied)`);
-    return { merged: true, sourceId, targetId, copied, sourceClosed, requesterNotified, targetRef: tgtRef };
+    return { merged: true, sourceId, targetId, copied, sourceClosed, requesterNotified, swept, targetRef: tgtRef };
   }
 
   /**

@@ -3,7 +3,14 @@ import logger from '../utils/logger.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 
-const LINK_KINDS = ['duplicate_of', 'related_to', 'parent_of'];
+// User-linkable kinds via the generic link() path. parent_of is deliberately
+// EXCLUDED: it carries invariants (single parent, no cycles, coordinator-only)
+// that only setParent() enforces, so it must be created via the /parent route.
+// merged_into is created solely by ticketMergeService.
+const LINK_KINDS = ['duplicate_of', 'related_to'];
+// Kinds the generic unlink() refuses to touch — they have dedicated lifecycles
+// (removeParent) or are immutable audit pointers (merged_into).
+const PROTECTED_LINK_KINDS = new Set(['parent_of', 'merged_into']);
 // The inverse label shown on the other ticket. merged_into links are created
 // by ticketMergeService (not user-linkable directly).
 const INVERSE_LABEL = { duplicate_of: 'has duplicate', related_to: 'related to', parent_of: 'child of', merged_into: 'merged from' };
@@ -62,6 +69,16 @@ class TicketLinkService {
       where: { id: Number(linkId), workspaceId, OR: [{ ticketId }, { relatedTicketId: ticketId }] },
     });
     if (!link) throw new NotFoundError('Link not found');
+    if (PROTECTED_LINK_KINDS.has(link.kind)) {
+      // Deleting a parent_of link here would bypass removeParent's FS pointer
+      // cleanup; deleting merged_into would erase the audit trail AND re-enable
+      // the reverse merge the circular guard blocks. Route through the proper path.
+      throw new ValidationError(
+        link.kind === 'parent_of'
+          ? 'Use “remove parent” to unlink a parent/child relationship'
+          : 'A merge record cannot be unlinked',
+      );
+    }
     await prisma.ticketLink.delete({ where: { id: link.id } });
     return { deleted: true };
   }
@@ -130,6 +147,9 @@ class TicketLinkService {
     ]);
     if (!child) throw new NotFoundError('This ticket no longer exists in the workspace');
     if (!parent) throw new NotFoundError(`Ticket ${parentId} was not found in this workspace — link by its TP-#### or #FS number`);
+    for (const [label, t] of [['parent', parent], ['child', child]]) {
+      if (['Deleted', 'Spam'].includes(t.status)) throw new ValidationError(`Cannot use a ${t.status.toLowerCase()} ticket as a ${label}`);
+    }
 
     // Cycle guard: the proposed parent must not be a descendant of the child.
     if (await this._isDescendant(parentId, childId, workspaceId)) {

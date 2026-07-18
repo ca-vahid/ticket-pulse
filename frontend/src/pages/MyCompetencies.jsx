@@ -1079,11 +1079,13 @@ export default function MyCompetencies() {
 
         {!loading && activeTab === 'notifications' && (
           <div className="space-y-4">
-            <div className="inline-flex rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+            <div className="inline-flex rounded-lg border border-slate-200 bg-white p-1 shadow-sm" role="tablist" aria-label="Notification settings">
               <button
                 type="button"
+                role="tab"
+                aria-selected={notifSubtab === 'preferences'}
                 onClick={() => setNotifSubtab('preferences')}
-                className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-semibold transition ${
+                className={`tp-focus-ring inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-semibold transition ${
                   notifSubtab === 'preferences' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-50'
                 }`}
               >
@@ -1092,8 +1094,10 @@ export default function MyCompetencies() {
               </button>
               <button
                 type="button"
+                role="tab"
+                aria-selected={notifSubtab === 'alerts'}
                 onClick={() => setNotifSubtab('alerts')}
-                className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-semibold transition ${
+                className={`tp-focus-ring inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-semibold transition ${
                   notifSubtab === 'alerts' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-50'
                 }`}
               >

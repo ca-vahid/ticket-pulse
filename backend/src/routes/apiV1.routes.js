@@ -148,7 +148,16 @@ router.get('/tickets', S('tickets:read'), asyncHandler(async (req, res) => {
   const pagination = result.nextCursor !== undefined
     ? { next_cursor: result.nextCursor, limit: result.pageSize }
     : { page: result.page, page_size: result.pageSize, total: result.total };
-  if (pagination.next_cursor) res.set('Link', `<${req.baseUrl}/tickets?cursor=${pagination.next_cursor}>; rel="next"`);
+  if (pagination.next_cursor) {
+    // Preserve the active filters on the next-page link — otherwise a client
+    // following it gets page 2 of the *unfiltered* list.
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(req.query || {})) {
+      if (k !== 'cursor' && k !== 'page' && v !== undefined && v !== null) qs.set(k, String(v));
+    }
+    qs.set('cursor', pagination.next_cursor);
+    res.set('Link', `<${req.baseUrl}/tickets?${qs.toString()}>; rel="next"`);
+  }
   res.json({ success: true, data: { items: result.items.map(ticketShape), pagination } });
 }));
 
@@ -257,13 +266,13 @@ router.post('/tickets/:id/tasks', S('tasks:write'), withIdempotency, asyncHandle
 
 router.patch('/tickets/:id/tasks/:taskId', S('tasks:write'), asyncHandler(async (req, res) => {
   const { default: ticketTaskService } = await import('../services/ticketTaskService.js');
-  const task = await ticketTaskService.update(Number(req.params.taskId), req.workspaceId, req.body || {}, apiActor(req));
+  const task = await ticketTaskService.update(Number(req.params.taskId), req.workspaceId, req.body || {}, apiActor(req), Number(req.params.id));
   res.json({ success: true, data: task });
 }));
 
 router.delete('/tickets/:id/tasks/:taskId', S('tasks:write'), asyncHandler(async (req, res) => {
   const { default: ticketTaskService } = await import('../services/ticketTaskService.js');
-  res.json({ success: true, data: await ticketTaskService.remove(Number(req.params.taskId), req.workspaceId, apiActor(req)) });
+  res.json({ success: true, data: await ticketTaskService.remove(Number(req.params.taskId), req.workspaceId, apiActor(req), Number(req.params.id)) });
 }));
 
 // ------------------------------------------------------------ attachments

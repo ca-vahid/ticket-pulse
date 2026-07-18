@@ -26,8 +26,12 @@ describe('ipAllowed', () => {
 });
 
 describe('clientIp', () => {
-  test('prefers the first X-Forwarded-For and strips v4-mapped v6', () => {
-    expect(clientIp({ headers: { 'x-forwarded-for': '198.51.100.9, 10.0.0.1' }, socket: {} })).toBe('198.51.100.9');
+  test('trusts Express req.ip (set via trust proxy), ignoring a spoofable XFF header', () => {
+    // req.ip is the platform-verified client hop. A forged X-Forwarded-For must
+    // NOT win — that would defeat the IP allowlist and every per-IP throttle.
+    expect(clientIp({ ip: '198.51.100.9', headers: { 'x-forwarded-for': '1.2.3.4' }, socket: {} })).toBe('198.51.100.9');
+  });
+  test('falls back to the socket address and strips v4-mapped v6', () => {
     expect(clientIp({ headers: {}, socket: { remoteAddress: '::ffff:203.0.113.5' } })).toBe('203.0.113.5');
   });
 });

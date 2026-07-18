@@ -54,6 +54,19 @@ export function signStandardWebhook(secret, msgId, timestampSec, body) {
   return `v1,${sig}`;
 }
 
+// Grace window during which a rotated-away secret still signs alongside the new
+// one, so consumers that haven't switched keep verifying (Standard Webhooks
+// permits multiple space-separated signatures in the header).
+const SECRET_GRACE_MS = 24 * 60 * 60 * 1000;
+export function standardWebhookHeader(sub, msgId, timestampSec, body) {
+  const sigs = [signStandardWebhook(sub.secret, msgId, timestampSec, body)];
+  if (sub.secretPrevious && sub.secretRotatedAt
+      && Date.now() - new Date(sub.secretRotatedAt).getTime() < SECRET_GRACE_MS) {
+    sigs.push(signStandardWebhook(sub.secretPrevious, msgId, timestampSec, body));
+  }
+  return sigs.join(' ');
+}
+
 async function enabledSubscriptions(workspaceId) {
   const hit = subsCache.get(workspaceId);
   if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.rows;
@@ -92,6 +105,12 @@ export function dispatchWebhookEvent(workspaceId, eventType, payload) {
 }
 
 async function sendHttp(sub, delivery) {
+  // Re-validate on EVERY delivery, not just at create/test time: an endpoint
+  // that was public when registered can 302 to an internal address, and this
+  // worker follows it. redirect:'error' refuses the redirect; the URL check
+  // blocks a directly-private target.
+  const urlProblem = webhookUrlProblem(sub.url);
+  if (urlProblem) return { ok: false, status: null, error: `blocked: ${urlProblem}` };
   const ts = Math.floor(Date.now() / 1000);
   const body = JSON.stringify(delivery.payload);
   const controller = new AbortController();
@@ -99,12 +118,13 @@ async function sendHttp(sub, delivery) {
   try {
     const res = await fetch(sub.url, {
       method: 'POST',
+      redirect: 'error',
       headers: {
         'Content-Type': 'application/json',
         'User-Agent': 'TicketPulse-Webhook/2.0',
         'webhook-id': delivery.eventId,
         'webhook-timestamp': String(ts),
-        'webhook-signature': signStandardWebhook(sub.secret, delivery.eventId, ts, body),
+        'webhook-signature': standardWebhookHeader(sub, delivery.eventId, ts, body),
         'X-TicketPulse-Event': delivery.eventType,
         'X-TicketPulse-Signature': signWebhookPayload(sub.secret, body),
       },
@@ -143,6 +163,7 @@ async function recordSubOutcome(sub, { ok, status, error }) {
 async function processOne(delivery) {
   const sub = await prisma.webhookSubscription.findUnique({ where: { id: delivery.subscriptionId } });
   if (!sub) { await prisma.webhookDelivery.update({ where: { id: delivery.id }, data: { status: 'dead', lastError: 'subscription deleted' } }).catch(() => {}); return; }
+  if (!sub.isEnabled) { await prisma.webhookDelivery.update({ where: { id: delivery.id }, data: { status: 'dead', lastError: 'subscription disabled' } }).catch(() => {}); return; }
   const result = await sendHttp(sub, delivery);
   const attempts = delivery.attempts + 1;
   if (result.ok) {
@@ -205,8 +226,9 @@ export async function listDeliveries(subscriptionId, workspaceId, limit = 25) {
 }
 
 export async function redeliver(deliveryId, workspaceId) {
-  const delivery = await prisma.webhookDelivery.findFirst({ where: { id: deliveryId, workspaceId } });
+  const delivery = await prisma.webhookDelivery.findFirst({ where: { id: deliveryId, workspaceId }, include: { subscription: { select: { isEnabled: true } } } });
   if (!delivery) return { ok: false, error: 'Delivery not found' };
+  if (delivery.subscription && !delivery.subscription.isEnabled) return { ok: false, error: 'Subscription is disabled — re-enable it before redelivering' };
   await prisma.webhookDelivery.update({ where: { id: delivery.id }, data: { status: 'pending', attempts: 0, nextAttemptAt: new Date(), lastError: null } });
   setTimeout(() => { processDue().catch(() => {}); }, 50);
   return { ok: true };

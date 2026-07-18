@@ -15,6 +15,7 @@ const TICK_MS = 10_000;
 const QUIET_MS = 20_000;
 const MAX_WAIT_MS = 90_000;
 const MAX_LISTED = 12; // tickets named in one alert before "…and N more"
+const MAX_DELIVERY_ATTEMPTS = 3; // give up (and mark sent) after this many failed flushes
 
 // categoryId/tagId are scalar refs (no Prisma relation), so names are resolved
 // via lookup maps — { cat: Map<id,name>, tag: Map<id,name> }.
@@ -288,7 +289,22 @@ class AgentAlertService {
       select: { id: true, subject: true, origin: true, nativeNumber: true, freshserviceTicketId: true, priority: true, status: true },
     });
     const result = await this._deliver(sub, pref, events, tickets);
-    await prisma.agentAlertEvent.updateMany({ where: { id: { in: events.map((e) => e.id) } }, data: { sentAt: new Date(), deliveryResult: result } });
+    const ids = events.map((e) => e.id);
+    const delivered = Object.values(result.channels || {}).some((c) => c?.sent);
+    const anyChannel = sub.channelEmail || sub.channelSms || sub.channelWhatsapp || sub.channelPhone;
+    if (delivered || !anyChannel) {
+      await prisma.agentAlertEvent.updateMany({ where: { id: { in: ids } }, data: { sentAt: new Date(), deliveryResult: result } });
+      return;
+    }
+    // Nothing was delivered (transient email outage, unverified phone, …). Leave
+    // the batch pending so it retries rather than being silently consumed —
+    // capped so a permanent failure doesn't retry forever.
+    const attempts = Math.max(0, ...events.map((e) => e.attempts || 0)) + 1;
+    if (attempts >= MAX_DELIVERY_ATTEMPTS) {
+      await prisma.agentAlertEvent.updateMany({ where: { id: { in: ids } }, data: { sentAt: new Date(), attempts, deliveryResult: { ...result, gaveUpAfter: attempts } } });
+    } else {
+      await prisma.agentAlertEvent.updateMany({ where: { id: { in: ids } }, data: { attempts } });
+    }
   }
 
   // ---- delivery --------------------------------------------------------
@@ -344,16 +360,35 @@ class AgentAlertService {
     const smsBody = `Ticket Pulse: ${headline}. ${listed}. Open the portal to review.`;
     if (sub.channelSms) {
       out.channels.sms = phoneReady ? await this._twilio('sms', { to: phone, body: smsBody }) : { sent: false, reason: 'phone_not_verified' };
+      await this._recordChannelHealth(sub.workspaceId, 'sms', out.channels.sms);
     }
     if (sub.channelWhatsapp) {
       out.channels.whatsapp = phoneReady ? await this._twilio('whatsapp', { to: phone, body: smsBody }) : { sent: false, reason: 'phone_not_verified' };
+      await this._recordChannelHealth(sub.workspaceId, 'whatsapp', out.channels.whatsapp);
     }
     if (sub.channelPhone) {
       out.channels.phone = phoneReady ? await this._twilio('phone', { to: phone, message: `New Ticket Pulse alert. ${headline}. Please open the portal to review.` }) : { sent: false, reason: 'phone_not_verified' };
+      await this._recordChannelHealth(sub.workspaceId, 'phone', out.channels.phone);
     }
 
     logger.info(`Agent alert delivered to ${sub.technician.name} — ${headline} (${count} ticket(s))`);
     return out;
+  }
+
+  /** Feed a Twilio channel result into delivery-health telemetry so SMS/voice
+   *  outages are visible too (the exact silent-drop failure email health was
+   *  built for). Skips config gaps (unverified phone) — those aren't transport
+   *  failures — and never lets telemetry break delivery. */
+  async _recordChannelHealth(workspaceId, channel, result) {
+    if (!result || result.reason === 'phone_not_verified') return;
+    try {
+      const { default: emailHealthService } = await import('./emailHealthService.js');
+      if (result.sent) {
+        await emailHealthService.recordSuccess({ workspaceId, channel, context: 'agent alert', provider: 'twilio' });
+      } else {
+        await emailHealthService.recordFailure({ workspaceId, channel, context: 'agent alert', provider: 'twilio', error: new Error(result.error || 'send failed') });
+      }
+    } catch { /* telemetry must not break delivery */ }
   }
 
   async _twilio(kind, args) {

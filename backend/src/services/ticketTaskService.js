@@ -94,9 +94,12 @@ class TicketTaskService {
     return shape(updated || row);
   }
 
-  async update(taskId, workspaceId, patch, actor = null) {
+  async update(taskId, workspaceId, patch, actor = null, expectedTicketId = null) {
     const task = await prisma.ticketTask.findFirst({ where: { id: Number(taskId), workspaceId }, select: TASK_SELECT });
     if (!task) throw new NotFoundError('Task not found');
+    // Guard against /tickets/<other>/tasks/<taskId> mutating a task that belongs
+    // to a different ticket in the same workspace.
+    if (expectedTicketId !== null && task.ticketId !== Number(expectedTicketId)) throw new NotFoundError('Task not found on this ticket');
     const ticket = await this._ticket(task.ticketId, workspaceId);
 
     const data = {};
@@ -123,7 +126,14 @@ class TicketTaskService {
 
     // FS-born or an FS-mirrored TP task: push the change to FreshService.
     if (task.fsTaskId && ticket.freshserviceTicketId) {
-      await this._fsUpdate(ticket, task, data).catch((err) => logger.warn(`FS task update failed (non-fatal): ${err.message}`));
+      if (ticket.origin === TICKET_ORIGIN.FRESHSERVICE) {
+        // FS owns this task. If the write fails, surface it — otherwise the
+        // local row updates optimistically and the next _syncFromFs silently
+        // reverts it, so the UI shows "Done" then flips back to "Open".
+        await this._fsUpdate(ticket, task, data);
+      } else {
+        await this._fsUpdate(ticket, task, data).catch((err) => logger.warn(`FS task mirror update failed (non-fatal): ${err.message}`));
+      }
     }
     let row = await prisma.ticketTask.update({ where: { id: task.id }, data, select: TASK_SELECT });
     if (data.status !== undefined && data.status !== task.status) {
@@ -158,15 +168,22 @@ class TicketTaskService {
     }
   }
 
-  async remove(taskId, workspaceId) {
+  async remove(taskId, workspaceId, _actor = null, expectedTicketId = null) {
     const task = await prisma.ticketTask.findFirst({ where: { id: Number(taskId), workspaceId } });
     if (!task) throw new NotFoundError('Task not found');
+    if (expectedTicketId !== null && task.ticketId !== Number(expectedTicketId)) throw new NotFoundError('Task not found on this ticket');
     if (task.fsTaskId) {
       const ticket = await this._ticket(task.ticketId, workspaceId);
       if (ticket.freshserviceTicketId) {
         const client = await this._fsClient(workspaceId);
-        await client?.deleteTicketTask(Number(ticket.freshserviceTicketId), Number(task.fsTaskId))
-          .catch((err) => logger.warn(`FS task delete failed (non-fatal): ${err.message}`));
+        if (ticket.origin === TICKET_ORIGIN.FRESHSERVICE) {
+          // FS owns the task — a swallowed failure lets _syncFromFs resurrect
+          // the row on the next list. Surface it instead.
+          if (client) await client.deleteTicketTask(Number(ticket.freshserviceTicketId), Number(task.fsTaskId));
+        } else {
+          await client?.deleteTicketTask(Number(ticket.freshserviceTicketId), Number(task.fsTaskId))
+            .catch((err) => logger.warn(`FS task mirror delete failed (non-fatal): ${err.message}`));
+        }
       }
     }
     await prisma.ticketTask.delete({ where: { id: task.id } });
@@ -251,10 +268,16 @@ class TicketTaskService {
       row.dueAt ? `<p>Due: ${new Date(row.dueAt).toLocaleString()}</p>` : '',
       `<p><a href="${publicBase}/tickets/${ticket.id}">Open the ticket</a> to see the full task list.</p>`,
     ].join('');
-    await sendTransactionalEmail({
+    const result = await sendTransactionalEmail({
       workspaceId: ticket.workspaceId, to: assignee.email, label: 'task assignment',
       subject: `New task on ${ref}: ${row.title}`, html,
     });
+    // Only mark notified if the send actually succeeded — otherwise a transient
+    // outage would permanently suppress the retry (notifiedAt is the guard).
+    if (!result?.sent) {
+      logger.warn(`Task assignment email to ${assignee.email} not sent (${result?.reason || 'unknown'}); leaving notifiedAt clear for retry`);
+      return null;
+    }
     return prisma.ticketTask.update({ where: { id: row.id }, data: { notifiedAt: new Date() }, select: TASK_SELECT });
   }
 

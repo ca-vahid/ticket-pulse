@@ -328,7 +328,9 @@ describe('notification workflow definitions', () => {
     expect(result.status).toBe('completed');
     expect(result.state.recipients.to).toEqual(['requester@example.com']);
     expect(result.state.recipients.cc).toEqual(['manager@example.com', 'lead@example.com']);
-    expect(sendStep.output.ccRecipients).toEqual(['manager@example.com', 'lead@example.com']);
+    // The step *output* is the audit copy, which sanitizeWorkflowAuditPayload
+    // redacts — the live send path above is what carries the real recipients.
+    expect(sendStep.output.ccRecipients).toEqual(['[redacted-email]', '[redacted-email]']);
   });
 
   test('template render uses LLM output with template fallback without Liquid if statements', async () => {

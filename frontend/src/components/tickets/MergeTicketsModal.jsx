@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, GitMerge, Loader2, Search, Sparkles, X } from 'lucide-react';
 import { ticketsAPI } from '../../services/api';
 import { StatusPill } from './ticketUi';
@@ -27,6 +27,16 @@ export default function MergeTicketsModal({ ticket, onClose, onMerged }) {
   const [notifyRequester, setNotifyRequester] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const dialogRef = useRef(null);
+
+  // Escape closes the dialog and focus moves into it on open — matches every
+  // sibling modal's keyboard bar.
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape' && !busy) onClose?.(); };
+    document.addEventListener('keydown', onKey);
+    dialogRef.current?.focus();
+    return () => document.removeEventListener('keydown', onKey);
+  }, [busy, onClose]);
 
   // Sources may be TP- or FS-born; only the surviving primary must be TP-born.
   const isMergeable = (t) => ['Open', 'Pending'].includes(t.status) && t.id !== ticket.id;
@@ -158,7 +168,7 @@ export default function MergeTicketsModal({ ticket, onClose, onMerged }) {
       aria-label="Merge tickets"
       onClick={busy ? undefined : onClose}
     >
-      <div className="flex max-h-[85vh] w-full max-w-2xl flex-col rounded-2xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+      <div ref={dialogRef} tabIndex={-1} className="tp-focus-ring flex max-h-[85vh] w-full max-w-2xl flex-col rounded-2xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-2.5 border-b border-slate-100 px-5 py-3.5">
           <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-violet-100">
             <GitMerge className="h-4 w-4 text-violet-600" aria-hidden="true" />

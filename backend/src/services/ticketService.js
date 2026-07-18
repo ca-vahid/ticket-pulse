@@ -1909,6 +1909,11 @@ class TicketService {
     await mirrorService.enqueueFieldSync(workspaceId, ticket.id);
     // Subject/description changed → the content embedding is stale (P5.2).
     if (changes.subject || changes.description) this._refreshEmbedding(ticket.id, workspaceId);
+    // A manual (non-AI) category change should fire the same agent-alert trigger
+    // the AI pipeline does — otherwise "re-categorized" alerts miss coordinator edits.
+    if (changes.internalCategoryId || changes.internalSubcategoryId) {
+      import('./agentAlertService.js').then(({ default: s }) => s.evaluate('recategorized', ticket.id)).catch(() => {});
+    }
     return { ...updated, displayRef: ticketDisplayRef(updated), changed: true };
   }
 
