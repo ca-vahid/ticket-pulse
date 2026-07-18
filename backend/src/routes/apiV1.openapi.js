@@ -107,9 +107,12 @@ export function buildOpenApiSpec(baseUrl) {
       ].join('\n'),
     },
     servers: [{ url: `${baseUrl}/api/v1` }],
-    security: [{ apiKey: [] }],
+    security: [{ apiKey: [] }, { oauth2: [] }],
     components: {
-      securitySchemes: { apiKey: { type: 'http', scheme: 'bearer', description: 'API key (tp_live_… / tp_test_…) issued in Settings → API Keys' } },
+      securitySchemes: {
+        apiKey: { type: 'http', scheme: 'bearer', description: 'API key (tp_live_… / tp_test_…) issued in Settings → API Keys' },
+        oauth2: { type: 'oauth2', description: 'Built-in OAuth2 client-credentials — exchange a client at /oauth/token for a bearer token.', flows: { clientCredentials: { tokenUrl: `${baseUrl}/api/v1/oauth/token`, scopes: {} } } },
+      },
       parameters: {
         cursor: { name: 'cursor', in: 'query', schema: { type: 'string' }, description: 'Opaque keyset cursor from a prior response.' },
         limit: { name: 'pageSize', in: 'query', schema: { type: 'integer', maximum: 100, default: 25 } },
@@ -122,7 +125,19 @@ export function buildOpenApiSpec(baseUrl) {
       schemas: T,
     },
     paths: {
-      '/me': { get: op('Identity, workspace, and limits for the calling key', null, { tag: 'discovery' }) },
+      '/oauth/token': {
+        post: {
+          summary: 'OAuth2 client-credentials token exchange',
+          tags: ['auth'], security: [],
+          requestBody: { required: true, content: { 'application/x-www-form-urlencoded': { schema: { type: 'object', required: ['grant_type', 'client_id', 'client_secret'], properties: { grant_type: { type: 'string', enum: ['client_credentials'] }, client_id: { type: 'string' }, client_secret: { type: 'string' } } } } } },
+          responses: {
+            200: { description: 'Access token', content: { 'application/json': { schema: { type: 'object', properties: { access_token: { type: 'string' }, token_type: { type: 'string', example: 'Bearer' }, expires_in: { type: 'integer' }, scope: { type: 'string' } } } } } },
+            400: { description: 'OAuth2 error', content: { 'application/json': { schema: { type: 'object', properties: { error: { type: 'string' }, error_description: { type: 'string' } } } } } },
+            401: { description: 'invalid_client' },
+          },
+        },
+      },
+      '/me': { get: op('Identity, workspace, and limits for the calling credential', null, { tag: 'discovery' }) },
       '/meta': { get: op('Enumerations: priorities, statuses, ticket types', null, { tag: 'discovery' }) },
       '/tickets': {
         get: op('List tickets (cursor or offset; filters mirror the queue)', 'tickets:read', { tag: 'tickets', responseRef: ref('Ticket'), list: true }),
@@ -196,12 +211,23 @@ table{border-collapse:collapse;width:100%;font-size:.85rem;margin-bottom:.5rem}t
 .m{font-weight:700;font-size:.7rem;width:52px}.get{color:#0369a1}.post{color:#047857}.put{color:#b45309}.patch{color:#7c3aed}.delete{color:#dc2626}
 .p{font-family:ui-monospace,monospace;font-size:.8rem;white-space:nowrap}.s{font-family:ui-monospace,monospace;font-size:.72rem;color:#64748b;white-space:nowrap}
 .card{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:1rem 1.2rem;margin:1rem 0}
-@media(prefers-color-scheme:dark){body{background:#0b1220;color:#e6edf7}code{background:#1e293b}.card{background:#111a2b;border-color:#1f2c3f}td{border-color:#1f2c3f}p{color:#94a3b8}}</style></head>
+pre{background:#0f172a;color:#e2e8f0;border-radius:8px;padding:.7rem .9rem;overflow-x:auto;font-family:ui-monospace,monospace;font-size:.78rem;line-height:1.5;margin:.5rem 0}
+@media(prefers-color-scheme:dark){body{background:#0b1220;color:#e6edf7}code{background:#1e293b}.card{background:#111a2b;border-color:#1f2c3f}td{border-color:#1f2c3f}p{color:#94a3b8}pre{background:#060b14;border:1px solid #1f2c3f}}</style></head>
 <body>
 <h1>Ticket Pulse Integration API <span style="font-size:.7rem;color:#64748b">v${spec.info.version}</span></h1>
 <p>Key-authenticated, workspace-scoped. Machine-readable spec: <a href="openapi.json">openapi.json</a>.</p>
 <div class="card">
-<b>Authentication</b><br>Send every request with <code>Authorization: Bearer tp_live_…</code>. Issue keys per workspace in <b>Settings → API Keys</b>, each scoped to exactly what an integration needs. Use <code>tp_test_…</code> keys while building.
+<b>Authentication — two options, both workspace-scoped</b><br>
+<b>1. API key</b> (simplest). Issue one per workspace in <b>Settings → API Keys</b>, scoped to exactly what the integration needs; use <code>tp_test_…</code> while building.
+<pre>curl ${baseUrl}/api/v1/me \\
+  -H "Authorization: Bearer tp_live_xxx"</pre>
+<b>2. OAuth2 client-credentials</b> (for apps). Create a client in <b>Settings → API Keys → OAuth clients</b>, then exchange it for a short-lived token:
+<pre>curl -X POST ${baseUrl}/api/v1/oauth/token \\
+  -d grant_type=client_credentials \\
+  -d client_id=tpc_xxx -d client_secret=tps_xxx
+# → { "access_token": "eyJ…", "token_type": "Bearer", "expires_in": 3600 }
+curl ${baseUrl}/api/v1/tickets -H "Authorization: Bearer eyJ…"</pre>
+Both resolve to a single workspace; a credential can never read or write another workspace's data.
 <br><br><b>Conventions</b><br>
 • Errors are <code>application/problem+json</code> (RFC 9457) with a stable <code>code</code>.<br>
 • Every response carries <code>X-Request-Id</code> and <code>X-RateLimit-Limit/Remaining/Reset</code>; <code>429</code> includes <code>Retry-After</code>.<br>

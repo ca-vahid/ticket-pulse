@@ -715,6 +715,14 @@ export const ticketsAPI = {
   getApiKeyUsage: async (keyId) => await api.get(`/tickets/api-keys/${keyId}/usage`),
   deleteApiKey: async (keyId) => await api.delete(`/tickets/api-keys/${keyId}`),
 
+  // OAuth2 clients (admin)
+  listOauthClients: async () => await api.get('/tickets/oauth-clients'),
+  createOauthClient: async (data) => await api.post('/tickets/oauth-clients', data),
+  updateOauthClient: async (id, data) => await api.patch(`/tickets/oauth-clients/${id}`, data),
+  rotateOauthClient: async (id) => await api.post(`/tickets/oauth-clients/${id}/rotate`),
+  revokeOauthClient: async (id) => await api.post(`/tickets/oauth-clients/${id}/revoke`),
+  deleteOauthClient: async (id) => await api.delete(`/tickets/oauth-clients/${id}`),
+
   // Custom fields
   customFieldDefinitions: async () => await api.get('/tickets/custom-fields/definitions'),
   setCustomFields: async (id, values) => await api.patch(`/tickets/${id}/custom-fields`, { values }),
