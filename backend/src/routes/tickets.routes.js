@@ -648,66 +648,62 @@ router.post('/watch-subscriptions', asyncHandler(async (req, res) => {
 // ------------------------------------------------------ API keys (admin)
 
 router.get('/api-keys', requireTicketingAdmin, asyncHandler(async (req, res) => {
-  const keys = await prisma.apiKey.findMany({
-    where: { workspaceId: req.workspaceId },
-    orderBy: { id: 'asc' },
-    select: {
-      id: true, name: true, keyPrefix: true, scopes: true, isEnabled: true,
-      lastUsedAt: true, requestCount: true, createdBy: true, createdAt: true,
-    },
-  });
-  res.json({ success: true, data: keys });
+  const { default: apiKeyService } = await import('../services/apiKeyService.js');
+  res.json({ success: true, data: await apiKeyService.list(req.workspaceId) });
+}));
+
+router.get('/api-keys/scopes', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const { API_KEY_SCOPES } = await import('../services/apiKeyService.js');
+  res.json({ success: true, data: API_KEY_SCOPES });
 }));
 
 router.post('/api-keys', requireTicketingAdmin, asyncHandler(async (req, res) => {
-  const name = String(req.body?.name || '').trim();
-  if (name.length < 3) throw new ValidationError('A key name is required (3+ characters)');
-  const { API_KEY_SCOPES, generateApiKey } = await import('./apiV1.routes.js');
-  const scopes = (Array.isArray(req.body?.scopes) ? req.body.scopes : ['tickets:read'])
-    .filter((s) => API_KEY_SCOPES.includes(s));
-  if (scopes.length === 0) throw new ValidationError(`Scopes must be one of: ${API_KEY_SCOPES.join(', ')}`);
-
-  const { raw, hash, prefix } = generateApiKey();
-  const key = await prisma.apiKey.create({
-    data: {
-      workspaceId: req.workspaceId,
-      name,
-      keyHash: hash,
-      keyPrefix: prefix,
-      scopes,
-      createdBy: req.ticketActor.email,
-    },
-    select: { id: true, name: true, keyPrefix: true, scopes: true, createdAt: true },
-  });
+  const { default: apiKeyService } = await import('../services/apiKeyService.js');
+  const key = await apiKeyService.create(req.workspaceId, {
+    name: req.body?.name,
+    scopes: req.body?.scopes,
+    mode: req.body?.mode,
+    expiresInDays: req.body?.expiresInDays,
+    ipAllowlist: req.body?.ipAllowlist,
+    rateLimitPerMin: req.body?.rateLimitPerMin,
+  }, req.ticketActor);
   // The raw key is returned exactly once — only its hash is stored.
-  res.status(201).json({ success: true, data: { ...key, apiKey: raw } });
+  res.status(201).json({ success: true, data: { ...key, apiKey: key.key } });
 }));
 
 router.patch('/api-keys/:keyId', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const { default: apiKeyService } = await import('../services/apiKeyService.js');
+  res.json({ success: true, data: await apiKeyService.update(Number(req.params.keyId), req.workspaceId, req.body || {}) });
+}));
+
+router.post('/api-keys/:keyId/rotate', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const { default: apiKeyService } = await import('../services/apiKeyService.js');
+  const key = await apiKeyService.rotate(Number(req.params.keyId), req.workspaceId);
+  res.json({ success: true, data: { ...key, apiKey: key.key } });
+}));
+
+router.post('/api-keys/:keyId/revoke', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const { default: apiKeyService } = await import('../services/apiKeyService.js');
+  res.json({ success: true, data: await apiKeyService.revoke(Number(req.params.keyId), req.workspaceId) });
+}));
+
+router.get('/api-keys/:keyId/usage', requireTicketingAdmin, asyncHandler(async (req, res) => {
   const id = Number(req.params.keyId);
-  const existing = await prisma.apiKey.findFirst({ where: { id, workspaceId: req.workspaceId } });
-  if (!existing) throw new ValidationError('API key not found in this workspace');
-  const data = {};
-  if (req.body?.isEnabled !== undefined) data.isEnabled = req.body.isEnabled === true;
-  if (req.body?.name) data.name = String(req.body.name).trim();
-  if (Array.isArray(req.body?.scopes)) {
-    const { API_KEY_SCOPES } = await import('./apiV1.routes.js');
-    data.scopes = req.body.scopes.filter((s) => API_KEY_SCOPES.includes(s));
-  }
-  const key = await prisma.apiKey.update({
-    where: { id },
-    data,
-    select: { id: true, name: true, keyPrefix: true, scopes: true, isEnabled: true },
-  });
-  res.json({ success: true, data: key });
+  const since = new Date(Date.now() - 7 * 24 * 3600 * 1000);
+  const [total24h, total7d, recent] = await Promise.all([
+    prisma.apiRequestLog.count({ where: { apiKeyId: id, createdAt: { gte: new Date(Date.now() - 86400000) } } }),
+    prisma.apiRequestLog.count({ where: { apiKeyId: id, createdAt: { gte: since } } }),
+    prisma.apiRequestLog.findMany({
+      where: { apiKeyId: id }, orderBy: { createdAt: 'desc' }, take: 20,
+      select: { method: true, path: true, statusCode: true, durationMs: true, createdAt: true },
+    }),
+  ]);
+  res.json({ success: true, data: { calls24h: total24h, calls7d: total7d, recent } });
 }));
 
 router.delete('/api-keys/:keyId', requireTicketingAdmin, asyncHandler(async (req, res) => {
-  const id = Number(req.params.keyId);
-  const existing = await prisma.apiKey.findFirst({ where: { id, workspaceId: req.workspaceId } });
-  if (!existing) throw new ValidationError('API key not found in this workspace');
-  await prisma.apiKey.delete({ where: { id } });
-  res.json({ success: true });
+  const { default: apiKeyService } = await import('../services/apiKeyService.js');
+  res.json({ success: true, data: await apiKeyService.remove(Number(req.params.keyId), req.workspaceId) });
 }));
 
 // ------------------------------------- outbound webhooks (gap plan 2 P3)
@@ -783,6 +779,16 @@ router.delete('/webhook-subscriptions/:subId', requireTicketingAdmin, asyncHandl
 router.post('/webhook-subscriptions/:subId/test', requireTicketingAdmin, asyncHandler(async (req, res) => {
   const { testWebhookSubscription } = await import('../services/webhookDispatchService.js');
   res.json({ success: true, data: await testWebhookSubscription(Number(req.params.subId), req.workspaceId) });
+}));
+
+router.get('/webhook-subscriptions/:subId/deliveries', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const { listDeliveries } = await import('../services/webhookDispatchService.js');
+  res.json({ success: true, data: await listDeliveries(Number(req.params.subId), req.workspaceId, req.query.limit) });
+}));
+
+router.post('/webhook-deliveries/:deliveryId/redeliver', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const { redeliver } = await import('../services/webhookDispatchService.js');
+  res.json({ success: true, data: await redeliver(Number(req.params.deliveryId), req.workspaceId) });
 }));
 
 router.post('/mailboxes/:mailboxId/test', requireTicketingAdmin, asyncHandler(async (req, res) => {

@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.0.69-preview';
+export const APP_VERSION = '3.0.70-preview';
 
 export const changelog = [
+  {
+    version: '3.0.70-preview',
+    date: 'July 18, 2026',
+    entries: [
+      { type: 'added', html: '<strong>🔌 Public API, enterprise-grade</strong> — the <code>/api/v1</code> integration API is now a FreshService-replacement surface: <b>scoped, rotatable, expiring keys</b> (live/test mode), RFC 9457 <code>problem+json</code> errors, durable per-key &amp; per-IP <b>rate limiting</b> with standard headers, <b>Idempotency-Key</b> on writes, and a full <b>OpenAPI 3.1</b> spec + docs. New endpoints span ticket update/assign/merge/parent-child, conversations, tasks, contacts, agents, groups, categories, types, and search — plus <code>/me</code>, <code>/meta</code>, and cursor pagination.' },
+      { type: 'added', html: '<strong>📡 Durable webhooks 2.0</strong> — outbound webhooks now follow the <b>Standard Webhooks</b> spec (<code>webhook-signature</code>) with a durable delivery queue that survives restarts, exponential-backoff retries, dead-lettering, and a per-subscription <b>delivery log</b> with one-click redeliver.' },
+      { type: 'changed', html: '<strong>🔐 Richer API-key management</strong> — Settings → API Keys now offers live/test mode, expiry, one-click secret <b>rotation</b>, the expanded scope catalogue, and per-key usage.' },
+    ],
+  },
   {
     version: '3.0.69-preview',
     date: 'July 18, 2026',

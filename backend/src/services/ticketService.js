@@ -602,6 +602,43 @@ class TicketService {
     const pageSize = Math.min(maxPageSize, Math.max(1, Number(query.pageSize) || 25));
     const where = await this.buildListWhere(workspaceId, query);
 
+    // Public-API cursor (keyset) pagination: opt-in via ?cursor=, keyed on id
+    // descending. Efficient for large/growing tables and stable under inserts;
+    // leaves the offset path (used by the web queue) untouched.
+    const hasCursor = query.cursor !== undefined && query.cursor !== null && query.cursor !== '';
+    if (hasCursor || query.useCursor) {
+      let cursorId = null;
+      if (hasCursor) {
+        const decoded = Number(Buffer.from(String(query.cursor), 'base64url').toString('utf8'));
+        cursorId = Number.isInteger(decoded) ? decoded : null;
+      }
+      const keysetWhere = cursorId ? { AND: [where, { id: { lt: cursorId } }] } : where;
+      const rows = await prisma.ticket.findMany({
+        where: keysetWhere, include: TICKET_INCLUDE, orderBy: [{ id: 'desc' }], take: pageSize + 1,
+      });
+      const hasMore = rows.length > pageSize;
+      const items = hasMore ? rows.slice(0, pageSize) : rows;
+      const [incoming, ai, bypass, proposed] = await Promise.all([
+        this._lastPublicEntryIncoming(items.map((t) => t.id)),
+        this._aiRunStateByTicket(items.map((t) => t.id)),
+        this._aiBypassByTicket(items),
+        this._openProposalTicketIds(items.map((t) => t.id)),
+      ]);
+      const nextCursor = hasMore
+        ? Buffer.from(String(items[items.length - 1].id), 'utf8').toString('base64url')
+        : null;
+      return {
+        items: items.map((t) => ({
+          ...t, tagLinks: undefined, tags: ticketTags(t), displayRef: ticketDisplayRef(t),
+          lastActivityAt: t.lastRealActivityAt || t.freshserviceUpdatedAt || t.updatedAt,
+          stateChip: deriveStateChip(t, incoming.get(t.id) === true),
+          ai: ai.get(t.id) || null, aiBypass: bypass.get(t.id) || null,
+          hasProposedReply: proposed.has(t.id),
+        })),
+        nextCursor, pageSize,
+      };
+    }
+
     const sortField = ['createdAt', 'updatedAt', 'priority', 'status', 'subject', 'requester'].includes(query.sort) ? query.sort : 'createdAt';
     const sortDir = query.dir === 'asc' ? 'asc' : 'desc';
 
