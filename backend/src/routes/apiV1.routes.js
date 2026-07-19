@@ -55,6 +55,14 @@ function ticketShape(t) {
     category: t.internalCategory?.name || null,
     subcategory: t.internalSubcategory?.name || null,
     tags: Array.isArray(t.tags) ? t.tags.map((tag) => (typeof tag === 'string' ? tag : tag.name)) : [],
+    // Operational review signals (read-only): how many times the ticket
+    // bounced back from an assignee, whether the AI flagged its category as a
+    // weak fit, and whether it was classified as noise/spam. Surfaced for
+    // reporting/audit consumers (e.g. the daily-brief routine).
+    rejections: Number(t.rejectionCount) || 0,
+    categoryReviewNeeded: t.taxonomyReviewNeeded === true,
+    isNoise: t.isNoise === true,
+    assignedBy: t.assignedBy || null,
     createdAt: t.createdAt,
     updatedAt: t.updatedAt,
     resolvedAt: t.resolvedAt || null,

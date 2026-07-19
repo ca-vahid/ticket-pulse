@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.72-preview';
+export const APP_VERSION = '3.0.73-preview';
 
 export const changelog = [
+  {
+    version: '3.0.73-preview',
+    date: 'July 18, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>🔎 API v1: tickets now carry review signals</strong> — ticket responses include <code>rejections</code> (bounce-back count), <code>categoryReviewNeeded</code> (AI flagged a weak category fit), <code>isNoise</code>, and <code>assignedBy</code>, so reporting and audit integrations can spot bounced or miscategorized tickets without extra queries. Read-only fields; OpenAPI docs updated.' },
+    ],
+  },
   {
     version: '3.0.72-preview',
     date: 'July 18, 2026',
