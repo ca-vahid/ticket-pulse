@@ -2,6 +2,7 @@
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import MyCompetencies from './MyCompetencies';
 import { agentAPI } from '../services/api';
 
@@ -34,6 +35,10 @@ vi.mock('../components/agent/NotificationSettingsPanel', () => ({
   default: ({ workspaceId }) => <div>Notification settings loaded for workspace {workspaceId}</div>,
 }));
 
+vi.mock('../components/agent/AgentAlertsPanel', () => ({
+  default: ({ workspaceId }) => <div>My alerts loaded for workspace {workspaceId}</div>,
+}));
+
 describe('MyCompetencies notification tab', () => {
   afterEach(() => {
     cleanup();
@@ -60,12 +65,14 @@ describe('MyCompetencies notification tab', () => {
     });
   });
 
-  test('loads the self-service Notifications tab beside competencies', async () => {
-    render(<MyCompetencies />);
+  test('Notifications tab stacks preferences + my-alerts on one page', async () => {
+    render(<MyCompetencies />, { wrapper: MemoryRouter });
 
     expect(await screen.findByRole('button', { name: /My Competencies/i })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Notifications/i }));
 
+    // Both sections render stacked (no sub-tabs) — QA 07-20 #4.
     expect(screen.getByText('Notification settings loaded for workspace 1')).toBeInTheDocument();
+    expect(screen.getByText('My alerts loaded for workspace 1')).toBeInTheDocument();
   });
 });

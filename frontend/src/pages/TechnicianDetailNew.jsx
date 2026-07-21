@@ -15,6 +15,17 @@ import { formatDateLocal } from '../components/tech-detail/utils';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
+// The dashboard's day boundaries are computed in Pacific time server-side, so
+// any client-side day bucketing must match to avoid off-by-one-day drift.
+const APP_TZ = 'America/Los_Angeles';
+const PT_DATE_FMT = new Intl.DateTimeFormat('en-CA', {
+  timeZone: APP_TZ, year: 'numeric', month: '2-digit', day: '2-digit',
+});
+function ptDateStr(input) {
+  const d = input instanceof Date ? input : new Date(input);
+  return Number.isNaN(d.getTime()) ? '' : PT_DATE_FMT.format(d); // en-CA → YYYY-MM-DD
+}
+
 const PRIMARY_TABS = [
   { id: 'overview', label: 'Overview' },
   { id: 'tickets',  label: 'Tickets' },
@@ -523,17 +534,16 @@ export default function TechnicianDetailNew() {
                 } else if (viewMode === 'monthly') {
                   badge = technician?.monthlyCSATCount || 0;
                 } else {
+                  // Compare in the SAME timezone the backend's weekly/monthly
+                  // counts use (America/Los_Angeles), not the browser's — a
+                  // non-PT browser otherwise puts a submission on the wrong day
+                  // and the daily badge disagrees with weekly/monthly by one day.
                   const iso = selectedDate
                     ? (typeof selectedDate === 'string' ? selectedDate : formatDateLocal(selectedDate))
-                    : formatDateLocal(new Date());
-                  badge = (csatTickets || []).filter((t) => {
-                    if (!t.csatSubmittedAt) return false;
-                    const d = new Date(t.csatSubmittedAt);
-                    const y = d.getFullYear();
-                    const m = String(d.getMonth() + 1).padStart(2, '0');
-                    const day = String(d.getDate()).padStart(2, '0');
-                    return `${y}-${m}-${day}` === iso;
-                  }).length;
+                    : ptDateStr(new Date());
+                  badge = (csatTickets || []).filter((t) => (
+                    t.csatSubmittedAt && ptDateStr(t.csatSubmittedAt) === iso
+                  )).length;
                 }
                 if (csatCount !== badge && csatCount > 0) badgeHint = `${csatCount} all-time`;
               } else if (tab.id === 'feedback') {
@@ -594,6 +604,7 @@ export default function TechnicianDetailNew() {
                 selectedMonth={selectedMonth}
                 openCount={openCount}
                 pendingCount={pendingCount}
+                onDrill={(view) => { setTicketView(view); setActiveTab('tickets'); }}
               />
             )}
 

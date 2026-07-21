@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { Fragment, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { useSettings } from '../contexts/SettingsContext';
@@ -152,37 +152,45 @@ export default function Settings() {
   const [providerTesting, setProviderTesting] = useState(null);
   const [providerTestStatus, setProviderTestStatus] = useState({});
 
-  // role: 'global' = global admin only, 'admin' = workspace admin+, 'viewer' = anyone
+  // role: 'global' = global admin only, 'admin' = workspace admin+, 'viewer' = anyone.
+  // Grouped by area, alphabetical within each group, so a long list stays
+  // scannable (QA 07-20 #9). The `group` label renders as a section header.
   const allNavigationItems = [
-    { id: 'freshservice', label: 'FreshService', Icon: Plug, minRole: 'global' },
-    { id: 'webhooks', label: 'Webhooks', Icon: KeyRound, minRole: 'admin' },
-    { id: 'ticket-mailboxes', label: 'Ticket Mailboxes', Icon: Inbox, minRole: 'admin' },
-    { id: 'agents', label: 'Members', Icon: Users, minRole: 'admin' },
-    { id: 'groups', label: 'Groups', Icon: Users2, minRole: 'admin' },
-    { id: 'approval-categories', label: 'Approval Categories', Icon: Stamp, minRole: 'admin' },
-    { id: 'ticket-ops', label: 'Ticket Ops', Icon: Wand2, minRole: 'admin' },
-    { id: 'api-keys', label: 'API Keys', Icon: KeyRound, minRole: 'admin' },
-    { id: 'notification-providers', label: 'Notifications', Icon: Bell, minRole: 'global' },
-    { id: 'public-ticket-status', label: 'Public Status', Icon: ExternalLink, minRole: 'admin' },
-    { id: 'feedback-page', label: 'Feedback', Icon: MessageSquare, minRole: 'admin' },
-    { id: 'urgent-escalation', label: 'Urgent Escalation', Icon: Siren, minRole: 'admin' },
-    { id: 'ai-routing', label: 'AI & Routing', Icon: Brain, minRole: 'admin' },
-    { id: 'ai-providers', label: 'AI Providers', Icon: Bot, minRole: 'admin' },
-    { id: 'sync', label: 'Sync Settings', Icon: RefreshCw, minRole: 'admin' },
-    { id: 'sync-ops', label: 'Sync Operations', Icon: BarChart3, minRole: 'admin' },
-    { id: 'backfill', label: 'Backfill', Icon: Download, minRole: 'admin' },
-    { id: 'workspaces', label: 'Workspaces', Icon: Globe, minRole: 'global' },
-    { id: 'admins', label: 'Admins', Icon: Shield, minRole: 'global' },
-    { id: 'ai-usage', label: 'AI Usage & Cost', Icon: BarChart3, minRole: 'global' },
-    { id: 'workspace-access', label: 'Workspace Access', Icon: KeyRound, minRole: 'admin' },
-    { id: 'dashboard', label: 'Dashboard', Icon: LayoutDashboard, minRole: 'viewer' },
-    { id: 'photos', label: 'Photos & Locations', Icon: Camera, minRole: 'admin' },
-    { id: 'business-hours', label: 'Business Hours', Icon: Clock, minRole: 'admin' },
-    { id: 'tech-schedules', label: 'Tech Schedules', Icon: CalendarDays, minRole: 'admin' },
-    { id: 'tech-visibility', label: 'Tech Visibility', Icon: EyeOff, minRole: 'admin' },
-    { id: 'noise-rules', label: 'Noise Rules', Icon: VolumeX, minRole: 'admin' },
-    { id: 'vacation-tracker', label: 'Vacation Tracker', Icon: CalendarDays, minRole: 'admin' },
-    { id: 'calendar-leave', label: 'Shared Calendar', Icon: CalendarDays, minRole: 'admin' },
+    // Integrations
+    { id: 'api-keys', label: 'API Keys', Icon: KeyRound, minRole: 'admin', group: 'Integrations' },
+    { id: 'freshservice', label: 'FreshService', Icon: Plug, minRole: 'global', group: 'Integrations' },
+    { id: 'ticket-mailboxes', label: 'Ticket Mailboxes', Icon: Inbox, minRole: 'admin', group: 'Integrations' },
+    { id: 'webhooks', label: 'Webhooks', Icon: KeyRound, minRole: 'admin', group: 'Integrations' },
+    // Tickets & AI
+    { id: 'ai-routing', label: 'AI & Routing', Icon: Brain, minRole: 'admin', group: 'Tickets & AI' },
+    { id: 'ai-providers', label: 'AI Providers', Icon: Bot, minRole: 'admin', group: 'Tickets & AI' },
+    { id: 'approval-categories', label: 'Approval Categories', Icon: Stamp, minRole: 'admin', group: 'Tickets & AI' },
+    { id: 'noise-rules', label: 'Noise Rules', Icon: VolumeX, minRole: 'admin', group: 'Tickets & AI' },
+    { id: 'ticket-ops', label: 'Ticket Ops', Icon: Wand2, minRole: 'admin', group: 'Tickets & AI' },
+    { id: 'urgent-escalation', label: 'Urgent Escalation', Icon: Siren, minRole: 'admin', group: 'Tickets & AI' },
+    // Notifications & Public
+    { id: 'feedback-page', label: 'Feedback', Icon: MessageSquare, minRole: 'admin', group: 'Notifications & Public' },
+    { id: 'notification-providers', label: 'Notifications', Icon: Bell, minRole: 'global', group: 'Notifications & Public' },
+    { id: 'public-ticket-status', label: 'Public Status', Icon: ExternalLink, minRole: 'admin', group: 'Notifications & Public' },
+    // Team & Scheduling
+    { id: 'business-hours', label: 'Business Hours', Icon: Clock, minRole: 'admin', group: 'Team & Scheduling' },
+    { id: 'groups', label: 'Groups', Icon: Users2, minRole: 'admin', group: 'Team & Scheduling' },
+    { id: 'agents', label: 'Members', Icon: Users, minRole: 'admin', group: 'Team & Scheduling' },
+    { id: 'photos', label: 'Photos & Locations', Icon: Camera, minRole: 'admin', group: 'Team & Scheduling' },
+    { id: 'calendar-leave', label: 'Shared Calendar', Icon: CalendarDays, minRole: 'admin', group: 'Team & Scheduling' },
+    { id: 'tech-schedules', label: 'Tech Schedules', Icon: CalendarDays, minRole: 'admin', group: 'Team & Scheduling' },
+    { id: 'tech-visibility', label: 'Tech Visibility', Icon: EyeOff, minRole: 'admin', group: 'Team & Scheduling' },
+    { id: 'vacation-tracker', label: 'Vacation Tracker', Icon: CalendarDays, minRole: 'admin', group: 'Team & Scheduling' },
+    // Sync & Data
+    { id: 'backfill', label: 'Backfill', Icon: Download, minRole: 'admin', group: 'Sync & Data' },
+    { id: 'sync-ops', label: 'Sync Operations', Icon: BarChart3, minRole: 'admin', group: 'Sync & Data' },
+    { id: 'sync', label: 'Sync Settings', Icon: RefreshCw, minRole: 'admin', group: 'Sync & Data' },
+    // Workspace
+    { id: 'admins', label: 'Admins', Icon: Shield, minRole: 'global', group: 'Workspace' },
+    { id: 'ai-usage', label: 'AI Usage & Cost', Icon: BarChart3, minRole: 'global', group: 'Workspace' },
+    { id: 'dashboard', label: 'Dashboard', Icon: LayoutDashboard, minRole: 'viewer', group: 'Workspace' },
+    { id: 'workspace-access', label: 'Workspace Access', Icon: KeyRound, minRole: 'admin', group: 'Workspace' },
+    { id: 'workspaces', label: 'Workspaces', Icon: Globe, minRole: 'global', group: 'Workspace' },
   ];
 
   const navigationItems = allNavigationItems.filter(item => {
@@ -626,9 +634,17 @@ export default function Settings() {
               </Tooltip>
             </div>
             <nav className="settings-scrollbar flex gap-1 overflow-x-auto p-2 md:block md:h-[calc(100%-65px)] md:space-y-1 md:overflow-y-auto">
-              {navigationItems.map((item) => {
+              {navigationItems.map((item, idx) => {
                 const isActive = activeSection === item.id;
                 const isDisabled = !!item.disabled;
+                // Group header when the group changes (desktop vertical nav only;
+                // the mobile horizontal strip stays a flat scroll).
+                const showGroupHeader = item.group && item.group !== navigationItems[idx - 1]?.group;
+                const groupHeader = showGroupHeader && !isNavCollapsed ? (
+                  <div key={`group-${item.group}`} className={cn('hidden px-3 pb-1 text-[10px] font-bold uppercase tracking-wide text-slate-400 md:block', idx > 0 && 'pt-3')}>
+                    {item.group}
+                  </div>
+                ) : null;
                 const navButton = (
                   <button
                     key={item.id}
@@ -662,7 +678,11 @@ export default function Settings() {
                   </button>
                 );
 
-                if (!isNavCollapsed) return navButton;
+                if (!isNavCollapsed) {
+                  return groupHeader
+                    ? <Fragment key={item.id}>{groupHeader}{navButton}</Fragment>
+                    : navButton;
+                }
 
                 return (
                   <Tooltip key={item.id}>

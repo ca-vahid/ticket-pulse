@@ -37,6 +37,14 @@ const confirmDestructive = (message) => typeof window === 'undefined' || window.
 // (an admin could conclude their keys were wiped). Surface it instead.
 const loadErrorMessage = (e) => e?.response?.data?.detail || e?.response?.data?.message || e?.message || 'Could not load — check your connection and retry.';
 
+// The public API is served from the backend host — the Static Web App can't
+// proxy /api on the current plan, so calling it at the app domain returns the
+// SPA HTML. Surface the real base URL integrators must call, derived from the
+// same VITE_API_URL the app itself uses (QA 07-20 #15-17).
+const API_ORIGIN = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '')
+  || (typeof window !== 'undefined' ? window.location.origin : '');
+const API_BASE_URL = `${API_ORIGIN}/api/v1`;
+
 function DeliveryLog({ subId }) {
   const [rows, setRows] = useState(null);
   const load = useCallback(() => { ticketsAPI.listWebhookDeliveries(subId).then((r) => setRows(r.data || [])).catch(() => setRows([])); }, [subId]);
@@ -324,11 +332,23 @@ export default function ApiKeysPanel() {
           <KeyRound className="w-4 h-4 text-blue-500" aria-hidden="true" />
           <h3 className="text-sm font-bold text-slate-800">Integration API keys</h3>
         </div>
-        <p className="text-xs text-slate-400 mb-3">
+        <p className="text-xs text-slate-400 mb-2">
           Keys authenticate the public <code className="bg-slate-100 rounded px-1">/api/v1</code> API (Bearer <code className="bg-slate-100 rounded px-1">tp_live_…</code> / <code className="bg-slate-100 rounded px-1">tp_test_…</code>), scoped to this workspace.
           {' '}<span className="text-amber-700">Test keys are read-only</span> — use them to build against the API safely; a live key is required to make changes.
-          {' '}Full reference: <a href="/api/v1/docs" target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">/api/v1/docs</a>.
+          {' '}Full reference: <a href={`${API_ORIGIN}/api/v1/docs`} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">API docs</a>.
         </p>
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2">
+          <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Base URL</span>
+          <code className="min-w-0 flex-1 truncate text-xs font-mono text-slate-700">{API_BASE_URL}</code>
+          <button
+            type="button"
+            onClick={() => { navigator.clipboard?.writeText(API_BASE_URL).catch(() => {}); }}
+            className="tp-focus-ring inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50"
+          >
+            <Copy className="h-3 w-3" aria-hidden="true" /> Copy
+          </button>
+          <span className="w-full text-[11px] text-slate-400">Call the API at this host — e.g. <code className="font-mono">{API_BASE_URL}/me</code>. (The app domain serves the web UI, not the API.)</span>
+        </div>
 
         {freshKey && (
           <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3">

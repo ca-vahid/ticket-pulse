@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Award,
+  Bell,
   Boxes,
   Calendar,
   Check,
@@ -349,6 +350,13 @@ export default function AppHeader({
         description: 'My competencies',
         path: '/my-competencies',
         Icon: Award,
+      },
+      {
+        id: 'notifications',
+        label: 'Notifications',
+        description: 'Email & alert preferences',
+        path: '/my-competencies?tab=notifications',
+        Icon: Bell,
       },
       ...(canManageWorkspace ? [{
         id: 'skill-matrix',

@@ -1,5 +1,7 @@
 import { useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { MessageSquareHeart } from 'lucide-react';
+import { TicketRefLink } from '../tickets/ticketUi';
 
 const EMOJI = ['😞', '😕', '😐', '🙂', '😄'];
 const COLORS = ['#ef4444', '#f97316', '#f59e0b', '#22c55e', '#10b981'];
@@ -63,7 +65,7 @@ export default function FeedbackSection({ feedbackTickets = [], stats = {}, isLo
             return (
               <div key={t.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-slate-400">#{t.freshserviceTicketId}</span>
+                  <TicketRefLink ticket={t} className="text-xs" linkClassName="font-semibold text-blue-600 hover:text-blue-800" />
                   <span className="text-xs text-slate-400">
                     {t.feedback?.submittedAt ? new Date(t.feedback.submittedAt).toLocaleDateString() : ''}
                   </span>
@@ -73,7 +75,11 @@ export default function FeedbackSection({ feedbackTickets = [], stats = {}, isLo
                   <span className="text-sm font-bold" style={{ color: m.color }}>{t.feedback?.score}/5</span>
                 </div>
                 {t.subject && (
-                  <div className="mt-1 truncate text-sm font-medium text-slate-700" title={t.subject}>{t.subject}</div>
+                  t.id ? (
+                    <Link to={`/tickets/${t.id}`} className="mt-1 block truncate text-sm font-medium text-slate-700 hover:text-blue-700 hover:underline" title={t.subject}>{t.subject}</Link>
+                  ) : (
+                    <div className="mt-1 truncate text-sm font-medium text-slate-700" title={t.subject}>{t.subject}</div>
+                  )
                 )}
                 {t.feedback?.comment && (
                   <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-sm italic text-slate-600">“{t.feedback.comment}”</p>

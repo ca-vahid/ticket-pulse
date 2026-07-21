@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
+  Bell,
   ChevronRight,
   LogOut,
   MoreHorizontal,
@@ -185,6 +186,18 @@ export default function MobileTabBar() {
                   <UserCircle2 className="h-[20px] w-[20px]" />
                 </span>
                 <span className="flex-1">My Skills</span>
+                <ChevronRight className="h-4 w-4 text-slate-300" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => go('/my-competencies?tab=notifications')}
+                className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500">
+                  <Bell className="h-[20px] w-[20px]" />
+                </span>
+                <span className="flex-1">Notifications</span>
                 <ChevronRight className="h-4 w-4 text-slate-300" />
               </button>
 

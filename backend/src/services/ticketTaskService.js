@@ -17,6 +17,24 @@ const TASK_SELECT = {
   assignedTech: { select: { id: true, name: true, photoUrl: true, email: true, freshserviceId: true } },
 };
 
+// FreshService returns task descriptions as HTML (e.g. `<div style="…">…</div>`).
+// Store them as readable plain text so the UI doesn't surface raw markup/metadata
+// (QA 07-20 #12).
+function fsPlainText(html) {
+  if (!html) return null;
+  const text = String(html)
+    .replace(/<\s*br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|li|tr|h[1-6])>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"').replace(/&#39;|&apos;/gi, "'")
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  return text || null;
+}
+
 function shape(task) {
   if (!task) return task;
   const { fsTaskId, assignedTech, ...rest } = task;
@@ -255,6 +273,31 @@ class TicketTaskService {
     }
   }
 
+  /** After a TP-born ticket is first mirrored to FreshService, push any tasks
+   *  that were created BEFORE the FS copy existed (added within the ~minutes
+   *  before the mirror, so `_writeBackToFs` had no freshserviceTicketId to
+   *  target and skipped them — QA 07-20 #14). Idempotent: only tasks lacking an
+   *  fsTaskId are pushed. Called from mirrorService once the FS id is set. */
+  async backfillMirrorTasks(ticketId, workspaceId) {
+    const ticket = await this._ticket(ticketId, workspaceId);
+    if (!ticket.freshserviceTicketId || ticket.origin !== TICKET_ORIGIN.TICKETPULSE) return { pushed: 0 };
+    const pending = await prisma.ticketTask.findMany({
+      where: { ticketId, workspaceId, origin: TICKET_ORIGIN.TICKETPULSE, fsTaskId: null },
+      select: TASK_SELECT,
+    });
+    let pushed = 0;
+    for (const row of pending) {
+      try {
+        await this._writeBackToFs(ticket, row);
+        if (row.fsTaskId) pushed += 1;
+      } catch (err) {
+        logger.warn(`Task mirror backfill failed for task ${row.id} (non-fatal): ${err.message}`);
+      }
+    }
+    if (pushed) logger.info(`Backfilled ${pushed} task(s) to FS for ${ticketDisplayRef(ticket)} after mirror`);
+    return { pushed };
+  }
+
   /** Email a TP-born task's assignee (idempotent via notifiedAt). */
   async _maybeNotify(ticket, row, assignee) {
     if (!row.notifyAgent || row.notifiedAt || !assignee?.email) return null;
@@ -318,7 +361,7 @@ class TicketTaskService {
       const assignee = t.agent_id ? await prisma.technician.findFirst({ where: { workspaceId: ticket.workspaceId, freshserviceId: BigInt(t.agent_id) }, select: { id: true } }) : null;
       const data = {
         title: t.title || '(untitled task)',
-        description: t.description || null,
+        description: fsPlainText(t.description),
         status: FROM_FS_STATUS[t.status] || 'open',
         assignedTechId: assignee?.id ?? null,
         dueAt: t.due_date ? new Date(t.due_date) : null,

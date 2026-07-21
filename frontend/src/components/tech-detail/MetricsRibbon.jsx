@@ -7,13 +7,13 @@ import { CircleDot, Hand, Send, CheckCircle2, Star } from 'lucide-react';
  * with a ring + bolder background so it reads as "you are here" without
  * adding a separate row of pills below.
  */
-function Metric({ icon: Icon, iconClass, label, value, sub, viewId, activeViewId, onSelect, isZero }) {
+function Metric({ icon: Icon, iconClass, label, period, value, sub, viewId, activeViewId, onSelect, isZero, cellClass = '' }) {
   const isActive = viewId && activeViewId === viewId;
   const isClickable = !!(viewId && onSelect);
 
   // Color-keyed dim/dim-inactive states so the active cell stands out without
   // making inactive ones feel disabled.
-  const baseClasses = 'flex items-center gap-2.5 px-3 py-2.5 sm:px-4 sm:py-2 transition-colors w-full h-full text-left';
+  const baseClasses = `flex items-center gap-2.5 px-3 py-2.5 sm:px-4 sm:py-2 transition-colors w-full h-full text-left ${cellClass}`;
   const activeClasses = 'bg-blue-50 ring-1 ring-blue-200 ring-inset';
   const idleClasses = isClickable ? 'hover:bg-slate-50 cursor-pointer' : '';
   const inactiveTextDim = isClickable && !isActive && isZero ? 'opacity-60' : '';
@@ -26,7 +26,10 @@ function Metric({ icon: Icon, iconClass, label, value, sub, viewId, activeViewId
           <span className={`text-lg font-bold leading-none tabular-nums ${isActive ? 'text-blue-700' : 'text-slate-900'}`}>{value}</span>
           {sub && <span className="text-xs text-amber-600 font-medium">{sub}</span>}
         </div>
-        <div className={`text-[10px] uppercase tracking-wide font-medium leading-tight mt-0.5 ${isActive ? 'text-blue-600' : 'text-slate-400'}`}>{label}</div>
+        <div className={`text-[10px] uppercase tracking-wide font-medium leading-tight mt-0.5 ${isActive ? 'text-blue-600' : 'text-slate-400'}`}>
+          {label}
+          {period && <span className="hidden sm:inline"> · {period}</span>}
+        </div>
       </div>
     </>
   );
@@ -94,7 +97,8 @@ export default function MetricsRibbon({
       <Metric
         icon={Hand}
         iconClass="text-slate-400"
-        label={`Self-picked · ${periodLabel}`}
+        label="Self-picked"
+        period={periodLabel}
         value={selfPickedCount}
         viewId="self"
         activeViewId={activeView}
@@ -104,7 +108,8 @@ export default function MetricsRibbon({
       <Metric
         icon={Send}
         iconClass="text-slate-400"
-        label={`Assigned · ${periodLabel}`}
+        label="Assigned"
+        period={periodLabel}
         value={assignedCount}
         viewId="assigned"
         activeViewId={activeView}
@@ -114,7 +119,8 @@ export default function MetricsRibbon({
       <Metric
         icon={CheckCircle2}
         iconClass="text-emerald-500"
-        label={`Closed · ${periodLabel}`}
+        label="Closed"
+        period={periodLabel}
         value={closedCount}
         viewId="closed"
         activeViewId={activeView}
@@ -127,6 +133,7 @@ export default function MetricsRibbon({
         label="CSAT · All time"
         value={csatCount}
         sub={csatAverage ? `Avg ${csatAverage}/4` : null}
+        cellClass="col-span-2 sm:col-span-1"
       />
     </div>
   );

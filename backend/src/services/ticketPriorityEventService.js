@@ -111,6 +111,67 @@ class TicketPriorityEventService {
     return { recorded: true, event };
   }
 
+  /**
+   * Record a priority change made natively in Ticket Pulse (a TP-born ticket
+   * edited in-app), so it drives the SAME downstream flow as an FS-detected
+   * change: threshold escalation notifications AND per-agent "My alerts".
+   * Previously only FS-sync detected priority changes recorded an event, so a
+   * raise done inside the app notified no one (QA 07-20 #7).
+   */
+  async recordNativePriorityChange({
+    ticketId,
+    workspaceId,
+    fromPriorityId,
+    toPriorityId,
+    changedAt = null,
+    processAsync = true,
+  } = {}) {
+    const fromId = Number(fromPriorityId);
+    const toId = Number(toPriorityId);
+    if (!ticketId || !Number.isFinite(fromId) || !Number.isFinite(toId) || fromId === toId) {
+      return { recorded: false, skipped: 'no_priority_change' };
+    }
+    const stamp = (changedAt ? new Date(changedAt) : new Date()).toISOString();
+    const dedupeKey = `tp-priority:${ticketId}:${fromId}:${toId}:${stamp}`;
+    const existing = await safeFindEvent(dedupeKey);
+    if (existing) return { recorded: false, skipped: 'already_recorded', event: existing };
+
+    let event;
+    try {
+      event = await prisma.ticketPriorityEvent.create({
+        data: {
+          workspaceId,
+          ticketId,
+          eventType: 'ticketpulse_priority_changed',
+          source: 'ticketpulse',
+          fromPriorityId: fromId,
+          fromPriorityLabel: priorityLabel(fromId),
+          toPriorityId: toId,
+          toPriorityLabel: priorityLabel(toId),
+          direction: priorityDirection(fromId, toId),
+          sourceUpdatedAt: stamp,
+          dedupeKey,
+        },
+      });
+    } catch (error) {
+      if (error.code === 'P2002') {
+        return { recorded: false, skipped: 'already_recorded', event: await safeFindEvent(dedupeKey) };
+      }
+      throw error;
+    }
+
+    logger.info('Ticket Pulse native priority change recorded', {
+      priorityEventId: event.id, ticketId, workspaceId, fromPriorityId: fromId, toPriorityId: toId, direction: event.direction,
+    });
+
+    if (processAsync) {
+      this.processEvent(event.id).catch((error) => logger.warn('Native priority-change event processing failed', {
+        priorityEventId: event.id, ticketId, error: error.message,
+      }));
+    }
+    return { recorded: true, event };
+  }
+
   async processPendingEvents(workspaceId, { limit = 25 } = {}) {
     const events = await prisma.ticketPriorityEvent.findMany({
       where: {

@@ -1,8 +1,10 @@
 import { useState, useEffect, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { RotateCcw, ExternalLink, Clock, AlertTriangle, Loader2 } from 'lucide-react';
 import { dashboardAPI } from '../../services/api';
 import { getTicketCategoryLabel } from '../../utils/ticketFilter';
 import { FRESHSERVICE_DOMAIN } from './constants';
+import { TicketRefLink } from '../tickets/ticketUi';
 
 const PRIORITY_LABELS = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Urgent' };
 const PRIORITY_PILL = {
@@ -235,9 +237,11 @@ export default function BouncedTab({ technician, viewMode = 'daily', selectedDat
                 >
                   {/* Ticket ID + (only when relevant) self-picked tag stacked beneath */}
                   <div className="flex flex-col gap-0.5 min-w-0">
-                    <span className="font-mono text-[11px] text-slate-500 truncate">
-                      #{ticket?.freshserviceTicketId || '?'}
-                    </span>
+                    {ticket ? (
+                      <TicketRefLink ticket={ticket} className="text-[11px] truncate" />
+                    ) : (
+                      <span className="font-mono text-[11px] text-slate-500 truncate">#?</span>
+                    )}
                     {isSelfPick && (
                       <span className="inline-flex items-center w-fit px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 text-[9px] font-semibold uppercase tracking-wide">
                         Self-picked
@@ -294,7 +298,15 @@ export default function BouncedTab({ technician, viewMode = 'daily', selectedDat
 
                   {/* Action — lightweight link */}
                   <span className="text-right">
-                    {fsUrl && (
+                    {ticket?.id ? (
+                      <Link
+                        to={`/tickets/${ticket.id}`}
+                        className="inline-flex items-center gap-0.5 text-blue-600 hover:text-blue-800 text-[11px] font-medium"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        Open
+                      </Link>
+                    ) : fsUrl && (
                       <a
                         href={fsUrl}
                         target="_blank"
