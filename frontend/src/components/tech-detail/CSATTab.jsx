@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
-import { Star, User, ExternalLink, X } from 'lucide-react';
-import { FRESHSERVICE_DOMAIN } from './constants';
+import { Star, User, X } from 'lucide-react';
+import { TicketRefLink } from '../tickets/ticketUi';
 
 // ── Score helpers ─────────────────────────────────────────────────────────────
 
@@ -121,15 +121,7 @@ function CSATCard({ ticket, onExpand }) {
     <div className={`rounded-xl border shadow-sm hover:shadow-md transition-all p-3 flex flex-col ${getCardTheme(score)}`}>
       {/* Header */}
       <div className="flex items-center justify-between mb-2">
-        <a
-          href={`https://${FRESHSERVICE_DOMAIN}/a/tickets/${ticket.freshserviceTicketId}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-blue-600 hover:text-blue-800 font-bold text-xs flex items-center gap-1"
-        >
-          #{ticket.freshserviceTicketId}
-          <ExternalLink className="w-2.5 h-2.5" />
-        </a>
+        <TicketRefLink ticket={ticket} className="text-xs" linkClassName="font-bold text-blue-600 hover:text-blue-800" />
         <span className="text-[10px] text-slate-400">{formatDate(ticket.csatSubmittedAt)}</span>
       </div>
 
@@ -202,15 +194,7 @@ function FeedbackModal({ ticket, onClose }) {
         <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-start justify-between">
           <div>
             <div className="flex items-center gap-2 mb-1">
-              <a
-                href={`https://${FRESHSERVICE_DOMAIN}/a/tickets/${ticket.freshserviceTicketId}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-blue-600 hover:text-blue-800 font-bold flex items-center gap-1 text-sm"
-              >
-                #{ticket.freshserviceTicketId}
-                <ExternalLink className="w-3.5 h-3.5" />
-              </a>
+              <TicketRefLink ticket={ticket} className="text-sm" linkClassName="font-bold text-blue-600 hover:text-blue-800" iconClassName="h-3.5 w-3.5" />
               <span className="text-xs text-slate-400">{formatDate(ticket.csatSubmittedAt)}</span>
             </div>
             <h3 className="font-semibold text-slate-900">{ticket.subject}</h3>

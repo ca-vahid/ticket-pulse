@@ -1,6 +1,6 @@
 import {
   Hand, Send, CheckCircle2, TrendingUp, TrendingDown, Minus, Star,
-  Inbox, Sparkles, Smartphone, RotateCcw, Activity,
+  Inbox, Sparkles, Smartphone, RotateCcw, Activity, ChevronRight,
 } from 'lucide-react';
 import { getTicketCategoryLabel } from '../../utils/ticketFilter';
 import { STATUS_COLORS } from './constants';
@@ -28,7 +28,7 @@ function SectionLabel({ children, hint }) {
  * Color carries meaning (status), so deliberately light backgrounds keep the
  * grid breathable without competing with the numbers themselves.
  */
-function KpiCard({ icon: Icon, label, value, sub, accent = 'slate', delta = null, footer = null }) {
+function KpiCard({ icon: Icon, label, value, sub, accent = 'slate', delta = null, footer = null, onClick = null }) {
   const accentMap = {
     blue:    { ring: 'ring-blue-100',    iconBg: 'bg-blue-50 text-blue-600',       num: 'text-blue-700' },
     emerald: { ring: 'ring-emerald-100', iconBg: 'bg-emerald-50 text-emerald-600', num: 'text-emerald-700' },
@@ -48,14 +48,22 @@ function KpiCard({ icon: Icon, label, value, sub, accent = 'slate', delta = null
     deltaClass = delta > 0 ? 'text-rose-500' : delta < 0 ? 'text-emerald-600' : 'text-slate-400';
   }
 
+  const interactive = typeof onClick === 'function';
+  const Wrapper = interactive ? 'button' : 'div';
   return (
-    <div className={`bg-white border border-slate-200 rounded-xl p-3 ring-1 ${a.ring} hover:shadow-sm transition-shadow`}>
+    <Wrapper
+      {...(interactive ? { type: 'button', onClick, 'aria-label': `${label}: ${value}. View these tickets.` } : {})}
+      className={`w-full text-left bg-white border border-slate-200 rounded-xl p-3 ring-1 ${a.ring} transition-all ${interactive ? 'cursor-pointer hover:shadow-md hover:-translate-y-px hover:border-slate-300 tp-focus-ring' : 'hover:shadow-sm'}`}
+    >
       <div className="flex items-center gap-2.5">
         <span className={`inline-flex h-8 w-8 items-center justify-center rounded-lg ${a.iconBg} flex-shrink-0`}>
           <Icon className="w-4 h-4" />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="text-[10px] uppercase tracking-wide text-slate-400 font-semibold leading-none">{label}</div>
+          <div className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-slate-400 font-semibold leading-none">
+            <span className="truncate">{label}</span>
+            {interactive && <ChevronRight className="h-3 w-3 flex-shrink-0 text-slate-300" aria-hidden="true" />}
+          </div>
           <div className="flex items-baseline gap-1.5 mt-1">
             <span className={`text-2xl font-bold leading-none tabular-nums ${a.num}`}>{value}</span>
             {sub && <span className="text-[11px] font-medium text-slate-500">{sub}</span>}
@@ -69,7 +77,7 @@ function KpiCard({ icon: Icon, label, value, sub, accent = 'slate', delta = null
         )}
       </div>
       {footer && <div className="mt-2 pt-2 border-t border-slate-100 text-[10px] text-slate-500">{footer}</div>}
-    </div>
+    </Wrapper>
   );
 }
 
@@ -304,7 +312,7 @@ function workloadTone(open) {
 
 // ── Daily Overview ────────────────────────────────────────────────────────────
 
-function DailyOverview({ technician, selectedDate, openCount, pendingCount }) {
+function DailyOverview({ technician, selectedDate, openCount, pendingCount, onDrill }) {
   const dayTickets = technician.ticketsOnDate || [];
   const total       = technician.totalTicketsOnDate || 0;
   const selfPicked  = technician.selfPickedOnDate || 0;
@@ -345,6 +353,7 @@ function DailyOverview({ technician, selectedDate, openCount, pendingCount }) {
           value={openCount}
           sub={pendingCount > 0 ? `+${pendingCount} pending` : null}
           footer={<span className="font-semibold">{load.label}</span>}
+          onClick={onDrill ? () => onDrill('all') : null}
         />
         <KpiCard
           icon={Hand}
@@ -352,13 +361,15 @@ function DailyOverview({ technician, selectedDate, openCount, pendingCount }) {
           label="Self-picked today"
           value={selfPicked}
           sub={total > 0 ? `${selfRate}%` : null}
+          onClick={onDrill ? () => onDrill('self') : null}
         />
         <KpiCard
           icon={Send}
           accent="slate"
           label="Assigned today"
-          value={assigned + appAssigned}
-          sub={appAssigned > 0 ? `${appAssigned} via app` : null}
+          value={assigned}
+          sub={appAssigned > 0 ? `+${appAssigned} via app` : null}
+          onClick={onDrill ? () => onDrill('assigned') : null}
         />
         <KpiCard
           icon={CheckCircle2}
@@ -366,6 +377,7 @@ function DailyOverview({ technician, selectedDate, openCount, pendingCount }) {
           label="Closed today"
           value={closed}
           sub={total > 0 ? `of ${total}` : null}
+          onClick={onDrill ? () => onDrill('closed') : null}
         />
       </div>
 
@@ -411,7 +423,7 @@ function DailyOverview({ technician, selectedDate, openCount, pendingCount }) {
 
 // ── Weekly Overview ───────────────────────────────────────────────────────────
 
-function WeeklyOverview({ technician, openCount, pendingCount }) {
+function WeeklyOverview({ technician, openCount, pendingCount, onDrill }) {
   const netChange   = technician.weeklyNetChange || 0;
   const total       = technician.weeklyTotalCreated || 0;
   const selfPicked  = technician.weeklySelfPicked || 0;
@@ -435,6 +447,7 @@ function WeeklyOverview({ technician, openCount, pendingCount }) {
           value={openCount}
           sub={pendingCount > 0 ? `+${pendingCount} pending` : null}
           footer={<span className="font-semibold">{load.label}</span>}
+          onClick={onDrill ? () => onDrill('all') : null}
         />
         <KpiCard
           icon={Activity}
@@ -443,6 +456,7 @@ function WeeklyOverview({ technician, openCount, pendingCount }) {
           value={total}
           delta={netChange}
           sub={total > 0 ? `${selfRate}% self-picked` : null}
+          onClick={onDrill ? () => onDrill('all') : null}
         />
         <KpiCard
           icon={CheckCircle2}
@@ -451,6 +465,7 @@ function WeeklyOverview({ technician, openCount, pendingCount }) {
           value={closed}
           sub={total > 0 ? `${closeRate}% close rate` : null}
           footer={`Avg ${(technician.avgClosedPerDay || 0).toFixed(1)} / day`}
+          onClick={onDrill ? () => onDrill('closed') : null}
         />
         <KpiCard
           icon={Sparkles}
@@ -459,6 +474,7 @@ function WeeklyOverview({ technician, openCount, pendingCount }) {
           value={`${selfRate}%`}
           sub={`${selfPicked} of ${total || 0}`}
           footer={selfRate >= 60 ? 'Highly proactive' : selfRate >= 30 ? 'Mixed mode' : 'Mostly assigned'}
+          onClick={onDrill ? () => onDrill('self') : null}
         />
       </div>
 
@@ -520,7 +536,7 @@ function WeeklyOverview({ technician, openCount, pendingCount }) {
 
 // ── Monthly Overview ──────────────────────────────────────────────────────────
 
-function MonthlyOverview({ technician, selectedMonth, openCount, pendingCount }) {
+function MonthlyOverview({ technician, selectedMonth, openCount, pendingCount, onDrill }) {
   const netChange    = technician.monthlyNetChange || 0;
   const total        = technician.monthlyTotalCreated || 0;
   const selfPicked   = technician.monthlySelfPicked || 0;
@@ -561,6 +577,7 @@ function MonthlyOverview({ technician, selectedMonth, openCount, pendingCount })
           value={openCount}
           sub={pendingCount > 0 ? `+${pendingCount} pending` : null}
           footer={<span className="font-semibold">{load.label}</span>}
+          onClick={onDrill ? () => onDrill('all') : null}
         />
         <KpiCard
           icon={Activity}
@@ -569,6 +586,7 @@ function MonthlyOverview({ technician, selectedMonth, openCount, pendingCount })
           value={total}
           delta={netChange}
           sub={total > 0 ? `${selfRate}% self-picked` : null}
+          onClick={onDrill ? () => onDrill('all') : null}
         />
         <KpiCard
           icon={CheckCircle2}
@@ -577,6 +595,7 @@ function MonthlyOverview({ technician, selectedMonth, openCount, pendingCount })
           value={closed}
           sub={total > 0 ? `${closeRate}% close rate` : null}
           footer={`Avg ${(technician.avgClosedPerDay || 0).toFixed(1)} / day`}
+          onClick={onDrill ? () => onDrill('closed') : null}
         />
         <KpiCard
           icon={Sparkles}
@@ -585,6 +604,7 @@ function MonthlyOverview({ technician, selectedMonth, openCount, pendingCount })
           value={`${selfRate}%`}
           sub={`${selfPicked} of ${total || 0}`}
           footer={selfRate >= 60 ? 'Highly proactive' : selfRate >= 30 ? 'Mixed mode' : 'Mostly assigned'}
+          onClick={onDrill ? () => onDrill('self') : null}
         />
       </div>
 
@@ -696,6 +716,7 @@ export default function OverviewTab({
   selectedMonth,
   openCount,
   pendingCount,
+  onDrill,
 }) {
   if (viewMode === 'weekly') {
     if (!technician.dailyBreakdown) {
@@ -706,7 +727,7 @@ export default function OverviewTab({
         </div>
       );
     }
-    return <WeeklyOverview technician={technician} openCount={openCount} pendingCount={pendingCount} />;
+    return <WeeklyOverview technician={technician} openCount={openCount} pendingCount={pendingCount} onDrill={onDrill} />;
   }
 
   if (viewMode === 'monthly') {
@@ -724,6 +745,7 @@ export default function OverviewTab({
         selectedMonth={selectedMonth}
         openCount={openCount}
         pendingCount={pendingCount}
+        onDrill={onDrill}
       />
     );
   }
@@ -734,6 +756,7 @@ export default function OverviewTab({
       selectedDate={selectedDate}
       openCount={openCount}
       pendingCount={pendingCount}
+      onDrill={onDrill}
     />
   );
 }

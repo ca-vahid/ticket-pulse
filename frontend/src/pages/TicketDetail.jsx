@@ -17,6 +17,7 @@ import AppHeader from '../components/AppHeader';
 import MobileTabBar from '../components/nav/MobileTabBar';
 import AiAssignModal from '../components/tickets/AiAssignModal';
 import AssigneePicker from '../components/tickets/AssigneePicker';
+import MobileAssignSheet from '../components/tickets/MobileAssignSheet';
 import CcChips from '../components/tickets/CcChips';
 import FsSyncConfirm from '../components/tickets/FsSyncConfirm';
 import RichTextEditor, { isRichContent } from '../components/tickets/RichTextEditor';
@@ -492,6 +493,7 @@ export default function TicketDetail() {
     }, { replace: true });
   };
   const [taskOpenCount, setTaskOpenCount] = useState(0); // drives the Tasks tab badge
+  const [mobileAssignOpen, setMobileAssignOpen] = useState(false); // mobile assign bottom sheet
 
   const [ticket, setTicket] = useState(null);
   const [meta, setMeta] = useState(null);
@@ -1857,6 +1859,41 @@ export default function TicketDetail() {
               </div>
             </div>
 
+            {/* Mobile quick-actions: on phones the properties sidebar stacks
+                BELOW the whole conversation, so surface the assignee + status up
+                here with a one-tap assign (reuses the touch-first bottom sheet). */}
+            <div className="lg:hidden mb-4 flex items-center gap-2 rounded-xl border border-slate-200 bg-white p-2 shadow-sm print-hide">
+              <button
+                type="button"
+                onClick={() => { if (canWrite || fsEditable) setMobileAssignOpen(true); }}
+                disabled={!(canWrite || fsEditable)}
+                aria-label={ticket.assignedTech ? `Assignee ${ticket.assignedTech.name} — tap to change` : 'Assign this ticket'}
+                className="tp-focus-ring flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-left disabled:opacity-100"
+              >
+                <PersonAvatar name={ticket.assignedTech?.name} photoUrl={ticket.assignedTech?.photoUrl} size="h-8 w-8" />
+                <span className="min-w-0">
+                  <span className="block text-[10px] uppercase tracking-wide font-semibold text-slate-400">Assignee</span>
+                  <span className="block truncate text-sm font-semibold text-slate-700">{ticket.assignedTech?.name || 'Unassigned'}</span>
+                </span>
+                {(canWrite || fsEditable) && <ChevronDown className="ml-auto h-4 w-4 flex-shrink-0 text-slate-300" aria-hidden="true" />}
+              </button>
+              <StatusPill status={ticket.status} />
+            </div>
+            <MobileAssignSheet
+              ticket={ticket}
+              open={mobileAssignOpen}
+              onClose={() => setMobileAssignOpen(false)}
+              technicians={meta?.technicians || []}
+              assignFn={fsEditable ? fsAssign : undefined}
+              canReview={canReview}
+              onAiAssign={canReview ? () => { setMobileAssignOpen(false); setAiModalOpen(true); } : null}
+              onAssigned={() => {
+                lastLocalMutationRef.current = Date.now();
+                fetchTicket({ silent: true });
+                if (!fsEditable) showToast('emerald', 'Saved');
+              }}
+            />
+
             {/* Page tabs — folder-style: squared, bordered, sitting on a baseline;
                 scroll horizontally on narrow screens instead of clipping. */}
             <div role="tablist" aria-label="Ticket sections" className="flex items-end gap-1 border-b border-slate-200 mb-4 overflow-x-auto no-scrollbar print-hide">
@@ -1880,7 +1917,7 @@ export default function TicketDetail() {
                         : 'bg-slate-50 text-slate-500 border-transparent hover:bg-slate-100 hover:text-slate-700'
                     }`}
                   >
-                    {selected && <span className="absolute inset-x-0 top-0 h-0.5 rounded-t bg-blue-600" aria-hidden="true" />}
+                    {selected && <span className="absolute inset-x-2 top-0 h-0.5 rounded-full bg-blue-600" aria-hidden="true" />}
                     <TabIcon className="w-4 h-4" aria-hidden="true" />
                     {label}
                     {count > 0 && (
@@ -2406,33 +2443,6 @@ export default function TicketDetail() {
                       {[1, 2, 3, 4].map((p) => <option key={p} value={p}>{PRIORITY_LABELS[p]}</option>)}
                     </select>
                   </SidebarField>
-
-                  {/* Impact / urgency (gap plan P2.5) — optional ITSM nuance, TP-born editable */}
-                  {(canWrite || ticket.impact || ticket.urgency) && (
-                    <div className="grid grid-cols-2 gap-2">
-                      {[['impact', 'Impact'], ['urgency', 'Urgency']].map(([field, label]) => (
-                        <SidebarField key={field} label={label}>
-                          <select
-                            value={ticket[field] ?? ''}
-                            disabled={!canWrite || savingField === field}
-                            onChange={(e) => {
-                              const next = e.target.value ? Number(e.target.value) : null;
-                              const prev = ticket[field] ?? null;
-                              applyChange(field, () => ticketsAPI.update(ticketId, { [field]: next }), {
-                                label: `${label} → ${next ? ['Low', 'Medium', 'High'][next - 1] : '—'}`,
-                                undo: () => ticketsAPI.update(ticketId, { [field]: prev }),
-                              });
-                            }}
-                            className={fieldClass}
-                            aria-label={`Ticket ${field}`}
-                          >
-                            <option value="">—</option>
-                            {[1, 2, 3].map((v) => <option key={v} value={v}>{['Low', 'Medium', 'High'][v - 1]}</option>)}
-                          </select>
-                        </SidebarField>
-                      ))}
-                    </div>
-                  )}
 
                   {(ticket.frDueBy || ticket.dueBy) && !['Deleted', 'Spam'].includes(ticket.status) && (
                     <div className="pt-1 border-t border-slate-100 space-y-2">

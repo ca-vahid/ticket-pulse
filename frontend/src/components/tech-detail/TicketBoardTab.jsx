@@ -1,8 +1,10 @@
+import { Link } from 'react-router-dom';
 import { ExternalLink, CheckCircle2, Search, X } from 'lucide-react';
 import CategoryFilter from '../CategoryFilter';
 import CanonicalCategoryFilter from '../CanonicalCategoryFilter';
 import { getTicketCategoryLabel } from '../../utils/ticketFilter';
-import { PRIORITY_STRIP_COLORS, PRIORITY_LABELS, STATUS_COLORS, FRESHSERVICE_DOMAIN } from './constants';
+import { PRIORITY_STRIP_COLORS, PRIORITY_LABELS, STATUS_COLORS } from './constants';
+import { TicketRefLink, ticketFsUrl } from '../tickets/ticketUi';
 import { formatResolutionTime, calculatePickupTime, calculateAgeSinceCreation } from './utils';
 
 // ── Search + category bar ─────────────────────────────────────────────────────
@@ -161,7 +163,8 @@ function TicketRow({ ticket, technicianName, activeView }) {
     timeMetric = <span className="text-slate-400 text-[11px] italic">Age {ageSinceCreation}</span>;
   }
 
-  const fsUrl = `https://${FRESHSERVICE_DOMAIN}/a/tickets/${ticket.freshserviceTicketId}`;
+  const fsUrl = ticketFsUrl(ticket);
+  const internalHref = ticket.id ? `/tickets/${ticket.id}` : null;
 
   const statusPill = (
     <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${STATUS_COLORS[ticket.status] || 'bg-slate-100 text-slate-600 border border-slate-200'}`}>
@@ -191,16 +194,7 @@ function TicketRow({ ticket, technicianName, activeView }) {
             </div>
             <div className="min-w-0 flex-1">
               <div className="mb-1 flex min-w-0 flex-wrap items-center gap-1.5">
-                <a
-                  href={fsUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 font-medium text-[11px]"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  #{ticket.freshserviceTicketId}
-                  <ExternalLink className="w-2.5 h-2.5 flex-shrink-0" />
-                </a>
+                <TicketRefLink ticket={ticket} className="text-[11px]" />
                 {isSelf && (
                   <span className="inline-flex items-center w-fit px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 text-[9px] font-semibold uppercase tracking-wide">
                     Self
@@ -223,16 +217,37 @@ function TicketRow({ ticket, technicianName, activeView }) {
               </div>
             </div>
           </div>
-          <div className="mt-3 flex justify-end">
-            <a
-              href={fsUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex min-h-[36px] items-center justify-center gap-1 rounded-lg border border-blue-100 bg-blue-50 px-3 text-[11px] font-semibold text-blue-700"
-              onClick={(e) => e.stopPropagation()}
-            >
-              Open in FreshService <ExternalLink className="w-3 h-3" />
-            </a>
+          <div className="mt-3 flex items-center justify-end gap-2">
+            {fsUrl && internalHref && (
+              <a
+                href={fsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex min-h-[36px] items-center justify-center gap-1 rounded-lg border border-slate-200 px-3 text-[11px] font-semibold text-slate-500"
+                onClick={(e) => e.stopPropagation()}
+              >
+                FreshService <ExternalLink className="w-3 h-3" />
+              </a>
+            )}
+            {internalHref ? (
+              <Link
+                to={internalHref}
+                className="inline-flex min-h-[36px] items-center justify-center gap-1 rounded-lg border border-blue-100 bg-blue-50 px-3 text-[11px] font-semibold text-blue-700"
+                onClick={(e) => e.stopPropagation()}
+              >
+                Open ticket
+              </Link>
+            ) : (
+              <a
+                href={fsUrl || '#'}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex min-h-[36px] items-center justify-center gap-1 rounded-lg border border-blue-100 bg-blue-50 px-3 text-[11px] font-semibold text-blue-700"
+                onClick={(e) => e.stopPropagation()}
+              >
+                Open in FreshService <ExternalLink className="w-3 h-3" />
+              </a>
+            )}
           </div>
         </div>
       </div>
@@ -243,16 +258,7 @@ function TicketRow({ ticket, technicianName, activeView }) {
         </div>
 
         <div className="flex flex-col gap-0.5 min-w-0">
-          <a
-            href={fsUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 font-medium text-[11px] truncate"
-            onClick={(e) => e.stopPropagation()}
-          >
-            #{ticket.freshserviceTicketId}
-            <ExternalLink className="w-2.5 h-2.5 flex-shrink-0" />
-          </a>
+          <TicketRefLink ticket={ticket} className="text-[11px] truncate" />
           {isSelf && (
             <span className="inline-flex items-center w-fit px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 text-[9px] font-semibold uppercase tracking-wide">
               Self
@@ -281,15 +287,25 @@ function TicketRow({ ticket, technicianName, activeView }) {
         <div className="min-w-0">{timeMetric}</div>
 
         <span className="text-right">
-          <a
-            href={fsUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-0.5 text-blue-600 hover:text-blue-800 text-[11px] font-medium"
-            onClick={(e) => e.stopPropagation()}
-          >
-            Open <ExternalLink className="w-3 h-3" />
-          </a>
+          {internalHref ? (
+            <Link
+              to={internalHref}
+              className="inline-flex items-center gap-0.5 text-blue-600 hover:text-blue-800 text-[11px] font-medium"
+              onClick={(e) => e.stopPropagation()}
+            >
+              Open
+            </Link>
+          ) : (
+            <a
+              href={fsUrl || '#'}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-0.5 text-blue-600 hover:text-blue-800 text-[11px] font-medium"
+              onClick={(e) => e.stopPropagation()}
+            >
+              Open <ExternalLink className="w-3 h-3" />
+            </a>
+          )}
         </span>
       </div>
     </>

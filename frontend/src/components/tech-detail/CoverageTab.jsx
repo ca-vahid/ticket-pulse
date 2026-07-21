@@ -1,8 +1,10 @@
 import { useState } from 'react';
-import { Moon, Sunrise, ExternalLink, Layers } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Moon, Sunrise, Layers } from 'lucide-react';
 import { getHolidayInfo, getHolidayTooltip } from '../../utils/holidays';
 import { getTicketCategoryLabel } from '../../utils/ticketFilter';
-import { PRIORITY_STRIP_COLORS, STATUS_COLORS, FRESHSERVICE_DOMAIN } from './constants';
+import { PRIORITY_STRIP_COLORS, STATUS_COLORS } from './constants';
+import { TicketRefLink } from '../tickets/ticketUi';
 import { fmtWaitTime } from './utils';
 import FilterBar, { applyNotPickedFilters, applyPickedFilters } from './FilterBar';
 import MergedTimelineModal from './MergedTimelineModal';
@@ -27,16 +29,14 @@ function CoverageTicketRow({ ticket, showAssignee, onExcludeCategory }) {
           {overnight
             ? <Moon className="w-3 h-3 text-indigo-400 flex-shrink-0" title="Overnight (before 5 AM ET)" />
             : <Sunrise className="w-3 h-3 text-amber-500 flex-shrink-0" title="Early morning (5 AM ET+)" />}
-          <a
-            href={`https://${FRESHSERVICE_DOMAIN}/a/tickets/${ticket.freshserviceTicketId}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-blue-600 hover:text-blue-800 flex-shrink-0"
-            title={`#${ticket.freshserviceTicketId}`}
-          >
-            <ExternalLink className="w-3 h-3" />
-          </a>
-          <span className="text-slate-800 font-medium text-xs truncate min-w-0 flex-1">{ticket.subject}</span>
+          <TicketRefLink ticket={ticket} className="text-[11px] flex-shrink-0" />
+          {ticket.id ? (
+            <Link to={`/tickets/${ticket.id}`} className="text-slate-800 hover:text-blue-700 hover:underline font-medium text-xs truncate min-w-0 flex-1" title={ticket.subject}>
+              {ticket.subject}
+            </Link>
+          ) : (
+            <span className="text-slate-800 font-medium text-xs truncate min-w-0 flex-1">{ticket.subject}</span>
+          )}
           <span className={`${STATUS_COLORS[ticket.status] || 'bg-slate-100 text-slate-600'} px-1.5 py-0.5 rounded text-[10px] font-medium flex-shrink-0`}>
             {ticket.status}
           </span>

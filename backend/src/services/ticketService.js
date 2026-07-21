@@ -1914,6 +1914,17 @@ class TicketService {
     if (changes.internalCategoryId || changes.internalSubcategoryId) {
       import('./agentAlertService.js').then(({ default: s }) => s.evaluate('recategorized', ticket.id)).catch(() => {});
     }
+    // A priority change made here in-app must record a priority event too, so
+    // escalation notifications + per-agent "My alerts" fire (QA 07-20 #7) — the
+    // FS-sync path only catches changes made in FreshService.
+    if (changes.priority) {
+      import('./ticketPriorityEventService.js').then(({ default: s }) => s.recordNativePriorityChange({
+        ticketId: ticket.id,
+        workspaceId,
+        fromPriorityId: changes.priority.from,
+        toPriorityId: changes.priority.to,
+      })).catch(() => {});
+    }
     return { ...updated, displayRef: ticketDisplayRef(updated), changed: true };
   }
 

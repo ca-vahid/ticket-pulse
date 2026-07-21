@@ -1,6 +1,7 @@
 import DOMPurify from 'dompurify';
-import { Ticket as TicketIcon, Ban, ClipboardList, Cloud, CloudOff, CloudUpload, Sparkles, UserCog, UserPlus, UserRound, Zap } from 'lucide-react';
-import { PRIORITY_STRIP_COLORS, PRIORITY_LABELS, STATUS_COLORS } from '../tech-detail/constants';
+import { Link } from 'react-router-dom';
+import { ExternalLink, Ticket as TicketIcon, Ban, ClipboardList, Cloud, CloudOff, CloudUpload, Sparkles, UserCog, UserPlus, UserRound, Zap } from 'lucide-react';
+import { PRIORITY_STRIP_COLORS, PRIORITY_LABELS, STATUS_COLORS, FRESHSERVICE_DOMAIN } from '../tech-detail/constants';
 import { useTicketTypes } from '../../hooks/useTicketTypes';
 
 export { PRIORITY_STRIP_COLORS, PRIORITY_LABELS, STATUS_COLORS };
@@ -450,6 +451,67 @@ export function PersonAvatar({ name, photoUrl, size = 'h-6 w-6', textSize = 'tex
   return (
     <span className={`${size} rounded-full bg-blue-50 text-blue-700 border border-blue-100 inline-flex items-center justify-center font-semibold ${textSize}`}>
       {initials(name)}
+    </span>
+  );
+}
+
+// ── Ticket reference link ─────────────────────────────────────────────────────
+// The in-app /tickets/:id page is the PRIMARY destination (migration off
+// FreshService); FS is kept one click away as a small external icon, and is the
+// only target when there's no internal id. Ref label mirrors the server's
+// ticketDisplayRef rule (TP-<n> for TP-born, #<fsId> otherwise).
+
+export function ticketRefLabel(ticket) {
+  if (!ticket) return '—';
+  if (ticket.origin === 'ticketpulse' && ticket.nativeNumber !== null && ticket.nativeNumber !== undefined) {
+    return `TP-${ticket.nativeNumber}`;
+  }
+  if (ticket.freshserviceTicketId) return `#${ticket.freshserviceTicketId}`;
+  return ticket.id ? `TP-ID-${ticket.id}` : '—';
+}
+
+export function ticketFsUrl(ticket) {
+  return ticket?.freshserviceTicketId
+    ? `https://${FRESHSERVICE_DOMAIN}/a/tickets/${ticket.freshserviceTicketId}`
+    : null;
+}
+
+export function TicketRefLink({
+  ticket,
+  label,
+  className = 'text-[11px]',
+  linkClassName = 'font-medium text-blue-600 hover:text-blue-800',
+  showFsIcon = true,
+  iconClassName = 'h-2.5 w-2.5',
+  onNavigate,
+}) {
+  const internalHref = ticket?.id ? `/tickets/${ticket.id}` : null;
+  const fsUrl = ticketFsUrl(ticket);
+  const text = label ?? ticketRefLabel(ticket);
+  const stop = (e) => { e.stopPropagation(); onNavigate?.(); };
+  return (
+    <span className={`inline-flex min-w-0 items-center gap-1 ${className}`}>
+      {internalHref ? (
+        <Link to={internalHref} title="Open in Ticket Pulse" className={`min-w-0 truncate ${linkClassName}`} onClick={stop}>
+          {text}
+        </Link>
+      ) : (
+        <a href={fsUrl || '#'} target="_blank" rel="noopener noreferrer" className={`min-w-0 truncate ${linkClassName}`} onClick={(e) => e.stopPropagation()}>
+          {text}
+        </a>
+      )}
+      {showFsIcon && fsUrl && internalHref && (
+        <a
+          href={fsUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Open in FreshService"
+          className="flex-shrink-0 text-blue-300 hover:text-blue-600"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <ExternalLink className={iconClassName} aria-hidden="true" />
+        </a>
+      )}
     </span>
   );
 }

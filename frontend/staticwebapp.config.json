@@ -1,8 +1,12 @@
 {
   "navigationFallback": {
     "rewrite": "/index.html",
-    "exclude": ["/assets/*", "/favicon.ico", "/*.png", "/*.svg", "/*.ico"]
+    "exclude": ["/assets/*", "/favicon.ico", "/*.png", "/*.svg", "/*.ico", "/api/*", "/health"]
   },
+  "routes": [
+    { "route": "/api/*", "allowedRoles": ["anonymous"] },
+    { "route": "/health", "allowedRoles": ["anonymous"] }
+  ],
   "globalHeaders": {
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",

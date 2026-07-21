@@ -1,6 +1,19 @@
-export const APP_VERSION = '3.0.73-preview';
+export const APP_VERSION = '3.0.74-preview';
 
 export const changelog = [
+  {
+    version: '3.0.74-preview',
+    date: 'July 21, 2026',
+    entries: [
+      { type: 'added', html: '<strong>📱 Mobile overhaul</strong> — the Dashboard, Technician page, ticket queue, and ticket detail were reworked for phones. Dashboard cards now expand a <b>ticket list inline</b> (no more leaving the page to see a tech’s tickets), the ticket detail gets a <b>one-tap assignee/status bar</b> and a touch-first assign sheet, and the live “assignee just changed” cue now fires on mobile too (with a static fallback when Reduce Motion is on).' },
+      { type: 'fixed', html: '<strong>🔗 Technician page — links, cards & numbers</strong> — ticket references across all tabs now open the <b>in-app ticket</b> (FreshService demoted to a small external icon); the Overview stat cards are now <b>clickable</b> and drill into the filtered ticket list; and the “Assigned” metric + daily CSAT day-boundary are corrected so the numbers line up.' },
+      { type: 'changed', html: '<strong>🔔 Notifications, promoted</strong> — <b>Notifications</b> is now a top-level item in the account menu (between My Skills and Skill Matrix) and the phone menu, and the page is a single view with <b>delivery preferences + My alerts stacked</b> (the sub-tabs are gone).' },
+      { type: 'fixed', html: '<strong>⚡ In-app escalation alerts</strong> — raising a ticket’s priority <b>inside Ticket Pulse</b> now fires escalation notifications and per-agent “My alerts” (previously only changes made in FreshService did).' },
+      { type: 'changed', html: '<strong>⚙️ Settings, reorganized</strong> — the long settings list is now <b>grouped</b> (Integrations · Tickets &amp; AI · Notifications &amp; Public · Team &amp; Scheduling · Sync &amp; Data · Workspace) and alphabetized within each group.' },
+      { type: 'fixed', html: '<strong>🧹 Ticket detail & tasks polish</strong> — the active-tab accent no longer pokes past the rounded corners; Impact/Urgency removed from the sidebar; FreshService task descriptions render as clean plain text; and TP-born tasks added before a ticket mirrors are now <b>backfilled to FreshService</b> once the copy exists.' },
+      { type: 'changed', html: '<strong>🔌 Public API base URL</strong> — Settings → API Keys now shows the correct, copyable <b>API base URL</b> (the API is served from the API host, not the web address) so integration calls return JSON.' },
+    ],
+  },
   {
     version: '3.0.73-preview',
     date: 'July 18, 2026',

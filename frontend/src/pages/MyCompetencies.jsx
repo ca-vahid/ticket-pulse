@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Archive, CheckCircle2, Clock3, LogOut, Search, ShieldCheck, UserRound,
   XCircle, Loader2, AlertCircle, BriefcaseBusiness, PlusCircle,
   X, Send, Sparkles, Undo2, ChevronLeft, ChevronRight,
-  Bell, BellRing, LayoutDashboard,
+  Bell, LayoutDashboard,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { agentAPI } from '../services/api';
@@ -73,8 +74,12 @@ export default function MyCompetencies() {
   });
   const [highlightCategoryId, setHighlightCategoryId] = useState(null);
   const [cancellingRequestId, setCancellingRequestId] = useState(null);
-  const [activeTab, setActiveTab] = useState('competencies');
-  const [notifSubtab, setNotifSubtab] = useState('preferences'); // within the Notifications tab: 'preferences' | 'alerts'
+  // Honour ?tab= so the avatar-menu "Notifications" entry lands straight on it.
+  const [searchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState(() => {
+    const t = searchParams.get('tab');
+    return ['competencies', 'notifications', 'summit'].includes(t) ? t : 'competencies';
+  });
   const [activeSummitTab, setActiveSummitTab] = useState('categories');
   const [matrixScrollLeft, setMatrixScrollLeft] = useState(0);
   const [matrixMaxScrollLeft, setMatrixMaxScrollLeft] = useState(0);
@@ -1078,36 +1083,11 @@ export default function MyCompetencies() {
         )}
 
         {!loading && activeTab === 'notifications' && (
+          // One page, two stacked sections (QA 07-20 #4) — the sub-tabs are gone:
+          // delivery preferences up top, then the alert subscriptions below.
           <div className="space-y-4">
-            <div className="inline-flex rounded-lg border border-slate-200 bg-white p-1 shadow-sm" role="tablist" aria-label="Notification settings">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={notifSubtab === 'preferences'}
-                onClick={() => setNotifSubtab('preferences')}
-                className={`tp-focus-ring inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-semibold transition ${
-                  notifSubtab === 'preferences' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-50'
-                }`}
-              >
-                <Bell className="h-4 w-4" />
-                Notification preferences
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={notifSubtab === 'alerts'}
-                onClick={() => setNotifSubtab('alerts')}
-                className={`tp-focus-ring inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-semibold transition ${
-                  notifSubtab === 'alerts' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-50'
-                }`}
-              >
-                <BellRing className="h-4 w-4" />
-                My alerts
-              </button>
-            </div>
-            {notifSubtab === 'preferences'
-              ? <NotificationSettingsPanel workspaceId={workspaceId} />
-              : <AgentAlertsPanel workspaceId={workspaceId} />}
+            <NotificationSettingsPanel workspaceId={workspaceId} />
+            <AgentAlertsPanel workspaceId={workspaceId} />
           </div>
         )}
       </main>

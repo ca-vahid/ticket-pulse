@@ -421,6 +421,12 @@ class MirrorService {
       { isPrivate: true },
     ).catch((err) => logger.warn(`Mirror intro note failed for ${ref} (non-fatal): ${err.message}`));
 
+    // Push any tasks that were added before this FS copy existed — their
+    // write-back was skipped for lack of a freshserviceTicketId (QA 07-20 #14).
+    import('./ticketTaskService.js')
+      .then(({ default: taskService }) => taskService.backfillMirrorTasks(ticket.id, ticket.workspaceId))
+      .catch((err) => logger.warn(`Mirror task backfill failed for ${ref} (non-fatal): ${err.message}`));
+
     this._broadcast(ticket, 'mirror');
     logger.info(`Mirrored ${ref} → FreshService #${fsTicket.id}`);
   }

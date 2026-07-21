@@ -585,10 +585,23 @@ code {
   .animate-slide-in-right {
     animation: none;
   }
-  /* Static fallback: no motion, but the moment still shows — a steady
-     emerald ring for the few seconds the fx class is applied. */
+  /* Static fallbacks: no motion, but the moment still shows for the few
+     seconds each fx class is applied (cleared by the same JS timer). */
   .tp-assign-pop::after {
     box-shadow: 0 0 0 3px rgb(16 185 129 / 0.45);
+  }
+  /* Just-arrived / just-updated subject: steady left accent + soft tint
+     instead of the glow sweep, so the row is still flagged. */
+  .tp-subject-flash-new,
+  .tp-subject-flash-updated {
+    box-shadow: inset 3px 0 0 0 var(--tp-glow, rgb(147 197 253 / 0.7));
+    background-color: var(--tp-glow-soft, rgb(191 219 254 / 0.25));
+    padding-left: 0.375rem;
+  }
+  /* NEW chip: stay fully visible (the animation's `both` fill would otherwise
+     end on the invisible 100% keyframe on browsers that honor fill over none). */
+  .tp-new-chip {
+    opacity: 1;
   }
 }
 

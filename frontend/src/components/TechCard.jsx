@@ -1,9 +1,10 @@
 import { useNavigate } from 'react-router-dom';
-import { EyeOff, Trophy, Star, Hand, Send, CheckSquare, Users, Bot, RotateCcw } from 'lucide-react';
+import { EyeOff, Trophy, Star, Hand, Send, CheckSquare, Users, Bot, RotateCcw, ChevronDown, Ticket as TicketIcon } from 'lucide-react';
 import { useState, useCallback, useRef } from 'react';
 import { getDateStyling, getHolidayTooltip } from '../utils/holidays';
 import { getLeaveForDate, getLeaveBadge, getLeaveTooltip, getLeaveDotClass, getLeaveStyle, isHalfDayLeave, getLeaveSplit } from '../utils/leaveInfo';
 import { prefetchTechDetail } from '../hooks/usePrefetch';
+import ExpandableTicketList, { useGroupedTickets, getTicketsForView } from './ExpandableTicketList';
 
 /**
  * Build a deep-link URL to the Bounced tab with a date range matching the
@@ -70,7 +71,13 @@ const getInitials = (name) => {
 export default function TechCard({ technician, onHide, rank, selectedDate, selectedWeek, selectedMonth, maxOpenCount = 10, maxDailyCount = 1, viewMode = 'daily', searchTerm = '', selectedCategories = [], canonicalCategoryFilter = null }) {
   const navigate = useNavigate();
   const [showAssignersPopup, setShowAssignersPopup] = useState(false);
+  const [ticketsOpen, setTicketsOpen] = useState(false);
   const hoverTimerRef = useRef(null);
+
+  // Inline ticket drilldown (mobile) — reuses the dashboard's grouped-ticket
+  // helpers so the rows carry the correct in-app /tickets/:id links.
+  const { allTickets, closedTickets } = useGroupedTickets(getTicketsForView(technician, viewMode));
+  const ticketTotal = allTickets.length;
 
   // Get color gradient based on normalized ticket count
   const getTicketColor = (count, maxCount) => {
@@ -208,13 +215,15 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
       onMouseLeave={handleMouseLeave}
       className={`${cardBgColor} border border-gray-200 rounded-lg shadow-sm hover:shadow-xl transition-all duration-300 cursor-pointer group relative overflow-hidden`}
     >
-      {/* Hide Button - Top Right */}
+      {/* Hide Button - Top Right. Always visible on touch (hover-reveal is
+          unreachable on phones); fades in on hover for pointer devices. */}
       <button
         onClick={handleHideToggle}
-        className="hide-button absolute top-2 right-2 opacity-0 group-hover:opacity-100 p-1.5 hover:bg-gray-100 rounded-lg transition-opacity z-10"
+        aria-label={`Hide ${technician.name}`}
+        className="hide-button tp-focus-ring absolute top-2 right-2 p-1.5 rounded-lg z-10 text-gray-400 bg-white/70 opacity-70 hover:bg-gray-100 hover:opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
         title="Hide technician"
       >
-        <EyeOff className="w-4 h-4 text-gray-400" />
+        <EyeOff className="w-4 h-4" />
       </button>
 
       {/* Card Content */}
@@ -226,15 +235,15 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
             <img
               src={technician.photoUrl}
               alt={technician.name}
-              className="w-14 h-14 sm:w-20 sm:h-20 rounded-full object-cover shadow-lg border-2 border-gray-300 transition-all duration-500 ease-in-out hover:scale-150 hover:shadow-2xl hover:z-50 cursor-pointer"
+              className="w-14 h-14 rounded-full object-cover shadow-md border-2 border-gray-300"
               onError={(e) => {
                 // Hide broken images so alt text doesn't leak the real name.
                 e.currentTarget.style.display = 'none';
               }}
             />
           ) : (
-            <div className="flex items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-blue-600 w-14 h-14 sm:w-20 sm:h-20 shadow-lg border-2 border-blue-400 transition-all duration-500 ease-in-out hover:scale-150 hover:shadow-2xl hover:z-50 cursor-pointer">
-              <span className="text-base sm:text-xl font-bold text-white">
+            <div className="flex items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-blue-600 w-14 h-14 shadow-md border-2 border-blue-400">
+              <span className="text-base font-bold text-white">
                 {getInitials(technician.name)}
               </span>
             </div>
@@ -628,6 +637,32 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
           )
         )}
       </div>
+
+      {/* Inline ticket drilldown — the mobile answer to "no ticket list on
+          phones". Tapping toggles the tech's tickets in place instead of
+          forcing a trip to the detail page; links go to /tickets/:id. */}
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); setTicketsOpen((v) => !v); }}
+        aria-expanded={ticketsOpen}
+        className="tp-focus-ring flex w-full items-center justify-between gap-2 border-t border-gray-200 px-4 py-2.5 text-left active:bg-slate-50"
+      >
+        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+          <TicketIcon className="h-3.5 w-3.5 text-slate-400" aria-hidden="true" />
+          {ticketsOpen ? 'Hide tickets' : `View tickets${ticketTotal ? ` (${ticketTotal})` : ''}`}
+        </span>
+        <ChevronDown className={`h-4 w-4 flex-shrink-0 text-slate-400 transition-transform ${ticketsOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
+      </button>
+      {ticketsOpen && (
+        <div onClick={(e) => e.stopPropagation()}>
+          <ExpandableTicketList
+            allTickets={allTickets}
+            closedTickets={closedTickets}
+            techName={technician.name}
+            viewMode={viewMode}
+          />
+        </div>
+      )}
     </div>
   );
 }

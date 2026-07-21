@@ -1727,7 +1727,7 @@ export default function Tickets() {
                                       )}
                                     </div>
                                   )}
-                                  <div className="mt-2 flex items-center gap-2">
+                                  <div className={`relative mt-2 flex items-center gap-2 ${fx === 'aiDone' ? 'tp-assign-pop' : ''}`}>
                                     {mobileAssignable ? (
                                       <button
                                         onClick={(e) => { e.stopPropagation(); setAssignSheetTicket(ticket); }}

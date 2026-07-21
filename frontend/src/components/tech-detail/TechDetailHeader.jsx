@@ -141,8 +141,11 @@ export default function TechDetailHeader({
             </div>
           </div>
 
-          {/* Right controls: Daily/Weekly/Monthly toggle + date nav + export */}
-          <div className="flex w-full flex-shrink-0 items-center gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [-ms-overflow-style:none] lg:w-auto lg:overflow-visible lg:pb-0 [&::-webkit-scrollbar]:hidden">
+          {/* Right controls: Daily/Weekly/Monthly toggle + date nav + export.
+              On phones these WRAP onto multiple rows so the Export / Today
+              controls stay reachable (they used to scroll off the edge of a
+              hidden-scrollbar strip). */}
+          <div className="flex w-full flex-shrink-0 flex-wrap items-center gap-2 lg:w-auto lg:flex-nowrap">
             {/* Daily / Weekly / Monthly toggle */}
             <div className="flex flex-shrink-0 bg-slate-100 rounded-lg p-0.5 text-xs font-semibold">
               <button
