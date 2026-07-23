@@ -1,23 +1,49 @@
 # Ticket Pulse — QA Test Plan (2026-07-21)
 
-**Build under test:** next preview build · **Prepared for:** QA team · **From:** Ticket Pulse dev
+**Build under test:** v3.0.74-preview (prod) · **Prepared for:** QA team · **From:** Ticket Pulse dev
 
-This round covers two bodies of work landing together:
+**Tester:** ________________  **Date:** ____________  **Device / browser:** ________________
 
-1. **Mobile overhaul** — the Dashboard, Technician page, ticket queue, and ticket detail
-   were reworked to be genuinely usable on a phone (new features + fixes).
+This round covers two bodies of work that shipped together:
+
+1. **Mobile overhaul** — the Dashboard, Technician page, ticket queue, and ticket detail were
+   reworked to be genuinely usable on a phone (new features + fixes).
 2. **Features Request 07-20 fixes** — the items you reported last round (Notifications
    restructure, Settings reorg, escalation alerts, ticket-detail tweaks, task sync, API).
 
-**How to test:** Use a real phone where a section says "mobile", or Chrome DevTools device
-mode (iPhone/Pixel, ~390px wide). Everything else can be tested on desktop. Use a **QA TEST**
-prefix on tickets you create and clean them up as usual. Report anything that deviates from
-the ✅ expected result, with the ticket ref (and, for API items, the `X-Request-Id`).
+**How to use this doc:** Work top-to-bottom. Do the **fast-pass smoke check** first for a quick
+go/no-go, then the detailed sections. Mark each section **☐ Pass / ☐ Fail** and jot the ticket
+ref (and, for API items, the `X-Request-Id`) in Notes. Use a **QA TEST** prefix on tickets you
+create and clean them up afterward. `☐` = check the box; ✅ = the expected result.
 
-> **Not in this build — please don't re-file these yet.** The sync-timing and mirror items
-> from 07-20 (#1 reply/attachment mirror, #2 email image attachment, #8/#10 priority/status
-> sync latency, #11 FreshService tags → TP, #13 close latency) are diagnosed and in a
-> separate backend pass. They are **not** in this build.
+**How to test:** Use a real phone where a section says "mobile", or Chrome DevTools device mode
+(iPhone/Pixel, ~390px wide). Everything else can be tested on desktop.
+
+> **Not in this build — please don't re-file these yet.** The sync-timing and mirror items from
+> 07-20 (#1 reply/attachment mirror, #2 email image attachment, #8/#10 priority/status sync
+> latency, #11 FreshService tags → TP, #13 close latency) are diagnosed and in a separate
+> backend pass. They are **not** in this build.
+
+---
+
+## Fast-pass smoke check (≈10 min)
+
+A quick go/no-go before the detailed run. Tick each; anything unticked → see the matching section.
+
+- ☐ **Mobile Dashboard:** a tech card's "View tickets" expands tickets inline; a ticket ref opens the in-app page (§1.1)
+- ☐ **Mobile ticket detail:** the assignee/status bar sits above the thread; tapping it opens the bottom-sheet picker (§1.4)
+- ☐ **Technician links:** ticket refs open `/tickets/:id` in-app, not FreshService (§2.1)
+- ☐ **Technician cards clickable:** an Overview stat card drills into the filtered ticket list (§2.2)
+- ☐ **Notifications menu item:** appears in the avatar menu between My Skills and Skill Matrix (§3.1)
+- ☐ **Notifications page:** one page, preferences + My alerts stacked, no sub-tabs (§3.2)
+- ☐ **Escalation alert:** raising priority *in Ticket Pulse* fires a My-alerts escalation (§3.3)
+- ☐ **Settings:** left nav is grouped with headers + alphabetized (§4)
+- ☐ **Ticket tabs:** the active-tab blue accent stays inside the rounded corners (§5.1)
+- ☐ **Impact/Urgency:** gone from the ticket sidebar (§5.2)
+- ☐ **Tasks:** FS task descriptions show as clean text; TP-born tasks reach FreshService (§6)
+- ☐ **API:** calling the Base URL from Settings → API Keys returns JSON, not HTML (§7)
+
+**Smoke result:** ☐ Pass   ☐ Fail — Notes: _______________________________________________
 
 ---
 
@@ -31,12 +57,14 @@ targets, and the things that only worked on desktop now work on mobile.
 2. ✅ Each technician shows as a single-column card sized for a phone (avatar and numbers no
    longer oversized; no hover-zoom on the photo).
 3. On any card, tap **"View tickets (N)"** at the bottom of the card.
-   ✅ The technician's tickets expand **inline, right on the Dashboard** (previously there
-   was no way to see a tech's tickets on mobile). Tapping again collapses them.
+   ✅ The technician's tickets expand **inline, right on the Dashboard** (previously there was
+   no way to see a tech's tickets on mobile). Tapping again collapses them.
 4. In that expanded list, tap a ticket reference (e.g. `TP-1042`).
    ✅ It opens the **in-app ticket page** (`/tickets/…`), not FreshService.
 5. Tap the small **hide (eye-off)** control at a card's top-right.
    ✅ It's tappable on touch (it used to only appear on hover, so phones couldn't reach it).
+
+**Result:** ☐ Pass   ☐ Fail — Notes: ___________________________________________________
 
 ### 1.2 Technician (agent) page — mobile
 1. From the Dashboard, tap a technician to open their page on a phone.
@@ -45,15 +73,19 @@ targets, and the things that only worked on desktop now work on mobile.
 3. ✅ The metrics ribbon fills cleanly (no orphaned tile); tiles read clearly at phone width.
 4. ✅ Ticket rows render as tidy cards (not a squeezed table).
 
+**Result:** ☐ Pass   ☐ Fail — Notes: ___________________________________________________
+
 ### 1.3 Ticket queue — live cues on mobile (NEW)
 1. Open **Tickets** on a phone.
 2. Trigger an AI auto-assignment (or have one land) on a visible ticket.
    ✅ The assignee cell on the **mobile card** shows the completion "pop" cue when the
    assignment lands (this previously only fired on desktop).
-3. If your device has **Reduce Motion** on (Settings → Accessibility), create/observe a new
-   or just-updated ticket.
+3. If your device has **Reduce Motion** on (Settings → Accessibility), create/observe a new or
+   just-updated ticket.
    ✅ New/updated tickets still show a **static** highlight (a steady tint/left accent) — the
    cue no longer silently disappears under reduced motion.
+
+**Result:** ☐ Pass   ☐ Fail — Notes: ___________________________________________________
 
 ### 1.4 Ticket detail — mobile assign + properties (NEW)
 1. Open any ticket detail on a phone.
@@ -65,6 +97,8 @@ targets, and the things that only worked on desktop now work on mobile.
    instead of the cramped desktop popover.
 4. Assign someone from the sheet. ✅ It saves and the properties bar updates.
 
+**Result:** ☐ Pass   ☐ Fail — Notes: ___________________________________________________
+
 ---
 
 ## 2. Technician page fixes (desktop AND mobile)
@@ -72,11 +106,13 @@ targets, and the things that only worked on desktop now work on mobile.
 These are correctness fixes that apply on any screen.
 
 ### 2.1 Ticket links open in Ticket Pulse (not FreshService)
-1. Open a technician page → **Tickets** tab. Also check the **Coverage**, **CSAT**,
-   **Bounced**, and **Feedback** tabs.
+1. Open a technician page → **Tickets** tab. Also check the **Coverage**, **CSAT**, **Bounced**,
+   and **Feedback** tabs.
 2. Click any ticket reference or subject.
    ✅ It opens the **in-app** ticket page (`/tickets/:id`). FreshService is now only a small
    secondary "external" icon beside the reference (click it to open FS if needed).
+
+**Result:** ☐ Pass   ☐ Fail — Notes: ___________________________________________________
 
 ### 2.2 Overview stat cards are clickable (NEW)
 1. On the technician page **Overview** tab, click the **Open now / Self-picked / Assigned /
@@ -84,13 +120,17 @@ These are correctness fixes that apply on any screen.
    ✅ Each jumps to the **Tickets** tab pre-filtered to that set (a chevron on the card hints
    it's clickable).
 
+**Result:** ☐ Pass   ☐ Fail — Notes: ___________________________________________________
+
 ### 2.3 Number accuracy
 1. Compare **"Assigned"** on the Overview tab vs the Tickets-tab ribbon.
-   ✅ They now agree (Overview previously added app-assignments into "Assigned"; both now
-   count coordinator-assigned, with any app-assigned shown as a separate "+N via app" note).
+   ✅ They now agree (Overview previously added app-assignments into "Assigned"; both now count
+   coordinator-assigned, with any app-assigned shown as a separate "+N via app" note).
 2. Check the daily **CSAT** count on the CSAT tab against a day you know.
    ✅ The day boundary now matches the weekly/monthly counts (Pacific time) — no more
    off-by-one-day mismatch for non-Pacific browsers.
+
+**Result:** ☐ Pass   ☐ Fail — Notes: ___________________________________________________
 
 ---
 
@@ -100,20 +140,23 @@ These are correctness fixes that apply on any screen.
 1. Click your **avatar menu** (top-right).
    ✅ There's a **Notifications** item (bell, "Email & alert preferences") between **My Skills**
    and **Skill Matrix** — it's no longer buried inside My Skills.
-2. On a phone, open the **More** sheet (bottom bar).
-   ✅ **Notifications** appears there too.
+2. On a phone, open the **More** sheet (bottom bar). ✅ **Notifications** appears there too.
 3. Click it. ✅ It lands directly on the Notifications view.
+
+**Result:** ☐ Pass   ☐ Fail — Notes: ___________________________________________________
 
 ### 3.2 One Notifications page, no sub-tabs
 1. On the Notifications view:
    ✅ It's a **single page with two stacked sections** — delivery **preferences** (priority
    threshold + Email/SMS/WhatsApp/Phone channels + phone verification) on top, **My alerts**
-   (your alert subscriptions + Quiet hours) below. The old "Notification preferences / My
-   alerts" sub-tabs are gone.
+   (your alert subscriptions + Quiet hours) below. The old "Notification preferences / My alerts"
+   sub-tabs are gone.
+
+**Result:** ☐ Pass   ☐ Fail — Notes: ___________________________________________________
 
 ### 3.3 Escalation alerts fire on an in-app priority raise (FIX)
-1. As an agent, add a **My alerts** subscription with **"is escalated"** on, matching a
-   category you can generate a test ticket for.
+1. As an agent, add a **My alerts** subscription with **"is escalated"** on, matching a category
+   you can generate a test ticket for.
 2. Create a **QA TEST** ticket in that category, then **raise its priority in Ticket Pulse**
    (e.g. Medium → High, then High → Urgent).
    ✅ You receive an escalation alert (previously, priority changes made *inside* Ticket Pulse
@@ -121,17 +164,21 @@ These are correctness fixes that apply on any screen.
 3. ✅ The second raise (High → Urgent) alerts again — a repeat escalation on the same ticket
    isn't suppressed.
 
+**Result:** ☐ Pass   ☐ Fail — Notes: ___________________________________________________
+
 ---
 
 ## 4. Settings reorganization (Features Request 07-20 #9)
 
 1. Open **Settings** (as an admin).
-   ✅ The left nav is now grouped under headers — **Integrations · Tickets & AI ·
-   Notifications & Public · Team & Scheduling · Sync & Data · Workspace** — and items are
-   alphabetical within each group.
+   ✅ The left nav is now grouped under headers — **Integrations · Tickets & AI · Notifications
+   & Public · Team & Scheduling · Sync & Data · Workspace** — and items are alphabetical within
+   each group.
 2. Find **Notifications** (the email/SMS provider setup).
-   ✅ It's under the **Notifications & Public** group — easy to locate now. (This is the
-   provider config, distinct from your personal Notifications page in §3.)
+   ✅ It's under the **Notifications & Public** group — easy to locate now. (This is the provider
+   config, distinct from your personal Notifications page in §3.)
+
+**Result:** ☐ Pass   ☐ Fail — Notes: ___________________________________________________
 
 ---
 
@@ -143,8 +190,9 @@ These are correctness fixes that apply on any screen.
    ✅ The blue bar sits **inside** the rounded tab corners — it no longer pokes out past them.
 
 ### 5.2 Impact / Urgency removed
-1. Open a ticket's detail sidebar.
-   ✅ **Impact** and **Urgency** fields are gone.
+1. Open a ticket's detail sidebar. ✅ **Impact** and **Urgency** fields are gone.
+
+**Result (§5.1 + §5.2):** ☐ Pass   ☐ Fail — Notes: ___________________________________
 
 ---
 
@@ -163,22 +211,26 @@ These are correctness fixes that apply on any screen.
    before the mirror existed were never pushed).
 3. Add another task **after** the ticket is mirrored. ✅ It appears in FreshService too.
 
+**Result (§6.1 + §6.2):** ☐ Pass   ☐ Fail — Notes: ___________________________________
+
 ---
 
 ## 7. Public API — base URL (Features Request 07-20 #15-17)
 
 1. Open **Settings → API Keys**.
-   ✅ A **Base URL** is shown with a **Copy** button, and a note that the app domain serves
-   the web UI, not the API. The "API docs" link points at the API host.
-2. Create a **Live** key with `tickets:read` (and copy it), then call the API using the
-   **Base URL shown on that page** (not the web address):
+   ✅ A **Base URL** is shown with a **Copy** button, and a note that the app domain serves the
+   web UI, not the API. The "API docs" link points at the API host.
+2. Create a **Live** key with `tickets:read` (and copy it), then call the API using the **Base
+   URL shown on that page** (not the web address):
    ```
    curl <BASE_URL>/me -H "Authorization: Bearer tp_live_…"
    ```
    ✅ Returns **JSON** (your key name, workspace, scopes) — not the HTML web page.
-3. `GET <BASE_URL>/tickets` ✅ returns JSON. `POST <BASE_URL>/tickets` with a body ✅ creates
-   a ticket (no more 405/HTML — those happened because the earlier calls went to the web
-   address instead of the API host).
+3. `GET <BASE_URL>/tickets` ✅ returns JSON. `POST <BASE_URL>/tickets` with a body ✅ creates a
+   ticket (no more 405/HTML — those happened because the earlier calls went to the web address
+   instead of the API host).
+
+**Result:** ☐ Pass   ☐ Fail — Notes: ___________________________________________________
 
 ---
 
@@ -187,7 +239,8 @@ These are correctness fixes that apply on any screen.
   Reduce Motion, expect steady highlights rather than animations (that's intended).
 - **Origin matters:** "TP-born" = created in Ticket Pulse (fully editable, mirrored to FS);
   "FS-born" = created in FreshService (read-mostly). Test steps call out which is needed.
-- Please report: any ticket link that still opens FreshService instead of the in-app page;
-  any stat card that isn't clickable; a mobile layout that squeezes or hides content; an
-  escalation alert that doesn't arrive; or an API call to the shown Base URL that returns
-  HTML instead of JSON.
+- Please report: any ticket link that still opens FreshService instead of the in-app page; any
+  stat card that isn't clickable; a mobile layout that squeezes or hides content; an escalation
+  alert that doesn't arrive; or an API call to the shown Base URL that returns HTML instead of JSON.
+
+**Overall sign-off:** ☐ All pass   ☐ Issues found (see notes above)  ·  Tester: ______________

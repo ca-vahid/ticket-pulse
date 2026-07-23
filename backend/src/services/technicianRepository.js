@@ -41,14 +41,17 @@ class TechnicianRepository {
    * Get all active technicians
    * @returns {Promise<Array>} Array of active technicians
    */
-  async getAllActive(workspaceId = null) {
+  async getAllActive(workspaceId = null, { lite = false } = {}) {
     try {
       const where = { isActive: true };
       if (workspaceId) where.workspaceId = workspaceId;
 
+      // `lite` skips the (potentially enormous) per-technician tickets include —
+      // callers that only need identity/schedule/location fields must pass it,
+      // otherwise this loads every ticket for every tech (QA 07-21 #1/#2).
       return await prisma.technician.findMany({
         where,
-        include: {
+        include: lite ? undefined : {
           tickets: {
             include: ticketCategoryInclude,
           },

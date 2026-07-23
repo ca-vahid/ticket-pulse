@@ -1,6 +1,16 @@
-export const APP_VERSION = '3.0.74-preview';
+export const APP_VERSION = '3.0.75-preview';
 
 export const changelog = [
+  {
+    version: '3.0.75-preview',
+    date: 'July 22, 2026',
+    entries: [
+      { type: 'changed', html: '<strong>🔔 Notifications is its own page</strong> — moved out of My Competencies into a dedicated <b>Notifications</b> page (no more "My Competencies" header or tab bar), and redesigned: delivery preferences up top, then <b>My alerts</b> with <b>one-click starter templates</b> (Urgent tickets · Escalations · a category) instead of a big empty area. The My Skills page also drops the old tab bar.' },
+      { type: 'fixed', html: '<strong>⚡ Tech Schedules &amp; agent lists load fast</strong> — the agents endpoint was loading <b>every ticket for every technician</b> (with joins) just to render a name/timezone/hours list, which made Settings → Tech Schedules and the map take minutes on busy workspaces. It now runs a lightweight metadata-only query.' },
+      { type: 'fixed', html: '<strong>🔗 API — lookup by ticket reference</strong> — <code>GET /api/v1/tickets/TP-1048</code> (and <code>#233976</code>) now resolve to the ticket instead of returning a 500; an unknown reference returns a clean 404. Applies to every <code>/tickets/:id</code> route.' },
+      { type: 'fixed', html: '<strong>🔗 API — pagination cursor</strong> — the ticket list now returns a <code>next_cursor</code> (and <code>total</code>) by default, so clients can page forward with <code>?cursor=</code>; <code>?page=</code> still works for offset paging.' },
+    ],
+  },
   {
     version: '3.0.74-preview',
     date: 'July 21, 2026',

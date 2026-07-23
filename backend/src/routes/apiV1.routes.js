@@ -38,6 +38,24 @@ const apiActor = (req) => ({
   technicianId: null,
 });
 
+// Resolve a /tickets/:id path segment to an internal id. A plain positive
+// integer is the internal id (unchanged); a visible ref (TP-1048, #233976)
+// resolves via the ref resolver → a clean 404 instead of a 500 on a non-numeric
+// param (QA 07-21 #7). Cached on the request so repeated reads are free.
+async function tid(req) {
+  if (req._resolvedTicketId !== undefined) return req._resolvedTicketId;
+  const raw = String(req.params.id ?? '');
+  let id;
+  if (/^\d+$/.test(raw)) {
+    id = Number(raw);
+  } else {
+    const { resolveTicketRefOrThrow } = await import('../services/ticketRefResolver.js');
+    id = (await resolveTicketRefOrThrow(raw, req.workspaceId)).id;
+  }
+  req._resolvedTicketId = id;
+  return id;
+}
+
 // ---------------------------------------------------------------- shapers
 
 function ticketShape(t) {
@@ -152,9 +170,14 @@ router.get('/meta', S(), asyncHandler(async (req, res) => {
 // ------------------------------------------------------------------ tickets
 
 router.get('/tickets', S('tickets:read'), asyncHandler(async (req, res) => {
-  const result = await ticketService.listTickets(req.workspaceId, req.query);
+  // Default the public API to cursor (keyset) pagination so `next_cursor` is
+  // always present for forward paging; honour an explicit ?page= for offset
+  // paging (QA 07-21 #8 — the default response had no cursor to follow).
+  const q = { ...req.query };
+  if (q.page === undefined && q.cursor === undefined) q.useCursor = true;
+  const result = await ticketService.listTickets(req.workspaceId, q);
   const pagination = result.nextCursor !== undefined
-    ? { next_cursor: result.nextCursor, limit: result.pageSize }
+    ? { next_cursor: result.nextCursor, limit: result.pageSize, total: result.total }
     : { page: result.page, page_size: result.pageSize, total: result.total };
   if (pagination.next_cursor) {
     // Preserve the active filters on the next-page link — otherwise a client
@@ -183,7 +206,7 @@ router.post('/tickets', S('tickets:write'), withIdempotency, asyncHandler(async 
 }));
 
 router.get('/tickets/:id', S('tickets:read'), asyncHandler(async (req, res) => {
-  const ticket = await ticketService.getTicket(Number(req.params.id), req.workspaceId);
+  const ticket = await ticketService.getTicket((await tid(req)), req.workspaceId);
   res.json({
     success: true,
     data: {
@@ -195,7 +218,7 @@ router.get('/tickets/:id', S('tickets:read'), asyncHandler(async (req, res) => {
 }));
 
 router.patch('/tickets/:id', S('tickets:write'), withIdempotency, asyncHandler(async (req, res) => {
-  const id = Number(req.params.id);
+  const id = (await tid(req));
   const body = req.body || {};
   const actor = apiActor(req);
   if (body.status !== undefined) await ticketService.changeStatus(id, req.workspaceId, body.status, actor);
@@ -211,7 +234,7 @@ router.patch('/tickets/:id', S('tickets:write'), withIdempotency, asyncHandler(a
 
 router.post('/tickets/:id/merge', S('tickets:write'), withIdempotency, asyncHandler(async (req, res) => {
   const { default: ticketMergeService } = await import('../services/ticketMergeService.js');
-  const result = await ticketMergeService.merge(Number(req.params.id), req.workspaceId, {
+  const result = await ticketMergeService.merge((await tid(req)), req.workspaceId, {
     targetTicketId: Number(req.body?.targetTicketId),
     notifyRequester: req.body?.notifyRequester === true,
   }, apiActor(req));
@@ -220,12 +243,12 @@ router.post('/tickets/:id/merge', S('tickets:write'), withIdempotency, asyncHand
 
 router.get('/tickets/:id/family', S('tickets:read'), asyncHandler(async (req, res) => {
   const { default: ticketLinkService } = await import('../services/ticketLinkService.js');
-  res.json({ success: true, data: await ticketLinkService.family(Number(req.params.id), req.workspaceId) });
+  res.json({ success: true, data: await ticketLinkService.family((await tid(req)), req.workspaceId) });
 }));
 
 router.put('/tickets/:id/parent', S('tickets:write'), asyncHandler(async (req, res) => {
   const { default: ticketLinkService } = await import('../services/ticketLinkService.js');
-  const result = await ticketLinkService.setParent(Number(req.params.id), req.workspaceId, {
+  const result = await ticketLinkService.setParent((await tid(req)), req.workspaceId, {
     parentTicketId: Number(req.body?.parentTicketId),
   }, apiActor(req));
   res.json({ success: true, data: result });
@@ -233,18 +256,18 @@ router.put('/tickets/:id/parent', S('tickets:write'), asyncHandler(async (req, r
 
 router.delete('/tickets/:id/parent', S('tickets:write'), asyncHandler(async (req, res) => {
   const { default: ticketLinkService } = await import('../services/ticketLinkService.js');
-  res.json({ success: true, data: await ticketLinkService.removeParent(Number(req.params.id), req.workspaceId, apiActor(req)) });
+  res.json({ success: true, data: await ticketLinkService.removeParent((await tid(req)), req.workspaceId, apiActor(req)) });
 }));
 
 // -------------------------------------------------------- conversations
 
 router.get('/tickets/:id/conversations', S('conversations:read'), asyncHandler(async (req, res) => {
-  const ticket = await ticketService.getTicket(Number(req.params.id), req.workspaceId);
+  const ticket = await ticketService.getTicket((await tid(req)), req.workspaceId);
   res.json({ success: true, data: (ticket.thread || []).filter((e) => e.bodyText || e.content).map(threadEntryShape) });
 }));
 
 router.post('/tickets/:id/replies', S(['tickets:write', 'conversations:write']), withIdempotency, asyncHandler(async (req, res) => {
-  const result = await ticketService.addReply(Number(req.params.id), req.workspaceId, {
+  const result = await ticketService.addReply((await tid(req)), req.workspaceId, {
     bodyText: req.body?.body || req.body?.bodyText,
     bodyHtml: req.body?.bodyHtml || null,
   }, apiActor(req));
@@ -252,7 +275,7 @@ router.post('/tickets/:id/replies', S(['tickets:write', 'conversations:write']),
 }));
 
 router.post('/tickets/:id/notes', S('conversations:write'), withIdempotency, asyncHandler(async (req, res) => {
-  const result = await ticketService.addPrivateNote(Number(req.params.id), req.workspaceId, {
+  const result = await ticketService.addPrivateNote((await tid(req)), req.workspaceId, {
     bodyText: req.body?.body || req.body?.bodyText,
     bodyHtml: req.body?.bodyHtml || null,
   }, apiActor(req));
@@ -263,31 +286,31 @@ router.post('/tickets/:id/notes', S('conversations:write'), withIdempotency, asy
 
 router.get('/tickets/:id/tasks', S('tasks:read'), asyncHandler(async (req, res) => {
   const { default: ticketTaskService } = await import('../services/ticketTaskService.js');
-  res.json({ success: true, data: await ticketTaskService.listForTicket(Number(req.params.id), req.workspaceId) });
+  res.json({ success: true, data: await ticketTaskService.listForTicket((await tid(req)), req.workspaceId) });
 }));
 
 router.post('/tickets/:id/tasks', S('tasks:write'), withIdempotency, asyncHandler(async (req, res) => {
   const { default: ticketTaskService } = await import('../services/ticketTaskService.js');
-  const task = await ticketTaskService.create(Number(req.params.id), req.workspaceId, req.body || {}, apiActor(req));
+  const task = await ticketTaskService.create((await tid(req)), req.workspaceId, req.body || {}, apiActor(req));
   res.status(201).json({ success: true, data: task });
 }));
 
 router.patch('/tickets/:id/tasks/:taskId', S('tasks:write'), asyncHandler(async (req, res) => {
   const { default: ticketTaskService } = await import('../services/ticketTaskService.js');
-  const task = await ticketTaskService.update(Number(req.params.taskId), req.workspaceId, req.body || {}, apiActor(req), Number(req.params.id));
+  const task = await ticketTaskService.update(Number(req.params.taskId), req.workspaceId, req.body || {}, apiActor(req), (await tid(req)));
   res.json({ success: true, data: task });
 }));
 
 router.delete('/tickets/:id/tasks/:taskId', S('tasks:write'), asyncHandler(async (req, res) => {
   const { default: ticketTaskService } = await import('../services/ticketTaskService.js');
-  res.json({ success: true, data: await ticketTaskService.remove(Number(req.params.taskId), req.workspaceId, apiActor(req), Number(req.params.id)) });
+  res.json({ success: true, data: await ticketTaskService.remove(Number(req.params.taskId), req.workspaceId, apiActor(req), (await tid(req))) });
 }));
 
 // ------------------------------------------------------------ attachments
 
 router.get('/tickets/:id/attachments', S('attachments:read'), asyncHandler(async (req, res) => {
   const rows = await prisma.ticketAttachment.findMany({
-    where: { ticketId: Number(req.params.id), workspaceId: req.workspaceId },
+    where: { ticketId: (await tid(req)), workspaceId: req.workspaceId },
     orderBy: { id: 'asc' },
     select: { id: true, fileName: true, contentType: true, sizeBytes: true, createdAt: true },
   });
@@ -297,7 +320,7 @@ router.get('/tickets/:id/attachments', S('attachments:read'), asyncHandler(async
 router.get('/tickets/:id/attachments/:attachmentId', S('attachments:read'), asyncHandler(async (req, res) => {
   const { default: attachmentService } = await import('../services/attachmentService.js');
   const { attachment, stream } = await attachmentService.openDownload(
-    Number(req.params.attachmentId), Number(req.params.id), req.workspaceId,
+    Number(req.params.attachmentId), (await tid(req)), req.workspaceId,
   );
   res.setHeader('Content-Type', attachment.contentType || 'application/octet-stream');
   res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(attachment.fileName)}"`);
@@ -308,7 +331,7 @@ router.get('/tickets/:id/attachments/:attachmentId', S('attachments:read'), asyn
 
 router.get('/tickets/:id/approvals', S('approvals:read'), asyncHandler(async (req, res) => {
   const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');
-  const approvals = await ticketApprovalService.listForTicket(Number(req.params.id), req.workspaceId);
+  const approvals = await ticketApprovalService.listForTicket((await tid(req)), req.workspaceId);
   res.json({
     success: true,
     data: approvals.map((a) => ({
@@ -321,7 +344,7 @@ router.get('/tickets/:id/approvals', S('approvals:read'), asyncHandler(async (re
 
 router.post('/tickets/:id/approvals', S('approvals:write'), withIdempotency, asyncHandler(async (req, res) => {
   const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');
-  const result = await ticketApprovalService.request(Number(req.params.id), req.workspaceId, {
+  const result = await ticketApprovalService.request((await tid(req)), req.workspaceId, {
     approvalCategoryId: req.body?.approvalCategoryId,
     note: req.body?.note || null,
   }, apiActor(req));
@@ -339,7 +362,7 @@ router.get('/tags', S('tags:read'), asyncHandler(async (req, res) => {
 }));
 
 router.put('/tickets/:id/tags', S('tags:write'), asyncHandler(async (req, res) => {
-  const result = await ticketService.setTags(Number(req.params.id), req.workspaceId, req.body?.tagIds, apiActor(req));
+  const result = await ticketService.setTags((await tid(req)), req.workspaceId, req.body?.tagIds, apiActor(req));
   res.json({ success: true, data: result });
 }));
 

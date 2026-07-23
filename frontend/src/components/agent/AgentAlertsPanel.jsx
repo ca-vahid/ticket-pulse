@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
-  BellRing, Loader2, Mail, MessageCircle, MessageSquare, Moon, Phone, Plus, Tag, Trash2, X,
+  BellRing, Flame, Loader2, Mail, MessageCircle, MessageSquare, Moon, Phone, Plus, Tag, TrendingUp, Trash2, X,
 } from 'lucide-react';
 import { agentAPI } from '../../services/api';
 
@@ -16,6 +16,14 @@ const EMPTY_DRAFT = {
   channelEmail: true, channelSms: false, channelWhatsapp: false, channelPhone: false,
   label: '',
 };
+
+// One-click starter templates — they open the form pre-filled so the empty
+// state teaches the feature and uses the space (QA 07-21 #5).
+const PRESETS = [
+  { key: 'urgent', Icon: Flame, tone: 'text-rose-500', label: 'Urgent tickets', desc: 'Any category · Urgent', draft: { ...EMPTY_DRAFT, priorityMin: '4', onCreated: true, label: 'Urgent tickets' } },
+  { key: 'escalations', Icon: TrendingUp, tone: 'text-amber-500', label: 'Escalations', desc: 'When a ticket is escalated', draft: { ...EMPTY_DRAFT, onCreated: false, onPriorityRaised: true, label: 'Escalations' } },
+  { key: 'category', Icon: Tag, tone: 'text-blue-500', label: 'A category', desc: 'Watch a category you own', draft: { ...EMPTY_DRAFT, onCreated: true } },
+];
 
 /**
  * Custom agent alerts (agent portal). An agent subscribes to a category /
@@ -120,11 +128,34 @@ export default function AgentAlertsPanel({ workspaceId }) {
 
       {error && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700" role="alert">{error}</div>}
 
+      {/* Empty state with one-click starter templates */}
+      {subs.length === 0 && !draft && (
+        <div className="rounded-2xl border border-slate-200 bg-gradient-to-b from-slate-50 to-white p-5 text-center">
+          <span className="mx-auto mb-2 inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-50 text-blue-500"><BellRing className="h-5 w-5" aria-hidden="true" /></span>
+          <p className="text-sm font-semibold text-slate-700">No alerts yet</p>
+          <p className="mx-auto mt-0.5 max-w-sm text-xs text-slate-400">Get a heads-up the moment tickets you care about arrive or change. Start from a template:</p>
+          <div className="mx-auto mt-3 grid max-w-lg gap-2 sm:grid-cols-3">
+            {PRESETS.map(({ key, Icon, tone, label, desc, draft: preset }) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setDraft({ ...preset })}
+                className="tp-focus-ring group flex flex-col items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-3 text-center transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-sm"
+              >
+                <Icon className={`h-5 w-5 ${tone}`} aria-hidden="true" />
+                <span className="text-xs font-semibold text-slate-700">{label}</span>
+                <span className="text-[11px] leading-tight text-slate-400">{desc}</span>
+              </button>
+            ))}
+          </div>
+          <button onClick={() => setDraft({ ...EMPTY_DRAFT })} className="tp-focus-ring mt-3 text-xs font-semibold text-blue-600 hover:underline">
+            or build one from scratch →
+          </button>
+        </div>
+      )}
+
       {/* Subscriptions */}
-      <ul className="space-y-2">
-        {subs.length === 0 && !draft && (
-          <li className="rounded-xl border border-dashed border-slate-200 px-4 py-6 text-center text-sm text-slate-400">No alerts yet — add one below.</li>
-        )}
+      <ul className={subs.length ? 'space-y-2' : 'hidden'}>
         {subs.map((sub) => (
           <li key={sub.id} className={`rounded-xl border px-3.5 py-3 ${sub.isActive ? 'border-slate-200 bg-white' : 'border-slate-200 bg-slate-50/70'}`}>
             <div className="flex items-start gap-3">
@@ -221,11 +252,11 @@ export default function AgentAlertsPanel({ workspaceId }) {
             <button onClick={() => setDraft(null)} className="tp-focus-ring rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50">Cancel</button>
           </div>
         </div>
-      ) : (
+      ) : subs.length > 0 ? (
         <button onClick={() => setDraft({ ...EMPTY_DRAFT })} className="tp-focus-ring inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-blue-600 hover:bg-blue-50">
           <Plus className="h-4 w-4" aria-hidden="true" /> Add an alert
         </button>
-      )}
+      ) : null}
 
       {/* Quiet hours */}
       <div className="rounded-xl border border-slate-200 bg-white p-3.5">
