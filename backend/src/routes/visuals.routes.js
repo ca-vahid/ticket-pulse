@@ -18,9 +18,13 @@ router.get(
   '/agents',
   asyncHandler(async (req, res) => {
     const includeInactive = req.query.includeInactive === 'true';
+    // Lite: this endpoint only returns identity/location/schedule fields — it
+    // never touches tickets, so loading every ticket per tech (the old default)
+    // made the map + Tech Schedules page take minutes on busy workspaces
+    // (QA 07-21 #1). Now a fast metadata-only query.
     const technicians = includeInactive
-      ? await technicianRepository.getAll(req.workspaceId)
-      : await technicianRepository.getAllActive(req.workspaceId);
+      ? await technicianRepository.getAll(req.workspaceId, { lite: true })
+      : await technicianRepository.getAllActive(req.workspaceId, { lite: true });
 
     const agents = technicians.map(tech => ({
       id: tech.id,
@@ -192,8 +196,8 @@ router.post(
       });
     }
 
-    // Get all active technicians
-    const technicians = await technicianRepository.getAllActive(req.workspaceId);
+    // Get all active technicians (flags only — no tickets needed here).
+    const technicians = await technicianRepository.getAllActive(req.workspaceId, { lite: true });
 
     // Update all technicians
     const updates = technicians.map(async (tech) => {

@@ -613,9 +613,12 @@ class TicketService {
         cursorId = Number.isInteger(decoded) ? decoded : null;
       }
       const keysetWhere = cursorId ? { AND: [where, { id: { lt: cursorId } }] } : where;
-      const rows = await prisma.ticket.findMany({
-        where: keysetWhere, include: TICKET_INCLUDE, orderBy: [{ id: 'desc' }], take: pageSize + 1,
-      });
+      const [rows, total] = await Promise.all([
+        prisma.ticket.findMany({
+          where: keysetWhere, include: TICKET_INCLUDE, orderBy: [{ id: 'desc' }], take: pageSize + 1,
+        }),
+        prisma.ticket.count({ where }),
+      ]);
       const hasMore = rows.length > pageSize;
       const items = hasMore ? rows.slice(0, pageSize) : rows;
       const [incoming, ai, bypass, proposed] = await Promise.all([
@@ -635,7 +638,7 @@ class TicketService {
           ai: ai.get(t.id) || null, aiBypass: bypass.get(t.id) || null,
           hasProposedReply: proposed.has(t.id),
         })),
-        nextCursor, pageSize,
+        nextCursor, pageSize, total,
       };
     }
 

@@ -4,14 +4,12 @@ import {
   Archive, CheckCircle2, Clock3, LogOut, Search, ShieldCheck, UserRound,
   XCircle, Loader2, AlertCircle, BriefcaseBusiness, PlusCircle,
   X, Send, Sparkles, Undo2, ChevronLeft, ChevronRight,
-  Bell, LayoutDashboard,
+  LayoutDashboard,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { agentAPI } from '../services/api';
 import ItSummitFeedbackPanel from '../components/ItSummitFeedbackPanel';
 import ItSummitCategoriesPanel from '../components/ItSummitCategoriesPanel';
-import NotificationSettingsPanel from '../components/agent/NotificationSettingsPanel';
-import AgentAlertsPanel from '../components/agent/AgentAlertsPanel';
 
 const LEVELS = [
   { value: '', label: 'No experience', short: '-', rank: 0, className: 'bg-slate-100 text-slate-400 border-slate-200' },
@@ -74,11 +72,12 @@ export default function MyCompetencies() {
   });
   const [highlightCategoryId, setHighlightCategoryId] = useState(null);
   const [cancellingRequestId, setCancellingRequestId] = useState(null);
-  // Honour ?tab= so the avatar-menu "Notifications" entry lands straight on it.
+  // Notifications is now its own page (/notifications); this page shows
+  // competencies + the archived IT Summit view.
   const [searchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState(() => {
     const t = searchParams.get('tab');
-    return ['competencies', 'notifications', 'summit'].includes(t) ? t : 'competencies';
+    return ['competencies', 'summit'].includes(t) ? t : 'competencies';
   });
   const [activeSummitTab, setActiveSummitTab] = useState('categories');
   const [matrixScrollLeft, setMatrixScrollLeft] = useState(0);
@@ -661,6 +660,20 @@ export default function MyCompetencies() {
             </div>
           </div>
           <div className="flex flex-none items-center gap-2">
+            {showSummitTab && (
+              <button
+                type="button"
+                onClick={() => setActiveTab((t) => (t === 'summit' ? 'competencies' : 'summit'))}
+                className={`inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-sm font-semibold transition ${
+                  activeTab === 'summit'
+                    ? 'border-slate-300 bg-slate-900 text-white hover:bg-slate-800'
+                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                <Archive className="h-4 w-4" />
+                <span className="hidden sm:inline">{activeTab === 'summit' ? 'My Skills' : 'IT Summit'}</span>
+              </button>
+            )}
             {canAccessDashboard && (
               <a
                 href="/dashboard"
@@ -685,48 +698,9 @@ export default function MyCompetencies() {
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-4">
-        <section className="mb-4 rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => setActiveTab('competencies')}
-              className={`inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition hover:-translate-y-0.5 ${
-                activeTab === 'competencies' ? 'bg-blue-600 text-white shadow-sm shadow-blue-100' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
-              }`}
-            >
-              <ShieldCheck className="h-4 w-4" />
-              My Competencies
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('notifications')}
-              className={`inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition hover:-translate-y-0.5 ${
-                activeTab === 'notifications' ? 'bg-blue-600 text-white shadow-sm shadow-blue-100' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
-              }`}
-            >
-              <Bell className="h-4 w-4" />
-              Notifications
-            </button>
-            {showSummitTab && (
-              <button
-                type="button"
-                onClick={() => setActiveTab('summit')}
-                className={`inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition hover:-translate-y-0.5 ${
-                  activeTab === 'summit' ? 'bg-slate-950 text-white shadow-sm shadow-slate-200' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
-                }`}
-              >
-                <Archive className="h-4 w-4" />
-                IT Summit 2026
-                <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
-                  activeTab === 'summit' ? 'bg-white/15 text-white' : 'bg-slate-200 text-slate-600'
-                }`}>
-                  Archived
-                </span>
-              </button>
-            )}
-          </div>
-        </section>
-
+        {/* The old My-Competencies tab bar is gone (QA 07-21 #6). Notifications
+            has its own page now; the archived IT Summit view is reachable via a
+            header pill (below) rather than a redundant nav bar. */}
         {activeTab === 'summit' && showSummitTab && (
           <div className="space-y-4">
             <section className="rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
@@ -1079,15 +1053,6 @@ export default function MyCompetencies() {
                 </div>
               </section>
             </>
-          </div>
-        )}
-
-        {!loading && activeTab === 'notifications' && (
-          // One page, two stacked sections (QA 07-20 #4) — the sub-tabs are gone:
-          // delivery preferences up top, then the alert subscriptions below.
-          <div className="space-y-4">
-            <NotificationSettingsPanel workspaceId={workspaceId} />
-            <AgentAlertsPanel workspaceId={workspaceId} />
           </div>
         )}
       </main>

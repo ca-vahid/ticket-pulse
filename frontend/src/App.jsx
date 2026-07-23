@@ -22,6 +22,7 @@ import PublicTicketEscalation from './pages/PublicTicketEscalation';
 import PublicTicketUrgency from './pages/PublicTicketUrgency';
 import PublicTicketFeedback from './pages/PublicTicketFeedback';
 import MyCompetencies from './pages/MyCompetencies';
+import Notifications from './pages/Notifications';
 import Tickets from './pages/Tickets';
 import TicketCreate from './pages/TicketCreate';
 import TicketDetail from './pages/TicketDetail';
@@ -255,6 +256,15 @@ function App() {
                   element={
                     <AgentRoute>
                       <MyCompetencies />
+                    </AgentRoute>
+                  }
+                />
+
+                <Route
+                  path="/notifications"
+                  element={
+                    <AgentRoute>
+                      <Notifications />
                     </AgentRoute>
                   }
                 />

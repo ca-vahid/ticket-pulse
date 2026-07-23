@@ -120,7 +120,7 @@ class VacationTrackerService {
   async syncUsers(workspaceId) {
     const client = await this._getClientForWorkspace(workspaceId);
     const vtUsers = await client.fetchUsers();
-    const technicians = await technicianRepository.getAllActive(workspaceId);
+    const technicians = await technicianRepository.getAllActive(workspaceId, { lite: true });
 
     const techByEmail = new Map();
     const techByName = new Map();

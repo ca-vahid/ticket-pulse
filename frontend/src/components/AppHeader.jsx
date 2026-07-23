@@ -355,7 +355,7 @@ export default function AppHeader({
         id: 'notifications',
         label: 'Notifications',
         description: 'Email & alert preferences',
-        path: '/my-competencies?tab=notifications',
+        path: '/notifications',
         Icon: Bell,
       },
       ...(canManageWorkspace ? [{

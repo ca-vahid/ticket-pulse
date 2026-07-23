@@ -158,9 +158,12 @@ export default function NotificationSettingsPanel({ workspaceId }) {
     <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
       <div className="border-b border-slate-200 px-4 py-3">
         <div className="flex items-center gap-2">
-          <Bell className="h-4 w-4 text-blue-600" />
-          <h2 className="text-sm font-semibold text-slate-900">Notifications</h2>
-          {message && <span className="rounded bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">{message}</span>}
+          <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-blue-50 text-blue-600"><Bell className="h-4 w-4" /></span>
+          <div className="min-w-0">
+            <h2 className="text-sm font-bold text-slate-900">How you&rsquo;re notified</h2>
+            <p className="text-xs text-slate-500">Delivery channels for priority tickets &amp; your alerts.</p>
+          </div>
+          {message && <span className="ml-auto rounded bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">{message}</span>}
         </div>
         {error && <p className="mt-2 text-sm font-medium text-red-600">{error}</p>}
       </div>

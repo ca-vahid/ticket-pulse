@@ -191,7 +191,7 @@ export default function MobileTabBar() {
 
               <button
                 type="button"
-                onClick={() => go('/my-competencies?tab=notifications')}
+                onClick={() => go('/notifications')}
                 className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50"
               >
                 <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500">
