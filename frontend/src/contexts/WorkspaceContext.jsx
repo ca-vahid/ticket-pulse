@@ -1,6 +1,5 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { workspaceAPI, setWorkspaceId, setAuthToken } from '../services/api';
-import { dataCache } from '../services/dataCache';
 import { useAuth } from './AuthContext';
 
 const WorkspaceContext = createContext(null);
@@ -152,14 +151,20 @@ export function WorkspaceProvider({ children }) {
     persistWorkspace(selected);
     setCurrentWorkspace(selected);
 
-    dataCache.clear();
+    // Do NOT nuke the SWR dataCache on switch. Every cache key is workspace-
+    // prefixed (`ws<id>:…`), so a workspace's entries can never bleed into
+    // another's — keeping them means switching back to a workspace you already
+    // viewed renders instantly from cache (stale-while-revalidate), instead of
+    // sitting on a cold loading screen for a minute (QA 07-23 #6). The next
+    // fetch for the target workspace revalidates in the background.
 
-    // Clear only app-owned sessionStorage keys. Do NOT call sessionStorage.clear()
-    // because that wipes MSAL's token cache, causing logout in incognito mode.
+    // Clear only the LEGACY, non-workspace-scoped app keys. Preserve `tp_cache:`
+    // (the workspace-prefixed SWR store) so revisits stay instant. Do NOT call
+    // sessionStorage.clear() — that wipes MSAL's token cache (logout in incognito).
     const appKeys = [];
     for (let i = 0; i < sessionStorage.length; i++) {
       const k = sessionStorage.key(i);
-      if (k && (k.startsWith('tp_cache:') || k.startsWith('dashboard_') || k.startsWith('techDetail') || k.startsWith('tl_'))) {
+      if (k && (k.startsWith('dashboard_') || k.startsWith('techDetail') || k.startsWith('tl_'))) {
         appKeys.push(k);
       }
     }

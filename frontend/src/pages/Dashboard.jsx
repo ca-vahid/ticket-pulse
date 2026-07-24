@@ -4,6 +4,7 @@ import { useDashboard } from '../contexts/DashboardContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { analyticsAPI, syncAPI, getGlobalExcludeNoise, setGlobalExcludeNoise } from '../services/api';
 import AppShell, { APP_BACKGROUND_CLASS, APP_BACKGROUND_STYLE } from '../components/AppShell';
+import DashboardLoadingProgress from '../components/DashboardLoadingProgress';
 import DemoModeToggle from '../components/DemoModeToggle';
 import TechCard from '../components/TechCard';
 import TechCardCompact from '../components/TechCardCompact';
@@ -746,14 +747,7 @@ export default function Dashboard() {
         className={`min-h-screen flex items-center justify-center ${APP_BACKGROUND_CLASS}`}
         style={APP_BACKGROUND_STYLE}
       >
-        <div className="text-center bg-white/80 backdrop-blur-sm px-6 py-5 rounded-xl shadow-sm border border-gray-200">
-          <img
-            src="/brand/icon-pulse.png"
-            alt=""
-            className="w-14 h-14 mx-auto mb-3 animate-pulse"
-          />
-          <p className="text-gray-700 font-medium">Loading dashboard…</p>
-        </div>
+        <DashboardLoadingProgress workspaceName={currentWorkspace?.name} />
       </div>
     );
   }

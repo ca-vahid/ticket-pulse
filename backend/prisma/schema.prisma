@@ -230,10 +230,10 @@ model ApiIdempotencyKey {
 
 // Durable fixed-window counter for /api/v1 rate limiting (per key + per IP).
 model ApiRateWindow {
-  id          Int      @id @default(autoincrement())
-  bucketKey   String   @map("bucket_key") @db.VarChar(120)
-  windowEpoch Int      @map("window_epoch")
-  count       Int      @default(0)
+  id          Int    @id @default(autoincrement())
+  bucketKey   String @map("bucket_key") @db.VarChar(120)
+  windowEpoch Int    @map("window_epoch")
+  count       Int    @default(0)
 
   @@unique([bucketKey, windowEpoch])
   @@index([windowEpoch])
@@ -392,7 +392,7 @@ model WebhookSubscription {
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
 
-  deliveries       WebhookDelivery[]
+  deliveries WebhookDelivery[]
 
   @@index([workspaceId, isEnabled])
   @@map("webhook_subscriptions")
@@ -1084,6 +1084,11 @@ model Ticket {
   @@index([workspaceId])
   @@index([workspaceId, lastRealActivityAt(sort: Desc)])
   @@index([assignedTechId])
+  // Dashboard workload scan: open/pending tickets per tech, scoped to a
+  // workspace. Serves getAllActiveScoped's unbounded status branch so a large
+  // backlog (Accounting) no longer forces a status-only full scan (QA 07-23 #6).
+  @@index([workspaceId, status])
+  @@index([assignedTechId, status])
   @@index([createdAt])
   @@index([status])
   @@index([workspaceName])

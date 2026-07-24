@@ -8,6 +8,24 @@ const ticketCategoryInclude = {
   internalSubcategory: { select: { id: true, name: true, parentId: true } },
 };
 
+// Heavy detail-only columns the dashboard never renders (full bodies, AI
+// rationales, evidence JSON, sync bookkeeping). Omitting them keeps every other
+// field intact for `...ticket` passthrough while cutting the row width — the
+// dashboard hydrates the whole open/pending backlog per tech, so wide rows are
+// the dominant cost for large-backlog workspaces (QA 07-23 #6). Prisma `omit`
+// is GA in 5.16+.
+const dashboardTicketOmit = {
+  description: true,
+  descriptionText: true,
+  priorityRationale: true,
+  priorityEvidence: true,
+  ticketTypeRationale: true,
+  internalCategoryRationale: true,
+  csatFeedback: true,
+  activitiesSyncError: true,
+  mirrorError: true,
+};
+
 /**
  * Repository for Technician operations
  */
@@ -88,6 +106,11 @@ class TechnicianRepository {
         ],
       };
 
+      // Scope tickets to the workspace explicitly so the open/pending scan can
+      // use the (workspace_id, status) composite index instead of a broad
+      // status-only scan across all workspaces (QA 07-23 #6).
+      if (workspaceId) ticketWhere.workspaceId = workspaceId;
+
       if (excludeNoise) {
         ticketWhere.isNoise = false;
       }
@@ -98,6 +121,7 @@ class TechnicianRepository {
           tickets: {
             where: ticketWhere,
             include: ticketCategoryInclude,
+            omit: dashboardTicketOmit,
           },
         },
         orderBy: { name: 'asc' },

@@ -1,6 +1,17 @@
-export const APP_VERSION = '3.0.75-preview';
+export const APP_VERSION = '3.0.76-preview';
 
 export const changelog = [
+  {
+    version: '3.0.76-preview',
+    date: 'July 23, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>⚡ Accounting dashboard loads fast</strong> — switching to a busy workspace (e.g. Accounting) no longer sits on a blank screen for a minute. The per-agent workload query was reading the entire open/pending backlog with every heavy text field attached; it now uses <b>workspace-scoped indexes</b> and skips the bulky description/rationale columns. Switching <b>back</b> to a workspace you already viewed is now <b>instant</b> (its data is cached and refreshed in the background), and the first cold load shows a <b>progress bar with a live percentage</b> instead of a bare spinner.' },
+      { type: 'fixed', html: '<strong>📊 Analytics → Team Balance charts, clearer</strong> — <b>Workload by Agent</b> and <b>Assignment Source by Agent</b> now grow taller as the roster grows (bars no longer clump), always list <b>every agent name</b> on the axis, label blank names as “Unknown agent” instead of “Undefined”, and show <b>exact per-series counts on hover</b> (with a total for the stacked chart).' },
+      { type: 'fixed', html: '<strong>🗓️ Shared Calendar no longer shows another workspace’s mailbox</strong> — a workspace with no shared-calendar source (e.g. IT, which uses the Vacation Tracker) showed the Accounting mailbox as a placeholder. It now shows a blank, clearly-<b>unconfigured</b> form with a short explainer, so one workspace’s calendar settings can never be mistaken for — or accidentally saved into — another’s.' },
+      { type: 'fixed', html: '<strong>🔔 “Notifications” is reachable for workspace admins</strong> — Settings → <b>Notifications &amp; Public → Notifications</b> now appears for workspace admins, showing the <b>Email delivery health</b> card (status, last send, 24h counts). The global provider credentials (SendGrid / Twilio) inside stay global-admin-only.' },
+      { type: 'fixed', html: '<strong>↔️ Public Status settings no longer cut off</strong> — the <b>Ticket Public Links</b> and <b>Historical ETA Model</b> sections were clipped on the right with no scrollbar on narrower screens; the ticket table now scrolls horizontally inside its own panel and both cards stay fully on screen.' },
+    ],
+  },
   {
     version: '3.0.75-preview',
     date: 'July 22, 2026',

@@ -452,8 +452,8 @@ export default function PublicTicketStatusPanel() {
 
       <Status status={status} />
 
-      <div className="grid gap-5 xl:grid-cols-[1fr_0.9fr]">
-        <section className="space-y-5">
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)]">
+        <section className="min-w-0 space-y-5">
           <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
             <h3 className="text-sm font-semibold uppercase text-slate-500">Availability and Expiry</h3>
             <div className="mt-4 space-y-4">
@@ -608,7 +608,7 @@ export default function PublicTicketStatusPanel() {
           </div>
         </section>
 
-        <aside className="space-y-5">
+        <aside className="min-w-0 space-y-5">
           <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex items-center gap-2">
               <Shield className="h-5 w-5 text-emerald-600" />

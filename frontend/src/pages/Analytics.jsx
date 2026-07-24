@@ -1085,6 +1085,15 @@ export default function Analytics({ view = 'standard' }) {
     return rows;
   }, [selectedTeamIds, team?.technicians, teamFilter, teamSearch, teamSort]);
 
+  // Grow the per-agent bar charts with the roster so bars never clump into an
+  // unreadable stack at a fixed height (QA 07-23 #5). ~34px per agent gives each
+  // grouped/stacked row breathing room; floor keeps small teams from looking
+  // sparse. The Panel scrolls if it gets tall.
+  const teamBarChartHeight = useMemo(
+    () => `${Math.min(1400, Math.max(isMobile ? 300 : 340, teamRows.length * (isMobile ? 30 : 36) + 96))}px`,
+    [teamRows.length, isMobile],
+  );
+
   const teamPickerRows = useMemo(() => {
     let rows = [...(team?.technicians || [])];
     const q = teamSearch.trim().toLowerCase();
@@ -1833,14 +1842,18 @@ export default function Analytics({ view = 'standard' }) {
     accessibility: { enabled: true },
     colors: ['#2563eb', '#f59e0b', '#059669'],
     xAxis: {
-      categories: teamRows.map((row) => row.name),
-      labels: { style: { color: '#475569', fontSize: '12px' } },
+      // Explicit category axis with every agent label shown. `type: 'category'`
+      // guarantees agent names (never a numeric fallback axis) and `step: 1`
+      // stops Highcharts thinning labels when the roster is long (QA 07-23 #5).
+      type: 'category',
+      categories: teamRows.map((row) => row.name || 'Unknown agent'),
+      labels: { step: 1, autoRotation: undefined, style: { color: '#475569', fontSize: '12px' } },
       lineColor: '#cbd5e1',
     },
     yAxis: {
       min: 0,
       allowDecimals: false,
-      title: { text: null },
+      title: { text: 'Tickets', style: { color: '#94a3b8', fontSize: '11px' } },
       gridLineDashStyle: 'Dash',
       gridLineColor: '#e2e8f0',
       labels: { style: { color: '#64748b', fontSize: '11px' } },
@@ -1848,8 +1861,10 @@ export default function Analytics({ view = 'standard' }) {
     legend: { itemStyle: { color: '#334155', fontSize: '12px' } },
     tooltip: {
       shared: true,
+      useHTML: true,
       borderColor: '#cbd5e1',
-      valueSuffix: ' tickets',
+      headerFormat: '<span style="font-size:12px;font-weight:700;color:#0f172a">{point.key}</span><br/>',
+      pointFormat: '<span style="color:{series.color}">●</span> {series.name}: <b>{point.y}</b> tickets<br/>',
     },
     plotOptions: {
       series: {
@@ -1879,14 +1894,15 @@ export default function Analytics({ view = 'standard' }) {
     accessibility: { enabled: true },
     colors: ['#f59e0b', '#059669', '#2563eb', '#64748b'],
     xAxis: {
-      categories: teamRows.map((row) => row.name),
-      labels: { style: { color: '#475569', fontSize: '12px' } },
+      type: 'category',
+      categories: teamRows.map((row) => row.name || 'Unknown agent'),
+      labels: { step: 1, autoRotation: undefined, style: { color: '#475569', fontSize: '12px' } },
       lineColor: '#cbd5e1',
     },
     yAxis: {
       min: 0,
       allowDecimals: false,
-      title: { text: null },
+      title: { text: 'Tickets', style: { color: '#94a3b8', fontSize: '11px' } },
       stackLabels: {
         enabled: true,
         style: { color: '#334155', fontSize: '10px', textOutline: 'none' },
@@ -1896,7 +1912,14 @@ export default function Analytics({ view = 'standard' }) {
       labels: { style: { color: '#64748b', fontSize: '11px' } },
     },
     legend: { itemStyle: { color: '#334155', fontSize: '12px' } },
-    tooltip: { shared: true, borderColor: '#cbd5e1', valueSuffix: ' tickets' },
+    tooltip: {
+      shared: true,
+      useHTML: true,
+      borderColor: '#cbd5e1',
+      headerFormat: '<span style="font-size:12px;font-weight:700;color:#0f172a">{point.key}</span><br/>',
+      pointFormat: '<span style="color:{series.color}">●</span> {series.name}: <b>{point.y}</b><br/>',
+      footerFormat: '<span style="color:#64748b">Total: <b>{point.total}</b> tickets</span>',
+    },
     plotOptions: {
       series: {
         stacking: 'normal',
@@ -3169,10 +3192,10 @@ export default function Analytics({ view = 'standard' }) {
 
       <div className="grid gap-4 xl:grid-cols-2">
         <Panel title="Workload by Agent" subtitle="Assigned tickets, current open queue, and closed count by agent.">
-          {teamRows.length ? <HighchartsBlock options={workloadChartOptions} height={isMobile ? '20rem' : '26rem'} /> : <EmptyState text="No agents match the current filters." />}
+          {teamRows.length ? <HighchartsBlock options={workloadChartOptions} height={teamBarChartHeight} /> : <EmptyState text="No agents match the current filters." />}
         </Panel>
         <Panel title="Assignment Source by Agent" subtitle="Shows self-picked, coordinator-assigned, and Ticket Pulse-assigned volume.">
-          {teamRows.length ? <HighchartsBlock options={sourceChartOptions} height={isMobile ? '20rem' : '26rem'} /> : <EmptyState text="No agents match the current filters." />}
+          {teamRows.length ? <HighchartsBlock options={sourceChartOptions} height={teamBarChartHeight} /> : <EmptyState text="No agents match the current filters." />}
         </Panel>
       </div>
 
