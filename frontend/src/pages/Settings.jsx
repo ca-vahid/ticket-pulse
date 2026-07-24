@@ -170,7 +170,9 @@ export default function Settings() {
     { id: 'urgent-escalation', label: 'Urgent Escalation', Icon: Siren, minRole: 'admin', group: 'Tickets & AI' },
     // Notifications & Public
     { id: 'feedback-page', label: 'Feedback', Icon: MessageSquare, minRole: 'admin', group: 'Notifications & Public' },
-    { id: 'notification-providers', label: 'Notifications', Icon: Bell, minRole: 'global', group: 'Notifications & Public' },
+    // Workspace admins can reach this to see Email delivery health (QA 07-23 #3);
+    // the global provider secrets inside are still gated to global admins below.
+    { id: 'notification-providers', label: 'Notifications', Icon: Bell, minRole: 'admin', group: 'Notifications & Public' },
     { id: 'public-ticket-status', label: 'Public Status', Icon: ExternalLink, minRole: 'admin', group: 'Notifications & Public' },
     // Team & Scheduling
     { id: 'business-hours', label: 'Business Hours', Icon: Clock, minRole: 'admin', group: 'Team & Scheduling' },
@@ -828,290 +830,299 @@ export default function Settings() {
               {activeSection === 'notification-providers' && (
                 <form onSubmit={handleSave} className="p-6 space-y-5">
                   <EmailHealthCard />
-                  <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                    <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-4">
-                      <div>
-                        <h2 className="text-base font-semibold text-slate-950">Notification Providers</h2>
-                        <p className="mt-1 text-sm text-slate-500">
-                        Global provider setup for all workspaces. Tests save the provider settings first, then send a real test message.
-                        </p>
-                      </div>
-                      <button
-                        type="submit"
-                        disabled={isSaving}
-                        className="inline-flex h-10 items-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60"
-                      >
-                        <Save className="h-4 w-4" />
-                        {isSaving ? 'Saving...' : 'Save Providers'}
-                      </button>
+                  {!isGlobalAdmin && (
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                      Notification <span className="font-semibold text-slate-800">provider setup</span> (SendGrid / Twilio
+                      credentials) is shared across all workspaces and managed by a global admin. You can monitor
+                      delivery health above; contact a global admin to change provider credentials.
                     </div>
-
-                    <div className="mt-5 grid gap-4 xl:grid-cols-2">
-                      <section className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
-                        <div className="mb-4 flex items-start justify-between gap-3">
-                          <div className="flex items-center gap-2">
-                            <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-blue-100 text-blue-700">
-                              <Mail className="h-4 w-4" />
-                            </span>
-                            <div>
-                              <h3 className="text-sm font-semibold text-slate-950">SendGrid Email</h3>
-                              <p className="text-xs text-slate-500">Uses the SendGrid v3 Web API with a Bearer API key.</p>
-                            </div>
-                          </div>
-                          <span className={`rounded-full px-2 py-1 text-xs font-semibold ${
-                            settings?.sendgrid_api_key === '***MASKED***' && settings?.sendgrid_from_email
-                              ? 'bg-emerald-100 text-emerald-700'
-                              : 'bg-slate-200 text-slate-600'
-                          }`}>
-                            {settings?.sendgrid_api_key === '***MASKED***' && settings?.sendgrid_from_email ? 'Configured' : 'Not configured'}
-                          </span>
+                  )}
+                  {isGlobalAdmin && (
+                    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-4">
+                        <div>
+                          <h2 className="text-base font-semibold text-slate-950">Notification Providers</h2>
+                          <p className="mt-1 text-sm text-slate-500">
+                        Global provider setup for all workspaces. Tests save the provider settings first, then send a real test message.
+                          </p>
                         </div>
+                        <button
+                          type="submit"
+                          disabled={isSaving}
+                          className="inline-flex h-10 items-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60"
+                        >
+                          <Save className="h-4 w-4" />
+                          {isSaving ? 'Saving...' : 'Save Providers'}
+                        </button>
+                      </div>
 
-                        <div className="grid gap-3">
-                          <label className="block">
-                            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">API key</span>
-                            <input
-                              type="password"
-                              name="sendgrid_api_key"
-                              value={formData.sendgrid_api_key}
-                              onChange={handleChange}
-                              placeholder={settings?.sendgrid_api_key === '***MASKED***' ? '(Configured)' : 'SG.xxxxx'}
-                              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-                            />
-                            <span className="mt-1 block text-xs text-slate-500">Leave blank to keep the existing key.</span>
-                          </label>
-
-                          <label className="block">
-                            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">From email</span>
-                            <input
-                              type="email"
-                              name="sendgrid_from_email"
-                              value={formData.sendgrid_from_email}
-                              onChange={handleChange}
-                              placeholder="ticketpulse@example.com"
-                              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-                            />
-                            <span className="mt-1 block text-xs text-slate-500">Must be a verified sender or domain in SendGrid.</span>
-                          </label>
-
-                          <div className="mt-2 rounded-lg border border-slate-200 bg-white p-3">
-                            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Test email</div>
-                            <div className="flex flex-col gap-2 sm:flex-row">
-                              <input
-                                type="email"
-                                value={providerTestTargets.sendgrid}
-                                onChange={(event) => handleProviderTargetChange('sendgrid', event.target.value)}
-                                placeholder="recipient@example.com"
-                                className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => handleProviderTest('sendgrid')}
-                                disabled={providerTesting === 'sendgrid' || !providerTestTargets.sendgrid}
-                                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                              >
-                                <Send className="h-4 w-4" />
-                                {providerTesting === 'sendgrid' ? 'Sending...' : 'Send Test'}
-                              </button>
-                            </div>
-                            {providerTestStatus.sendgrid && (
-                              <div className={`mt-2 flex items-start gap-2 rounded-lg px-3 py-2 text-xs ${
-                                providerTestStatus.sendgrid.success ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'
-                              }`}>
-                                {providerTestStatus.sendgrid.success ? <CheckCircle className="h-4 w-4 shrink-0" /> : <XCircle className="h-4 w-4 shrink-0" />}
-                                <span>{providerTestStatus.sendgrid.message}</span>
+                      <div className="mt-5 grid gap-4 xl:grid-cols-2">
+                        <section className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+                          <div className="mb-4 flex items-start justify-between gap-3">
+                            <div className="flex items-center gap-2">
+                              <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-blue-100 text-blue-700">
+                                <Mail className="h-4 w-4" />
+                              </span>
+                              <div>
+                                <h3 className="text-sm font-semibold text-slate-950">SendGrid Email</h3>
+                                <p className="text-xs text-slate-500">Uses the SendGrid v3 Web API with a Bearer API key.</p>
                               </div>
-                            )}
-                          </div>
-                        </div>
-                      </section>
-
-                      <section className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
-                        <div className="mb-4 flex items-start justify-between gap-3">
-                          <div className="flex items-center gap-2">
-                            <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700">
-                              <MessageSquare className="h-4 w-4" />
-                            </span>
-                            <div>
-                              <h3 className="text-sm font-semibold text-slate-950">Twilio SMS, WhatsApp, and Voice</h3>
-                              <p className="text-xs text-slate-500">WhatsApp alerts use an approved Twilio Content template.</p>
                             </div>
-                          </div>
-                          <div className="flex flex-wrap justify-end gap-1.5">
                             <span className={`rounded-full px-2 py-1 text-xs font-semibold ${
-                              settings?.twilio_account_sid && settings?.twilio_auth_token === '***MASKED***' && settings?.twilio_from_number
+                              settings?.sendgrid_api_key === '***MASKED***' && settings?.sendgrid_from_email
                                 ? 'bg-emerald-100 text-emerald-700'
                                 : 'bg-slate-200 text-slate-600'
                             }`}>
-                              {settings?.twilio_account_sid && settings?.twilio_auth_token === '***MASKED***' && settings?.twilio_from_number ? 'SMS/voice ready' : 'SMS/voice incomplete'}
+                              {settings?.sendgrid_api_key === '***MASKED***' && settings?.sendgrid_from_email ? 'Configured' : 'Not configured'}
                             </span>
-                            <span className={`rounded-full px-2 py-1 text-xs font-semibold ${
-                              settings?.twilio_account_sid
+                          </div>
+
+                          <div className="grid gap-3">
+                            <label className="block">
+                              <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">API key</span>
+                              <input
+                                type="password"
+                                name="sendgrid_api_key"
+                                value={formData.sendgrid_api_key}
+                                onChange={handleChange}
+                                placeholder={settings?.sendgrid_api_key === '***MASKED***' ? '(Configured)' : 'SG.xxxxx'}
+                                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                              />
+                              <span className="mt-1 block text-xs text-slate-500">Leave blank to keep the existing key.</span>
+                            </label>
+
+                            <label className="block">
+                              <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">From email</span>
+                              <input
+                                type="email"
+                                name="sendgrid_from_email"
+                                value={formData.sendgrid_from_email}
+                                onChange={handleChange}
+                                placeholder="ticketpulse@example.com"
+                                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                              />
+                              <span className="mt-1 block text-xs text-slate-500">Must be a verified sender or domain in SendGrid.</span>
+                            </label>
+
+                            <div className="mt-2 rounded-lg border border-slate-200 bg-white p-3">
+                              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Test email</div>
+                              <div className="flex flex-col gap-2 sm:flex-row">
+                                <input
+                                  type="email"
+                                  value={providerTestTargets.sendgrid}
+                                  onChange={(event) => handleProviderTargetChange('sendgrid', event.target.value)}
+                                  placeholder="recipient@example.com"
+                                  className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => handleProviderTest('sendgrid')}
+                                  disabled={providerTesting === 'sendgrid' || !providerTestTargets.sendgrid}
+                                  className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                  <Send className="h-4 w-4" />
+                                  {providerTesting === 'sendgrid' ? 'Sending...' : 'Send Test'}
+                                </button>
+                              </div>
+                              {providerTestStatus.sendgrid && (
+                                <div className={`mt-2 flex items-start gap-2 rounded-lg px-3 py-2 text-xs ${
+                                  providerTestStatus.sendgrid.success ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'
+                                }`}>
+                                  {providerTestStatus.sendgrid.success ? <CheckCircle className="h-4 w-4 shrink-0" /> : <XCircle className="h-4 w-4 shrink-0" />}
+                                  <span>{providerTestStatus.sendgrid.message}</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </section>
+
+                        <section className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+                          <div className="mb-4 flex items-start justify-between gap-3">
+                            <div className="flex items-center gap-2">
+                              <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700">
+                                <MessageSquare className="h-4 w-4" />
+                              </span>
+                              <div>
+                                <h3 className="text-sm font-semibold text-slate-950">Twilio SMS, WhatsApp, and Voice</h3>
+                                <p className="text-xs text-slate-500">WhatsApp alerts use an approved Twilio Content template.</p>
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap justify-end gap-1.5">
+                              <span className={`rounded-full px-2 py-1 text-xs font-semibold ${
+                                settings?.twilio_account_sid && settings?.twilio_auth_token === '***MASKED***' && settings?.twilio_from_number
+                                  ? 'bg-emerald-100 text-emerald-700'
+                                  : 'bg-slate-200 text-slate-600'
+                              }`}>
+                                {settings?.twilio_account_sid && settings?.twilio_auth_token === '***MASKED***' && settings?.twilio_from_number ? 'SMS/voice ready' : 'SMS/voice incomplete'}
+                              </span>
+                              <span className={`rounded-full px-2 py-1 text-xs font-semibold ${
+                                settings?.twilio_account_sid
                               && settings?.twilio_auth_token === '***MASKED***'
                               && settings?.twilio_whatsapp_content_sid
                               && (settings?.twilio_whatsapp_messaging_service_sid || settings?.twilio_whatsapp_sender || settings?.twilio_from_number)
-                                ? 'bg-emerald-100 text-emerald-700'
-                                : 'bg-amber-100 text-amber-700'
-                            }`}>
-                              {settings?.twilio_whatsapp_content_sid ? 'WhatsApp template set' : 'WhatsApp template needed'}
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="grid gap-3">
-                          <label className="block">
-                            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Account SID</span>
-                            <input
-                              type="text"
-                              name="twilio_account_sid"
-                              value={formData.twilio_account_sid}
-                              onChange={handleChange}
-                              placeholder="AC..."
-                              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-                            />
-                          </label>
-
-                          <label className="block">
-                            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Auth token</span>
-                            <input
-                              type="password"
-                              name="twilio_auth_token"
-                              value={formData.twilio_auth_token}
-                              onChange={handleChange}
-                              placeholder={settings?.twilio_auth_token === '***MASKED***' ? '(Configured)' : 'Enter auth token'}
-                              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-                            />
-                            <span className="mt-1 block text-xs text-slate-500">Leave blank to keep the existing token.</span>
-                          </label>
-
-                          <label className="block">
-                            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Twilio phone number</span>
-                            <input
-                              type="tel"
-                              name="twilio_from_number"
-                              value={formData.twilio_from_number}
-                              onChange={handleChange}
-                              placeholder="+16045550100"
-                              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-                            />
-                            <span className="mt-1 block text-xs text-slate-500">Use E.164 format.</span>
-                          </label>
-
-                          <div className="grid gap-3 rounded-lg border border-emerald-100 bg-emerald-50/50 p-3">
-                            <div>
-                              <div className="text-xs font-semibold uppercase tracking-wide text-emerald-700">WhatsApp template</div>
-                              <p className="mt-1 text-xs text-emerald-700/80">
-                              Use a Twilio-approved template for business-initiated WhatsApp tests and alerts.
-                              </p>
+                                  ? 'bg-emerald-100 text-emerald-700'
+                                  : 'bg-amber-100 text-amber-700'
+                              }`}>
+                                {settings?.twilio_whatsapp_content_sid ? 'WhatsApp template set' : 'WhatsApp template needed'}
+                              </span>
                             </div>
-
-                            <label className="block">
-                              <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">WhatsApp sender</span>
-                              <input
-                                type="tel"
-                                name="twilio_whatsapp_sender"
-                                value={formData.twilio_whatsapp_sender}
-                                onChange={handleChange}
-                                placeholder="Defaults to Twilio phone number"
-                                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-                              />
-                              <span className="mt-1 block text-xs text-slate-500">Optional. Use +16045550100 or whatsapp:+16045550100.</span>
-                            </label>
-
-                            <label className="block">
-                              <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Messaging Service SID</span>
-                              <input
-                                type="text"
-                                name="twilio_whatsapp_messaging_service_sid"
-                                value={formData.twilio_whatsapp_messaging_service_sid}
-                                onChange={handleChange}
-                                placeholder="MG..."
-                                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-                              />
-                              <span className="mt-1 block text-xs text-slate-500">Optional. If set, Twilio selects the WhatsApp sender from the service.</span>
-                            </label>
-
-                            <label className="block">
-                              <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Content SID</span>
-                              <input
-                                type="text"
-                                name="twilio_whatsapp_content_sid"
-                                value={formData.twilio_whatsapp_content_sid}
-                                onChange={handleChange}
-                                placeholder="HX..."
-                                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-                              />
-                              <span className="mt-1 block text-xs text-slate-500">Required for WhatsApp tests and assignment alerts.</span>
-                            </label>
-
-                            <label className="block">
-                              <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Content variables JSON</span>
-                              <textarea
-                                name="twilio_whatsapp_content_variables"
-                                value={formData.twilio_whatsapp_content_variables}
-                                onChange={handleChange}
-                                rows={3}
-                                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 font-mono text-xs outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-                              />
-                              <span className="mt-1 block text-xs text-slate-500">Default sends the full alert text as template variable 1.</span>
-                            </label>
                           </div>
 
-                          <div className="mt-2 rounded-lg border border-slate-200 bg-white p-3">
-                            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Test SMS, WhatsApp, and voice</div>
-                            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto]">
+                          <div className="grid gap-3">
+                            <label className="block">
+                              <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Account SID</span>
+                              <input
+                                type="text"
+                                name="twilio_account_sid"
+                                value={formData.twilio_account_sid}
+                                onChange={handleChange}
+                                placeholder="AC..."
+                                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                              />
+                            </label>
+
+                            <label className="block">
+                              <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Auth token</span>
+                              <input
+                                type="password"
+                                name="twilio_auth_token"
+                                value={formData.twilio_auth_token}
+                                onChange={handleChange}
+                                placeholder={settings?.twilio_auth_token === '***MASKED***' ? '(Configured)' : 'Enter auth token'}
+                                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                              />
+                              <span className="mt-1 block text-xs text-slate-500">Leave blank to keep the existing token.</span>
+                            </label>
+
+                            <label className="block">
+                              <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Twilio phone number</span>
                               <input
                                 type="tel"
-                                value={providerTestTargets.twilio}
-                                onChange={(event) => handleProviderTargetChange('twilio', event.target.value)}
+                                name="twilio_from_number"
+                                value={formData.twilio_from_number}
+                                onChange={handleChange}
                                 placeholder="+16045550100"
-                                className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                               />
-                              <button
-                                type="button"
-                                onClick={() => handleProviderTest('twilio_sms')}
-                                disabled={providerTesting === 'twilio_sms' || !providerTestTargets.twilio}
-                                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                              >
-                                <MessageSquare className="h-4 w-4" />
-                                {providerTesting === 'twilio_sms' ? 'Sending...' : 'Test SMS'}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleProviderTest('twilio_whatsapp')}
-                                disabled={providerTesting === 'twilio_whatsapp' || !providerTestTargets.twilio}
-                                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 text-sm font-semibold text-emerald-800 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
-                              >
-                                <MessageCircle className="h-4 w-4" />
-                                {providerTesting === 'twilio_whatsapp' ? 'Sending...' : 'Test WhatsApp'}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleProviderTest('twilio_voice')}
-                                disabled={providerTesting === 'twilio_voice' || !providerTestTargets.twilio}
-                                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-                              >
-                                <PhoneCall className="h-4 w-4" />
-                                {providerTesting === 'twilio_voice' ? 'Calling...' : 'Test Voice'}
-                              </button>
-                            </div>
-                            {['twilio_sms', 'twilio_whatsapp', 'twilio_voice'].map((channel) => (
-                              providerTestStatus[channel] && (
-                                <div key={channel} className={`mt-2 flex items-start gap-2 rounded-lg px-3 py-2 text-xs ${
-                                  providerTestStatus[channel].success ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'
-                                }`}>
-                                  {providerTestStatus[channel].success ? <CheckCircle className="h-4 w-4 shrink-0" /> : <XCircle className="h-4 w-4 shrink-0" />}
-                                  <span>{channel === 'twilio_sms' ? 'SMS: ' : channel === 'twilio_whatsapp' ? 'WhatsApp: ' : 'Voice: '}{providerTestStatus[channel].message}</span>
-                                </div>
-                              )
-                            ))}
-                          </div>
-                        </div>
-                      </section>
-                    </div>
-                  </div>
+                              <span className="mt-1 block text-xs text-slate-500">Use E.164 format.</span>
+                            </label>
 
-                  {saveStatus && (
+                            <div className="grid gap-3 rounded-lg border border-emerald-100 bg-emerald-50/50 p-3">
+                              <div>
+                                <div className="text-xs font-semibold uppercase tracking-wide text-emerald-700">WhatsApp template</div>
+                                <p className="mt-1 text-xs text-emerald-700/80">
+                              Use a Twilio-approved template for business-initiated WhatsApp tests and alerts.
+                                </p>
+                              </div>
+
+                              <label className="block">
+                                <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">WhatsApp sender</span>
+                                <input
+                                  type="tel"
+                                  name="twilio_whatsapp_sender"
+                                  value={formData.twilio_whatsapp_sender}
+                                  onChange={handleChange}
+                                  placeholder="Defaults to Twilio phone number"
+                                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                                />
+                                <span className="mt-1 block text-xs text-slate-500">Optional. Use +16045550100 or whatsapp:+16045550100.</span>
+                              </label>
+
+                              <label className="block">
+                                <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Messaging Service SID</span>
+                                <input
+                                  type="text"
+                                  name="twilio_whatsapp_messaging_service_sid"
+                                  value={formData.twilio_whatsapp_messaging_service_sid}
+                                  onChange={handleChange}
+                                  placeholder="MG..."
+                                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                                />
+                                <span className="mt-1 block text-xs text-slate-500">Optional. If set, Twilio selects the WhatsApp sender from the service.</span>
+                              </label>
+
+                              <label className="block">
+                                <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Content SID</span>
+                                <input
+                                  type="text"
+                                  name="twilio_whatsapp_content_sid"
+                                  value={formData.twilio_whatsapp_content_sid}
+                                  onChange={handleChange}
+                                  placeholder="HX..."
+                                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                                />
+                                <span className="mt-1 block text-xs text-slate-500">Required for WhatsApp tests and assignment alerts.</span>
+                              </label>
+
+                              <label className="block">
+                                <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Content variables JSON</span>
+                                <textarea
+                                  name="twilio_whatsapp_content_variables"
+                                  value={formData.twilio_whatsapp_content_variables}
+                                  onChange={handleChange}
+                                  rows={3}
+                                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 font-mono text-xs outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                                />
+                                <span className="mt-1 block text-xs text-slate-500">Default sends the full alert text as template variable 1.</span>
+                              </label>
+                            </div>
+
+                            <div className="mt-2 rounded-lg border border-slate-200 bg-white p-3">
+                              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Test SMS, WhatsApp, and voice</div>
+                              <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto]">
+                                <input
+                                  type="tel"
+                                  value={providerTestTargets.twilio}
+                                  onChange={(event) => handleProviderTargetChange('twilio', event.target.value)}
+                                  placeholder="+16045550100"
+                                  className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => handleProviderTest('twilio_sms')}
+                                  disabled={providerTesting === 'twilio_sms' || !providerTestTargets.twilio}
+                                  className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                  <MessageSquare className="h-4 w-4" />
+                                  {providerTesting === 'twilio_sms' ? 'Sending...' : 'Test SMS'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleProviderTest('twilio_whatsapp')}
+                                  disabled={providerTesting === 'twilio_whatsapp' || !providerTestTargets.twilio}
+                                  className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 text-sm font-semibold text-emerald-800 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                  <MessageCircle className="h-4 w-4" />
+                                  {providerTesting === 'twilio_whatsapp' ? 'Sending...' : 'Test WhatsApp'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleProviderTest('twilio_voice')}
+                                  disabled={providerTesting === 'twilio_voice' || !providerTestTargets.twilio}
+                                  className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                  <PhoneCall className="h-4 w-4" />
+                                  {providerTesting === 'twilio_voice' ? 'Calling...' : 'Test Voice'}
+                                </button>
+                              </div>
+                              {['twilio_sms', 'twilio_whatsapp', 'twilio_voice'].map((channel) => (
+                                providerTestStatus[channel] && (
+                                  <div key={channel} className={`mt-2 flex items-start gap-2 rounded-lg px-3 py-2 text-xs ${
+                                    providerTestStatus[channel].success ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'
+                                  }`}>
+                                    {providerTestStatus[channel].success ? <CheckCircle className="h-4 w-4 shrink-0" /> : <XCircle className="h-4 w-4 shrink-0" />}
+                                    <span>{channel === 'twilio_sms' ? 'SMS: ' : channel === 'twilio_whatsapp' ? 'WhatsApp: ' : 'Voice: '}{providerTestStatus[channel].message}</span>
+                                  </div>
+                                )
+                              ))}
+                            </div>
+                          </div>
+                        </section>
+                      </div>
+                    </div>
+                  )}
+
+                  {isGlobalAdmin && saveStatus && (
                     <div className={`flex items-center gap-2 rounded-lg p-4 ${saveStatus.success ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
                       {saveStatus.success ? <CheckCircle className="h-5 w-5" /> : <XCircle className="h-5 w-5" />}
                       <span>{saveStatus.message}</span>

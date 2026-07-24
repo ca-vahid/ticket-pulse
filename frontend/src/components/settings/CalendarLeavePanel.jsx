@@ -4,9 +4,13 @@ import {
 } from 'lucide-react';
 import { calendarLeaveAPI, visualsAPI } from '../../services/api';
 
+// Neutral defaults only. Never seed a real mailbox / Graph Group here: this
+// panel is per-workspace, and a workspace with no saved source row must render
+// a blank, obviously-unconfigured form — not another workspace's identifiers
+// (QA 07-23 #4: Accounting's mailbox was bleeding into the IT workspace view).
 const DEFAULT_CONFIG = {
-  mailbox: 'accounting@bgcengineering.ca',
-  graphGroupId: '1a328f31-4d1d-41fc-afb1-955a7193617d',
+  mailbox: '',
+  graphGroupId: '',
   timezone: 'America/Vancouver',
   syncEnabled: true,
   lookbackDays: 7,
@@ -53,6 +57,9 @@ export default function CalendarLeavePanel() {
   const [status, setStatus] = useState(null);
   const [busy, setBusy] = useState(false);
   const [loadingInitial, setLoadingInitial] = useState(true);
+  // Whether THIS workspace has a saved shared-calendar source row. Null config
+  // means unconfigured — we surface an empty state instead of stale form values.
+  const [configured, setConfigured] = useState(false);
 
   const loadReviewRows = useCallback(async (statusFilter = reviewFilter) => {
     const res = await calendarLeaveAPI.getReviewRows({ status: statusFilter, limit: 250 });
@@ -73,8 +80,16 @@ export default function CalendarLeavePanel() {
       calendarLeaveAPI.getReviewRows({ status: reviewFilter, limit: 250 }),
       calendarLeaveAPI.getReviewSummary(),
     ]);
-    if (configRes.status === 'fulfilled' && configRes.value?.data) {
-      setConfig({ ...DEFAULT_CONFIG, ...configRes.value.data });
+    if (configRes.status === 'fulfilled') {
+      if (configRes.value?.data) {
+        setConfig({ ...DEFAULT_CONFIG, ...configRes.value.data });
+        setConfigured(true);
+      } else {
+        // No source configured for this workspace — reset to a blank form so we
+        // never show another workspace's mailbox/Group ID (QA 07-23 #4).
+        setConfig(DEFAULT_CONFIG);
+        setConfigured(false);
+      }
     }
     if (rulesRes.status === 'fulfilled') setRules(rulesRes.value?.data || []);
     if (aliasesRes.status === 'fulfilled') setAliases(aliasesRes.value?.data || []);
@@ -315,6 +330,17 @@ export default function CalendarLeavePanel() {
             <div className="text-xs font-medium text-gray-500">Last Sync</div>
             <div className="mt-1 text-sm font-semibold text-gray-900">{formatDateTime(reviewSummary.lastSyncAt)}</div>
           </div>
+        </div>
+      )}
+
+      {!loadingInitial && !configured && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          <div className="font-semibold">No shared-calendar source configured for this workspace.</div>
+          <p className="mt-1 text-amber-800">
+            This workspace doesn&apos;t pull leave from a shared mailbox calendar. If it uses the
+            Vacation Tracker instead, you can leave this blank. To enable, enter this workspace&apos;s
+            own mailbox and Graph Group ID below, then Save — values are never shared between workspaces.
+          </p>
         </div>
       )}
 
