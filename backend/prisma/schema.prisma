@@ -9,6 +9,10 @@ datasource db {
 
 generator client {
   provider = "prisma-client-js"
+  // omitApi: the per-query `omit` argument (used by the dashboard workload
+  // query) is a preview feature on Prisma 5.x — without this flag the client
+  // throws "Unknown argument `omit`" at runtime (GA only in Prisma 6).
+  previewFeatures = ["omitApi"]
 }
 
 model Workspace {
