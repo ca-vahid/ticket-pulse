@@ -21,18 +21,37 @@ jobs:
         with:
           submodules: true
           lfs: false
-      - name: Build And Deploy
+      # Build in the runner with the real pnpm lockfile, then hand SWA the
+      # prebuilt dist. Oryx's container ran a lockfile-less `npm install`
+      # (frontend only has pnpm-lock.yaml), so transitive versions floated —
+      # on 2026-07-27 the latest rollup native binary required GLIBC_2.32,
+      # newer than Oryx's image, and every deploy failed. Runner builds are
+      # reproducible (frozen lockfile) and use a current glibc.
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Build frontend
+        run: |
+          pnpm install --dir frontend --frozen-lockfile
+          npm run build --prefix frontend
+        env:
+          VITE_API_URL: ${{ secrets.VITE_API_URL }}
+          VITE_FRESHSERVICE_DOMAIN: ${{ secrets.VITE_FRESHSERVICE_DOMAIN }}
+          VITE_AZURE_AD_CLIENT_ID: ${{ secrets.VITE_AZURE_AD_CLIENT_ID }}
+          VITE_AZURE_AD_TENANT_ID: ${{ secrets.VITE_AZURE_AD_TENANT_ID }}
+      - name: Deploy
         id: builddeploy
         uses: Azure/static-web-apps-deploy@v1
         with:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_BRAVE_DUNE_056D0421E }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           action: "upload"
-          app_location: "/frontend"
+          app_location: "frontend/dist"
           api_location: ""
-          output_location: "dist"
-        env:
-          VITE_API_URL: ${{ secrets.VITE_API_URL }}
-          VITE_FRESHSERVICE_DOMAIN: ${{ secrets.VITE_FRESHSERVICE_DOMAIN }}
-          VITE_AZURE_AD_CLIENT_ID: ${{ secrets.VITE_AZURE_AD_CLIENT_ID }}
-          VITE_AZURE_AD_TENANT_ID: ${{ secrets.VITE_AZURE_AD_TENANT_ID }}
+          output_location: ""
+          skip_app_build: true
