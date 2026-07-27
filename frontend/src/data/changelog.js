@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.76-preview';
+export const APP_VERSION = '3.0.77-preview';
 
 export const changelog = [
+  {
+    version: '3.0.77-preview',
+    date: 'July 27, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>🚑 Dashboard failed to load ("Database error: Failed to fetch active technicians")</strong> — the v3.0.76 dashboard speed-up used a query option our database client version only supports behind a feature flag, so every dashboard load errored after deploy. The flag is now enabled; verified against production data (the Accounting workload query returns in under a second). Apologies for the outage.' },
+    ],
+  },
   {
     version: '3.0.76-preview',
     date: 'July 23, 2026',
