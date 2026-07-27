@@ -103,6 +103,26 @@ class AssignmentPipelineService {
       return { skipped: true, reason: 'cancelled_before_start' };
     }
 
+    // ── priority_changed eligibility: never reassess a dead ticket ───────
+    // The noise auto-close's own FS write can shift priority; the next sync
+    // then records a priority event that would re-run the pipeline on the
+    // already-closed ticket, re-closing and re-noting it (prod #233696: three
+    // runs + three duplicate courtesy notes in four minutes). The event
+    // service gates this too — this is the belt for any other caller.
+    if (triggerSource === 'priority_changed') {
+      const eligibility = await prisma.ticket.findUnique({
+        where: { id: ticketId },
+        select: { status: true, isNoise: true },
+      }).catch(() => null);
+      if (!eligibility || ['Resolved', 'Closed'].includes(eligibility.status) || eligibility.isNoise === true) {
+        logger.info('Pipeline skipped: priority_changed on closed/noise ticket', {
+          ticketId, status: eligibility?.status, isNoise: eligibility?.isNoise,
+        });
+        emit({ type: 'complete' });
+        return { skipped: true, reason: 'priority_reassessment_ineligible' };
+      }
+    }
+
     // ── Dedupe: reject if a queued or running run already exists ─────────
     const openRun = await assignmentRepository.getOpenPipelineRun(ticketId);
     if (openRun) {

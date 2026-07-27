@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.77-preview';
+export const APP_VERSION = '3.0.78-preview';
 
 export const changelog = [
+  {
+    version: '3.0.78-preview',
+    date: 'July 27, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>🔁 No more duplicate “closed without assignment” notes</strong> — when the AI auto-closed a courtesy/noise ticket, its own FreshService write could shift the ticket’s priority, which the next sync read as a priority change and re-ran the AI on the already-closed ticket — closing and noting it again (one ticket collected three identical notes in four minutes). Priority-change reassessment now skips tickets that are closed, resolved, noise, or already noise-dismissed; the priority event records why it was skipped for auditability.' },
+    ],
+  },
   {
     version: '3.0.77-preview',
     date: 'July 27, 2026',

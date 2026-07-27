@@ -7,6 +7,11 @@ const prismaMock = {
     findMany: jest.fn(),
     update: jest.fn(),
   },
+  // The reassessment eligibility gate checks the last completed run before
+  // relaunching the pipeline (prod #233696 duplicate-note loop fix).
+  assignmentPipelineRun: {
+    findFirst: jest.fn().mockResolvedValue(null),
+  },
 };
 
 const runPipelineMock = jest.fn();
