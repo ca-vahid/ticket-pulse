@@ -201,6 +201,8 @@ class TicketPriorityEventService {
             workspaceId: true,
             freshserviceTicketId: true,
             subject: true,
+            status: true,
+            isNoise: true,
             assignedTechId: true,
             assignedTech: { select: { id: true, name: true, email: true } },
           },
@@ -209,6 +211,30 @@ class TicketPriorityEventService {
     });
 
     if (!event) return { processed: false, skipped: 'event_not_found' };
+
+    // Reassessment eligibility: a priority delta on a ticket that is already
+    // closed/resolved or noise must NOT re-enter the pipeline. Without this,
+    // the noise auto-close's own FS write can shift priority, the next sync
+    // records a priority event, and processEvent launches a fresh run on the
+    // closed ticket — which closes/notes it AGAIN, feeding the loop (prod
+    // #233696 collected three runs + three duplicate courtesy notes in 4 min).
+    const t = event.ticket;
+    let reassessSkipReason = null;
+    if (!t) {
+      reassessSkipReason = 'ticket_missing';
+    } else if (['Resolved', 'Closed'].includes(t.status)) {
+      reassessSkipReason = 'ticket_already_closed';
+    } else if (t.isNoise === true) {
+      reassessSkipReason = 'ticket_is_noise';
+    } else {
+      const lastRun = await prisma.assignmentPipelineRun.findFirst({
+        where: { ticketId: event.ticketId, status: 'completed' },
+        orderBy: { id: 'desc' },
+        select: { decision: true },
+      }).catch(() => null);
+      if (lastRun?.decision === 'noise_dismissed') reassessSkipReason = 'last_run_noise_dismissed';
+    }
+    const reassessEligible = reassessSkipReason === null;
 
     let notificationResult = { queued: 0, skipped: 'not_notification_eligible' };
     let notificationStatus = 'skipped';
@@ -240,28 +266,36 @@ class TicketPriorityEventService {
         });
       };
 
-      assignmentPipelineService.runPipeline(
-        event.ticketId,
-        event.workspaceId,
-        'priority_changed',
-        (pipelineEvent) => {
-          if (pipelineEvent?.type === 'run_started') {
-            rememberReassessmentRun(pipelineEvent.runId);
-          }
-        },
-        null,
-        { priorityEventId: event.id },
-      ).then((run) => {
-        const runId = run?.id || run?.existingRunId || null;
-        rememberReassessmentRun(runId);
-        return null;
-      }).catch((error) => {
-        logger.warn('Priority-change reassessment run failed', {
+      if (reassessEligible) {
+        assignmentPipelineService.runPipeline(
+          event.ticketId,
+          event.workspaceId,
+          'priority_changed',
+          (pipelineEvent) => {
+            if (pipelineEvent?.type === 'run_started') {
+              rememberReassessmentRun(pipelineEvent.runId);
+            }
+          },
+          null,
+          { priorityEventId: event.id },
+        ).then((run) => {
+          const runId = run?.id || run?.existingRunId || null;
+          rememberReassessmentRun(runId);
+          return null;
+        }).catch((error) => {
+          logger.warn('Priority-change reassessment run failed', {
+            priorityEventId: event.id,
+            ticketId: event.ticketId,
+            error: error.message,
+          });
+        });
+      } else {
+        logger.info('Priority-change reassessment skipped', {
           priorityEventId: event.id,
           ticketId: event.ticketId,
-          error: error.message,
+          reason: reassessSkipReason,
         });
-      });
+      }
 
       await prisma.ticketPriorityEvent.update({
         where: { id: event.id },
@@ -270,6 +304,7 @@ class TicketPriorityEventService {
           skipReason: notificationResult.skipped || null,
           notificationSummary: {
             notificationStatus,
+            reassessment: reassessEligible ? 'launched' : `skipped:${reassessSkipReason}`,
             ...notificationResult,
           },
           reassessmentRunId,
@@ -279,6 +314,7 @@ class TicketPriorityEventService {
       return {
         processed: true,
         notificationStatus,
+        reassessment: reassessEligible ? 'launched' : `skipped:${reassessSkipReason}`,
         ...notificationResult,
         reassessmentRunId,
       };
