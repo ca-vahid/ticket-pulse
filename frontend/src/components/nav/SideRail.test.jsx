@@ -34,7 +34,7 @@ function renderRail(path = '/dashboard') {
 describe('SideRail', () => {
   test('renders every destination plus Settings for an admin', () => {
     renderRail();
-    for (const label of ['Dashboard', 'Tickets', 'Timeline', 'Analytics', 'Assignment', 'Mail Workflows', 'Member Map', 'Approvals', 'Settings']) {
+    for (const label of ['Dashboard', 'Tickets', 'Timeline', 'Analytics', 'Assignment', 'Mail Workflows', 'Agent Maps', 'Approvals', 'Settings']) {
       expect(screen.getByRole('button', { name: new RegExp(label) })).toBeInTheDocument();
     }
   });

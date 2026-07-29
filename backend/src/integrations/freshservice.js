@@ -1071,8 +1071,15 @@ class FreshServiceClient {
     } catch (error) {
       const detail = error.response?.data;
       const httpStatus = error.response?.status;
-      logger.error('Error creating FreshService ticket:', { status: httpStatus, detail });
-      const wrapped = new Error(detail?.description || detail?.message || error.message);
+      logger.error('Error creating FreshService ticket:', { status: httpStatus, detail: JSON.stringify(detail) });
+      // Surface FS field-level errors in the message — "Validation failed"
+      // alone is undebuggable from a mirror-job lastError (QA 07-28 TP-1058:
+      // the real cause was a required department_id, invisible for 8 retries).
+      const fieldErrors = Array.isArray(detail?.errors)
+        ? detail.errors.map((e) => `${e.field || e.code || 'field'}: ${e.message || e.code}`).join('; ')
+        : '';
+      const baseMsg = detail?.description || detail?.message || error.message;
+      const wrapped = new Error(fieldErrors ? `${baseMsg} (${fieldErrors})` : baseMsg);
       wrapped.freshserviceDetail = detail;
       wrapped.freshserviceStatus = httpStatus;
       throw wrapped;

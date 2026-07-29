@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, Archive, Check, FileText, Layers, Loader2, Plus, RefreshCw, Sparkles, Star, StickyNote, Tag as TagGlyph, Timer, Trash2, Wand2 } from 'lucide-react';
-import { settingsAPI, ticketsAPI } from '../../services/api';
+import { AlertTriangle, Archive, Check, FileText, Globe as GlobeGlyph, Layers, Loader2, Plus, RefreshCw, Sparkles, Star, StickyNote, Tag as TagGlyph, Timer, Trash2, Wand2 } from 'lucide-react';
+import { settingsAPI, ticketsAPI, workspaceAPI } from '../../services/api';
+import { useWorkspace } from '../../contexts/WorkspaceContext';
 import { TAG_CHIP_TONES, TYPE_COLOR_TONES } from '../tickets/ticketUi';
 import { useTicketTypes, invalidateTicketTypesCache } from '../../hooks/useTicketTypes';
 
@@ -811,11 +812,99 @@ function CategoryGroupSection() {
   );
 }
 
+// Trusted (internal) email domains — tickets whose requester email is outside
+// this list get an "External" badge across the queue/preview/detail (QA 07-27
+// #4). Per-workspace; empty list turns the flagging off.
+function TrustedDomainsSection() {
+  const { currentWorkspace } = useWorkspace();
+  const [domains, setDomains] = useState([]);
+  const [draft, setDraft] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!currentWorkspace?.id) return;
+    workspaceAPI.getById(currentWorkspace.id)
+      .then((res) => setDomains(res.data?.internalDomains || res.data?.data?.internalDomains || []))
+      .catch(() => {})
+      .finally(() => setLoaded(true));
+  }, [currentWorkspace?.id]);
+
+  const persist = async (next) => {
+    setBusy(true); setSaved(false);
+    try {
+      const res = await workspaceAPI.update(currentWorkspace.id, { internalDomains: next });
+      setDomains(res.data?.internalDomains || res.data?.data?.internalDomains || next);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch { /* keep prior state; server rejects malformed domains silently */ }
+    setBusy(false);
+  };
+
+  const addDomain = () => {
+    const cleaned = draft.trim().toLowerCase().replace(/^.*@/, '');
+    if (!cleaned) return;
+    setDraft('');
+    if (domains.includes(cleaned)) return;
+    persist([...domains, cleaned]);
+  };
+
+  return (
+    <SectionCard
+      icon={GlobeGlyph}
+      title="Trusted domains (external-requester flag)"
+      hint='Tickets from requester emails OUTSIDE these domains get an amber "External" badge in the queue, preview, and detail. Add every domain your organization sends from (subdomains are trusted automatically). Leave empty to turn the badge off.'
+    >
+      <div className="flex flex-wrap items-center gap-1.5">
+        {domains.map((d) => (
+          <span key={d} className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-semibold text-slate-700">
+            {d}
+            <button
+              type="button"
+              aria-label={`Remove ${d}`}
+              onClick={() => persist(domains.filter((x) => x !== d))}
+              disabled={busy}
+              className="text-slate-400 hover:text-red-600"
+            >
+              ×
+            </button>
+          </span>
+        ))}
+        {loaded && domains.length === 0 && (
+          <span className="text-xs italic text-slate-400">No trusted domains yet — external flagging is off.</span>
+        )}
+      </div>
+      <div className="mt-3 flex items-center gap-2">
+        <input
+          type="text"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addDomain(); } }}
+          placeholder="bgcengineering.ca"
+          className="h-9 w-64 rounded-lg border border-slate-200 px-3 text-sm outline-none focus:ring-2 focus:ring-blue-200"
+        />
+        <button
+          type="button"
+          onClick={addDomain}
+          disabled={busy || !draft.trim()}
+          className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-slate-900 px-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+        >
+          {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Plus className="h-4 w-4" aria-hidden="true" />}
+          Add domain
+        </button>
+        {saved && <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600"><Check className="h-3.5 w-3.5" aria-hidden="true" /> Saved</span>}
+      </div>
+    </SectionCard>
+  );
+}
+
 export default function TicketOpsPanel() {
   return (
     <div className="space-y-4 animate-fadeIn">
       <TicketTypesSection />
       <SlaSection />
+      <TrustedDomainsSection />
       <TagsSection />
       <CategoryGroupSection />
       <MacrosSection />

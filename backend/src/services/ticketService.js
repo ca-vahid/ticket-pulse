@@ -18,6 +18,29 @@ import { sseManager } from '../routes/sse.routes.js';
 export const NATIVE_TICKET_STATUSES = ['Open', 'Pending', 'Resolved', 'Closed'];
 const TERMINAL_STATUSES = ['Resolved', 'Closed'];
 
+// External-requester flagging (QA 07-27 #4). Derived at read time from the
+// workspace's internalDomains list — no per-ticket column, so editing the
+// list in Settings retroactively re-labels every ticket. Empty list = off.
+export function isExternalRequester(email, internalDomains) {
+  if (!Array.isArray(internalDomains) || internalDomains.length === 0) return false;
+  const domain = String(email || '').trim().toLowerCase().split('@')[1];
+  if (!domain) return false; // no email → can't judge; don't flag
+  return !internalDomains.some((d) => domain === d || domain.endsWith(`.${d}`));
+}
+
+// internalDomains per workspace, 60s cache — read on every queue page.
+const internalDomainsCache = new Map(); // workspaceId → { list, fetchedAt }
+async function workspaceInternalDomains(workspaceId) {
+  const cached = internalDomainsCache.get(workspaceId);
+  if (cached && Date.now() - cached.fetchedAt < 60_000) return cached.list;
+  const ws = await prisma.workspace.findUnique({
+    where: { id: workspaceId }, select: { internalDomains: true },
+  }).catch(() => null);
+  const list = ws?.internalDomains || [];
+  internalDomainsCache.set(workspaceId, { list, fetchedAt: Date.now() });
+  return list;
+}
+
 // FreshService 400s carry a structured errors[] the generic message hides —
 // "Validation failed" told the user nothing about the missing department
 // (QA 07-10, #231072). Translate field errors into actionable English.
@@ -601,6 +624,7 @@ class TicketService {
     const page = Math.max(1, Number(query.page) || 1);
     const pageSize = Math.min(maxPageSize, Math.max(1, Number(query.pageSize) || 25));
     const where = await this.buildListWhere(workspaceId, query);
+    const internalDomains = await workspaceInternalDomains(workspaceId);
 
     // Public-API cursor (keyset) pagination: opt-in via ?cursor=, keyed on id
     // descending. Efficient for large/growing tables and stable under inserts;
@@ -634,6 +658,7 @@ class TicketService {
         items: items.map((t) => ({
           ...t, tagLinks: undefined, tags: ticketTags(t), displayRef: ticketDisplayRef(t),
           lastActivityAt: t.lastRealActivityAt || t.freshserviceUpdatedAt || t.updatedAt,
+          isExternal: isExternalRequester(t.requester?.email, internalDomains),
           stateChip: deriveStateChip(t, incoming.get(t.id) === true),
           ai: ai.get(t.id) || null, aiBypass: bypass.get(t.id) || null,
           hasProposedReply: proposed.has(t.id),
@@ -684,6 +709,7 @@ class TicketService {
         displayRef: ticketDisplayRef(t),
         // truthful "last activity" for display: FS's timestamp for FS-born rows
         lastActivityAt: t.lastRealActivityAt || t.freshserviceUpdatedAt || t.updatedAt,
+        isExternal: isExternalRequester(t.requester?.email, internalDomains),
         stateChip: deriveStateChip(t, incomingByTicket.get(t.id) === true),
         ai: aiByTicket.get(t.id) || null,
         aiBypass: bypassByTicket.get(t.id) || null,
@@ -1055,6 +1081,7 @@ class TicketService {
       tagLinks: undefined,
       tags: ticketTags(ticket),
       displayRef: ticketDisplayRef(ticket),
+      isExternal: isExternalRequester(ticket.requester?.email, await workspaceInternalDomains(workspaceId)),
       thread: resolvedThread,
       activities,
       approvals,

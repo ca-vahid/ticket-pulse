@@ -453,7 +453,7 @@ export default function Visuals() {
                 >
                   <ArrowLeft className="w-5 h-5" />
                 </button>
-                <h1 className="min-w-0 truncate text-lg font-bold text-gray-800 sm:text-2xl">Agent Map Visualization</h1>
+                <h1 className="min-w-0 truncate text-lg font-bold text-gray-800 sm:text-2xl">Agent Maps</h1>
               </div>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:flex lg:items-center lg:gap-4">
                 {/* Radius Scale Slider */}

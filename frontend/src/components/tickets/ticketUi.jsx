@@ -1,6 +1,6 @@
 import DOMPurify from 'dompurify';
 import { Link } from 'react-router-dom';
-import { ExternalLink, Ticket as TicketIcon, Ban, ClipboardList, Cloud, CloudOff, CloudUpload, Sparkles, UserCog, UserPlus, UserRound, Zap } from 'lucide-react';
+import { ExternalLink, Ticket as TicketIcon, Ban, ClipboardList, Cloud, CloudOff, CloudUpload, Globe, Sparkles, UserCog, UserPlus, UserRound, Zap } from 'lucide-react';
 import { PRIORITY_STRIP_COLORS, PRIORITY_LABELS, STATUS_COLORS, FRESHSERVICE_DOMAIN } from '../tech-detail/constants';
 import { useTicketTypes } from '../../hooks/useTicketTypes';
 
@@ -322,6 +322,21 @@ export function PriorityDot({ priority, withLabel = false }) {
 }
 
 /** Where a ticket was born: Ticket Pulse or FreshService. */
+// Requester email domain is outside the workspace's trusted list — flag it so
+// agents treat links/attachments with more care (QA 07-27 #4). Amber, not red:
+// external ≠ malicious, it just deserves a second look.
+export function ExternalChip() {
+  return (
+    <span
+      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-800 border border-amber-300"
+      title="The requester's email domain is outside this workspace's trusted domains (Settings → Ticket Ops → Trusted domains)"
+    >
+      <Globe className="w-3 h-3" aria-hidden="true" />
+      External
+    </span>
+  );
+}
+
 export function OriginChip({ origin }) {
   if (origin === 'ticketpulse') {
     return (

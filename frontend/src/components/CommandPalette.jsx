@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
-  BarChart3, Boxes, CheckCircle2, ClipboardList, Command, Link as LinkIcon, LayoutDashboard,
+  BarChart3, Boxes, CheckCircle2, Command, Link as LinkIcon, LayoutDashboard,
   Loader2, Mail, Map as MapIcon, Plus, Search, Settings as SettingsIcon, Sparkles,
   Stamp, Ticket as TicketIcon, UserCheck, Clock,
 } from 'lucide-react';
@@ -24,10 +24,13 @@ const NAV_ITEMS = [
   { id: 'nav-approvals', label: 'Approvals', path: '/approvals', Icon: Stamp, keywords: 'pending requests decisions' },
   { id: 'nav-dashboard', label: 'Dashboard', path: '/dashboard', Icon: LayoutDashboard, keywords: 'home workload technicians', full: true },
   { id: 'nav-timeline', label: 'Timeline Explorer', path: '/timeline', Icon: Clock, keywords: 'ownership coverage history', full: true },
-  { id: 'nav-analytics', label: 'Analytics & Insights', path: '/analytics', Icon: BarChart3, keywords: 'reports charts demand quality', full: true },
-  { id: 'nav-assignments', label: 'Assignment Review', path: '/assignments', Icon: ClipboardList, keywords: 'ai review pipeline', full: true },
+  // Labels mirror the side-rail/page titles exactly (QA 07-28 #1) — a palette
+  // entry that says "Assignment Review" for a page titled "Assignment" reads
+  // as two different destinations.
+  { id: 'nav-analytics', label: 'Analytics', path: '/analytics', Icon: BarChart3, keywords: 'reports charts demand quality insights', full: true },
+  { id: 'nav-assignments', label: 'Assignment', path: '/assignments', Icon: UserCheck, keywords: 'ai review pipeline assignment review', full: true },
   { id: 'nav-workflows', label: 'Mail Workflows', path: '/workflows', Icon: Mail, keywords: 'automation rules triggers templates notifications', full: true, manage: true },
-  { id: 'nav-visuals', label: 'Visuals', path: '/visuals', Icon: MapIcon, keywords: 'map schedule agents', full: true },
+  { id: 'nav-visuals', label: 'Agent Maps', path: '/visuals', Icon: MapIcon, keywords: 'map schedule agents visuals locations', full: true },
   { id: 'nav-settings', label: 'Settings', path: '/settings', Icon: SettingsIcon, keywords: 'workflows mail admin config', full: true },
   { id: 'nav-competencies', label: 'My Competencies', path: '/my-competencies', Icon: UserCheck, keywords: 'skills profile', agent: true },
 ];
