@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import config from '../../config/index.js';
 import { normalizeAiModel, shouldOmitAnthropicTemperature } from '../../utils/aiProviders.js';
+import { sanitizeMessagesForAnthropicReplay } from './openAiConverters.js';
 
 function usageFromResponse(response) {
   const inputTokens = response.usage?.input_tokens || 0;
@@ -166,7 +167,9 @@ class AnthropicProvider {
       // cache reads of the previous turn's prefix.
       system: cacheableSystem(systemPrompt),
       tools: cacheableTools(tools),
-      messages: cacheableMessages(messages),
+      // Replay histories can contain OpenAI-fallback residue (round-trip
+      // annotations, unsigned thinking blocks) that the Messages API 400s on.
+      messages: cacheableMessages(sanitizeMessagesForAnthropicReplay(messages)),
       // Sonnet 5 runs adaptive thinking when the field is omitted (4.6 ran
       // thinking-off); disable explicitly so pipeline latency/token behavior
       // stays model-independent unless a caller opts in via extra.thinking.

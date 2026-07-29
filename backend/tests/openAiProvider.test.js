@@ -210,9 +210,11 @@ describe('OpenAiProvider streaming tool responses', () => {
       call_id: 'call_1',
       name: 'find_similar_tickets',
       arguments: '{"ticketId":27883}',
-      status: 'completed',
     });
     expect(functionCallInput.parsed_arguments).toBeUndefined();
+    // Response-side `status` must never be replayed as input — the API 400s
+    // with "Unknown parameter: 'input[N].status'".
+    expect(continuationInput.every((item) => item.status === undefined)).toBe(true);
   });
 });
 

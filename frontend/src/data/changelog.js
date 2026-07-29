@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.80-preview';
+export const APP_VERSION = '3.0.81-preview';
 
 export const changelog = [
+  {
+    version: '3.0.81-preview',
+    date: 'July 28, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>🛟 AI triage failover actually fails over now</strong> — when the primary AI provider degraded, the pipeline correctly switched to the backup… which then rejected every request. Mid-run conversation history was replayed to the other provider in the wrong dialect (provider-internal IDs and reasoning fields the other API refuses), so any run that had already used a tool could not survive the switch — the safety net failed precisely under load. History is now cleaned per provider at the handover: foreign annotations are stripped, unverifiable reasoning is dropped (each provider keeps its own), and response-side fields are no longer echoed back as input. Verified against the exact request shapes from the six failed production runs.' },
+    ],
+  },
   {
     version: '3.0.80-preview',
     date: 'July 28, 2026',

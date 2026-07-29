@@ -26,6 +26,9 @@ function cloneResponseItem(item) {
   return sanitizeOpenAiResponseInputItem(item);
 }
 
+// NOTE: replay items deliberately omit `status`. The Responses API rejects it
+// on input items ("Unknown parameter: 'input[N].status'") — it's response-side
+// metadata, not request-side. Seen in prod failed runs 16673/16679 (Jul 2026).
 export function sanitizeOpenAiResponseInputItem(item) {
   if (!item || typeof item !== 'object') return null;
   const copy = JSON.parse(JSON.stringify(item));
@@ -36,7 +39,6 @@ export function sanitizeOpenAiResponseInputItem(item) {
       call_id: copy.call_id || copy.id,
       name: copy.name,
       arguments: typeof copy.arguments === 'string' ? copy.arguments : JSON.stringify(copy.arguments || {}),
-      status: copy.status || 'completed',
     };
   }
   if (copy.type === 'reasoning') {
@@ -45,7 +47,6 @@ export function sanitizeOpenAiResponseInputItem(item) {
       ...(copy.id ? { id: copy.id } : {}),
       summary: Array.isArray(copy.summary) ? copy.summary : [],
       ...(copy.encrypted_content ? { encrypted_content: copy.encrypted_content } : {}),
-      status: copy.status || 'completed',
     };
   }
   if (copy.type === 'message') {
@@ -53,7 +54,6 @@ export function sanitizeOpenAiResponseInputItem(item) {
       type: 'message',
       ...(copy.id ? { id: copy.id } : {}),
       role: copy.role || 'assistant',
-      status: copy.status || 'completed',
       content: Array.isArray(copy.content) ? copy.content : [],
     };
   }
@@ -96,11 +96,11 @@ function convertTextContentToOpenAi(content, role) {
   if (!text) return null;
 
   if (role === 'assistant') {
+    // No fabricated id and no status: locally-invented item ids risk
+    // "item not found" rejections, and `status` is not a valid input field.
     return {
       type: 'message',
-      id: `msg_local_${Math.random().toString(36).slice(2)}`,
       role: 'assistant',
-      status: 'completed',
       content: [{ type: 'output_text', text, annotations: [] }],
     };
   }
@@ -139,13 +139,13 @@ export function convertAnthropicMessagesToOpenAiInput(messages = []) {
       if (!block || block.type === 'text') continue;
       if (block.type === 'tool_use') {
         const replayItem = sanitizeOpenAiResponseInputItem(block.openai_response_item);
+        // Foreign (Anthropic-born) tool calls get a minimal function_call:
+        // call_id can be any string, but a fabricated `id` cannot.
         input.push(replayItem || {
           type: 'function_call',
-          id: block.openai_item_id || undefined,
           call_id: block.openai_call_id || block.id,
           name: block.name,
           arguments: JSON.stringify(block.input || {}),
-          status: 'completed',
         });
       } else if (block.type === 'tool_result') {
         input.push({
@@ -154,13 +154,13 @@ export function convertAnthropicMessagesToOpenAiInput(messages = []) {
           output: toText(block.content),
         });
       } else if (block.type === 'thinking') {
+        // Only replay reasoning that OpenAI itself produced (round-trips via
+        // openai_response_item, with a real id + encrypted_content). Foreign
+        // (Anthropic-born) thinking is dropped: fabricated rs_local_* ids are
+        // rejected by the Responses API, and reasoning is never required to
+        // continue a tool loop.
         const replayItem = sanitizeOpenAiResponseInputItem(block.openai_response_item);
-        input.push(replayItem || {
-          type: 'reasoning',
-          id: block.openai_item_id || `rs_local_${Math.random().toString(36).slice(2)}`,
-          summary: [{ type: 'summary_text', text: block.thinking || block.text || '' }],
-          status: 'completed',
-        });
+        if (replayItem) input.push(replayItem);
       }
     }
   }
@@ -206,6 +206,43 @@ export function buildAnthropicBlocksFromOpenAiResponse(responseOutput = []) {
   }
 
   return blocks;
+}
+
+/**
+ * Clean cross-provider residue out of a message history before replaying it
+ * to the Anthropic API. After an OpenAI fallback turn, assistant blocks carry
+ * `openai_item_id` / `openai_call_id` / `openai_response_item` round-trip
+ * annotations ("Extra inputs are not permitted") and `thinking` blocks with
+ * no `signature` ("thinking.signature: Field required") — both hard 400s.
+ * Seen in prod failed runs 16670/16674/16677/16680 (Jul 2026).
+ *
+ * Signed (Anthropic-native) thinking blocks are preserved; foreign ones are
+ * dropped — Anthropic cannot verify another provider's reasoning anyway.
+ */
+export function sanitizeMessagesForAnthropicReplay(messages = []) {
+  return (messages || []).map((message) => {
+    if (!message || !Array.isArray(message.content)) return message;
+
+    const content = [];
+    for (const block of message.content) {
+      if (!block || typeof block !== 'object') continue;
+      if ((block.type === 'thinking' || block.type === 'redacted_thinking')
+          && !(typeof block.signature === 'string' && block.signature)
+          && !(typeof block.data === 'string' && block.data)) {
+        continue;
+      }
+      const { openai_item_id, openai_call_id, openai_response_item, ...clean } = block;
+      content.push(clean);
+    }
+
+    // An assistant turn whose only content was foreign reasoning would become
+    // an (invalid) empty message — keep the transcript shape with a stub.
+    if (!content.length) {
+      content.push({ type: 'text', text: '(reasoning from fallback provider omitted)' });
+    }
+
+    return { ...message, content };
+  });
 }
 
 export function buildAnthropicMessageFromOpenAiResponse(response) {

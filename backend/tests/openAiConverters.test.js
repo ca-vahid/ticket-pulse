@@ -1,4 +1,5 @@
 import {
+  sanitizeMessagesForAnthropicReplay,
   buildAnthropicBlocksFromOpenAiResponse,
   convertAnthropicMessagesToOpenAiInput,
   convertAnthropicToolsToOpenAiResponses,
@@ -60,8 +61,16 @@ describe('OpenAI Responses converters', () => {
     expect(input).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: 'function_call', call_id: 'toolu_1', name: 'lookup_ticket' }),
       expect.objectContaining({ type: 'function_call_output', call_id: 'toolu_1' }),
-      expect.objectContaining({ type: 'reasoning', status: 'completed' }),
     ]));
+    // Anthropic-born thinking must NOT become a fabricated reasoning item —
+    // the Responses API rejects locally-invented reasoning ids.
+    expect(input.some((item) => item.type === 'reasoning')).toBe(false);
+    // `status` is response-side metadata; sending it back 400s ("Unknown
+    // parameter: 'input[N].status'").
+    expect(input.every((item) => item.status === undefined)).toBe(true);
+    // Locally-built items must not fabricate ids either.
+    const assistantMsg = input.find((i) => i.type === 'message' && i.role === 'assistant');
+    expect(assistantMsg.id).toBeUndefined();
   });
 
   test('builds Anthropic-style blocks while preserving OpenAI IDs', () => {
@@ -153,6 +162,7 @@ describe('OpenAI Responses converters', () => {
       }),
     ]);
     expect(input.find((item) => item.type === 'function_call').parsed_arguments).toBeUndefined();
+    expect(input.every((item) => item.status === undefined)).toBe(true);
   });
 
   test('strips parsed function-call fields while preserving continuation fields', () => {
@@ -196,7 +206,6 @@ describe('OpenAI Responses converters', () => {
         id: 'rs_required',
         summary: [],
         encrypted_content: 'encrypted-reasoning',
-        status: 'completed',
       }),
       expect.objectContaining({
         type: 'function_call',
@@ -204,7 +213,6 @@ describe('OpenAI Responses converters', () => {
         call_id: 'call_required',
         name: 'detect_related_ticket_spike',
         arguments: '{"ticketId":27883}',
-        status: 'completed',
       }),
       expect.objectContaining({
         type: 'function_call_output',
@@ -213,6 +221,7 @@ describe('OpenAI Responses converters', () => {
     ]);
     expect(input[0].content).toBeUndefined();
     expect(input[1].parsed_arguments).toBeUndefined();
+    expect(input.every((item) => item.status === undefined)).toBe(true);
   });
 
   test('strips SDK-only fields from function-call replay items', () => {
@@ -234,7 +243,6 @@ describe('OpenAI Responses converters', () => {
       call_id: 'call_123',
       name: 'find_similar_tickets',
       arguments: '{"ticketId":225001}',
-      status: 'completed',
     });
 
     const input = convertAnthropicMessagesToOpenAiInput([
@@ -264,6 +272,77 @@ describe('OpenAI Responses converters', () => {
       type: 'function_call',
       call_id: 'call_123',
       name: 'find_similar_tickets',
+    });
+  });
+
+  // Prod failure class from Jul 2026 (runs 16670/16674/16677/16680): after an
+  // OpenAI fallback turn, the accumulated history 400s on Anthropic with
+  // "tool_use.openai_item_id: Extra inputs are not permitted" and
+  // "thinking.signature: Field required".
+  describe('sanitizeMessagesForAnthropicReplay', () => {
+    test('strips OpenAI round-trip annotations from replayed blocks', () => {
+      const [message] = sanitizeMessagesForAnthropicReplay([
+        {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'Checking workload.' },
+            {
+              type: 'tool_use',
+              id: 'call_9',
+              name: 'find_matching_agents',
+              input: { ticketId: 9 },
+              openai_item_id: 'fc_9',
+              openai_call_id: 'call_9',
+              openai_response_item: { type: 'function_call', id: 'fc_9' },
+            },
+          ],
+        },
+      ]);
+
+      expect(message.content[1]).toEqual({
+        type: 'tool_use',
+        id: 'call_9',
+        name: 'find_matching_agents',
+        input: { ticketId: 9 },
+      });
+    });
+
+    test('drops foreign thinking blocks but keeps signed Anthropic ones', () => {
+      const [message] = sanitizeMessagesForAnthropicReplay([
+        {
+          role: 'assistant',
+          content: [
+            { type: 'thinking', thinking: 'OpenAI reasoning summary', openai_item_id: 'rs_1' },
+            { type: 'thinking', thinking: 'Native reasoning', signature: 'sig_abc' },
+            { type: 'redacted_thinking', data: 'opaque-blob' },
+            { type: 'text', text: 'Assigning to Dana.' },
+          ],
+        },
+      ]);
+
+      expect(message.content).toEqual([
+        { type: 'thinking', thinking: 'Native reasoning', signature: 'sig_abc' },
+        { type: 'redacted_thinking', data: 'opaque-blob' },
+        { type: 'text', text: 'Assigning to Dana.' },
+      ]);
+    });
+
+    test('stubs an assistant turn whose only content was foreign reasoning', () => {
+      const [message] = sanitizeMessagesForAnthropicReplay([
+        {
+          role: 'assistant',
+          content: [{ type: 'thinking', thinking: 'summary only', openai_item_id: 'rs_2' }],
+        },
+      ]);
+
+      expect(message.content).toEqual([
+        { type: 'text', text: '(reasoning from fallback provider omitted)' },
+      ]);
+    });
+
+    test('passes plain-string messages through untouched', () => {
+      const messages = [{ role: 'user', content: 'Classify this ticket.' }];
+      expect(sanitizeMessagesForAnthropicReplay(messages)).toEqual(messages);
     });
   });
 });
