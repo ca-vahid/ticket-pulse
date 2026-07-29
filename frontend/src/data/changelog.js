@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.79-preview';
+export const APP_VERSION = '3.0.80-preview';
 
 export const changelog = [
+  {
+    version: '3.0.80-preview',
+    date: 'July 28, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>🚑 Tickets page failed to load</strong> — v3.0.79 shipped a declaration-order bug in the new Board view wiring that crashed the Tickets page on load (blank screen, "Cannot access before initialization"). Fixed, and the page now has a mount smoke test so this class of bug can\'t ship again. Apologies for the break.' },
+    ],
+  },
   {
     version: '3.0.79-preview',
     date: 'July 28, 2026',
