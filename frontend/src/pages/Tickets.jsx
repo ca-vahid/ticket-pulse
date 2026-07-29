@@ -4,7 +4,7 @@ import { motion } from 'motion/react';
 import {
   Activity, AlertCircle, ArrowDownWideNarrow, ArrowUpNarrowWide, CalendarDays, Check,
   CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, CornerUpRight, Download, Inbox,
-  ListFilter, Loader2, MessageSquare, Plus, RefreshCw, Rows2, Rows4, Search, ShieldCheck, Sparkles, Ticket, UserRound, X,
+  Columns3, ListFilter, Loader2, MessageSquare, Plus, RefreshCw, Rows2, Rows4, Search, ShieldCheck, Sparkles, Ticket, UserRound, X,
 } from 'lucide-react';
 import AppHeader from '../components/AppHeader';
 import MobileTabBar from '../components/nav/MobileTabBar';
@@ -13,12 +13,13 @@ import ScheduledTicketsPanel from '../components/tickets/ScheduledTicketsPanel';
 import TicketFilterRail, { ActiveFilterBar } from '../components/tickets/TicketFilterRail';
 import AssigneePicker from '../components/tickets/AssigneePicker';
 import StatusPicker from '../components/tickets/StatusPicker';
+import TicketBoard from '../components/tickets/TicketBoard';
 import MobileAssignSheet from '../components/tickets/MobileAssignSheet';
 import AiAssignModal from '../components/tickets/AiAssignModal';
 import LiveUpdatePill from '../components/tickets/LiveUpdatePill';
 import FsSyncConfirm from '../components/tickets/FsSyncConfirm';
 import {
-  PersonAvatar, PriorityDot, SlaChip, StateChip, StatusPill, TagChip, TypePill, UnassignedBadge,
+  ExternalChip, PersonAvatar, PriorityDot, SlaChip, StateChip, StatusPill, TagChip, TypePill, UnassignedBadge,
   PRIORITY_LABELS, PRIORITY_STRIP_COLORS, ticketCategoryLabels, timeAgo,
 } from '../components/tickets/ticketUi';
 import { ticketsAPI } from '../services/api';
@@ -372,7 +373,10 @@ export default function Tickets() {
   const queryParams = useMemo(() => {
     const params = { page, pageSize: PAGE_SIZE, sort, dir };
     // A segment supplies its own status scope; the checkboxes apply otherwise.
+    // Board mode needs every status so its Closed column isn't empty — the
+    // default checkbox scope is Open+Pending only.
     if (segment !== 'all') params.segment = segment;
+    else if (boardMode) { /* all statuses */ }
     else if (statuses.length > 0 && statuses.length < STATUS_FILTERS.length) params.status = statuses.join(',');
     if (assignee) params.assignedTechId = assignee;
     if (priority) params.priority = priority;
@@ -396,7 +400,7 @@ export default function Tickets() {
     if (requesterId) params.requesterId = requesterId;
     if (debouncedSearch) params.q = debouncedSearch;
     return params;
-  }, [page, statuses, assignee, priority, origin, segment, sort, dir, debouncedSearch,
+  }, [page, statuses, assignee, priority, origin, segment, sort, dir, debouncedSearch, boardMode,
     type, category, subcategory, group, source, createdFrom, createdTo, due, noise, tag, tagMode, impactFilter, urgencyFilter, aiState, requesterId]);
 
   // Post-refresh row highlights: ticketId → 'new' | 'updated'. Set when a
@@ -547,13 +551,15 @@ export default function Tickets() {
   const [layout, setLayout] = useState(() => {
     try {
       const v = localStorage.getItem('tp_ticket_layout');
-      if (v === 'compact' || v === 'roomy') return v;
+      if (v === 'compact' || v === 'roomy' || v === 'board') return v;
       // Migrate legacy density: comfortable → roomy, compact/dense → compact.
       return localStorage.getItem('tp_ticket_density') === 'comfortable' ? 'roomy' : 'compact';
     } catch { return 'compact'; }
   });
   useEffect(() => { try { localStorage.setItem('tp_ticket_layout', layout); } catch { /* no-op */ } }, [layout]);
   const roomy = layout === 'roomy';
+  // Board view (QA 07-27 #3): Open / Pending / Closed columns with drag-drop.
+  const boardMode = layout === 'board';
   const cellPad = roomy ? 'py-1.5' : 'py-2.5';
   const [pendingCount, setPendingCount] = useState(0);
   const lastLocalMutationRef = useRef(0);
@@ -989,6 +995,25 @@ export default function Tickets() {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const ticketingOn = meta ? meta.nativeTicketingEnabled : true;
   const isAgent = user?.role === 'agent';
+
+  // Board drag-drop → the same origin-aware status flow the StatusPicker uses:
+  // TP-born saves directly (undo toast); FS-born goes through the confirmed
+  // FreshService write-back modal (QA 07-27 #3).
+  const onBoardStatusDrop = useCallback(async (ticket, nextStatus) => {
+    const isTpEditable = ticket.origin === 'ticketpulse' && ticketingOn;
+    try {
+      if (isTpEditable) {
+        const prev = ticket.status;
+        await ticketsAPI.setStatus(ticket.id, nextStatus);
+        refreshAfterEdit();
+        showToast(`${ticket.displayRef} → ${nextStatus}`, async () => {
+          try { await ticketsAPI.setStatus(ticket.id, prev); refreshAfterEdit(); } catch { /* refresh shows truth */ }
+        });
+      } else if (ticket.freshserviceTicketId) {
+        await fsStatusChange(ticket, nextStatus); // resolves after the confirm modal syncs
+      }
+    } catch { /* cancelled confirm or failed save — refresh already shows truth */ }
+  }, [ticketingOn, refreshAfterEdit, showToast, fsStatusChange]);
   const sortLabel = SORT_OPTIONS.find((o) => o.value === sort)?.label || 'Last activity';
   const groupNames = useMemo(() => {
     const map = new Map();
@@ -1197,12 +1222,13 @@ export default function Tickets() {
                       </div>
                     )}
                   </div>
-                  {/* Row layout — Compact (tight, type folds into the title) vs
-                      Roomy (title on its own line). The two ends of density. */}
-                  <div className="hidden md:inline-flex items-center rounded-lg border border-input bg-white overflow-hidden" role="group" aria-label="Row layout">
+                  {/* View — two list densities plus the drag-drop board
+                      (Open / Pending / Closed columns, QA 07-27 #3). */}
+                  <div className="hidden md:inline-flex items-center rounded-lg border border-input bg-white overflow-hidden" role="group" aria-label="View layout">
                     {[
                       { key: 'compact', Icon: Rows4, label: 'Compact', hint: 'Type folds into the title — one tight line per ticket. Best for scanning.' },
                       { key: 'roomy', Icon: Rows2, label: 'Roomy', hint: 'The title gets its own line, everything else beneath. Best for reading.' },
+                      { key: 'board', Icon: Columns3, label: 'Board', hint: 'Open / Pending / Closed columns — drag a card to change its status (Ticket Pulse tickets save directly; FreshService tickets confirm first).' },
                     ].map(({ key, Icon, label, hint }) => (
                       <button
                         key={key}
@@ -1275,6 +1301,14 @@ export default function Tickets() {
                       <p className="text-slate-700 font-medium">No tickets match these filters</p>
                       <p className="text-sm text-slate-500 mt-1">Try a different segment or clear the filters in the rail.</p>
                     </div>
+                  ) : boardMode ? (
+                    <TicketBoard
+                      tickets={tickets}
+                      ticketingOn={ticketingOn}
+                      onCardClick={onRowClick}
+                      onCardDoubleClick={onRowDoubleClick}
+                      onStatusDrop={onBoardStatusDrop}
+                    />
                   ) : (
                     <div className="tp-card rounded-xl overflow-hidden">
                       {/* Header */}
@@ -1377,6 +1411,7 @@ export default function Tickets() {
                                   New
                                 </span>
                               )}
+                              {ticket.isExternal && <ExternalChip />}
                               <StateChip state={ticket.stateChip} />
                               {ticket.hasProposedReply && (
                                 <span

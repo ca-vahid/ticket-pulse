@@ -68,6 +68,14 @@ class WorkspaceRepository {
       if (data.nativeTicketingEnabled !== undefined) {
         updateData.nativeTicketingEnabled = data.nativeTicketingEnabled === true;
       }
+      if (data.internalDomains !== undefined) {
+        // Normalize: lowercase bare domains ("BGCengineering.ca", "@x.com",
+        // "user@x.com" all → "x.com"), deduped, empty entries dropped.
+        const cleaned = (Array.isArray(data.internalDomains) ? data.internalDomains : [])
+          .map((d) => String(d || '').trim().toLowerCase().replace(/^.*@/, ''))
+          .filter((d) => /^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/.test(d));
+        updateData.internalDomains = [...new Set(cleaned)];
+      }
 
       return await prisma.workspace.update({
         where: { id },

@@ -139,6 +139,7 @@ class FreshServiceActionService {
       select: {
         freshserviceTicketId: true,
         subject: true,
+        status: true,
         ticketCategory: true,
         tpSkill: true,
         tpSubskill: true,
@@ -272,7 +273,12 @@ class FreshServiceActionService {
         });
       }
       actions.push({ type: 'note', ticketId: fsTicketId, body: noteBody, private: true });
-      actions.push({ type: 'close', ticketId: fsTicketId, status: 4 });
+      // Don't re-close a ticket an agent already resolved/closed — the close
+      // action carries status 4 (Resolved) and used to DOWNGRADE an agent's
+      // Closed to Resolved (QA 07-27 #5). Note still lands; status stays put.
+      if (!['Resolved', 'Closed'].includes(ticket?.status)) {
+        actions.push({ type: 'close', ticketId: fsTicketId, status: 4 });
+      }
     } else {
       return { actions: [], preview: `No FreshService action for decision: ${decision}`, error: null };
     }
@@ -1262,11 +1268,15 @@ class FreshServiceActionService {
             freshserviceTicketId: action.ticketId,
             runId,
           });
+          // Never downgrade an agent's Closed to Resolved (QA 07-27 #5): the
+          // close action always carries status 4, but if the ticket is already
+          // Closed (locally or FS reported alreadyClosed) keep it Closed.
+          const alreadyClosed = existingTicket?.status === 'Closed' || result?.alreadyClosed;
           await prisma.ticket.update({
             where: { id: run.ticketId },
             data: {
-              status: mapClosedStatus(action.status),
-              resolvedAt: new Date(),
+              status: alreadyClosed ? 'Closed' : mapClosedStatus(action.status),
+              resolvedAt: existingTicket?.resolvedAt || new Date(),
               updatedAt: new Date(),
             },
           }).catch((updateError) => {

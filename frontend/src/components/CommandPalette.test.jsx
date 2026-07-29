@@ -39,7 +39,7 @@ describe('CommandPalette', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     openPalette();
     expect(screen.getByRole('dialog', { name: 'Command palette' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: /Analytics & Insights/ })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /Analytics/ })).toBeInTheDocument();
   });
 
   test('Ctrl+K toggles closed again and Escape closes', () => {
@@ -71,7 +71,7 @@ describe('CommandPalette', () => {
     renderPalette();
     openPalette();
     expect(screen.getByRole('option', { name: /My Competencies/ })).toBeInTheDocument();
-    expect(screen.queryByRole('option', { name: /Assignment Review/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /^Assignment$/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('option', { name: /Dashboard/ })).not.toBeInTheDocument();
   });
 

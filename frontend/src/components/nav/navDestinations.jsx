@@ -78,7 +78,7 @@ export const NAV_DESTINATIONS = [
   },
   {
     id: 'map',
-    label: 'Member Map',
+    label: 'Agent Maps',
     path: '/visuals',
     Icon: MapNavIcon,
     tile: 'border-[#f8d5a8] bg-[#fdeede] text-[#e07b22]',

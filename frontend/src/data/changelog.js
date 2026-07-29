@@ -1,6 +1,19 @@
-export const APP_VERSION = '3.0.78-preview';
+export const APP_VERSION = '3.0.79-preview';
 
 export const changelog = [
+  {
+    version: '3.0.79-preview',
+    date: 'July 28, 2026',
+    entries: [
+      { type: 'added', html: '<strong>🗂️ Tickets board view</strong> — the queue now has a third view next to Compact/Roomy: a <b>Board</b> with Open / Pending / Closed columns. <b>Drag a card between columns to change its status</b> — Ticket Pulse tickets save instantly (with undo), FreshService tickets open the usual confirm-first write-back, and read-only cards show a lock. The Closed column holds Resolved + Closed together (resolved cards keep a small tag), matching how every dashboard already counts them.' },
+      { type: 'added', html: '<strong>🌐 External-requester flag</strong> — tickets whose requester email is outside your workspace’s <b>trusted domains</b> now carry an amber <b>External</b> badge in the queue, preview, and detail. Manage the domain list in Settings → Ticket Ops → Trusted domains (empty list = badge off); subdomains are trusted automatically.' },
+      { type: 'fixed', html: '<strong>📊 Team Balance: Pending is no longer counted as Open</strong> — "Workload by Agent" showed open+pending as one "Open now" bar (an agent with 59 pending + 15 open read as 74 open). Open and Pending are now separate series, the distribution table gains a <b>Pending Now</b> column, and load badges/filters key off the true combined queue.' },
+      { type: 'fixed', html: '<strong>🪞 Ticket mirroring works again</strong> — FreshService made <b>Department a required field</b> on ticket creation, so every new mirror (e.g. TP-1058) failed with an opaque "validation error". Mirrors now resolve the department from the ticket/requester automatically, and mirror errors surface FreshService’s field-level details instead of a generic message.' },
+      { type: 'fixed', html: '<strong>🔕 Noise dismissal no longer reopens the status</strong> — dismissing an already-<b>Closed</b> ticket as noise used to flip it back to Resolved. An agent’s Closed status now stays put (the noise note still lands).' },
+      { type: 'changed', html: '<strong>🧭 Command palette matches the pages</strong> — palette entries now use the pages’ real titles (<b>Analytics</b>, <b>Assignment</b>, <b>Agent Maps</b>) with a person-with-checkmark icon for Assignment; the side rail and Agent Maps page title now agree too.' },
+      { type: 'changed', html: '<strong>✨ Assignment page: clearer "all caught up" panel</strong> — the cryptic "TODAY PT" label is gone. The panel now spells out the exact window ("Monday, July 28 · Pacific Time, since midnight"), leads with tickets analyzed <b>and the fully-automatic rate</b>, shows the outcome mix as a color-matched bar, and adds "last auto-assignment X min ago" plus an after-hours "resumes at…" chip.' },
+    ],
+  },
   {
     version: '3.0.78-preview',
     date: 'July 27, 2026',

@@ -509,6 +509,7 @@ function insightDrilldownColumns(insight) {
       { key: 'name', label: 'Technician' },
       { key: 'assigned', label: 'Assigned', render: (row) => formatNumber(row.assigned || 0) },
       { key: 'openNow', label: 'Open Now', render: (row) => formatNumber(row.openNow || 0) },
+      { key: 'pendingNow', label: 'Pending Now', render: (row) => formatNumber(row.pendingNow || 0) },
       { key: 'closed', label: 'Closed', render: (row) => formatNumber(row.closed || 0) },
       { key: 'rejected', label: 'Rejected', render: (row) => formatNumber(row.rejected || 0) },
       { key: 'availableDays', label: 'Available', render: (row) => formatNumber(row.availableDays || 0) },
@@ -1071,7 +1072,7 @@ export default function Analytics({ view = 'standard' }) {
       rows = rows.filter((row) => selected.has(row.technicianId));
     }
     if (teamFilter === 'onLeave') rows = rows.filter((row) => (row.leaveDays || 0) > 0);
-    if (teamFilter === 'highOpen') rows = rows.filter((row) => (row.openNow || 0) >= 20);
+    if (teamFilter === 'highOpen') rows = rows.filter((row) => ((row.openNow || 0) + (row.pendingNow || 0)) >= 20);
     if (teamFilter === 'highRejected') rows = rows.filter((row) => (row.rejected || 0) > 0);
     rows.sort((a, b) => {
       const aValue = a[teamSort.key];
@@ -1101,7 +1102,7 @@ export default function Analytics({ view = 'standard' }) {
       rows = rows.filter((row) => row.name?.toLowerCase().includes(q) || row.email?.toLowerCase().includes(q));
     }
     if (teamFilter === 'onLeave') rows = rows.filter((row) => (row.leaveDays || 0) > 0);
-    if (teamFilter === 'highOpen') rows = rows.filter((row) => (row.openNow || 0) >= 20);
+    if (teamFilter === 'highOpen') rows = rows.filter((row) => ((row.openNow || 0) + (row.pendingNow || 0)) >= 20);
     if (teamFilter === 'highRejected') rows = rows.filter((row) => (row.rejected || 0) > 0);
     return rows.sort((a, b) => (b.openNow || 0) - (a.openNow || 0) || (b.assigned || 0) - (a.assigned || 0) || a.name.localeCompare(b.name));
   }, [team?.technicians, teamFilter, teamSearch]);
@@ -1840,7 +1841,7 @@ export default function Analytics({ view = 'standard' }) {
     title: { text: null },
     credits: { enabled: false },
     accessibility: { enabled: true },
-    colors: ['#2563eb', '#f59e0b', '#059669'],
+    colors: ['#2563eb', '#f59e0b', '#8b5cf6', '#059669'],
     xAxis: {
       // Explicit category axis with every agent label shown. `type: 'category'`
       // guarantees agent names (never a numeric fallback axis) and `step: 1`
@@ -1882,7 +1883,11 @@ export default function Analytics({ view = 'standard' }) {
     },
     series: [
       { name: 'Assigned', data: teamRows.map((row) => ({ y: row.assigned || 0, technicianId: row.technicianId })) },
+      // Open and Pending are separate series — Pending used to be silently
+      // folded into "Open now", which badly misread for techs with large
+      // pending queues (QA 07-27 #1).
       { name: 'Open now', data: teamRows.map((row) => ({ y: row.openNow || 0, technicianId: row.technicianId })) },
+      { name: 'Pending now', data: teamRows.map((row) => ({ y: row.pendingNow || 0, technicianId: row.technicianId })) },
       { name: 'Closed / resolved', data: teamRows.map((row) => ({ y: row.closed || 0, technicianId: row.technicianId })) },
     ],
   }), [teamRows, toggleTeamSelection]);
@@ -3054,7 +3059,7 @@ export default function Analytics({ view = 'standard' }) {
             >
               <option value="all">All agents</option>
               <option value="onLeave">Has leave in range</option>
-              <option value="highOpen">20+ open now</option>
+              <option value="highOpen">20+ in queue (open + pending)</option>
               <option value="highRejected">Has rejected tickets</option>
             </select>
             <select
@@ -3147,15 +3152,20 @@ export default function Analytics({ view = 'standard' }) {
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <p className="truncate text-sm font-bold text-slate-900">{row.name}</p>
-                          <p className="mt-0.5 text-xs text-slate-500">{row.assigned} assigned · {row.openNow} open</p>
+                          <p className="mt-0.5 text-xs text-slate-500">{row.assigned} assigned · {row.openNow} open · {row.pendingNow || 0} pending</p>
                         </div>
-                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                          row.openNow >= 30 ? 'bg-red-50 text-red-700'
-                            : row.openNow >= 15 ? 'bg-amber-50 text-amber-700'
-                              : 'bg-emerald-50 text-emerald-700'
-                        }`}>
-                          {row.openNow >= 30 ? 'High' : row.openNow >= 15 ? 'Watch' : 'OK'}
-                        </span>
+                        {(() => {
+                          const active = (row.openNow || 0) + (row.pendingNow || 0);
+                          return (
+                            <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                              active >= 30 ? 'bg-red-50 text-red-700'
+                                : active >= 15 ? 'bg-amber-50 text-amber-700'
+                                  : 'bg-emerald-50 text-emerald-700'
+                            }`}>
+                              {active >= 30 ? 'High' : active >= 15 ? 'Watch' : 'OK'}
+                            </span>
+                          );
+                        })()}
                       </div>
                       <div className="mt-3 grid grid-cols-3 gap-1 text-center text-[11px]">
                         <div className="rounded bg-slate-100 px-1.5 py-1">
@@ -3206,7 +3216,7 @@ export default function Analytics({ view = 'standard' }) {
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-bold text-slate-900">{row.name}</p>
-                  <p className="text-xs text-slate-500">{row.assigned} assigned · {row.openNow} open · {row.closed} closed</p>
+                  <p className="text-xs text-slate-500">{row.assigned} assigned · {row.openNow} open · {row.pendingNow || 0} pending · {row.closed} closed</p>
                   <p className="text-xs text-slate-500">{row.availableDays} available days · {row.assignedPerAvailableDay ?? '—'} / available day</p>
                 </div>
                 <button
@@ -3266,6 +3276,7 @@ export default function Analytics({ view = 'standard' }) {
                   ['name', 'Technician'],
                   ['assigned', 'Assigned'],
                   ['openNow', 'Open Now'],
+                  ['pendingNow', 'Pending Now'],
                   ['selfPicked', 'Self'],
                   ['coordinatorAssigned', 'Coordinator'],
                   ['appAssigned', 'App'],
@@ -3298,6 +3309,7 @@ export default function Analytics({ view = 'standard' }) {
                   <td className="px-3 py-2 font-semibold text-slate-800">{row.name}</td>
                   <td className="px-3 py-2 text-slate-700">{row.assigned}</td>
                   <td className="px-3 py-2 text-slate-700">{row.openNow}</td>
+                  <td className="px-3 py-2 text-slate-700">{row.pendingNow || 0}</td>
                   <td className="px-3 py-2 text-slate-700">{row.selfPicked}</td>
                   <td className="px-3 py-2 text-slate-700">{row.coordinatorAssigned}</td>
                   <td className="px-3 py-2 text-slate-700">{row.appAssigned}</td>
@@ -3342,7 +3354,7 @@ export default function Analytics({ view = 'standard' }) {
                   <div className="min-w-0">
                     <h3 className="truncate text-sm font-bold text-slate-900">{row.name}</h3>
                     <p className="text-xs text-slate-500">
-                      {row.assigned} assigned · {row.openNow} open · {row.closed} closed
+                      {row.assigned} assigned · {row.openNow} open · {row.pendingNow || 0} pending · {row.closed} closed
                     </p>
                   </div>
                   <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${

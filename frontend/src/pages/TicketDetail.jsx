@@ -27,7 +27,7 @@ import TicketAiTab from '../components/tickets/TicketAiTab';
 import TicketTasksTab from '../components/tickets/TicketTasksTab';
 import TicketFamilyCard from '../components/tickets/TicketFamilyCard';
 import {
-  MirrorChip, OriginChip, PersonAvatar, PriorityDot, ProvenanceChip, SafeHtml, SlaChip, StateChip, StatusPill,
+  ExternalChip, MirrorChip, OriginChip, PersonAvatar, PriorityDot, ProvenanceChip, SafeHtml, SlaChip, StateChip, StatusPill,
   TypePill, PRIORITY_LABELS, SOURCE_OPTIONS, formatBytes, isConversationEntry, pipelineRunLabel,
   pipelineTriggerLabel, ticketCategoryLabels, ticketSourceLabel, timeAgo,
 } from '../components/tickets/ticketUi';
@@ -1483,6 +1483,7 @@ export default function TicketDetail() {
                   <div className="flex flex-wrap items-center gap-2 mb-1.5">
                     <span className="font-mono text-sm font-bold text-slate-500">{ticket.displayRef}</span>
                     <OriginChip origin={ticket.origin} />
+                    {ticket.isExternal && <ExternalChip />}
                     <MirrorChip ticket={ticket} />
                     {isNative && isAdmin && ['pending', 'error'].includes(ticket.mirrorState) && (
                       <button

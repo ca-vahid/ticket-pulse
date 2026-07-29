@@ -52,6 +52,10 @@ class MirrorService {
     // wrote it back — producing two FS tickets for one TP ticket (QA 07-08,
     // TP-1006 → FS #231932 + #231933).
     this._inFlightTickets = new Set();
+    // FS departments per workspace, cached: FS made department_id REQUIRED on
+    // ticket create (QA 07-28, TP-1058 dead-lettered on "department_id …
+    // missing_field"), so every mirror create resolves one.
+    this._departmentsCache = new Map(); // workspaceId → { list, fetchedAt }
   }
 
   isEnabled() {
@@ -354,6 +358,46 @@ class MirrorService {
     }
   }
 
+  /**
+   * Resolve the FS department id for a mirror create. FreshService made
+   * department_id a REQUIRED create field (QA 07-28: TP-1058's create job
+   * dead-lettered 8 times on "department_id … missing_field"), so we match the
+   * ticket's department name — else the requester's Entra office/department —
+   * against the FS department list, falling back to "Non-BGC Email" and then
+   * the first department. Cached 10 min per workspace.
+   */
+  async _resolveDepartmentId(client, ticket) {
+    try {
+      const wsId = ticket.workspaceId;
+      let entry = this._departmentsCache.get(wsId);
+      if (!entry || Date.now() - entry.fetchedAt > 10 * 60 * 1000) {
+        entry = { list: await client.listDepartments(), fetchedAt: Date.now() };
+        this._departmentsCache.set(wsId, entry);
+      }
+      const departments = entry.list || [];
+      if (!departments.length) return undefined;
+      const byName = (name) => {
+        const target = String(name || '').trim().toLowerCase();
+        if (!target) return null;
+        return departments.find((d) => String(d.name || '').toLowerCase() === target) || null;
+      };
+      const candidates = [
+        ticket.department,
+        ticket.requester?.entraOfficeLocation,
+        ticket.requester?.entraDepartment,
+        'Non-BGC Email',
+      ];
+      for (const candidate of candidates) {
+        const match = byName(candidate);
+        if (match?.id) return Number(match.id);
+      }
+      return departments[0]?.id ? Number(departments[0].id) : undefined;
+    } catch (err) {
+      logger.warn(`Mirror: department resolution failed (non-fatal): ${err.message}`);
+      return undefined;
+    }
+  }
+
   async _mirrorCreate(job, client) {
     const ticket = await this._loadTicket(job.ticketId);
     if (ticket.freshserviceTicketId) return; // already mirrored (idempotent)
@@ -371,6 +415,7 @@ class MirrorService {
       workspace_id: ticket.workspace?.freshserviceWorkspaceId ? Number(ticket.workspace.freshserviceWorkspaceId) : undefined,
       group_id: ticket.groupId ? Number(ticket.groupId) : undefined,
       responder_id: ticket.assignedTech?.freshserviceId ? Number(ticket.assignedTech.freshserviceId) : undefined,
+      department_id: await this._resolveDepartmentId(client, ticket),
     };
     // Ticket type rides along only when the registry maps it to an FS choice
     // for this workspace — TP-native-only types (fsTypeValue null) stay

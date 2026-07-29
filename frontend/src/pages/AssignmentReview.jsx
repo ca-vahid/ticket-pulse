@@ -644,43 +644,99 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
         </p>
       </div>
 
-      {/* Hero — light, centered card with today's total processed by the
-          pipeline as the focal point. Soft gradient background + decorative
-          icon flourishes on the sides match the rest of the app's bright,
-          friendly theme (the dark glassmorphism version felt off-brand). */}
+      {/* Hero — today's pipeline story at a glance (QA 07-28 #3). The old
+          "TODAY PT" sparkle label read as jargon; this spells out the exact
+          window ("Monday, July 28 · Pacific Time, since midnight"), leads
+          with the automation rate (the number an ops lead actually wants),
+          and shows the outcome mix as a bar whose colors match the four
+          drill-down tiles below. Freshness ("last auto-assignment 4 min
+          ago") answers "is it alive right now?" without watching logs. */}
       <div className="max-w-4xl mx-auto mb-4 sm:mb-5">
-        <div className="relative overflow-hidden rounded-2xl shadow-sm
-                        bg-gradient-to-br from-blue-50 via-indigo-50/60 to-violet-50
-                        border border-blue-100 px-5 sm:px-8 py-6 sm:py-8">
-          {/* Decorative pastel orbs in the background — subtle layering */}
-          <div className="absolute -top-20 -right-20 w-72 h-72 rounded-full bg-blue-200/30 blur-3xl pointer-events-none" aria-hidden />
-          <div className="absolute -bottom-24 -left-16 w-72 h-72 rounded-full bg-violet-200/30 blur-3xl pointer-events-none" aria-hidden />
+        {(() => {
+          const tz = today.range?.timezone || queueStatus?.timezone || 'America/Los_Angeles';
+          const tzLabel = tz === 'America/Los_Angeles' ? 'Pacific Time' : tz.replace(/_/g, ' ');
+          let dayLabel = '';
+          try {
+            dayLabel = new Intl.DateTimeFormat('en-US', {
+              weekday: 'long', month: 'long', day: 'numeric', timeZone: tz,
+            }).format(today.range?.start ? new Date(today.range.start) : new Date());
+          } catch { dayLabel = today.range?.label || 'Today'; }
+          const decided = stats.autoAssigned + stats.approved + stats.handledInFs + stats.noiseDismissed;
+          const autoRate = decided > 0 ? Math.round((stats.autoAssigned / decided) * 100) : null;
+          const mix = [
+            { key: 'auto', value: stats.autoAssigned, cls: 'bg-emerald-500', label: 'Auto-assigned by AI' },
+            { key: 'approved', value: stats.approved, cls: 'bg-blue-500', label: 'Approved by you' },
+            { key: 'fs', value: stats.handledInFs, cls: 'bg-amber-500', label: 'Picked up in FreshService' },
+            { key: 'noise', value: stats.noiseDismissed, cls: 'bg-slate-400', label: 'Dismissed as noise' },
+          ].filter((seg) => seg.value > 0);
+          const lastAssign = recent[0] || null;
+          const afterHours = queueStatus?.isBusinessHours === false;
+          return (
+            <div className="relative overflow-hidden rounded-2xl shadow-sm
+                            bg-gradient-to-br from-blue-50 via-indigo-50/60 to-violet-50
+                            border border-blue-100 px-5 sm:px-8 py-6 sm:py-7">
+              <div className="absolute -top-20 -right-20 w-72 h-72 rounded-full bg-blue-200/30 blur-3xl pointer-events-none" aria-hidden />
+              <div className="absolute -bottom-24 -left-16 w-72 h-72 rounded-full bg-violet-200/30 blur-3xl pointer-events-none" aria-hidden />
 
-          {/* Centered content with flanking decorative icons */}
-          <div className="relative flex flex-col items-center text-center">
-            {/* Top label with sparkle accent. The backend anchors this panel
-                to the current Pacific day (midnight PT -> now), and the queue
-                tab uses the same PT-day window for drill-downs. */}
-            <div className="inline-flex items-center gap-2 mb-2">
-              <Sparkles className="w-4 h-4 text-blue-500" />
-              <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-blue-700">{queueStatus?.today?.range?.label || 'Today PT'}</span>
-              <Sparkles className="w-4 h-4 text-blue-500" />
-            </div>
+              <div className="relative flex flex-col items-center text-center">
+                <div className="mb-1 text-sm font-bold text-slate-800">Pipeline activity — {dayLabel}</div>
+                <div className="mb-4 text-[11px] font-medium uppercase tracking-wide text-slate-400" title={`Counts reset at midnight ${tzLabel}; the drill-down tiles below use the same window.`}>
+                  {tzLabel} · since midnight
+                </div>
 
-            {/* Big number with flanking icon flourishes (hidden on small) */}
-            <div className="flex items-center gap-3 sm:gap-5">
-              <Bot className="hidden sm:block w-7 h-7 text-emerald-500/70" aria-hidden />
-              <div className="text-5xl sm:text-6xl font-bold tabular-nums leading-none text-slate-900">
-                {stats.totalRuns}
+                <div className="flex w-full flex-col items-center gap-4 sm:flex-row sm:justify-center sm:gap-10">
+                  <div className="flex items-center gap-3">
+                    <Bot className="hidden sm:block w-7 h-7 text-emerald-500/70" aria-hidden />
+                    <div>
+                      <div className="text-5xl font-bold tabular-nums leading-none text-slate-900">{stats.totalRuns}</div>
+                      <div className="mt-1 text-xs font-medium text-slate-500">tickets analyzed</div>
+                    </div>
+                  </div>
+                  {autoRate !== null && (
+                    <div className="flex items-center gap-3">
+                      <Zap className="hidden sm:block w-7 h-7 text-amber-500/70" aria-hidden />
+                      <div>
+                        <div className="text-5xl font-bold tabular-nums leading-none text-emerald-700">{autoRate}%</div>
+                        <div className="mt-1 text-xs font-medium text-slate-500" title="Share of today's decided tickets the pipeline routed with no human touch">fully automatic</div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {decided > 0 && (
+                  <div className="mt-5 w-full max-w-md">
+                    <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-white/70 shadow-inner" role="img" aria-label="Outcome mix for today">
+                      {mix.map((seg) => (
+                        <div
+                          key={seg.key}
+                          className={`${seg.cls} h-full`}
+                          style={{ width: `${(seg.value / decided) * 100}%` }}
+                          title={`${seg.label}: ${seg.value}`}
+                        />
+                      ))}
+                    </div>
+                    <div className="mt-1.5 text-[10px] font-medium text-slate-400">outcome mix — colors match the tiles below</div>
+                  </div>
+                )}
+
+                <div className="mt-4 flex flex-wrap items-center justify-center gap-2 text-xs">
+                  {lastAssign?.decidedAt && (
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-white/80 px-2.5 py-1 font-semibold text-emerald-800">
+                      <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden />
+                      Last auto-assignment <RelativeTime iso={lastAssign.decidedAt} />{lastAssign.techName ? ` → ${lastAssign.techName}` : ''}
+                    </span>
+                  )}
+                  {afterHours && queueStatus?.nextWindow?.label && (
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-indigo-200 bg-white/80 px-2.5 py-1 font-semibold text-indigo-800" title="Outside business hours the pipeline holds non-urgent tickets and releases them when the next window opens.">
+                      After hours — resumes {queueStatus.nextWindow.label}
+                      {queuedRunsTotal > 0 ? ` · ${queuedRunsTotal} queued` : ''}
+                    </span>
+                  )}
+                </div>
               </div>
-              <Zap className="hidden sm:block w-7 h-7 text-amber-500/70" aria-hidden />
             </div>
-
-            <div className="mt-2 text-sm sm:text-base font-medium text-slate-600">
-              tickets processed by the pipeline
-            </div>
-          </div>
-        </div>
+          );
+        })()}
       </div>
 
       {/* Outcome tiles — 4 distinct paths a ticket can end up in.

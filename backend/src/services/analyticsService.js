@@ -1537,6 +1537,10 @@ export async function getTeamBalance(workspaceId, query = {}) {
       unknown: 0,
       closed: 0,
       openNow: 0,
+      // Pending + Waiting on Customer, split out of openNow — the Team Balance
+      // chart labeled the combined number "Open", which misread badly for techs
+      // with big pending queues (QA 07-27 #1: 59 pending + 15 open shown as 74 open).
+      pendingNow: 0,
       rejected: 0,
       reassignedAway: 0,
       availableDays: rangeBusinessDays,
@@ -1623,7 +1627,10 @@ export async function getTeamBalance(workspaceId, query = {}) {
     }
     for (const ticket of openTickets) {
       const id = ticket.assignedTech?.id;
-      if (id && byTech.has(id)) byTech.get(id).openNow += 1;
+      if (!id || !byTech.has(id)) continue;
+      const row = byTech.get(id);
+      if (ticket.status === 'Open') row.openNow += 1;
+      else row.pendingNow += 1; // 'Pending' and 'Waiting on Customer'
     }
     for (const episode of episodes) {
       if (!byTech.has(episode.technicianId)) continue;

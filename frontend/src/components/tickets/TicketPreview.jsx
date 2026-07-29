@@ -5,7 +5,7 @@ import {
   Loader2, Lock, Mail, MapPin, Phone, Sparkles, Trash2, VolumeX, X,
 } from 'lucide-react';
 import {
-  MirrorChip, OriginChip, PersonAvatar, PriorityDot, ProvenanceChip, SafeHtml, SlaChip, StateChip, StatusPill,
+  ExternalChip, MirrorChip, OriginChip, PersonAvatar, PriorityDot, ProvenanceChip, SafeHtml, SlaChip, StateChip, StatusPill,
   TagChip, TypePill, PRIORITY_LABELS, isConversationEntry, pipelineRunLabel, pipelineTriggerLabel,
   ticketCategoryLabels, timeAgo,
 } from './ticketUi';
@@ -227,6 +227,7 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
           <span className="flex items-center gap-2 min-w-0 overflow-hidden">
             <span className="font-mono text-xs font-bold text-slate-500 whitespace-nowrap">{ticket?.displayRef || '…'}</span>
             {ticket && <OriginChip origin={ticket.origin} />}
+            {ticket?.isExternal && <ExternalChip />}
             {ticket && <MirrorChip ticket={ticket} />}
             {ticket && <ProvenanceChip ticket={ticket} />}
           </span>
