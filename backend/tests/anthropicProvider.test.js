@@ -57,4 +57,57 @@ describe('AnthropicProvider', () => {
       undefined,
     );
   });
+
+  // Regression: prod runs 16670/16674/16677/16680 (Jul 2026) — after an
+  // OpenAI fallback turn the replayed history 400'd on Anthropic with
+  // "openai_item_id: Extra inputs are not permitted" / "thinking.signature:
+  // Field required".
+  test('toolResponse strips OpenAI fallback residue from replayed history', async () => {
+    const stream = jest.fn().mockReturnValue({
+      on: jest.fn().mockReturnThis(),
+      finalMessage: jest.fn().mockResolvedValue({
+        content: [{ type: 'text', text: 'done' }],
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 1, output_tokens: 1 },
+      }),
+    });
+    const provider = new AnthropicProvider();
+    provider.client = { messages: { stream } };
+
+    await provider.toolResponse({
+      systemPrompt: 'Assign the ticket.',
+      tools: [],
+      messages: [
+        { role: 'user', content: 'Ticket 9' },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'thinking', thinking: 'OpenAI summary', openai_item_id: 'rs_1' },
+            {
+              type: 'tool_use',
+              id: 'call_9',
+              name: 'get_ticket_details',
+              input: { ticketId: 9 },
+              openai_item_id: 'fc_9',
+              openai_call_id: 'call_9',
+              openai_response_item: { type: 'function_call', id: 'fc_9' },
+            },
+          ],
+        },
+        {
+          role: 'user',
+          content: [{ type: 'tool_result', tool_use_id: 'call_9', content: '{}' }],
+        },
+      ],
+    });
+
+    const sentMessages = stream.mock.calls[0][0].messages;
+    const assistantBlocks = sentMessages[1].content;
+    expect(assistantBlocks.some((b) => b.type === 'thinking')).toBe(false);
+    const toolUse = assistantBlocks.find((b) => b.type === 'tool_use');
+    expect(toolUse.openai_item_id).toBeUndefined();
+    expect(toolUse.openai_call_id).toBeUndefined();
+    expect(toolUse.openai_response_item).toBeUndefined();
+    expect(toolUse).toMatchObject({ id: 'call_9', name: 'get_ticket_details' });
+  });
 });
