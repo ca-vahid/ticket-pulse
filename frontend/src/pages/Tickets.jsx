@@ -370,6 +370,24 @@ export default function Tickets() {
   }, []);
   useEffect(() => { fetchStats(); }, [fetchStats, workspaceId]);
 
+  // Row layout — the two ends of the old density spectrum plus the drag-drop
+  // Board (QA 07-27 #3). Persisted; migrates the old 3-way density value.
+  // DECLARED BEFORE queryParams: its useMemo dependency array reads boardMode
+  // at render time, and a later declaration is a temporal-dead-zone crash in
+  // the production bundle ("Cannot access 'Vt' before initialization" — the
+  // /tickets page rendered blank until this moved up. QA 07-28 hotfix).
+  const [layout, setLayout] = useState(() => {
+    try {
+      const v = localStorage.getItem('tp_ticket_layout');
+      if (v === 'compact' || v === 'roomy' || v === 'board') return v;
+      // Migrate legacy density: comfortable → roomy, compact/dense → compact.
+      return localStorage.getItem('tp_ticket_density') === 'comfortable' ? 'roomy' : 'compact';
+    } catch { return 'compact'; }
+  });
+  useEffect(() => { try { localStorage.setItem('tp_ticket_layout', layout); } catch { /* no-op */ } }, [layout]);
+  // Board view (QA 07-27 #3): Open / Pending / Closed columns with drag-drop.
+  const boardMode = layout === 'board';
+
   const queryParams = useMemo(() => {
     const params = { page, pageSize: PAGE_SIZE, sort, dir };
     // A segment supplies its own status scope; the checkboxes apply otherwise.
@@ -548,18 +566,7 @@ export default function Tickets() {
   //               big queue). 'roomy' — the title gets its own full-width line
   //               with everything else beneath (read, nothing ever clips).
   // Persisted; migrates the old 3-way density value in place.
-  const [layout, setLayout] = useState(() => {
-    try {
-      const v = localStorage.getItem('tp_ticket_layout');
-      if (v === 'compact' || v === 'roomy' || v === 'board') return v;
-      // Migrate legacy density: comfortable → roomy, compact/dense → compact.
-      return localStorage.getItem('tp_ticket_density') === 'comfortable' ? 'roomy' : 'compact';
-    } catch { return 'compact'; }
-  });
-  useEffect(() => { try { localStorage.setItem('tp_ticket_layout', layout); } catch { /* no-op */ } }, [layout]);
   const roomy = layout === 'roomy';
-  // Board view (QA 07-27 #3): Open / Pending / Closed columns with drag-drop.
-  const boardMode = layout === 'board';
   const cellPad = roomy ? 'py-1.5' : 'py-2.5';
   const [pendingCount, setPendingCount] = useState(0);
   const lastLocalMutationRef = useRef(0);
