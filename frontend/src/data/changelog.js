@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.81-preview';
+export const APP_VERSION = '3.0.82-preview';
 
 export const changelog = [
+  {
+    version: '3.0.82-preview',
+    date: 'July 29, 2026',
+    entries: [
+      { type: 'changed', html: '<strong>👥 Settings → Members, rebuilt</strong> — the two-column list that snaked alphabetically across the page is now <b>one sortable table</b> (Member / Type / Location / Status) with a <b>search box</b> and <b>count-labelled filters</b> (Active · Disabled · Local · FreshService · All). It opens on <b>Active members only</b> — the dozens of disabled synced accounts no longer crowd the page, and Disabled is a quiet grey pill instead of a red alarm on every other row. Editing, AI routing notes, and enable/disable all work inline as before.' },
+    ],
+  },
   {
     version: '3.0.81-preview',
     date: 'July 28, 2026',

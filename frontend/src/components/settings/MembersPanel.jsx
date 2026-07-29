@@ -1,9 +1,13 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import {
+  useReactTable, getCoreRowModel, getSortedRowModel, flexRender, createColumnHelper,
+} from '@tanstack/react-table';
 import { settingsAPI } from '../../services/api';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 import {
   Users, Loader, Cloud, Home, Power, PowerOff, Pencil, Check, X,
-  AlertCircle, CheckCircle2, MapPin, Mail, Search, UserPlus, Ban, Brain,
+  AlertCircle, CheckCircle2, MapPin, Search, UserPlus, Brain,
+  ArrowUpDown, ArrowUp, ArrowDown,
 } from 'lucide-react';
 
 const COMMON_TIMEZONES = [
@@ -140,6 +144,29 @@ function DirectoryAdd({ onAdded, onError }) {
   );
 }
 
+/**
+ * Members panel, rebuilt as ONE sortable/filterable table (QA 07-29).
+ *
+ * The old layout was two alphabetical columns snaking left→right (unscannable),
+ * with a shouting red DISABLED badge + red rail on most rows (46 of 68 members
+ * are disabled — that's a normal state, not an alarm) and no search or filter.
+ *
+ * Now: TanStack Table (headless — logic only, all styling is ours) drives a
+ * single dense table with sortable Name / Type / Location / Status columns,
+ * a search box, and count-labelled filter chips. The default view is ACTIVE
+ * members only, which removes ~⅔ of the rows an admin never cares about.
+ * Disabled rows (in their filter) are dimmed with a quiet slate pill.
+ */
+const FILTERS = [
+  { key: 'active', label: 'Active' },
+  { key: 'disabled', label: 'Disabled' },
+  { key: 'local', label: 'Local' },
+  { key: 'fs', label: 'FreshService' },
+  { key: 'all', label: 'All' },
+];
+
+const columnHelper = createColumnHelper();
+
 export default function MembersPanel() {
   const { currentWorkspace } = useWorkspace();
   const [members, setMembers] = useState(null);
@@ -150,6 +177,9 @@ export default function MembersPanel() {
   const [editForm, setEditForm] = useState({ name: '', location: '', timezone: 'America/Los_Angeles' });
   const [togglingId, setTogglingId] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [filter, setFilter] = useState('active');
+  const [searchQ, setSearchQ] = useState('');
+  const [sorting, setSorting] = useState([{ id: 'name', desc: false }]);
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
@@ -167,13 +197,30 @@ export default function MembersPanel() {
 
   const flash = (msg) => { setSuccessMsg(msg); setTimeout(() => setSuccessMsg(null), 4000); };
 
-  const { local, fs } = useMemo(() => {
+  const counts = useMemo(() => {
     const list = members || [];
     return {
-      local: list.filter((t) => t.origin === 'local'),
-      fs: list.filter((t) => t.origin !== 'local'),
+      all: list.length,
+      active: list.filter((t) => t.isActive).length,
+      disabled: list.filter((t) => !t.isActive).length,
+      local: list.filter((t) => t.origin === 'local').length,
+      fs: list.filter((t) => t.origin !== 'local').length,
     };
   }, [members]);
+
+  const rows = useMemo(() => {
+    let list = members || [];
+    if (filter === 'active') list = list.filter((t) => t.isActive);
+    else if (filter === 'disabled') list = list.filter((t) => !t.isActive);
+    else if (filter === 'local') list = list.filter((t) => t.origin === 'local');
+    else if (filter === 'fs') list = list.filter((t) => t.origin !== 'local');
+    const q = searchQ.trim().toLowerCase();
+    if (q) {
+      list = list.filter((t) => [t.name, t.email, t.location]
+        .some((v) => String(v || '').toLowerCase().includes(q)));
+    }
+    return list;
+  }, [members, filter, searchQ]);
 
   const saveEdit = useCallback(async (id) => {
     if (!editForm.name.trim()) { setError('Name is required.'); return; }
@@ -221,11 +268,78 @@ export default function MembersPanel() {
     finally { setGuidanceSaving(false); }
   }, [guidanceId, guidanceDraft, load]);
 
-  const localActive = local.filter((t) => t.isActive).length;
-  const localDisabled = local.length - localActive;
+  const columns = useMemo(() => [
+    columnHelper.accessor('name', {
+      id: 'name',
+      header: 'Member',
+      cell: ({ row }) => {
+        const t = row.original;
+        return (
+          <div className="flex items-center gap-2.5 min-w-0">
+            <Avatar name={t.name} photoUrl={t.photoUrl} dim={!t.isActive} />
+            <div className="min-w-0">
+              <div className={`text-sm font-medium truncate ${t.isActive ? 'text-gray-900' : 'text-slate-500'}`}>
+                {t.name}
+                {t.routingGuidance && (
+                  <Brain className="inline-block w-3.5 h-3.5 ml-1.5 -mt-0.5 text-violet-500" aria-label="Has an AI routing note" title={t.routingGuidance} />
+                )}
+              </div>
+              <div className="text-xs text-gray-500 truncate">{t.email || '—'}</div>
+            </div>
+          </div>
+        );
+      },
+    }),
+    columnHelper.accessor((t) => (t.origin === 'local' ? 'Local' : 'FreshService'), {
+      id: 'type',
+      header: 'Type',
+      cell: ({ getValue }) => (getValue() === 'Local' ? (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+          <Home className="w-3 h-3" aria-hidden="true" /> Local
+        </span>
+      ) : (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-slate-50 text-slate-500 border border-slate-200">
+          <Cloud className="w-3 h-3" aria-hidden="true" /> FreshService
+        </span>
+      )),
+    }),
+    columnHelper.accessor((t) => t.location || '', {
+      id: 'location',
+      header: 'Location',
+      cell: ({ getValue }) => (getValue() ? (
+        <span className="inline-flex items-center gap-1 text-xs text-gray-600">
+          <MapPin className="w-3 h-3 text-slate-400" aria-hidden="true" />{getValue()}
+        </span>
+      ) : <span className="text-xs text-slate-300">—</span>),
+    }),
+    columnHelper.accessor((t) => (t.isActive ? 0 : 1), {
+      id: 'status',
+      header: 'Status',
+      cell: ({ row }) => (row.original.isActive ? (
+        <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700">
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500" aria-hidden="true" /> Active
+        </span>
+      ) : (
+        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-500 border border-slate-200">
+          Disabled
+        </span>
+      )),
+    }),
+  ], []);
+
+  const table = useReactTable({
+    data: rows,
+    columns,
+    state: { sorting },
+    onSortingChange: setSorting,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+  });
+
+  const colSpanAll = columns.length + 1; // + actions column
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center gap-3">
         <div className="p-2 bg-blue-100 rounded-lg">
@@ -234,9 +348,9 @@ export default function MembersPanel() {
         <div>
           <h3 className="text-lg font-semibold text-gray-900">Members</h3>
           <p className="text-sm text-gray-500 max-w-2xl">
-            FreshService members sync automatically. <strong>Local members</strong> are staff without a
-            FreshService license — search your company directory to add them; they can be assigned
-            <strong> Ticket Pulse tickets only</strong> and sign in with their Microsoft account.
+            FreshService members sync automatically (read-only). <strong>Local members</strong> are staff without a
+            FreshService license — they can be assigned <strong>Ticket Pulse tickets only</strong> and sign in with
+            their Microsoft account.
           </p>
         </div>
       </div>
@@ -267,133 +381,181 @@ export default function MembersPanel() {
           <Loader className="w-5 h-5 animate-spin mr-2" /> Loading members…
         </div>
       ) : (
-        <>
-          {/* Local members */}
-          <section className="space-y-2">
-            <div className="flex items-center gap-2 text-sm font-semibold text-gray-700">
-              <Home className="w-4 h-4 text-blue-600" /> Local members
-              <span className="text-xs font-normal text-gray-400">({localActive} active{localDisabled ? `, ${localDisabled} disabled` : ''})</span>
+        <div className="tp-card rounded-xl overflow-hidden">
+          {/* Toolbar: search + filter chips with live counts */}
+          <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-slate-50/60 px-3 py-2.5">
+            <div className="relative w-full sm:w-64">
+              <Search className="w-4 h-4 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" aria-hidden="true" />
+              <input
+                value={searchQ}
+                onChange={(e) => setSearchQ(e.target.value)}
+                placeholder="Search name, email, location…"
+                aria-label="Search members"
+                className="w-full pl-8 pr-3 py-1.5 border border-input rounded-lg text-sm bg-white tp-focus-ring"
+              />
             </div>
-            {local.length === 0 ? (
-              <p className="text-sm text-gray-400 italic px-1 py-1">
-                No local members yet. Use the search above to add staff who aren’t in FreshService.
-              </p>
-            ) : (
-              <div className="grid grid-cols-1 xl:grid-cols-2 gap-2">
-                {local.map((t) => (
-                  <MemberRow
-                    guidanceOpen={guidanceId === t.id}
-                    guidanceDraft={guidanceDraft}
-                    setGuidanceDraft={setGuidanceDraft}
-                    onOpenGuidance={() => openGuidance(t)}
-                    onCloseGuidance={() => setGuidanceId(null)}
-                    onSaveGuidance={saveGuidance}
-                    guidanceSaving={guidanceSaving}
-                    key={t.id}
-                    t={t}
-                    editable
-                    editing={editingId === t.id}
-                    editForm={editForm} setEditForm={setEditForm}
-                    onStartEdit={() => { setEditingId(t.id); setEditForm({ name: t.name || '', location: t.location || '', timezone: t.timezone || 'America/Los_Angeles' }); setError(null); }}
-                    onCancelEdit={() => { setEditingId(null); setError(null); }}
-                    onSaveEdit={() => saveEdit(t.id)}
-                    onToggle={() => toggleActive(t)}
-                    saving={saving}
-                    toggling={togglingId === t.id}
-                  />
-                ))}
-              </div>
-            )}
-          </section>
-
-          {/* FreshService members */}
-          <section className="space-y-2">
-            <div className="flex items-center gap-2 text-sm font-semibold text-gray-700">
-              <Cloud className="w-4 h-4 text-slate-500" /> FreshService members
-              <span className="text-xs font-normal text-gray-400">({fs.length}) · synced, read-only</span>
-            </div>
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-2">
-              {fs.map((t) => (
-                <MemberRow
-                  key={t.id}
-                  t={t}
-                  onToggle={() => toggleActive(t)}
-                  toggling={togglingId === t.id}
-                  guidanceOpen={guidanceId === t.id}
-                  guidanceDraft={guidanceDraft}
-                  setGuidanceDraft={setGuidanceDraft}
-                  onOpenGuidance={() => openGuidance(t)}
-                  onCloseGuidance={() => setGuidanceId(null)}
-                  onSaveGuidance={saveGuidance}
-                  guidanceSaving={guidanceSaving}
-                />
+            <div className="flex flex-wrap items-center gap-1" role="group" aria-label="Filter members">
+              {FILTERS.map(({ key, label }) => (
+                <button
+                  key={key}
+                  onClick={() => setFilter(key)}
+                  aria-pressed={filter === key}
+                  className={`tp-focus-ring px-2.5 py-1 rounded-full text-xs font-semibold border transition-colors ${
+                    filter === key
+                      ? 'bg-blue-600 text-white border-blue-600'
+                      : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                  }`}
+                >
+                  {label} <span className={filter === key ? 'opacity-80' : 'text-slate-400'}>{counts[key]}</span>
+                </button>
               ))}
             </div>
-          </section>
-        </>
+            <span className="ml-auto hidden md:inline text-xs text-slate-400">
+              {rows.length} shown · click a column to sort
+            </span>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                {table.getHeaderGroups().map((hg) => (
+                  <tr key={hg.id}>
+                    {hg.headers.map((header) => {
+                      const sorted = header.column.getIsSorted();
+                      const hideOnMobile = header.column.id === 'type' ? 'hidden md:table-cell'
+                        : header.column.id === 'location' ? 'hidden lg:table-cell' : '';
+                      return (
+                        <th key={header.id} className={`px-3 py-2 ${hideOnMobile}`}>
+                          <button
+                            type="button"
+                            onClick={header.column.getToggleSortingHandler()}
+                            className="tp-focus-ring inline-flex items-center gap-1 rounded uppercase tracking-wide hover:text-slate-700"
+                          >
+                            {flexRender(header.column.columnDef.header, header.getContext())}
+                            {sorted === 'asc' ? <ArrowUp className="w-3 h-3" aria-hidden="true" />
+                              : sorted === 'desc' ? <ArrowDown className="w-3 h-3" aria-hidden="true" />
+                                : <ArrowUpDown className="w-3 h-3 opacity-40" aria-hidden="true" />}
+                          </button>
+                        </th>
+                      );
+                    })}
+                    <th className="px-3 py-2 text-right">Actions</th>
+                  </tr>
+                ))}
+              </thead>
+              <tbody className="divide-y divide-slate-100 bg-white">
+                {table.getRowModel().rows.length === 0 && (
+                  <tr>
+                    <td colSpan={colSpanAll} className="px-3 py-8 text-center text-sm text-slate-400">
+                      {searchQ ? `No members match “${searchQ}” in this filter.` : 'No members in this filter.'}
+                    </td>
+                  </tr>
+                )}
+                {table.getRowModel().rows.map((row) => {
+                  const t = row.original;
+                  const isLocal = t.origin === 'local';
+                  const editing = editingId === t.id;
+                  const guidanceOpen = guidanceId === t.id;
+                  return (
+                    <MemberTableRow
+                      key={t.id}
+                      row={row}
+                      t={t}
+                      colSpanAll={colSpanAll}
+                      editing={editing}
+                      editForm={editForm}
+                      setEditForm={setEditForm}
+                      onStartEdit={isLocal ? () => { setEditingId(t.id); setEditForm({ name: t.name || '', location: t.location || '', timezone: t.timezone || 'America/Los_Angeles' }); setError(null); } : null}
+                      onCancelEdit={() => { setEditingId(null); setError(null); }}
+                      onSaveEdit={() => saveEdit(t.id)}
+                      saving={saving}
+                      onToggle={() => toggleActive(t)}
+                      toggling={togglingId === t.id}
+                      guidanceOpen={guidanceOpen}
+                      guidanceDraft={guidanceDraft}
+                      setGuidanceDraft={setGuidanceDraft}
+                      onOpenGuidance={() => openGuidance(t)}
+                      onCloseGuidance={() => setGuidanceId(null)}
+                      onSaveGuidance={saveGuidance}
+                      guidanceSaving={guidanceSaving}
+                    />
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
     </div>
   );
 }
 
-function MemberRow({ t, editable, editing, editForm, setEditForm, onStartEdit, onCancelEdit, onSaveEdit, onToggle, saving, toggling, guidanceOpen = false, guidanceDraft = '', setGuidanceDraft, onOpenGuidance, onCloseGuidance, onSaveGuidance, guidanceSaving = false }) {
-  if (editing) {
-    return (
-      <div className="tp-card p-3 border-blue-200 ring-1 ring-blue-100 xl:col-span-2">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-          <input value={editForm.name} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
-            placeholder="Name" className="px-3 py-2 border border-input rounded-lg text-sm tp-focus-ring" />
-          <input value={editForm.location} onChange={(e) => setEditForm((f) => ({ ...f, location: e.target.value }))}
-            placeholder="Location" className="px-3 py-2 border border-input rounded-lg text-sm tp-focus-ring" />
-          <select value={editForm.timezone} onChange={(e) => setEditForm((f) => ({ ...f, timezone: e.target.value }))}
-            className="px-3 py-2 border border-input rounded-lg text-sm bg-white tp-focus-ring">
-            {COMMON_TIMEZONES.map((tz) => <option key={tz} value={tz}>{tz}</option>)}
-          </select>
-        </div>
-        <div className="flex items-center gap-2 mt-2.5">
-          <button onClick={onSaveEdit} disabled={saving}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground rounded-lg text-xs font-medium hover:bg-primary/90 disabled:opacity-60 tp-focus-ring">
-            {saving ? <Loader className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} Save
-          </button>
-          <button onClick={onCancelEdit} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-600 hover:text-gray-900 tp-focus-ring rounded-lg">
-            <X className="w-3.5 h-3.5" /> Cancel
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  const disabled = !t.isActive;
+function MemberTableRow({
+  row, t, colSpanAll, editing, editForm, setEditForm, onStartEdit, onCancelEdit, onSaveEdit, saving,
+  onToggle, toggling, guidanceOpen, guidanceDraft, setGuidanceDraft, onOpenGuidance, onCloseGuidance, onSaveGuidance, guidanceSaving,
+}) {
   return (
-    <div className={`group relative flex items-center gap-2.5 rounded-lg border px-3 py-2 transition-colors ${
-      disabled
-        ? 'border-dashed border-slate-300 bg-slate-100/70'
-        : 'border-slate-200 bg-white hover:border-slate-300'
-    }`}>
-      {/* Disabled gets a bold red left rail so it's unmistakable at a glance */}
-      {disabled && <span className="absolute left-0 top-0 bottom-0 w-1 rounded-l-lg bg-red-400" aria-hidden="true" />}
-      <Avatar name={t.name} photoUrl={t.photoUrl} dim={disabled} />
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5">
-          <span className={`text-sm font-medium truncate ${disabled ? 'text-slate-500 line-through decoration-slate-300' : 'text-gray-900'}`}>{t.name}</span>
-          {disabled && (
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-red-100 text-red-700 shrink-0">
-              <Ban className="w-3 h-3" /> Disabled
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-2 text-xs text-gray-500 truncate">
-          {t.email && <span className="inline-flex items-center gap-1 truncate"><Mail className="w-3 h-3 shrink-0" />{t.email}</span>}
-          {t.location && <span className="inline-flex items-center gap-1 shrink-0"><MapPin className="w-3 h-3" />{t.location}</span>}
-        </div>
-        {t.routingGuidance && !guidanceOpen && (
-          <div className="mt-1 flex items-start gap-1 text-[11px] text-violet-700 bg-violet-50 border border-violet-100 rounded-md px-1.5 py-0.5" title="The assignment AI reads this note whenever this person is a candidate">
-            <Brain className="w-3 h-3 mt-0.5 shrink-0" aria-hidden="true" />
-            <span className="line-clamp-2">{t.routingGuidance}</span>
+    <>
+      <tr className={`transition-colors hover:bg-slate-50/70 ${t.isActive ? '' : 'opacity-70'}`}>
+        {row.getVisibleCells().map((cell) => {
+          const hideOnMobile = cell.column.id === 'type' ? 'hidden md:table-cell'
+            : cell.column.id === 'location' ? 'hidden lg:table-cell' : '';
+          return (
+            <td key={cell.id} className={`px-3 py-2 ${hideOnMobile}`}>
+              {flexRender(cell.column.columnDef.cell, cell.getContext())}
+            </td>
+          );
+        })}
+        <td className="px-3 py-2">
+          <div className="flex items-center justify-end gap-0.5">
+            {t.isActive && !guidanceOpen && (
+              <button onClick={onOpenGuidance} title={t.routingGuidance ? 'Edit AI routing note' : 'Add AI routing note (e.g. reduced capacity)'}
+                className={`p-1.5 rounded-lg tp-focus-ring ${t.routingGuidance ? 'text-violet-600 hover:text-violet-800' : 'text-gray-400 hover:text-violet-600'}`}>
+                <Brain className="w-4 h-4" />
+              </button>
+            )}
+            {onStartEdit && t.isActive && !editing && (
+              <button onClick={onStartEdit} title="Edit name / location / timezone" className="p-1.5 text-gray-400 hover:text-blue-600 rounded-lg tp-focus-ring">
+                <Pencil className="w-4 h-4" />
+              </button>
+            )}
+            <button onClick={onToggle} disabled={toggling} title={t.isActive ? 'Disable' : 'Re-enable'}
+              className={`p-1.5 rounded-lg tp-focus-ring ${t.isActive ? 'text-gray-400 hover:text-red-600' : 'text-emerald-600 hover:text-emerald-700'}`}>
+              {toggling ? <Loader className="w-4 h-4 animate-spin" /> : t.isActive ? <PowerOff className="w-4 h-4" /> : <Power className="w-4 h-4" />}
+            </button>
           </div>
-        )}
-        {guidanceOpen && (
-          <div className="mt-1.5" onClick={(e) => e.stopPropagation()}>
+        </td>
+      </tr>
+
+      {/* Expanded editors render as a full-width row directly under the member */}
+      {editing && (
+        <tr className="bg-blue-50/40">
+          <td colSpan={colSpanAll} className="px-3 py-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <input value={editForm.name} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
+                placeholder="Name" className="px-3 py-2 border border-input rounded-lg text-sm tp-focus-ring" />
+              <input value={editForm.location} onChange={(e) => setEditForm((f) => ({ ...f, location: e.target.value }))}
+                placeholder="Location" className="px-3 py-2 border border-input rounded-lg text-sm tp-focus-ring" />
+              <select value={editForm.timezone} onChange={(e) => setEditForm((f) => ({ ...f, timezone: e.target.value }))}
+                className="px-3 py-2 border border-input rounded-lg text-sm bg-white tp-focus-ring">
+                {COMMON_TIMEZONES.map((tz) => <option key={tz} value={tz}>{tz}</option>)}
+              </select>
+            </div>
+            <div className="flex items-center gap-2 mt-2.5">
+              <button onClick={onSaveEdit} disabled={saving}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground rounded-lg text-xs font-medium hover:bg-primary/90 disabled:opacity-60 tp-focus-ring">
+                {saving ? <Loader className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} Save
+              </button>
+              <button onClick={onCancelEdit} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-600 hover:text-gray-900 tp-focus-ring rounded-lg">
+                <X className="w-3.5 h-3.5" /> Cancel
+              </button>
+            </div>
+          </td>
+        </tr>
+      )}
+      {guidanceOpen && (
+        <tr className="bg-violet-50/40">
+          <td colSpan={colSpanAll} className="px-3 py-3">
             <textarea
               value={guidanceDraft}
               onChange={(e) => setGuidanceDraft?.(e.target.value)}
@@ -403,7 +565,7 @@ function MemberRow({ t, editable, editing, editForm, setEditForm, onStartEdit, o
               className="w-full px-2.5 py-1.5 border border-violet-200 rounded-lg text-xs tp-focus-ring"
               autoFocus
             />
-            <div className="flex items-center gap-2 mt-1">
+            <div className="flex items-center gap-2 mt-1.5">
               <button onClick={onSaveGuidance} disabled={guidanceSaving}
                 className="inline-flex items-center gap-1 px-2.5 py-1 bg-violet-600 text-white rounded-lg text-[11px] font-semibold hover:bg-violet-700 disabled:opacity-60 tp-focus-ring">
                 {guidanceSaving ? <Loader className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />} Save note
@@ -411,26 +573,9 @@ function MemberRow({ t, editable, editing, editForm, setEditForm, onStartEdit, o
               <button onClick={onCloseGuidance} className="text-[11px] text-gray-500 hover:text-gray-800 tp-focus-ring rounded px-1.5 py-1">Cancel</button>
               <span className="ml-auto text-[10px] text-gray-400">The AI treats this as a standing instruction from the team lead</span>
             </div>
-          </div>
-        )}
-      </div>
-      <div className="flex items-center gap-0.5 shrink-0">
-        {onOpenGuidance && !disabled && !guidanceOpen && (
-          <button onClick={onOpenGuidance} title={t.routingGuidance ? 'Edit AI routing note' : 'Add AI routing note (e.g. reduced capacity)'}
-            className={`p-1.5 rounded-lg tp-focus-ring ${t.routingGuidance ? 'text-violet-600 hover:text-violet-800' : 'text-gray-400 hover:text-violet-600'}`}>
-            <Brain className="w-4 h-4" />
-          </button>
-        )}
-        {editable && !disabled && (
-          <button onClick={onStartEdit} title="Edit" className="p-1.5 text-gray-400 hover:text-blue-600 rounded-lg tp-focus-ring">
-            <Pencil className="w-4 h-4" />
-          </button>
-        )}
-        <button onClick={onToggle} disabled={toggling} title={t.isActive ? 'Disable' : 'Re-enable'}
-          className={`p-1.5 rounded-lg tp-focus-ring ${t.isActive ? 'text-gray-400 hover:text-red-600' : 'text-emerald-600 hover:text-emerald-700'}`}>
-          {toggling ? <Loader className="w-4 h-4 animate-spin" /> : t.isActive ? <PowerOff className="w-4 h-4" /> : <Power className="w-4 h-4" />}
-        </button>
-      </div>
-    </div>
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
