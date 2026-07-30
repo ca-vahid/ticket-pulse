@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.82-preview';
+export const APP_VERSION = '3.0.83-preview';
 
 export const changelog = [
+  {
+    version: '3.0.83-preview',
+    date: 'July 30, 2026',
+    entries: [
+      { type: 'changed', html: '<strong>🗂️ Board columns are taller</strong> — the Tickets Board now guarantees room for <b>4–5 cards per column</b> before scrolling (columns previously collapsed to ~2 cards on shorter screens), and still grows to fill tall monitors. (QA follow-up 07-30.)' },
+    ],
+  },
   {
     version: '3.0.82-preview',
     date: 'July 29, 2026',
