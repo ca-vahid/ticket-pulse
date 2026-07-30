@@ -138,7 +138,10 @@ function BoardColumn({ column, tickets, activeBucket, children }) {
         <h3 className="text-sm font-bold text-slate-800">{column.label}</h3>
         <span className="ml-auto rounded-full bg-white px-2 py-0.5 text-xs font-bold text-slate-500 shadow-subtle">{tickets.length}</span>
       </header>
-      <div className="settings-scrollbar flex max-h-[calc(100vh-320px)] min-h-[120px] flex-col gap-2 overflow-y-auto p-2">
+      {/* Column body: guarantee 4–5 cards visible before scrolling (QA 07-30 —
+          a viewport-only cap collapsed columns to ~2 cards on short screens),
+          and still grow to fill tall viewports. */}
+      <div className="settings-scrollbar flex min-h-[26rem] max-h-[max(30rem,calc(100vh-300px))] flex-col gap-2 overflow-y-auto p-2">
         {children}
         {tickets.length === 0 && (
           <p className="py-6 text-center text-xs text-slate-400">Nothing here — drag a card over.</p>
