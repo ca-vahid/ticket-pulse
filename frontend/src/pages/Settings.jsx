@@ -19,6 +19,7 @@ import GroupsPanel from '../components/settings/GroupsPanel';
 import ApprovalCategoriesPanel from '../components/settings/ApprovalCategoriesPanel';
 import TicketOpsPanel from '../components/settings/TicketOpsPanel';
 import ApiKeysPanel from '../components/settings/ApiKeysPanel';
+import BackupRestorePanel from '../components/settings/BackupRestorePanel';
 import AiUsagePanel from '../components/settings/AiUsagePanel';
 import AdminManagementPanel from '../components/settings/AdminManagementPanel';
 import VacationTrackerPanel from '../components/settings/VacationTrackerPanel';
@@ -70,6 +71,7 @@ import {
   Stamp,
   Wand2,
   Brain,
+  DatabaseBackup,
 } from 'lucide-react';
 import { AssignmentConfigPanel } from './AssignmentReview';
 
@@ -87,7 +89,7 @@ export default function Settings() {
   })();
   const isWsAdmin = wsRole === 'admin';
 
-  const validSections = ['freshservice', 'webhooks', 'ticket-mailboxes', 'agents', 'members', 'groups', 'approval-categories', 'ticket-ops', 'api-keys', 'notification-providers', 'public-ticket-status', 'feedback-page', 'urgent-escalation', 'ai-routing', 'ai-providers', 'sync', 'sync-ops', 'backfill', 'workspaces', 'admins', 'workspace-access', 'dashboard', 'photos', 'business-hours', 'tech-schedules', 'tech-visibility', 'noise-rules', 'vacation-tracker', 'calendar-leave'];
+  const validSections = ['freshservice', 'webhooks', 'ticket-mailboxes', 'agents', 'members', 'groups', 'approval-categories', 'ticket-ops', 'api-keys', 'notification-providers', 'public-ticket-status', 'feedback-page', 'urgent-escalation', 'ai-routing', 'ai-providers', 'sync', 'sync-ops', 'backfill', 'backup-restore', 'workspaces', 'admins', 'workspace-access', 'dashboard', 'photos', 'business-hours', 'tech-schedules', 'tech-visibility', 'noise-rules', 'vacation-tracker', 'calendar-leave'];
   const initialSection = (() => {
     const hash = window.location.hash.replace('#', '');
     return validSections.includes(hash) ? hash : 'freshservice';
@@ -185,6 +187,7 @@ export default function Settings() {
     { id: 'vacation-tracker', label: 'Vacation Tracker', Icon: CalendarDays, minRole: 'admin', group: 'Team & Scheduling' },
     // Sync & Data
     { id: 'backfill', label: 'Backfill', Icon: Download, minRole: 'admin', group: 'Sync & Data' },
+    { id: 'backup-restore', label: 'Backup & Restore', Icon: DatabaseBackup, minRole: 'admin', group: 'Sync & Data' },
     { id: 'sync-ops', label: 'Sync Operations', Icon: BarChart3, minRole: 'admin', group: 'Sync & Data' },
     { id: 'sync', label: 'Sync Settings', Icon: RefreshCw, minRole: 'admin', group: 'Sync & Data' },
     // Workspace
@@ -1206,6 +1209,13 @@ export default function Settings() {
               {activeSection === 'backfill' && (
                 <div className="p-6">
                   <BackfillPanel />
+                </div>
+              )}
+
+              {/* Backup & Restore (config snapshots + restore wizard) */}
+              {activeSection === 'backup-restore' && (
+                <div className="p-6">
+                  <BackupRestorePanel />
                 </div>
               )}
 

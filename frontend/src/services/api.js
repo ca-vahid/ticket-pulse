@@ -1422,6 +1422,48 @@ export const publicTicketFeedbackAPI = {
 };
 
 /**
+ * Backup & Restore API (Settings → Sync & Data → Backup & Restore).
+ * Snapshots are versioned config / config+data exports; restores always go
+ * through a server-computed dry-run diff before anything is written.
+ */
+export const backupAPI = {
+  list: () => api.get('/backup/snapshots'),
+  create: ({ scope, tier }) => api.post('/backup/snapshots', { scope, tier }),
+  remove: (id) => api.delete(`/backup/snapshots/${id}`),
+  dryRun: (id, body) => api.post(`/backup/snapshots/${id}/dry-run`, body),
+  restore: (id, body) => api.post(`/backup/snapshots/${id}/restore`, body),
+
+  /** Full URL to a snapshot archive on the backend host (the SPA origin doesn't serve /api). */
+  downloadUrl: (id) => `${API_BASE_URL}/backup/snapshots/${id}/download`,
+
+  /** Auth-aware download (same approach as ticketsAPI.exportCsv). */
+  download: async (id, fileName = `tp-snapshot-${id}.zip`) => {
+    const response = await axios.get(`${API_BASE_URL}/backup/snapshots/${id}/download`, {
+      responseType: 'blob',
+      withCredentials: true,
+      headers: {
+        ...(_authToken ? { Authorization: `Bearer ${_authToken}` } : {}),
+        ...(_workspaceId ? { 'X-Workspace-Id': String(_workspaceId) } : {}),
+      },
+    });
+    const url = URL.createObjectURL(response.data);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  },
+
+  getSchedules: () => api.get('/backup/schedules'),
+  saveSchedule: (schedule) => (schedule.id
+    ? api.patch(`/backup/schedules/${schedule.id}`, schedule)
+    : api.post('/backup/schedules', schedule)),
+  deleteSchedule: (id) => api.delete(`/backup/schedules/${id}`),
+};
+
+/**
  * Health check
  */
 export const healthCheck = async () => {

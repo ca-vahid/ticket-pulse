@@ -346,6 +346,14 @@ async function initialize() {
       logger.warn('Agent-alert flush worker failed to start (non-fatal):', e.message);
     }
 
+    // App-level backup schedules: due-snapshot runner + retention sweeps.
+    try {
+      const { default: backupService } = await import('./services/backupService.js');
+      backupService.start();
+    } catch (e) {
+      logger.warn('Backup schedule worker failed to start (non-fatal):', e.message);
+    }
+
     // Public API: durable outbound-webhook delivery worker + housekeeping sweep.
     try {
       const { start: startWebhookWorker } = await import('./services/webhookDispatchService.js');
