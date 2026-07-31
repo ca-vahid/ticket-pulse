@@ -2372,7 +2372,8 @@ class TicketService {
         run
         && ['approved', 'modified', 'auto_assigned'].includes(run.decision)
         && run.status === 'completed'
-        && run.assignedTechId != null
+        && run.assignedTechId !== null
+        && run.assignedTechId !== undefined
         && run.assignedTechId !== newTechId,
       );
     } catch {
