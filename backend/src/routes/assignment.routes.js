@@ -1335,6 +1335,23 @@ router.post('/runs/:id/rerun', requireAdmin, asyncHandler(async (req, res) => {
   });
 }));
 
+// Correction feedback loop: a coordinator reassigned a ticket away from an AI
+// pick via the normal assign path and picked a why-chip. No FreshService
+// write-back — the reassignment already happened; this only records the reason
+// and feeds it to the assignment LLM prompt. 200 {recorded:false} when the
+// ticket has no correctable run (nothing to learn from).
+router.post('/ticket/:ticketId/override-reason', requireReviewer, asyncHandler(async (req, res) => {
+  const ticketId = parseInt(req.params.ticketId);
+  const { toTechnicianId, reasonCode, reason } = req.body || {};
+  const correction = await assignmentCorrectionService.recordManualReassignReason(ticketId, req.workspaceId, {
+    toTechnicianId,
+    reasonCode,
+    reason,
+    actorEmail: req.session?.user?.email || 'admin',
+  });
+  res.json({ success: true, recorded: Boolean(correction) });
+}));
+
 router.get('/ticket/:ticketId/latest-run', requireReviewer, asyncHandler(async (req, res) => {
   const ticketId = parseInt(req.params.ticketId);
   const run = await prisma.assignmentPipelineRun.findFirst({

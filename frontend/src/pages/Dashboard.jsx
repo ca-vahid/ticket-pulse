@@ -138,11 +138,24 @@ export default function Dashboard() {
     return stored !== null ? JSON.parse(stored) : true;
   });
 
+  // Card style — 'detailed' (rich colors + icons) vs 'simple' (plain numbers,
+  // full-word labels, QA 07-30 #8/#9). Persisted in localStorage.
+  const [dashStyle, setDashStyle] = useState(() => localStorage.getItem('tp_dash_style') || 'detailed');
+  const simpleStyle = dashStyle === 'simple';
+  const handleDashStyle = (style) => {
+    setDashStyle(style);
+    try {
+      localStorage.setItem('tp_dash_style', style);
+    } catch {
+      // localStorage may be unavailable (private mode); silently ignore
+    }
+  };
+
   // Expand-all override for compact view: null = individual control, true/false = forced
   const [expandAllOverride, setExpandAllOverride] = useState(null);
 
   // Compact-table sort state — persisted in localStorage. `field === null`
-  // means "use the default ranking sort (self-picked desc)".
+  // means "use the default sort (total load for the current view, desc)".
   const [compactSort, setCompactSort] = useState(() => {
     try {
       const stored = localStorage.getItem('compactSort');
@@ -1141,13 +1154,29 @@ export default function Dashboard() {
     localStorage.setItem('collapsedSections', JSON.stringify(newCollapsedSections));
   };
 
-  // Calculate rankings based on self-picked today (only for visible/searched/filtered techs)
-  const techsWithRanks = [...filteredTechnicians]
-    .sort((a, b) => b.selfPickedToday - a.selfPickedToday)
-    .map((tech, index) => ({
-      ...tech,
-      rank: tech.selfPickedToday > 0 ? index + 1 : null,
-    }));
+  // Trophy ranks (top-3 badge) stay based on self-picked, but the LIST order
+  // is total load for the current view, heaviest first (QA 07-30 #6).
+  const techsWithRanks = (() => {
+    const rankById = new Map(
+      [...filteredTechnicians]
+        .sort((a, b) => b.selfPickedToday - a.selfPickedToday)
+        .map((tech, index) => [tech.id, tech.selfPickedToday > 0 ? index + 1 : null]),
+    );
+    return filteredTechnicians
+      .map((tech) => ({ ...tech, rank: rankById.get(tech.id) }))
+      .sort((a, b) => {
+        const diff = (getSortValue(b, 'total', viewMode) || 0) - (getSortValue(a, 'total', viewMode) || 0);
+        if (diff !== 0) return diff;
+        return (a.name || '').localeCompare(b.name || '');
+      });
+  })();
+
+  // Heaviest-load callout for the simple card style: the tech with the highest
+  // total for the current view (list is already total-desc, so index 0; null
+  // when nobody has tickets).
+  const topLoadTechId = techsWithRanks.length > 0 && (getSortValue(techsWithRanks[0], 'total', viewMode) || 0) > 0
+    ? techsWithRanks[0].id
+    : null;
 
   // Group technicians by load level (only when viewing today)
   const _techsByLoadLevel = {
@@ -1809,6 +1838,30 @@ export default function Dashboard() {
               </button>
             </div>
 
+            {/* Style toggle — Detailed / Simple (QA 07-30 #8) */}
+            <div className="hidden bg-gray-100 rounded-lg p-0.5 text-xs font-medium flex-shrink-0 sm:flex">
+              <button
+                onClick={() => handleDashStyle('detailed')}
+                aria-pressed={!simpleStyle}
+                title="Rich colors and icons"
+                className={`px-2.5 py-1 rounded-md transition-all ${
+                  !simpleStyle ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-800'
+                }`}
+              >
+                Detailed
+              </button>
+              <button
+                onClick={() => handleDashStyle('simple')}
+                aria-pressed={simpleStyle}
+                title="Plain numbers, full-word headers, fewer colors"
+                className={`px-2.5 py-1 rounded-md transition-all ${
+                  simpleStyle ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-800'
+                }`}
+              >
+                Simple
+              </button>
+            </div>
+
             <button
               onClick={handleToggleNoise}
               className={`flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors sm:flex-shrink-0 ${
@@ -2040,6 +2093,7 @@ export default function Dashboard() {
                         sortField={compactSort.field}
                         sortDirection={compactSort.direction}
                         onSort={handleCompactSort}
+                        simple={simpleStyle}
                       />
                     </div>
                     <div className="hidden space-y-1.5 sm:block">
@@ -2063,6 +2117,8 @@ export default function Dashboard() {
                             selectedCategories={selectedCategories}
                             canonicalCategoryFilter={selectedCanonicalCategories}
                             forceExpand={expandAllOverride}
+                            simple={simpleStyle}
+                            topLoad={tech.id === topLoadTechId}
                           />
                         </div>
                       ))}
@@ -2087,6 +2143,8 @@ export default function Dashboard() {
                             searchTerm={searchTerm}
                             selectedCategories={selectedCategories}
                             canonicalCategoryFilter={selectedCanonicalCategories}
+                            simple={simpleStyle}
+                            topLoad={tech.id === topLoadTechId}
                           />
                         </div>
                       ))}
@@ -2114,6 +2172,8 @@ export default function Dashboard() {
                           searchTerm={searchTerm}
                           selectedCategories={selectedCategories}
                           canonicalCategoryFilter={selectedCanonicalCategories}
+                          simple={simpleStyle}
+                          topLoad={tech.id === topLoadTechId}
                         />
                       </div>
                     ))}

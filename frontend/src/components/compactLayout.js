@@ -17,11 +17,17 @@
 export const COMPACT_GRID_WEEKLY = 'var(--tp-compact-grid-weekly)';
 
 // Daily: no week heatmap, so we lock the name column to a fixed width
-// (otherwise it grows and pushes all the metrics far to the right). The
-// last column (assigners) takes whatever space is left.
+// (otherwise it grows and pushes all the metrics far to the right).
 export const COMPACT_GRID_DAILY = 'var(--tp-compact-grid-daily)';
 
-export function getCompactGridTemplate(viewMode) {
+// `simple` (QA 07-30 #8) switches to the plain-number style: wider metric
+// tracks so the full-word two-line headers fit.
+export function getCompactGridTemplate(viewMode, simple = false) {
+  if (simple) {
+    return viewMode === 'weekly'
+      ? 'var(--tp-compact-grid-weekly-simple)'
+      : 'var(--tp-compact-grid-daily-simple)';
+  }
   return viewMode === 'weekly' ? COMPACT_GRID_WEEKLY : COMPACT_GRID_DAILY;
 }
 
@@ -31,9 +37,11 @@ export function getCompactGridTemplate(viewMode) {
 //
 // The first two columns (expand chevron, name) intentionally aren't sortable
 // from the header — name sorting can be added later if useful.
+// Assigners column removed (QA 07-30 #4) — that detail lives in the expanded
+// row now. Name column gained a real header title (QA 07-30 #7).
 export const COMPACT_COLUMNS_WEEKLY = [
   { key: 'expand', label: '', sortable: false, align: 'left' },
-  { key: 'name', label: '', sortable: true, align: 'left' },
+  { key: 'name', label: 'Agent Name', sortable: true, align: 'left' },
   { key: 'week', label: 'This Week (Mon–Sun)', sortable: false, align: 'center' },
   { key: 'total', label: 'Total', sortable: true, align: 'center' },
   { key: 'self', label: 'Self', sortable: true, align: 'center' },
@@ -42,12 +50,11 @@ export const COMPACT_COLUMNS_WEEKLY = [
   { key: 'done', label: 'Done', sortable: true, align: 'center' },
   { key: 'rej', label: 'Rej', sortable: true, align: 'center' },
   { key: 'csat', label: 'CSAT', sortable: true, align: 'center' },
-  { key: 'assigners', label: '', sortable: false, align: 'left' },
 ];
 
 export const COMPACT_COLUMNS_DAILY = [
   { key: 'expand', label: '', sortable: false, align: 'left' },
-  { key: 'name', label: '', sortable: true, align: 'left' },
+  { key: 'name', label: 'Agent Name', sortable: true, align: 'left' },
   { key: 'open', label: 'Open', sortable: true, align: 'center' },
   { key: 'total', label: 'Today', sortable: true, align: 'center' },
   { key: 'self', label: 'Self', sortable: true, align: 'center' },
@@ -56,11 +63,27 @@ export const COMPACT_COLUMNS_DAILY = [
   { key: 'done', label: 'Done', sortable: true, align: 'center' },
   { key: 'rej', label: 'Rej', sortable: true, align: 'center' },
   { key: 'csat', label: 'CSAT', sortable: true, align: 'center' },
-  { key: 'assigners', label: '', sortable: false, align: 'left' },
 ];
 
-export function getCompactColumns(viewMode) {
-  return viewMode === 'weekly' ? COMPACT_COLUMNS_WEEKLY : COMPACT_COLUMNS_DAILY;
+// Simple style (QA 07-30 #8): the same columns wearing plain-English names —
+// the user's mockup labels, verbatim. Cryptic Self/App/Asgn become full words.
+const SIMPLE_LABELS = {
+  name: 'Agent Name',
+  week: 'Tickets each day',
+  open: 'Open now',
+  total: 'Total',
+  self: 'Picked up themselves',
+  app: 'Sent by the app',
+  asgn: 'Sent by a coordinator',
+  done: 'Resolved',
+  rej: 'Rejected',
+  csat: 'CSAT score',
+};
+
+export function getCompactColumns(viewMode, simple = false) {
+  const cols = viewMode === 'weekly' ? COMPACT_COLUMNS_WEEKLY : COMPACT_COLUMNS_DAILY;
+  if (!simple) return cols;
+  return cols.map((c) => (SIMPLE_LABELS[c.key] ? { ...c, label: SIMPLE_LABELS[c.key] } : c));
 }
 
 // Resolve the actual numeric value to sort by for a given column + viewMode.
@@ -112,12 +135,19 @@ export function getSortValue(tech, sortKey, viewMode) {
         ? (tech.rejected30d || 0)
         : (tech.rejected7d || 0);
   case 'csat': {
+    // Sort by the average (what the cell now shows, QA 07-30 #5); response
+    // count breaks ties so 4.0-with-5-responses outranks 4.0-with-1.
+    const avg = isMonthly
+      ? tech.monthlyCSATAverage
+      : isWeekly
+        ? tech.weeklyCSATAverage
+        : tech.csatAverage;
     const count = isMonthly
       ? (tech.monthlyCSATCount || 0)
       : isWeekly
         ? (tech.weeklyCSATCount || 0)
         : (tech.csatCount || 0);
-    return count;
+    return (avg || 0) * 1000 + count;
   }
   default:
     return 0;

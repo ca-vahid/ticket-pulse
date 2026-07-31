@@ -18,9 +18,14 @@ import { getCompactColumns, getCompactGridTemplate } from './compactLayout';
  * it was sticky) used z-30; we keep z-30 here since nothing else competes
  * for this slot once the banner is non-sticky.
  */
-export default function TechCompactHeader({ viewMode, sortField, sortDirection, onSort }) {
-  const columns = getCompactColumns(viewMode);
-  const gridTemplate = getCompactGridTemplate(viewMode);
+export default function TechCompactHeader({ viewMode, sortField, sortDirection, onSort, simple = false }) {
+  const columns = getCompactColumns(viewMode, simple);
+  const gridTemplate = getCompactGridTemplate(viewMode, simple);
+  // Simple style uses full-word labels ("Sent by a coordinator") that need to
+  // wrap to two lines; detailed keeps the tight single-line caps style.
+  const labelClass = simple
+    ? 'text-[10px] normal-case font-semibold leading-tight'
+    : 'text-[10px] uppercase font-semibold tracking-wide';
 
   const handleClick = (col) => {
     if (!col.sortable) return;
@@ -48,7 +53,7 @@ export default function TechCompactHeader({ viewMode, sortField, sortDirection, 
             return (
               <div
                 key={col.key}
-                className={`flex items-center ${alignClass} text-[10px] uppercase font-semibold text-gray-500 tracking-wide select-none`}
+                className={`flex items-center ${alignClass} ${labelClass} text-gray-500 select-none`}
               >
                 {col.label}
               </div>
@@ -60,7 +65,7 @@ export default function TechCompactHeader({ viewMode, sortField, sortDirection, 
               key={col.key}
               type="button"
               onClick={() => handleClick(col)}
-              className={`flex items-center gap-1 ${alignClass} text-[10px] uppercase font-semibold tracking-wide rounded px-1 py-0.5 hover:bg-gray-100 transition-colors select-none ${
+              className={`flex items-center gap-1 ${alignClass} ${labelClass} rounded px-1 py-0.5 hover:bg-gray-100 transition-colors select-none ${
                 isActive ? 'text-blue-600' : 'text-gray-500'
               }`}
               title={`Sort by ${col.label}${isActive ? ` (${sortDirection === 'desc' ? 'high → low' : 'low → high'})` : ''}`}

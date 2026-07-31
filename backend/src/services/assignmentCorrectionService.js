@@ -98,7 +98,79 @@ export function isCorrectableAssignmentRun(run) {
   return run.syncStatus === 'synced' && !!run.assignedTechId;
 }
 
+// Canned reason text per override reason code — used when the coordinator
+// picks a chip without typing anything, so the LLM feedback stays readable.
+export const OVERRIDE_REASON_CODES = {
+  wrong_skill: 'Coordinator override: the AI pick did not match the required skill.',
+  load_balancing: 'Coordinator override: rebalancing workload across the team.',
+  availability: 'Coordinator override: the AI pick was not available to take this ticket.',
+  other: 'Coordinator override: manual reassignment away from the AI pick.',
+};
+
 class AssignmentCorrectionService {
+  /**
+   * Correction feedback loop v1: a coordinator reassigned a ticket away from
+   * an AI pick through the normal assign path and told us why (one-click
+   * reason chip). Records an assignmentCorrection against the ticket's latest
+   * correctable pipeline run and feeds a summary line to the assignment LLM
+   * prompt. Deliberately does NOT touch FreshService — the reassignment
+   * already happened. Returns null when there is nothing correctable.
+   */
+  async recordManualReassignReason(ticketId, workspaceId, { toTechnicianId, reasonCode, reason, actorEmail } = {}) {
+    const code = String(reasonCode || '').trim();
+    const toTechId = Number(toTechnicianId);
+    if (!OVERRIDE_REASON_CODES[code] || !Number.isInteger(toTechId) || toTechId <= 0) return null;
+
+    const recentRuns = await prisma.assignmentPipelineRun.findMany({
+      where: { ticketId, workspaceId },
+      orderBy: { id: 'desc' },
+      take: 5,
+      include: { ticket: { select: { freshserviceTicketId: true, subject: true } } },
+    });
+    const run = recentRuns.find(isCorrectableAssignmentRun) || null;
+    // Reassigning to the run's own pick is not an override — nothing to learn.
+    if (!run || run.assignedTechId === toTechId) return null;
+
+    const techs = await prisma.technician.findMany({
+      where: { id: { in: [run.assignedTechId, toTechId].filter(Boolean) } },
+      select: { id: true, name: true },
+    });
+    const fromTech = techs.find((t) => t.id === run.assignedTechId) || null;
+    const toTech = techs.find((t) => t.id === toTechId) || null;
+    const reasonText = String(reason || '').trim() || OVERRIDE_REASON_CODES[code];
+
+    const correction = await prisma.assignmentCorrection.create({
+      data: {
+        workspaceId,
+        pipelineRunId: run.id,
+        ticketId,
+        fromTechnicianId: run.assignedTechId || null,
+        toTechnicianId: toTechId,
+        selectionSource: 'manual',
+        reasonCode: code,
+        reason: reasonText,
+        createdByEmail: actorEmail || null,
+        freshserviceSyncStatus: 'not_required',
+      },
+    });
+
+    const workspace = await prisma.workspace.findUnique({
+      where: { id: workspaceId },
+      select: { defaultTimezone: true },
+    });
+    const timestamp = convertToTimezone(new Date(), workspace?.defaultTimezone || 'America/Los_Angeles');
+    const ticketRef = `Ticket #${run.ticket?.freshserviceTicketId || ticketId} (${run.ticket?.subject || 'unknown'})`;
+    const feedbackEntry = `[${timestamp}] ${ticketRef}: Coordinator reassigned after an AI pick. Original: ${fromTech?.name || 'unassigned/unknown'}. Corrected: ${toTech?.name || `technician #${toTechId}`}. Reason code: ${code}. Reason: ${reasonText}`;
+    await assignmentRepository.appendFeedback(workspaceId, feedbackEntry).catch((error) => {
+      logger.warn('Failed to append manual reassign feedback', {
+        correctionId: correction.id,
+        error: error.message,
+      });
+    });
+
+    return correction;
+  }
+
   async reassignRun(runId, workspaceId, input, actorEmail) {
     const { valid, errors, normalized } = validateCorrectionInput(input);
     if (!valid) {

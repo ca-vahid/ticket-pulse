@@ -1,6 +1,19 @@
-export const APP_VERSION = '3.0.83-preview';
+export const APP_VERSION = '3.0.84-preview';
 
 export const changelog = [
+  {
+    version: '3.0.84-preview',
+    date: 'July 31, 2026',
+    entries: [
+      { type: 'added', html: '<strong>🎛️ Dashboard "Simple" style</strong> — a new <b>Detailed / Simple</b> toggle next to Cards/Compact. Simple strips the dashboard to plain numbers on white with <b>full-word column titles</b> (Picked up themselves · Sent by the app · Sent by a coordinator · Resolved · Rejected · CSAT score) and calm captions under each name — while keeping the availability colors (WFH, vacation, holidays) that matter. Works in both Compact and Cards; your choice is remembered.' },
+      { type: 'changed', html: '<strong>📊 Dashboard cleanup</strong> — sorted by <b>highest load first</b> (ties alphabetical); the name column finally says <b>Agent Name</b>; the cryptic "assigned-by" people column is gone (that detail now lives inside the expanded row); and <b>CSAT shows the average score out of 5</b> (FreshService’s /4 converted ×1.25) instead of the response count that read like a score — hover for the raw scale and response count.' },
+      { type: 'changed', html: '<strong>🧾 Tickets Roomy view fixed &amp; tightened</strong> — column titles (Assignee · Status · Due · Updated) now sit exactly over their columns instead of clumping in the corner, and the title block hugs its detail line so the view wastes less vertical space.' },
+      { type: 'added', html: '<strong>🎯 Routing accuracy on Automation Ops</strong> — Analytics → Automation Ops now shows the % of auto-assignments that <b>stuck</b> (not reassigned within 7 days), with a weekly trend chart. Deterministic, computed from assignment episodes.' },
+      { type: 'added', html: '<strong>🧠 Override reasons feed the AI</strong> — when a coordinator reassigns a ticket the AI had routed, a small one-click prompt asks why (<b>Wrong skill / Load balancing / Availability / Other</b>). The reason is recorded as a structured correction and fed into the assignment AI’s standing feedback.' },
+      { type: 'fixed', html: '<strong>📐 Team-Safe Distribution alignment</strong> — every numeric column right-aligns under its title (no more numbers drifting away from their headers), with tabular numerals.' },
+      { type: 'changed', html: '<strong>🌐 External flag is now live</strong> — trusted domains were seeded for every workspace (<code>bgcengineering.ca</code>), so outside-sender tickets (e.g. Bamboo HR notifications) now carry the amber External chip.' },
+    ],
+  },
   {
     version: '3.0.83-preview',
     date: 'July 30, 2026',

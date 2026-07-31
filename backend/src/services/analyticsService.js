@@ -1958,7 +1958,7 @@ export async function getAutomationOps(workspaceId, query = {}) {
       createdAt: { gte: rangeInfo.start, lte: rangeInfo.end },
       ...pipelineTicketWhere,
     };
-    const [runs, steps, syncLogs, backfillRuns, dailyReviewRuns, recommendationCounts] = await Promise.all([
+    const [runs, steps, syncLogs, backfillRuns, dailyReviewRuns, recommendationCounts, autoAssignedRuns] = await Promise.all([
       prisma.assignmentPipelineRun.findMany({
         where: pipelineRunWhere,
         select: {
@@ -2000,7 +2000,59 @@ export async function getAutomationOps(workspaceId, query = {}) {
         where: { workspaceId, createdAt: { gte: rangeInfo.start, lte: rangeInfo.end } },
         _count: { _all: true },
       }),
+      prisma.assignmentPipelineRun.findMany({
+        where: { workspaceId, decision: 'auto_assigned', createdAt: { gte: rangeInfo.start, lte: rangeInfo.end } },
+        select: { id: true, ticketId: true, assignedTechId: true, decidedAt: true, createdAt: true },
+      }),
     ]);
+
+    // Routing accuracy: did the auto-assigned pick hold, or did a human move
+    // the ticket within 7 days? Joined through assignment episodes so only the
+    // episode this run actually opened (tech match, started at/after the
+    // decision) counts against the pick.
+    const autoTicketIds = [...new Set(autoAssignedRuns.map((run) => run.ticketId))];
+    const autoEpisodes = autoTicketIds.length
+      ? await prisma.ticketAssignmentEpisode.findMany({
+        where: { workspaceId, ticketId: { in: autoTicketIds } },
+        select: { ticketId: true, technicianId: true, startedAt: true, endedAt: true, endMethod: true },
+      })
+      : [];
+    const episodesByTicket = new Map();
+    for (const episode of autoEpisodes) {
+      const list = episodesByTicket.get(episode.ticketId) || [];
+      list.push(episode);
+      episodesByTicket.set(episode.ticketId, list);
+    }
+    const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+    const heldPctOf = (total, reassigned) => (total ? Math.round((1 - reassigned / total) * 100) : null);
+    let reassignedWithin7d = 0;
+    const routingWeeks = new Map();
+    for (const run of autoAssignedRuns) {
+      const anchor = run.decidedAt || run.createdAt;
+      const episode = (episodesByTicket.get(run.ticketId) || [])
+        .filter((e) => e.technicianId === run.assignedTechId && e.startedAt >= anchor)
+        .sort((a, b) => a.startedAt - b.startedAt)[0] || null;
+      const reassigned = Boolean(
+        episode
+        && episode.endMethod === 'reassigned'
+        && episode.endedAt
+        && episode.endedAt.getTime() <= episode.startedAt.getTime() + SEVEN_DAYS_MS,
+      );
+      if (reassigned) reassignedWithin7d += 1;
+      const week = groupKey(run.createdAt, { groupBy: 'week', timezone: rangeInfo.timezone });
+      const weekRow = routingWeeks.get(week) || { week, total: 0, reassigned: 0 };
+      weekRow.total += 1;
+      if (reassigned) weekRow.reassigned += 1;
+      routingWeeks.set(week, weekRow);
+    }
+    const routingAccuracy = {
+      autoAssignedTotal: autoAssignedRuns.length,
+      reassignedWithin7d,
+      heldPct: heldPctOf(autoAssignedRuns.length, reassignedWithin7d),
+      weeklyTrend: Array.from(routingWeeks.values())
+        .map((row) => ({ ...row, heldPct: heldPctOf(row.total, row.reassigned) }))
+        .sort((a, b) => a.week.localeCompare(b.week)),
+    };
 
     const funnel = {};
     const triggerSources = {};
@@ -2103,6 +2155,7 @@ export async function getAutomationOps(workspaceId, query = {}) {
           count: row._count._all,
         })),
       },
+      routingAccuracy,
     };
   });
 }

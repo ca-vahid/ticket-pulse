@@ -2684,6 +2684,7 @@ model AssignmentCorrection {
   toTechnician           Technician            @relation("correctionToTech", fields: [toTechnicianId], references: [id])
   selectionSource        String                @map("selection_source") @db.VarChar(30) // recommendation | manual
   recommendationRank     Int?                  @map("recommendation_rank")
+  reasonCode             String?               @map("reason_code") @db.VarChar(30) // wrong_skill | load_balancing | availability | other
   reason                 String                @db.Text
   createdByEmail         String?               @map("created_by_email") @db.VarChar(255)
   freshserviceSyncStatus String                @default("pending") @map("freshservice_sync_status") @db.VarChar(20)

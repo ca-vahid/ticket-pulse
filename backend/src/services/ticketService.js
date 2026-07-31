@@ -2354,7 +2354,30 @@ class TicketService {
     await this._notifyLifecycle(ticket, updated);
     this._broadcast(workspaceId, 'assignment', updated, { fromTechId: ticket.assignedTechId });
     await mirrorService.enqueueFieldSync(workspaceId, ticket.id);
-    return { ...updated, displayRef: ticketDisplayRef(updated), changed: true };
+    const aiOverride = targetId === null ? false : await this._isAiOverride(ticket.id, workspaceId, targetId);
+    return { ...updated, displayRef: ticketDisplayRef(updated), changed: true, aiOverride };
+  }
+
+  // Correction-loop eligibility: this manual pick overrode a completed AI
+  // decision, so the UI may ask for a one-click reason. One cheap indexed
+  // query; never fatal — a false negative only skips the prompt.
+  async _isAiOverride(ticketId, workspaceId, newTechId) {
+    try {
+      const run = await prisma.assignmentPipelineRun.findFirst({
+        where: { ticketId, workspaceId },
+        orderBy: { id: 'desc' },
+        select: { decision: true, status: true, assignedTechId: true },
+      });
+      return Boolean(
+        run
+        && ['approved', 'modified', 'auto_assigned'].includes(run.decision)
+        && run.status === 'completed'
+        && run.assignedTechId != null
+        && run.assignedTechId !== newTechId,
+      );
+    } catch {
+      return false;
+    }
   }
 
   // ------------------------------------------------------------ conversation

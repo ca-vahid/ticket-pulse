@@ -1331,15 +1331,24 @@ export default function Tickets() {
                           />
                         </span>
                         {roomy ? (
-                          <div className="flex-1 flex items-center text-[11px] font-semibold uppercase tracking-wide text-slate-400 py-2">
-                            <span className="px-3 flex-1">
+                          /* Roomy header rides the SAME grid as the rows so every
+                             label sits over its column — the old flat flex shoved
+                             one "Status · Due · Updated" clump into the corner
+                             (QA 07-30 #1). "Ticket" spans the type+category
+                             tracks the title block sits over. */
+                          <div className={`flex-1 ${GRID_ROOMY} text-[11px] font-semibold uppercase tracking-wide text-slate-400`}>
+                            <span aria-hidden="true" />
+                            <span className={`${CELL} py-2`} style={{ gridColumn: '2 / 4' }}>
                               <button onClick={() => headerSort('subject')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 rounded">
                                 Ticket{sortIndicator('subject')}
                               </button>
                             </span>
-                            <span className="px-3 flex-shrink-0">
-                              <button onClick={() => headerSort('updatedAt')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 rounded">
-                                Status · Due · Updated{sortIndicator('updatedAt')}
+                            <span className={`${CELL} py-2`}>Assignee</span>
+                            <span className={`${CELL} py-2`}>Status</span>
+                            <span className={`${CELL} py-2`}>Due</span>
+                            <span className={`${CELL} py-2 justify-end`}>
+                              <button onClick={() => headerSort('updatedAt')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 rounded text-right">
+                                Updated{sortIndicator('updatedAt')}
                               </button>
                             </span>
                           </div>
@@ -1683,8 +1692,10 @@ export default function Tickets() {
                                   {roomy ? (
                                     <div className={`flex-1 ${GRID_ROOMY}`}>
                                       <span aria-hidden="true" className={`self-stretch ${accent}`} style={{ gridRow: '1 / 3' }} />
-                                      {/* Roomy: the title (+ ref/requester) spans the full width on line 1 */}
-                                      <span className="px-3 py-2 flex flex-col items-start justify-center gap-0.5 min-w-0" style={{ gridColumn: '2 / -1', gridRow: 1 }}>
+                                      {/* Roomy: the title (+ ref/requester) spans the full width on line 1.
+                                          Tightened (QA 07-30 #1): the old py-2 + py-1.5 stack read as
+                                          dead space — title now hugs its detail line. */}
+                                      <span className="px-3 pt-1.5 pb-0.5 flex flex-col items-start justify-center gap-0.5 min-w-0" style={{ gridColumn: '2 / -1', gridRow: 1 }}>
                                         <span className="flex items-center gap-1.5 min-w-0 w-full">
                                           {priorityEl}
                                           {subjectBtn}
