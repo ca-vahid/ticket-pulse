@@ -25,6 +25,7 @@ import { publicTicketStatusPublicRouter } from './publicTicketStatus.routes.js';
 import agentRoutes from './agent.routes.js';
 import ticketsRoutes, { ticketApprovalPublicRouter } from './tickets.routes.js';
 import apiV1Routes from './apiV1.routes.js';
+import backupRoutes from './backup.routes.js';
 import { requireWorkspace } from '../middleware/workspace.js';
 import { requireAuth, requireWorkspaceAccess } from '../middleware/auth.js';
 
@@ -107,5 +108,6 @@ router.use('/ai-providers', aiProviderRoutes);
 router.use('/assignment', assignmentRoutes);
 router.use('/analytics', analyticsRoutes);
 router.use('/summit', summitRoutes);
+router.use('/backup', backupRoutes);
 
 export default router;

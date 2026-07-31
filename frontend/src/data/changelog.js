@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.0.84-preview';
+export const APP_VERSION = '3.0.85-preview';
 
 export const changelog = [
+  {
+    version: '3.0.85-preview',
+    date: 'August 1, 2026',
+    entries: [
+      { type: 'added', html: '<strong>💾 Backup &amp; Restore</strong> — new Settings → Sync &amp; Data → <b>Backup &amp; Restore</b>. Take <b>configuration snapshots</b> (workflows, noise rules, SLA policies, macros, custom fields, ticket types, categories, business hours, trusted domains) per workspace or site-wide, on demand or on a <b>schedule</b> with keep-last-N retention. Restore through a guided wizard: pick the modules (down to a single one), review a <b>dry-run diff</b> of exactly what would be added, updated, or removed, then apply as <b>Merge</b> (never deletes) or <b>Replace</b> (typed confirmation). Restoring another workspace’s snapshot into the current one doubles as <b>cross-workspace config copy</b>. A "Configuration + data" tier also exports TP-born tickets and conversations for download.' },
+      { type: 'added', html: '<strong>🛡️ Platform protection hardened</strong> — database point-in-time restore covers 35 days, a new <b>Azure Backup vault</b> keeps weekly long-term database backups, and attachment storage now has versioning + 30-day undelete. Recovery procedures are documented in the ops runbook.' },
+    ],
+  },
   {
     version: '3.0.84-preview',
     date: 'July 31, 2026',

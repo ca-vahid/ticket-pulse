@@ -15,6 +15,48 @@ generator client {
   previewFeatures = ["omitApi"]
 }
 
+// App-level backup snapshots (BACKUP_RESTORE_PLAN Phase 2/3). A snapshot is a
+// gzipped JSON bundle in Azure Blob: { manifest, modules: { <module>: rows } }.
+// Scope 'site' = every workspace's config; 'workspace' = one workspace.
+// Tier 'config' = configuration modules; 'config_data' adds TP-native ticket
+// data (export/download only — ticket restore stays a PITR operation).
+model BackupSnapshot {
+  id             Int       @id @default(autoincrement())
+  scope          String    @db.VarChar(20)
+  workspaceId    Int?      @map("workspace_id")
+  tier           String    @default("config") @db.VarChar(20)
+  status         String    @default("pending") @db.VarChar(20)
+  trigger        String    @default("manual") @db.VarChar(20)
+  blobName       String?   @map("blob_name") @db.VarChar(300)
+  sizeBytes      Int?      @map("size_bytes")
+  manifest       Json?
+  createdByEmail String?   @map("created_by_email") @db.VarChar(255)
+  error          String?   @db.Text
+  createdAt      DateTime  @default(now()) @map("created_at")
+  completedAt    DateTime? @map("completed_at")
+
+  @@index([workspaceId])
+  @@index([createdAt])
+  @@map("backup_snapshots")
+}
+
+model BackupSchedule {
+  id             Int       @id @default(autoincrement())
+  scope          String    @db.VarChar(20)
+  workspaceId    Int?      @map("workspace_id")
+  tier           String    @default("config") @db.VarChar(20)
+  frequency      String    @default("daily") @db.VarChar(20)
+  hourUtc        Int       @default(9) @map("hour_utc")
+  weekday        Int?
+  retentionCount Int       @default(14) @map("retention_count")
+  enabled        Boolean   @default(true)
+  lastRunAt      DateTime? @map("last_run_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  @@map("backup_schedules")
+}
+
 model Workspace {
   id                      Int      @id @default(autoincrement())
   name                    String   @db.VarChar(100)
