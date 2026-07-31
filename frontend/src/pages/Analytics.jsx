@@ -2263,6 +2263,29 @@ export default function Analytics({ view = 'standard' }) {
     };
   }, [ops?.pipeline?.trend, ops?.sync?.trend]);
 
+  const opsRoutingAccuracyOptions = useMemo(() => {
+    const rows = ops?.routingAccuracy?.weeklyTrend || [];
+    return {
+      ...chartBase('column'),
+      xAxis: {
+        categories: rows.map((row) => row.week),
+        labels: { style: { color: '#64748b', fontSize: '11px' } },
+      },
+      yAxis: {
+        min: 0,
+        max: 100,
+        title: { text: null },
+        labels: { format: '{value}%', style: { color: '#64748b', fontSize: '11px' } },
+        gridLineDashStyle: 'Dash',
+        gridLineColor: '#e2e8f0',
+      },
+      legend: { enabled: false },
+      tooltip: { borderColor: '#cbd5e1', pointFormat: '<b>{point.y}%</b> of auto-assignments held' },
+      plotOptions: { column: { borderRadius: 4 } },
+      series: [{ name: 'Held', data: rows.map((row) => row.heldPct ?? 0), color: '#2563eb' }],
+    };
+  }, [ops?.routingAccuracy?.weeklyTrend]);
+
   const insightRows = useMemo(() => insights?.insights || [], [insights?.insights]);
   const selectedInsight = useMemo(() => (
     insightRows.find((item) => item.id === selectedInsightId) || insightRows[0] || null
@@ -3290,11 +3313,14 @@ export default function Analytics({ view = 'standard' }) {
                   ['leaveDays', 'Leave Days'],
                   ['wfhDays', 'WFH Days'],
                 ].map(([key, label]) => (
-                  <th key={key} className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-normal text-slate-500">
+                  /* Numbers sit flush under their titles: name stays left,
+                     every metric column right-aligns header + cells and the
+                     long trailing labels stop wrapping (QA 07-30 #3). */
+                  <th key={key} className={`px-3 py-2 text-xs font-semibold uppercase tracking-normal text-slate-500 whitespace-nowrap ${key === 'name' ? 'text-left' : 'text-right'}`}>
                     <button
                       type="button"
                       onClick={() => setTeamSortKey(key)}
-                      className="inline-flex items-center gap-1 hover:text-slate-900"
+                      className={`inline-flex items-center gap-1 hover:text-slate-900 ${key === 'name' ? '' : 'flex-row-reverse'}`}
                     >
                       {label}
                       {teamSort.key === key && <span>{teamSort.direction === 'desc' ? '↓' : '↑'}</span>}
@@ -3307,25 +3333,25 @@ export default function Analytics({ view = 'standard' }) {
               {teamRows.map((row) => (
                 <tr key={row.technicianId} className="hover:bg-slate-50">
                   <td className="px-3 py-2 font-semibold text-slate-800">{row.name}</td>
-                  <td className="px-3 py-2 text-slate-700">{row.assigned}</td>
-                  <td className="px-3 py-2 text-slate-700">{row.openNow}</td>
-                  <td className="px-3 py-2 text-slate-700">{row.pendingNow || 0}</td>
-                  <td className="px-3 py-2 text-slate-700">{row.selfPicked}</td>
-                  <td className="px-3 py-2 text-slate-700">{row.coordinatorAssigned}</td>
-                  <td className="px-3 py-2 text-slate-700">{row.appAssigned}</td>
-                  <td className="px-3 py-2 text-slate-700">{row.closed}</td>
-                  <td className="px-3 py-2 text-slate-700">{row.closeRatePct}%</td>
-                  <td className="px-3 py-2 text-slate-700">{row.avgResolutionHours === null ? '—' : `${row.avgResolutionHours}h`}</td>
-                  <td className="px-3 py-2 text-slate-700">{row.csatAverage === null ? '—' : `${row.csatAverage} (${row.csatCount})`}</td>
-                  <td className="px-3 py-2 text-slate-700">{row.rejected}</td>
-                  <td className="px-3 py-2 text-slate-700">{row.availableDays}</td>
-                  <td className="px-3 py-2 text-slate-700">{row.assignedPerAvailableDay ?? '—'}</td>
-                  <td className="px-3 py-2 text-slate-700">
+                  <td className="px-3 py-2 text-right tabular-nums text-slate-700">{row.assigned}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-slate-700">{row.openNow}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-slate-700">{row.pendingNow || 0}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-slate-700">{row.selfPicked}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-slate-700">{row.coordinatorAssigned}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-slate-700">{row.appAssigned}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-slate-700">{row.closed}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-slate-700">{row.closeRatePct}%</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-slate-700">{row.avgResolutionHours === null ? '—' : `${row.avgResolutionHours}h`}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-slate-700">{row.csatAverage === null ? '—' : `${row.csatAverage} (${row.csatCount})`}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-slate-700">{row.rejected}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-slate-700">{row.availableDays}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-slate-700">{row.assignedPerAvailableDay ?? '—'}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-slate-700">
                     <span title={row.leaveTypes?.map((leave) => `${leave.name}: ${leave.days}`).join('\n') || ''}>
                       {row.leaveDays}
                     </span>
                   </td>
-                  <td className="px-3 py-2 text-slate-700">{row.wfhDays || 0}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-slate-700">{row.wfhDays || 0}</td>
                 </tr>
               ))}
             </tbody>
@@ -3543,6 +3569,13 @@ export default function Analytics({ view = 'standard' }) {
     <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard title="Pipeline Runs" value={formatNumber(ops?.pipeline?.totalRuns)} icon={Sparkles} tone="purple" />
+        <StatCard
+          title="Routing accuracy"
+          value={ops?.routingAccuracy?.heldPct != null ? `${ops.routingAccuracy.heldPct}%` : '—'}
+          subtitle="auto-assignments that stuck ≥7 days"
+          icon={Gauge}
+          tone={ops?.routingAccuracy?.heldPct != null && ops.routingAccuracy.heldPct < 80 ? 'amber' : 'green'}
+        />
         <StatCard title="Rebounds" value={formatNumber(ops?.pipeline?.rebounds)} icon={RefreshCw} tone="amber" />
         <StatCard title="Sync Failure Rate" value={`${ops?.sync?.failureRatePct ?? 0}%`} subtitle={`${formatNumber(ops?.sync?.failed)} failed logs`} icon={AlertTriangle} tone={ops?.sync?.failureRatePct > 5 ? 'red' : 'green'} />
         <StatCard title="Stale Started Syncs" value={formatNumber(ops?.sync?.staleStarted)} icon={Clock} tone={ops?.sync?.staleStarted > 0 ? 'red' : 'green'} />
@@ -3563,6 +3596,14 @@ export default function Analytics({ view = 'standard' }) {
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
+        <Panel
+          title="Routing Accuracy Trend"
+          subtitle={`Weekly share of auto-assignments whose pick held at least 7 days (${formatNumber(ops?.routingAccuracy?.reassignedWithin7d)} of ${formatNumber(ops?.routingAccuracy?.autoAssignedTotal)} were reassigned within 7 days).`}
+        >
+          {(ops?.routingAccuracy?.weeklyTrend || []).length
+            ? <HighchartsBlock options={opsRoutingAccuracyOptions} height={isMobile ? '18rem' : '22rem'} />
+            : <EmptyState text="No auto-assigned pipeline runs in this range." />}
+        </Panel>
         <Panel title="Step Health" subtitle="Completed, failed, and skipped step counts by pipeline stage.">
           {(ops?.steps || []).length ? <HighchartsBlock options={opsStepHealthOptions} height={isMobile ? '20rem' : '26rem'} /> : <EmptyState />}
         </Panel>

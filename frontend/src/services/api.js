@@ -1177,6 +1177,8 @@ export const assignmentAPI = {
   getTicketRuns: (ticketId) => api.get(`/assignment/ticket/${ticketId}/runs`),
   decide: (id, data) => api.post(`/assignment/runs/${id}/decide`, data),
   reassignRun: (id, data) => api.post(`/assignment/runs/${id}/reassign`, data),
+  // Correction feedback loop: record why a manual reassign overrode the AI pick.
+  recordOverrideReason: (ticketId, data) => api.post(`/assignment/ticket/${ticketId}/override-reason`, data),
   deleteRun: (id) => api.delete(`/assignment/runs/${id}`),
   dismissRun: (id) => api.post(`/assignment/runs/${id}/dismiss`),
   bulkDeleteRuns: (data) => api.post('/assignment/runs/bulk-delete', data),

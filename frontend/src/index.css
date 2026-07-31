@@ -35,15 +35,21 @@
        layout; laptop widths compress the fixed metric/name columns so the
        trailing Asgn/CSAT/assigner cells stop spilling past the row card
        (QA 07-16 #1). */
-    --tp-compact-grid-weekly: 28px minmax(240px, 1.6fr) minmax(290px, 1.4fr) 64px 56px 56px 56px 56px 56px 64px 110px;
-    --tp-compact-grid-daily: 28px 260px 72px 72px 56px 56px 56px 56px 56px 64px 1fr;
+    /* Assigners column removed (QA 07-30 #4) — its info lives in the expanded row. */
+    --tp-compact-grid-weekly: 28px minmax(240px, 1.6fr) minmax(290px, 1.4fr) 70px 60px 60px 60px 60px 60px 72px;
+    --tp-compact-grid-daily: 28px 260px 80px 80px 62px 62px 62px 62px 62px minmax(72px, 1fr);
+    /* Simple style (QA 07-30 #8): plain numbers under full-word two-line headers. */
+    --tp-compact-grid-weekly-simple: 28px minmax(220px, 1.5fr) minmax(280px, 1.3fr) 64px 92px 82px 108px 76px 72px 84px;
+    --tp-compact-grid-daily-simple: 28px 250px 76px 76px 92px 82px 108px 76px 72px minmax(84px, 1fr);
   }
 
   /* ≤1536px (laptops): tighten name/heatmap minimums and metric columns. */
   @media (max-width: 1536px) {
     :root {
-      --tp-compact-grid-weekly: 24px minmax(150px, 1.2fr) minmax(250px, 1fr) 52px 44px 44px 44px 46px 44px 52px 84px;
-      --tp-compact-grid-daily: 24px minmax(150px, 1fr) 60px 60px 46px 46px 46px 48px 46px 54px minmax(72px, 1fr);
+      --tp-compact-grid-weekly: 24px minmax(150px, 1.2fr) minmax(250px, 1fr) 56px 48px 48px 48px 50px 48px 58px;
+      --tp-compact-grid-daily: 24px minmax(150px, 1fr) 64px 64px 50px 50px 50px 52px 50px minmax(58px, 1fr);
+      --tp-compact-grid-weekly-simple: 24px minmax(150px, 1.2fr) minmax(230px, 1fr) 52px 84px 76px 100px 70px 66px 76px;
+      --tp-compact-grid-daily-simple: 24px minmax(150px, 1fr) 60px 60px 84px 76px 100px 70px 66px minmax(76px, 1fr);
     }
   }
 

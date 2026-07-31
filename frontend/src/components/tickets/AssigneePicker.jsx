@@ -33,6 +33,10 @@ export default function AssigneePicker({
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(false);
   const [aiState, setAiState] = useState(null); // 'queued' | null
+  // Correction feedback loop: the manual pick overrode a completed AI decision
+  // — ask (one click, skippable) why, so the assignment LLM can learn.
+  const [overridePrompt, setOverridePrompt] = useState(null); // { techId } | null
+  const [overrideState, setOverrideState] = useState(null); // 'sent' | null
   const [selectedAiTechId, setSelectedAiTechId] = useState(null); // which AI candidate is picked for Approve
   const rootRef = useRef(null);
   const panelRef = useRef(null);
@@ -113,11 +117,32 @@ export default function AssigneePicker({
     if (busy) return;
     setBusy(true);
     try {
-      await (assignFn ? assignFn(techId) : ticketsAPI.assign(ticketId, techId));
+      const res = await (assignFn ? assignFn(techId) : ticketsAPI.assign(ticketId, techId));
       setOpen(false);
+      // The interceptor unwraps to the {success, data} envelope; the assign
+      // payload flags manual picks that override a completed AI decision.
+      if (techId != null && res?.data?.aiOverride) setOverridePrompt({ techId });
       onAssigned?.(techId);
     } catch { /* cancelled or failed — the silent refresh shows the true state */ }
     setBusy(false);
+  };
+
+  // Auto-dismiss the override-reason prompt — it's an optional nicety, never a
+  // gate on the assignment (which already went through).
+  useEffect(() => {
+    if (!overridePrompt || overrideState === 'sent') return undefined;
+    const timer = setTimeout(() => { setOverridePrompt(null); setOverrideState(null); }, 15000);
+    return () => clearTimeout(timer);
+  }, [overridePrompt, overrideState]);
+
+  const sendOverrideReason = async (reasonCode) => {
+    if (!overridePrompt || overrideState === 'sent') return;
+    const techId = overridePrompt.techId;
+    setOverrideState('sent');
+    try {
+      await assignmentAPI.recordOverrideReason(ticketId, { toTechnicianId: techId, reasonCode });
+    } catch { /* best-effort — the assignment itself already succeeded */ }
+    setTimeout(() => { setOverridePrompt(null); setOverrideState(null); }, 1800);
   };
 
   const aiAssign = async () => {
@@ -428,6 +453,56 @@ export default function AssigneePicker({
                 )}
               </button>
             </div>
+          )}
+        </div>,
+        document.body,
+      )}
+
+      {overridePrompt && createPortal(
+        <div
+          role="status"
+          className="fixed bottom-4 right-4 z-[70] w-80 tp-card rounded-xl shadow-soft p-3 animate-slide-in-right"
+        >
+          {overrideState === 'sent' ? (
+            <p className="flex items-center gap-2 text-sm font-medium text-emerald-700">
+              <Check className="w-4 h-4 flex-shrink-0" aria-hidden="true" /> Thanks — noted
+            </p>
+          ) : (
+            <>
+              <div className="flex items-start gap-2">
+                <span className="h-6 w-6 rounded-full bg-violet-100 text-violet-600 inline-flex items-center justify-center flex-shrink-0">
+                  <Sparkles className="w-3 h-3" aria-hidden="true" />
+                </span>
+                <p className="flex-1 min-w-0 text-sm font-medium text-slate-700 leading-tight">
+                  Why the override?
+                  <span className="block text-[11px] font-normal text-slate-400">helps the AI learn</span>
+                </p>
+                <button
+                  onClick={() => { setOverridePrompt(null); setOverrideState(null); }}
+                  aria-label="Skip — don't record a reason"
+                  title="Skip"
+                  className="tp-focus-ring h-6 w-6 inline-flex items-center justify-center rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-50 flex-shrink-0"
+                >
+                  <X className="w-3.5 h-3.5" aria-hidden="true" />
+                </button>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {[
+                  ['wrong_skill', 'Wrong skill'],
+                  ['load_balancing', 'Load balancing'],
+                  ['availability', 'Availability'],
+                  ['other', 'Other'],
+                ].map(([code, label]) => (
+                  <button
+                    key={code}
+                    onClick={() => sendOverrideReason(code)}
+                    className="tp-focus-ring px-2.5 py-1 rounded-full border border-violet-200 bg-violet-50/60 text-xs font-medium text-violet-700 hover:bg-violet-100 transition-colors"
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </>
           )}
         </div>,
         document.body,

@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { EyeOff, Trophy, Star, Hand, Send, CheckSquare, Users, Bot, RotateCcw, ChevronDown, Ticket as TicketIcon } from 'lucide-react';
+import { EyeOff, Trophy, Star, Hand, Send, CheckSquare, Bot, RotateCcw, ChevronDown, Ticket as TicketIcon } from 'lucide-react';
 import { useState, useCallback, useRef } from 'react';
 import { getDateStyling, getHolidayTooltip } from '../utils/holidays';
 import { getLeaveForDate, getLeaveBadge, getLeaveTooltip, getLeaveDotClass, getLeaveStyle, isHalfDayLeave, getLeaveSplit } from '../utils/leaveInfo';
@@ -68,9 +68,8 @@ const getInitials = (name) => {
   return '??';
 };
 
-export default function TechCard({ technician, onHide, rank, selectedDate, selectedWeek, selectedMonth, maxOpenCount = 10, maxDailyCount = 1, viewMode = 'daily', searchTerm = '', selectedCategories = [], canonicalCategoryFilter = null }) {
+export default function TechCard({ technician, onHide, rank, selectedDate, selectedWeek, selectedMonth, maxOpenCount = 10, maxDailyCount = 1, viewMode = 'daily', searchTerm = '', selectedCategories = [], canonicalCategoryFilter = null, simple = false, topLoad = false }) {
   const navigate = useNavigate();
-  const [showAssignersPopup, setShowAssignersPopup] = useState(false);
   const [ticketsOpen, setTicketsOpen] = useState(false);
   const hoverTimerRef = useRef(null);
 
@@ -176,12 +175,19 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
 
   const hasCSAT = csatCount > 0;
 
-  // CSAT color based on average
-  const getCSATColor = (avg) => {
-    if (!avg) return 'text-gray-400';
-    if (avg >= 3.5) return 'text-green-600';
-    if (avg >= 2.5) return 'text-yellow-600';
-    if (avg >= 1.5) return 'text-orange-600';
+  // FreshService CSAT is 1-4; TP-native feedback is 1-5. Display everything on
+  // the /5 scale (the go-forward system, QA 07-30 #5): FS average x 1.25.
+  const csatOutOf5 = csatAverage != null ? Math.round(csatAverage * 1.25 * 10) / 10 : null;
+  const csatTooltip = hasCSAT
+    ? `CSAT average: ${csatOutOf5?.toFixed(1)}/5 (FreshService raw ${csatAverage?.toFixed(1)}/4 · ${csatCount} response${csatCount === 1 ? '' : 's'})`
+    : 'No CSAT responses in this period';
+
+  // Color bands on the /5 scale (same cutoffs as the old /4 bands x 1.25).
+  const getCSATColor = (avg5) => {
+    if (!avg5) return 'text-gray-400';
+    if (avg5 >= 4.4) return 'text-green-600';
+    if (avg5 >= 3.1) return 'text-yellow-600';
+    if (avg5 >= 1.9) return 'text-orange-600';
     return 'text-red-600';
   };
 
@@ -205,15 +211,31 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
   const pendingCount = technician.pendingCount || 0;
   const _totalOpenCount = technician.openTicketCount || 0; // Open + Pending combined
 
-  // Use "Open" status count for card background color (most important metric)
-  const cardBgColor = getCardBackgroundColor(openOnlyCount, maxOpenCount);
+  // Use "Open" status count for card background color (most important metric).
+  // Simple style keeps cards plain white — load is readable from the numbers
+  // (QA 07-30 #9: fewer colors).
+  const cardBgColor = simple ? 'bg-white' : getCardBackgroundColor(openOnlyCount, maxOpenCount);
+
+  // Active leave for the current view's reference date (badge + simple caption)
+  const activeLeave = (() => {
+    let dateStr;
+    if (viewMode === 'daily') {
+      dateStr = selectedDate
+        ? (typeof selectedDate === 'string' ? selectedDate : selectedDate.toISOString().slice(0, 10))
+        : new Date().toISOString().slice(0, 10);
+    } else {
+      dateStr = new Date().toISOString().slice(0, 10);
+    }
+    return getLeaveForDate(technician.leaveInfo, dateStr);
+  })();
+  const leaveBadge = activeLeave ? getLeaveBadge(activeLeave) : null;
 
   return (
     <div
       onClick={handleClick}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
-      className={`${cardBgColor} border border-gray-200 rounded-lg shadow-sm hover:shadow-xl transition-all duration-300 cursor-pointer group relative overflow-hidden`}
+      className={`${cardBgColor} border ${simple ? 'border-slate-200' : 'border-gray-200'} rounded-lg shadow-sm hover:shadow-xl transition-all duration-300 cursor-pointer group relative overflow-hidden`}
     >
       {/* Hide Button - Top Right. Always visible on touch (hover-reveal is
           unreachable on phones); fades in on hover for pointer devices. */}
@@ -272,7 +294,7 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
               </h3>
 
               {/* Self-Starter Badge */}
-              {highSelfPickRate && (
+              {!simple && highSelfPickRate && (
                 <div className="flex items-center gap-1 px-2 py-1 bg-purple-100 rounded-full">
                   <Star className="w-3 h-3 text-purple-600 fill-purple-600" />
                   <span className="text-[9px] text-purple-700 font-semibold">SELF</span>
@@ -280,27 +302,21 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
               )}
 
               {/* Leave Badge */}
-              {(() => {
-                let dateStr;
-                if (viewMode === 'daily') {
-                  dateStr = selectedDate
-                    ? (typeof selectedDate === 'string' ? selectedDate : selectedDate.toISOString().slice(0, 10))
-                    : new Date().toISOString().slice(0, 10);
-                } else {
-                  dateStr = new Date().toISOString().slice(0, 10);
-                }
-                const leave = getLeaveForDate(technician.leaveInfo, dateStr);
-                if (!leave) return null;
-                const badge = getLeaveBadge(leave);
-                return (
-                  <div className={`flex items-center gap-1 px-2 py-0.5 ${badge.badgeBg} ${badge.badgeText} border ${badge.badgeBorder} rounded-full`} title={getLeaveTooltip(leave)}>
-                    <div className={`w-1.5 h-1.5 rounded-full ${badge.dotClass}`} />
-                    <span className="text-[9px] font-semibold">{badge.shortText}</span>
-                  </div>
-                );
-              })()}
+              {leaveBadge && (
+                <div className={`flex items-center gap-1 px-2 py-0.5 ${leaveBadge.badgeBg} ${leaveBadge.badgeText} border ${leaveBadge.badgeBorder} rounded-full`} title={getLeaveTooltip(activeLeave)}>
+                  <div className={`w-1.5 h-1.5 rounded-full ${leaveBadge.dotClass}`} />
+                  <span className="text-[9px] font-semibold">{leaveBadge.shortText}</span>
+                </div>
+              )}
 
             </div>
+
+            {/* Simple style: one calm caption instead of pills (QA 07-30 #9) */}
+            {simple && (
+              <div className={`text-[11px] truncate mt-0.5 ${leaveBadge ? leaveBadge.badgeText : topLoad ? 'text-violet-600 font-medium' : 'text-slate-400'}`}>
+                {leaveBadge ? getLeaveTooltip(activeLeave)?.split('\n')[0] : topLoad ? 'Heaviest load on the team' : 'Steady week'}
+              </div>
+            )}
           </div>
         </div>
 
@@ -383,6 +399,14 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
                     }
                     return 'border-slate-400 bg-slate-200 text-slate-800';
                   }
+                  // Simple style: one calm violet tint for activity, white for
+                  // zero — leave/holiday/weekend colors above stay (QA: keep
+                  // availability colors).
+                  if (simple) {
+                    return day.total === 0
+                      ? 'border-slate-200 bg-white text-slate-300'
+                      : 'border-violet-200 bg-violet-100 text-violet-900';
+                  }
                   return colorClass;
                 };
 
@@ -436,205 +460,190 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
           </div>
         )}
 
-        {/* Ticket Status Display */}
-        <div className="mb-3 py-3 border-b border-gray-200">
-          <div className="flex items-center justify-center gap-4 sm:gap-6">
-            {/* Open Count - Only show in daily view */}
-            {viewMode === 'daily' && (
-              <div className="text-center flex items-center gap-2 sm:gap-3">
-                <img
-                  src="/brand/icon-workload.png"
-                  alt=""
-                  aria-hidden="true"
-                  title={`Workload: ${openOnlyCount} open ticket${openOnlyCount === 1 ? '' : 's'}`}
-                  className="w-7 h-7 sm:w-9 sm:h-9 flex-shrink-0 opacity-90"
-                />
-                <div>
-                  <div className="text-4xl sm:text-5xl font-bold text-gray-900 leading-none">{openOnlyCount}</div>
-                  <div className="text-xs text-gray-700 uppercase font-bold mt-1">Open</div>
-                  {pendingCount > 0 && (
-                    <div className="text-xs text-gray-500 font-medium mt-0.5">
-                      ({pendingCount} pend)
+        {simple ? (
+          /* Simple style (QA 07-30 #9): total band + plain-number stat pairs
+             with full-word labels — no icon tiles, minimal color. */
+          <>
+            <div className="mb-3 flex items-baseline justify-center gap-1.5 rounded-lg bg-violet-50/60 py-2">
+              <span className="text-2xl font-bold text-indigo-600 leading-none">{totalTickets}</span>
+              <span className="text-xs font-medium text-slate-500">
+                {totalTickets === 1 ? 'ticket' : 'tickets'}{' '}
+                {viewMode === 'weekly' ? 'this week' : viewMode === 'monthly' ? 'this month' : 'today'}
+              </span>
+            </div>
+
+            <div className="mb-2 grid grid-cols-3 gap-x-2 gap-y-3">
+              <div className="flex flex-col items-center text-center">
+                <div className={`text-base font-semibold ${selfPicked > 0 ? 'text-slate-800' : 'text-slate-300'}`}>{selfPicked}</div>
+                <div className="text-[10px] text-slate-400 leading-tight">Picked up themselves</div>
+              </div>
+              <div className="flex flex-col items-center text-center">
+                <div className={`text-base font-semibold ${appAssigned > 0 ? 'text-slate-800' : 'text-slate-300'}`}>{appAssigned}</div>
+                <div className="text-[10px] text-slate-400 leading-tight">Sent by the app</div>
+              </div>
+              <div className="flex flex-col items-center text-center">
+                <div className={`text-base font-semibold ${assigned > 0 ? 'text-slate-800' : 'text-slate-300'}`}>{assigned}</div>
+                <div className="text-[10px] text-slate-400 leading-tight">Sent by a coordinator</div>
+              </div>
+              <div className="flex flex-col items-center text-center">
+                <div className={`text-base font-semibold ${closed > 0 ? 'text-green-700' : 'text-slate-300'}`}>{closed}</div>
+                <div className="text-[10px] text-slate-400 leading-tight">Resolved</div>
+              </div>
+              <div
+                className="flex flex-col items-center text-center"
+                title={
+                  rejectedDisplay > 0
+                    ? `Rejected tickets — picked up then put back in queue\nSelected ${periodLabel}: ${rejectedDisplay}`
+                    : `No bounced tickets ${periodLabel}`
+                }
+              >
+                <div className={`text-base font-semibold ${rejectedDisplay > 0 ? 'text-red-600' : 'text-slate-300'}`}>{rejectedDisplay}</div>
+                <div className="text-[10px] text-slate-400 leading-tight">Rejected</div>
+              </div>
+              <div className="flex flex-col items-center text-center" title={csatTooltip}>
+                <div className={`text-base font-semibold ${hasCSAT ? getCSATColor(csatOutOf5) : 'text-slate-300'}`}>
+                  {hasCSAT ? csatOutOf5?.toFixed(1) : '—'}
+                </div>
+                <div className="text-[10px] text-slate-400 leading-tight">CSAT score</div>
+              </div>
+            </div>
+          </>
+        ) : (
+          <>
+            {/* Ticket Status Display */}
+            <div className="mb-3 py-3 border-b border-gray-200">
+              <div className="flex items-center justify-center gap-4 sm:gap-6">
+                {/* Open Count - Only show in daily view */}
+                {viewMode === 'daily' && (
+                  <div className="text-center flex items-center gap-2 sm:gap-3">
+                    <img
+                      src="/brand/icon-workload.png"
+                      alt=""
+                      aria-hidden="true"
+                      title={`Workload: ${openOnlyCount} open ticket${openOnlyCount === 1 ? '' : 's'}`}
+                      className="w-7 h-7 sm:w-9 sm:h-9 flex-shrink-0 opacity-90"
+                    />
+                    <div>
+                      <div className="text-4xl sm:text-5xl font-bold text-gray-900 leading-none">{openOnlyCount}</div>
+                      <div className="text-xs text-gray-700 uppercase font-bold mt-1">Open</div>
+                      {pendingCount > 0 && (
+                        <div className="text-xs text-gray-500 font-medium mt-0.5">
+                          ({pendingCount} pend)
+                        </div>
+                      )}
                     </div>
-                  )}
+                  </div>
+                )}
+
+                {/* Total Count */}
+                <div className="text-center">
+                  <div className="text-3xl font-bold text-indigo-600 leading-none">{totalTickets}</div>
+                  <div className="text-[9px] text-indigo-400 uppercase font-semibold mt-1">
+                    {viewMode === 'weekly' || viewMode === 'monthly' ? 'total' : 'today'}
+                  </div>
                 </div>
               </div>
-            )}
-
-            {/* Total Count */}
-            <div className="text-center">
-              <div className="text-3xl font-bold text-indigo-600 leading-none">{totalTickets}</div>
-              <div className="text-[9px] text-indigo-400 uppercase font-semibold mt-1">
-                {viewMode === 'weekly' || viewMode === 'monthly' ? 'total' : 'today'}
-              </div>
             </div>
-          </div>
-        </div>
 
-        {/* Metrics Grid - Icons + Numbers */}
-        {/* Fixed 6-column layout so all techs align vertically. Optional metrics
+            {/* Metrics Grid - Icons + Numbers */}
+            {/* Fixed 6-column layout so all techs align vertically. Optional metrics
             (App, Rej, CSAT) render as muted placeholders when count is 0. */}
-        <div className="grid grid-cols-3 gap-2 mb-2 sm:grid-cols-6">
+            <div className="grid grid-cols-3 gap-2 mb-2 sm:grid-cols-6">
 
-          {/* Self - always primary */}
-          <div className="flex flex-col items-center p-2 bg-purple-100 rounded-lg shadow-sm border border-purple-200">
-            <Hand className="w-5 h-5 text-purple-700 mb-1" />
-            <div className="text-lg font-bold text-purple-900">{selfPicked}</div>
-            <div className="text-[9px] text-purple-700 uppercase font-bold">Self</div>
-          </div>
-
-          {/* App Assigned - muted when 0 to keep alignment */}
-          <div
-            className={`flex flex-col items-center p-2 rounded-lg shadow-sm border ${
-              appAssigned > 0
-                ? 'bg-sky-50 border-sky-200'
-                : 'bg-slate-50/50 border-slate-100 opacity-50'
-            }`}
-            title={appAssigned > 0 ? 'App-assigned tickets (by Ticket Pulse service account)' : 'No app-assigned tickets'}
-          >
-            <Bot className={`w-5 h-5 mb-1 ${appAssigned > 0 ? 'text-sky-600' : 'text-slate-300'}`} />
-            <div className={`text-lg font-bold ${appAssigned > 0 ? 'text-sky-800' : 'text-slate-300'}`}>{appAssigned}</div>
-            <div className={`text-[9px] uppercase font-bold ${appAssigned > 0 ? 'text-sky-600' : 'text-slate-300'}`}>App</div>
-          </div>
-
-          {/* Assigned (by coordinator) - always shown */}
-          <div className="flex flex-col items-center p-2">
-            <Send className="w-5 h-5 text-orange-600 mb-1" />
-            <div className="text-lg font-bold text-orange-800">{assigned}</div>
-            <div className="text-[9px] text-orange-600 uppercase font-medium">Asgn</div>
-          </div>
-
-          {/* Done - always shown */}
-          <div className="flex flex-col items-center p-2">
-            <CheckSquare className="w-5 h-5 text-green-600 mb-1" />
-            <div className="text-lg font-bold text-green-800">{closed}</div>
-            <div className="text-[9px] text-green-600 uppercase font-medium">Done</div>
-          </div>
-
-          {/* Rejected - count of rejections in the SELECTED period; muted when 0; clickable to drill into bounced list */}
-          {rejectedDisplay > 0 ? (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                navigate(buildBouncedUrl(technician.id, viewMode, selectedDate, selectedWeek, selectedMonth));
-              }}
-              className="flex flex-col items-center p-2 bg-red-50 rounded-lg shadow-sm border border-red-200 hover:bg-red-100 hover:border-red-300 transition-colors cursor-pointer"
-              title={
-                'Rejected tickets — tech picked up then put back in queue\n' +
-                `Selected ${periodLabel}: ${rejectedDisplay}\n` +
-                `Last 7d: ${technician.rejected7d || 0}\n` +
-                `Last 30d: ${technician.rejected30d || 0}\n` +
-                `Lifetime: ${technician.rejectedLifetime || 0}\n\n` +
-                'Click to see the list'
-              }
-            >
-              <RotateCcw className="w-5 h-5 text-red-500 mb-1" />
-              <div className="text-lg font-bold text-red-700">{rejectedDisplay}</div>
-              <div className="text-[9px] text-red-500 uppercase font-bold">Rej</div>
-            </button>
-          ) : (
-            <div
-              className="flex flex-col items-center p-2 bg-slate-50/50 rounded-lg shadow-sm border border-slate-100 opacity-50"
-              title={
-                `No bounced tickets ${periodLabel}\n` +
-                `Last 7d: ${technician.rejected7d || 0}  ·  Last 30d: ${technician.rejected30d || 0}  ·  Lifetime: ${technician.rejectedLifetime || 0}`
-              }
-            >
-              <RotateCcw className="w-5 h-5 text-slate-300 mb-1" />
-              <div className="text-lg font-bold text-slate-300">0</div>
-              <div className="text-[9px] text-slate-300 uppercase font-bold">Rej</div>
-            </div>
-          )}
-
-          {/* CSAT - muted when 0 */}
-          {hasCSAT ? (
-            <div className="flex flex-col items-center p-2 bg-yellow-50 rounded-lg shadow-sm border border-yellow-200" title={`Average: ${csatAverage?.toFixed(1)}/4`}>
-              <Star className={`w-5 h-5 ${getCSATColor(csatAverage)} mb-1`} />
-              <div className={`text-lg font-bold ${getCSATColor(csatAverage)}`}>{csatCount}</div>
-              <div className="text-[9px] text-yellow-700 uppercase font-bold">CSAT</div>
-            </div>
-          ) : (
-            <div
-              className="flex flex-col items-center p-2 bg-slate-50/50 rounded-lg shadow-sm border border-slate-100 opacity-50"
-              title="No CSAT responses in this period"
-            >
-              <Star className="w-5 h-5 text-slate-300 mb-1" />
-              <div className="text-lg font-bold text-slate-300">0</div>
-              <div className="text-[9px] text-slate-300 uppercase font-bold">CSAT</div>
-            </div>
-          )}
-        </div>
-
-        {/* Assigners Badges / Popup */}
-        {viewMode === 'weekly' ? (
-          // Weekly view: Show icon with popup on hover
-          technician.assigners && technician.assigners.length > 0 && (
-            <div className="mt-1 relative">
-              <div
-                className="inline-flex items-center gap-1 px-3 py-1.5 bg-orange-100 rounded-lg cursor-help"
-                onMouseEnter={() => setShowAssignersPopup(true)}
-                onMouseLeave={() => setShowAssignersPopup(false)}
-              >
-                <Users className="w-4 h-4 text-orange-600" />
-                <span className="text-[10px] font-bold text-orange-800">
-                  {technician.assigners.length} Assigner{technician.assigners.length !== 1 ? 's' : ''}
-                </span>
+              {/* Self - always primary */}
+              <div className="flex flex-col items-center p-2 bg-purple-100 rounded-lg shadow-sm border border-purple-200">
+                <Hand className="w-5 h-5 text-purple-700 mb-1" />
+                <div className="text-lg font-bold text-purple-900">{selfPicked}</div>
+                <div className="text-[9px] text-purple-700 uppercase font-bold">Self</div>
               </div>
 
-              {/* Popup */}
-              {showAssignersPopup && (
-                <div className="absolute bottom-full left-0 mb-2 z-50 bg-white border-2 border-orange-300 rounded-lg shadow-xl p-3 min-w-[180px]">
-                  <div className="text-[9px] text-gray-500 uppercase font-bold mb-2">Assigned by:</div>
-                  <div className="space-y-1.5">
-                    {technician.assigners.map((assigner, idx) => (
-                      <div key={idx} className="flex items-center justify-between gap-2">
-                        <span className="text-[11px] text-gray-700">{assigner.name}</span>
-                        <span className="text-[10px] font-bold text-orange-600 bg-orange-100 px-2 py-0.5 rounded">
-                          {assigner.count}
-                        </span>
-                      </div>
-                    ))}
+              {/* App Assigned - muted when 0 to keep alignment */}
+              <div
+                className={`flex flex-col items-center p-2 rounded-lg shadow-sm border ${
+                  appAssigned > 0
+                    ? 'bg-sky-50 border-sky-200'
+                    : 'bg-slate-50/50 border-slate-100 opacity-50'
+                }`}
+                title={appAssigned > 0 ? 'App-assigned tickets (by Ticket Pulse service account)' : 'No app-assigned tickets'}
+              >
+                <Bot className={`w-5 h-5 mb-1 ${appAssigned > 0 ? 'text-sky-600' : 'text-slate-300'}`} />
+                <div className={`text-lg font-bold ${appAssigned > 0 ? 'text-sky-800' : 'text-slate-300'}`}>{appAssigned}</div>
+                <div className={`text-[9px] uppercase font-bold ${appAssigned > 0 ? 'text-sky-600' : 'text-slate-300'}`}>App</div>
+              </div>
+
+              {/* Assigned (by coordinator) - always shown */}
+              <div className="flex flex-col items-center p-2">
+                <Send className="w-5 h-5 text-orange-600 mb-1" />
+                <div className="text-lg font-bold text-orange-800">{assigned}</div>
+                <div className="text-[9px] text-orange-600 uppercase font-medium">Asgn</div>
+              </div>
+
+              {/* Done - always shown */}
+              <div className="flex flex-col items-center p-2">
+                <CheckSquare className="w-5 h-5 text-green-600 mb-1" />
+                <div className="text-lg font-bold text-green-800">{closed}</div>
+                <div className="text-[9px] text-green-600 uppercase font-medium">Done</div>
+              </div>
+
+              {/* Rejected - count of rejections in the SELECTED period; muted when 0; clickable to drill into bounced list */}
+              {rejectedDisplay > 0 ? (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigate(buildBouncedUrl(technician.id, viewMode, selectedDate, selectedWeek, selectedMonth));
+                  }}
+                  className="flex flex-col items-center p-2 bg-red-50 rounded-lg shadow-sm border border-red-200 hover:bg-red-100 hover:border-red-300 transition-colors cursor-pointer"
+                  title={
+                    'Rejected tickets — tech picked up then put back in queue\n' +
+                    `Selected ${periodLabel}: ${rejectedDisplay}\n` +
+                    `Last 7d: ${technician.rejected7d || 0}\n` +
+                    `Last 30d: ${technician.rejected30d || 0}\n` +
+                    `Lifetime: ${technician.rejectedLifetime || 0}\n\n` +
+                    'Click to see the list'
+                  }
+                >
+                  <RotateCcw className="w-5 h-5 text-red-500 mb-1" />
+                  <div className="text-lg font-bold text-red-700">{rejectedDisplay}</div>
+                  <div className="text-[9px] text-red-500 uppercase font-bold">Rej</div>
+                </button>
+              ) : (
+                <div
+                  className="flex flex-col items-center p-2 bg-slate-50/50 rounded-lg shadow-sm border border-slate-100 opacity-50"
+                  title={
+                    `No bounced tickets ${periodLabel}\n` +
+                    `Last 7d: ${technician.rejected7d || 0}  ·  Last 30d: ${technician.rejected30d || 0}  ·  Lifetime: ${technician.rejectedLifetime || 0}`
+                  }
+                >
+                  <RotateCcw className="w-5 h-5 text-slate-300 mb-1" />
+                  <div className="text-lg font-bold text-slate-300">0</div>
+                  <div className="text-[9px] text-slate-300 uppercase font-bold">Rej</div>
+                </div>
+              )}
+
+              {/* CSAT — the AVERAGE on the /5 scale, not the response count
+              (QA 07-30 #5: "2" next to a star read as a 2/4 score). */}
+              {hasCSAT ? (
+                <div className="flex flex-col items-center p-2 bg-yellow-50 rounded-lg shadow-sm border border-yellow-200" title={csatTooltip}>
+                  <Star className={`w-5 h-5 ${getCSATColor(csatOutOf5)} mb-1`} />
+                  <div className={`text-lg font-bold ${getCSATColor(csatOutOf5)}`}>
+                    {csatOutOf5?.toFixed(1)}
+                    <span className="ml-0.5 text-[10px] font-semibold text-yellow-700/70">/ 5</span>
                   </div>
+                  <div className="text-[9px] text-yellow-700 uppercase font-bold">CSAT</div>
+                </div>
+              ) : (
+                <div
+                  className="flex flex-col items-center p-2 bg-slate-50/50 rounded-lg shadow-sm border border-slate-100 opacity-50"
+                  title="No CSAT responses in this period"
+                >
+                  <Star className="w-5 h-5 text-slate-300 mb-1" />
+                  <div className="text-lg font-bold text-slate-300">—</div>
+                  <div className="text-[9px] text-slate-300 uppercase font-bold">CSAT</div>
                 </div>
               )}
             </div>
-          )
-        ) : (
-          // Daily view: Show badges as before
-          technician.assigners && technician.assigners.length > 0 && (
-            <div className="mt-1">
-              <div className="text-[9px] text-gray-500 uppercase font-medium mb-1">Assigned by:</div>
-              <div className="flex flex-wrap gap-1">
-                {technician.assigners.slice(0, 3).map((assigner, idx) => {
-                  // Get first name or initials
-                  const nameParts = assigner.name.split(' ');
-                  const firstName = nameParts[0];
-                  const initials = nameParts.map(p => p[0]).join('').substring(0, 2);
-                  const displayName = firstName.length <= 8 ? firstName : initials;
-
-                  return (
-                    <div
-                      key={idx}
-                      className="flex items-center gap-1 px-2 py-0.5 bg-gradient-to-r from-orange-100 to-orange-200 border border-orange-300 rounded-full shadow-sm"
-                    >
-                      <span className="text-[10px] font-semibold text-orange-800">
-                        {displayName}
-                      </span>
-                      <span className="text-[10px] w-4 h-4 font-bold text-orange-600 bg-orange-300 rounded-full flex items-center justify-center">
-                        {assigner.count}
-                      </span>
-                    </div>
-                  );
-                })}
-                {technician.assigners.length > 3 && (
-                  <div className="text-[10px] text-gray-500 px-2 py-0.5">
-                    +{technician.assigners.length - 3} more
-                  </div>
-                )}
-              </div>
-            </div>
-          )
+          </>
         )}
       </div>
 
@@ -655,6 +664,14 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
       </button>
       {ticketsOpen && (
         <div onClick={(e) => e.stopPropagation()}>
+          {/* Assigned-by summary — used to be its own badges/popup block on
+              the card face (QA 07-30 #4). */}
+          {technician.assigners?.length > 0 && (
+            <div className="px-4 pt-2 pb-0.5 text-[11px] text-slate-500">
+              <span className="font-semibold text-slate-600">Assigned by:</span>{' '}
+              {technician.assigners.map((a) => `${a.name} (${a.count})`).join(' · ')}
+            </div>
+          )}
           <ExpandableTicketList
             allTickets={allTickets}
             closedTickets={closedTickets}
