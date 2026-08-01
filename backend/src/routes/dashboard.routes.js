@@ -12,6 +12,7 @@ import { computeDashboardAvoidance, computeWeeklyDashboardAvoidance, computeTech
 import vtService from '../services/vacationTrackerService.js';
 import settingsRepository from '../services/settingsRepository.js';
 import { buildTicketCategoryAliases, getCategoryMode } from '../utils/ticketCategoryNormalizer.js';
+import { getActivityCalendar } from '../services/activityCalendarService.js';
 
 const router = express.Router();
 
@@ -1172,6 +1173,48 @@ router.get(
         topTwoBoxPct: total ? Number(((satisfied / total) * 100).toFixed(1)) : null,
       },
     });
+  }),
+);
+
+/**
+ * GET /api/dashboard/technician/:id/activity-calendar
+ * Per-day handled-ticket counts (assignment-date convention, PT boundaries)
+ * feeding the agent page's activity heatmap.
+ * Query params:
+ *   - days: trailing window size (default 365, max 400)
+ *   - timezone: IANA TZ for day bucketing (default America/Los_Angeles)
+ * Response: { days: [{ date: 'YYYY-MM-DD', count }] } (only non-zero days).
+ */
+router.get(
+  '/technician/:id/activity-calendar',
+  readCache(60_000),
+  asyncHandler(async (req, res) => {
+    const techId = parseInt(req.params.id, 10);
+    if (isNaN(techId)) {
+      return res.status(400).json({ success: false, message: 'Invalid technician ID' });
+    }
+    const daysRaw = parseInt(req.query.days, 10);
+    const days = Number.isFinite(daysRaw) ? Math.min(Math.max(daysRaw, 1), 400) : 365;
+    const timezone = req.query.timezone || 'America/Los_Angeles';
+
+    // Lightweight ownership check — the full getById include (every ticket)
+    // would defeat the point of this endpoint's skinny query.
+    const technician = await prisma.technician.findUnique({
+      where: { id: techId },
+      select: { id: true, workspaceId: true },
+    });
+    if (!technician || technician.workspaceId !== req.workspaceId) {
+      return res.status(404).json({ success: false, message: 'Technician not found' });
+    }
+
+    const dayCounts = await getActivityCalendar({
+      technicianId: techId,
+      workspaceId: req.workspaceId,
+      days,
+      timezone,
+    });
+
+    res.json({ success: true, data: { days: dayCounts } });
   }),
 );
 

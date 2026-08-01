@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.0.85-preview';
+export const APP_VERSION = '3.0.86-preview';
 
 export const changelog = [
+  {
+    version: '3.0.86-preview',
+    date: 'August 1, 2026',
+    entries: [
+      { type: 'added', html: '<strong>👤 Agent page, completely rebuilt</strong> — the technician page is now one evidence-first screen instead of six tabs. A left rail of <b>clickable stats</b> (each one filters the ticket list — no more “Closed 33” leading nowhere), an <b>activity heatmap</b> that follows your Daily/Weekly/Monthly view (with manual Week / Month / Quarter / Year override), a daily <b>event strip</b> with batch-close clustering, and repeated sweeps collapse into one expandable batch row. Every count is scoped to the period you’re looking at — the number you clicked on the dashboard is the number you land on.' },
+      { type: 'changed', html: '<strong>🧭 Coverage tab retired</strong> — it was a limited re-implementation of the Timeline; the agent page now deep-links straight into the full <b>Timeline Explorer</b> pre-filtered to that technician. CSAT and Feedback merged into one <b>Satisfaction</b> view (single /5 average, response count always shown, per-response source chip). The Daily/Weekly/Monthly toggle no longer shifts when icons appear.' },
+    ],
+  },
   {
     version: '3.0.85-preview',
     date: 'August 1, 2026',

@@ -327,6 +327,12 @@ export default function TimelineExplorer() {
   // ── Tech state ──
   const [techList, setTechList] = useState([]);
   const [selectedTechIds, setSelectedTechIds] = useState(new Set());
+  // Deep link: /timeline?techId=N preselects that technician on load (the
+  // agent page's "Open in Timeline Explorer" link). Captured once on mount.
+  const [deepLinkTechId] = useState(() => {
+    const n = parseInt(new URLSearchParams(window.location.search).get('techId'), 10);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  });
   const [hiddenTechIds, setHiddenTechIds] = useState(() => {
     try { return new Set(JSON.parse(sessionStorage.getItem('tl_hidden') || '[]')); }
     catch { return new Set(); }
@@ -400,10 +406,22 @@ export default function TimelineExplorer() {
     setTechListLoading(true);
     dashboardAPI.getDashboard('America/Los_Angeles', null).then((res) => {
       if (res?.success && res.data?.technicians) {
-        setTechList(res.data.technicians.filter((t) => t.isActive !== false));
+        const list = res.data.technicians.filter((t) => t.isActive !== false);
+        setTechList(list);
+        // Apply the ?techId= deep link once the list is known.
+        if (deepLinkTechId && list.some((t) => t.id === deepLinkTechId)) {
+          setSelectedTechIds(new Set([deepLinkTechId]));
+          setHiddenTechIds((prev) => {
+            if (!prev.has(deepLinkTechId)) return prev;
+            const next = new Set(prev);
+            next.delete(deepLinkTechId);
+            sessionStorage.setItem('tl_hidden', JSON.stringify([...next]));
+            return next;
+          });
+        }
       }
     }).catch(() => {}).finally(() => setTechListLoading(false));
-  }, []);
+  }, [deepLinkTechId]);
 
   // ── Keep accent map in sync with selectedTechIds ──
   useEffect(() => {

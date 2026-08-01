@@ -1,6 +1,6 @@
 /**
  * Shared timeline utility functions.
- * Used by both MergedTimelineModal (single-tech) and TimelineExplorer (multi-tech).
+ * Used by TimelineExplorer (single- and multi-tech views).
  * All functions are pure JS — no React.
  *
  * techConfigs shape:
@@ -138,7 +138,7 @@ export function collapseMarkers(items) {
 
 /**
  * Merge coverage + extended tickets into a single chronological array.
- * allPicked / allNotPicked already carry _day metadata from CoverageTab.
+ * allPicked / allNotPicked already carry _day metadata from the caller.
  */
 export function mergeTicketsForTimeline(days, allPicked, allNotPicked) {
   const extendedAll = days.flatMap((d) =>

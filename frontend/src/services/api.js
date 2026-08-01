@@ -314,6 +314,14 @@ export const dashboardAPI = {
     return await api.get(`/dashboard/technician/${id}/csat`);
   },
 
+  /**
+   * Per-day handled counts for the agent page's activity heatmap.
+   * Returns { days: [{ date: 'YYYY-MM-DD', count }] } (non-zero days only).
+   */
+  getTechnicianActivityCalendar: async (id, days = 365) => {
+    return await api.get(`/dashboard/technician/${id}/activity-calendar`, { params: { days } });
+  },
+
   getTechnicianFeedback: async (id) => {
     return await api.get(`/dashboard/technician/${id}/feedback`);
   },
