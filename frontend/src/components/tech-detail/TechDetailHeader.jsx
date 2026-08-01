@@ -1,4 +1,4 @@
-import { ArrowLeft, MapPin, Clock, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ArrowLeft, MapPin, Clock, ChevronLeft, ChevronRight, Clock3, CalendarRange, CalendarDays } from 'lucide-react';
 import ExportButton from '../ExportButton';
 import { getInitials, formatDateLocal } from './utils';
 
@@ -146,32 +146,27 @@ export default function TechDetailHeader({
               controls stay reachable (they used to scroll off the edge of a
               hidden-scrollbar strip). */}
           <div className="flex w-full flex-shrink-0 flex-wrap items-center gap-2 lg:w-auto lg:flex-nowrap">
-            {/* Daily / Weekly / Monthly toggle */}
+            {/* Daily / Weekly / Monthly toggle — fixed-width segments with the
+                icon ALWAYS rendered, so switching modes never shifts layout
+                (the old text-only pills jittered when styling changed). */}
             <div className="flex flex-shrink-0 bg-slate-100 rounded-lg p-0.5 text-xs font-semibold">
-              <button
-                onClick={handleSwitchToDaily}
-                className={`px-3 py-1.5 rounded-md transition-all ${
-                  viewMode === 'daily' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                Daily
-              </button>
-              <button
-                onClick={handleSwitchToWeekly}
-                className={`px-3 py-1.5 rounded-md transition-all ${
-                  viewMode === 'weekly' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                Weekly
-              </button>
-              <button
-                onClick={handleSwitchToMonthly}
-                className={`px-3 py-1.5 rounded-md transition-all ${
-                  viewMode === 'monthly' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                Monthly
-              </button>
+              {[
+                { key: 'daily', label: 'Daily', Icon: Clock3, onClick: handleSwitchToDaily },
+                { key: 'weekly', label: 'Weekly', Icon: CalendarRange, onClick: handleSwitchToWeekly },
+                { key: 'monthly', label: 'Monthly', Icon: CalendarDays, onClick: handleSwitchToMonthly },
+              ].map(({ key, label, Icon, onClick }) => (
+                <button
+                  key={key}
+                  onClick={onClick}
+                  aria-pressed={viewMode === key}
+                  className={`tp-focus-ring flex w-[92px] items-center justify-center gap-1.5 rounded-md py-1.5 transition-colors ${
+                    viewMode === key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  <Icon className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+                  {label}
+                </button>
+              ))}
             </div>
 
             <div className="h-5 w-px flex-shrink-0 bg-slate-200" />
