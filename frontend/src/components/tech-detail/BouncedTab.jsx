@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { RotateCcw, ExternalLink, Clock, AlertTriangle, Loader2 } from 'lucide-react';
 import { dashboardAPI } from '../../services/api';
 import { getTicketCategoryLabel } from '../../utils/ticketFilter';
@@ -120,6 +120,9 @@ function Owner({ name, photoUrl }) {
 }
 
 export default function BouncedTab({ technician, viewMode = 'daily', selectedDate, selectedWeek, selectedMonth }) {
+  const location = useLocation();
+  // Return address so /tickets/:id's Back control comes back to this drill-in.
+  const backState = { from: `${location.pathname}${location.search}` };
   const range = useMemo(
     () => getRange({ viewMode, selectedDate, selectedWeek, selectedMonth }),
     [viewMode, selectedDate, selectedWeek, selectedMonth],
@@ -238,7 +241,7 @@ export default function BouncedTab({ technician, viewMode = 'daily', selectedDat
                   {/* Ticket ID + (only when relevant) self-picked tag stacked beneath */}
                   <div className="flex flex-col gap-0.5 min-w-0">
                     {ticket ? (
-                      <TicketRefLink ticket={ticket} className="text-[11px] truncate" />
+                      <TicketRefLink ticket={ticket} state={backState} className="text-[11px] truncate" />
                     ) : (
                       <span className="font-mono text-[11px] text-slate-500 truncate">#?</span>
                     )}
@@ -301,6 +304,7 @@ export default function BouncedTab({ technician, viewMode = 'daily', selectedDat
                     {ticket?.id ? (
                       <Link
                         to={`/tickets/${ticket.id}`}
+                        state={backState}
                         className="inline-flex items-center gap-0.5 text-blue-600 hover:text-blue-800 text-[11px] font-medium"
                         onClick={(e) => e.stopPropagation()}
                       >

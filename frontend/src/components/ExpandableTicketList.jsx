@@ -19,10 +19,12 @@ const STATUS_COLORS = {
 
 const FRESHDOMAIN = import.meta.env.VITE_FRESHSERVICE_DOMAIN || 'efusion.freshservice.com';
 
+// First-group headers: the ACTIVE (non-terminal) slice of the period. Closed/
+// Resolved tickets live exclusively in the second group — no double-listing.
 const PERIOD_LABELS = {
-  daily: "Today's tickets",
-  weekly: "This week's tickets",
-  monthly: "This month's tickets",
+  daily: 'Active today · open/pending',
+  weekly: 'Active this week · open/pending',
+  monthly: 'Active this month · open/pending',
 };
 
 function formatTicketTime(date, includeDate) {
@@ -148,27 +150,33 @@ function TicketRow({ ticket, variant = 'active', techName, viewMode = 'daily' })
 /**
  * Groups and sorts tickets for the expandable drilldown.
  *
- * Returns { allTickets, closedTickets } where:
- *  - allTickets: every ticket in the period, self-picked sorted first
- *  - closedTickets: only Closed/Resolved, sorted by close time (may overlap with allTickets)
+ * Returns DISJOINT groups { activeTickets, closedTickets } (no ticket appears
+ * twice; period total = activeTickets.length + closedTickets.length):
+ *  - activeTickets: non-terminal tickets (anything not Closed/Resolved),
+ *    sorted by arrival time, newest first
+ *  - closedTickets: only Closed/Resolved, sorted by close time
  */
 export function useGroupedTickets(tickets) {
   return useMemo(() => {
-    if (!tickets || tickets.length === 0) return { allTickets: [], closedTickets: [] };
+    if (!tickets || tickets.length === 0) return { activeTickets: [], closedTickets: [] };
+
+    const isTerminal = (t) => t.status === 'Closed' || t.status === 'Resolved';
 
     // Sort by arrival time, newest first
-    const all = [...tickets].sort((a, b) =>
-      new Date(b.firstAssignedAt || b.createdAt) - new Date(a.firstAssignedAt || a.createdAt),
-    );
+    const active = tickets
+      .filter(t => !isTerminal(t))
+      .sort((a, b) =>
+        new Date(b.firstAssignedAt || b.createdAt) - new Date(a.firstAssignedAt || a.createdAt),
+      );
 
     const closed = tickets
-      .filter(t => t.status === 'Closed' || t.status === 'Resolved')
+      .filter(isTerminal)
       .sort((a, b) =>
         new Date(b.closedAt || b.resolvedAt || b.updatedAt || 0)
         - new Date(a.closedAt || a.resolvedAt || a.updatedAt || 0),
       );
 
-    return { allTickets: all, closedTickets: closed };
+    return { activeTickets: active, closedTickets: closed };
   }, [tickets]);
 }
 
@@ -182,30 +190,32 @@ export function getTicketsForView(technician, viewMode) {
 }
 
 /**
- * Renders the two-section expandable ticket list (all tickets + closed/resolved).
+ * Renders the two-section expandable ticket list. The groups are DISJOINT:
+ * active (open/pending) tickets first, Closed/Resolved second — a ticket never
+ * appears in both, so the period total is the sum of the two counts.
  *
  * @param {Object} props
- * @param {Array}  props.allTickets      - sorted ticket array (self-picked first)
+ * @param {Array}  props.activeTickets   - non-terminal tickets, newest first
  * @param {Array}  props.closedTickets   - closed/resolved subset
  * @param {string} props.techName        - technician name (for self-pick badge logic)
  * @param {string} props.viewMode        - 'daily' | 'weekly' | 'monthly'
  */
-export default function ExpandableTicketList({ allTickets, closedTickets, techName, viewMode = 'daily' }) {
+export default function ExpandableTicketList({ activeTickets, closedTickets, techName, viewMode = 'daily' }) {
   const periodLabel = PERIOD_LABELS[viewMode] || PERIOD_LABELS.daily;
 
   return (
     <div className="expanded-tickets border-t border-gray-200 bg-gray-50/80 px-4 py-2">
-      {/* All tickets for the period */}
-      {allTickets.length > 0 && (
+      {/* Active (open/pending) tickets for the period */}
+      {activeTickets.length > 0 && (
         <div className="mb-1.5">
           <div className="flex items-center gap-1.5 mb-0.5">
             <Hand className="w-3 h-3 text-blue-600" />
             <span className="text-[10px] font-bold text-blue-700 uppercase">
-              {periodLabel} ({allTickets.length})
+              {periodLabel} ({activeTickets.length})
             </span>
           </div>
           <div className="space-y-0">
-            {allTickets.map(ticket => (
+            {activeTickets.map(ticket => (
               <TicketRow
                 key={ticket.id || ticket.freshserviceTicketId}
                 ticket={ticket}
@@ -220,8 +230,8 @@ export default function ExpandableTicketList({ allTickets, closedTickets, techNa
 
       {/* Closed / Resolved */}
       {closedTickets.length > 0 && (
-        <div className={allTickets.length > 0 ? 'pt-1.5' : ''}>
-          {allTickets.length > 0 && (
+        <div className={activeTickets.length > 0 ? 'pt-1.5' : ''}>
+          {activeTickets.length > 0 && (
             <div className="border-t border-gray-300 mb-1.5" />
           )}
           <div className="flex items-center gap-1.5 mb-0.5">
@@ -244,7 +254,7 @@ export default function ExpandableTicketList({ allTickets, closedTickets, techNa
         </div>
       )}
 
-      {allTickets.length === 0 && closedTickets.length === 0 && (
+      {activeTickets.length === 0 && closedTickets.length === 0 && (
         <div className="text-[10px] text-gray-400 text-center py-2">
           Ticket details not loaded yet. Try clicking &quot;Sync Week&quot; or refreshing the dashboard.
         </div>

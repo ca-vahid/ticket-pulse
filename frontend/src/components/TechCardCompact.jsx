@@ -75,10 +75,10 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
   // forceExpand (true/false) overrides local state; null = use local
   const isExpanded = forceExpand !== null ? forceExpand : localExpanded;
 
-  // Centralized ticket grouping
+  // Centralized ticket grouping (disjoint: active vs closed/resolved)
   const ticketsForView = getTicketsForView(technician, viewMode);
-  const { allTickets, closedTickets } = useGroupedTickets(ticketsForView);
-  const hasExpandableTickets = allTickets.length > 0 || closedTickets.length > 0;
+  const { activeTickets, closedTickets } = useGroupedTickets(ticketsForView);
+  const hasExpandableTickets = activeTickets.length > 0 || closedTickets.length > 0;
 
   // Get color gradient based on normalized ticket count
   const getTicketColor = (count, maxCount) => {
@@ -111,12 +111,10 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
     setLocalExpanded(prev => !prev);
   };
 
-  const handleClick = (e) => {
-    if (e.target.closest('.hide-button')) return;
-    if (e.target.closest('.expand-toggle')) return;
-    if (e.target.closest('.expanded-tickets')) return;
-    if (e.target.closest('.no-row-nav')) return;
-
+  // Navigation to the agent page lives on the name/avatar (a real affordance);
+  // the row body itself toggles the inline ticket list (QA: clicking a row to
+  // "see the tickets" kept teleporting people to the agent page).
+  const navigateToAgent = () => {
     navigate(`/technician/${technician.id}`, {
       state: {
         selectedDate: selectedDate,
@@ -134,6 +132,22 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
         },
       },
     });
+  };
+
+  const handleAgentLinkClick = (e) => {
+    e.stopPropagation();
+    navigateToAgent();
+  };
+
+  const handleClick = (e) => {
+    if (e.target.closest('.hide-button')) return;
+    if (e.target.closest('.expand-toggle')) return;
+    if (e.target.closest('.expanded-tickets')) return;
+    if (e.target.closest('.no-row-nav')) return;
+
+    // Row body click = expand/collapse, same as the chevron.
+    if (!hasExpandableTickets) return;
+    setLocalExpanded(prev => !prev);
   };
 
   const handleHideToggle = (e) => {
@@ -272,26 +286,34 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
           )}
         </button>
 
-        {/* Col 2: Avatar + Name + inline pills */}
+        {/* Col 2: Avatar + Name (both navigate to the agent page) + inline pills */}
         <div className="flex items-center gap-2 min-w-0">
-          {technician.photoUrl ? (
-            <img
-              src={technician.photoUrl}
-              alt={technician.name}
-              className="w-9 h-9 rounded-full object-cover shadow-sm border border-gray-300 flex-shrink-0 transition-all duration-300 ease-in-out hover:scale-150 hover:shadow-2xl hover:z-50"
-              onError={(e) => {
-                // If the image URL is broken (404, CORS, etc.), hide the broken
-                // image so the alt text doesn't leak the technician's name.
-                e.currentTarget.style.display = 'none';
-              }}
-            />
-          ) : (
-            <div className="flex items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-blue-600 w-9 h-9 shadow-sm border border-blue-400 flex-shrink-0 transition-all duration-300 ease-in-out hover:scale-150 hover:shadow-2xl hover:z-50">
-              <span className="text-[11px] font-bold text-white">
-                {getInitials(technician.name)}
+          <button
+            type="button"
+            onClick={handleAgentLinkClick}
+            title="Open agent page"
+            aria-label={`Open ${technician.name}'s agent page`}
+            className="no-row-nav tp-focus-ring rounded-full flex-shrink-0"
+          >
+            {technician.photoUrl ? (
+              <img
+                src={technician.photoUrl}
+                alt={technician.name}
+                className="w-9 h-9 rounded-full object-cover shadow-sm border border-gray-300 transition-all duration-300 ease-in-out hover:scale-150 hover:shadow-2xl hover:z-50"
+                onError={(e) => {
+                  // If the image URL is broken (404, CORS, etc.), hide the broken
+                  // image so the alt text doesn't leak the technician's name.
+                  e.currentTarget.style.display = 'none';
+                }}
+              />
+            ) : (
+              <span className="flex items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-blue-600 w-9 h-9 shadow-sm border border-blue-400 transition-all duration-300 ease-in-out hover:scale-150 hover:shadow-2xl hover:z-50">
+                <span className="text-[11px] font-bold text-white">
+                  {getInitials(technician.name)}
+                </span>
               </span>
-            </div>
-          )}
+            )}
+          </button>
 
           {isTopPerformer && (
             <div className={`flex items-center justify-center rounded-full w-5 h-5 flex-shrink-0 ${
@@ -307,15 +329,27 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
 
           {simple ? (
             <span className="min-w-0 flex flex-col">
-              <span className="font-semibold text-sm text-gray-900 truncate">{technician.name}</span>
+              <button
+                type="button"
+                onClick={handleAgentLinkClick}
+                title="Open agent page"
+                className="no-row-nav tp-focus-ring self-start max-w-full truncate rounded text-left font-semibold text-sm text-gray-900 hover:underline hover:text-blue-700"
+              >
+                {technician.name}
+              </button>
               <span className={`text-[10px] truncate ${leaveBadge ? leaveBadge.badgeText : topLoad ? 'text-violet-600 font-medium' : 'text-slate-400'}`}>
                 {leaveBadge ? getLeaveTooltip(activeLeave)?.split('\n')[0] : topLoad ? 'Heaviest load on the team' : 'Steady week'}
               </span>
             </span>
           ) : (
-            <span className="font-semibold text-sm text-gray-900 truncate">
+            <button
+              type="button"
+              onClick={handleAgentLinkClick}
+              title="Open agent page"
+              className="no-row-nav tp-focus-ring min-w-0 truncate rounded text-left font-semibold text-sm text-gray-900 hover:underline hover:text-blue-700"
+            >
               {technician.name}
-            </span>
+            </button>
           )}
 
           {!simple && highSelfPickRate && (
@@ -588,7 +622,7 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
       )}
       {isExpanded && (
         <ExpandableTicketList
-          allTickets={allTickets}
+          activeTickets={activeTickets}
           closedTickets={closedTickets}
           techName={technician.name}
           viewMode={viewMode}

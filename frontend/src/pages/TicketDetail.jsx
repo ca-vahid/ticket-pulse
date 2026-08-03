@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   Activity, AlertCircle, ArrowLeft, Bell, BellRing, Bot, Building2, Check, CheckCircle2,
   CheckSquare, ChevronDown, ChevronLeft, ChevronRight, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Flame, Forward, Hand,
@@ -469,6 +469,10 @@ function HistoryEvent({ icon: Icon, tone, title, meta, at, isLast }) {
 export default function TicketDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  // Origin pages (agent page rows/markers, etc.) hand us a `{ from }` return
+  // address — the Back control goes there instead of the generic queue.
+  const backTo = location.state?.from || null;
   const ticketId = Number(id);
   // This ticket belongs to the workspace it was opened in. If the user switches
   // workspace while viewing it, the ticket won't exist in the new one — bounce
@@ -1437,10 +1441,10 @@ export default function TicketDetail() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 pb-20 md:pb-6 animate-fadeIn">
         <div className="flex items-center justify-between mb-4 print-hide">
           <button
-            onClick={() => navigate('/tickets')}
+            onClick={() => navigate(backTo || '/tickets')}
             className="tp-focus-ring inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-blue-700 rounded"
           >
-            <ArrowLeft className="w-4 h-4" aria-hidden="true" /> Back to tickets
+            <ArrowLeft className="w-4 h-4" aria-hidden="true" /> {backTo ? 'Back' : 'Back to tickets'}
           </button>
           {navIndex >= 0 && (
             <div className="flex items-center gap-1">

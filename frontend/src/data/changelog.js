@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.0.86-preview';
+export const APP_VERSION = '3.0.87-preview';
 
 export const changelog = [
+  {
+    version: '3.0.87-preview',
+    date: 'August 3, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>👤 Agent page polish</strong> — the ticket list now matches the Tickets queue’s look (priority strip, bold subject with type pill, ref · requester meta line, leaf-first category, proper status pills); opening a ticket from the agent page and clicking Back returns you <b>to the agent page</b>, not the main queue.' },
+      { type: 'changed', html: '<strong>🖱️ Dashboard rows expand on click</strong> — clicking an agent’s row now opens their inline ticket list; the <b>name or avatar</b> opens their full agent page (hover shows the affordance). The expanded list no longer shows closed tickets twice — it’s now “Active” + “Closed / Resolved” as separate, non-overlapping groups.' },
+    ],
+  },
   {
     version: '3.0.86-preview',
     date: 'August 1, 2026',

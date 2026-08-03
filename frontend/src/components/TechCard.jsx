@@ -74,9 +74,10 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
   const hoverTimerRef = useRef(null);
 
   // Inline ticket drilldown (mobile) — reuses the dashboard's grouped-ticket
-  // helpers so the rows carry the correct in-app /tickets/:id links.
-  const { allTickets, closedTickets } = useGroupedTickets(getTicketsForView(technician, viewMode));
-  const ticketTotal = allTickets.length;
+  // helpers so the rows carry the correct in-app /tickets/:id links. Groups
+  // are disjoint, so the period total is the sum of both.
+  const { activeTickets, closedTickets } = useGroupedTickets(getTicketsForView(technician, viewMode));
+  const ticketTotal = activeTickets.length + closedTickets.length;
 
   // Get color gradient based on normalized ticket count
   const getTicketColor = (count, maxCount) => {
@@ -104,10 +105,7 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
     if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
   }, []);
 
-  const handleClick = (e) => {
-    // Don't navigate if clicking the hide button
-    if (e.target.closest('.hide-button')) return;
-
+  const navigateToAgent = () => {
     navigate(`/technician/${technician.id}`, {
       state: {
         selectedDate: selectedDate,
@@ -125,6 +123,19 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
         },
       },
     });
+  };
+
+  // Name/avatar are explicit agent-page affordances (mirrors TechCardCompact).
+  const handleAgentLinkClick = (e) => {
+    e.stopPropagation();
+    navigateToAgent();
+  };
+
+  const handleClick = (e) => {
+    // Don't navigate if clicking the hide button
+    if (e.target.closest('.hide-button')) return;
+
+    navigateToAgent();
   };
 
   const handleHideToggle = (e) => {
@@ -252,24 +263,32 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
       <div className="p-3 sm:p-4">
         {/* Header: Photo + Name + Badges */}
         <div className="flex items-start gap-3 mb-3 sm:mb-4">
-          {/* Profile Photo or Initials Circle */}
-          {technician.photoUrl ? (
-            <img
-              src={technician.photoUrl}
-              alt={technician.name}
-              className="w-14 h-14 rounded-full object-cover shadow-md border-2 border-gray-300"
-              onError={(e) => {
-                // Hide broken images so alt text doesn't leak the real name.
-                e.currentTarget.style.display = 'none';
-              }}
-            />
-          ) : (
-            <div className="flex items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-blue-600 w-14 h-14 shadow-md border-2 border-blue-400">
-              <span className="text-base font-bold text-white">
-                {getInitials(technician.name)}
+          {/* Profile Photo or Initials Circle — explicit agent-page affordance */}
+          <button
+            type="button"
+            onClick={handleAgentLinkClick}
+            title="Open agent page"
+            aria-label={`Open ${technician.name}'s agent page`}
+            className="tp-focus-ring rounded-full flex-shrink-0"
+          >
+            {technician.photoUrl ? (
+              <img
+                src={technician.photoUrl}
+                alt={technician.name}
+                className="w-14 h-14 rounded-full object-cover shadow-md border-2 border-gray-300"
+                onError={(e) => {
+                  // Hide broken images so alt text doesn't leak the real name.
+                  e.currentTarget.style.display = 'none';
+                }}
+              />
+            ) : (
+              <span className="flex items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-blue-600 w-14 h-14 shadow-md border-2 border-blue-400">
+                <span className="text-base font-bold text-white">
+                  {getInitials(technician.name)}
+                </span>
               </span>
-            </div>
-          )}
+            )}
+          </button>
 
           {/* Name and Badges Column */}
           <div className="flex-1 min-w-0 pt-1">
@@ -288,9 +307,16 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
                 </div>
               )}
 
-              {/* Name */}
+              {/* Name — explicit agent-page affordance */}
               <h3 className="font-semibold text-base sm:text-lg text-gray-900 truncate">
-                {technician.name}
+                <button
+                  type="button"
+                  onClick={handleAgentLinkClick}
+                  title="Open agent page"
+                  className="tp-focus-ring max-w-full truncate rounded text-left hover:underline hover:text-blue-700"
+                >
+                  {technician.name}
+                </button>
               </h3>
 
               {/* Self-Starter Badge */}
@@ -673,7 +699,7 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
             </div>
           )}
           <ExpandableTicketList
-            allTickets={allTickets}
+            activeTickets={activeTickets}
             closedTickets={closedTickets}
             techName={technician.name}
             viewMode={viewMode}
