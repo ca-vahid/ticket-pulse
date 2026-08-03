@@ -1441,10 +1441,17 @@ export default function TicketDetail() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 pb-20 md:pb-6 animate-fadeIn">
         <div className="flex items-center justify-between mb-4 print-hide">
           <button
-            onClick={() => navigate(backTo || '/tickets')}
+            onClick={() => {
+              // Priority: explicit return address (state.from) → real browser
+              // back when there IS in-app history (covers every surface that
+              // links here without wiring state) → /tickets for direct opens.
+              if (backTo) navigate(backTo);
+              else if (window.history.state?.idx > 0) navigate(-1);
+              else navigate('/tickets');
+            }}
             className="tp-focus-ring inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-blue-700 rounded"
           >
-            <ArrowLeft className="w-4 h-4" aria-hidden="true" /> {backTo ? 'Back' : 'Back to tickets'}
+            <ArrowLeft className="w-4 h-4" aria-hidden="true" /> {(backTo || window.history.state?.idx > 0) ? 'Back' : 'Back to tickets'}
           </button>
           {navIndex >= 0 && (
             <div className="flex items-center gap-1">
