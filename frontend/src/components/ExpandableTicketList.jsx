@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { Hand, CheckSquare, Star, ExternalLink } from 'lucide-react';
 import { getTicketCategoryLabel } from '../utils/ticketFilter';
 
@@ -38,6 +38,10 @@ function formatTicketTime(date, includeDate) {
 }
 
 function TicketRow({ ticket, variant = 'active', techName, viewMode = 'daily' }) {
+  const location = useLocation();
+  // Return address so /tickets/:id's Back control comes back to this page
+  // (dashboard expanded row, tech detail, …) instead of the /tickets queue.
+  const linkState = { from: `${location.pathname}${location.search}` };
   const priorityDot = PRIORITY_DOT_COLORS[ticket.priority] || 'bg-gray-400';
   const statusClass = STATUS_COLORS[ticket.status] || 'bg-gray-100 text-gray-600';
   const isSelf = ticket.isSelfPicked || ticket.assignedBy === techName;
@@ -72,6 +76,7 @@ function TicketRow({ ticket, variant = 'active', techName, viewMode = 'daily' })
       {internalHref ? (
         <Link
           to={internalHref}
+          state={linkState}
           title="Open in Ticket Pulse"
           className={refClass}
           onClick={(e) => e.stopPropagation()}
@@ -106,6 +111,7 @@ function TicketRow({ ticket, variant = 'active', techName, viewMode = 'daily' })
       {internalHref ? (
         <Link
           to={internalHref}
+          state={linkState}
           title="Open in Ticket Pulse"
           className={`truncate flex-1 min-w-0 hover:underline ${isMuted ? 'text-gray-400' : 'text-gray-800'}`}
           onClick={(e) => e.stopPropagation()}

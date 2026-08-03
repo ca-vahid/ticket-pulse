@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.87-preview';
+export const APP_VERSION = '3.0.88-preview';
 
 export const changelog = [
+  {
+    version: '3.0.88-preview',
+    date: 'August 3, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>↩️ Back always returns where you came from</strong> — the agent page’s view, date, and selected stat now live <b>in the URL</b> (e.g. <code>/technician/6?view=daily&date=2026-07-29</code>), so opening a ticket and clicking Back restores the exact filtered moment you left — and agent-page views are now shareable links. Tickets opened from a <b>dashboard expanded row</b> also return to the dashboard instead of the main queue.' },
+    ],
+  },
   {
     version: '3.0.87-preview',
     date: 'August 3, 2026',
