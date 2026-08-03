@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.88-preview';
+export const APP_VERSION = '3.0.89-preview';
 
 export const changelog = [
+  {
+    version: '3.0.89-preview',
+    date: 'August 3, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>↩️ Back works from every entry point</strong> — the ticket page’s Back button now falls back to real browser history when you arrived from anywhere inside the app (satisfaction lists, search, future surfaces), so it can never dump you on the main queue again unless you opened the ticket directly.' },
+    ],
+  },
   {
     version: '3.0.88-preview',
     date: 'August 3, 2026',
