@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
+import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
 import {
   Layers, Hand, CheckCircle2, Inbox, RotateCcw, Star, X, ArrowRight,
   MapPin, Clock,
@@ -33,6 +33,7 @@ export default function TechnicianDetailNew() {
   const { id } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
+  const [, setSearchParams] = useSearchParams();
   const { getTechnicianCSAT } = useDashboard();
 
   // ── State ──────────────────────────────────────────────────────────────────
@@ -42,10 +43,13 @@ export default function TechnicianDetailNew() {
   const fetchSeqRef = useRef(0);
   const [error, setError] = useState(null);
 
-  // Active stat chip — the evidence filter. Honour the legacy ?tab=bounced
-  // deep link (dashboard Rej badges + other pages still build that URL).
+  // Active stat chip — the evidence filter. Canonical param is ?bucket=<chip>
+  // (written by the URL round-trip effect below); the legacy ?tab=bounced deep
+  // link (dashboard Rej badges + other pages still build that URL) keeps working.
   const [activeChip, setActiveChip] = useState(() => {
     const params = new URLSearchParams(location.search);
+    const bucket = params.get('bucket');
+    if (['handled', 'closed', 'open', 'self', 'bounced', 'satisfaction'].includes(bucket)) return bucket;
     const tab = params.get('tab');
     if (tab === 'bounced') return 'bounced';
     if (tab === 'csat' || tab === 'feedback') return 'satisfaction';
@@ -78,23 +82,38 @@ export default function TechnicianDetailNew() {
     canonicalCategoryFilter: location.state?.canonicalCategoryFilter || { categoryIds: [], subcategoryIds: [] },
   });
 
-  // Parse URL query params on mount — deep-link bootstrap (e.g. the dashboard
-  // Rej badge supplies ?range=day|week|month&start=YYYY-MM-DD).
+  // Parse URL query params on mount — deep-link bootstrap. Two contracts:
+  //  • canonical (Back round-trip): ?view=daily|weekly|monthly&date=YYYY-MM-DD
+  //  • legacy (dashboard Rej badge): ?range=day|week|month&start=YYYY-MM-DD
+  // Either half may arrive alone: a bare view means "current period in that
+  // view"; a bare date means "that day, daily view".
   const urlParamsOnMount = useMemo(() => {
     const p = new URLSearchParams(location.search);
+    const viewParam = p.get('view');
     const range = p.get('range');
-    const start = p.get('start');
-    if (!range || !start) return null;
-    const startDate = new Date(start + 'T12:00:00');
-    if (Number.isNaN(startDate.getTime())) return null;
-    return { range, startDate };
+    const view = ['daily', 'weekly', 'monthly'].includes(viewParam)
+      ? viewParam
+      : range === 'day' ? 'daily'
+        : range === 'week' ? 'weekly'
+          : range === 'month' ? 'monthly'
+            : null;
+    const rawDate = p.get('date') || p.get('start');
+    let startDate = null;
+    if (rawDate) {
+      const d = new Date(rawDate + 'T12:00:00');
+      if (!Number.isNaN(d.getTime())) startDate = d;
+    }
+    if (!view && !startDate) return null;
+    return { view: view || 'daily', startDate };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Date / week / month state. Priority: URL deep-link > location.state > defaults.
   const [selectedDate, setSelectedDate] = useState(() => {
-    if (urlParamsOnMount?.range === 'day') {
-      return formatDateLocal(urlParamsOnMount.startDate);
+    if (urlParamsOnMount?.view === 'daily' && urlParamsOnMount.startDate) {
+      const str = formatDateLocal(urlParamsOnMount.startDate);
+      // null = today (the page's "live" default) — keep that invariant.
+      return str === formatDateLocal(new Date()) ? null : str;
     }
     const passedDate = location.state?.selectedDate;
     if (!passedDate) return null;
@@ -103,19 +122,13 @@ export default function TechnicianDetailNew() {
     return formatDateLocal(new Date(passedDate));
   });
 
-  const initialViewMode = urlParamsOnMount?.range === 'week'
-    ? 'weekly'
-    : urlParamsOnMount?.range === 'month'
-      ? 'monthly'
-      : urlParamsOnMount?.range === 'day'
-        ? 'daily'
-        : (location.state?.viewMode || 'daily');
+  const initialViewMode = urlParamsOnMount?.view || location.state?.viewMode || 'daily';
 
   const [viewMode, setViewMode] = useState(initialViewMode);
   const originViewModeRef = useRef(initialViewMode);
 
   const [selectedWeek, setSelectedWeek] = useState(() => {
-    if (urlParamsOnMount?.range === 'week') {
+    if (urlParamsOnMount?.view === 'weekly' && urlParamsOnMount.startDate) {
       return urlParamsOnMount.startDate;
     }
     const nav = location.state?.selectedWeek;
@@ -133,7 +146,7 @@ export default function TechnicianDetailNew() {
 
   // selectedMonth: Date representing the 1st of the selected month
   const [selectedMonth, setSelectedMonth] = useState(() => {
-    if (urlParamsOnMount?.range === 'month') {
+    if (urlParamsOnMount?.view === 'monthly' && urlParamsOnMount.startDate) {
       const d = urlParamsOnMount.startDate;
       return new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0);
     }
@@ -146,6 +159,33 @@ export default function TechnicianDetailNew() {
   const satisfactionRef = useRef(null);
 
   // ── Effects ────────────────────────────────────────────────────────────────
+
+  // URL round-trip: reflect the selected period + active chip into the query
+  // string (?view=&date=&bucket=, replace:true so history doesn't spam). Every
+  // ticket link on this page builds its Back address from location.pathname +
+  // location.search, so the ticket page's Back control restores this exact
+  // view. Defaults are omitted to keep URLs clean (no params = today, daily,
+  // handled); the legacy range/start/end/tab deep-link params are consumed by
+  // the mount bootstrap above and dropped here. location.state (dashboard
+  // drill context) is re-attached so the replace doesn't lose the drill chip.
+  useEffect(() => {
+    const next = new URLSearchParams(location.search);
+    ['range', 'start', 'end', 'tab'].forEach((k) => next.delete(k));
+    if (viewMode !== 'daily') next.set('view', viewMode);
+    else next.delete('view');
+    const dateStr = viewMode === 'weekly'
+      ? (selectedWeek ? formatDateLocal(new Date(selectedWeek)) : null)
+      : viewMode === 'monthly'
+        ? (selectedMonth ? formatDateLocal(selectedMonth) : null)
+        : (selectedDate || null);
+    if (dateStr) next.set('date', dateStr);
+    else next.delete('date');
+    if (activeChip !== 'handled') next.set('bucket', activeChip);
+    else next.delete('bucket');
+    if (next.toString() !== new URLSearchParams(location.search).toString()) {
+      setSearchParams(next, { replace: true, state: location.state });
+    }
+  }, [viewMode, selectedDate, selectedWeek, selectedMonth, activeChip, location.search, location.state, setSearchParams]);
 
   // Fetch CSAT
   useEffect(() => {

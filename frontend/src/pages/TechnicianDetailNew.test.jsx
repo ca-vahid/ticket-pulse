@@ -181,4 +181,17 @@ describe('TechnicianDetailNew (agent page rebuild)', () => {
       expect(screen.getByText(/Bounced tickets/)).toBeInTheDocument();
     });
   });
+
+  test('canonical ?view=&date=&bucket= params bootstrap period + chip (Back round-trip)', async () => {
+    renderPage('/technician/7?view=weekly&date=2026-07-20&bucket=closed');
+    await mounted();
+    // The weekly fetch is anchored to the URL's week start, not the default.
+    const { dashboardAPI } = await import('../services/api');
+    expect(dashboardAPI.getTechnicianWeekly).toHaveBeenCalledWith(7, '2026-07-20', 'America/Los_Angeles');
+    // The closed chip arrived active — the evidence table tells the closed story.
+    await waitFor(() => {
+      expect(screen.getByText(/Closed on .+ · \d+ tickets?/)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/Handled on .+ · \d+ tickets?/)).not.toBeInTheDocument();
+  });
 });
