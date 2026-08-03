@@ -1488,7 +1488,6 @@ export default function Tickets() {
                           );
                           const assigneeCell = (isEditable || fsRowEditable) ? (
                             <span className={`${CELL} py-1 gap-1 relative ${fx === 'aiDone' ? 'tp-assign-pop' : ''}`}>
-                              {ticket.aiBypass && <BypassBadge bypass={ticket.aiBypass} />}
                               <AssigneePicker
                                 ticketId={ticket.id}
                                 value={ticket.assignedTechId}
@@ -1503,6 +1502,9 @@ export default function Tickets() {
                                 aiSuggestion={canReview ? (ticket.ai || (aiLive ? { state: 'analyzing' } : null)) : null}
                                 onAiAssign={canReview ? () => setAiTicket(ticket) : null}
                               />
+                              {/* Provenance badge AFTER the picker so avatars/names
+                                  align vertically across rows (QA 08-03). */}
+                              {ticket.aiBypass && <BypassBadge bypass={ticket.aiBypass} />}
                             </span>
                           ) : (
                             <span

@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.89-preview';
+export const APP_VERSION = '3.0.90-preview';
 
 export const changelog = [
+  {
+    version: '3.0.90-preview',
+    date: 'August 3, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>📐 Tickets queue: assignee names align</strong> — the orange provenance badge (agent grabbed in FreshService before the AI ran) now sits after the assignee instead of pushing the avatar and name out of column.' },
+    ],
+  },
   {
     version: '3.0.89-preview',
     date: 'August 3, 2026',
