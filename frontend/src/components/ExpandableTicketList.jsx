@@ -37,7 +37,7 @@ function formatTicketTime(date, includeDate) {
   return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
 }
 
-function TicketRow({ ticket, variant = 'active', techName, viewMode = 'daily' }) {
+function TicketRow({ ticket, variant = 'active', techName, viewMode = 'daily', narrow = false }) {
   const location = useLocation();
   // Return address so /tickets/:id's Back control comes back to this page
   // (dashboard expanded row, tech detail, …) instead of the /tickets queue.
@@ -69,58 +69,108 @@ function TicketRow({ ticket, variant = 'active', techName, viewMode = 'daily' })
       : `TP-ID-${ticket.id}`;
   const refClass = `font-semibold flex-shrink-0 ${isMuted ? 'text-gray-400 hover:text-gray-600' : 'text-blue-600 hover:text-blue-800'}`;
 
+  // Shared pieces so the wide (single-line) and narrow (stacked) layouts keep
+  // identical link targets + `state.from` return-address behavior.
+  const refEl = internalHref ? (
+    <Link
+      to={internalHref}
+      state={linkState}
+      title="Open in Ticket Pulse"
+      className={refClass}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {refLabel}
+    </Link>
+  ) : (
+    <a
+      href={fsUrl || '#'}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={refClass}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {refLabel}
+    </a>
+  );
+
+  const fsIconEl = fsUrl && internalHref ? (
+    <a
+      href={fsUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      title="Open in FreshService"
+      className={`flex-shrink-0 ${isMuted ? 'text-gray-300 hover:text-gray-500' : 'text-blue-300 hover:text-blue-600'}`}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <ExternalLink className="w-2.5 h-2.5" />
+    </a>
+  ) : null;
+
+  const subjectEl = internalHref ? (
+    <Link
+      to={internalHref}
+      state={linkState}
+      title="Open in Ticket Pulse"
+      className={`truncate flex-1 min-w-0 hover:underline ${isMuted ? 'text-gray-400' : 'text-gray-800'}`}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {ticket.subject}
+    </Link>
+  ) : (
+    <span className={`truncate flex-1 min-w-0 ${isMuted ? 'text-gray-400' : 'text-gray-800'}`}>{ticket.subject}</span>
+  );
+
+  if (narrow) {
+    // Stacked two-line layout for tight containers (dashboard tech cards):
+    // every segment truncates, so the row can never exceed the card width.
+    return (
+      <div className={`min-w-0 py-1 px-2 hover:bg-gray-50 rounded text-[11px] leading-tight ${isMuted ? 'opacity-50' : ''}`}>
+        {/* Line 1: priority dot + ref + subject */}
+        <div className="flex min-w-0 items-center gap-1.5">
+          <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${priorityDot}`} title={`Priority ${ticket.priority}`} />
+          {refEl}
+          {fsIconEl}
+          {subjectEl}
+        </div>
+        {/* Line 2: status + category + self + requester + time */}
+        <div className="mt-0.5 flex min-w-0 items-center gap-1.5 pl-3 text-[10px]">
+          <span className={`${statusClass} px-1 py-0.5 rounded text-[9px] font-medium flex-shrink-0`}>
+            {ticket.status}
+          </span>
+          {categoryLabel && (
+            <span className="bg-blue-50 text-blue-600 px-1 py-0.5 rounded text-[9px] min-w-0 truncate">
+              {categoryLabel}
+            </span>
+          )}
+          {isSelf && variant !== 'closed' && (
+            <span className="bg-purple-50 text-purple-600 px-1 py-0.5 rounded text-[9px] flex-shrink-0 flex items-center gap-0.5">
+              <Star className="w-2 h-2 fill-purple-600" />
+              Self
+            </span>
+          )}
+          {ticket.requesterName && (
+            <span
+              className="text-gray-400 text-[9px] min-w-0 flex-1 truncate"
+              title={ticket.requesterEmail ? `${ticket.requesterName} (${ticket.requesterEmail})` : ticket.requesterName}
+            >
+              {ticket.requesterName}
+            </span>
+          )}
+          {timeLabel && (
+            <span className="text-gray-400 text-[9px] flex-shrink-0 tabular-nums ml-auto">{timeLabel}</span>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className={`flex items-center gap-1.5 py-1 px-2 hover:bg-gray-50 rounded text-[11px] leading-tight ${isMuted ? 'opacity-50' : ''}`}>
+    <div className={`flex min-w-0 items-center gap-1.5 py-1 px-2 hover:bg-gray-50 rounded text-[11px] leading-tight ${isMuted ? 'opacity-50' : ''}`}>
       <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${priorityDot}`} title={`Priority ${ticket.priority}`} />
 
-      {internalHref ? (
-        <Link
-          to={internalHref}
-          state={linkState}
-          title="Open in Ticket Pulse"
-          className={refClass}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {refLabel}
-        </Link>
-      ) : (
-        <a
-          href={fsUrl || '#'}
-          target="_blank"
-          rel="noopener noreferrer"
-          className={refClass}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {refLabel}
-        </a>
-      )}
-
-      {fsUrl && internalHref && (
-        <a
-          href={fsUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          title="Open in FreshService"
-          className={`flex-shrink-0 ${isMuted ? 'text-gray-300 hover:text-gray-500' : 'text-blue-300 hover:text-blue-600'}`}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <ExternalLink className="w-2.5 h-2.5" />
-        </a>
-      )}
-
-      {internalHref ? (
-        <Link
-          to={internalHref}
-          state={linkState}
-          title="Open in Ticket Pulse"
-          className={`truncate flex-1 min-w-0 hover:underline ${isMuted ? 'text-gray-400' : 'text-gray-800'}`}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {ticket.subject}
-        </Link>
-      ) : (
-        <span className={`truncate flex-1 min-w-0 ${isMuted ? 'text-gray-400' : 'text-gray-800'}`}>{ticket.subject}</span>
-      )}
+      {refEl}
+      {fsIconEl}
+      {subjectEl}
 
       <span className={`${statusClass} px-1 py-0.5 rounded text-[9px] font-medium flex-shrink-0`}>
         {ticket.status}
@@ -205,12 +255,14 @@ export function getTicketsForView(technician, viewMode) {
  * @param {Array}  props.closedTickets   - closed/resolved subset
  * @param {string} props.techName        - technician name (for self-pick badge logic)
  * @param {string} props.viewMode        - 'daily' | 'weekly' | 'monthly'
+ * @param {boolean} props.narrow         - stacked two-line rows for tight containers
+ *                                         (dashboard cards); default single-line
  */
-export default function ExpandableTicketList({ activeTickets, closedTickets, techName, viewMode = 'daily' }) {
+export default function ExpandableTicketList({ activeTickets, closedTickets, techName, viewMode = 'daily', narrow = false }) {
   const periodLabel = PERIOD_LABELS[viewMode] || PERIOD_LABELS.daily;
 
   return (
-    <div className="expanded-tickets border-t border-gray-200 bg-gray-50/80 px-4 py-2">
+    <div className="expanded-tickets min-w-0 border-t border-gray-200 bg-gray-50/80 px-4 py-2">
       {/* Active (open/pending) tickets for the period */}
       {activeTickets.length > 0 && (
         <div className="mb-1.5">
@@ -228,6 +280,7 @@ export default function ExpandableTicketList({ activeTickets, closedTickets, tec
                 variant="active"
                 techName={techName}
                 viewMode={viewMode}
+                narrow={narrow}
               />
             ))}
           </div>
@@ -254,6 +307,7 @@ export default function ExpandableTicketList({ activeTickets, closedTickets, tec
                 variant="closed"
                 techName={techName}
                 viewMode={viewMode}
+                narrow={narrow}
               />
             ))}
           </div>
