@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { ticketRefLabel } from '../tickets/ticketUi';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -112,6 +112,13 @@ export function clusterEvents(events) {
 
 export default function DayEventStrip({ ticketsOnDate = [], dayLabel = '', dayIso = null }) {
   const navigate = useNavigate();
+  const location = useLocation();
+  // Return address so the ticket page's Back control comes back to this
+  // agent page (same period), not the generic queue.
+  const openTicket = (ticketId) => {
+    if (!ticketId) return;
+    navigate(`/tickets/${ticketId}`, { state: { from: `${location.pathname}${location.search}` } });
+  };
 
   const markers = useMemo(
     () => clusterEvents(buildDayEvents({ ticketsOnDate, dayIso })),
@@ -154,7 +161,7 @@ export default function DayEventStrip({ ticketsOnDate = [], dayLabel = '', dayIs
               <button
                 key={m.id}
                 type="button"
-                onClick={() => m.events[0].ticket?.id && navigate(`/tickets/${m.events[0].ticket.id}`)}
+                onClick={() => openTicket(m.events[0].ticket?.id)}
                 title={title}
                 aria-label={`${style.label} batch of ${m.events.length} around ${time}`}
                 className={`tp-focus-ring absolute top-1/2 flex h-6 min-w-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full px-1 text-[9px] font-bold text-white shadow-sm transition-transform hover:scale-110 motion-reduce:transition-none ${style.dot}`}
@@ -169,7 +176,7 @@ export default function DayEventStrip({ ticketsOnDate = [], dayLabel = '', dayIs
             <button
               key={m.id}
               type="button"
-              onClick={() => t?.id && navigate(`/tickets/${t.id}`)}
+              onClick={() => openTicket(t?.id)}
               title={`${style.label} · ${time}\n${ticketRefLabel(t)} ${t.subject || ''}`}
               aria-label={`${style.label} ${ticketRefLabel(t)} at ${time}`}
               className={`tp-focus-ring absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full shadow-sm transition-transform hover:scale-150 motion-reduce:transition-none ${style.dot}`}

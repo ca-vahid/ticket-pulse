@@ -711,7 +711,6 @@ export default function TechnicianDetailNew() {
               tickets={evidence.tickets}
               chipKey={activeChip === 'satisfaction' ? 'handled' : activeChip}
               title={evidenceTitle}
-              viewMode={viewMode}
             />
           )}
 

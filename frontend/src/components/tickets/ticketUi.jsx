@@ -499,6 +499,9 @@ export function TicketRefLink({
   showFsIcon = true,
   iconClassName = 'h-2.5 w-2.5',
   onNavigate,
+  // Optional router location state passed to the internal link — lets origin
+  // pages (e.g. the agent page) hand /tickets/:id a `{ from }` return address.
+  state,
 }) {
   const internalHref = ticket?.id ? `/tickets/${ticket.id}` : null;
   const fsUrl = ticketFsUrl(ticket);
@@ -507,7 +510,7 @@ export function TicketRefLink({
   return (
     <span className={`inline-flex min-w-0 items-center gap-1 ${className}`}>
       {internalHref ? (
-        <Link to={internalHref} title="Open in Ticket Pulse" className={`min-w-0 truncate ${linkClassName}`} onClick={stop}>
+        <Link to={internalHref} state={state} title="Open in Ticket Pulse" className={`min-w-0 truncate ${linkClassName}`} onClick={stop}>
           {text}
         </Link>
       ) : (
