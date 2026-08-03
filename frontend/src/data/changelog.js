@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.90-preview';
+export const APP_VERSION = '3.0.91-preview';
 
 export const changelog = [
+  {
+    version: '3.0.91-preview',
+    date: 'August 3, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>📏 Cards view: ticket list no longer cut off</strong> — the inline ticket drilldown inside dashboard cards now uses a stacked two-line row (ref + subject, then status · category · requester · time) that truncates gracefully instead of clipping past the card edge. The full-width layout in Compact view is unchanged.' },
+    ],
+  },
   {
     version: '3.0.90-preview',
     date: 'August 3, 2026',

@@ -689,7 +689,7 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
         <ChevronDown className={`h-4 w-4 flex-shrink-0 text-slate-400 transition-transform ${ticketsOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
       </button>
       {ticketsOpen && (
-        <div onClick={(e) => e.stopPropagation()}>
+        <div className="min-w-0" onClick={(e) => e.stopPropagation()}>
           {/* Assigned-by summary — used to be its own badges/popup block on
               the card face (QA 07-30 #4). */}
           {technician.assigners?.length > 0 && (
@@ -703,6 +703,7 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
             closedTickets={closedTickets}
             techName={technician.name}
             viewMode={viewMode}
+            narrow
           />
         </div>
       )}
