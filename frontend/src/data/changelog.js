@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.0.91-preview';
+export const APP_VERSION = '3.0.92-preview';
 
 export const changelog = [
+  {
+    version: '3.0.92-preview',
+    date: 'August 3, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>🔗 Ticket Pulse links are now the primary ticket link everywhere</strong> — assignment run pages, Timeline rows, and previews now open the in-app ticket page first, with FreshService demoted to a small ↗ icon. Applies wherever a ticket is listed.' },
+      { type: 'fixed', html: '<strong>⬅️ Back returns to where you came from</strong> — opening a ticket from Assignment history, Timeline, approvals, scheduled tickets, the command palette, or a filtered queue now carries the origin, so the ticket page’s Back button takes you back to that exact page and filters.' },
+    ],
+  },
   {
     version: '3.0.91-preview',
     date: 'August 3, 2026',

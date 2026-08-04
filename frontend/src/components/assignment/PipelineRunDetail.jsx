@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import { assignmentAPI } from '../../services/api';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -1142,6 +1143,7 @@ function TranscriptSection({ transcript }) {
 }
 
 export default function PipelineRunDetail({ run, onDecide, deciding, onSyncComplete, isAdmin = false, workspaceTimezone = 'America/Los_Angeles' }) {
+  const location = useLocation();
   const [fsDomain, setFsDomain] = useState(null);
   const [freshness, setFreshness] = useState(null);
   const [freshnessLoading, setFreshnessLoading] = useState(false);
@@ -1356,12 +1358,37 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
               )}
               <span className="text-slate-300">·</span>
               <span>{formatDateTimeInTimezone(ticket?.createdAt, workspaceTimezone)}</span>
-              {ticketUrl && (
+              {/* Ticket Pulse's own ticket page is the primary destination; FS
+                  stays one click away as the small external icon. */}
+              {(ticket?.id || ticketUrl) && (
                 <>
                   <span className="text-slate-300">·</span>
-                  <a href={ticketUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 font-medium flex items-center gap-0.5">
-                    Open in FreshService <ExternalLink className="w-3 h-3" />
-                  </a>
+                  {ticket?.id ? (
+                    <span className="flex items-center gap-1">
+                      <Link
+                        to={`/tickets/${ticket.id}`}
+                        state={{ from: `${location.pathname}${location.search}` }}
+                        className="text-blue-600 hover:text-blue-800 font-medium"
+                      >
+                        Open ticket
+                      </Link>
+                      {ticketUrl && (
+                        <a
+                          href={ticketUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title="Open in FreshService"
+                          className="flex-shrink-0 text-slate-400 hover:text-blue-600"
+                        >
+                          <ExternalLink className="w-3 h-3" aria-hidden="true" />
+                        </a>
+                      )}
+                    </span>
+                  ) : (
+                    <a href={ticketUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 font-medium flex items-center gap-0.5">
+                      Open in FreshService <ExternalLink className="w-3 h-3" />
+                    </a>
+                  )}
                 </>
               )}
             </div>

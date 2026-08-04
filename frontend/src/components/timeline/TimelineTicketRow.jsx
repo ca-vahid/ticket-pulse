@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import {
   ArrowRight,
   ChevronDown,
@@ -23,7 +24,13 @@ import { getTicketCategoryLabel } from '../../utils/ticketFilter';
  *   idx              — list index (used for key uniqueness)
  */
 export default function TimelineTicketRow({ ticket, defaultFirstName, onExcludeCategory, idx: _idx, showFullDate }) {
+  const location = useLocation();
   const [expanded, setExpanded] = useState(false);
+  // Ticket Pulse's own ticket page is the primary destination (subject link);
+  // FS is demoted to the small external icon. `state.from` gives /tickets/:id
+  // a return address back to this exact timeline view.
+  const internalHref = ticket.id ? `/tickets/${ticket.id}` : null;
+  const linkState = { from: `${location.pathname}${location.search}` };
   const picked = ticket._picked;
   const overnight = isOvernight(ticket);
   const wait = fmtWaitTime(ticket);
@@ -118,15 +125,18 @@ export default function TimelineTicketRow({ ticket, defaultFirstName, onExcludeC
             })()}
           </span>
 
-          {/* FreshService link */}
-          <a
-            href={`https://${FRESHSERVICE_DOMAIN}/a/tickets/${ticket.freshserviceTicketId}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-blue-600 hover:text-blue-800 flex-shrink-0"
-          >
-            <ExternalLink className="w-3 h-3" />
-          </a>
+          {/* FreshService link — secondary when the internal page exists */}
+          {ticket.freshserviceTicketId && (
+            <a
+              href={`https://${FRESHSERVICE_DOMAIN}/a/tickets/${ticket.freshserviceTicketId}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Open in FreshService"
+              className={`flex-shrink-0 ${internalHref ? 'text-slate-400 hover:text-blue-600' : 'text-blue-600 hover:text-blue-800'}`}
+            >
+              <ExternalLink className="w-3 h-3" />
+            </a>
+          )}
 
           {/* Agent avatar (before subject) */}
           {picked && pickerPhoto ? (
@@ -143,10 +153,21 @@ export default function TimelineTicketRow({ ticket, defaultFirstName, onExcludeC
             </div>
           ) : null}
 
-          {/* Subject */}
-          <span className={`order-first min-w-0 w-full font-medium text-sm sm:order-none sm:w-auto sm:flex-1 sm:text-xs ${picked ? 'text-slate-900' : 'text-slate-500'}`}>
-            {ticket.subject}
-          </span>
+          {/* Subject — primary link to the in-app ticket page */}
+          {internalHref ? (
+            <Link
+              to={internalHref}
+              state={linkState}
+              title="Open in Ticket Pulse"
+              className={`order-first min-w-0 w-full font-medium text-sm hover:underline hover:text-blue-700 sm:order-none sm:w-auto sm:flex-1 sm:text-xs ${picked ? 'text-slate-900' : 'text-slate-500'}`}
+            >
+              {ticket.subject}
+            </Link>
+          ) : (
+            <span className={`order-first min-w-0 w-full font-medium text-sm sm:order-none sm:w-auto sm:flex-1 sm:text-xs ${picked ? 'text-slate-900' : 'text-slate-500'}`}>
+              {ticket.subject}
+            </span>
+          )}
 
           {/* Picked badge */}
           <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium flex-shrink-0 ${picked ? pickedBadgeClass : 'bg-slate-200 text-slate-600'}`}>

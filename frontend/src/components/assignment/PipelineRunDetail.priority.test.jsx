@@ -2,8 +2,12 @@
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import PipelineRunDetail from './PipelineRunDetail';
 import { assignmentAPI, dashboardAPI } from '../../services/api';
+
+// PipelineRunDetail links to the in-app ticket page, so it needs router context.
+const renderWithRouter = (ui) => render(<MemoryRouter>{ui}</MemoryRouter>);
 
 vi.mock('../../services/api', () => ({
   assignmentAPI: {
@@ -30,7 +34,7 @@ describe('PipelineRunDetail priority display', () => {
   });
 
   test('shows assessed priority and rationale alongside FreshService priority', async () => {
-    render(<PipelineRunDetail
+    renderWithRouter(<PipelineRunDetail
       run={{
         id: 3101,
         status: 'completed',
@@ -76,7 +80,7 @@ describe('PipelineRunDetail priority display', () => {
   });
 
   test('shows priority writeback and alert delivery audit evidence', async () => {
-    render(<PipelineRunDetail
+    renderWithRouter(<PipelineRunDetail
       run={{
         id: 3102,
         status: 'completed',
@@ -140,7 +144,7 @@ describe('PipelineRunDetail priority display', () => {
   });
 
   test('shows provider and fallback audit details', async () => {
-    render(<PipelineRunDetail
+    renderWithRouter(<PipelineRunDetail
       run={{
         id: 3103,
         status: 'completed',

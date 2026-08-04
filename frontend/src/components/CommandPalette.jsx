@@ -247,11 +247,13 @@ export default function CommandPalette() {
         sub: `${t.displayRef} · ${t.requester?.name || 'Unknown requester'}`,
         status: t.status,
         Icon: TicketIcon,
-        run: () => { navigate(`/tickets/${t.id}`); close(); },
+        // Return address so /tickets/:id's Back control comes back to the page
+        // the palette was opened from.
+        run: () => { navigate(`/tickets/${t.id}`, { state: { from: `${location.pathname}${location.search}` } }); close(); },
       });
     }
     return out;
-  }, [open, query, context, ticketResults, user?.role, wsRole, availableWorkspaces, currentWorkspace?.id, switchWorkspace, navigate, close, runTicketAction]);
+  }, [open, query, context, ticketResults, user?.role, wsRole, availableWorkspaces, currentWorkspace?.id, switchWorkspace, navigate, close, runTicketAction, location.pathname, location.search]);
 
   useEffect(() => { setActiveIndex(0); }, [query, ticketResults.length]);
 
