@@ -1,4 +1,5 @@
 import { forwardRef, useMemo, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Star } from 'lucide-react';
 import { TicketRefLink, PersonAvatar } from '../tickets/ticketUi';
 
@@ -90,6 +91,9 @@ const SatisfactionPanel = forwardRef(function SatisfactionPanel(
   { csatTickets = [], feedbackTickets = [], isLoading = false, highlighted = false },
   ref,
 ) {
+  const location = useLocation();
+  // Return address so /tickets/:id's Back control comes back to this page.
+  const backState = { from: `${location.pathname}${location.search}` };
   const merged = useMemo(
     () => mergeSatisfaction(csatTickets, feedbackTickets),
     [csatTickets, feedbackTickets],
@@ -151,7 +155,7 @@ const SatisfactionPanel = forwardRef(function SatisfactionPanel(
               </span>
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <TicketRefLink ticket={r.ticket} className="text-[11px]" />
+                  <TicketRefLink ticket={r.ticket} state={backState} className="text-[11px]" />
                   <span className="min-w-0 truncate text-[12px] font-medium text-slate-700" title={r.ticket.subject}>
                     {r.ticket.subject || ''}
                   </span>

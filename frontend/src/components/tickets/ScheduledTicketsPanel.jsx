@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { Activity, AlertCircle, CalendarClock, Check, Loader2, Play, Repeat, Trash2 } from 'lucide-react';
 import { ticketsAPI } from '../../services/api';
 import { timeAgo } from './ticketUi';
@@ -19,6 +19,9 @@ function inFuture(value) {
  * time. Activation replays the payload through the normal create path.
  */
 export default function ScheduledTicketsPanel({ ticketingOn = true }) {
+  const location = useLocation();
+  // Return address so /tickets/:id's Back control comes back to this view.
+  const backState = { from: `${location.pathname}${location.search}` };
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(null); // `${action}:${id}`
@@ -162,7 +165,7 @@ export default function ScheduledTicketsPanel({ ticketingOn = true }) {
                 <span className="min-w-0 flex-1 truncate text-slate-600">{row.payload?.subject || '(no subject)'}</span>
                 <span className="text-xs text-slate-400 whitespace-nowrap">activated {timeAgo(row.activatedAt)}</span>
                 {row.ticketId && (
-                  <Link to={`/tickets/${row.ticketId}`} className="tp-focus-ring text-xs font-semibold text-blue-700 hover:underline rounded whitespace-nowrap">
+                  <Link to={`/tickets/${row.ticketId}`} state={backState} className="tp-focus-ring text-xs font-semibold text-blue-700 hover:underline rounded whitespace-nowrap">
                     Open ticket
                   </Link>
                 )}

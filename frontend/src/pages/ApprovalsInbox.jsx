@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { Stamp, Loader2, Check, X, MessageCircleQuestion, Inbox, ExternalLink, RotateCcw, ClipboardList } from 'lucide-react';
 import AppHeader from '../components/AppHeader';
 import MobileTabBar from '../components/nav/MobileTabBar';
@@ -25,6 +25,9 @@ const STAT_TILES = [
 ];
 
 export default function ApprovalsInbox() {
+  const location = useLocation();
+  // Return address so /tickets/:id's Back control comes back to this inbox.
+  const backState = { from: `${location.pathname}${location.search}` };
   const { currentWorkspace, isWorkspaceSelected } = useWorkspace();
   const wsRole = useWorkspaceRole();
   const canReview = wsRole === 'admin' || wsRole === 'reviewer';
@@ -146,7 +149,7 @@ export default function ApprovalsInbox() {
                     <div className="flex items-start gap-2 flex-wrap">
                       <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide border ${STATUS_META[a.status]?.cls || 'bg-slate-100 text-slate-500 border-slate-200'}`}>{STATUS_META[a.status]?.label || a.status}</span>
                       {a.categoryName && <span className="px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-100">{a.categoryName}</span>}
-                      <Link to={`/tickets/${a.ticketId}?tab=approvals`} className="tp-focus-ring rounded font-mono text-xs font-bold text-blue-700 hover:underline inline-flex items-center gap-1">{a.displayRef} <ExternalLink className="w-3 h-3" aria-hidden="true" /></Link>
+                      <Link to={`/tickets/${a.ticketId}?tab=approvals`} state={backState} className="tp-focus-ring rounded font-mono text-xs font-bold text-blue-700 hover:underline inline-flex items-center gap-1">{a.displayRef} <ExternalLink className="w-3 h-3" aria-hidden="true" /></Link>
                       <span className="text-sm text-slate-800 truncate max-w-full">{a.subject || '(no subject)'}</span>
                       <span className="ml-auto text-[11px] text-slate-400 whitespace-nowrap">{timeAgo(a.decidedAt || a.createdAt)}</span>
                     </div>
@@ -174,7 +177,7 @@ export default function ApprovalsInbox() {
                     <li key={a.id} className="tp-card rounded-xl p-4">
                       <div className="flex items-start gap-2 flex-wrap">
                         {a.categoryName && <span className="px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-100">{a.categoryName}</span>}
-                        <Link to={`/tickets/${a.ticketId}?tab=approvals`} className="tp-focus-ring rounded font-mono text-xs font-bold text-blue-700 hover:underline inline-flex items-center gap-1">
+                        <Link to={`/tickets/${a.ticketId}?tab=approvals`} state={backState} className="tp-focus-ring rounded font-mono text-xs font-bold text-blue-700 hover:underline inline-flex items-center gap-1">
                           {a.displayRef} <ExternalLink className="w-3 h-3" aria-hidden="true" />
                         </Link>
                         <span className="text-sm text-slate-800 font-medium truncate max-w-full">{a.subject || '(no subject)'}</span>
@@ -226,7 +229,7 @@ export default function ApprovalsInbox() {
                     <li key={a.id} className="tp-card rounded-xl p-4 border-l-2 border-l-violet-300">
                       <div className="flex items-start gap-2 flex-wrap">
                         {a.categoryName && <span className="px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-100">{a.categoryName}</span>}
-                        <Link to={`/tickets/${a.ticketId}?tab=approvals`} className="tp-focus-ring rounded font-mono text-xs font-bold text-blue-700 hover:underline inline-flex items-center gap-1">
+                        <Link to={`/tickets/${a.ticketId}?tab=approvals`} state={backState} className="tp-focus-ring rounded font-mono text-xs font-bold text-blue-700 hover:underline inline-flex items-center gap-1">
                           {a.displayRef} <ExternalLink className="w-3 h-3" aria-hidden="true" />
                         </Link>
                         <span className="text-sm text-slate-800 font-medium truncate max-w-full">{a.subject || '(no subject)'}</span>
@@ -237,7 +240,7 @@ export default function ApprovalsInbox() {
                         <button onClick={() => resubmit(a)} disabled={busyId === a.id} className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-primary text-primary-foreground hover:bg-blue-700 disabled:opacity-50">
                           {busyId === a.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />} Resubmit for approval
                         </button>
-                        <Link to={`/tickets/${a.ticketId}?tab=conversation`} className="tp-focus-ring px-2 py-1 text-[11px] font-medium rounded-lg text-slate-500 hover:bg-slate-100">Add info on ticket →</Link>
+                        <Link to={`/tickets/${a.ticketId}?tab=conversation`} state={backState} className="tp-focus-ring px-2 py-1 text-[11px] font-medium rounded-lg text-slate-500 hover:bg-slate-100">Add info on ticket →</Link>
                       </div>
                     </li>
                   ))}

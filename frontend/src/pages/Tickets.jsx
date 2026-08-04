@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'motion/react';
 import {
   Activity, AlertCircle, ArrowDownWideNarrow, ArrowUpNarrowWide, CalendarDays, Check,
@@ -264,6 +264,12 @@ function Pagination({ page, totalPages, total, pageSize, onPage, compact = false
 
 export default function Tickets() {
   const navigate = useNavigate();
+  const location = useLocation();
+  // Return address so /tickets/:id's Back control comes back to this exact
+  // queue view (filters, page, view — everything in the query string).
+  const openTicket = useCallback((id) => navigate(`/tickets/${id}`, {
+    state: { from: `${location.pathname}${location.search}` },
+  }), [navigate, location.pathname, location.search]);
   const { user } = useAuth();
   const { currentWorkspace } = useWorkspace();
   // AI assignment/review is a reviewer/admin capability — its endpoints are
@@ -836,12 +842,12 @@ export default function Tickets() {
     clickTimerRef.current = setTimeout(() => {
       // The drawer needs desktop room; on small screens go straight to detail.
       if (window.matchMedia('(min-width: 1024px)').matches) openPreview(id);
-      else navigate(`/tickets/${id}`);
+      else openTicket(id);
     }, 220);
   };
   const onRowDoubleClick = (id) => {
     if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
-    navigate(`/tickets/${id}`);
+    openTicket(id);
   };
   useEffect(() => () => { if (clickTimerRef.current) clearTimeout(clickTimerRef.current); }, []);
 
@@ -874,7 +880,7 @@ export default function Tickets() {
         else setParams({ peek: tickets[down ? 0 : tickets.length - 1].id }, { resetPage: false });
       } else if (e.key === 'Enter' && previewId) {
         e.preventDefault();
-        navigate(`/tickets/${previewId}`);
+        openTicket(previewId);
       } else if (e.key.toLowerCase() === 'x' && previewId) {
         e.preventDefault();
         setSelectedIds((prev) => {
@@ -886,7 +892,7 @@ export default function Tickets() {
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [previewId, tickets, stepPreview, navigate, setParams]);
+  }, [previewId, tickets, stepPreview, openTicket, setParams]);
   const [bulkAction, setBulkAction] = useState(null); // { type: 'assign'|'status', value, label }
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkResult, setBulkResult] = useState(null); // { ok, failed: [{ref, message}], skipped }

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import { ArrowRight, ExternalLink, GitBranch, RotateCcw } from 'lucide-react';
 import { FRESHSERVICE_DOMAIN } from './constants';
 
@@ -55,6 +56,12 @@ function EventAvatar({ name, photoUrl, tone }) {
 }
 
 export default function TimelineEventRow({ event, showFullDate }) {
+  const location = useLocation();
+  // Ticket Pulse's own ticket page is the primary destination (subject link);
+  // FS is demoted to the small external icon. `state.from` gives /tickets/:id
+  // a return address back to this exact timeline view.
+  const internalHref = event.ticketId ? `/tickets/${event.ticketId}` : null;
+  const linkState = { from: `${location.pathname}${location.search}` };
   const isRejected = event.eventType === 'rejected';
   const Icon = isRejected ? RotateCcw : GitBranch;
   const fromName = event.fromTechName || 'Previous holder';
@@ -78,7 +85,8 @@ export default function TimelineEventRow({ event, showFullDate }) {
               href={`https://${FRESHSERVICE_DOMAIN}/a/tickets/${event.freshserviceTicketId}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-blue-600 hover:text-blue-800 flex-shrink-0"
+              title="Open in FreshService"
+              className={`flex-shrink-0 ${internalHref ? 'text-slate-400 hover:text-blue-600' : 'text-blue-600 hover:text-blue-800'}`}
             >
               <ExternalLink className="w-3 h-3" />
             </a>
@@ -90,9 +98,20 @@ export default function TimelineEventRow({ event, showFullDate }) {
           }`}>
             {isRejected ? 'Rejected' : 'Handoff'}
           </span>
-          <span className="order-first min-w-0 w-full font-medium text-sm text-slate-900 sm:order-none sm:w-auto sm:text-xs">
-            {event.subject}
-          </span>
+          {internalHref ? (
+            <Link
+              to={internalHref}
+              state={linkState}
+              title="Open in Ticket Pulse"
+              className="order-first min-w-0 w-full font-medium text-sm text-slate-900 hover:underline hover:text-blue-700 sm:order-none sm:w-auto sm:text-xs"
+            >
+              {event.subject}
+            </Link>
+          ) : (
+            <span className="order-first min-w-0 w-full font-medium text-sm text-slate-900 sm:order-none sm:w-auto sm:text-xs">
+              {event.subject}
+            </span>
+          )}
           <div className="flex min-w-0 flex-wrap items-center gap-1.5 flex-shrink-0">
             <EventAvatar name={fromName} photoUrl={event.fromTechPhotoUrl} />
             <span className="max-w-[90px] truncate text-[11px] font-semibold text-slate-700 sm:max-w-[120px]" title={fromName}>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   Activity, Bot, CalendarDays, Check, ChevronDown, ChevronUp, ExternalLink, Hand, Inbox,
   Loader2, Lock, Mail, MapPin, Phone, Sparkles, Trash2, VolumeX, X,
@@ -36,6 +36,12 @@ const TABS = [
  */
 export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onChanged, onStep, stepInfo }) {
   const navigate = useNavigate();
+  const location = useLocation();
+  // Return address so /tickets/:id's Back control comes back to the exact
+  // originating queue view (filters + peek param intact).
+  const openFullTicket = () => navigate(`/tickets/${ticketId}`, {
+    state: { from: `${location.pathname}${location.search}` },
+  });
   const [ticket, setTicket] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -289,7 +295,7 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
               </a>
             )}
             <button
-              onClick={() => navigate(`/tickets/${ticketId}`)}
+              onClick={openFullTicket}
               aria-label="Open full ticket"
               title="Open full ticket in Ticket Pulse"
               className="tp-focus-ring p-1.5 rounded-lg text-slate-400 hover:text-blue-700 hover:bg-blue-50"
@@ -693,7 +699,7 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
             </button>
           )}
           <button
-            onClick={() => navigate(`/tickets/${ticketId}`)}
+            onClick={openFullTicket}
             className="tp-focus-ring ml-auto px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-primary text-primary-foreground hover:bg-blue-700"
           >
             Open full ticket
