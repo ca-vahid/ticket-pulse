@@ -5,7 +5,7 @@ import {
   Loader2, Lock, Mail, MapPin, Phone, Sparkles, Trash2, VolumeX, X,
 } from 'lucide-react';
 import {
-  ExternalChip, MirrorChip, OriginChip, PersonAvatar, PriorityDot, ProvenanceChip, SafeHtml, SlaChip, StateChip, StatusPill,
+  ExternalChip, MirrorChip, OriginChip, PersonAvatar, PriorityDot, ProvenanceChip, SafeHtml, SlaChip, SlaTargetChip, StateChip, StatusPill,
   TagChip, TypePill, PRIORITY_LABELS, isConversationEntry, pipelineRunLabel, pipelineTriggerLabel,
   ticketCategoryLabels, timeAgo,
 } from './ticketUi';
@@ -546,10 +546,8 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                   <div className="flex items-center gap-2 px-2.5 py-1.5">
                     <dt className="text-slate-400 w-24 flex-shrink-0 pl-[18px]">First response</dt>
                     <dd className="flex items-center gap-1.5 min-w-0">
-                      <span className="text-slate-600">{new Date(ticket.frDueBy).toLocaleString(undefined, DAY_TIME)}</span>
-                      {ticket.firstPublicAgentReplyAt
-                        ? <span className="inline-flex px-1.5 py-0.5 rounded-full text-[10px] font-semibold border bg-emerald-50 text-emerald-700 border-emerald-200">Responded</span>
-                        : <SlaChip value={ticket.frDueBy} paused={ticket.status === 'Pending'} className="!px-1.5 !text-[10px]" />}
+                      <span className="text-slate-600" title={new Date(ticket.frDueBy).toLocaleString()}>{new Date(ticket.frDueBy).toLocaleString(undefined, DAY_TIME)}</span>
+                      <SlaTargetChip target={ticket.frDueBy} metAt={ticket.firstPublicAgentReplyAt} status={ticket.status} kind="response" className="!px-1.5 !text-[10px]" />
                     </dd>
                   </div>
                 )}
@@ -557,10 +555,8 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                   <div className="flex items-center gap-2 px-2.5 py-1.5">
                     <dt className="text-slate-400 w-24 flex-shrink-0 pl-[18px]">Resolution</dt>
                     <dd className="flex items-center gap-1.5 min-w-0">
-                      <span className="text-slate-600">{new Date(ticket.dueBy).toLocaleString(undefined, DAY_TIME)}</span>
-                      {['Resolved', 'Closed'].includes(ticket.status)
-                        ? <span className="inline-flex px-1.5 py-0.5 rounded-full text-[10px] font-semibold border bg-emerald-50 text-emerald-700 border-emerald-200">Done</span>
-                        : <SlaChip value={ticket.dueBy} paused={ticket.status === 'Pending'} className="!px-1.5 !text-[10px]" />}
+                      <span className="text-slate-600" title={new Date(ticket.dueBy).toLocaleString()}>{new Date(ticket.dueBy).toLocaleString(undefined, DAY_TIME)}</span>
+                      <SlaTargetChip target={ticket.dueBy} metAt={ticket.resolvedAt || ticket.closedAt} status={ticket.status} kind="resolution" className="!px-1.5 !text-[10px]" />
                     </dd>
                   </div>
                 )}

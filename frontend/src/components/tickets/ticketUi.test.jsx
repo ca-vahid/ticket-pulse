@@ -3,7 +3,7 @@ import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, test } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import {
-  MirrorChip, OriginChip, PersonAvatar, PriorityDot, StatusPill, initials, timeAgo,
+  MirrorChip, OriginChip, PersonAvatar, PriorityDot, SlaTargetChip, StatusPill, initials, slaTargetState, timeAgo,
 } from './ticketUi';
 
 afterEach(cleanup);
@@ -20,6 +20,25 @@ describe('ticketUi helpers', () => {
     expect(initials('Rita Requester')).toBe('RR');
     expect(initials('Cher')).toBe('C');
     expect(initials('')).toBe('?');
+  });
+
+  test('slaTargetState covers the SLA badge state machine', () => {
+    const target = new Date('2026-07-28T13:00:00Z');
+    const before = new Date('2026-07-28T09:00:00Z');
+    const after = new Date('2026-07-29T13:00:00Z');
+    // Met at/before target → met (green), never live.
+    expect(slaTargetState({ target, metAt: before, isTerminal: true }).state).toBe('met');
+    expect(slaTargetState({ target, metAt: target, isTerminal: false }).state).toBe('met');
+    // Met after target → late (amber, historical), even while the ticket is open.
+    expect(slaTargetState({ target, metAt: after, isTerminal: false }).state).toBe('late');
+    expect(slaTargetState({ target, metAt: after, isTerminal: true }).state).toBe('late');
+    // Terminal ticket, fulfillment time unknown → unknown (quiet), NEVER overdue.
+    expect(slaTargetState({ target, metAt: null, isTerminal: true }).state).toBe('unknown');
+    // Open ticket, not yet fulfilled → live (countdown/overdue chip applies).
+    expect(slaTargetState({ target, metAt: null, isTerminal: false }).state).toBe('live');
+    // No/invalid target → no row state at all.
+    expect(slaTargetState({ target: null })).toBeNull();
+    expect(slaTargetState({ target: 'not-a-date' })).toBeNull();
   });
 });
 
@@ -62,5 +81,39 @@ describe('ticketUi components', () => {
     expect(screen.getByText('TT')).toBeInTheDocument();
     const { container } = render(<PersonAvatar name={null} />);
     expect(container.querySelector('svg')).toBeTruthy();
+  });
+
+  test('SlaTargetChip never shows a live Overdue badge on a closed ticket (bug: FS #234903)', () => {
+    // Closed ticket, first-response target a week in the past, reply time
+    // unknown (sparse FS data) → quiet "—" chip with an explanatory tooltip.
+    const pastTarget = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
+    render(<SlaTargetChip target={pastTarget} metAt={null} status="Closed" kind="response" />);
+    const quiet = screen.getByText('—');
+    expect(quiet).toBeInTheDocument();
+    expect(quiet).toHaveAttribute('title', expect.stringContaining('First response target was'));
+    expect(screen.queryByText(/Overdue/)).not.toBeInTheDocument();
+  });
+
+  test('SlaTargetChip freezes outcomes: Met, Met late, Done, Resolved late', () => {
+    const target = '2026-07-28T13:00:00Z';
+    render(<SlaTargetChip target={target} metAt="2026-07-28T09:00:00Z" status="Open" kind="response" />);
+    expect(screen.getByText('Met')).toBeInTheDocument();
+    render(<SlaTargetChip target={target} metAt="2026-07-30T09:00:00Z" status="Closed" kind="response" />);
+    expect(screen.getByText('Met late')).toBeInTheDocument();
+    render(<SlaTargetChip target={target} metAt="2026-07-27T09:00:00Z" status="Resolved" kind="resolution" />);
+    expect(screen.getByText('Done')).toBeInTheDocument();
+    render(<SlaTargetChip target={target} metAt="2026-07-29T21:00:00Z" status="Closed" kind="resolution" />);
+    expect(screen.getByText('Resolved late')).toBeInTheDocument();
+    expect(screen.queryByText(/Overdue/)).not.toBeInTheDocument();
+  });
+
+  test('SlaTargetChip keeps the live countdown for open tickets past due', () => {
+    const pastTarget = new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString();
+    render(<SlaTargetChip target={pastTarget} metAt={null} status="Open" kind="response" />);
+    expect(screen.getByText(/Overdue/)).toBeInTheDocument();
+    // Pending pauses the clock instead of nagging.
+    cleanup();
+    render(<SlaTargetChip target={pastTarget} metAt={null} status="Pending" kind="response" />);
+    expect(screen.getByText('Paused')).toBeInTheDocument();
   });
 });
