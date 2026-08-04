@@ -250,6 +250,87 @@ export function SlaChip({ value, paused = false, className = '' }) {
   );
 }
 
+/**
+ * Terminal-aware state for one SLA target row (first response / resolution).
+ *
+ * States:
+ *  - 'met'     → fulfilled at/before the target (fulfillment time known)
+ *  - 'late'    → fulfilled after the target — a historical fact, not an alarm
+ *  - 'unknown' → ticket already resolved/closed but we never learned when (or
+ *                whether) the target was met (sparse FS data) — never "Overdue"
+ *  - 'live'    → ticket still open; the countdown/overdue chip applies
+ */
+export function slaTargetState({ target, metAt = null, isTerminal = false }) {
+  if (!target) return null;
+  const targetMs = new Date(target).getTime();
+  if (Number.isNaN(targetMs)) return null;
+  if (metAt) {
+    const metMs = new Date(metAt).getTime();
+    if (!Number.isNaN(metMs)) {
+      return { state: metMs <= targetMs ? 'met' : 'late', deltaMs: metMs - targetMs };
+    }
+  }
+  return { state: isTerminal ? 'unknown' : 'live' };
+}
+
+/** Compact duration label for tooltip deltas ("45m", "7h", "3d"). */
+function slaSpan(ms) {
+  const min = Math.round(Math.abs(ms) / 60000);
+  if (min < 60) return `${min}m`;
+  if (min < 48 * 60) return `${Math.round(min / 60)}h`;
+  return `${Math.round(min / 1440)}d`;
+}
+
+const SLA_TARGET_DATETIME = { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' };
+
+/**
+ * SLA chip for a target row that knows about terminal tickets. Live tickets
+ * defer to SlaChip (countdown / overdue / paused); once the target is met or
+ * the ticket is closed, the chip freezes into a historical outcome — a closed
+ * ticket must never show a running "Overdue Nd".
+ *
+ * kind: 'response' (first response) | 'resolution'.
+ */
+export function SlaTargetChip({ target, metAt = null, status, kind = 'response', className = '' }) {
+  const isTerminal = ['Resolved', 'Closed'].includes(status);
+  const info = slaTargetState({ target, metAt, isTerminal });
+  if (!info) return null;
+  if (info.state === 'live') {
+    return <SlaChip value={target} paused={status === 'Pending'} className={className} />;
+  }
+  const base = `inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap border ${className}`;
+  const targetLabel = new Date(target).toLocaleString(undefined, SLA_TARGET_DATETIME);
+  const noun = kind === 'resolution' ? 'Resolution' : 'First response';
+  if (info.state === 'unknown') {
+    const title = `${noun} target was ${targetLabel}. The ticket is ${String(status).toLowerCase()} and this timestamp wasn't tracked, so it can't be marked met or missed.`;
+    return (
+      <span className={`${base} bg-slate-50 text-slate-400 border-slate-200`} title={title} aria-label={title}>
+        —
+      </span>
+    );
+  }
+  const metLabel = new Date(metAt).toLocaleString(undefined, SLA_TARGET_DATETIME);
+  const verb = kind === 'resolution' ? 'Resolved' : 'Responded';
+  if (info.state === 'met') {
+    return (
+      <span
+        className={`${base} bg-emerald-50 text-emerald-700 border-emerald-200`}
+        title={`${verb} ${metLabel} — ${slaSpan(info.deltaMs)} before the ${targetLabel} target`}
+      >
+        {kind === 'resolution' ? 'Done' : 'Met'}
+      </span>
+    );
+  }
+  return (
+    <span
+      className={`${base} bg-amber-50 text-amber-700 border-amber-200`}
+      title={`${verb} ${metLabel} — ${slaSpan(info.deltaMs)} after the ${targetLabel} target`}
+    >
+      {kind === 'resolution' ? 'Resolved late' : 'Met late'}
+    </span>
+  );
+}
+
 export function timeAgo(value) {
   if (!value) return '—';
   const date = new Date(value);
