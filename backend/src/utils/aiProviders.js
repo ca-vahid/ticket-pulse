@@ -25,7 +25,9 @@ export const AI_OPERATIONS = [
 // in the settings dropdown for opt-back.
 export const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-5';
 export const SONNET_4_6_MODEL = 'claude-sonnet-4-6';
-export const DEFAULT_OPENAI_MODEL = 'gpt-5.5';
+// GPT-5.6 Sol (Jul 2026): OpenAI's flagship, successor to gpt-5.5 in the
+// default slot ($5/M in, $30/M out — complex reasoning/coding/agentic tier).
+export const DEFAULT_OPENAI_MODEL = 'gpt-5.6-sol';
 export const DEFAULT_RECLASSIFICATION_MODEL = 'claude-haiku-4-5-20251001';
 export const DEFAULT_OPUS_MODEL = 'claude-opus-4-8';
 
@@ -39,6 +41,8 @@ const LEGACY_MODEL_ALIASES = new Map([
   ['gpt-5', DEFAULT_OPENAI_MODEL],
   ['gpt-5-mini', DEFAULT_OPENAI_MODEL],
   ['gpt-5-nano', DEFAULT_OPENAI_MODEL],
+  // Saved settings created while gpt-5.5 was the default migrate silently.
+  ['gpt-5.5', DEFAULT_OPENAI_MODEL],
 ]);
 
 export const MODEL_METADATA = [
@@ -89,13 +93,13 @@ export const MODEL_METADATA = [
   {
     provider: AI_PROVIDER_OPENAI,
     model: DEFAULT_OPENAI_MODEL,
-    label: 'GPT-5.5',
+    label: 'GPT-5.6 Sol',
     operations: AI_OPERATIONS,
     supportsStreaming: false,
     supportsTools: true,
     supportsJson: true,
     supportsThinking: true,
-    costNotes: 'Default OpenAI fallback model. Tune reasoning effort instead of selecting a separate pro model.',
+    costNotes: 'Default OpenAI fallback model (flagship tier, successor to GPT-5.5). Tune reasoning effort instead of selecting a separate pro model.',
   },
   {
     provider: AI_PROVIDER_OPENAI,

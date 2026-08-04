@@ -64,12 +64,13 @@ describe('ai provider utilities', () => {
       provider: AI_PROVIDER_OPENAI,
       operation: 'assignment_pipeline',
     });
-    // Approved set: GPT-5.5 (default/fallback) + GPT-5.6 Luna (economy tier,
+    // Approved set: GPT-5.6 Sol (default/fallback, successor to GPT-5.5) +
+    // GPT-5.6 Luna (economy tier,
     // added Aug 2026 after OpenAI's 80% price cut — ~10x cheaper than Sonnet).
     expect(openAiModels).toEqual([
       expect.objectContaining({
         model: DEFAULT_OPENAI_MODEL,
-        label: 'GPT-5.5',
+        label: 'GPT-5.6 Sol',
       }),
       expect.objectContaining({
         model: 'gpt-5.6-luna',

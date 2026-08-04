@@ -9,7 +9,7 @@ import providerGateway from './aiProviders/providerGateway.js';
  */
 class LLMService {
   constructor() {
-    this.model = config.openai.model || 'gpt-5.5';
+    this.model = config.openai.model || 'gpt-5.6-sol';
   }
 
   /**

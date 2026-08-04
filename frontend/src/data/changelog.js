@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.93-preview';
+export const APP_VERSION = '3.0.94-preview';
 
 export const changelog = [
+  {
+    version: '3.0.94-preview',
+    date: 'August 3, 2026',
+    entries: [
+      { type: 'changed', html: '<strong>⚡ Default OpenAI model is now GPT-5.6 Sol</strong> — the flagship successor to GPT-5.5 ($5/M in, $30/M out, 1M context), used wherever OpenAI is the primary or failover provider. Saved settings that still reference GPT-5.5 migrate automatically; the Settings dropdown and run records now show the new name. Live-tested through the tool-calling pipeline path. The OpenAI lineup is now GPT-5.6 Sol (flagship) + GPT-5.6 Luna (economy).' },
+    ],
+  },
   {
     version: '3.0.93-preview',
     date: 'August 3, 2026',

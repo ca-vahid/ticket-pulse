@@ -17,7 +17,7 @@ jest.unstable_mockModule('../src/config/index.js', () => ({
   default: {
     openai: {
       apiKey: 'test-openai-key',
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-sol',
     },
   },
 }));
@@ -91,14 +91,14 @@ describe('OpenAiProvider streaming tool responses', () => {
       systemPrompt: 'Assign the ticket.',
       messages: [{ role: 'user', content: 'Ticket 123' }],
       tools: [{ name: 'get_ticket_details', input_schema: { type: 'object', properties: {} } }],
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-sol',
       onText,
       onThinking,
       onInputJson,
     });
 
     expect(streamMock).toHaveBeenCalledWith(expect.objectContaining({
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-sol',
       include: ['reasoning.encrypted_content'],
       tools: [expect.objectContaining({ name: 'get_ticket_details' })],
     }), undefined);
@@ -138,7 +138,7 @@ describe('OpenAiProvider streaming tool responses', () => {
       systemPrompt: 'Assign the ticket.',
       messages: [{ role: 'user', content: 'Ticket 123' }],
       tools: [],
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-sol',
       onText,
     });
 
@@ -179,7 +179,7 @@ describe('OpenAiProvider streaming tool responses', () => {
       systemPrompt: 'Write notification copy.',
       messages: [{ role: 'user', content: 'Ticket 27883' }],
       tools: [{ name: 'find_similar_tickets', input_schema: { type: 'object', properties: {} } }],
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-sol',
     });
 
     await provider.toolResponse({
@@ -199,7 +199,7 @@ describe('OpenAiProvider streaming tool responses', () => {
         },
       ],
       tools: [{ name: 'find_similar_tickets', input_schema: { type: 'object', properties: {} } }],
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-sol',
     });
 
     const continuationInput = streamMock.mock.calls[1][0].input;
@@ -234,7 +234,7 @@ describe('OpenAiProvider JSON responses', () => {
     const result = await provider.sendJson({
       systemPrompt: 'Classify the ticket.',
       userMessage: '{"ticketId":123}',
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-sol',
     });
 
     expect(createMock).toHaveBeenCalledWith(expect.objectContaining({
