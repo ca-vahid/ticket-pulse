@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.92-preview';
+export const APP_VERSION = '3.0.93-preview';
 
 export const changelog = [
+  {
+    version: '3.0.93-preview',
+    date: 'August 3, 2026',
+    entries: [
+      { type: 'added', html: '<strong>💸 GPT-5.6 Luna (Economy) available as an AI model</strong> — OpenAI cut Luna\'s API price by 80% on July 30 ($0.20/M input, $1.20/M output — roughly a tenth of Sonnet-class pricing). It\'s now selectable in Settings → AI &amp; Routing for any operation. Live-tested against the real API through the full tool-calling pipeline path. Suited to high-volume triage workspaces (e.g. Accounting, where it would cut model spend ~90% on the current workload); keep Sonnet for the hardest reasoning.' },
+    ],
+  },
   {
     version: '3.0.92-preview',
     date: 'August 3, 2026',
