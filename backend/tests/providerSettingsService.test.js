@@ -47,7 +47,7 @@ describe('providerSettingsService', () => {
       primaryProvider: 'anthropic',
       primaryModel: 'claude-sonnet-4-6',
       fallbackProvider: 'openai',
-      fallbackModel: 'gpt-5.5',
+      fallbackModel: 'gpt-5.6-sol',
     });
     expect(created.find((row) => row.operation === 'ticket_reclassification')).toMatchObject({
       primaryProvider: 'anthropic',
@@ -55,13 +55,13 @@ describe('providerSettingsService', () => {
     });
     expect(created.find((row) => row.operation === 'autoresponse_generation')).toMatchObject({
       primaryProvider: 'openai',
-      primaryModel: 'gpt-5.5',
+      primaryModel: 'gpt-5.6-sol',
       fallbackProvider: 'anthropic',
       fallbackModel: 'claude-sonnet-5',
     });
     expect(created.find((row) => row.operation === 'notification_workflow_generation')).toMatchObject({
       primaryProvider: 'openai',
-      primaryModel: 'gpt-5.5',
+      primaryModel: 'gpt-5.6-sol',
       fallbackProvider: 'anthropic',
       fallbackModel: 'claude-sonnet-5',
     });

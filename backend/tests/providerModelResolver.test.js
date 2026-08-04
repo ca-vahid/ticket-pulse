@@ -45,7 +45,7 @@ describe('ProviderModelResolver', () => {
 
     expect(result.attempts).toEqual([{
       provider: 'openai',
-      model: 'gpt-5.5',
+      model: 'gpt-5.6-sol',
       fallbackFromProvider: 'anthropic',
       fallbackReason: 'primary_down',
       healthStatus: 'healthy',
@@ -65,7 +65,7 @@ describe('ProviderModelResolver', () => {
 
     expect(result.attempts).toEqual([
       expect.objectContaining({ provider: 'anthropic', model: 'claude-sonnet-4-6', fallbackFromProvider: null }),
-      expect.objectContaining({ provider: 'openai', model: 'gpt-5.5', fallbackFromProvider: 'anthropic' }),
+      expect.objectContaining({ provider: 'openai', model: 'gpt-5.6-sol', fallbackFromProvider: 'anthropic' }),
     ]);
   });
 
@@ -88,7 +88,7 @@ describe('ProviderModelResolver', () => {
     });
 
     expect(result.attempts).toEqual([
-      expect.objectContaining({ provider: 'openai', model: 'gpt-5.5' }),
+      expect.objectContaining({ provider: 'openai', model: 'gpt-5.6-sol' }),
     ]);
   });
 });
