@@ -59,15 +59,21 @@ describe('ai provider utilities', () => {
     expect(shouldOmitAnthropicTemperature(DEFAULT_RECLASSIFICATION_MODEL)).toBe(false);
   });
 
-  test('exposes only the approved GPT-5.5 option and marks Opus as expensive', () => {
+  test('exposes only the approved OpenAI options and marks Opus as expensive', () => {
     const openAiModels = getModelMetadata({
       provider: AI_PROVIDER_OPENAI,
       operation: 'assignment_pipeline',
     });
+    // Approved set: GPT-5.5 (default/fallback) + GPT-5.6 Luna (economy tier,
+    // added Aug 2026 after OpenAI's 80% price cut — ~10x cheaper than Sonnet).
     expect(openAiModels).toEqual([
       expect.objectContaining({
         model: DEFAULT_OPENAI_MODEL,
         label: 'GPT-5.5',
+      }),
+      expect.objectContaining({
+        model: 'gpt-5.6-luna',
+        label: expect.stringContaining('Economy'),
       }),
     ]);
 

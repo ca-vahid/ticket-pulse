@@ -97,6 +97,19 @@ export const MODEL_METADATA = [
     supportsThinking: true,
     costNotes: 'Default OpenAI fallback model. Tune reasoning effort instead of selecting a separate pro model.',
   },
+  {
+    provider: AI_PROVIDER_OPENAI,
+    model: 'gpt-5.6-luna',
+    label: 'GPT-5.6 Luna (Economy)',
+    operations: AI_OPERATIONS,
+    supportsStreaming: false,
+    supportsTools: true,
+    supportsJson: true,
+    supportsThinking: true,
+    // Priced Jul 30 2026 after OpenAI's 80% cut: $0.20/M input, $1.20/M output
+    // (vs Sonnet 5 $3/$15) — ~90% cheaper on the Accounting workload profile.
+    costNotes: 'Economy model for high-volume workspaces (e.g. invoice triage). ~10x cheaper than Sonnet-class; suited to classification and lightweight agentic runs, not the hardest reasoning.',
+  },
 ];
 
 export function normalizeProvider(provider, fallbackProvider = AI_PROVIDER_ANTHROPIC) {
