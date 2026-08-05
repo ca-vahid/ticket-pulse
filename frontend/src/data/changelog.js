@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.0.95-preview';
+export const APP_VERSION = '3.0.96-preview';
 
 export const changelog = [
+  {
+    version: '3.0.96-preview',
+    date: 'August 4, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>📱 iPad & tablet pass across the app</strong> — the ticket queue now has a dedicated tablet layout: longer subjects, agent first names only, compact status/due columns, and no more overlapping SR/INC pills or External badges. (QA 07-31)' },
+      { type: 'fixed', html: '<strong>🖥️ Dashboard fits tablet portrait</strong> — the compact table no longer spills past the right edge: header and rows scroll together in one smooth region on narrow screens.' },
+      { type: 'fixed', html: '<strong>✖️ New-ticket Cancel button unblocked on iPad</strong> — the bottom action bar now clears the home indicator and never clips the Cancel button in portrait.' },
+    ],
+  },
   {
     version: '3.0.95-preview',
     date: 'August 4, 2026',

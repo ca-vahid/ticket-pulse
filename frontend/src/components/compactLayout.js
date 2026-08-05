@@ -86,6 +86,19 @@ export function getCompactColumns(viewMode, simple = false) {
   return cols.map((c) => (SIMPLE_LABELS[c.key] ? { ...c, label: SIMPLE_LABELS[c.key] } : c));
 }
 
+// Minimum content width (px) for the compact table in the tablet band
+// (640–1100px — where index.css's ≤1536px track values apply): the sum of the
+// fixed grid tracks + 9 column gaps (gap-3 = 12px × 9) + the row's horizontal
+// padding (px-3). The Dashboard wraps header + rows in ONE horizontally
+// scrolling container (QA 08-04 #3: iPad portrait pushed the trailing columns
+// past the right edge with no way to reach them) and pins this as the inner
+// min-width so header and rows scroll together, perfectly aligned.
+// Monthly shares the daily template (see getCompactGridTemplate).
+export function getCompactMinWidth(viewMode, simple = false) {
+  if (viewMode === 'weekly') return simple ? 1060 : 920;
+  return simple ? 900 : 760;
+}
+
 // Resolve the actual numeric value to sort by for a given column + viewMode.
 // Returning null/undefined => treated as -Infinity in sort comparator.
 export function getSortValue(tech, sortKey, viewMode) {

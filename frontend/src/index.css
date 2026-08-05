@@ -56,6 +56,20 @@
   * {
     border-color: hsl(var(--border));
   }
+
+  /* Dashboard compact table (QA 08-04 #3): in the ~640–1100px band the fixed
+     grid tracks are wider than the viewport, so the wrapper scrolls the sticky
+     header and every row together horizontally. Above 1100px overflow returns
+     to visible so the header's position:sticky sticks to the page scroll again
+     (a scroll container would otherwise swallow it). */
+  .tp-compact-scroll {
+    overflow-x: auto;
+  }
+  @media (min-width: 1100px) {
+    .tp-compact-scroll {
+      overflow-x: visible;
+    }
+  }
 }
 
 html {

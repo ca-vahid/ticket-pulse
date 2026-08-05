@@ -426,14 +426,34 @@ export function PriorityDot({ priority, withLabel = false }) {
   );
 }
 
+/**
+ * Agent name that renders first-name-only below xl (the tablet band shrinks the
+ * assignee column to ~120px — QA 08-04 #5/#6 asked for first names on iPad) and
+ * the full name at xl+. Purely a display treatment: the full name always lives
+ * in the title tooltip and the underlying data is untouched.
+ */
+export function AgentFirstName({ name, className = '' }) {
+  const full = String(name || '').trim();
+  if (!full) return null;
+  const first = full.split(/\s+/)[0];
+  return (
+    <span className={`min-w-0 truncate ${className}`} title={full}>
+      <span className="xl:hidden">{first}</span>
+      <span className="hidden xl:inline">{full}</span>
+    </span>
+  );
+}
+
 /** Where a ticket was born: Ticket Pulse or FreshService. */
 // Requester email domain is outside the workspace's trusted list — flag it so
 // agents treat links/attachments with more care (QA 07-27 #4). Amber, not red:
 // external ≠ malicious, it just deserves a second look.
 export function ExternalChip() {
+  // shrink-0 + nowrap: in tight queue rows (iPad band) the chip must wrap as a
+  // unit, never compress letter-by-letter into the category column (QA 08-04 #5).
   return (
     <span
-      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-800 border border-amber-300"
+      className="shrink-0 whitespace-nowrap inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-800 border border-amber-300"
       title="The requester's email domain is outside this workspace's trusted domains (Settings → Ticket Ops → Trusted domains)"
     >
       <Globe className="w-3 h-3" aria-hidden="true" />

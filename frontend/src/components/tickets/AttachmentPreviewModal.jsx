@@ -176,7 +176,6 @@ export default function AttachmentPreviewModal({ ticketId, attachment, onClose }
       return (
         <div
           className="tp-doc-preview settings-scrollbar h-[76vh] w-[min(92vw,820px)] overflow-auto rounded-lg bg-white px-8 py-6 text-sm leading-relaxed text-slate-800 shadow-subtle"
-          // eslint-disable-next-line react/no-danger
           dangerouslySetInnerHTML={{ __html: rich.html }}
         />
       );
@@ -191,7 +190,6 @@ export default function AttachmentPreviewModal({ ticketId, attachment, onClose }
           )}
           <div
             className="tp-sheet-preview settings-scrollbar flex-1 overflow-auto p-2 text-xs text-slate-700"
-            // eslint-disable-next-line react/no-danger
             dangerouslySetInnerHTML={{ __html: rich.html }}
           />
         </div>

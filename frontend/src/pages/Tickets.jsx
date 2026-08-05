@@ -19,7 +19,7 @@ import AiAssignModal from '../components/tickets/AiAssignModal';
 import LiveUpdatePill from '../components/tickets/LiveUpdatePill';
 import FsSyncConfirm from '../components/tickets/FsSyncConfirm';
 import {
-  ExternalChip, PersonAvatar, PriorityDot, SlaChip, StateChip, StatusPill, TagChip, TypePill, UnassignedBadge,
+  AgentFirstName, ExternalChip, PersonAvatar, PriorityDot, SlaChip, StateChip, StatusPill, TagChip, TypePill, UnassignedBadge,
   PRIORITY_LABELS, PRIORITY_STRIP_COLORS, ticketCategoryLabels, timeAgo,
 } from '../components/tickets/ticketUi';
 import { ticketsAPI } from '../services/api';
@@ -101,10 +101,25 @@ const SEGMENT_COUNT_KEY = { all: 'all', open: 'open', unassigned: 'unassigned', 
 //     that a narrow subject track caused. 7 tracks.
 //   ROOMY: the subject spans row 1 full-width; these are the row-2 meta tracks
 //     (a slim type slot, then category/assignee/status/due/updated). 7 tracks.
-const GRID_COMPACT = 'grid grid-cols-[6px_minmax(0,2.4fr)_minmax(150px,1fr)_210px_116px_88px_74px] items-center';
-const GRID_ROOMY = 'grid grid-cols-[6px_60px_minmax(150px,1fr)_210px_116px_88px_74px] items-stretch';
+//
+// Tablet band (QA 08-04 #5/#6): below xl the fixed tracks used to claim 644px
+// before the subject saw a single pixel — on an iPad (768 portrait, or 1024
+// landscape where the docked filter rail eats ~300px) the subject collapsed
+// and the type/External pills crashed into the category column. md→xl runs a
+// narrower 6-track template: assignee 210→120, status 116→90, category min
+// 150→120, and the Updated column is dropped (its time folds into the meta
+// line). The cutoff is xl, not lg, because iPad landscape (1024) IS lg and
+// shows the rail — the wide template only fits once the viewport clears it.
+// Headers and rows share these classes, so the templates always stay aligned.
+const GRID_COMPACT = 'grid md:grid-cols-[6px_minmax(0,2.4fr)_minmax(100px,0.8fr)_118px_96px_84px] xl:grid-cols-[6px_minmax(0,2.4fr)_minmax(150px,1fr)_210px_116px_88px_74px] items-center';
+const GRID_ROOMY = 'grid md:grid-cols-[6px_60px_minmax(100px,1fr)_118px_96px_84px] xl:grid-cols-[6px_60px_minmax(150px,1fr)_210px_116px_88px_74px] items-stretch';
+// The Updated column only exists at xl+ (see GRID templates above) — this
+// hides its header + cell together so track counts always match.
+const UPDATED_COL = 'hidden xl:flex';
 // No vertical grid lines (modern list feel) — horizontal row dividers only.
-const CELL = 'px-3 self-stretch flex items-center min-w-0';
+// px-2 below xl: the tablet band's narrower tracks need the padding back as
+// content width (px-3 alone truncated "Open" → "Op…" in the status column).
+const CELL = 'px-2 xl:px-3 self-stretch flex items-center min-w-0';
 
 // Live pipeline progress → human stage label for the "AI choosing…" chip.
 // Tool names arrive over SSE per analysis turn; buckets are coarse on purpose
@@ -1394,7 +1409,7 @@ export default function Tickets() {
                                 Due{sortIndicator('dueBy')}
                               </button>
                             </span>
-                            <span className={`${CELL} py-2 justify-end`}>
+                            <span className={`${CELL} ${UPDATED_COL} py-2 justify-end`}>
                               <button onClick={() => headerSort('updatedAt')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 rounded text-right">
                                 Updated{sortIndicator('updatedAt')}
                               </button>
@@ -1420,7 +1435,7 @@ export default function Tickets() {
                                 Due{sortIndicator('dueBy')}
                               </button>
                             </span>
-                            <span className={`${CELL} ${cellPad} justify-end`}>
+                            <span className={`${CELL} ${UPDATED_COL} ${cellPad} justify-end`}>
                               <button onClick={() => headerSort('updatedAt')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 rounded text-right">
                                 Updated{sortIndicator('updatedAt')}
                               </button>
@@ -1522,6 +1537,9 @@ export default function Tickets() {
                                 <span className="ml-1.5 text-indigo-500 font-medium">· {groupNames.get(String(ticket.groupId))}</span>
                               )}
                               {ticket.origin === 'ticketpulse' && <span className="ml-1.5 text-sky-600 font-medium">· TP-born</span>}
+                              {/* Below xl the Updated column is dropped (tablet band) —
+                                  its relative time folds into this meta line instead. */}
+                              <span className="xl:hidden">{` · updated ${timeAgo(ticket.lastActivityAt || ticket.updatedAt)}`}</span>
                             </span>
                           );
                           // Category, leaf-first: the SUBCATEGORY is the most specific (= most
@@ -1613,7 +1631,9 @@ export default function Tickets() {
                                     <span className="text-[9px] font-bold uppercase tracking-wider text-violet-600">
                                       Suggested{typeof ticket.ai.score === 'number' ? ` · ${Math.round(ticket.ai.score * 100)}%` : ''}
                                     </span>
-                                    <span className="truncate text-xs font-semibold text-slate-800">{ticket.ai.techName || 'AI pick'}</span>
+                                    {ticket.ai.techName
+                                      ? <AgentFirstName name={ticket.ai.techName} className="text-xs font-semibold text-slate-800" />
+                                      : <span className="truncate text-xs font-semibold text-slate-800">AI pick</span>}
                                   </span>
                                   {ticket.ai.count > 1 && (
                                     <span className="text-[9px] font-medium text-violet-400 flex-shrink-0">+{ticket.ai.count - 1}</span>
@@ -1625,7 +1645,7 @@ export default function Tickets() {
                                     {ticket.assignedTech ? (
                                       <>
                                         <PersonAvatar name={ticket.assignedTech.name} photoUrl={ticket.assignedTech.photoUrl} />
-                                        <span className="text-xs text-slate-600 truncate">{ticket.assignedTech.name}</span>
+                                        <AgentFirstName name={ticket.assignedTech.name} className="text-xs text-slate-600" />
                                       </>
                                     ) : (
                                       <UnassignedBadge variant="muted" />
@@ -1701,7 +1721,7 @@ export default function Tickets() {
                           );
                           const updatedCell = (
                             <span
-                              className={`${CELL} ${cellPad} justify-end relative`}
+                              className={`${CELL} ${UPDATED_COL} ${cellPad} justify-end relative`}
                               title={ticket.lastActivityAt ? new Date(ticket.lastActivityAt).toLocaleString() : ''}
                             >
                               <span className="text-xs text-slate-400 whitespace-nowrap transition-opacity group-hover:opacity-0">
@@ -1754,9 +1774,16 @@ export default function Tickets() {
                                           Tightened (QA 07-30 #1): the old py-2 + py-1.5 stack read as
                                           dead space — title now hugs its detail line. */}
                                       <span className="px-3 pt-1.5 pb-0.5 flex flex-col items-start justify-center gap-0.5 min-w-0" style={{ gridColumn: '2 / -1', gridRow: 1 }}>
-                                        <span className="flex items-center gap-1.5 min-w-0 w-full">
-                                          {priorityEl}
-                                          {subjectBtn}
+                                        {/* Wrap below xl: chips fall to a second line in normal
+                                            flow instead of overlaying the neighbour column when
+                                            the tablet-band subject track runs out (QA 08-04 #6).
+                                            The dot+subject stay one non-wrapping unit so the
+                                            priority dot never strands on a line of its own. */}
+                                        <span className="flex flex-wrap xl:flex-nowrap items-center gap-x-1.5 gap-y-0.5 min-w-0 w-full">
+                                          <span className="flex items-center gap-1.5 min-w-0">
+                                            {priorityEl}
+                                            {subjectBtn}
+                                          </span>
                                           {subjectChips}
                                         </span>
                                         {subjectMeta}
@@ -1774,10 +1801,17 @@ export default function Tickets() {
                                       <span aria-hidden="true" className={`self-stretch ${accent}`} />
                                       {/* Compact: type folds into the title line so the subject gets the width */}
                                       <span className={`${CELL} ${cellPad} flex-col !items-start justify-center gap-0.5`}>
-                                        <span className="flex items-center gap-1.5 min-w-0 w-full">
-                                          {priorityEl}
-                                          <span className="shrink-0">{typePill}</span>
-                                          {subjectBtn}
+                                        {/* Wrap below xl — same rationale as the roomy row: pills
+                                            wrap under the subject rather than colliding into the
+                                            category column on iPad widths (QA 08-04 #6). The
+                                            dot+type+subject group never wraps internally, so the
+                                            SR/INC pill stays glued to its subject line. */}
+                                        <span className="flex flex-wrap xl:flex-nowrap items-center gap-x-1.5 gap-y-0.5 min-w-0 w-full">
+                                          <span className="flex items-center gap-1.5 min-w-0">
+                                            {priorityEl}
+                                            <span className="shrink-0">{typePill}</span>
+                                            {subjectBtn}
+                                          </span>
                                           {subjectChips}
                                         </span>
                                         {subjectMeta}
