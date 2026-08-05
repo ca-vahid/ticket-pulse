@@ -2981,17 +2981,20 @@ function routingResultForWorkflow({ workflow, timing, variantSelection }) {
   };
 }
 
-const UPDATE_TICKET_STATUSES = ['Open', 'Pending', 'Resolved', 'Closed'];
-
 /**
  * `update_ticket` action node: apply status/priority changes to the event's
  * ticket. TP-born tickets only — FS-born state is owned by FreshService and
  * would be clobbered on the next sync. Changes are audited, queued for the
  * fallback mirror, and broadcast over SSE.
+ *
+ * Statuses are validated against the WORKSPACE's status registry at runtime
+ * (Phase 8a — replaces the hardcoded Open/Pending/Resolved/Closed list), so
+ * workflows can set custom statuses; terminal/resolution stamping keys on the
+ * status's BASE, never the label.
  */
 async function executeUpdateTicketNode(node, eventContext, { dryRun = false } = {}) {
   const ticketId = Number(eventContext.ticket?.id);
-  const setStatus = node.data?.setStatus || null;
+  let setStatus = node.data?.setStatus || null;
   const setPriority = node.data?.setPriority ? Number(node.data.setPriority) : null;
   const setInternalCategoryId = node.data?.setInternalCategoryId ? Number(node.data.setInternalCategoryId) : null;
   const setInternalSubcategoryId = node.data?.setInternalSubcategoryId ? Number(node.data.setInternalSubcategoryId) : null;
@@ -3013,8 +3016,19 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false } = 
     && !addTags.length && !removeTags.length) {
     return { skipped: true, reason: 'update_ticket node has no changes configured' };
   }
-  if (setStatus && !UPDATE_TICKET_STATUSES.includes(setStatus)) {
-    return { skipped: true, reason: `Unsupported status "${setStatus}"` };
+  if (setStatus) {
+    // Workspace registry lookup; the event context carries the ticket's
+    // workspaceId. Unknown workspace (bare dry-run contexts) falls back to
+    // the canonical 4 inside statusService.
+    const { default: statusService } = await import('./statusService.js');
+    const normalized = await statusService.normalizeStatusName(
+      Number(eventContext.ticket?.workspaceId) || 0,
+      String(setStatus),
+    );
+    if (!normalized) {
+      return { skipped: true, reason: `Unsupported status "${setStatus}"` };
+    }
+    setStatus = normalized;
   }
   if (dryRun) {
     return {
@@ -3102,14 +3116,19 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false } = 
   if (setStatus && setStatus !== ticket.status) {
     patch.status = setStatus;
     changes.status = { from: ticket.status, to: setStatus };
-    const wasTerminal = ['Resolved', 'Closed'].includes(ticket.status);
-    const isTerminal = ['Resolved', 'Closed'].includes(setStatus);
+    // Base-status lifecycle (Phase 8a): custom labels stamp/clear resolution
+    // fields per the base they map to, identically to ticketService.changeStatus.
+    const { default: statusService } = await import('./statusService.js');
+    const oldBase = await statusService.baseStatusOf(ticket.workspaceId, ticket.status);
+    const newBase = await statusService.baseStatusOf(ticket.workspaceId, setStatus);
+    const wasTerminal = ['Resolved', 'Closed'].includes(oldBase);
+    const isTerminal = ['Resolved', 'Closed'].includes(newBase);
     const resolutionSeconds = () => ticket.resolutionTimeSeconds
       ?? Math.max(0, Math.round((now.getTime() - new Date(ticket.createdAt).getTime()) / 1000));
-    if (setStatus === 'Resolved') {
+    if (newBase === 'Resolved') {
       patch.resolvedAt = now;
       patch.resolutionTimeSeconds = resolutionSeconds();
-    } else if (setStatus === 'Closed') {
+    } else if (newBase === 'Closed') {
       patch.closedAt = now;
       if (!ticket.resolvedAt) {
         patch.resolvedAt = now;

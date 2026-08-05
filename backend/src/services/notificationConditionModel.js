@@ -23,7 +23,13 @@ const MAX_DEPTH = 2; // root group + one nested level
  * operator set + the value input the builder UI renders.
  */
 export const CONDITION_FIELDS = Object.freeze({
-  'ticket.status': { label: 'Ticket status', type: 'enum', path: 'ticket.status', options: ['Open', 'Pending', 'Resolved', 'Closed'] },
+  // Ticket status is per-workspace since Phase 8a (statusService registry).
+  // `options` stays the canonical 4 as a static fallback; `dynamicOptions`
+  // is the 8c hook point — the builder UI should fetch the workspace's
+  // statuses (GET /api/ticket-statuses) and use them instead of `options`.
+  // Values are NOT validated against `options` (validateConditionGroup is
+  // value-lenient), so custom statuses already evaluate correctly today.
+  'ticket.status': { label: 'Ticket status', type: 'enum', path: 'ticket.status', options: ['Open', 'Pending', 'Resolved', 'Closed'], dynamicOptions: 'ticket-statuses' },
   'ticket.priorityLabel': { label: 'Priority', type: 'enum', path: 'ticket.priorityLabel', options: ['Low', 'Medium', 'High', 'Urgent'] },
   'ticket.origin': { label: 'Ticket origin', type: 'enum', path: 'ticket.origin', options: ['ticketpulse', 'freshservice'] },
   // Arrival channel (QA 07-07 #1) — how the ticket reached the helpdesk.

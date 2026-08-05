@@ -4,6 +4,7 @@ import { settingsAPI, ticketsAPI, workspaceAPI } from '../../services/api';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 import { TAG_CHIP_TONES, TYPE_COLOR_TONES } from '../tickets/ticketUi';
 import { useTicketTypes, invalidateTicketTypesCache } from '../../hooks/useTicketTypes';
+import TicketStatusesSection from './TicketStatusesSection';
 
 /**
  * Admin config for the enterprise ticket ops shipped with the workflow revamp:
@@ -903,6 +904,7 @@ export default function TicketOpsPanel() {
   return (
     <div className="space-y-4 animate-fadeIn">
       <TicketTypesSection />
+      <TicketStatusesSection />
       <SlaSection />
       <TrustedDomainsSection />
       <TagsSection />

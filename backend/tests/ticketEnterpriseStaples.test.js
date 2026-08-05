@@ -88,6 +88,26 @@ describe('macros', () => {
     await expect(ticketMacroService.create(1, { name: 'x', actions: {} }, null)).rejects.toThrow(/at least one action/i);
     await expect(ticketMacroService.create(1, { name: 'x', actions: { setStatus: 'Nope' } }, null)).rejects.toThrow(/status must be/i);
   });
+
+  test('setStatus validates against the WORKSPACE status registry and canonicalizes casing (Phase 8a)', async () => {
+    const { invalidateStatusCache } = await import('../src/services/statusService.js');
+    invalidateStatusCache(77);
+    prismaMock.ticketStatusDefinition = {
+      findMany: jest.fn().mockResolvedValue([
+        { id: 1, workspaceId: 77, name: 'Open', baseStatus: 'Open', sortOrder: 0, isSystem: true, isActive: true },
+        { id: 2, workspaceId: 77, name: 'Waiting on vendor', baseStatus: 'Pending', sortOrder: 1, isSystem: false, isActive: true },
+        { id: 3, workspaceId: 77, name: 'Needs Rework', baseStatus: 'Open', sortOrder: 2, isSystem: false, isActive: false },
+      ]),
+    };
+    prismaMock.ticketMacro.create.mockImplementation(({ data }) => Promise.resolve({ id: 9, ...data }));
+
+    const macro = await ticketMacroService.create(77, { name: 'Park it', actions: { setStatus: 'waiting ON vendor' } }, null);
+    expect(macro.actions.setStatus).toBe('Waiting on vendor');
+
+    // Retired statuses can't be chosen for new changes.
+    await expect(ticketMacroService.create(77, { name: 'y', actions: { setStatus: 'Needs Rework' } }, null))
+      .rejects.toThrow(/status must be one of this workspace's statuses: Open, Waiting on vendor/i);
+  });
 });
 
 describe('thread summary prompt safety', () => {

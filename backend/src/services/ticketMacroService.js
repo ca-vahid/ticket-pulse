@@ -19,7 +19,7 @@ class TicketMacroService {
   async create(workspaceId, { name, description, actions }, actor) {
     const cleanName = String(name || '').trim();
     if (!cleanName) throw new ValidationError('Macro needs a name');
-    const cleanActions = this._validateActions(actions);
+    const cleanActions = await this._validateActions(workspaceId, actions);
     return prisma.ticketMacro.create({
       data: { workspaceId, name: cleanName.slice(0, 120), description: description || null, actions: cleanActions, createdBy: actor?.email || null },
     });
@@ -28,12 +28,13 @@ class TicketMacroService {
   async update(workspaceId, id, { name, description, actions, isActive }, _actor) {
     const macro = await prisma.ticketMacro.findFirst({ where: { id: Number(id), workspaceId } });
     if (!macro) throw new NotFoundError('Macro not found');
+    const cleanActions = actions !== undefined ? await this._validateActions(workspaceId, actions) : undefined;
     return prisma.ticketMacro.update({
       where: { id: macro.id },
       data: {
         ...(name !== undefined ? { name: String(name).trim().slice(0, 120) } : {}),
         ...(description !== undefined ? { description: description || null } : {}),
-        ...(actions !== undefined ? { actions: this._validateActions(actions) } : {}),
+        ...(cleanActions !== undefined ? { actions: cleanActions } : {}),
         ...(isActive !== undefined ? { isActive: isActive !== false } : {}),
       },
     });
@@ -85,7 +86,7 @@ class TicketMacroService {
     return { macro: { id: macro.id, name: macro.name }, steps, ok: failed.length === 0 };
   }
 
-  _validateActions(actions) {
+  async _validateActions(workspaceId, actions) {
     if (!actions || typeof actions !== 'object' || Array.isArray(actions)) {
       throw new ValidationError('Macro actions must be an object');
     }
@@ -95,8 +96,16 @@ class TicketMacroService {
       if (actions[key] !== undefined && actions[key] !== null && actions[key] !== '') clean[key] = actions[key];
     }
     if (Object.keys(clean).length === 0) throw new ValidationError('Macro needs at least one action');
-    if (clean.setStatus && !['Open', 'Pending', 'Resolved', 'Closed'].includes(clean.setStatus)) {
-      throw new ValidationError('Macro status must be Open, Pending, Resolved or Closed');
+    if (clean.setStatus) {
+      // Per-workspace status registry (Phase 8a) — canonicalize the casing so
+      // apply() hits changeStatus with the exact stored label.
+      const { default: statusService } = await import('./statusService.js');
+      const normalized = await statusService.normalizeStatusName(workspaceId, String(clean.setStatus));
+      if (!normalized) {
+        const valid = (await statusService.listStatuses(workspaceId)).map((s) => s.name).join(', ');
+        throw new ValidationError(`Macro status must be one of this workspace's statuses: ${valid}`);
+      }
+      clean.setStatus = normalized;
     }
     if (clean.setPriority && !(Number(clean.setPriority) >= 1 && Number(clean.setPriority) <= 4)) {
       throw new ValidationError('Macro priority must be 1–4');
