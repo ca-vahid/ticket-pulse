@@ -231,6 +231,8 @@ export function sanitizeMessagesForAnthropicReplay(messages = []) {
           && !(typeof block.data === 'string' && block.data)) {
         continue;
       }
+      // Destructure-to-omit: the three named keys are deliberately dropped.
+      // eslint-disable-next-line no-unused-vars
       const { openai_item_id, openai_call_id, openai_response_item, ...clean } = block;
       content.push(clean);
     }

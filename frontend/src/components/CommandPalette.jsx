@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
-  BarChart3, Boxes, CheckCircle2, Command, Link as LinkIcon, LayoutDashboard,
-  Loader2, Mail, Map as MapIcon, Plus, Search, Settings as SettingsIcon, Sparkles,
-  Stamp, Ticket as TicketIcon, UserCheck, Clock,
+  BarChart3, Boxes, Building2, CheckCircle2, Command, Link as LinkIcon, LayoutDashboard,
+  ListChecks, Loader2, Mail, Map as MapIcon, Plus, Search, Settings as SettingsIcon, Sparkles,
+  Stamp, Ticket as TicketIcon, User, UserCheck, Clock,
 } from 'lucide-react';
-import { ticketsAPI } from '../services/api';
+import { searchAPI, ticketsAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useWorkspaceRole } from './nav/navDestinations';
@@ -42,6 +42,27 @@ const STATUS_STYLES = {
   Closed: 'bg-slate-100 text-slate-500',
 };
 
+// Task lifecycle chips (ticket_tasks.status → label + tint).
+const TASK_STATUS = {
+  open: { label: 'Open', style: 'bg-blue-50 text-blue-700' },
+  in_progress: { label: 'In progress', style: 'bg-amber-50 text-amber-700' },
+  done: { label: 'Done', style: 'bg-emerald-50 text-emerald-700' },
+};
+
+// Multi-entity search scopes (QA 08-04 #2): the pill row under the input.
+// 'all' keeps the classic palette (nav + workspace + actions) alongside every
+// entity section; a specific pill narrows both the request and the list.
+const SCOPES = [
+  { id: 'all', label: 'All' },
+  { id: 'tickets', label: 'Tickets' },
+  { id: 'tasks', label: 'Tasks' },
+  { id: 'agents', label: 'Agents' },
+  { id: 'requesters', label: 'Requesters' },
+  { id: 'departments', label: 'Departments' },
+];
+
+const EMPTY_SECTIONS = { tickets: [], tasks: [], agents: [], requesters: [], departments: [] };
+
 function matches(query, ...haystacks) {
   const q = query.trim().toLowerCase();
   if (!q) return true;
@@ -59,7 +80,8 @@ export default function CommandPalette() {
   const [showChangelog, setShowChangelog] = useState(false);
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
-  const [ticketResults, setTicketResults] = useState([]);
+  const [scope, setScope] = useState('all');
+  const [sections, setSections] = useState(EMPTY_SECTIONS);
   const [searching, setSearching] = useState(false);
   const [context, setContext] = useState(null); // { ticket, myTechId } when on a detail page
   const [actionError, setActionError] = useState(null);
@@ -73,7 +95,8 @@ export default function CommandPalette() {
   const close = useCallback(() => {
     setOpen(false);
     setQuery('');
-    setTicketResults([]);
+    setSections(EMPTY_SECTIONS);
+    setScope('all');
     setActiveIndex(0);
     setContext(null);
     setActionError(null);
@@ -118,29 +141,31 @@ export default function CommandPalette() {
     return () => { cancelled = true; clearTimeout(t); };
   }, [open, detailId, user?.email]);
 
-  // Debounced ticket search once the query looks like one.
+  // Debounced multi-entity search once the query looks like one. The scope
+  // pill narrows the request server-side (?types=) — 'All' fans out across
+  // every section in one call.
   useEffect(() => {
     if (!open) return undefined;
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     const q = query.trim();
     if (q.length < 2) {
-      setTicketResults([]);
+      setSections(EMPTY_SECTIONS);
       setSearching(false);
       return undefined;
     }
     setSearching(true);
     const seq = ++searchSeqRef.current;
     searchTimerRef.current = setTimeout(() => {
-      ticketsAPI.list({ q, pageSize: 7 })
+      searchAPI.global(q, scope === 'all' ? undefined : scope)
         .then((res) => {
           if (searchSeqRef.current !== seq) return; // stale response
-          setTicketResults(res.data?.items || []);
+          setSections({ ...EMPTY_SECTIONS, ...(res.data?.sections || {}) });
           setSearching(false);
         })
         .catch(() => { if (searchSeqRef.current === seq) setSearching(false); });
     }, 250);
     return () => clearTimeout(searchTimerRef.current);
-  }, [open, query]);
+  }, [open, query, scope]);
 
   const runTicketAction = useCallback(async (kind) => {
     if (!context?.ticket) return;
@@ -163,12 +188,20 @@ export default function CommandPalette() {
     }
   }, [context, close]);
 
-  // Assemble the visible, keyboard-navigable item list.
+  // Assemble the visible, keyboard-navigable item list. One flat array —
+  // ArrowUp/Down walk straight across section boundaries, section headers are
+  // presentation only.
   const items = useMemo(() => {
     if (!open) return [];
     const out = [];
+    // Return address so destination pages' Back controls come back to the
+    // page the palette was opened from.
+    const from = `${location.pathname}${location.search}`;
+    // Nav / workspace / actions belong to the classic palette — a specific
+    // entity pill means "I'm searching for records", so those step aside.
+    const showCommands = scope === 'all';
 
-    if (context?.ticket) {
+    if (showCommands && context?.ticket) {
       const { ticket, myTechId, ticketingOn } = context;
       const isNative = ticket.origin === 'ticketpulse';
       const actionable = isNative ? ticketingOn : Boolean(ticket.freshserviceTicketId);
@@ -200,7 +233,7 @@ export default function CommandPalette() {
 
     const isAgent = user?.role === 'agent';
     const canManage = wsRole === 'admin';
-    for (const nav of NAV_ITEMS) {
+    for (const nav of showCommands ? NAV_ITEMS : []) {
       if (isAgent && nav.full) continue;
       if (!isAgent && nav.agent) continue;
       if (nav.manage && !canManage) continue;
@@ -212,7 +245,7 @@ export default function CommandPalette() {
     }
 
     // Workspace switching — the top bar's switcher, reachable by keyboard.
-    for (const ws of availableWorkspaces || []) {
+    for (const ws of (showCommands && availableWorkspaces) || []) {
       if (ws.id === currentWorkspace?.id) continue;
       if (!matches(query, `switch to ${ws.name}`, 'workspace change')) continue;
       out.push({
@@ -228,7 +261,7 @@ export default function CommandPalette() {
       });
     }
 
-    if (matches(query, "what's new", 'changelog version release notes updates')) {
+    if (showCommands && matches(query, "what's new", 'changelog version release notes updates')) {
       out.push({
         id: 'act-whats-new',
         section: 'App',
@@ -239,23 +272,80 @@ export default function CommandPalette() {
       });
     }
 
-    for (const t of ticketResults) {
+    for (const t of sections.tickets) {
       out.push({
         id: `ticket-${t.id}`,
         section: 'Tickets',
         label: t.subject || '(no subject)',
-        sub: `${t.displayRef} · ${t.requester?.name || 'Unknown requester'}`,
+        sub: `${t.displayRef} · ${t.requesterName || 'Unknown requester'}`,
         status: t.status,
+        statusStyle: STATUS_STYLES[t.status],
         Icon: TicketIcon,
-        // Return address so /tickets/:id's Back control comes back to the page
-        // the palette was opened from.
-        run: () => { navigate(`/tickets/${t.id}`, { state: { from: `${location.pathname}${location.search}` } }); close(); },
+        run: () => { navigate(`/tickets/${t.id}`, { state: { from } }); close(); },
+      });
+    }
+
+    for (const task of sections.tasks) {
+      const ts = TASK_STATUS[task.status];
+      out.push({
+        id: `task-${task.id}`,
+        section: 'Tasks',
+        label: task.title || '(untitled task)',
+        sub: [task.ticket?.displayRef, task.ticket?.subject, task.assignedTechName]
+          .filter(Boolean).join(' · '),
+        status: ts?.label || task.status,
+        statusStyle: ts?.style,
+        Icon: ListChecks,
+        // Straight into the parent ticket's Tasks tab (?tab=tasks is a real
+        // TicketDetail tab param).
+        run: () => { navigate(`/tickets/${task.ticket?.id}?tab=tasks`, { state: { from } }); close(); },
+      });
+    }
+
+    for (const a of sections.agents) {
+      out.push({
+        id: `agent-${a.id}`,
+        section: 'Agents',
+        label: a.name,
+        sub: [a.location, a.email].filter(Boolean).join(' · ') || undefined,
+        Icon: UserCheck,
+        run: () => { navigate(`/technician/${a.id}`); close(); },
+      });
+    }
+
+    for (const r of sections.requesters) {
+      out.push({
+        id: `requester-${r.id}`,
+        section: 'Requesters',
+        label: r.name,
+        sub: [r.email, r.department].filter(Boolean).join(' · ') || undefined,
+        Icon: User,
+        // The queue has a first-class requester filter (?requesterId= +
+        // ?requesterName= for the banner) — use it.
+        run: () => {
+          navigate(`/tickets?requesterId=${r.id}&requesterName=${encodeURIComponent(r.name || '')}`);
+          close();
+        },
+      });
+    }
+
+    for (const d of sections.departments) {
+      out.push({
+        id: `department-${d.name}`,
+        section: 'Departments',
+        label: d.name,
+        sub: 'Search the queue for this department',
+        Icon: Building2,
+        // v1 fallback: the queue has no department filter param yet, so this
+        // lands on a text search (subject / requester name+email). Honest
+        // best-effort until ?department= exists server-side.
+        run: () => { navigate(`/tickets?q=${encodeURIComponent(d.name)}`); close(); },
       });
     }
     return out;
-  }, [open, query, context, ticketResults, user?.role, wsRole, availableWorkspaces, currentWorkspace?.id, switchWorkspace, navigate, close, runTicketAction, location.pathname, location.search]);
+  }, [open, query, scope, context, sections, user?.role, wsRole, availableWorkspaces, currentWorkspace?.id, switchWorkspace, navigate, close, runTicketAction, location.pathname, location.search]);
 
-  useEffect(() => { setActiveIndex(0); }, [query, ticketResults.length]);
+  useEffect(() => { setActiveIndex(0); }, [query, scope, sections]);
 
   const onInputKeyDown = (e) => {
     if (e.key === 'ArrowDown') {
@@ -298,7 +388,7 @@ export default function CommandPalette() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onInputKeyDown}
-            placeholder="Search tickets, jump to a page, or run an action…"
+            placeholder="Search tickets, tasks, people, departments — or run an action…"
             aria-label="Command palette search"
             role="combobox"
             aria-expanded="true"
@@ -310,6 +400,30 @@ export default function CommandPalette() {
           <kbd className="hidden sm:inline-flex items-center gap-0.5 text-[10px] font-mono text-slate-400 border border-slate-200 rounded px-1 py-0.5">esc</kbd>
         </div>
 
+        {/* Entity scope pills (QA 08-04 #2) — All keeps commands + every
+            section; a specific pill narrows the search to that entity. */}
+        <div
+          role="group"
+          aria-label="Search scope"
+          className="flex items-center gap-1 px-3.5 py-2 border-b border-slate-100 overflow-x-auto"
+        >
+          {SCOPES.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              aria-pressed={scope === s.id}
+              onClick={() => { setScope(s.id); inputRef.current?.focus(); }}
+              className={`tp-focus-ring shrink-0 px-2.5 py-1 rounded-full text-[11px] font-semibold transition-colors ${
+                scope === s.id
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700'
+              }`}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+
         {actionError && (
           <p className="px-4 py-2 text-xs text-red-600 bg-red-50 border-b border-red-100">{actionError}</p>
         )}
@@ -317,7 +431,11 @@ export default function CommandPalette() {
         <ul id="tp-palette-list" role="listbox" aria-label="Results" className="max-h-[46vh] overflow-y-auto settings-scrollbar py-1.5">
           {items.length === 0 && (
             <li className="px-4 py-6 text-center text-sm text-slate-400">
-              {query.trim().length >= 2 && !searching ? 'No matches.' : 'Type to search tickets and commands.'}
+              {query.trim().length >= 2 && !searching
+                ? 'No matches.'
+                : scope === 'all'
+                  ? 'Type to search tickets, tasks, people, and commands.'
+                  : `Type to search ${SCOPES.find((s) => s.id === scope)?.label.toLowerCase()}.`}
             </li>
           )}
           {items.map((item, idx) => {
@@ -346,7 +464,7 @@ export default function CommandPalette() {
                     {item.sub && <span className="block truncate text-[11px] text-slate-400">{item.sub}</span>}
                   </span>
                   {item.status && (
-                    <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold ${STATUS_STYLES[item.status] || 'bg-slate-100 text-slate-500'}`}>
+                    <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold ${item.statusStyle || 'bg-slate-100 text-slate-500'}`}>
                       {item.status}
                     </span>
                   )}

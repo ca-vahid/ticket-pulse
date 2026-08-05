@@ -968,6 +968,17 @@ export const ticketsAPI = {
 };
 
 /**
+ * Multi-entity search (command palette): one query fanned out across
+ * tickets / tasks / agents / requesters / departments, each section capped
+ * server-side. `types` narrows to a comma-separated subset; omit for all.
+ */
+export const searchAPI = {
+  global: async (q, types) => {
+    return await api.get('/search', { params: { q, ...(types ? { types } : {}) } });
+  },
+};
+
+/**
  * Public approval magic-link API (no auth — the token is the credential).
  */
 export const publicApprovalAPI = {
