@@ -9,7 +9,7 @@ import {
   CalendarClock, CalendarDays, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight,
   GripVertical, LayoutList, ListFilter, Plus, Search, Sparkles, Star, Trash2, Users, VolumeX, X,
 } from 'lucide-react';
-import { PersonAvatar, PRIORITY_LABELS, PRIORITY_STRIP_COLORS, TagChip } from './ticketUi';
+import { PersonAvatar, PRIORITY_LABELS, PRIORITY_STRIP_COLORS, TagChip, formatDay } from './ticketUi';
 import { ticketsAPI } from '../../services/api';
 import { useTicketTypes } from '../../hooks/useTicketTypes';
 import 'react-day-picker/style.css';
@@ -313,7 +313,10 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
 
   const CANNED_VIEWS = [
     { key: 'all', label: 'All tickets', params: { status: 'any' } },
-    ...(meta?.actor?.technicianId ? [{ key: 'mine', label: 'My open', params: { assignee: String(meta.actor.technicianId) } }] : []),
+    // "My open" is explicit about its status scope — an assignee-only filter
+    // left board mode (which once fetched every status) showing closed cards
+    // under an "open" label (QA 08-04 #15).
+    ...(meta?.actor?.technicianId ? [{ key: 'mine', label: 'My open', params: { assignee: String(meta.actor.technicianId), status: 'Open,Pending' } }] : []),
     { key: 'unassigned', label: 'Unassigned', params: { segment: 'unassigned' } },
     { key: 'awaiting_approval', label: 'Awaiting AI approval', params: { aiState: 'suggested' }, icon: Sparkles },
     { key: 'awaiting', label: 'Awaiting reply', params: { segment: 'awaiting' } },
@@ -913,10 +916,10 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
 
 // ---------------------------------------------------------------------------
 
-const MONTH_DAY = { month: 'short', day: 'numeric' };
+// Year appears automatically when the date isn't this year (QA 08-04 #17a).
 const fmtDay = (s) => {
   const d = new Date(`${s}T00:00:00`);
-  return Number.isNaN(d.getTime()) ? s : d.toLocaleDateString(undefined, MONTH_DAY);
+  return Number.isNaN(d.getTime()) ? s : formatDay(d);
 };
 
 /**

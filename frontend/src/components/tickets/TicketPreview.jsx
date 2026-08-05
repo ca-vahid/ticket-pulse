@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import {
   ExternalChip, MirrorChip, OriginChip, PersonAvatar, PriorityDot, ProvenanceChip, SafeHtml, SlaChip, SlaTargetChip, StateChip, StatusPill,
-  TagChip, TypePill, PRIORITY_LABELS, isConversationEntry, pipelineRunLabel, pipelineTriggerLabel,
+  TagChip, TypePill, PRIORITY_LABELS, formatDayTime, isConversationEntry, pipelineRunLabel, pipelineTriggerLabel,
   ticketCategoryLabels, timeAgo,
 } from './ticketUi';
 import AssigneePicker from './AssigneePicker';
@@ -19,8 +19,6 @@ import { useWorkspaceRole } from '../nav/navDestinations';
 function looksLikeHtml(s) {
   return /<[a-z][\s\S]*>/i.test(String(s || ''));
 }
-
-const DAY_TIME = { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' };
 
 const TABS = [
   { key: 'details', label: 'Details' },
@@ -537,8 +535,8 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
               <dl className="rounded-lg border border-slate-100 divide-y divide-slate-50 text-xs">
                 <div className="flex items-center gap-2 px-2.5 py-1.5">
                   <dt className="flex items-center gap-1.5 text-slate-400 w-24 flex-shrink-0"><CalendarDays className="w-3 h-3" aria-hidden="true" />Created</dt>
-                  <dd className="text-slate-600 truncate">
-                    {new Date(ticket.createdAt).toLocaleString(undefined, DAY_TIME)}
+                  <dd className="text-slate-600 truncate" title={new Date(ticket.createdAt).toLocaleString()}>
+                    {formatDayTime(ticket.createdAt)}
                     <span className="text-slate-400"> · {timeAgo(ticket.createdAt)}</span>
                   </dd>
                 </div>
@@ -546,7 +544,7 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                   <div className="flex items-center gap-2 px-2.5 py-1.5">
                     <dt className="text-slate-400 w-24 flex-shrink-0 pl-[18px]">First response</dt>
                     <dd className="flex items-center gap-1.5 min-w-0">
-                      <span className="text-slate-600" title={new Date(ticket.frDueBy).toLocaleString()}>{new Date(ticket.frDueBy).toLocaleString(undefined, DAY_TIME)}</span>
+                      <span className="text-slate-600" title={new Date(ticket.frDueBy).toLocaleString()}>{formatDayTime(ticket.frDueBy)}</span>
                       <SlaTargetChip target={ticket.frDueBy} metAt={ticket.firstPublicAgentReplyAt} status={ticket.status} kind="response" className="!px-1.5 !text-[10px]" />
                     </dd>
                   </div>
@@ -555,7 +553,7 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                   <div className="flex items-center gap-2 px-2.5 py-1.5">
                     <dt className="text-slate-400 w-24 flex-shrink-0 pl-[18px]">Resolution</dt>
                     <dd className="flex items-center gap-1.5 min-w-0">
-                      <span className="text-slate-600" title={new Date(ticket.dueBy).toLocaleString()}>{new Date(ticket.dueBy).toLocaleString(undefined, DAY_TIME)}</span>
+                      <span className="text-slate-600" title={new Date(ticket.dueBy).toLocaleString()}>{formatDayTime(ticket.dueBy)}</span>
                       <SlaTargetChip target={ticket.dueBy} metAt={ticket.resolvedAt || ticket.closedAt} status={ticket.status} kind="resolution" className="!px-1.5 !text-[10px]" />
                     </dd>
                   </div>

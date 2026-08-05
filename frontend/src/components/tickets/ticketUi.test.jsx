@@ -3,7 +3,7 @@ import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, test } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import {
-  MirrorChip, OriginChip, PersonAvatar, PriorityDot, SlaTargetChip, StatusPill, initials, slaTargetState, timeAgo,
+  MirrorChip, OriginChip, PersonAvatar, PriorityDot, SlaTargetChip, StatusPill, formatDay, formatDayTime, initials, slaTargetState, timeAgo,
 } from './ticketUi';
 
 afterEach(cleanup);
@@ -14,6 +14,22 @@ describe('ticketUi helpers', () => {
     expect(timeAgo(new Date(Date.now() - 5 * 60 * 1000))).toBe('5m ago');
     expect(timeAgo(new Date(Date.now() - 3 * 3600 * 1000))).toBe('3h ago');
     expect(timeAgo(null)).toBe('—');
+  });
+
+  test('formatDayTime/formatDay spell out the year only when the date is off-year (QA 08-04 #17a)', () => {
+    // Midday mid-month so no timezone can nudge the date across a year edge.
+    const thisYear = new Date();
+    thisYear.setMonth(6, 15);
+    thisYear.setHours(12, 0, 0, 0);
+    const lastYear = new Date(thisYear);
+    lastYear.setFullYear(thisYear.getFullYear() - 1);
+
+    expect(formatDayTime(thisYear)).not.toContain(String(thisYear.getFullYear()));
+    expect(formatDayTime(lastYear)).toContain(String(lastYear.getFullYear()));
+    expect(formatDay(thisYear)).not.toContain(String(thisYear.getFullYear()));
+    expect(formatDay(lastYear)).toContain(String(lastYear.getFullYear()));
+    expect(formatDayTime(null)).toBe('—');
+    expect(formatDay('not-a-date')).toBe('—');
   });
 
   test('initials collapses names', () => {

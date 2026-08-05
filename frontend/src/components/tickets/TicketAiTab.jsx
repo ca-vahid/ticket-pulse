@@ -5,7 +5,7 @@ import {
   ExternalLink, Hand, Loader2, Plus, RotateCcw, Sparkles, UserRound, X, Zap,
 } from 'lucide-react';
 import { assignmentAPI } from '../../services/api';
-import { PersonAvatar, pipelineRunLabel, pipelineTriggerLabel, timeAgo } from './ticketUi';
+import { PersonAvatar, formatDayTime, pipelineRunLabel, pipelineTriggerLabel, timeAgo } from './ticketUi';
 import { getRecommendationList } from '../../utils/assignmentRecommendations';
 
 /**
@@ -466,7 +466,7 @@ export default function TicketAiTab({ ticket, technicians = [], canReview = fals
                     )}
                   </div>
                   <p className="mt-0.5 text-[10px] text-slate-400" title={new Date(node.at).toLocaleString()}>
-                    {new Date(node.at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                    {formatDayTime(node.at)}
                   </p>
                 </li>
               );

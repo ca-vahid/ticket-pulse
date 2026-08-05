@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, GitMerge, Loader2, Search, Sparkles, X } from 'lucide-react';
 import { ticketsAPI } from '../../services/api';
-import { StatusPill } from './ticketUi';
+import { StatusPill, formatDay } from './ticketUi';
 
 // List rows carry displayRef from the server; the detail ticket may not.
 const refOf = (t) => t?.displayRef
@@ -146,7 +146,7 @@ export default function MergeTicketsModal({ ticket, onClose, onMerged }) {
           <span className="block truncate text-sm font-medium text-slate-700">{t.subject || '(no subject)'}</span>
           <span className="block text-xs text-slate-400">
             {refOf(t)}
-            {t.createdAt ? ` · ${new Date(t.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` : ''}
+            {t.createdAt ? ` · ${formatDay(t.createdAt)}` : ''}
             {why && <span className="ml-1 inline-flex items-center gap-0.5 text-violet-500"><Sparkles className="h-3 w-3" aria-hidden="true" />{why}</span>}
           </span>
         </span>
