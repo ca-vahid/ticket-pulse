@@ -3,12 +3,17 @@ import { jest } from '@jest/globals';
 const prismaMock = {
   notificationWorkflow: { findMany: jest.fn() },
   ticket: { findMany: jest.fn(), count: jest.fn() },
+  ticketTask: { findMany: jest.fn() },
   workspace: { findMany: jest.fn() },
 };
 const emitMock = jest.fn().mockResolvedValue({ status: 'completed', workflowCount: 1 });
 const executeForEventMock = jest.fn().mockResolvedValue({ status: 'completed', workflowCount: 1 });
+const sendDueReminderMock = jest.fn().mockResolvedValue(true);
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
+jest.unstable_mockModule('../src/services/ticketTaskService.js', () => ({
+  default: { sendDueReminder: sendDueReminderMock },
+}));
 jest.unstable_mockModule('../src/services/ticketLifecycleNotificationService.js', () => ({
   default: { emitTicketEvent: emitMock },
   emitTicketEvent: emitMock,
@@ -44,6 +49,8 @@ beforeEach(() => {
   jest.clearAllMocks();
   process.env.NOTIFICATION_TIME_TRIGGERS_ENABLED = 'true';
   emitMock.mockResolvedValue({ status: 'completed', workflowCount: 1 });
+  sendDueReminderMock.mockResolvedValue(true);
+  prismaMock.ticketTask.findMany.mockResolvedValue([]);
 });
 
 describe('notificationTimeTriggerService.tick', () => {
@@ -168,5 +175,70 @@ describe('scheduled (ticketless) workflows', () => {
 
     expect(result.fired).toBe(0);
     expect(executeForEventMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('task due reminders (QA 08-04 #8b)', () => {
+  const taskRow = (over = {}) => ({
+    id: 900, title: 'Renew cert', description: null, status: 'open', origin: 'ticketpulse',
+    dueAt: new Date(Date.now() + 10 * 60000), remindBeforeMinutes: 15, reminderSentAt: null,
+    assignedTech: { id: 10, name: 'Alice', email: 'alice@x.io' },
+    ticket: { id: 1, workspaceId: 1, origin: 'ticketpulse', subject: 'S', nativeNumber: 42, freshserviceTicketId: null },
+    ...over,
+  });
+
+  test('scan queries TP-owned, undone, assigned, reminder-armed tasks in the due window', async () => {
+    await timeTriggerService.scanTaskReminders();
+
+    const { where, take } = prismaMock.ticketTask.findMany.mock.calls[0][0];
+    expect(where.origin).toBe('ticketpulse'); // FS-born/shadow rows are FS's job
+    expect(where.status).toEqual({ not: 'done' });
+    expect(where.assignedTechId).toEqual({ not: null });
+    expect(where.remindBeforeMinutes).toEqual({ not: null });
+    expect(where.reminderSentAt).toBeNull();
+    // Window: 60-min grace behind now, longest preset (120 min) ahead.
+    const now = Date.now();
+    expect(now - where.dueAt.gte.getTime()).toBeGreaterThanOrEqual(59 * 60000);
+    expect(where.dueAt.lte.getTime() - now).toBeLessThanOrEqual(121 * 60000);
+    expect(take).toBe(200);
+  });
+
+  test('sends only rows whose per-row threshold (dueAt − remindBefore) has passed', async () => {
+    const inWindow = taskRow(); // due in 10 min, remind 15 → threshold passed
+    const notYet = taskRow({ id: 901, dueAt: new Date(Date.now() + 100 * 60000), remindBeforeMinutes: 15 });
+    prismaMock.ticketTask.findMany.mockResolvedValue([inWindow, notYet]);
+
+    const result = await timeTriggerService.scanTaskReminders();
+
+    expect(result).toEqual({ candidates: 2, sent: 1 });
+    expect(sendDueReminderMock).toHaveBeenCalledTimes(1);
+    expect(sendDueReminderMock).toHaveBeenCalledWith(inWindow);
+  });
+
+  test('grace window: a task 30 min past due still gets its reminder', async () => {
+    const justMissed = taskRow({ dueAt: new Date(Date.now() - 30 * 60000) });
+    prismaMock.ticketTask.findMany.mockResolvedValue([justMissed]);
+
+    const result = await timeTriggerService.scanTaskReminders();
+
+    expect(result.sent).toBe(1);
+    expect(sendDueReminderMock).toHaveBeenCalledWith(justMissed);
+  });
+
+  test('one failing reminder does not block the rest of the batch', async () => {
+    sendDueReminderMock.mockRejectedValueOnce(new Error('smtp down'));
+    prismaMock.ticketTask.findMany.mockResolvedValue([taskRow(), taskRow({ id: 901 })]);
+
+    const result = await timeTriggerService.scanTaskReminders();
+
+    expect(result.sent).toBe(1);
+    expect(sendDueReminderMock).toHaveBeenCalledTimes(2);
+  });
+
+  test('kill switch skips the scan', async () => {
+    process.env.NOTIFICATION_TIME_TRIGGERS_ENABLED = 'false';
+    const result = await timeTriggerService.scanTaskReminders();
+    expect(result).toEqual({ skipped: true });
+    expect(prismaMock.ticketTask.findMany).not.toHaveBeenCalled();
   });
 });

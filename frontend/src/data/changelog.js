@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.0.97-preview';
+export const APP_VERSION = '3.0.98-preview';
 
 export const changelog = [
+  {
+    version: '3.0.98-preview',
+    date: 'August 4, 2026',
+    entries: [
+      { type: 'new', html: '<strong>⏰ Task due times & reminders</strong> — ticket tasks now take a due <em>time</em> (15-minute steps, defaults 5:00 PM) alongside the date, and a “Notify before” reminder (15m–2h) that emails the assignee ahead of the deadline — matching FreshService. Overdue tasks tint red. (QA 07-31)' },
+      { type: 'improved', html: '<strong>✏️ Tasks are fully editable</strong> — the pencil now opens an edit panel for title, description, assignee, status, due date/time, and reminder (previously only the title could be edited after creation). Task emails got a cleaner, branded layout.' },
+    ],
+  },
   {
     version: '3.0.97-preview',
     date: 'August 4, 2026',
