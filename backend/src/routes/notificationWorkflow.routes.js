@@ -1267,6 +1267,30 @@ router.get(
   }),
 );
 
+// Condition-field catalog for the AND/OR builder, with `dynamicOptions`
+// resolved per workspace (Phase 8c): `ticket.status` serves the workspace's
+// status registry instead of the canonical 4, so custom statuses are pickable.
+// The frontend renders whatever this serves (static CG_FIELDS is its offline
+// fallback only).
+router.get(
+  '/condition-fields',
+  asyncHandler(async (req, res) => {
+    const { CONDITION_FIELDS } = await import('../services/notificationConditionModel.js');
+    const { default: statusService } = await import('../services/statusService.js');
+    const fields = [];
+    for (const [value, spec] of Object.entries(CONDITION_FIELDS)) {
+      const field = { value, label: spec.label, type: spec.type };
+      if (spec.options) field.options = spec.options;
+      if (spec.dynamicOptions === 'ticket-statuses') {
+        const statuses = await statusService.listStatuses(req.workspaceId);
+        if (statuses.length > 0) field.options = statuses.map((s) => s.name);
+      }
+      fields.push(field);
+    }
+    res.json({ success: true, data: fields });
+  }),
+);
+
 router.get(
   '/routing/metadata',
   asyncHandler(async (req, res) => {

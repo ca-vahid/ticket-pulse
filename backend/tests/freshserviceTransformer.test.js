@@ -42,3 +42,26 @@ describe('FreshService transformer', () => {
     expect(withoutStats.firstPublicAgentReplyAt).toBeNull();
   });
 });
+
+describe('getStatusId (Phase 8c base mapping)', () => {
+  test('canonical labels map directly', async () => {
+    const { getStatusId } = await import('../src/integrations/freshserviceTransformer.js');
+    expect(getStatusId('Open')).toBe(2);
+    expect(getStatusId('Pending')).toBe(3);
+    expect(getStatusId('Resolved')).toBe(4);
+    expect(getStatusId('Closed')).toBe(5);
+  });
+
+  test('custom labels map through the caller-resolved base status', async () => {
+    const { getStatusId } = await import('../src/integrations/freshserviceTransformer.js');
+    expect(getStatusId('Needs Rework', { baseStatus: 'Pending' })).toBe(3);
+    expect(getStatusId('Fixed', { baseStatus: 'Resolved' })).toBe(4);
+  });
+
+  test('unknown labels with no base return null — never the old silent Open(2)', async () => {
+    const { getStatusId } = await import('../src/integrations/freshserviceTransformer.js');
+    expect(getStatusId('Needs Rework')).toBeNull();
+    expect(getStatusId('Needs Rework', { baseStatus: null })).toBeNull();
+    expect(getStatusId('Whatever', { baseStatus: 'Not A Base' })).toBeNull();
+  });
+});

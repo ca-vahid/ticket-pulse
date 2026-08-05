@@ -218,3 +218,12 @@ export function useWorkspace() {
   }
   return context;
 }
+
+/**
+ * Tolerant variant for components that also render outside a
+ * WorkspaceProvider (unit tests, embeddable widgets): returns null instead
+ * of throwing.
+ */
+export function useWorkspaceOptional() {
+  return useContext(WorkspaceContext);
+}

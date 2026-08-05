@@ -10,7 +10,31 @@ vi.mock('../../hooks/useTicketTypes', () => ({
   invalidateTicketTypesCache: () => {},
 }));
 
-import ConditionGroupBuilder, { emptyGroup } from './ConditionGroupBuilder';
+// Server-resolved condition-field catalog (Phase 8c): ticket.status options
+// come from the workspace status registry via the API; the mock serves a
+// registry with a custom status so the tests can prove the builder renders
+// whatever the API serves.
+const conditionFieldsMock = vi.fn();
+vi.mock('../../services/api', () => ({
+  ticketsAPI: { customFieldDefinitions: vi.fn().mockResolvedValue({ data: [] }) },
+  notificationWorkflowAPI: { conditionFields: (...args) => conditionFieldsMock(...args) },
+}));
+vi.mock('../../contexts/WorkspaceContext', () => ({
+  useWorkspace: () => ({ currentWorkspace: { id: 1 } }),
+  useWorkspaceOptional: () => ({ currentWorkspace: { id: 1 } }),
+}));
+
+import ConditionGroupBuilder, { emptyGroup, invalidateConditionFieldsCache } from './ConditionGroupBuilder';
+
+conditionFieldsMock.mockResolvedValue({
+  data: [
+    { value: 'ticket.status', label: 'Ticket status', type: 'enum', options: ['Open', 'Pending', 'Resolved', 'Closed', 'Needs Rework'] },
+    { value: 'ticket.statusBase', label: 'Ticket status base (Open/Pending/Resolved/Closed)', type: 'enum', options: ['Open', 'Pending', 'Resolved', 'Closed'] },
+    { value: 'ticket.priorityLabel', label: 'Priority', type: 'enum', options: ['Low', 'Medium', 'High', 'Urgent'] },
+    { value: 'ticket.subject', label: 'Subject', type: 'string' },
+    { value: 'assignedAgent.email', label: 'Assigned agent email', type: 'string' },
+  ],
+});
 
 afterEach(cleanup);
 
@@ -77,5 +101,34 @@ describe('ConditionGroupBuilder', () => {
     render(<ConditionGroupBuilder value={emptyGroup()} onChange={() => {}} onClear={onClear} />);
     fireEvent.click(screen.getByText(/remove & use raw rule/i));
     expect(onClear).toHaveBeenCalled();
+  });
+
+  test('ticket.status options come from the workspace registry served by the API (Phase 8c)', async () => {
+    invalidateConditionFieldsCache();
+    const group = {
+      logic: 'all',
+      conditions: [{ field: 'ticket.status', operator: 'is', value: 'Open' }],
+    };
+    render(<ConditionGroupBuilder value={group} onChange={() => {}} onClear={() => {}} />);
+
+    // Once the server catalog lands, the custom status is a pickable option…
+    expect(await screen.findByRole('option', { name: 'Needs Rework' })).toBeInTheDocument();
+    // …and the derived statusBase field is offered in the field select.
+    expect(screen.getByRole('option', { name: 'Ticket status base (Open/Pending/Resolved/Closed)' })).toBeInTheDocument();
+    expect(conditionFieldsMock).toHaveBeenCalled();
+  });
+
+  test('API failure keeps the static canonical catalog usable (offline fallback)', async () => {
+    invalidateConditionFieldsCache();
+    conditionFieldsMock.mockRejectedValueOnce(new Error('down'));
+    const group = {
+      logic: 'all',
+      conditions: [{ field: 'ticket.status', operator: 'is', value: 'Open' }],
+    };
+    render(<ConditionGroupBuilder value={group} onChange={() => {}} onClear={() => {}} />);
+
+    expect(await screen.findByDisplayValue('Open')).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Closed' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Needs Rework' })).not.toBeInTheDocument();
   });
 });

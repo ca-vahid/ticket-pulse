@@ -116,8 +116,89 @@ describe('emitTicketLifecycleNotifications → engine dispatch (derived events)'
     expect(result.events).toEqual(['ticket.status_changed']);
     const [eventContext] = engineMock.executeForEvent.mock.calls[0];
     expect(eventContext.event.type).toBe('ticket.status_changed');
-    expect(eventContext.event.extra).toEqual({ from: 'Open', to: 'Pending' });
+    // Phase 8c: the payload carries the status NAMES and their BASES so
+    // conditions can match either ("entered Needs Rework" / "entered any
+    // Pending-base status").
+    expect(eventContext.event.extra).toEqual({
+      from: 'Open', to: 'Pending', fromBase: 'Open', toBase: 'Pending',
+    });
     expect(eventContext.event.dedupeStamp).toBe('Open->Pending:2026-07-06T10:00:00.000Z');
+    expect(eventContext.ticket.statusBase).toBe('Open'); // hydrated ticket is still status Open
+  });
+
+  test('custom-status transition carries the registry base (statusBase + toBase)', async () => {
+    // Registry knows "Needs Rework" as Pending-base for ws1.
+    prismaMock.ticketStatusDefinition = {
+      findMany: jest.fn().mockResolvedValue([
+        { id: 1, workspaceId: 1, name: 'Open', baseStatus: 'Open', color: 'blue', sortOrder: 0, isSystem: true, isActive: true },
+        { id: 2, workspaceId: 1, name: 'Pending', baseStatus: 'Pending', color: 'amber', sortOrder: 1, isSystem: true, isActive: true },
+        { id: 3, workspaceId: 1, name: 'Resolved', baseStatus: 'Resolved', color: 'emerald', sortOrder: 2, isSystem: true, isActive: true },
+        { id: 4, workspaceId: 1, name: 'Closed', baseStatus: 'Closed', color: 'slate', sortOrder: 3, isSystem: true, isActive: true },
+        { id: 5, workspaceId: 1, name: 'Needs Rework', baseStatus: 'Pending', color: 'violet', sortOrder: 4, isSystem: false, isActive: true },
+      ]),
+    };
+    const { invalidateStatusCache } = await import('../src/services/statusService.js');
+    invalidateStatusCache();
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...hydratedTicket, status: 'Needs Rework' });
+
+    const result = await emitTicketLifecycleNotifications({
+      existingTicket: { id: 501, workspaceId: 1, assignedTechId: null, status: 'Open' },
+      upsertedTicket: {
+        id: 501,
+        workspaceId: 1,
+        assignedTechId: null,
+        status: 'Needs Rework',
+        freshserviceUpdatedAt: new Date('2026-07-06T11:00:00.000Z'),
+      },
+      source: 'ticketpulse_native',
+      allowNotificationWorkflows: true,
+    });
+
+    // Pending-base custom status is NOT terminal — no resolved_closed event.
+    expect(result.events).toEqual(['ticket.status_changed']);
+    const [eventContext] = engineMock.executeForEvent.mock.calls[0];
+    expect(eventContext.event.extra).toEqual({
+      from: 'Open', to: 'Needs Rework', fromBase: 'Open', toBase: 'Pending',
+    });
+    expect(eventContext.ticket.status).toBe('Needs Rework');
+    expect(eventContext.ticket.statusBase).toBe('Pending');
+
+    delete prismaMock.ticketStatusDefinition;
+    invalidateStatusCache();
+  });
+
+  test('custom Resolved-base status fires resolved_closed (registry-aware terminal)', async () => {
+    prismaMock.ticketStatusDefinition = {
+      findMany: jest.fn().mockResolvedValue([
+        { id: 1, workspaceId: 1, name: 'Open', baseStatus: 'Open', color: 'blue', sortOrder: 0, isSystem: true, isActive: true },
+        { id: 2, workspaceId: 1, name: 'Pending', baseStatus: 'Pending', color: 'amber', sortOrder: 1, isSystem: true, isActive: true },
+        { id: 3, workspaceId: 1, name: 'Resolved', baseStatus: 'Resolved', color: 'emerald', sortOrder: 2, isSystem: true, isActive: true },
+        { id: 4, workspaceId: 1, name: 'Closed', baseStatus: 'Closed', color: 'slate', sortOrder: 3, isSystem: true, isActive: true },
+        { id: 6, workspaceId: 1, name: 'Fixed', baseStatus: 'Resolved', color: 'emerald', sortOrder: 5, isSystem: false, isActive: true },
+      ]),
+    };
+    const { invalidateStatusCache } = await import('../src/services/statusService.js');
+    invalidateStatusCache();
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...hydratedTicket, status: 'Fixed' });
+
+    const result = await emitTicketLifecycleNotifications({
+      existingTicket: { id: 501, workspaceId: 1, assignedTechId: null, status: 'Open' },
+      upsertedTicket: {
+        id: 501,
+        workspaceId: 1,
+        assignedTechId: null,
+        status: 'Fixed',
+        resolvedAt: new Date('2026-07-06T12:00:00.000Z'),
+        freshserviceUpdatedAt: new Date('2026-07-06T12:00:00.000Z'),
+      },
+      source: 'ticketpulse_native',
+      allowNotificationWorkflows: true,
+    });
+
+    expect(result.events).toEqual(['ticket.resolved_closed', 'ticket.status_changed']);
+
+    delete prismaMock.ticketStatusDefinition;
+    invalidateStatusCache();
   });
 
   test('disallowed ingest paths do not dispatch', async () => {

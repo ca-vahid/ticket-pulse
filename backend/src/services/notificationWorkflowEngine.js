@@ -111,6 +111,26 @@ function conditionTimeFields(ticket) {
   };
 }
 
+/**
+ * Fill `ticket.statusBase` (Phase 8c) when the emitter didn't — preview
+ * contexts, approval events, and any stored/resumed context predating the
+ * lifecycle-service change. Lookup goes through the workspace status
+ * registry with the FS-int/substring heuristic fallback; a context that
+ * already carries the key (even null) is left alone.
+ */
+async function enrichEventContextWithStatusBase(context) {
+  const ticket = context?.ticket;
+  if (!ticket || typeof ticket !== 'object') return context;
+  if (ticket.statusBase !== undefined || !ticket.status) return context;
+  try {
+    const { default: statusService } = await import('./statusService.js');
+    const statusBase = await statusService.resolveBaseStatus(Number(context.workspace?.id) || 0, ticket.status);
+    return { ...context, ticket: { ...ticket, statusBase } };
+  } catch {
+    return context;
+  }
+}
+
 const MAX_NODE_EXECUTIONS = 60;
 const MAX_EMAIL_RECIPIENTS = 25;
 const DEFAULT_LLM_MAX_TOKENS = 10000;
@@ -2697,6 +2717,7 @@ export async function executeDefinition({
   normalizedContext = await enrichEventContextWithRequesterProfile(normalizedContext);
   normalizedContext = await enrichEventContextWithPublicStatusUrl(normalizedContext);
   normalizedContext = await enrichEventContextWithAgentNotes(normalizedContext);
+  normalizedContext = await enrichEventContextWithStatusBase(normalizedContext);
   const effectiveActionLinkRenderMode = forceActionLinks ? 'force_all_enabled' : actionLinkRenderMode;
   const workflowScheduleMode = normalizedDefinition.metadata?.scheduleMode
     || workflow?.publishedDefinition?.metadata?.scheduleMode

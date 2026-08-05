@@ -4,6 +4,7 @@ import logger from '../utils/logger.js';
 import { resolveAfterHoursActiveContact } from './urgentEscalationContactService.js';
 import { AuthorizationError, NotFoundError, ValidationError } from '../utils/errors.js';
 import { getTodayRange } from '../utils/timezone.js';
+import statusService, { heuristicBaseStatus } from './statusService.js';
 
 export const DEFAULT_PUBLIC_TICKET_STATUS_SETTINGS = {
   enabled: true,
@@ -218,17 +219,37 @@ function priorityLabel(ticket) {
   }[Number(ticket?.priority)] || String(ticket?.priority || '');
 }
 
-function statusTone(status) {
-  const text = String(status || '').toLowerCase();
-  if (text.includes('closed') || text.includes('resolved')) return 'resolved';
-  if (text.includes('pending')) return 'waiting';
-  if (text.includes('open')) return 'open';
+/**
+ * Base status for a ticket (Phase 8c): the workspace-registry base stamped
+ * onto the loaded ticket by serializePublicStatus (`ticket.statusBase`) wins;
+ * unstamped tickets/labels fall back to the FS-int/substring heuristic that
+ * predates the registry. Accepts a raw status string for callers without the
+ * ticket object.
+ */
+export function publicStatusBase(ticketOrStatus) {
+  if (ticketOrStatus && typeof ticketOrStatus === 'object') {
+    if (ticketOrStatus.statusBase !== undefined && ticketOrStatus.statusBase !== null) {
+      return ticketOrStatus.statusBase;
+    }
+    return heuristicBaseStatus(ticketOrStatus.status);
+  }
+  return heuristicBaseStatus(ticketOrStatus);
+}
+
+export function statusTone(ticketOrStatus) {
+  const base = publicStatusBase(ticketOrStatus);
+  if (base === 'Resolved' || base === 'Closed') return 'resolved';
+  if (base === 'Pending') return 'waiting';
+  if (base === 'Open') return 'open';
   return 'neutral';
 }
 
-function isPendingStatus(status) {
-  const text = String(status || '').toLowerCase();
-  return text.includes('pending') || text.includes('waiting') || text.includes('on hold');
+function isPendingStatus(ticketOrStatus) {
+  return publicStatusBase(ticketOrStatus) === 'Pending';
+}
+
+function isClosedStatus(ticketOrStatus) {
+  return publicStatusBase(ticketOrStatus) === 'Closed';
 }
 
 function secondsLabel(seconds) {
@@ -255,8 +276,8 @@ function isoOrNull(value) {
   return date ? date.toISOString() : null;
 }
 
-function isResolvedStatus(status) {
-  return statusTone(status) === 'resolved';
+function isResolvedStatus(ticketOrStatus) {
+  return statusTone(ticketOrStatus) === 'resolved';
 }
 
 function lifecycleStartAt(ticket) {
@@ -270,7 +291,7 @@ function lifecycleUpdatedAt(ticket) {
 function lifecycleCompletedAt(ticket) {
   const explicit = dateOrNull(ticket?.closedAt) || dateOrNull(ticket?.resolvedAt);
   if (explicit) return explicit;
-  if (!isResolvedStatus(ticket?.status)) return null;
+  if (!isResolvedStatus(ticket)) return null;
 
   const startAt = lifecycleStartAt(ticket);
   const resolutionSeconds = Number(ticket?.resolutionTimeSeconds);
@@ -469,8 +490,8 @@ export async function computeTicketEta(ticket, settingsInput = DEFAULT_PUBLIC_TI
 function withTicketEtaTiming(ticket, eta) {
   const startedAt = lifecycleStartAt(ticket);
   const completedAt = lifecycleCompletedAt(ticket);
-  const isDone = isResolvedStatus(ticket.status) || Boolean(completedAt);
-  const isPaused = !isDone && isPendingStatus(ticket.status);
+  const isDone = isResolvedStatus(ticket) || Boolean(completedAt);
+  const isPaused = !isDone && isPendingStatus(ticket);
   const expectedAt = startedAt && eta.estimatedSeconds
     ? new Date(startedAt.getTime() + eta.estimatedSeconds * 1000)
     : null;
@@ -489,7 +510,7 @@ function withTicketEtaTiming(ticket, eta) {
 
   if (isDone) {
     state = 'resolved';
-    statusLabel = String(ticket.status || '').toLowerCase().includes('closed') ? 'Closed' : 'Resolved';
+    statusLabel = isClosedStatus(ticket) ? 'Closed' : 'Resolved';
     displayLabel = actualLabel || 'Completed';
     summary = actualLabel
       ? `Completed in ${actualLabel}${estimateLabel ? `; typical similar tickets take about ${estimateLabel}.` : '.'}`
@@ -867,7 +888,7 @@ function publicTicket(ticket, settings) {
     subject: ticket.subject || 'Ticket status',
     summary: settings.showSummary ? summarize(ticket.descriptionText || ticket.description) : null,
     status: ticket.status,
-    statusTone: statusTone(ticket.status),
+    statusTone: statusTone(ticket),
     priority: settings.showPriority ? priorityLabel(ticket) : null,
     category: settings.showCategory ? {
       ticketPulseCategory: ticket.internalCategory?.name || ticket.tpSkill || null,
@@ -900,7 +921,7 @@ function publicTimeline(ticket) {
   const assignedAt = lifecycleAssignedAt(ticket);
   const updatedAt = lifecycleUpdatedAt(ticket);
   const completedAt = lifecycleCompletedAt(ticket);
-  const isClosed = String(ticket.status || '').toLowerCase().includes('closed');
+  const isClosed = isClosedStatus(ticket);
   const timeline = [
     {
       key: 'received',
@@ -931,7 +952,7 @@ function publicTimeline(ticket) {
     });
   }
 
-  if (isPendingStatus(ticket.status)) {
+  if (isPendingStatus(ticket)) {
     timeline.push({
       key: 'pending',
       label: 'Pending',
@@ -939,7 +960,7 @@ function publicTimeline(ticket) {
       at: isoOrNull(updatedAt),
       detail: 'The ticket is waiting on information, access, vendor work, or another dependency.',
     });
-  } else if (completedAt || statusTone(ticket.status) === 'resolved') {
+  } else if (completedAt || statusTone(ticket) === 'resolved') {
     timeline.push({
       key: isClosed ? 'closed' : 'resolved',
       label: isClosed ? 'Closed' : 'Resolved',
@@ -961,6 +982,16 @@ function publicTimeline(ticket) {
 }
 
 async function serializePublicStatus({ link, ticket, settings, token = null }) {
+  // Stamp the workspace-registry base ONCE (Phase 8c) — every downstream
+  // tone/stage/timeline decision (statusTone, isPendingStatus, ETA pause)
+  // reads ticket.statusBase, so a custom "Needs Rework" (Pending base)
+  // renders the paused/waiting stage instead of falling through to the
+  // substring heuristics. Registry-unknown FS labels keep the heuristics.
+  try {
+    ticket.statusBase = await statusService.resolveBaseStatus(ticket.workspaceId, ticket.status);
+  } catch {
+    ticket.statusBase = null;
+  }
   const [eta, stats, latestImmediateSupportEvent, latestUrgencyEvent] = await Promise.all([
     computeTicketEta(ticket, settings),
     workspaceStats(ticket, settings),

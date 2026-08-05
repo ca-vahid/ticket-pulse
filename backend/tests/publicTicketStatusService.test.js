@@ -201,3 +201,69 @@ describe('public ticket status service', () => {
     expect(link.url).toBe(buildPublicTicketStatusUrl('stored-token', 'https://ticketpulse.example'));
   });
 });
+
+// Phase 8c: tone/stage decisions key on the registry BASE stamped onto the
+// loaded ticket (ticket.statusBase); the old substring heuristics remain the
+// fallback for unstamped/unknown FS labels.
+describe('base-aware public status (Phase 8c)', () => {
+  let statusTone;
+  let publicStatusBase;
+  beforeAll(async () => {
+    ({ statusTone, publicStatusBase } = await import('../src/services/publicTicketStatusService.js'));
+  });
+
+  test('stamped registry base wins over the label text', () => {
+    // "Needs Rework" contains no pending/open/closed substring — base carries it.
+    expect(publicStatusBase({ status: 'Needs Rework', statusBase: 'Pending' })).toBe('Pending');
+    expect(statusTone({ status: 'Needs Rework', statusBase: 'Pending' })).toBe('waiting');
+    expect(statusTone({ status: 'Fixed', statusBase: 'Resolved' })).toBe('resolved');
+    expect(statusTone({ status: 'In Triage', statusBase: 'Open' })).toBe('open');
+  });
+
+  test('unstamped tickets and raw labels fall back to the substring/FS-int heuristics', () => {
+    expect(statusTone({ status: 'Waiting on Customer', statusBase: null })).toBe('waiting');
+    expect(statusTone('Auto-Closed')).toBe('resolved');
+    expect(statusTone('4')).toBe('resolved');
+    expect(statusTone('Deleted')).toBe('neutral');
+    expect(publicStatusBase({ status: 'On Hold' })).toBe('Pending');
+  });
+
+  test('computeTicketEta pauses the estimate for a custom Pending-base status', async () => {
+    prismaMock.ticket.findMany.mockResolvedValue(
+      Array.from({ length: 10 }, () => ({ resolutionTimeSeconds: 3600 })),
+    );
+    const eta = await computeTicketEta({
+      id: 9001,
+      workspaceId: 1,
+      status: 'Needs Rework',
+      statusBase: 'Pending',
+      priority: 3,
+      createdAt: new Date(Date.now() - 60 * 60 * 1000),
+      resolvedAt: null,
+      closedAt: null,
+    });
+    expect(eta.state).toBe('paused');
+    expect(eta.paused).toBe(true);
+    expect(eta.pausedReason).toMatch(/Pending/);
+  });
+
+  test('computeTicketEta treats a custom Resolved-base status as complete', async () => {
+    prismaMock.ticket.findMany.mockResolvedValue(
+      Array.from({ length: 10 }, () => ({ resolutionTimeSeconds: 3600 })),
+    );
+    const eta = await computeTicketEta({
+      id: 9002,
+      workspaceId: 1,
+      status: 'Fixed',
+      statusBase: 'Resolved',
+      priority: 3,
+      createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
+      resolvedAt: null,
+      closedAt: null,
+      resolutionTimeSeconds: 5400,
+    });
+    expect(eta.state).toBe('resolved');
+    expect(eta.isComplete).toBe(true);
+    expect(eta.statusLabel).toBe('Resolved'); // Resolved base, not Closed
+  });
+});

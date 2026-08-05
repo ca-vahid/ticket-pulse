@@ -268,3 +268,36 @@ describe('mirrorService.reconcile', () => {
     }));
   });
 });
+
+// Phase 8c: TP custom labels reach FreshService through their BASE status.
+describe('mirrorService._fsStatusCode (base-mapped FS codes)', () => {
+  const registryRows = [
+    { id: 1, workspaceId: 1, name: 'Open', baseStatus: 'Open', sortOrder: 0, isSystem: true, isActive: true },
+    { id: 2, workspaceId: 1, name: 'Pending', baseStatus: 'Pending', sortOrder: 1, isSystem: true, isActive: true },
+    { id: 3, workspaceId: 1, name: 'Resolved', baseStatus: 'Resolved', sortOrder: 2, isSystem: true, isActive: true },
+    { id: 4, workspaceId: 1, name: 'Closed', baseStatus: 'Closed', sortOrder: 3, isSystem: true, isActive: true },
+    { id: 5, workspaceId: 1, name: 'Needs Rework', baseStatus: 'Pending', sortOrder: 4, isSystem: false, isActive: true },
+  ];
+
+  afterEach(async () => {
+    delete prismaMock.ticketStatusDefinition;
+    const { invalidateStatusCache } = await import('../src/services/statusService.js');
+    invalidateStatusCache();
+  });
+
+  test('canonical labels map directly; custom labels map via their registry base', async () => {
+    prismaMock.ticketStatusDefinition = { findMany: jest.fn().mockResolvedValue(registryRows) };
+    const { invalidateStatusCache } = await import('../src/services/statusService.js');
+    invalidateStatusCache();
+
+    expect(await mirrorService._fsStatusCode({ workspaceId: 1, status: 'Open' })).toBe(2);
+    expect(await mirrorService._fsStatusCode({ workspaceId: 1, status: 'Closed' })).toBe(5);
+    // "Needs Rework" is Pending-base → FS Pending(3).
+    expect(await mirrorService._fsStatusCode({ workspaceId: 1, status: 'Needs Rework' })).toBe(3);
+  });
+
+  test('unmappable labels return null (callers omit the field — no silent Open)', async () => {
+    expect(await mirrorService._fsStatusCode({ workspaceId: 1, status: 'Deleted' })).toBeNull();
+    expect(await mirrorService._fsStatusCode({ workspaceId: 1, status: 'Spam' })).toBeNull();
+  });
+});

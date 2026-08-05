@@ -1306,6 +1306,7 @@ export const notificationWorkflowAPI = {
   installTemplate: (key) => api.post(`/notification-workflows/templates/${key}/install`),
   runForTicket: (id, ticketId) => api.post(`/notification-workflows/${id}/run-for-ticket/${ticketId}`),
   variables: () => api.get('/notification-workflows/variables'),
+  conditionFields: () => api.get('/notification-workflows/condition-fields'),
   getSignature: () => api.get('/notification-workflows/signature'),
   updateSignature: (data) => api.put('/notification-workflows/signature', data),
   getEmailBlocks: () => api.get('/notification-workflows/email-blocks'),

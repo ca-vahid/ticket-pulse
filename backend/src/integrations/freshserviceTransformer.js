@@ -709,13 +709,25 @@ export function getPriorityNumber(priorityId) {
 }
 
 /**
- * Convert status string to FreshService status ID
- * @param {string} status - Status string
- * @returns {number} FreshService status ID
+ * Convert a status label to a FreshService status ID. This module is
+ * workspace-less, so custom labels resolve via the caller-supplied BASE
+ * status (Phase 8c — callers look it up in the workspace registry:
+ * statusService.baseStatusOf/resolveBaseStatus). Unknown labels with no
+ * resolvable base return null — callers must OMIT the field, never ship the
+ * old silent Open(2) fallback (it reopened tickets whose label FS didn't
+ * know).
+ * @param {string} status - Status label ('Open', 'Needs Rework', …)
+ * @param {{ baseStatus?: string|null }} [options] - registry-resolved base
+ * @returns {number|null} FreshService status ID, or null when unmappable
  */
-export function getStatusId(status) {
-  const reverseMap = Object.entries(STATUS_MAP).find(([_id, str]) => str === status);
-  return reverseMap ? Number(reverseMap[0]) : 2; // Default to Open
+export function getStatusId(status, { baseStatus = null } = {}) {
+  const direct = Object.entries(STATUS_MAP).find(([_id, str]) => str === status);
+  if (direct) return Number(direct[0]);
+  if (baseStatus) {
+    const viaBase = Object.entries(STATUS_MAP).find(([_id, str]) => str === baseStatus);
+    if (viaBase) return Number(viaBase[0]);
+  }
+  return null;
 }
 
 /**

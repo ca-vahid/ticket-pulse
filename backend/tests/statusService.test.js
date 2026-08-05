@@ -240,3 +240,27 @@ describe('CRUD', () => {
     expect(statusService.removeStatus).toBeUndefined();
   });
 });
+
+describe('resolveBaseStatus / heuristicBaseStatus (Phase 8c)', () => {
+  test('registry labels resolve to their configured base (custom + retired rows)', async () => {
+    expect(await statusService.resolveBaseStatus(1, 'Waiting on vendor')).toBe('Pending');
+    expect(await statusService.resolveBaseStatus(1, 'needs rework')).toBe('Open'); // inactive rows still resolve
+  });
+
+  test('registry-unknown labels fall back to FS ints and substrings', async () => {
+    const { heuristicBaseStatus } = await import('../src/services/statusService.js');
+    expect(await statusService.resolveBaseStatus(1, '4')).toBe('Resolved'); // raw FS code
+    expect(await statusService.resolveBaseStatus(1, 'Waiting on Customer')).toBe('Pending');
+    expect(await statusService.resolveBaseStatus(1, 'On Hold')).toBe('Pending');
+    expect(heuristicBaseStatus('2')).toBe('Open');
+    expect(heuristicBaseStatus('In Progress')).toBe('Open');
+    expect(heuristicBaseStatus('Auto-Closed')).toBe('Closed');
+  });
+
+  test('truly unknown labels return null (Deleted/Spam never get a base)', async () => {
+    expect(await statusService.resolveBaseStatus(1, 'Deleted')).toBeNull();
+    expect(await statusService.resolveBaseStatus(1, 'Spam')).toBeNull();
+    expect(await statusService.resolveBaseStatus(1, '')).toBeNull();
+    expect(await statusService.resolveBaseStatus(1, null)).toBeNull();
+  });
+});

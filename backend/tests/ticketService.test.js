@@ -955,3 +955,158 @@ describe('ticketService queue consumers resolve the workspace registry (Phase 8b
     expect(prismaMock.ticketStatusDefinition.findMany).toHaveBeenCalledTimes(1);
   });
 });
+
+// Phase 8c: FS write-back accepts workspace custom statuses, mapping to an FS
+// code via the label's BASE status; unmappable labels are rejected instead of
+// the old silent Open(2) fallback; resolution stamps key on the base.
+describe('ticketService.updateFsTicket (custom statuses via baseStatus)', () => {
+  const REGISTRY_8C = [
+    { id: 1, workspaceId: 1, name: 'Open', baseStatus: 'Open', sortOrder: 0, isSystem: true, isActive: true },
+    { id: 2, workspaceId: 1, name: 'Pending', baseStatus: 'Pending', sortOrder: 1, isSystem: true, isActive: true },
+    { id: 3, workspaceId: 1, name: 'Resolved', baseStatus: 'Resolved', sortOrder: 2, isSystem: true, isActive: true },
+    { id: 4, workspaceId: 1, name: 'Closed', baseStatus: 'Closed', sortOrder: 3, isSystem: true, isActive: true },
+    { id: 5, workspaceId: 1, name: 'Needs Rework', baseStatus: 'Pending', sortOrder: 4, isSystem: false, isActive: true },
+    { id: 6, workspaceId: 1, name: 'Fixed', baseStatus: 'Resolved', sortOrder: 5, isSystem: false, isActive: true },
+  ];
+
+  const fsBorn8c = {
+    id: 701,
+    workspaceId: 1,
+    origin: 'freshservice',
+    nativeNumber: null,
+    freshserviceTicketId: BigInt(231500),
+    subject: 'Custom status write-back',
+    status: 'Open',
+    priority: 3,
+    createdAt: new Date('2026-08-01T10:00:00Z'),
+    assignedTechId: null,
+    firstAssignedAt: null,
+    resolvedAt: null,
+    closedAt: null,
+    internalCategoryId: null,
+    internalSubcategoryId: null,
+    tpSkill: null,
+    tpSubskill: null,
+    requester: { id: 40, name: 'Rita Requester', email: 'rita@example.com' },
+    assignedTech: null,
+    internalCategory: null,
+    internalSubcategory: null,
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    invalidateStatusCache();
+    prismaMock.ticketStatusDefinition.findMany.mockResolvedValue(REGISTRY_8C);
+    prismaMock.workspace.findUnique.mockResolvedValue({
+      id: 1, name: 'IT', isActive: true, tpSkillCustomField: 'tp_skill', tpSubskillCustomField: 'tp_subskill',
+    });
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...fsBorn8c });
+    prismaMock.ticket.update.mockImplementation(({ data }) => Promise.resolve({
+      ...fsBorn8c, ...data, assignedTech: null,
+    }));
+    ticketActivityRepositoryMock.create.mockResolvedValue({});
+  });
+
+  afterAll(() => {
+    invalidateStatusCache();
+  });
+
+  test('custom Pending-base status ships its base FS code (3) and stores the label locally', async () => {
+    fsClientMock.updateTicketFields.mockResolvedValue({ status: 3, updated_at: '2026-08-05T10:00:00Z' });
+
+    const result = await ticketService.updateFsTicket(701, 1, { status: 'Needs Rework' }, actor);
+
+    expect(fsClientMock.updateTicketFields).toHaveBeenCalledWith(231500, expect.objectContaining({ status: 3 }));
+    expect(prismaMock.ticket.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'Needs Rework' }),
+    }));
+    // Pending-base: no resolution stamps.
+    const patch = prismaMock.ticket.update.mock.calls[0][0].data;
+    expect(patch.resolvedAt).toBeUndefined();
+    expect(patch.closedAt).toBeUndefined();
+    expect(result.synced).toEqual(['status']);
+  });
+
+  test('custom Resolved-base status maps to 4 and stamps resolvedAt (base-aware terminal)', async () => {
+    fsClientMock.updateTicketFields.mockResolvedValue({ status: 4, updated_at: '2026-08-05T10:00:00Z' });
+
+    await ticketService.updateFsTicket(701, 1, { status: 'Fixed' }, actor);
+
+    expect(fsClientMock.updateTicketFields).toHaveBeenCalledWith(231500, expect.objectContaining({ status: 4 }));
+    const patch = prismaMock.ticket.update.mock.calls[0][0].data;
+    expect(patch.status).toBe('Fixed');
+    expect(patch.resolvedAt).toBeInstanceOf(Date);
+    expect(patch.closedAt).toBeUndefined(); // Resolved base, not Closed
+  });
+
+  test('input is normalized case-insensitively against the registry', async () => {
+    fsClientMock.updateTicketFields.mockResolvedValue({ status: 3, updated_at: '2026-08-05T10:00:00Z' });
+
+    await ticketService.updateFsTicket(701, 1, { status: 'needs rework' }, actor);
+
+    const patch = prismaMock.ticket.update.mock.calls[0][0].data;
+    expect(patch.status).toBe('Needs Rework');
+  });
+
+  test('unknown statuses are rejected naming the workspace vocabulary — nothing reaches FS', async () => {
+    await expect(ticketService.updateFsTicket(701, 1, { status: 'Bogus' }, actor))
+      .rejects.toThrow(/Status must be one of: .*Needs Rework/);
+    expect(fsClientMock.updateTicketFields).not.toHaveBeenCalled();
+  });
+
+  test('re-applying the current label stays a no-op (idempotent retry, QA 231648)', async () => {
+    const result = await ticketService.updateFsTicket(701, 1, { status: 'Open' }, actor);
+    expect(result.noChanges).toBe(true);
+    expect(fsClientMock.updateTicketFields).not.toHaveBeenCalled();
+  });
+});
+
+// Phase 8c: sort=status ranks by BASE rank then the workspace's sortOrder —
+// custom statuses slot into their lifecycle stage instead of after Closed.
+describe('ticketService sort=status with custom statuses (Phase 8c)', () => {
+  const REGISTRY_SORT = [
+    { id: 1, workspaceId: 1, name: 'Open', baseStatus: 'Open', sortOrder: 0, isSystem: true, isActive: true },
+    { id: 2, workspaceId: 1, name: 'Pending', baseStatus: 'Pending', sortOrder: 1, isSystem: true, isActive: true },
+    { id: 3, workspaceId: 1, name: 'Resolved', baseStatus: 'Resolved', sortOrder: 2, isSystem: true, isActive: true },
+    { id: 4, workspaceId: 1, name: 'Closed', baseStatus: 'Closed', sortOrder: 3, isSystem: true, isActive: true },
+    { id: 5, workspaceId: 1, name: 'Needs Rework', baseStatus: 'Pending', sortOrder: 4, isSystem: false, isActive: true },
+    { id: 6, workspaceId: 1, name: 'Fixed', baseStatus: 'Resolved', sortOrder: 5, isSystem: false, isActive: true },
+  ];
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    invalidateStatusCache();
+    prismaMock.ticketStatusDefinition.findMany.mockResolvedValue(REGISTRY_SORT);
+    prismaMock.workspace.findUnique.mockResolvedValue({ id: 1, internalDomains: [] });
+    prismaMock.ticket.count.mockResolvedValue(0);
+    prismaMock.ticket.findMany.mockResolvedValue([]);
+    prismaMock.$queryRaw.mockResolvedValue([]);
+  });
+
+  afterAll(() => invalidateStatusCache());
+
+  test('customs bucket into their base stage; unknown legacy labels trail their heuristic base; Deleted sorts last', async () => {
+    prismaMock.ticket.groupBy.mockResolvedValue([
+      { status: 'Deleted', _count: { _all: 1 } },
+      { status: 'Fixed', _count: { _all: 1 } },
+      { status: 'Closed', _count: { _all: 1 } },
+      { status: 'Needs Rework', _count: { _all: 1 } },
+      { status: 'Waiting on Customer', _count: { _all: 1 } }, // registry-unknown, heuristic Pending
+      { status: 'Open', _count: { _all: 1 } },
+      { status: 'Pending', _count: { _all: 1 } },
+      { status: 'Resolved', _count: { _all: 1 } },
+    ]);
+
+    await ticketService.listTickets(1, { sort: 'status', dir: 'asc', pageSize: 25 });
+
+    const sliceOrder = prismaMock.ticket.findMany.mock.calls
+      .map(([args]) => args.where.AND[1].status);
+    expect(sliceOrder).toEqual([
+      'Open',
+      'Pending', 'Needs Rework', 'Waiting on Customer',
+      'Resolved', 'Fixed',
+      'Closed',
+      'Deleted',
+    ]);
+  });
+});

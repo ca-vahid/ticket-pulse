@@ -449,6 +449,7 @@ const LLM_TOOL_POLICY_MODES = [
 
 const CONDITION_FIELD_OPTIONS = [
   { value: 'ticket.status', label: 'Ticket status', example: 'Open' },
+  { value: 'ticket.statusBase', label: 'Ticket status base (Open/Pending/Resolved/Closed)', example: 'Pending' },
   { value: 'ticket.priorityLabel', label: 'Ticket priority', example: 'High' },
   { value: 'ticket.assessedPriority', label: 'Assessed priority', example: 'Urgent' },
   { value: 'ticket.category', label: 'Category', example: 'Access' },

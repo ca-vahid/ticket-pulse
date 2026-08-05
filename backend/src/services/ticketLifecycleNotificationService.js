@@ -2,6 +2,7 @@ import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { ticketSourceLabel } from '../utils/ticketOrigin.js';
 import notificationWorkflowEngine from './notificationWorkflowEngine.js';
+import statusService, { TERMINAL_BASE_STATUSES } from './statusService.js';
 
 const TERMINAL_STATUS_VALUES = new Set(['resolved', 'closed', '4', '5']);
 
@@ -33,10 +34,50 @@ function stableAssignmentEvidence(upsertedTicket = {}, existingTicket = null) {
     || `${asNumber(existingTicket?.assignedTechId) || 'none'}-${asNumber(upsertedTicket.assignedTechId) || 'none'}`;
 }
 
+/**
+ * Workspace-less terminal heuristic (FS ints + substrings) — the pre-8c
+ * behavior, kept as the fallback for raw FS payload labels and for callers
+ * without a workspace resolver (deriveTicketLifecycleEvents default).
+ * A custom label like "Needs Rework" is invisible to this heuristic; the
+ * registry-aware resolver below handles it.
+ */
 function isTerminalStatus(status) {
   const value = String(status || '').trim().toLowerCase();
   if (!value) return false;
   return TERMINAL_STATUS_VALUES.has(value) || value.includes('resolved') || value.includes('closed');
+}
+
+/**
+ * Registry-aware terminal check for a workspace (Phase 8c): a status is
+ * terminal when its BASE is Resolved/Closed per the workspace's status
+ * definitions; unknown labels keep the FS-int/substring heuristic so raw
+ * FreshService payload values ('4', 'Closed') still resolve. Returns a SYNC
+ * predicate so deriveTicketLifecycleEvents stays synchronous.
+ */
+async function workspaceTerminalResolver(workspaceId) {
+  const wsId = Number(workspaceId);
+  if (!Number.isFinite(wsId) || wsId <= 0) return isTerminalStatus;
+  let knownTerminal = null;
+  try {
+    // includeInactive: retired custom statuses linger on historical rows and
+    // must still resolve their base.
+    const rows = await statusService.listStatuses(wsId, { includeInactive: true });
+    knownTerminal = new Map(rows.map((r) => [
+      r.name.toLowerCase(),
+      TERMINAL_BASE_STATUSES.includes(r.baseStatus),
+    ]));
+  } catch {
+    return isTerminalStatus; // registry unreadable → pre-8c behavior
+  }
+  return (status) => {
+    const value = String(status || '').trim().toLowerCase();
+    if (!value) return false;
+    // Registry rows are AUTHORITATIVE for both directions — a non-terminal
+    // custom label must not fall through to a substring match. Heuristics
+    // only cover labels the registry has never seen (raw FS values).
+    if (knownTerminal.has(value)) return knownTerminal.get(value);
+    return isTerminalStatus(value);
+  };
 }
 
 function priorityLabel(ticket) {
@@ -140,7 +181,7 @@ export function lifecycleNotificationFingerprint(eventType, upsertedTicket, exis
   ].join(':');
 }
 
-export function deriveTicketLifecycleEvents(existingTicket, upsertedTicket) {
+export function deriveTicketLifecycleEvents(existingTicket, upsertedTicket, { isTerminal = isTerminalStatus } = {}) {
   const events = [];
   if (!upsertedTicket) return events;
 
@@ -162,7 +203,7 @@ export function deriveTicketLifecycleEvents(existingTicket, upsertedTicket) {
         notificationFingerprint: lifecycleNotificationFingerprint('ticket.assigned', upsertedTicket, existingTicket),
       });
     }
-    if (isTerminalStatus(upsertedTicket.status)) {
+    if (isTerminal(upsertedTicket.status)) {
       events.push({
         type: 'ticket.resolved_closed',
         occurredAt: dateIso(upsertedTicket.resolvedAt)
@@ -191,7 +232,7 @@ export function deriveTicketLifecycleEvents(existingTicket, upsertedTicket) {
     });
   }
 
-  if (!isTerminalStatus(existingTicket.status) && isTerminalStatus(upsertedTicket.status)) {
+  if (!isTerminal(existingTicket.status) && isTerminal(upsertedTicket.status)) {
     events.push({
       type: 'ticket.resolved_closed',
       occurredAt: dateIso(upsertedTicket.resolvedAt)
@@ -263,6 +304,7 @@ function webhookPayloadFromContext(eventContext) {
       ref: t.freshserviceTicketId ? `#${t.freshserviceTicketId}` : `TP-${t.id}`,
       subject: t.subject,
       status: t.status,
+      statusBase: t.statusBase ?? null,
       priority: t.priority,
       origin: t.origin,
       tags: t.tags || [],
@@ -290,7 +332,7 @@ async function maybeRefreshSentiment(eventContext) {
   } catch { /* sentiment is an annotation, never a pipeline step */ }
 }
 
-function buildEventContext({ event, ticket, previousAgent, source }) {
+function buildEventContext({ event, ticket, previousAgent, source, statusBase = null }) {
   return {
     event: {
       type: event.type,
@@ -311,6 +353,10 @@ function buildEventContext({ event, ticket, previousAgent, source }) {
       subject: ticket.subject,
       descriptionText: ticket.descriptionText,
       status: ticket.status,
+      // Base status (Phase 8c): the label's canonical base per the workspace
+      // registry, so conditions can match "any Pending-base status" without
+      // enumerating custom labels.
+      statusBase,
       priority: ticket.priority,
       priorityLabel: priorityLabel(ticket),
       impact: ticket.impact ?? null,
@@ -383,16 +429,31 @@ export async function emitTicketLifecycleNotifications({
     return { status: 'skipped', reason: 'Notification workflows disabled for this ingest path' };
   }
 
-  const events = deriveTicketLifecycleEvents(existingTicket, upsertedTicket);
+  // Terminal detection is per-workspace since 8c: a custom "Done" (Resolved
+  // base) fires resolved_closed; a custom "Needs Rework" (Pending base) never
+  // does. Unknown labels keep the FS-int/substring heuristics.
+  const workspaceId = asNumber(upsertedTicket?.workspaceId) || asNumber(existingTicket?.workspaceId);
+  const isTerminal = await workspaceTerminalResolver(workspaceId);
+  const events = deriveTicketLifecycleEvents(existingTicket, upsertedTicket, { isTerminal });
   if (events.length === 0) return { status: 'skipped', reason: 'No lifecycle notification events' };
 
   const ticket = await hydrateTicket(upsertedTicket.id);
   if (!ticket) return { status: 'skipped', reason: 'Ticket not found after upsert' };
   const previousAgent = await hydratePreviousAgent(existingTicket);
+  const statusBase = await statusService.resolveBaseStatus(ticket.workspaceId, ticket.status).catch(() => null);
 
   const results = [];
   for (const event of events) {
-    const eventContext = buildEventContext({ event, ticket, previousAgent, source });
+    // status_changed conditions get the transition's BASES alongside the
+    // names ("left an Open-base status", "entered any Pending-base status").
+    if (event.type === 'ticket.status_changed' && event.extra) {
+      event.extra = {
+        ...event.extra,
+        fromBase: await statusService.resolveBaseStatus(ticket.workspaceId, event.extra.from).catch(() => null),
+        toBase: await statusService.resolveBaseStatus(ticket.workspaceId, event.extra.to).catch(() => null),
+      };
+    }
+    const eventContext = buildEventContext({ event, ticket, previousAgent, source, statusBase });
     dispatchLifecycleWebhook(eventContext);
     maybeRefreshSentiment(eventContext);
     try {
@@ -440,7 +501,8 @@ export async function emitTicketEvent(eventType, ticketId, {
     dedupeStamp: stamp,
     notificationFingerprint: `wf:${ticket.workspaceId}:${eventType}:${stamp}`,
   };
-  const eventContext = buildEventContext({ event, ticket, previousAgent: null, source });
+  const statusBase = await statusService.resolveBaseStatus(ticket.workspaceId, ticket.status).catch(() => null);
+  const eventContext = buildEventContext({ event, ticket, previousAgent: null, source, statusBase });
   if (extra) eventContext.event.extra = extra;
   dispatchLifecycleWebhook(eventContext);
   maybeRefreshSentiment(eventContext);
