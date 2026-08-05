@@ -1034,6 +1034,10 @@ model Ticket {
   resolvedAt                          DateTime? @map("resolved_at")
   closedAt                            DateTime? @map("closed_at")
   dueBy                               DateTime? @map("due_by")
+  // Who last set dueBy: 'sla' (policy clock at create) | 'manual' (agent edit,
+  // QA 08-04 #13). Null = legacy/SLA-owned. Any future SLA recompute must skip
+  // rows marked 'manual' — a manual override always outranks the policy clock.
+  dueBySetBy                          String?   @map("due_by_set_by") @db.VarChar(10)
   frDueBy                             DateTime? @map("fr_due_by") // First response due by
   updatedAt                           DateTime  @updatedAt @map("updated_at")
   freshserviceUpdatedAt               DateTime? @map("freshservice_updated_at")

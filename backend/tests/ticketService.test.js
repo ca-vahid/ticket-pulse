@@ -473,6 +473,148 @@ describe('ticketService.updateFsTicket (FS-born write-back)', () => {
   });
 });
 
+// QA 08-04 #13: editable resolution due date. TP-born tickets accept ISO
+// dueBy/frDueBy (null clears), stamp the dueBySetBy ownership marker, audit
+// as due_changed, and skip the FS mirror (its copy doesn't carry due dates).
+describe('ticketService.updateTicketFields (due-date editing)', () => {
+  const nativeTicket = {
+    id: 501,
+    workspaceId: 1,
+    origin: 'ticketpulse',
+    nativeNumber: 1042,
+    freshserviceTicketId: null,
+    subject: 'Laptop will not boot',
+    status: 'Open',
+    priority: 3,
+    createdAt: new Date('2026-08-01T10:00:00Z'),
+    assignedTechId: null,
+    dueBy: new Date('2026-08-06T23:59:00Z'),
+    dueBySetBy: 'sla',
+    frDueBy: new Date('2026-08-05T18:00:00Z'),
+    internalCategoryId: null,
+    internalSubcategoryId: null,
+    groupId: null,
+    internalGroupId: null,
+    requester: { id: 40, name: 'Rita Requester', email: 'rita@example.com' },
+    assignedTech: null,
+    internalCategory: null,
+    internalSubcategory: null,
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...nativeTicket });
+    prismaMock.ticket.update.mockImplementation(({ data }) => Promise.resolve({
+      ...nativeTicket, ...data, requester: nativeTicket.requester, assignedTech: null,
+    }));
+    ticketActivityRepositoryMock.create.mockResolvedValue({});
+  });
+
+  test('an ISO dueBy sets the clock, stamps dueBySetBy=manual and audits due_changed', async () => {
+    const iso = '2026-08-08T23:59:00.000Z';
+    const result = await ticketService.updateTicketFields(501, 1, { dueBy: iso }, actor);
+
+    expect(prismaMock.ticket.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ dueBy: new Date(iso), dueBySetBy: 'manual' }),
+    }));
+    expect(ticketActivityRepositoryMock.create).toHaveBeenCalledWith(expect.objectContaining({
+      activityType: 'due_changed',
+      details: expect.objectContaining({
+        changes: { dueBy: { from: '2026-08-06T23:59:00.000Z', to: iso } },
+      }),
+    }));
+    expect(result.changed).toBe(true);
+  });
+
+  test('null dueBy clears the date AND the ownership marker', async () => {
+    await ticketService.updateTicketFields(501, 1, { dueBy: null }, actor);
+
+    expect(prismaMock.ticket.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ dueBy: null, dueBySetBy: null }),
+    }));
+    expect(ticketActivityRepositoryMock.create).toHaveBeenCalledWith(expect.objectContaining({
+      activityType: 'due_changed',
+      details: expect.objectContaining({
+        changes: { dueBy: { from: '2026-08-06T23:59:00.000Z', to: null } },
+      }),
+    }));
+  });
+
+  test('due-only edits skip the FS mirror (no mirrorState churn, no field-sync job)', async () => {
+    await ticketService.updateTicketFields(501, 1, { dueBy: '2026-08-08T23:59:00.000Z' }, actor);
+
+    const { data } = prismaMock.ticket.update.mock.calls.find(([args]) => args.data.dueBy)[0];
+    expect(data.mirrorState).toBeUndefined();
+    expect(mirrorServiceMock.enqueueFieldSync).not.toHaveBeenCalled();
+  });
+
+  test('a mixed edit (priority + dueBy) still mirrors and writes BOTH audit types', async () => {
+    await ticketService.updateTicketFields(501, 1, { priority: 1, dueBy: '2026-08-08T23:59:00.000Z' }, actor);
+
+    expect(prismaMock.ticket.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ priority: 1, dueBy: expect.any(Date), mirrorState: 'pending' }),
+    }));
+    expect(mirrorServiceMock.enqueueFieldSync).toHaveBeenCalledWith(1, 501);
+    const auditTypes = ticketActivityRepositoryMock.create.mock.calls.map(([a]) => a.activityType);
+    expect(auditTypes).toEqual(expect.arrayContaining(['fields_updated', 'due_changed']));
+    // The generic entry must NOT double-report the due change.
+    const fieldsAudit = ticketActivityRepositoryMock.create.mock.calls.find(([a]) => a.activityType === 'fields_updated')[0];
+    expect(fieldsAudit.details.changes.dueBy).toBeUndefined();
+  });
+
+  test('frDueBy edits never touch the dueBy ownership marker', async () => {
+    await ticketService.updateTicketFields(501, 1, { frDueBy: '2026-08-05T20:00:00.000Z' }, actor);
+
+    const { data } = prismaMock.ticket.update.mock.calls.find(([args]) => args.data.frDueBy)[0];
+    expect(data.frDueBy).toEqual(new Date('2026-08-05T20:00:00.000Z'));
+    expect(data.dueBySetBy).toBeUndefined();
+    expect(ticketActivityRepositoryMock.create).toHaveBeenCalledWith(expect.objectContaining({
+      activityType: 'due_changed',
+      details: expect.objectContaining({
+        changes: { frDueBy: { from: '2026-08-05T18:00:00.000Z', to: '2026-08-05T20:00:00.000Z' } },
+      }),
+    }));
+  });
+
+  test('re-sending the current dueBy is a no-op (no update, no audit)', async () => {
+    const result = await ticketService.updateTicketFields(501, 1, { dueBy: '2026-08-06T23:59:00.000Z' }, actor);
+
+    expect(result.changed).toBe(false);
+    expect(prismaMock.ticket.update).not.toHaveBeenCalled();
+    expect(ticketActivityRepositoryMock.create).not.toHaveBeenCalled();
+  });
+
+  test('rejects non-ISO garbage via the strict schema', async () => {
+    await expect(ticketService.updateTicketFields(501, 1, { dueBy: 'next tuesday' }, actor))
+      .rejects.toThrow(ValidationError);
+  });
+
+  test('FS-born tickets are rejected — FreshService owns their SLA clocks', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue({
+      ...nativeTicket, origin: 'freshservice', freshserviceTicketId: BigInt(231309),
+    });
+
+    await expect(ticketService.updateTicketFields(501, 1, { dueBy: '2026-08-08T23:59:00.000Z' }, actor))
+      .rejects.toThrow(/owned by FreshService/i);
+  });
+
+  test('createTicket stamps dueBySetBy=sla when the policy clock sets dueBy', async () => {
+    armCreateDefaults();
+    prismaMock.slaPolicy.findFirst.mockResolvedValue({
+      firstResponseMinutes: 60, resolveMinutes: 480, isActive: true,
+    });
+
+    await ticketService.createTicket(1, {
+      subject: 'Laptop will not boot',
+      requesterEmail: 'rita@example.com',
+    }, actor);
+
+    expect(prismaMock.ticket.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ dueBy: expect.any(Date), dueBySetBy: 'sla' }),
+    }));
+  });
+});
+
 // QA 08-04 #14: queue sorting — dueBy joins the whitelist (nulls last) and
 // sort=status orders by LIFECYCLE rank (Open first asc), not alphabetically.
 // Status pages are assembled bucket-by-bucket (groupBy counts → per-status
@@ -552,5 +694,27 @@ describe('ticketService.listTickets sorting', () => {
       skip: 0,
       take: 1,
     }));
+  });
+});
+
+describe('ticketService.buildListWhere q matching', () => {
+  test('free-text q matches subject, requester name, AND requester email (QA 08-04 #2)', async () => {
+    const where = await ticketService.buildListWhere(1, { q: 'ana@bgc' });
+    const qClause = where.AND.find((c) => Array.isArray(c.OR));
+    expect(qClause.OR).toEqual([
+      { subject: { contains: 'ana@bgc', mode: 'insensitive' } },
+      { requester: { is: { name: { contains: 'ana@bgc', mode: 'insensitive' } } } },
+      { requester: { is: { email: { contains: 'ana@bgc', mode: 'insensitive' } } } },
+    ]);
+  });
+
+  test('numeric q still adds the ref matches alongside the text clauses', async () => {
+    const where = await ticketService.buildListWhere(1, { q: '#1042' });
+    const qClause = where.AND.find((c) => Array.isArray(c.OR));
+    expect(qClause.OR).toEqual(expect.arrayContaining([
+      { nativeNumber: 1042 },
+      { freshserviceTicketId: 1042n },
+      { requester: { is: { email: { contains: '#1042', mode: 'insensitive' } } } },
+    ]));
   });
 });

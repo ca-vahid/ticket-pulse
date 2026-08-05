@@ -143,6 +143,11 @@ const updateTicketSchema = z.object({
   internalGroupId: z.number().int().positive().optional().nullable(),
   impact: z.number().int().min(1).max(3).optional().nullable(),
   urgency: z.number().int().min(1).max(3).optional().nullable(),
+  // Editable due dates (QA 08-04 #13, TP-born only via _requireNativeTicket):
+  // ISO datetime sets the clock (stamps dueBySetBy='manual' for dueBy), null
+  // clears it. FS-born tickets never reach this schema — FS owns their SLA.
+  dueBy: z.string().datetime({ offset: true }).optional().nullable(),
+  frDueBy: z.string().datetime({ offset: true }).optional().nullable(),
 }).strict();
 
 const threadBodySchema = z.object({
@@ -608,6 +613,9 @@ class TicketService {
       const or = [
         { subject: { contains: q, mode: 'insensitive' } },
         { requester: { is: { name: { contains: q, mode: 'insensitive' } } } },
+        // Requester EMAIL too (QA 08-04 #2 audit): people paste an address as
+        // often as a name; assignment-audit search already matched on it.
+        { requester: { is: { email: { contains: q, mode: 'insensitive' } } } },
       ];
       // Ticket refs: "TP-1042", "1042", "#232558", "232558" — the leading '#'
       // people copy from FreshService must not defeat the numeric match.
@@ -1792,8 +1800,14 @@ class TicketService {
         source: data.source ?? sourceChannel,
         lastIngestSource: 'ticketpulse_native',
         lastIngestedAt: now,
+        // dueBySetBy marker contract (QA 08-04 #13): 'sla' = the policy clock
+        // stamped dueBy here at creation; 'manual' = an agent edited it via
+        // updateTicketFields. dueDatesFor is only ever applied HERE — if an
+        // SLA recompute path for existing tickets is added later (e.g. on
+        // priority/type change, flagged in plans/TICKET_TYPES_PLAN.md), it
+        // MUST skip tickets where dueBySetBy === 'manual'.
         ...(slaDueDates.frDueBy ? { frDueBy: slaDueDates.frDueBy } : {}),
-        ...(slaDueDates.dueBy ? { dueBy: slaDueDates.dueBy } : {}),
+        ...(slaDueDates.dueBy ? { dueBy: slaDueDates.dueBy, dueBySetBy: 'sla' } : {}),
         ...(assignee ? {
           assignedTechId: assignee.id,
           assignedAt: now,
@@ -1984,11 +1998,45 @@ class TicketService {
         changes.internalGroupId = { from: ticket.internalGroupId ?? null, to: internalGroupId ?? null };
       }
     }
+    // Due-date edits (QA 08-04 #13). dueBy carries the ownership marker:
+    // 'manual' pins the clock against any future SLA recompute; clearing the
+    // date clears the marker too (back to "SLA may own this"). frDueBy edits
+    // don't touch the marker — it describes the RESOLUTION clock only.
+    if (data.dueBy !== undefined) {
+      const next = data.dueBy ? new Date(data.dueBy) : null;
+      const prevMs = ticket.dueBy ? new Date(ticket.dueBy).getTime() : null;
+      if ((next ? next.getTime() : null) !== prevMs) {
+        patch.dueBy = next;
+        patch.dueBySetBy = next ? 'manual' : null;
+        changes.dueBy = {
+          from: ticket.dueBy ? new Date(ticket.dueBy).toISOString() : null,
+          to: next ? next.toISOString() : null,
+        };
+      }
+    }
+    if (data.frDueBy !== undefined) {
+      const next = data.frDueBy ? new Date(data.frDueBy) : null;
+      const prevMs = ticket.frDueBy ? new Date(ticket.frDueBy).getTime() : null;
+      if ((next ? next.getTime() : null) !== prevMs) {
+        patch.frDueBy = next;
+        changes.frDueBy = {
+          from: ticket.frDueBy ? new Date(ticket.frDueBy).toISOString() : null,
+          to: next ? next.toISOString() : null,
+        };
+      }
+    }
 
     if (Object.keys(patch).length === 0) {
       return { ...ticket, displayRef: ticketDisplayRef(ticket), changed: false };
     }
-    patch.mirrorState = 'pending';
+    // The FS fallback mirror doesn't carry due dates (FS SLA policies own
+    // due_by there) — a due-only edit needs no mirror churn.
+    const dueChanges = {};
+    if (changes.dueBy) dueChanges.dueBy = changes.dueBy;
+    if (changes.frDueBy) dueChanges.frDueBy = changes.frDueBy;
+    const otherChanges = Object.fromEntries(Object.entries(changes).filter(([k]) => !(k in dueChanges)));
+    const dueOnly = Object.keys(otherChanges).length === 0 && Object.keys(dueChanges).length > 0;
+    if (!dueOnly) patch.mirrorState = 'pending';
 
     const updated = await prisma.ticket.update({
       where: { id: ticket.id },
@@ -1996,9 +2044,13 @@ class TicketService {
       include: TICKET_INCLUDE,
     });
 
-    await this._audit(ticket.id, 'fields_updated', actor, { changes });
+    // Due edits get their own audit type (due_changed) so SLA-clock history
+    // reads distinctly in the activity timeline; other field edits keep the
+    // generic fields_updated entry.
+    if (Object.keys(otherChanges).length) await this._audit(ticket.id, 'fields_updated', actor, { changes: otherChanges });
+    if (Object.keys(dueChanges).length) await this._audit(ticket.id, 'due_changed', actor, { changes: dueChanges });
     this._broadcast(workspaceId, 'updated', updated, { changes: Object.keys(changes) });
-    await mirrorService.enqueueFieldSync(workspaceId, ticket.id);
+    if (!dueOnly) await mirrorService.enqueueFieldSync(workspaceId, ticket.id);
     // Subject/description changed → the content embedding is stale (P5.2).
     if (changes.subject || changes.description) this._refreshEmbedding(ticket.id, workspaceId);
     // A manual (non-AI) category change should fire the same agent-alert trigger
