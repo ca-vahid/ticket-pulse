@@ -1,6 +1,17 @@
-export const APP_VERSION = '3.0.94-preview';
+export const APP_VERSION = '3.0.95-preview';
 
 export const changelog = [
+  {
+    version: '3.0.95-preview',
+    date: 'August 4, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>🧾 “All tickets” means all tickets</strong> — the All-tickets stat card no longer silently applies Open+Pending; it now shows every status, matching its count and the filter rail. (QA 07-31)' },
+      { type: 'fixed', html: '<strong>📋 Board view tells the truth</strong> — the board now respects your status filters exactly like the list (no more closed cards under “My open”, no more missing open tickets under “All”). When closed tickets are filtered out, the Closed column says so — with a one-click “Show closed”. Column counts are labeled “on page” when paginated, and the board gained the full pagination footer.' },
+      { type: 'new', html: '<strong>↕️ Status & Due column sorting</strong> — click Status to sort Open → Pending → Resolved → Closed (FreshService-style, honest across pages), and Due to sort by due date (soonest first, no-due last). Both are in the sort menu too.' },
+      { type: 'fixed', html: '<strong>📆 Years on old dates</strong> — dates outside the current year now show the year everywhere in the ticket surfaces (peek panel, activity, SLA rows, scheduled tickets), with full timestamps on hover.' },
+      { type: 'improved', html: '<strong>🤝 cambioearth.com is now a trusted domain</strong> — their tickets no longer carry the External badge (IT, Accounting, Health & Safety).' },
+    ],
+  },
   {
     version: '3.0.94-preview',
     date: 'August 3, 2026',
