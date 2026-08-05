@@ -30,6 +30,11 @@ export const CONDITION_FIELDS = Object.freeze({
   // Values are NOT validated against `options` (validateConditionGroup is
   // value-lenient), so custom statuses already evaluate correctly today.
   'ticket.status': { label: 'Ticket status', type: 'enum', path: 'ticket.status', options: ['Open', 'Pending', 'Resolved', 'Closed'], dynamicOptions: 'ticket-statuses' },
+  // Derived base (Phase 8c): every status label maps to one of the 4 canonical
+  // bases via the workspace registry, so "any open-base status" is matchable
+  // without enumerating custom labels. Populated on the event context by
+  // ticketLifecycleNotificationService / the engine's statusBase enrichment.
+  'ticket.statusBase': { label: 'Ticket status base', type: 'enum', path: 'ticket.statusBase', options: ['Open', 'Pending', 'Resolved', 'Closed'] },
   'ticket.priorityLabel': { label: 'Priority', type: 'enum', path: 'ticket.priorityLabel', options: ['Low', 'Medium', 'High', 'Urgent'] },
   'ticket.origin': { label: 'Ticket origin', type: 'enum', path: 'ticket.origin', options: ['ticketpulse', 'freshservice'] },
   // Arrival channel (QA 07-07 #1) — how the ticket reached the helpdesk.

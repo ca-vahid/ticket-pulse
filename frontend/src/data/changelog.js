@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.1.3-preview';
+export const APP_VERSION = '3.1.4-preview';
 
 export const changelog = [
+  {
+    version: '3.1.4-preview',
+    date: 'August 5, 2026',
+    entries: [
+      { type: 'new', html: '<strong>🏷️ Custom statuses: automations & sync</strong> — part 3 of 3: workflows can now trigger on your custom statuses (“when a ticket enters Needs Rework…”) or on any base state via the new <em>Status base</em> condition, with an installable “Notify on custom status” template. FreshService mirrors sync custom statuses as their base status, the public status pages understand them, and the API lists each workspace’s own statuses. This completes the custom-status feature. (QA 07-31)' },
+    ],
+  },
   {
     version: '3.1.3-preview',
     date: 'August 5, 2026',

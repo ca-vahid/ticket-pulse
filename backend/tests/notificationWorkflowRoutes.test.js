@@ -1330,3 +1330,48 @@ describe('notification workflow routes', () => {
     expect(createdDelivery.htmlBody.indexOf('We received it.')).toBeLessThan(createdDelivery.htmlBody.indexOf('Alternate footer'));
   });
 });
+
+// Phase 8c: the condition-fields catalog resolves dynamicOptions per
+// workspace — ticket.status serves the status registry, statusBase stays the
+// canonical 4.
+describe('GET /condition-fields', () => {
+  afterEach(async () => {
+    delete prismaMock.ticketStatusDefinition;
+    const { invalidateStatusCache } = await import('../src/services/statusService.js');
+    invalidateStatusCache();
+  });
+
+  test('ticket.status options come from the workspace status registry', async () => {
+    prismaMock.ticketStatusDefinition = {
+      findMany: jest.fn().mockResolvedValue([
+        { id: 1, workspaceId: 1, name: 'Open', baseStatus: 'Open', sortOrder: 0, isSystem: true, isActive: true },
+        { id: 2, workspaceId: 1, name: 'Pending', baseStatus: 'Pending', sortOrder: 1, isSystem: true, isActive: true },
+        { id: 3, workspaceId: 1, name: 'Resolved', baseStatus: 'Resolved', sortOrder: 2, isSystem: true, isActive: true },
+        { id: 4, workspaceId: 1, name: 'Closed', baseStatus: 'Closed', sortOrder: 3, isSystem: true, isActive: true },
+        { id: 5, workspaceId: 1, name: 'Needs Rework', baseStatus: 'Pending', sortOrder: 4, isSystem: false, isActive: true },
+      ]),
+    };
+    const { invalidateStatusCache } = await import('../src/services/statusService.js');
+    invalidateStatusCache();
+
+    const response = await request(buildApp(1))
+      .get('/api/notification-workflows/condition-fields')
+      .expect(200);
+
+    const byValue = Object.fromEntries(response.body.data.map((f) => [f.value, f]));
+    expect(byValue['ticket.status'].options).toEqual(['Open', 'Pending', 'Resolved', 'Closed', 'Needs Rework']);
+    expect(byValue['ticket.status'].type).toBe('enum');
+    expect(byValue['ticket.statusBase'].options).toEqual(['Open', 'Pending', 'Resolved', 'Closed']);
+    expect(byValue['ticket.subject'].type).toBe('string');
+    expect(byValue['ticket.subject'].options).toBeUndefined();
+  });
+
+  test('registry fallback serves the canonical 4 (pre-seed workspace / mocked prisma)', async () => {
+    const response = await request(buildApp(2))
+      .get('/api/notification-workflows/condition-fields')
+      .expect(200);
+
+    const status = response.body.data.find((f) => f.value === 'ticket.status');
+    expect(status.options).toEqual(['Open', 'Pending', 'Resolved', 'Closed']);
+  });
+});

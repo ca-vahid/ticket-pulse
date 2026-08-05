@@ -6,7 +6,7 @@ import { ValidationError, NotFoundError, ServiceBusyError } from '../utils/error
 import { TICKET_ORIGIN, TICKET_SOURCE, TICKET_SOURCE_LABELS, APP_NATIVE_TRIGGER_SOURCE, AGENT_SELECTABLE_SOURCES, ticketDisplayRef } from '../utils/ticketOrigin.js';
 import noiseRuleService from './noiseRuleService.js';
 import ticketTypeService from './ticketTypeService.js';
-import statusService from './statusService.js';
+import statusService, { heuristicBaseStatus } from './statusService.js';
 import ticketActivityRepository from './ticketActivityRepository.js';
 import ticketThreadRepository from './ticketThreadRepository.js';
 import ticketLifecycleNotificationService from './ticketLifecycleNotificationService.js';
@@ -19,16 +19,19 @@ import { sseManager } from '../routes/sse.routes.js';
 
 // The 4 canonical statuses. Since Phase 8a these are the BASE statuses of the
 // per-workspace registry (statusService) — TP-born validation goes through
-// assertValidStatus/baseStatusOf so workspaces can add custom labels. This
-// list remains the allowlist for FS write-back (updateFsTicket): FreshService
-// only understands the canonical set until the 8c mapping work.
+// assertValidStatus/baseStatusOf so workspaces can add custom labels. Since
+// 8c the FS write-back (updateFsTicket) accepts custom labels too, mapping to
+// an FS code via the label's base status.
 export const NATIVE_TICKET_STATUSES = ['Open', 'Pending', 'Resolved', 'Closed'];
 const TERMINAL_STATUSES = ['Resolved', 'Closed'];
 
 // Lifecycle order for sort=status (QA 08-04 #14a): alphabetical is meaningless
 // to operators — asc walks the ticket lifecycle Open-first (matching
-// FreshService), desc reverses it. Unknown statuses sort after these.
-const STATUS_SORT_ORDER = ['Open', 'Pending', 'Waiting on Customer', 'Waiting on Third Party', 'Resolved', 'Closed'];
+// FreshService), desc reverses it. Since 8c the rank is BASE rank first, then
+// the registry's per-workspace sortOrder within a base — customs slot into
+// their lifecycle stage instead of sorting after Closed. Unknown labels rank
+// by heuristic base (legacy 'Waiting on …' lands with Pending), then last.
+const BASE_STATUS_RANK = { Open: 0, Pending: 1, Resolved: 2, Closed: 3 };
 
 // External-requester flagging (QA 07-27 #4). Derived at read time from the
 // workspace's internalDomains list — no per-ticket column, so editing the
@@ -726,7 +729,7 @@ class TicketService {
     if (sortField === 'status') {
       // Lifecycle rank, not alphabetical — Prisma can't ORDER BY CASE, so the
       // page is assembled bucket-by-bucket (see _statusRankedPage).
-      ({ total, items } = await this._statusRankedPage(where, { page, pageSize, sortDir }));
+      ({ total, items } = await this._statusRankedPage(workspaceId, where, { page, pageSize, sortDir }));
     } else {
       // "updatedAt" means LAST REAL ACTIVITY: last_real_activity_at is derived
       // only from messages/assignments/status changes (backfilled + maintained
@@ -796,16 +799,25 @@ class TicketService {
    * bucket, matching every other sort's tiebreaker). Honest across pages —
    * page 2 continues exactly where page 1 left off.
    */
-  async _statusRankedPage(where, { page, pageSize, sortDir }) {
+  async _statusRankedPage(workspaceId, where, { page, pageSize, sortDir }) {
     const grouped = await prisma.ticket.groupBy({ by: ['status'], where, _count: { _all: true } });
-    const rank = new Map(STATUS_SORT_ORDER.map((s, i) => [s, i]));
+    // Registry-aware rank (Phase 8c): base rank, then the workspace's own
+    // sortOrder within the base, then name. Labels the registry doesn't know
+    // (legacy FS 'Waiting on Customer' rows) rank by heuristic base after the
+    // registry rows of that base; fully unknown labels ('Deleted') sort last.
+    const defs = await statusService.listStatuses(workspaceId, { includeInactive: true });
+    const defByName = new Map(defs.map((d) => [d.name.toLowerCase(), d]));
+    const rankOf = (status) => {
+      const def = defByName.get(String(status || '').toLowerCase());
+      const base = def?.baseStatus ?? heuristicBaseStatus(status);
+      const baseRank = BASE_STATUS_RANK[base] ?? Object.keys(BASE_STATUS_RANK).length;
+      // Registry rows order by their configured sortOrder; unknown labels
+      // trail every registry row of the same base.
+      return baseRank * 1000 + (def ? Math.min(Number(def.sortOrder) || 0, 998) : 999);
+    };
     const buckets = grouped
-      .map((g) => ({ status: g.status, count: g._count._all }))
-      .sort((a, b) => {
-        const ra = rank.has(a.status) ? rank.get(a.status) : STATUS_SORT_ORDER.length;
-        const rb = rank.has(b.status) ? rank.get(b.status) : STATUS_SORT_ORDER.length;
-        return ra !== rb ? ra - rb : a.status.localeCompare(b.status);
-      });
+      .map((g) => ({ status: g.status, count: g._count._all, rank: rankOf(g.status) }))
+      .sort((a, b) => (a.rank !== b.rank ? a.rank - b.rank : a.status.localeCompare(b.status)));
     if (sortDir === 'desc') buckets.reverse();
 
     const total = buckets.reduce((sum, b) => sum + b.count, 0);
@@ -2167,16 +2179,23 @@ class TicketService {
     const changes = {};
 
     if (input.status !== undefined) {
-      if (!NATIVE_TICKET_STATUSES.includes(input.status)) {
-        throw new ValidationError(`Status must be one of: ${NATIVE_TICKET_STATUSES.join(', ')}`);
-      }
+      // Workspace registry validation (Phase 8c — was the canonical-4
+      // allowlist). Custom labels map to FS through their BASE status; a
+      // label whose base can't resolve is rejected rather than shipped to FS
+      // as the old silent Open(2) fallback.
+      const normalized = await statusService.assertValidStatus(workspaceId, input.status);
       // Idempotency: re-applying the current status is a no-op, not another FS
       // write. (QA 231648: a timed-out-then-retried resolve wrote to FS twice,
       // and each FS transition emailed the requester.)
-      if (input.status !== ticket.status) {
-        fsPayload.status = getStatusId(input.status);
-        localPatch.status = input.status;
-        changes.status = { from: ticket.status, to: input.status };
+      if (normalized !== ticket.status) {
+        const baseStatus = await statusService.baseStatusOf(workspaceId, normalized);
+        const fsStatusId = getStatusId(normalized, { baseStatus });
+        if (fsStatusId === null) {
+          throw new ValidationError(`Status "${normalized}" has no FreshService equivalent — give it a base status in Settings → Ticket Ops → Ticket statuses`);
+        }
+        fsPayload.status = fsStatusId;
+        localPatch.status = normalized;
+        changes.status = { from: ticket.status, to: normalized };
       }
     }
 
@@ -2310,11 +2329,16 @@ class TicketService {
       throw new ValidationError(`FreshService did not accept: ${rejected.join(', ')} — nothing was changed in Ticket Pulse`);
     }
 
-    // 3) FS confirmed — now mirror the same values locally.
+    // 3) FS confirmed — now mirror the same values locally. Resolution stamps
+    //    key on the BASE status (Phase 8c) so custom terminal labels stamp too.
     const now = new Date();
-    if (localPatch.status && ['Resolved', 'Closed'].includes(localPatch.status) && !TERMINAL_STATUSES.includes(ticket.status)) {
-      localPatch.resolvedAt = ticket.resolvedAt || now;
-      if (localPatch.status === 'Closed') localPatch.closedAt = ticket.closedAt || now;
+    if (localPatch.status) {
+      const newBase = await statusService.resolveBaseStatus(workspaceId, localPatch.status);
+      const oldBase = await statusService.resolveBaseStatus(workspaceId, ticket.status);
+      if (TERMINAL_STATUSES.includes(newBase) && !TERMINAL_STATUSES.includes(oldBase)) {
+        localPatch.resolvedAt = ticket.resolvedAt || now;
+        if (newBase === 'Closed') localPatch.closedAt = ticket.closedAt || now;
+      }
     }
     if (localPatch.assignedTechId) {
       localPatch.assignedAt = now;

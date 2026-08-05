@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Archive, ArrowDown, ArrowUp, Check, CircleDot, Info, Loader2, Lock, Plus, RotateCcw } from 'lucide-react';
 import { settingsAPI } from '../../services/api';
+import { invalidateConditionFieldsCache } from './ConditionGroupBuilder';
 
 /**
  * Settings → Ticket Ops → "Ticket statuses" (QA 08-04 #12, Phase 8a).
@@ -92,7 +93,13 @@ export default function TicketStatusesSection() {
 
   const run = async (fn) => {
     setBusy(true); setError(null);
-    try { await fn(); load(); } catch (e) { setError(e.response?.data?.message || e.message); }
+    try {
+      await fn();
+      load();
+      // The workflow builder caches the server-resolved condition fields
+      // (ticket.status options come from this registry) — keep it honest.
+      invalidateConditionFieldsCache();
+    } catch (e) { setError(e.response?.data?.message || e.message); }
     setBusy(false);
   };
 

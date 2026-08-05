@@ -759,3 +759,127 @@ describe('installable workflow templates', () => {
     }
   });
 });
+
+// Phase 8c: workflows can match custom statuses by NAME (exact string) or by
+// BASE (ticket.statusBase, enriched by the engine from the workspace status
+// registry when the emitter didn't populate it).
+describe('custom-status conditions (Phase 8c)', () => {
+  const REGISTRY_ROWS = [
+    { id: 1, workspaceId: 1, name: 'Open', baseStatus: 'Open', sortOrder: 0, isSystem: true, isActive: true },
+    { id: 2, workspaceId: 1, name: 'Pending', baseStatus: 'Pending', sortOrder: 1, isSystem: true, isActive: true },
+    { id: 3, workspaceId: 1, name: 'Resolved', baseStatus: 'Resolved', sortOrder: 2, isSystem: true, isActive: true },
+    { id: 4, workspaceId: 1, name: 'Closed', baseStatus: 'Closed', sortOrder: 3, isSystem: true, isActive: true },
+    { id: 5, workspaceId: 1, name: 'Needs Rework', baseStatus: 'Pending', sortOrder: 4, isSystem: false, isActive: true },
+  ];
+
+  function statusConditionDefinition(conditionGroup) {
+    return {
+      version: 2,
+      metadata: {},
+      nodes: [
+        { id: 'trigger', type: 'trigger', data: { triggerType: 'ticket.status_changed' } },
+        { id: 'check', type: 'condition', data: { conditionGroup } },
+        { id: 'hit', type: 'update_ticket', data: { setPriority: 4 } },
+        { id: 'end-hit', type: 'stop', data: {} },
+        { id: 'end-miss', type: 'stop', data: {} },
+      ],
+      edges: [
+        { id: 'e1', source: 'trigger', target: 'check' },
+        { id: 'e2', source: 'check', sourceHandle: 'true', target: 'hit' },
+        { id: 'e3', source: 'check', sourceHandle: 'false', target: 'end-miss' },
+        { id: 'e4', source: 'hit', target: 'end-hit' },
+      ],
+    };
+  }
+
+  async function armRegistry() {
+    prismaMock.ticketStatusDefinition = { findMany: jest.fn().mockResolvedValue(REGISTRY_ROWS) };
+    const { invalidateStatusCache } = await import('../src/services/statusService.js');
+    invalidateStatusCache();
+  }
+
+  async function disarmRegistry() {
+    delete prismaMock.ticketStatusDefinition;
+    const { invalidateStatusCache } = await import('../src/services/statusService.js');
+    invalidateStatusCache();
+  }
+
+  afterEach(async () => disarmRegistry());
+
+  function statusChangedContext(status) {
+    return eventContext({
+      event: {
+        type: 'ticket.status_changed',
+        source: 'test',
+        occurredAt: '2026-08-05T10:00:00.000Z',
+        dedupeStamp: `sc-${Math.random()}`,
+        extra: { from: 'Open', to: status },
+      },
+      ticket: { id: 100, freshserviceTicketId: 225010, subject: 'VPN access problem', status, isNoise: false },
+    });
+  }
+
+  test('a custom status name matches with a base-insensitive exact string', async () => {
+    await armRegistry();
+    const definition = statusConditionDefinition({
+      logic: 'all',
+      conditions: [{ field: 'ticket.status', operator: 'is', value: 'Needs Rework' }],
+    });
+    const result = await engine.executePreview({
+      workflow: { id: 30, workspaceId: 1, triggerType: 'ticket.status_changed', draftDefinition: definition, publishedVersion: 0, versions: [] },
+      definition,
+      eventContext: statusChangedContext('Needs Rework'),
+      executeLlm: false,
+    });
+    const conditionStep = result.steps.find((s) => s.nodeType === 'condition');
+    expect(conditionStep.output.passed).toBe(true);
+    expect(result.steps.some((s) => s.nodeId === 'hit')).toBe(true);
+  });
+
+  test('ticket.statusBase matches "any Pending-base status" via the engine enrichment', async () => {
+    await armRegistry();
+    const definition = statusConditionDefinition({
+      logic: 'all',
+      conditions: [{ field: 'ticket.statusBase', operator: 'is', value: 'Pending' }],
+    });
+    // The context does NOT carry statusBase — executeDefinition resolves it
+    // from the registry ("Needs Rework" → Pending).
+    const result = await engine.executePreview({
+      workflow: { id: 31, workspaceId: 1, triggerType: 'ticket.status_changed', draftDefinition: definition, publishedVersion: 0, versions: [] },
+      definition,
+      eventContext: statusChangedContext('Needs Rework'),
+      executeLlm: false,
+    });
+    const conditionStep = result.steps.find((s) => s.nodeType === 'condition');
+    expect(conditionStep.output.passed).toBe(true);
+  });
+
+  test('statusBase does not match a different base (custom Pending is not Open)', async () => {
+    await armRegistry();
+    const definition = statusConditionDefinition({
+      logic: 'all',
+      conditions: [{ field: 'ticket.statusBase', operator: 'is', value: 'Open' }],
+    });
+    const result = await engine.executePreview({
+      workflow: { id: 32, workspaceId: 1, triggerType: 'ticket.status_changed', draftDefinition: definition, publishedVersion: 0, versions: [] },
+      definition,
+      eventContext: statusChangedContext('Needs Rework'),
+      executeLlm: false,
+    });
+    const conditionStep = result.steps.find((s) => s.nodeType === 'condition');
+    expect(conditionStep.output.passed).toBe(false);
+    expect(result.steps.some((s) => s.nodeId === 'hit')).toBe(false);
+  });
+
+  test('the notify_on_custom_status template targets status_changed with an editable status condition', () => {
+    const template = WORKFLOW_TEMPLATES.find((t) => t.key === 'notify_on_custom_status');
+    expect(template).toBeDefined();
+    expect(template.triggerType).toBe('ticket.status_changed');
+    const definition = template.build();
+    expect(validateWorkflowDefinition(definition, { triggerType: 'ticket.status_changed' }).errors).toEqual([]);
+    const condition = definition.nodes.find((n) => n.type === 'condition');
+    expect(condition.data.conditionGroup.conditions[0]).toEqual({ field: 'ticket.status', operator: 'is', value: 'Needs Rework' });
+    const recipients = definition.nodes.find((n) => n.type === 'recipient_resolver');
+    expect(recipients.data.to).toEqual(['assigned_agent', 'requester']);
+  });
+});

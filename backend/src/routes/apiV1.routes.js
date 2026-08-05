@@ -154,6 +154,12 @@ router.get('/meta', S(), asyncHandler(async (req, res) => {
     where: { workspaceId: req.workspaceId, isActive: true },
     select: { name: true, description: true, isDefault: true }, orderBy: { name: 'asc' },
   }).catch(() => []);
+  // Per-workspace status registry (Phase 8c). `statuses` keeps its original
+  // string[] shape (names, display order) for existing consumers;
+  // `statusDetails` adds each label's canonical base for automation that
+  // needs lifecycle semantics ("is this open-like?").
+  const { default: statusService } = await import('../services/statusService.js');
+  const statusDefs = await statusService.listStatuses(req.workspaceId);
   res.json({
     success: true,
     data: {
@@ -161,7 +167,8 @@ router.get('/meta', S(), asyncHandler(async (req, res) => {
         { value: 1, label: 'Low' }, { value: 2, label: 'Medium' },
         { value: 3, label: 'High' }, { value: 4, label: 'Urgent' },
       ],
-      statuses: ['Open', 'Pending', 'Resolved', 'Closed'],
+      statuses: statusDefs.map((s) => s.name),
+      statusDetails: statusDefs.map((s) => ({ name: s.name, baseStatus: s.baseStatus })),
       ticketTypes: types,
     },
   });

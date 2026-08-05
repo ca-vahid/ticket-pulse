@@ -17,6 +17,29 @@ import logger from '../utils/logger.js';
 export const BASE_STATUSES = ['Open', 'Pending', 'Resolved', 'Closed'];
 export const TERMINAL_BASE_STATUSES = ['Resolved', 'Closed'];
 
+// FreshService numeric status codes → base (raw FS payloads sometimes carry
+// the int; keep parity with freshserviceTransformer.STATUS_MAP).
+const FS_CODE_BASES = { 2: 'Open', 3: 'Pending', 4: 'Resolved', 5: 'Closed' };
+
+/**
+ * Workspace-less heuristic base guess for labels the registry doesn't know —
+ * FS numeric codes first, then the substring rules the pre-8c consumers used
+ * (lifecycle terminal detection, public status page tone). 'Deleted'/'Spam'
+ * and anything unrecognizable stay null.
+ */
+export function heuristicBaseStatus(status) {
+  const raw = String(status ?? '').trim();
+  if (!raw) return null;
+  if (FS_CODE_BASES[raw] !== undefined) return FS_CODE_BASES[raw];
+  if (BASE_STATUSES.includes(raw)) return raw;
+  const text = raw.toLowerCase();
+  if (text.includes('resolved')) return 'Resolved';
+  if (text.includes('closed')) return 'Closed';
+  if (text.includes('pending') || text.includes('waiting') || text.includes('on hold') || text.includes('hold')) return 'Pending';
+  if (text.includes('open') || text.includes('progress')) return 'Open';
+  return null;
+}
+
 // Same palette as the ticket-type registry (TYPE_COLOR_TONES on the frontend).
 const COLORS = new Set(['slate', 'orange', 'violet', 'red', 'blue', 'emerald', 'amber', 'cyan', 'pink']);
 
@@ -119,6 +142,17 @@ class StatusService {
     const match = rows.find((r) => r.name.toLowerCase() === key);
     if (match) return match.baseStatus;
     return BASE_STATUSES.includes(String(name).trim()) ? String(name).trim() : null;
+  }
+
+  /**
+   * baseStatusOf + heuristic fallback (FS ints, substrings) for labels the
+   * registry can't place — FS-born payload labels, legacy 'Waiting on
+   * Customer' rows. The 8c contract for consumers that must never come up
+   * empty-handed on real-world data (lifecycle events, FS write-back codes,
+   * public status tone).
+   */
+  async resolveBaseStatus(workspaceId, name) {
+    return (await this.baseStatusOf(workspaceId, name)) ?? heuristicBaseStatus(name);
   }
 
   /** Active status names whose base is one of the given base statuses. */

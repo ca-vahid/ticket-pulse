@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Plus, Trash2, X } from 'lucide-react';
-import { ticketsAPI } from '../../services/api';
+import { notificationWorkflowAPI, ticketsAPI } from '../../services/api';
 import { useTicketTypes } from '../../hooks/useTicketTypes';
+import { useWorkspaceOptional } from '../../contexts/WorkspaceContext';
 
 /**
  * AND/OR condition-group builder for workflow condition nodes. Edits the
@@ -16,6 +17,9 @@ import { useTicketTypes } from '../../hooks/useTicketTypes';
 
 export const CG_FIELDS = [
   { value: 'ticket.status', label: 'Ticket status', type: 'enum', options: ['Open', 'Pending', 'Resolved', 'Closed'] },
+  // Derived base behind any status label — matches "any Open-base status"
+  // without enumerating this workspace's custom labels.
+  { value: 'ticket.statusBase', label: 'Ticket status base (Open/Pending/Resolved/Closed)', type: 'enum', options: ['Open', 'Pending', 'Resolved', 'Closed'] },
   { value: 'ticket.priorityLabel', label: 'Priority', type: 'enum', options: ['Low', 'Medium', 'High', 'Urgent'] },
   { value: 'ticket.origin', label: 'Ticket origin', type: 'enum', options: ['ticketpulse', 'freshservice'] },
   { value: 'ticket.sourceLabel', label: 'Ticket source (arrival channel)', type: 'enum', options: ['Email', 'Portal', 'Phone', 'Chat', 'API', 'Webhook', 'Agent'] },
@@ -74,11 +78,24 @@ const LIST_OPERATORS = new Set(['in', 'not_in', 'has_any', 'has_all', 'has_none'
 // Custom-field definitions extend the catalog as `custom:<key>` string fields
 // (mirrors the backend's dynamic fieldSpec). Fetched once per session.
 let customFieldCache = null;
+// Server-resolved field catalog (Phase 8c): the backend serves the condition
+// fields with dynamicOptions resolved per workspace — ticket.status lists the
+// workspace's status registry (custom statuses included). Cached per
+// workspace; CG_FIELDS stays the offline/first-paint fallback.
+const serverFieldsCache = new Map(); // workspaceId -> fields[]
+
+/** Status-registry CRUD changes the ticket.status options — drop the cache. */
+export function invalidateConditionFieldsCache() {
+  serverFieldsCache.clear();
+}
+
 function useConditionFields() {
   const { activeTypes } = useTicketTypes();
-  const [fields, setFields] = useState(customFieldCache
-    ? [...CG_FIELDS, ...customFieldCache]
-    : CG_FIELDS);
+  // Tolerant workspace read: the builder also renders in unit tests without a
+  // WorkspaceProvider — no workspace just means no server catalog fetch.
+  const workspaceId = useWorkspaceOptional()?.currentWorkspace?.id ?? null;
+  const [serverFields, setServerFields] = useState(() => serverFieldsCache.get(workspaceId) || null);
+  const [customFields, setCustomFields] = useState(customFieldCache || []);
   useEffect(() => {
     if (customFieldCache) return;
     ticketsAPI.customFieldDefinitions()
@@ -86,10 +103,27 @@ function useConditionFields() {
         customFieldCache = (res?.data || []).map((d) => ({
           value: `custom:${d.key}`, label: `Custom: ${d.label}`, type: 'string',
         }));
-        if (customFieldCache.length) setFields([...CG_FIELDS, ...customFieldCache]);
+        setCustomFields(customFieldCache);
       })
       .catch(() => { customFieldCache = []; });
   }, []);
+  useEffect(() => {
+    if (!workspaceId) { setServerFields(null); return; }
+    const hit = serverFieldsCache.get(workspaceId);
+    if (hit) { setServerFields(hit); return; }
+    let cancelled = false;
+    notificationWorkflowAPI.conditionFields()
+      .then((res) => {
+        const list = (res?.data || []).filter((f) => f && f.value && f.type);
+        if (list.length === 0) return;
+        serverFieldsCache.set(workspaceId, list);
+        if (!cancelled) setServerFields(list);
+      })
+      .catch(() => { /* silent — static CG_FIELDS fallback keeps the builder usable */ });
+    return () => { cancelled = true; };
+  }, [workspaceId]);
+
+  const fields = [...(serverFields || CG_FIELDS), ...customFields];
   // The ticket-type field is a per-workspace enum once the registry loads —
   // the backend keeps it a string, so any stored value still evaluates.
   if (activeTypes.length) {

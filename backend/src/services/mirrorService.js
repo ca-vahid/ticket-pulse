@@ -9,7 +9,8 @@ import ticketTypeService from './ticketTypeService.js';
 import statusService from './statusService.js';
 import { sseManager } from '../routes/sse.routes.js';
 
-// TP status labels → FreshService status codes
+// TP status labels → FreshService status codes (canonical labels only —
+// custom labels resolve through their BASE via _fsStatusCode below).
 export const FS_STATUS_CODES = { Open: 2, Pending: 3, Resolved: 4, Closed: 5 };
 
 const MAX_ATTEMPTS = 8;
@@ -399,6 +400,22 @@ class MirrorService {
     }
   }
 
+  /**
+   * FS status code for a TP ticket (Phase 8c): canonical labels map directly;
+   * custom labels ("Needs Rework") map through their BASE status in the
+   * workspace registry (Pending-base → 3). Unknown/unmappable labels return
+   * null — callers omit the field rather than silently shipping Open(2).
+   */
+  async _fsStatusCode(ticket) {
+    if (FS_STATUS_CODES[ticket.status] !== undefined) return FS_STATUS_CODES[ticket.status];
+    try {
+      const base = await statusService.resolveBaseStatus(ticket.workspaceId, ticket.status);
+      return FS_STATUS_CODES[base] ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   async _mirrorCreate(job, client) {
     const ticket = await this._loadTicket(job.ticketId);
     if (ticket.freshserviceTicketId) return; // already mirrored (idempotent)
@@ -410,7 +427,9 @@ class MirrorService {
       email: ticket.requester.email,
       subject: `${ticket.subject || '(no subject)'}`,
       description: ticket.description || textToHtml(ticket.descriptionText) || textToHtml(ticket.subject),
-      status: FS_STATUS_CODES[ticket.status] || FS_STATUS_CODES.Open,
+      // FS requires a status on create — base-mapped, Open only as the final
+      // fallback for labels with no resolvable base.
+      status: (await this._fsStatusCode(ticket)) ?? FS_STATUS_CODES.Open,
       priority: ticket.priority || 2,
       source: 2, // portal
       workspace_id: ticket.workspace?.freshserviceWorkspaceId ? Number(ticket.workspace.freshserviceWorkspaceId) : undefined,
@@ -487,7 +506,7 @@ class MirrorService {
     const customFields = await this._skillCustomFields(client, ticket);
     await client.updateTicket(Number(ticket.freshserviceTicketId), {
       subject: ticket.subject || undefined,
-      status: FS_STATUS_CODES[ticket.status] || undefined,
+      status: (await this._fsStatusCode(ticket)) ?? undefined,
       priority: ticket.priority || undefined,
       group_id: ticket.groupId ? Number(ticket.groupId) : undefined,
       responder_id: ticket.assignedTech?.freshserviceId ? Number(ticket.assignedTech.freshserviceId) : null,
@@ -720,7 +739,7 @@ class MirrorService {
 
     if (fsTicket && typeof fsTicket === 'object' && fsTicket.id) {
       const fsStatusCode = Number(fsTicket.status);
-      const ourStatusCode = FS_STATUS_CODES[ticket.status] || null;
+      const ourStatusCode = await this._fsStatusCode(ticket);
       const fsResponder = fsTicket.responder_id ? Number(fsTicket.responder_id) : null;
       const ourResponder = ticket.assignedTech?.freshserviceId ? Number(ticket.assignedTech.freshserviceId) : null;
       const drift = [];

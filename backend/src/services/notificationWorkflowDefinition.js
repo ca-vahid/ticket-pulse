@@ -182,6 +182,50 @@ export const WORKFLOW_TEMPLATES = [
     ]),
   },
   {
+    key: 'notify_on_custom_status',
+    name: 'Notify on custom status',
+    description: 'When a ticket enters a specific status (including workspace custom statuses like "Needs Rework"), email the assignee and the requester a templated heads-up. Edit the condition to pick the status after installing — the builder lists this workspace\'s statuses.',
+    triggerType: 'ticket.status_changed',
+    build: () => templateNodes([
+      { id: 'trigger', type: 'trigger', data: { triggerType: 'ticket.status_changed' } },
+      {
+        id: 'entered-status',
+        type: 'condition',
+        data: {
+          label: 'Entered the watched status?',
+          // Placeholder: swap "Needs Rework" for one of this workspace's
+          // statuses (Settings → Ticket Ops → Ticket statuses). Matching on
+          // ticket.statusBase instead catches every status of a base
+          // ("any Pending-base status").
+          conditionGroup: {
+            logic: 'all',
+            conditions: [{ field: 'ticket.status', operator: 'is', value: 'Needs Rework' }],
+          },
+        },
+      },
+      { id: 'recipients', type: 'recipient_resolver', data: { to: ['assigned_agent', 'requester'], cc: [], bcc: [] } },
+      {
+        id: 'template',
+        type: 'template_render',
+        data: {
+          contentSource: 'template_only',
+          subject: 'Ticket #{{ ticket.freshserviceTicketId }} is now {{ ticket.status }}',
+          html: '<p>Ticket <strong>#{{ ticket.freshserviceTicketId }}</strong> ({{ ticket.subject }}) moved to <strong>{{ ticket.status }}</strong>.</p><p>Reply to this email if anything looks wrong.</p>',
+          text: 'Ticket #{{ ticket.freshserviceTicketId }} ({{ ticket.subject }}) moved to {{ ticket.status }}.\n\nReply to this email if anything looks wrong.',
+          plainTextMode: 'auto',
+        },
+      },
+      { id: 'send', type: 'send_email', data: { provider: 'sendgrid', includeFooter: true, includeHeader: false } },
+      { id: 'end', type: 'stop', data: {} },
+    ], [
+      { id: 'e1', source: 'trigger', target: 'entered-status' },
+      { id: 'e2', source: 'entered-status', sourceHandle: 'true', target: 'recipients' },
+      { id: 'e3', source: 'entered-status', sourceHandle: 'false', target: 'end' },
+      { id: 'e4', source: 'recipients', target: 'template' },
+      { id: 'e5', source: 'template', target: 'send' },
+    ]),
+  },
+  {
     key: 'daily_open_tickets_digest',
     name: 'Daily open-tickets digest',
     description: 'Every morning, email a configured list a plain-language digest: open/unassigned/overdue counts and the oldest open tickets. Deterministic template — no AI. Configure the recipients and send time after installing.',
@@ -1236,6 +1280,7 @@ export function notificationVariableCatalog(extraOutputFields = []) {
     variable('ticket.subject', 'Subject', 'Ticket', 'Ticket subject line.', 'VPN access problem'),
     variable('ticket.descriptionText', 'Description', 'Ticket', 'Plain-text ticket description.', 'User cannot connect to VPN from home.'),
     variable('ticket.status', 'Status', 'Ticket', 'Ticket status label.', 'Open'),
+    variable('ticket.statusBase', 'Status base', 'Ticket', 'Canonical base (Open/Pending/Resolved/Closed) behind the status label — custom statuses map to one of the four.', 'Pending'),
     variable('ticket.priority', 'Priority ID', 'Ticket', 'FreshService priority numeric value.', '3'),
     variable('ticket.priorityLabel', 'Priority', 'Ticket', 'Human-readable priority.', 'High'),
     variable('ticket.assessedPriority', 'Assessed priority', 'Ticket', 'Ticket Pulse assessed priority where available.', 'Urgent'),

@@ -171,3 +171,39 @@ describe('condition validation', () => {
     }
   });
 });
+
+describe('ticket.statusBase (Phase 8c custom statuses)', () => {
+  test('catalog: enum field over the 4 canonical bases; ticket.status keeps its dynamicOptions hook', () => {
+    expect(CONDITION_FIELDS['ticket.statusBase']).toEqual(expect.objectContaining({
+      type: 'enum',
+      path: 'ticket.statusBase',
+      options: ['Open', 'Pending', 'Resolved', 'Closed'],
+    }));
+    expect(CONDITION_FIELDS['ticket.status'].dynamicOptions).toBe('ticket-statuses');
+  });
+
+  test('custom status names evaluate as exact strings; statusBase matches "any Pending-base"', () => {
+    const customScope = {
+      ...scope,
+      ticket: { ...scope.ticket, status: 'Needs Rework', statusBase: 'Pending' },
+      event: { type: 'ticket.status_changed', extra: { from: 'Open', to: 'Needs Rework', fromBase: 'Open', toBase: 'Pending' } },
+    };
+    const evalIn = (group) => Boolean(jsonLogic.apply(compileConditionGroup(group), customScope));
+    // Exact custom-name match (case-sensitive exact string, base-independent).
+    expect(evalIn({ logic: 'all', conditions: [{ field: 'ticket.status', operator: 'is', value: 'Needs Rework' }] })).toBe(true);
+    expect(evalIn({ logic: 'all', conditions: [{ field: 'ticket.status', operator: 'is', value: 'Pending' }] })).toBe(false);
+    // Base-level match sweeps every Pending-base label without enumerating.
+    expect(evalIn({ logic: 'all', conditions: [{ field: 'ticket.statusBase', operator: 'is', value: 'Pending' }] })).toBe(true);
+    expect(evalIn({ logic: 'all', conditions: [{ field: 'ticket.statusBase', operator: 'in', value: ['Open', 'Pending'] }] })).toBe(true);
+    expect(evalIn({ logic: 'all', conditions: [{ field: 'ticket.statusBase', operator: 'is', value: 'Resolved' }] })).toBe(false);
+    // Transition conditions can read the entered status by name.
+    expect(evalIn({ logic: 'all', conditions: [{ field: 'event.statusTo', operator: 'is', value: 'Needs Rework' }] })).toBe(true);
+  });
+
+  test('statusBase group validates cleanly in the builder', () => {
+    expect(validateConditionGroup({
+      logic: 'all',
+      conditions: [{ field: 'ticket.statusBase', operator: 'is', value: 'Open' }],
+    })).toEqual([]);
+  });
+});
