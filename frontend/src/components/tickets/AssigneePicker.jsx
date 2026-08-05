@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown, Loader2, Search, Sparkles, UserRound, X } from 'lucide-react';
-import { PersonAvatar, UnassignedBadge } from './ticketUi';
+import { AgentFirstName, PersonAvatar, UnassignedBadge } from './ticketUi';
 import { assignmentAPI, ticketsAPI } from '../../services/api';
 
 /**
@@ -239,7 +239,9 @@ export default function AssigneePicker({
         ) : current ? (
           <>
             <PersonAvatar name={current.name} photoUrl={current.photoUrl} size={sm ? 'h-5 w-5' : 'h-7 w-7'} textSize={sm ? 'text-[8px]' : 'text-[10px]'} />
-            <span className={`${sm ? 'text-xs' : 'text-sm'} text-slate-700 truncate`}>{current.name}</span>
+            {/* First-name-only below xl (tablet columns are narrow — QA 08-04);
+                the full name stays in the tooltip + aria-label. */}
+            <AgentFirstName name={current.name} className={`${sm ? 'text-xs' : 'text-sm'} text-slate-700`} />
             {currentReadOnly && (
               <span
                 title="Assigned in FreshService — not an active Ticket Pulse member, so they can only be (re)assigned in FreshService."
@@ -281,9 +283,9 @@ export default function AssigneePicker({
               <span className={`${sm ? 'text-[8px]' : 'text-[9px]'} font-bold uppercase tracking-wider text-violet-600`}>
                 Suggested{topPct !== null ? ` · ${topPct}%` : ''}
               </span>
-              <span className={`${sm ? 'text-xs' : 'text-sm'} font-semibold text-slate-800 truncate`}>
-                {aiSuggestion.techName || 'AI pick'}
-              </span>
+              {aiSuggestion.techName
+                ? <AgentFirstName name={aiSuggestion.techName} className={`${sm ? 'text-xs' : 'text-sm'} font-semibold text-slate-800`} />
+                : <span className={`${sm ? 'text-xs' : 'text-sm'} font-semibold text-slate-800 truncate`}>AI pick</span>}
             </span>
           </>
         ) : (

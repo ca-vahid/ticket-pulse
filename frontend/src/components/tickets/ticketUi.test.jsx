@@ -3,7 +3,7 @@ import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, test } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import {
-  MirrorChip, OriginChip, PersonAvatar, PriorityDot, SlaTargetChip, StatusPill, formatDay, formatDayTime, initials, slaTargetState, timeAgo,
+  AgentFirstName, ExternalChip, MirrorChip, OriginChip, PersonAvatar, PriorityDot, SlaTargetChip, StatusPill, formatDay, formatDayTime, initials, slaTargetState, timeAgo,
 } from './ticketUi';
 
 afterEach(cleanup);
@@ -90,6 +90,25 @@ describe('ticketUi components', () => {
 
     render(<MirrorChip ticket={{ origin: 'ticketpulse', mirrorState: 'error', mirrorError: 'boom' }} />);
     expect(screen.getByText('Mirror error')).toBeInTheDocument();
+  });
+
+  test('AgentFirstName is display-only: first name below xl, full name at xl+ and in the tooltip (QA 08-04 iPad)', () => {
+    const { container } = render(<AgentFirstName name="Mehdi Rahimi" className="text-xs" />);
+    const wrapper = container.firstChild;
+    // Full name always survives in the tooltip — no data is lost on tablets.
+    expect(wrapper).toHaveAttribute('title', 'Mehdi Rahimi');
+    // Two CSS-swapped spans: tablet band shows the first name only, xl+ the full name.
+    expect(screen.getByText('Mehdi')).toHaveClass('xl:hidden');
+    expect(screen.getByText('Mehdi Rahimi')).toHaveClass('hidden', 'xl:inline');
+    // Empty names render nothing rather than an empty chip.
+    const empty = render(<AgentFirstName name="  " />);
+    expect(empty.container).toBeEmptyDOMElement();
+  });
+
+  test('ExternalChip wraps as a unit instead of compressing into neighbours (QA 08-04 #5)', () => {
+    render(<ExternalChip />);
+    const chip = screen.getByText('External');
+    expect(chip).toHaveClass('shrink-0', 'whitespace-nowrap');
   });
 
   test('PersonAvatar falls back to initials, then to a generic glyph', () => {

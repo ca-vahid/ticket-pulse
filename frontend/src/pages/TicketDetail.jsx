@@ -580,7 +580,7 @@ export default function TicketDetail() {
       }
     })();
     return () => { cancelled = true; };
-  }, [threadEmailsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [threadEmailsKey]);  
 
   const [composerMode, setComposerMode] = useState('note'); // default to internal note
   const [composerBody, setComposerBody] = useState(''); // sanitized html from the editor

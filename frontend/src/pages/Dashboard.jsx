@@ -9,7 +9,7 @@ import DemoModeToggle from '../components/DemoModeToggle';
 import TechCard from '../components/TechCard';
 import TechCardCompact from '../components/TechCardCompact';
 import TechCompactHeader from '../components/TechCompactHeader';
-import { getSortValue } from '../components/compactLayout';
+import { getSortValue, getCompactMinWidth } from '../components/compactLayout';
 import SearchBox from '../components/SearchBox';
 import CategoryFilter from '../components/CategoryFilter';
 import CanonicalCategoryFilter from '../components/CanonicalCategoryFilter';
@@ -2085,43 +2085,51 @@ export default function Dashboard() {
                 })();
 
                 return isCompactView ? (
-                  /* Compact view - data table with sticky column header */
+                  /* Compact view - data table with sticky column header.
+                     Header + rows share ONE horizontal scroll container with a
+                     min-width matching the grid tracks, so in the 640–1100px
+                     iPad band they scroll together instead of the trailing
+                     columns spilling past the right edge (QA 08-04 #3). Above
+                     1100px .tp-compact-scroll stops scrolling and the header's
+                     sticky positioning works against the page again. */
                   <div className="animate-fadeIn">
-                    <div className="hidden sm:block">
-                      <TechCompactHeader
-                        viewMode={viewMode}
-                        sortField={compactSort.field}
-                        sortDirection={compactSort.direction}
-                        onSort={handleCompactSort}
-                        simple={simpleStyle}
-                      />
-                    </div>
-                    <div className="hidden space-y-1.5 sm:block">
-                      {compactRows.map((tech, index) => (
-                        <div
-                          key={tech.id}
-                          className="animate-slideInLeft"
-                          style={{ animationDelay: `${index * 20}ms` }}
-                        >
-                          <TechCardCompact
-                            technician={tech}
-                            rank={tech.rank}
-                            onHide={handleHideTechnician}
-                            selectedDate={selectedDate}
-                            selectedWeek={selectedWeek}
-                            selectedMonth={selectedMonth}
-                            maxOpenCount={maxOpenCount}
-                            maxDailyCount={maxDailyCount}
-                            viewMode={viewMode}
-                            searchTerm={searchTerm}
-                            selectedCategories={selectedCategories}
-                            canonicalCategoryFilter={selectedCanonicalCategories}
-                            forceExpand={expandAllOverride}
-                            simple={simpleStyle}
-                            topLoad={tech.id === topLoadTechId}
-                          />
+                    <div className="hidden sm:block tp-compact-scroll settings-scrollbar">
+                      <div style={{ minWidth: getCompactMinWidth(viewMode, simpleStyle) }}>
+                        <TechCompactHeader
+                          viewMode={viewMode}
+                          sortField={compactSort.field}
+                          sortDirection={compactSort.direction}
+                          onSort={handleCompactSort}
+                          simple={simpleStyle}
+                        />
+                        <div className="space-y-1.5">
+                          {compactRows.map((tech, index) => (
+                            <div
+                              key={tech.id}
+                              className="animate-slideInLeft"
+                              style={{ animationDelay: `${index * 20}ms` }}
+                            >
+                              <TechCardCompact
+                                technician={tech}
+                                rank={tech.rank}
+                                onHide={handleHideTechnician}
+                                selectedDate={selectedDate}
+                                selectedWeek={selectedWeek}
+                                selectedMonth={selectedMonth}
+                                maxOpenCount={maxOpenCount}
+                                maxDailyCount={maxDailyCount}
+                                viewMode={viewMode}
+                                searchTerm={searchTerm}
+                                selectedCategories={selectedCategories}
+                                canonicalCategoryFilter={selectedCanonicalCategories}
+                                forceExpand={expandAllOverride}
+                                simple={simpleStyle}
+                                topLoad={tech.id === topLoadTechId}
+                              />
+                            </div>
+                          ))}
                         </div>
-                      ))}
+                      </div>
                     </div>
                     <div className="grid grid-cols-1 gap-3 sm:hidden">
                       {compactRows.map((tech, index) => (
