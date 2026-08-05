@@ -2068,7 +2068,7 @@ export async function getAutomationOps(workspaceId, query = {}) {
       funnel[key] = (funnel[key] || 0) + 1;
       triggerSources[run.triggerSource || 'unknown'] = (triggerSources[run.triggerSource || 'unknown'] || 0) + 1;
       const isRebound = Boolean(run.reboundFrom || ['rebound', 'rebound_exhausted'].includes(run.triggerSource));
-      const reboundKey = run.ticketId != null ? `t:${run.ticketId}` : `run:${run.id}`;
+      const reboundKey = run.ticketId !== null && run.ticketId !== undefined ? `t:${run.ticketId}` : `run:${run.id}`;
       if (isRebound) reboundTicketKeys.add(reboundKey);
       const period = groupKey(run.createdAt, rangeInfo);
       const trendRow = pipelineTrend.get(period) || { period, runs: 0, errors: 0, reboundTicketKeys: new Set(), durationValues: [] };
