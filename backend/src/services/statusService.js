@@ -43,6 +43,10 @@ function canonicalFallbackRows(workspaceId) {
 const CACHE_TTL_MS = 60 * 1000;
 const CACHE_MAX = 50;
 const cache = new Map(); // workspaceId -> { at, rows }
+// Concurrent cold-cache reads (e.g. getQueueStats resolving three base
+// scopes in one Promise.all) share a single in-flight DB read instead of
+// each firing their own (Phase 8b hot-path contract).
+const pendingReads = new Map(); // workspaceId -> Promise<rows>
 
 function readCache(workspaceId) {
   const hit = cache.get(workspaceId);
@@ -59,8 +63,13 @@ function writeCache(workspaceId, rows) {
 }
 
 export function invalidateStatusCache(workspaceId) {
-  if (workspaceId === undefined) cache.clear();
-  else cache.delete(Number(workspaceId));
+  if (workspaceId === undefined) {
+    cache.clear();
+    pendingReads.clear();
+  } else {
+    cache.delete(Number(workspaceId));
+    pendingReads.delete(Number(workspaceId));
+  }
 }
 
 class StatusService {
@@ -73,17 +82,26 @@ class StatusService {
     const wsId = Number(workspaceId);
     let rows = readCache(wsId);
     if (!rows) {
-      try {
-        rows = await prisma.ticketStatusDefinition.findMany({
-          where: { workspaceId: wsId },
-          orderBy: [{ isActive: 'desc' }, { sortOrder: 'asc' }, { name: 'asc' }],
-        });
-      } catch (err) {
-        logger.warn(`Status registry unavailable for ws${wsId} — canonical fallback (${err.message})`);
-        rows = null;
+      let inflight = pendingReads.get(wsId);
+      if (!inflight) {
+        inflight = (async () => {
+          let fetched = null;
+          try {
+            fetched = await prisma.ticketStatusDefinition.findMany({
+              where: { workspaceId: wsId },
+              orderBy: [{ isActive: 'desc' }, { sortOrder: 'asc' }, { name: 'asc' }],
+            });
+          } catch (err) {
+            logger.warn(`Status registry unavailable for ws${wsId} — canonical fallback (${err.message})`);
+          }
+          if (!fetched || fetched.length === 0) fetched = canonicalFallbackRows(wsId);
+          writeCache(wsId, fetched);
+          return fetched;
+        })();
+        pendingReads.set(wsId, inflight);
+        inflight.finally(() => pendingReads.delete(wsId)).catch(() => {});
       }
-      if (!rows || rows.length === 0) rows = canonicalFallbackRows(wsId);
-      writeCache(wsId, rows);
+      rows = await inflight;
     }
     return includeInactive ? rows : rows.filter((r) => r.isActive);
   }
@@ -108,6 +126,27 @@ class StatusService {
     const bases = (Array.isArray(baseOrBases) ? baseOrBases : [baseOrBases]).filter(Boolean);
     const rows = await this.listStatuses(workspaceId);
     return rows.filter((r) => bases.includes(r.baseStatus)).map((r) => r.name);
+  }
+
+  /**
+   * Hot-path bundle (Phase 8b): resolve the workspace's ACTIVE status names
+   * into base-keyed Sets ONCE per request, then test ticket rows synchronously
+   * (dashboards / statsCalculator iterate thousands of tickets — never await
+   * a registry lookup per ticket). Backed by the same 60s cache as
+   * listStatuses, so calling this per-request is one cache hit.
+   * Shape: { open, pending, openLike, terminal } — Sets of names.
+   */
+  async baseStatusSets(workspaceId) {
+    const rows = await this.listStatuses(workspaceId);
+    const open = new Set();
+    const pending = new Set();
+    const terminal = new Set();
+    for (const r of rows) {
+      if (r.baseStatus === 'Open') open.add(r.name);
+      else if (r.baseStatus === 'Pending') pending.add(r.name);
+      else if (TERMINAL_BASE_STATUSES.includes(r.baseStatus)) terminal.add(r.name);
+    }
+    return { open, pending, openLike: new Set([...open, ...pending]), terminal };
   }
 
   /**

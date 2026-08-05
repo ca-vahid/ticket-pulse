@@ -11,6 +11,7 @@ import logger from '../utils/logger.js';
 import { PRIORITY_ID_TO_LABEL } from './priorityAssessment.js';
 import { normalizeTicketType } from './ticketTypeAssessment.js';
 import ticketTypeService from './ticketTypeService.js';
+import statusService from './statusService.js';
 import notificationPreferenceService from './notificationPreferenceService.js';
 import ticketLifecycleNotificationService from './ticketLifecycleNotificationService.js';
 import { TICKET_ORIGIN, ticketDisplayRef } from '../utils/ticketOrigin.js';
@@ -276,7 +277,11 @@ class FreshServiceActionService {
       // Don't re-close a ticket an agent already resolved/closed — the close
       // action carries status 4 (Resolved) and used to DOWNGRADE an agent's
       // Closed to Resolved (QA 07-27 #5). Note still lands; status stays put.
-      if (!['Resolved', 'Closed'].includes(ticket?.status)) {
+      // Base-aware (Phase 8b): custom terminal-base statuses count as closed.
+      const noiseCloseBase = ticket?.status
+        ? await statusService.baseStatusOf(run.workspaceId, ticket.status)
+        : null;
+      if (!['Resolved', 'Closed'].includes(noiseCloseBase)) {
         actions.push({ type: 'close', ticketId: fsTicketId, status: 4 });
       }
     } else {
@@ -1439,7 +1444,8 @@ class FreshServiceActionService {
       actions.push({ type: 'local_assign', ticketId: ticket.id, techId: tech.id, techName: tech.name });
     }
 
-    if (decision === 'noise_dismissed' && !ticket.assignedTechId && !['Resolved', 'Closed'].includes(ticket.status)) {
+    if (decision === 'noise_dismissed' && !ticket.assignedTechId
+      && !['Resolved', 'Closed'].includes(await statusService.baseStatusOf(run.workspaceId, ticket.status))) {
       const assignmentConfig = await prisma.assignmentConfig.findUnique({
         where: { workspaceId: Number(run.workspaceId) },
         select: { autoCloseNoise: true },

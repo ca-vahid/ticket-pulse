@@ -11,6 +11,18 @@ import graphMailClient from '../integrations/graphMailClient.js';
 import logger from '../utils/logger.js';
 import { normalizeFreshServiceGroupMemberIds } from './freshServiceGroupGuard.js';
 import ticketTypeService from './ticketTypeService.js';
+import statusService from './statusService.js';
+
+// Workload scans historically match legacy row variants too (lowercase labels
+// and raw FS status ints from very old syncs). Phase 8b: the canonical pair is
+// replaced by the workspace registry's Open/Pending-BASE names so tickets in
+// custom statuses still count toward a technician's load; the legacy variants
+// stay appended.
+const LEGACY_OPEN_STATUS_VARIANTS = ['open', 'pending', '2', '3'];
+async function openWorkloadStatuses(workspaceId) {
+  const names = await statusService.statusNamesForBase(workspaceId, ['Open', 'Pending']);
+  return [...new Set([...names, ...LEGACY_OPEN_STATUS_VARIANTS])];
+}
 
 /**
  * Specialize the submit_recommendation ticketType fields for a workspace's
@@ -1472,7 +1484,7 @@ async function getAssignmentRiskSignals(workspaceId, input = {}) {
     }),
     prisma.ticket.groupBy({
       by: ['assignedTechId'],
-      where: { workspaceId, assignedTechId: { in: candidateIds }, status: { in: ['Open', 'Pending', 'open', 'pending', '2', '3'] } },
+      where: { workspaceId, assignedTechId: { in: candidateIds }, status: { in: await openWorkloadStatuses(workspaceId) } },
       _count: true,
     }),
     prisma.ticket.groupBy({
@@ -1711,7 +1723,7 @@ async function findMatchingAgents(workspaceId, criteria, ticketId = null) {
     }),
     prisma.ticket.groupBy({
       by: ['assignedTechId'],
-      where: { workspaceId, status: { in: ['Open', 'Pending', 'open', 'pending', '2', '3'] } },
+      where: { workspaceId, status: { in: await openWorkloadStatuses(workspaceId) } },
       _count: true,
     }),
     prisma.ticket.groupBy({
@@ -2330,7 +2342,7 @@ async function getWorkloadStats(workspaceId) {
   const [openTickets, todayTickets, selfPicked] = await Promise.all([
     prisma.ticket.groupBy({
       by: ['assignedTechId'],
-      where: { workspaceId, assignedTechId: { in: techIds }, status: { in: ['Open', 'Pending', 'open', 'pending', '2', '3'] } },
+      where: { workspaceId, assignedTechId: { in: techIds }, status: { in: await openWorkloadStatuses(workspaceId) } },
       _count: true,
     }),
     prisma.ticket.groupBy({

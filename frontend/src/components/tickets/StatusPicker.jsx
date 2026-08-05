@@ -2,9 +2,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown, Loader2 } from 'lucide-react';
 import { StatusPill } from './ticketUi';
+import { CANONICAL_STATUS_NAMES, statusToneFromDefs } from './statusDefs';
 import { ticketsAPI } from '../../services/api';
-
-const STATUSES = ['Open', 'Pending', 'Resolved', 'Closed'];
 
 /**
  * Inline status dropdown for queue rows (QA 07-06 #2). Origin-aware confirm:
@@ -12,6 +11,12 @@ const STATUSES = ['Open', 'Pending', 'Resolved', 'Closed'];
  *    normal status API.
  *  - FS-born: hands off to the page's FsSyncConfirm flow (fail-first if
  *    FreshService rejects, exactly like assignee/category write-backs).
+ *
+ * Status vocabulary (Phase 8b): TP-born tickets offer the workspace registry
+ * (`statusDefs` from the queue meta — custom statuses included); FS-born
+ * tickets (`fsChange` set, which is also how this picker knows the origin)
+ * keep the canonical 4 — FreshService doesn't understand custom labels until
+ * the 8c mapping. Defs absent (meta still loading) → canonical 4.
  */
 export default function StatusPicker({
   ticketId,
@@ -19,7 +24,12 @@ export default function StatusPicker({
   fsChange = null, // (nextStatus) => Promise — FS-born write-back w/ confirm modal
   onChanged, // (nextStatus, prevStatus) => void after success
   disabled = false,
+  statusDefs = null, // workspace registry defs [{name, baseStatus, color, ...}]
 }) {
+  const options = fsChange || !statusDefs?.length
+    ? CANONICAL_STATUS_NAMES
+    : statusDefs.map((d) => d.name);
+  const toneOf = (name) => statusToneFromDefs(statusDefs, name);
   const [open, setOpen] = useState(false);
   const [confirming, setConfirming] = useState(null); // status awaiting TP confirm
   const [busy, setBusy] = useState(false);
@@ -93,7 +103,7 @@ export default function StatusPicker({
         aria-label={`Status: ${value} — change`}
         className="tp-focus-ring group inline-flex max-w-full min-w-0 items-center gap-1 rounded-lg px-1 py-0.5 border border-transparent hover:border-slate-200 hover:bg-white transition-colors disabled:cursor-not-allowed"
       >
-        {busy ? <Loader2 className="w-4 h-4 animate-spin text-slate-400" aria-hidden="true" /> : <StatusPill status={value} size="sm" />}
+        {busy ? <Loader2 className="w-4 h-4 animate-spin text-slate-400" aria-hidden="true" /> : <StatusPill status={value} size="sm" tone={toneOf(value)} />}
         {!disabled && <ChevronDown className={`w-3 h-3 text-slate-300 group-hover:text-slate-400 ${open ? 'rotate-180' : ''} transition-transform`} aria-hidden="true" />}
       </button>
 
@@ -126,7 +136,7 @@ export default function StatusPicker({
               </div>
             </div>
           ) : (
-            STATUSES.map((status) => (
+            options.map((status) => (
               <button
                 key={status}
                 role="option"
@@ -134,7 +144,7 @@ export default function StatusPicker({
                 onClick={() => pick(status)}
                 className={`tp-focus-ring w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left hover:bg-slate-50 ${status === value ? 'bg-blue-50/70' : ''}`}
               >
-                <StatusPill status={status} size="sm" />
+                <StatusPill status={status} size="sm" tone={toneOf(status)} />
                 {status === value && <Check className="w-3.5 h-3.5 text-blue-600 ml-auto" aria-hidden="true" />}
               </button>
             ))

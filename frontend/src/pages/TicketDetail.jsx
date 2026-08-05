@@ -40,7 +40,11 @@ import { useSSE } from '../hooks/useSSE';
 import { useTicketPresence } from '../hooks/useTicketPresence';
 import { useTicketTypes } from '../hooks/useTicketTypes';
 import MergeTicketsModal from '../components/tickets/MergeTicketsModal';
+import { baseStatusOf, isTerminalStatus, statusDefsFromMeta, statusToneFromDefs } from '../components/tickets/statusDefs';
 
+// Canonical 4 — FS-born tickets keep this vocabulary (FreshService owns their
+// fields; custom labels can't write back until 8c). TP-born tickets use the
+// workspace status registry from meta.statuses (Phase 8b, see statusDefs.js).
 const STATUSES = ['Open', 'Pending', 'Resolved', 'Closed'];
 const CONVERSATION_TABS = [
   { key: 'all', label: 'All' },
@@ -749,6 +753,17 @@ export default function TicketDetail() {
   const isNative = ticket?.origin === 'ticketpulse';
   const ticketingOn = meta?.nativeTicketingEnabled !== false;
   const canWrite = isNative && ticketingOn;
+  // Workspace status registry (Phase 8b): TP-born tickets pick from it
+  // (custom statuses included); FS-born stay on the canonical 4. Base-aware
+  // helpers below key lifecycle affordances off baseStatus, not the label.
+  const statusDefs = useMemo(() => statusDefsFromMeta(meta), [meta]);
+  const statusOptions = useMemo(() => {
+    if (!isNative) return STATUSES;
+    return statusDefs.map((d) => d.name);
+  }, [isNative, statusDefs]);
+  const ticketTerminal = ticket ? isTerminalStatus(statusDefs, ticket.status) : false;
+  const ticketOpenLike = ticket ? ['Open', 'Pending'].includes(baseStatusOf(statusDefs, ticket.status)) : false;
+  const ticketSlaPaused = ticket ? baseStatusOf(statusDefs, ticket.status) === 'Pending' : false;
   // Per-workspace type registry: sidebar Type options ('Case' for Accounting…).
   const { activeTypes: activeTicketTypes } = useTicketTypes();
   const canConverse = ticketingOn && (isNative || Boolean(ticket?.freshserviceTicketId));
@@ -1591,7 +1606,7 @@ export default function TicketDetail() {
                       }`}
                     >
                       <PriorityDot priority={ticket.priority} withLabel />
-                      <StatusPill status={ticket.status} />
+                      <StatusPill status={ticket.status} tone={statusToneFromDefs(statusDefs, ticket.status)} />
                     </div>
                   </div>
 
@@ -1652,7 +1667,7 @@ export default function TicketDetail() {
                         {confirmPickup ? 'Confirm pick up?' : 'Pick up'}
                       </button>
                     )}
-                    {canWrite && !['Resolved', 'Closed'].includes(ticket.status) && (
+                    {canWrite && !ticketTerminal && (
                       <button
                         onClick={resolveTicket}
                         disabled={savingField === 'resolve'}
@@ -1698,7 +1713,7 @@ export default function TicketDetail() {
                     Clone
                       </button>
                     )}
-                    {ticketingOn && isNative && meta?.actor?.kind !== 'agent' && ['Open', 'Pending'].includes(ticket.status) && (
+                    {ticketingOn && isNative && meta?.actor?.kind !== 'agent' && ticketOpenLike && (
                       <button
                         onClick={() => setMergeOpen(true)}
                         title="Merge duplicate or related tickets into this one"
@@ -1747,7 +1762,7 @@ export default function TicketDetail() {
                           >
                         Flag as noise
                           </button>
-                          {isNative && !['Resolved', 'Closed'].includes(ticket.status) && (
+                          {isNative && !ticketTerminal && (
                             <button
                               onClick={() => setNoiseFlag(true, true)}
                               role="menuitem"
@@ -1898,7 +1913,7 @@ export default function TicketDetail() {
                 </span>
                 {(canWrite || fsEditable) && <ChevronDown className="ml-auto h-4 w-4 flex-shrink-0 text-slate-300" aria-hidden="true" />}
               </button>
-              <StatusPill status={ticket.status} />
+              <StatusPill status={ticket.status} tone={statusToneFromDefs(statusDefs, ticket.status)} />
             </div>
             <MobileAssignSheet
               ticket={ticket}
@@ -2439,8 +2454,8 @@ export default function TicketDetail() {
                       className={fieldClass}
                       aria-label="Ticket status"
                     >
-                      {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-                      {!STATUSES.includes(ticket.status) && <option value={ticket.status}>{ticket.status}</option>}
+                      {statusOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+                      {!statusOptions.includes(ticket.status) && <option value={ticket.status}>{ticket.status}</option>}
                     </select>
                   </SidebarField>
 
@@ -2479,7 +2494,7 @@ export default function TicketDetail() {
                           ) : (
                             <span className="ml-auto text-slate-300">Not set</span>
                           )}
-                          {ticket.frDueBy && <SlaTargetChip target={ticket.frDueBy} metAt={ticket.firstPublicAgentReplyAt} status={ticket.status} kind="response" />}
+                          {ticket.frDueBy && <SlaTargetChip target={ticket.frDueBy} metAt={ticket.firstPublicAgentReplyAt} status={ticket.status} terminal={ticketTerminal} paused={ticketSlaPaused} kind="response" />}
                           {canWrite && (
                             <DueDateEditor
                               label="First response"
@@ -2504,7 +2519,7 @@ export default function TicketDetail() {
                           ) : (
                             <span className="ml-auto text-slate-300">Not set</span>
                           )}
-                          {ticket.dueBy && <SlaTargetChip target={ticket.dueBy} metAt={ticket.resolvedAt || ticket.closedAt} status={ticket.status} kind="resolution" />}
+                          {ticket.dueBy && <SlaTargetChip target={ticket.dueBy} metAt={ticket.resolvedAt || ticket.closedAt} status={ticket.status} terminal={ticketTerminal} paused={ticketSlaPaused} kind="resolution" />}
                           {canWrite && (
                             <DueDateEditor
                               label="Resolution"

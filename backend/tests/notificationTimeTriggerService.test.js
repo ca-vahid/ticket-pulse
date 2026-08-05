@@ -5,6 +5,9 @@ const prismaMock = {
   ticket: { findMany: jest.fn(), count: jest.fn() },
   ticketTask: { findMany: jest.fn() },
   workspace: { findMany: jest.fn() },
+  // Per-workspace status registry (Phase 8b): canonical 4 by default; the
+  // custom-status tests below override + invalidate the statusService cache.
+  ticketStatusDefinition: { findMany: jest.fn().mockResolvedValue([]) },
 };
 const emitMock = jest.fn().mockResolvedValue({ status: 'completed', workflowCount: 1 });
 const executeForEventMock = jest.fn().mockResolvedValue({ status: 'completed', workflowCount: 1 });
@@ -27,6 +30,7 @@ jest.unstable_mockModule('../src/utils/logger.js', () => ({
 }));
 
 const { default: timeTriggerService } = await import('../src/services/notificationTimeTriggerService.js');
+const { invalidateStatusCache } = await import('../src/services/statusService.js');
 
 const agingWorkflow = {
   id: 7,
@@ -47,10 +51,12 @@ const slaWorkflow = {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  invalidateStatusCache();
   process.env.NOTIFICATION_TIME_TRIGGERS_ENABLED = 'true';
   emitMock.mockResolvedValue({ status: 'completed', workflowCount: 1 });
   sendDueReminderMock.mockResolvedValue(true);
   prismaMock.ticketTask.findMany.mockResolvedValue([]);
+  prismaMock.ticketStatusDefinition.findMany.mockResolvedValue([]);
 });
 
 describe('notificationTimeTriggerService.tick', () => {
@@ -118,6 +124,42 @@ describe('notificationTimeTriggerService.tick', () => {
     const result = await timeTriggerService.tick();
     expect(result).toEqual({ skipped: true });
     expect(prismaMock.notificationWorkflow.findMany).not.toHaveBeenCalled();
+  });
+
+  describe('custom workspace statuses keep triggers alive (Phase 8b — CRITICAL)', () => {
+    const CUSTOM_ROWS = [
+      { id: 1, workspaceId: 1, name: 'Open', baseStatus: 'Open', sortOrder: 0, isSystem: true, isActive: true },
+      { id: 2, workspaceId: 1, name: 'Pending', baseStatus: 'Pending', sortOrder: 1, isSystem: true, isActive: true },
+      { id: 3, workspaceId: 1, name: 'Resolved', baseStatus: 'Resolved', sortOrder: 2, isSystem: true, isActive: true },
+      { id: 4, workspaceId: 1, name: 'Closed', baseStatus: 'Closed', sortOrder: 3, isSystem: true, isActive: true },
+      { id: 5, workspaceId: 1, name: 'Needs Rework', baseStatus: 'Pending', sortOrder: 4, isSystem: false, isActive: true },
+      { id: 6, workspaceId: 1, name: 'In Triage', baseStatus: 'Open', sortOrder: 5, isSystem: false, isActive: true },
+    ];
+
+    beforeEach(() => {
+      invalidateStatusCache();
+      prismaMock.ticketStatusDefinition.findMany.mockResolvedValue(CUSTOM_ROWS);
+    });
+
+    test('aging scan includes custom Open- AND Pending-base names ("Needs Rework" keeps aging)', async () => {
+      prismaMock.notificationWorkflow.findMany.mockResolvedValue([agingWorkflow]);
+      prismaMock.ticket.findMany.mockResolvedValue([]);
+
+      await timeTriggerService.tick();
+
+      const query = prismaMock.ticket.findMany.mock.calls[0][0];
+      expect(query.where.status).toEqual({ in: ['Open', 'Pending', 'Needs Rework', 'In Triage'] });
+    });
+
+    test('SLA scans stay Open-BASE only, but include custom Open-base names ("In Triage" keeps SLA alive)', async () => {
+      prismaMock.notificationWorkflow.findMany.mockResolvedValue([slaWorkflow]);
+      prismaMock.ticket.findMany.mockResolvedValue([]);
+
+      await timeTriggerService.tick();
+
+      const query = prismaMock.ticket.findMany.mock.calls[0][0];
+      expect(query.where.status).toEqual({ in: ['Open', 'In Triage'] });
+    });
   });
 });
 

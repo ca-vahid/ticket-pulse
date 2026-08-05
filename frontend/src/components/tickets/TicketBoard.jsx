@@ -4,16 +4,26 @@ import {
   useDraggable, useDroppable, useSensor, useSensors,
 } from '@dnd-kit/core';
 import { Circle, Clock3, CheckCircle2, Lock } from 'lucide-react';
-import { PersonAvatar, SlaChip, TypePill, PRIORITY_STRIP_COLORS, PRIORITY_LABELS } from './ticketUi';
+import { PersonAvatar, SlaChip, StatusPill, TypePill, PRIORITY_STRIP_COLORS, PRIORITY_LABELS } from './ticketUi';
+import { baseStatusOf, statusToneFromDefs } from './statusDefs';
 
 /**
  * Board view for the tickets queue (QA 07-27 #3): Open / Pending / Closed
  * columns, drag a card between columns to change status.
  *
- * Status buckets: the "Closed" column holds BOTH Resolved and Closed —
- * every aggregate in the app already treats them as one terminal bucket
- * (QA 07-27 #2); resolved cards carry a small "Resolved" tag so the FS
- * distinction stays visible without a fourth column.
+ * Status buckets (Phase 8b): bucketing keys on the ticket status's BASE
+ * status from the workspace registry (`statusDefs`), so custom statuses land
+ * in their base's column — Open-base in Open, Pending-base in Pending, and
+ * the "Closed" column holds BOTH Resolved- and Closed-base statuses (every
+ * aggregate in the app already treats them as one terminal bucket, QA 07-27
+ * #2). Legacy FS "Waiting …" labels keep sitting in Pending. Cards whose
+ * status name differs from the column's own label carry a small status tag
+ * so e.g. a "Needs Rework" card in Pending stays identifiable.
+ *
+ * Drag OUT of a column with several member statuses: dropping into a column
+ * sets that column's BASE canonical status — the simplest honest rule (no
+ * mid-drag status picker; refine a card into a custom status via the row /
+ * detail pickers instead). Dropping into the card's own bucket is a no-op.
  *
  * Drag rules mirror the queue's origin-aware editing exactly:
  *  - TP-born + native ticketing on  → direct status change (with undo toast).
@@ -51,14 +61,20 @@ const BOARD_COLUMNS = [
   },
 ];
 
-const bucketFor = (status) => {
-  if (status === 'Open') return 'open';
-  if (status === 'Pending' || status === 'Waiting on Customer') return 'pending';
-  if (status === 'Resolved' || status === 'Closed') return 'closed';
-  return null; // Deleted / Spam — not shown on the board
+/**
+ * Column for a status label, via its BASE status in the workspace registry
+ * (canonical fallback while defs load). Pending-base absorbs the legacy FS
+ * "Waiting …" states exactly as before.
+ */
+const makeBucketFor = (statusDefs) => (status) => {
+  const base = baseStatusOf(statusDefs, status);
+  if (base === 'Open') return 'open';
+  if (base === 'Pending' || status === 'Waiting on Customer' || status === 'Waiting on Third Party') return 'pending';
+  if (base === 'Resolved' || base === 'Closed') return 'closed';
+  return null; // Deleted / Spam / unknown labels — not shown on the board
 };
 
-function BoardCard({ ticket, canDrag, dragging, onClick, onDoubleClick }) {
+function BoardCard({ ticket, statusDefs, canDrag, dragging, onClick, onDoubleClick }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: String(ticket.id),
     disabled: !canDrag,
@@ -66,6 +82,13 @@ function BoardCard({ ticket, canDrag, dragging, onClick, onDoubleClick }) {
   const style = transform
     ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`, zIndex: 30 }
     : undefined;
+
+  // A card whose status name isn't its column's own label carries a small
+  // status tag — keeps "Resolved" visible in the Closed column (QA 07-27 #2)
+  // and identifies custom statuses ("Needs Rework") inside their base column.
+  const bucket = makeBucketFor(statusDefs)(ticket.status);
+  const columnLabel = { open: 'Open', pending: 'Pending', closed: 'Closed' }[bucket];
+  const showStatusTag = Boolean(columnLabel) && ticket.status !== columnLabel;
 
   return (
     <div
@@ -84,8 +107,10 @@ function BoardCard({ ticket, canDrag, dragging, onClick, onDoubleClick }) {
         <div className="flex items-center gap-1.5">
           <span className="font-mono text-[11px] font-bold text-slate-500">{ticket.displayRef}</span>
           {ticket.ticketType && <TypePill type={ticket.ticketType} />}
-          {ticket.status === 'Resolved' && (
-            <span className="rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-px text-[10px] font-bold text-emerald-700">Resolved</span>
+          {showStatusTag && (
+            ticket.status === 'Resolved'
+              ? <span className="rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-px text-[10px] font-bold text-emerald-700">Resolved</span>
+              : <StatusPill status={ticket.status} size="sm" tone={statusToneFromDefs(statusDefs, ticket.status)} className="!text-[10px]" />
           )}
           {!canDrag && (
             <span
@@ -109,7 +134,7 @@ function BoardCard({ ticket, canDrag, dragging, onClick, onDoubleClick }) {
             <span className="text-[11px] font-medium text-slate-400">Unassigned</span>
           )}
           <span className="ml-auto flex flex-none items-center gap-1.5">
-            {ticket.status === 'Open' && ticket.dueBy && (
+            {baseStatusOf(statusDefs, ticket.status) === 'Open' && ticket.dueBy && (
               <SlaChip value={ticket.dueBy} className="!px-1.5 !text-[10px]" />
             )}
             <span className="text-[10px] font-semibold uppercase text-slate-400" title={`Priority: ${PRIORITY_LABELS[ticket.priority] || ticket.priority}`}>
@@ -163,6 +188,7 @@ function BoardColumn({ column, tickets, activeBucket, paginated, emptyState, chi
 export default function TicketBoard({
   tickets, ticketingOn, onCardClick, onCardDoubleClick, onStatusDrop,
   closedExcluded = false, onShowClosed = null, paginated = false,
+  statusDefs = null, // workspace status registry (queue meta) — base-aware buckets
 }) {
   const [activeId, setActiveId] = useState(null);
   const sensors = useSensors(
@@ -171,6 +197,8 @@ export default function TicketBoard({
     useSensor(KeyboardSensor),
   );
 
+  const bucketFor = useMemo(() => makeBucketFor(statusDefs), [statusDefs]);
+
   const buckets = useMemo(() => {
     const map = { open: [], pending: [], closed: [] };
     for (const t of tickets) {
@@ -178,7 +206,7 @@ export default function TicketBoard({
       if (bucket) map[bucket].push(t);
     }
     return map;
-  }, [tickets]);
+  }, [tickets, bucketFor]);
 
   const byId = useMemo(() => new Map(tickets.map((t) => [String(t.id), t])), [tickets]);
   const activeTicket = activeId ? byId.get(activeId) : null;
@@ -197,7 +225,9 @@ export default function TicketBoard({
     const ticket = byId.get(String(active.id));
     const column = BOARD_COLUMNS.find((c) => c.key === over.id);
     if (!ticket || !column) return;
-    if (bucketFor(ticket.status) === column.key) return; // same column — no-op
+    if (bucketFor(ticket.status) === column.key) return; // same column (any member status) — no-op
+    // Dropping into a column always sets that column's BASE canonical status
+    // (column.status) — see the drag-out rule in the header comment.
     onStatusDrop?.(ticket, column.status);
   };
 
@@ -237,6 +267,7 @@ export default function TicketBoard({
               <BoardCard
                 key={ticket.id}
                 ticket={ticket}
+                statusDefs={statusDefs}
                 canDrag={canDragTicket(ticket)}
                 onClick={onCardClick}
                 onDoubleClick={onCardDoubleClick}
@@ -248,7 +279,7 @@ export default function TicketBoard({
       <DragOverlay dropAnimation={null}>
         {activeTicket ? (
           <div className="w-[260px] rotate-2 opacity-95">
-            <BoardCard ticket={activeTicket} canDrag dragging />
+            <BoardCard ticket={activeTicket} statusDefs={statusDefs} canDrag dragging />
           </div>
         ) : null}
       </DragOverlay>

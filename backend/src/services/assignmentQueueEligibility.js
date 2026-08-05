@@ -5,7 +5,15 @@ const FRESHSERVICE_TERMINAL_STATUS_LABELS = new Map([
   [5, 'Closed'],
 ]);
 
-export function getLocalTicketQueueBlocker(ticket) {
+/**
+ * Local (Ticket Pulse row) eligibility. Pure and synchronous — callers that
+ * know the workspace resolve its custom terminal-BASE status names via
+ * `statusService.statusNamesForBase(wsId, ['Resolved','Closed'])` and pass
+ * them as `extraClosedNames` (Phase 8b) so a ticket parked in e.g. a
+ * Resolved-base "Fixed" never enters the assignment queue. Without the extra
+ * names this is exactly the pre-registry canonical check.
+ */
+export function getLocalTicketQueueBlocker(ticket, extraClosedNames = []) {
   if (!ticket) {
     return {
       valid: false,
@@ -13,7 +21,7 @@ export function getLocalTicketQueueBlocker(ticket) {
     };
   }
 
-  if (CLOSED_STATUSES.includes(String(ticket.status))) {
+  if (CLOSED_STATUSES.includes(String(ticket.status)) || extraClosedNames.includes(String(ticket.status))) {
     return {
       valid: false,
       reason: `Ticket already ${ticket.status}`,

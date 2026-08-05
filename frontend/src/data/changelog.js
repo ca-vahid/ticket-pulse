@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.1.2-preview';
+export const APP_VERSION = '3.1.3-preview';
 
 export const changelog = [
+  {
+    version: '3.1.3-preview',
+    date: 'August 5, 2026',
+    entries: [
+      { type: 'new', html: '<strong>🏷️ Custom statuses everywhere</strong> — part 2 of 3: statuses you define now appear with their colors in the queue filters, status pickers, board (bucketed by their base column), dashboards, SLA clocks, analytics, and stat cards. A ticket in “Needs Rework” counts as open everywhere it should, keeps its SLA alive, and round-trips through shared filter links. FreshService-born tickets keep FreshService’s own statuses.' },
+    ],
+  },
   {
     version: '3.1.2-preview',
     date: 'August 5, 2026',

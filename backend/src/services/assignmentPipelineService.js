@@ -11,8 +11,10 @@ import { formatDateInTimezone } from '../utils/timezone.js';
 import { TICKET_ORIGIN } from '../utils/ticketOrigin.js';
 import { formatInTimeZone } from 'date-fns-tz';
 import { createFreshServiceClient } from '../integrations/freshservice.js';
+import { Prisma } from '@prisma/client';
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
+import statusService from './statusService.js';
 // Pure helpers extracted to their own modules so unit tests can exercise the
 // rebound-context user-message logic and the auto-assign decision rules
 // without pulling in Prisma/Anthropic.
@@ -114,7 +116,12 @@ class AssignmentPipelineService {
         where: { id: ticketId },
         select: { status: true, isNoise: true },
       }).catch(() => null);
-      if (!eligibility || ['Resolved', 'Closed'].includes(eligibility.status) || eligibility.isNoise === true) {
+      // Base-aware terminal check (Phase 8b): custom Resolved/Closed-base
+      // statuses are just as dead as the canonical pair.
+      const eligibilityBase = eligibility
+        ? await statusService.baseStatusOf(workspaceId, eligibility.status)
+        : null;
+      if (!eligibility || ['Resolved', 'Closed'].includes(eligibilityBase) || eligibility.isNoise === true) {
         logger.info('Pipeline skipped: priority_changed on closed/noise ticket', {
           ticketId, status: eligibility?.status, isNoise: eligibility?.isNoise,
         });
@@ -457,6 +464,19 @@ class AssignmentPipelineService {
   }
 
   /**
+   * Workspace's custom terminal-BASE status names (Phase 8b) for the
+   * eligibility check — resolved from the ticket row's workspaceId when
+   * present (statusService caches per workspace, 60s). Empty when the row is
+   * missing or workspace-less, which degrades to the canonical-only check.
+   */
+  async _customTerminalNames(ticket) {
+    if (!ticket?.workspaceId) return [];
+    try {
+      return await statusService.statusNamesForBase(ticket.workspaceId, ['Resolved', 'Closed']);
+    } catch { return []; }
+  }
+
+  /**
    * Validate a ticket is eligible to enter the queue. Mirrors
    * validateQueuedRun but takes a ticketId directly (no run needed).
    * Used at queue-time so closed/deleted/assigned tickets never get
@@ -465,9 +485,9 @@ class AssignmentPipelineService {
   async _validateForQueue(ticketId) {
     const ticket = await prisma.ticket.findUnique({
       where: { id: ticketId },
-      select: { status: true, assignedTechId: true },
+      select: { workspaceId: true, status: true, assignedTechId: true },
     });
-    const blocker = getLocalTicketQueueBlocker(ticket);
+    const blocker = getLocalTicketQueueBlocker(ticket, await this._customTerminalNames(ticket));
     if (blocker) return blocker.reason === 'Ticket no longer exists'
       ? { valid: false, reason: 'Ticket not found in database' }
       : blocker;
@@ -491,7 +511,7 @@ class AssignmentPipelineService {
       },
     });
 
-    const localBlocker = getLocalTicketQueueBlocker(ticket);
+    const localBlocker = getLocalTicketQueueBlocker(ticket, await this._customTerminalNames(ticket));
     if (localBlocker) return localBlocker;
 
     if (options.liveCheck !== false) {
@@ -1637,11 +1657,14 @@ class AssignmentPipelineService {
   async _queueMissedTickets(workspaceId) {
     const config = await assignmentRepository.getConfig(workspaceId);
     if (!config?.isEnabled) return;
+    // Open/Pending-BASE names from the workspace registry (Phase 8b),
+    // interpolated via Prisma.join so they stay parameterized.
+    const openNames = await statusService.statusNamesForBase(workspaceId, ['Open', 'Pending']);
     const missed = await prisma.$queryRaw`
       SELECT t.id FROM tickets t
       WHERE t.workspace_id = ${workspaceId}
         AND t.assigned_tech_id IS NULL
-        AND t.status IN ('Open', 'Pending')
+        AND t.status IN (${Prisma.join(openNames)})
         AND COALESCE(t.is_noise, false) = false
         AND t.created_at BETWEEN NOW() - INTERVAL '48 hours' AND NOW() - INTERVAL '15 minutes'
         AND NOT EXISTS (SELECT 1 FROM assignment_pipeline_runs r WHERE r.ticket_id = t.id)
@@ -1659,7 +1682,7 @@ class AssignmentPipelineService {
       SELECT t.id FROM tickets t
       WHERE t.workspace_id = ${workspaceId}
         AND t.assigned_tech_id IS NULL
-        AND t.status IN ('Open', 'Pending')
+        AND t.status IN (${Prisma.join(openNames)})
         AND COALESCE(t.is_noise, false) = false
         AND t.updated_at > NOW() - INTERVAL '48 hours'
         AND (SELECT r.decision FROM assignment_pipeline_runs r
@@ -1784,7 +1807,10 @@ class AssignmentPipelineService {
           where: { id: r.ticketId },
           select: { status: true, assignedTechId: true, isNoise: true },
         });
-        if (!ticket || ticket.assignedTechId || !['Open', 'Pending'].includes(ticket.status) || ticket.isNoise) continue;
+        // Base-aware (Phase 8b): stuck-run retries only chase tickets whose
+        // status still maps to an Open/Pending base in their workspace.
+        const stuckBase = ticket ? await statusService.baseStatusOf(r.workspaceId, ticket.status) : null;
+        if (!ticket || ticket.assignedTechId || !['Open', 'Pending'].includes(stuckBase) || ticket.isNoise) continue;
         const failures = await prisma.assignmentPipelineRun.count({
           where: { ticketId: r.ticketId, status: 'failed' },
         });

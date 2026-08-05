@@ -1,5 +1,6 @@
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
+import statusService from './statusService.js';
 
 /**
  * Executors for the Phase 3 orchestrator action nodes (assign, webhook, child
@@ -43,9 +44,15 @@ export async function resolveAssignmentTarget(workspaceId, assignTo = {}) {
   if (techs.length === 0) return { error: 'No active technicians in this workspace' };
 
   if (mode === 'least_loaded') {
+    // Open/Pending-BASE names from the workspace registry (Phase 8b) so
+    // custom-status tickets still count toward a technician's load.
     const counts = await prisma.ticket.groupBy({
       by: ['assignedTechId'],
-      where: { workspaceId, status: { in: ['Open', 'Pending'] }, assignedTechId: { in: techs.map((t) => t.id) } },
+      where: {
+        workspaceId,
+        status: { in: await statusService.statusNamesForBase(workspaceId, ['Open', 'Pending']) },
+        assignedTechId: { in: techs.map((t) => t.id) },
+      },
       _count: { _all: true },
     });
     const byTech = new Map(counts.map((c) => [c.assignedTechId, c._count._all]));

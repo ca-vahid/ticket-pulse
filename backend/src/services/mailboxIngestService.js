@@ -2,6 +2,7 @@ import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import graphMailClient from '../integrations/graphMailClient.js';
 import ticketService from './ticketService.js';
+import statusService from './statusService.js';
 import ticketActivityRepository from './ticketActivityRepository.js';
 import mirrorService from './mirrorService.js';
 import { TICKET_ORIGIN, TICKET_SOURCE, ticketDisplayRef } from '../utils/ticketOrigin.js';
@@ -210,12 +211,14 @@ class MailboxIngestService {
       if (fsTicket) return { skip: true, reason: 'freshservice_ref' };
     }
 
-    // 4. Sender + recency against open TP-born tickets
+    // 4. Sender + recency against open TP-born tickets (open = Open/Pending-
+    // BASE names from the workspace registry, so a reply still threads onto a
+    // ticket parked in a custom open status — Phase 8b)
     const recent = await prisma.ticket.findFirst({
       where: {
         workspaceId,
         origin: TICKET_ORIGIN.TICKETPULSE,
-        status: { in: ['Open', 'Pending'] },
+        status: { in: await statusService.statusNamesForBase(workspaceId, ['Open', 'Pending']) },
         updatedAt: { gte: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000) },
         requester: { is: { email: { equals: String(email.from), mode: 'insensitive' } } },
       },

@@ -36,6 +36,7 @@ import { ExternalAPIError } from '../utils/errors.js';
 import { TICKET_ORIGIN, isTicketPulseOrigin } from '../utils/ticketOrigin.js';
 import groupSyncService from './groupSyncService.js';
 import ticketTypeService from './ticketTypeService.js';
+import statusService from './statusService.js';
 
 // Cap how much thread-preheat work runs per scheduled sync cycle so we keep
 // budget headroom on the shared FS rate limiter (110/min). At ~24% already
@@ -52,6 +53,11 @@ const PREHEAT_MAX_CONVERSATIONS_PER_TICKET = 30;
 // workers refill the limiter's queue without idle gaps.
 const PREHEAT_POOL_SIZE = 8;
 const NOISE_RULE_TRIGGER_SOURCE = 'noise_rule';
+// Canonical actionable set. Phase 8b: sites with a workspaceId in scope
+// resolve Open/Pending-BASE names via statusService instead; this Set remains
+// only for isActionableUnassignedFreshServiceTicket, which inspects RAW
+// FreshService payloads (label or numeric status id) before any workspace
+// resolution exists — FS payloads never carry TP custom statuses.
 const ACTIONABLE_TICKET_STATUSES = new Set(['Open', 'Pending']);
 const ACTIONABLE_FRESHSERVICE_STATUS_IDS = new Set([2, 3]);
 const INCREMENTAL_SYNC_OVERLAP_MS = 5 * 60 * 1000;
@@ -1553,7 +1559,7 @@ class SyncService {
     if (
       confirmedRebound
       && upsertedTicket.assignedTechId === null
-      && ['Open', 'Pending'].includes(upsertedTicket.status)
+      && (await statusService.statusNamesForBase(ticketWorkspaceId, ['Open', 'Pending'])).includes(upsertedTicket.status)
       && !upsertedTicket.isNoise
     ) {
       this._handleTicketRebound(
@@ -2148,7 +2154,7 @@ class SyncService {
         origin: TICKET_ORIGIN.FRESHSERVICE, // FS-writing sweep — TP-born noise handling is app-side
         assignedTechId: null,
         isNoise: true,
-        status: { in: [...ACTIONABLE_TICKET_STATUSES] },
+        status: { in: await statusService.statusNamesForBase(workspaceId, ['Open', 'Pending']) },
         createdAt: { gte: cutoff },
       },
       orderBy: { createdAt: 'desc' },
@@ -2191,7 +2197,9 @@ class SyncService {
     if (!ticket?.isNoise) {
       return { skipped: true, reason: 'not_noise' };
     }
-    if (ticket.assignedTechId || !ACTIONABLE_TICKET_STATUSES.has(ticket.status)) {
+    // Base-aware (Phase 8b): only Open/Pending-base statuses are actionable.
+    const ticketBase = await statusService.baseStatusOf(workspaceId, ticket.status);
+    if (ticket.assignedTechId || !['Open', 'Pending'].includes(ticketBase)) {
       return { skipped: true, reason: 'not_open_unassigned' };
     }
 

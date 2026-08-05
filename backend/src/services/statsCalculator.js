@@ -10,15 +10,35 @@ import { getTodayRange, formatDateInTimezone } from '../utils/timezone.js';
 import { getLoadLevel } from '../config/constants.js';
 
 /**
+ * Per-workspace status registry support (Phase 8b, QA 08-04 #12).
+ *
+ * These calculators are HOT, synchronous, per-ticket loops — they must never
+ * await a registry lookup per row. Callers that know the workspace resolve
+ * `statusService.baseStatusSets(workspaceId)` ONCE per request and pass the
+ * resulting `{ open, pending, openLike, terminal }` name Sets in as the
+ * trailing `statusSets` argument; omitted (older callers, tests), the
+ * canonical 4 apply — byte-for-byte the old hardcoded behavior.
+ */
+const CANONICAL_STATUS_SETS = {
+  open: new Set(['Open']),
+  pending: new Set(['Pending']),
+  openLike: new Set(['Open', 'Pending']),
+  terminal: new Set(['Resolved', 'Closed']),
+};
+const setsOf = (statusSets) => statusSets || CANONICAL_STATUS_SETS;
+
+/**
  * Calculate statistics for a single technician for a given date range
  * @param {Object} technician - Technician object with tickets array
  * @param {Date} rangeStart - Start of date range
  * @param {Date} rangeEnd - End of date range
  * @param {boolean} isViewingToday - Whether we're viewing current day
+ * @param {Object|null} statusSets - Optional per-workspace status name Sets (see above)
  * @returns {Object} Calculated statistics for the technician
  */
-export function calculateTechnicianDailyStats(technician, rangeStart, rangeEnd, isViewingToday = true, serviceAccountNames = []) {
+export function calculateTechnicianDailyStats(technician, rangeStart, rangeEnd, isViewingToday = true, serviceAccountNames = [], statusSets = null) {
   const tech = technician;
+  const sets = setsOf(statusSets);
 
   // Calculate open tickets based on viewing mode
   let openTickets;
@@ -26,7 +46,7 @@ export function calculateTechnicianDailyStats(technician, rangeStart, rangeEnd, 
   if (isViewingToday) {
     // All currently open tickets
     openTickets = tech.tickets.filter(ticket =>
-      ['Open', 'Pending'].includes(ticket.status),
+      sets.openLike.has(ticket.status),
     );
   } else {
     // Historical approximation: tickets assigned before/on date that are still open
@@ -39,7 +59,7 @@ export function calculateTechnicianDailyStats(technician, rangeStart, rangeEnd, 
     });
 
     const stillOpen = ticketsAssignedBeforeOrOnDate.filter(ticket =>
-      ['Open', 'Pending'].includes(ticket.status),
+      sets.openLike.has(ticket.status),
     );
 
     const assignedOnDateNowClosed = tech.tickets.filter(ticket => {
@@ -47,7 +67,7 @@ export function calculateTechnicianDailyStats(technician, rangeStart, rangeEnd, 
         ? new Date(ticket.firstAssignedAt)
         : new Date(ticket.createdAt);
       const isAssignedOnDate = assignDate >= rangeStart && assignDate <= rangeEnd;
-      const isClosed = ['Closed', 'Resolved'].includes(ticket.status);
+      const isClosed = sets.terminal.has(ticket.status);
       return isAssignedOnDate && isClosed;
     });
 
@@ -103,14 +123,15 @@ export function calculateTechnicianDailyStats(technician, rangeStart, rangeEnd, 
     const assignDate = ticket.firstAssignedAt
       ? new Date(ticket.firstAssignedAt)
       : new Date(ticket.createdAt);
-    return ['Resolved', 'Closed'].includes(ticket.status) &&
+    return sets.terminal.has(ticket.status) &&
            assignDate >= rangeStart &&
            assignDate <= rangeEnd;
   }).length;
 
-  // Breakdown of open tickets by status
-  const openOnlyCount = openTickets.filter(t => t.status === 'Open').length;
-  const pendingCount = openTickets.filter(t => t.status === 'Pending').length;
+  // Breakdown of open tickets by BASE status (custom Open-base names count
+  // as open, Pending-base ones as pending)
+  const openOnlyCount = openTickets.filter(t => sets.open.has(t.status)).length;
+  const pendingCount = openTickets.filter(t => sets.pending.has(t.status)).length;
 
   // Load level based on current open tickets
   const loadLevel = isViewingToday ? getLoadLevel(openTickets.length) : 'light';
@@ -154,16 +175,17 @@ export function calculateTechnicianDailyStats(technician, rangeStart, rangeEnd, 
  * @param {string} timezone - Timezone for date calculations
  * @returns {Object} Weekly statistics for the technician
  */
-export function calculateTechnicianWeeklyStats(technician, weekStart, weekEnd, timezone, serviceAccountNames = []) {
+export function calculateTechnicianWeeklyStats(technician, weekStart, weekEnd, timezone, serviceAccountNames = [], statusSets = null) {
   const tech = technician;
+  const sets = setsOf(statusSets);
 
   // Current open tickets (snapshot, not time-bound)
   const openTickets = tech.tickets.filter(ticket =>
-    ['Open', 'Pending'].includes(ticket.status),
+    sets.openLike.has(ticket.status),
   );
 
-  const openOnlyCount = openTickets.filter(t => t.status === 'Open').length;
-  const pendingCount = openTickets.filter(t => t.status === 'Pending').length;
+  const openOnlyCount = openTickets.filter(t => sets.open.has(t.status)).length;
+  const pendingCount = openTickets.filter(t => sets.pending.has(t.status)).length;
 
   // Build timezone-aware week boundaries (Monday 00:00:00 to Sunday 23:59:59.999)
   const weekStartRange = getTodayRange(timezone, weekStart);
@@ -217,7 +239,7 @@ export function calculateTechnicianWeeklyStats(technician, weekStart, weekEnd, t
   // Note: We filter by assignment date (consistent with daily view), not close date
   // because closedAt/resolvedAt fields may be null
   const weeklyClosed = weeklyTickets.filter(ticket =>
-    ['Resolved', 'Closed'].includes(ticket.status),
+    sets.terminal.has(ticket.status),
   ).length;
 
   // Weekly totals
@@ -261,7 +283,7 @@ export function calculateTechnicianWeeklyStats(technician, weekStart, weekEnd, t
     ).length;
 
     const dayClosed = dayTickets.filter(ticket =>
-      ['Resolved', 'Closed'].includes(ticket.status),
+      sets.terminal.has(ticket.status),
     ).length;
 
     // CSAT for this day
@@ -341,16 +363,17 @@ export function calculateTechnicianWeeklyStats(technician, weekStart, weekEnd, t
  * @param {string} timezone - Timezone for date calculations
  * @returns {Object} Monthly statistics for the technician
  */
-export function calculateTechnicianMonthlyStats(technician, monthStart, monthEnd, timezone, serviceAccountNames = []) {
+export function calculateTechnicianMonthlyStats(technician, monthStart, monthEnd, timezone, serviceAccountNames = [], statusSets = null) {
   const tech = technician;
+  const sets = setsOf(statusSets);
 
   // Current open tickets (snapshot, not time-bound)
   const openTickets = tech.tickets.filter(ticket =>
-    ['Open', 'Pending'].includes(ticket.status),
+    sets.openLike.has(ticket.status),
   );
 
-  const openOnlyCount = openTickets.filter(t => t.status === 'Open').length;
-  const pendingCount = openTickets.filter(t => t.status === 'Pending').length;
+  const openOnlyCount = openTickets.filter(t => sets.open.has(t.status)).length;
+  const pendingCount = openTickets.filter(t => sets.pending.has(t.status)).length;
 
   // Build timezone-aware month boundaries
   const monthStartRange = getTodayRange(timezone, monthStart);
@@ -397,7 +420,7 @@ export function calculateTechnicianMonthlyStats(technician, monthStart, monthEnd
     .sort((a, b) => b.count - a.count);
 
   const monthlyClosed = monthlyTickets.filter(ticket =>
-    ['Resolved', 'Closed'].includes(ticket.status),
+    sets.terminal.has(ticket.status),
   ).length;
 
   const monthlyTotalCreated = monthlyTickets.length;
@@ -442,7 +465,7 @@ export function calculateTechnicianMonthlyStats(technician, monthStart, monthEnd
     ).length;
 
     const dayClosed = dayTickets.filter(ticket =>
-      ['Resolved', 'Closed'].includes(ticket.status),
+      sets.terminal.has(ticket.status),
     ).length;
 
     dailyBreakdown.push({
@@ -510,9 +533,9 @@ export function calculateTechnicianMonthlyStats(technician, monthStart, monthEnd
  * @param {boolean} isViewingToday - Whether viewing current day
  * @returns {Object} Dashboard data with technician stats and totals
  */
-export function calculateDailyDashboard(technicians, dateStart, dateEnd, isViewingToday = true, serviceAccountNames = []) {
+export function calculateDailyDashboard(technicians, dateStart, dateEnd, isViewingToday = true, serviceAccountNames = [], statusSets = null) {
   const techsWithLoad = technicians.map(tech => {
-    const stats = calculateTechnicianDailyStats(tech, dateStart, dateEnd, isViewingToday, serviceAccountNames);
+    const stats = calculateTechnicianDailyStats(tech, dateStart, dateEnd, isViewingToday, serviceAccountNames, statusSets);
 
     return {
       id: tech.id,
@@ -561,9 +584,9 @@ export function calculateDailyDashboard(technicians, dateStart, dateEnd, isViewi
  * @param {string} timezone - Timezone for calculations
  * @returns {Object} Weekly dashboard data with aggregated stats
  */
-export function calculateWeeklyDashboard(technicians, weekStart, weekEnd, timezone, serviceAccountNames = []) {
+export function calculateWeeklyDashboard(technicians, weekStart, weekEnd, timezone, serviceAccountNames = [], statusSets = null) {
   const techsWithWeeklyStats = technicians.map(tech => {
-    const stats = calculateTechnicianWeeklyStats(tech, weekStart, weekEnd, timezone, serviceAccountNames);
+    const stats = calculateTechnicianWeeklyStats(tech, weekStart, weekEnd, timezone, serviceAccountNames, statusSets);
 
     return {
       id: tech.id,
@@ -616,13 +639,14 @@ export function calculateWeeklyDashboard(technicians, weekStart, weekEnd, timezo
  * @param {boolean} isViewingToday - Whether we're viewing current day
  * @returns {Object} Detailed statistics with categorized ticket lists
  */
-export function calculateTechnicianDetail(technician, rangeStart, rangeEnd, isViewingToday = true, serviceAccountNames = []) {
+export function calculateTechnicianDetail(technician, rangeStart, rangeEnd, isViewingToday = true, serviceAccountNames = [], statusSets = null) {
+  const sets = setsOf(statusSets);
   // Get basic daily stats
-  const stats = calculateTechnicianDailyStats(technician, rangeStart, rangeEnd, isViewingToday, serviceAccountNames);
+  const stats = calculateTechnicianDailyStats(technician, rangeStart, rangeEnd, isViewingToday, serviceAccountNames, statusSets);
 
   // All currently open tickets (regardless of viewing mode)
   const openTickets = technician.tickets.filter(ticket =>
-    ['Open', 'Pending'].includes(ticket.status),
+    sets.openLike.has(ticket.status),
   );
 
   // Tickets assigned on the selected date (use firstAssignedAt)
@@ -635,7 +659,7 @@ export function calculateTechnicianDetail(technician, rangeStart, rangeEnd, isVi
 
   // Closed tickets assigned on the selected date
   const closedTicketsOnDate = ticketsOnDate.filter(ticket =>
-    ['Resolved', 'Closed'].includes(ticket.status),
+    sets.terminal.has(ticket.status),
   );
 
   // Helper to check if a ticket was assigned by the app (service account)
@@ -702,7 +726,7 @@ export function calculateTechnicianDetail(technician, rangeStart, rangeEnd, isVi
  * @param {string} timezone - Timezone identifier (e.g. America/Los_Angeles)
  * @returns {Object} Monthly dashboard data with daily breakdown & aggregates
  */
-export function calculateMonthlyDashboard(technicians, monthStartDate, monthEndDate, timezone, serviceAccountNames = []) {
+export function calculateMonthlyDashboard(technicians, monthStartDate, monthEndDate, timezone, serviceAccountNames = [], statusSets = null) {
   const daysInMonth = new Date(monthStartDate.getFullYear(), monthStartDate.getMonth() + 1, 0).getDate();
 
   const monthStartString = formatDateInTimezone(monthStartDate, timezone);
@@ -734,7 +758,7 @@ export function calculateMonthlyDashboard(technicians, monthStartDate, monthEndD
     const techniciansForDay = [];
 
     technicians.forEach((tech) => {
-      const stats = calculateTechnicianDailyStats(tech, dayStart, dayEnd, false, serviceAccountNames);
+      const stats = calculateTechnicianDailyStats(tech, dayStart, dayEnd, false, serviceAccountNames, statusSets);
 
       if (stats.totalTicketsToday > 0) {
         techniciansForDay.push({

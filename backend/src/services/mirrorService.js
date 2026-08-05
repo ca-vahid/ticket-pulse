@@ -6,6 +6,7 @@ import attachmentService from './attachmentService.js';
 import { createFreshServiceClient } from '../integrations/freshservice.js';
 import { TICKET_ORIGIN, ticketDisplayRef } from '../utils/ticketOrigin.js';
 import ticketTypeService from './ticketTypeService.js';
+import statusService from './statusService.js';
 import { sseManager } from '../routes/sse.routes.js';
 
 // TP status labels → FreshService status codes
@@ -612,12 +613,18 @@ class MirrorService {
     const client = await this._getClient(workspaceId);
     if (!client) return { skipped: true, reason: 'freshservice_not_configured' };
 
+    // activeOnly = Open/Pending-BASE names from the workspace registry
+    // (Phase 8b): a TP-born ticket parked in a custom open status must keep
+    // reconciling against its FS mirror copy.
+    const activeNames = activeOnly
+      ? await statusService.statusNamesForBase(workspaceId, ['Open', 'Pending'])
+      : null;
     const tickets = await prisma.ticket.findMany({
       where: {
         workspaceId,
         origin: TICKET_ORIGIN.TICKETPULSE,
         freshserviceTicketId: { not: null },
-        ...(activeOnly ? { status: { in: ['Open', 'Pending'] } } : {}),
+        ...(activeNames ? { status: { in: activeNames } } : {}),
         ...(since ? { mirroredAt: { gte: new Date(since) } } : {}),
       },
       include: { assignedTech: { select: { freshserviceId: true, name: true } } },
@@ -759,10 +766,19 @@ class MirrorService {
   }
 
   async _reconcileAllWorkspaces() {
-    // Only workspaces that actually have TP-born mirrored tickets.
+    // Only workspaces that actually have TP-born mirrored tickets. This
+    // candidate scan is cross-workspace (no registry to resolve against), so
+    // it excludes the KNOWN-dead labels instead of listing open ones — a
+    // workspace whose only mirrored tickets sit in custom statuses still
+    // becomes a candidate; reconcile() then applies the workspace's own
+    // registry-resolved open scope (Phase 8b).
     const rows = await prisma.ticket.groupBy({
       by: ['workspaceId'],
-      where: { origin: TICKET_ORIGIN.TICKETPULSE, freshserviceTicketId: { not: null }, status: { in: ['Open', 'Pending'] } },
+      where: {
+        origin: TICKET_ORIGIN.TICKETPULSE,
+        freshserviceTicketId: { not: null },
+        status: { notIn: ['Deleted', 'Spam'] },
+      },
     });
     for (const row of rows) {
       await this.reconcile(row.workspaceId, { activeOnly: true, limit: 30 }).catch(() => {});
