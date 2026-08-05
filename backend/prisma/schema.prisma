@@ -675,6 +675,13 @@ model TicketTask {
   dueAt          DateTime?   @map("due_at")
   notifyAgent    Boolean     @default(true) @map("notify_agent")
   notifiedAt     DateTime?   @map("notified_at") // idempotency guard for the assignee email
+  // "Notify before" due reminder (QA 08-04 #8b): minutes before dueAt to email
+  // the assignee (15/30/45/60/120); null = never. reminderSentAt is the
+  // idempotency stamp — cleared (re-armed) whenever dueAt or the reminder
+  // setting changes. TP sends reminders for TP-owned rows only; FS-born rows
+  // forward this to FreshService as notify_before instead.
+  remindBeforeMinutes Int?      @map("remind_before_minutes")
+  reminderSentAt      DateTime? @map("reminder_sent_at")
   // 'ticketpulse' = created here; 'freshservice' = synced from FS
   origin         String      @default("ticketpulse") @db.VarChar(20)
   fsTaskId       BigInt?     @map("fs_task_id") // FreshService task id once mirrored/synced

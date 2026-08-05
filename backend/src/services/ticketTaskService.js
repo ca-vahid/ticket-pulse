@@ -9,13 +9,45 @@ const STATUSES = ['open', 'in_progress', 'done'];
 const TO_FS_STATUS = { open: 1, in_progress: 2, done: 3 };
 const FROM_FS_STATUS = { 1: 'open', 2: 'in_progress', 3: 'done' };
 
+// "Notify before" choices (QA 08-04 #8b) — mirrors the FreshService modal:
+// Never / 15 / 30 / 45 minutes / 1 hour / 2 hours.
+const REMINDER_MINUTES = [15, 30, 45, 60, 120];
+
 const TASK_SELECT = {
   id: true, ticketId: true, title: true, description: true, status: true,
   assignedTechId: true, dueAt: true, notifyAgent: true, notifiedAt: true,
+  remindBeforeMinutes: true, reminderSentAt: true,
   origin: true, fsTaskId: true, sortOrder: true, createdByName: true,
   completedAt: true, createdAt: true, updatedAt: true,
   assignedTech: { select: { id: true, name: true, photoUrl: true, email: true, freshserviceId: true } },
 };
+
+/**
+ * Parse a task due input robustly (QA 08-04 #8a). The UI now posts a full ISO
+ * datetime, but legacy/API callers may still send a bare "YYYY-MM-DD" — which
+ * `new Date()` would read as UTC MIDNIGHT (shifting the visible date/time for
+ * anyone west of Greenwich). Bare dates are instead anchored at 5:00 PM
+ * server-local — the same end-of-business default the picker uses.
+ */
+function parseDueAt(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value).trim());
+  const date = m
+    ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 17, 0, 0, 0)
+    : new Date(value);
+  if (Number.isNaN(date.getTime())) throw new ValidationError('Invalid due date');
+  return date;
+}
+
+/** Normalize a remindBeforeMinutes input: null (never) or one of the presets. */
+function parseRemindBefore(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const minutes = Number(value);
+  if (!REMINDER_MINUTES.includes(minutes)) {
+    throw new ValidationError(`Notify-before must be one of: ${REMINDER_MINUTES.join(', ')} minutes`);
+  }
+  return minutes;
+}
 
 // FreshService returns task descriptions as HTML (e.g. `<div style="…">…</div>`).
 // Store them as readable plain text so the UI doesn't surface raw markup/metadata
@@ -81,7 +113,8 @@ class TicketTaskService {
     const status = STATUSES.includes(input?.status) ? input.status : 'open';
     const assignedTechId = input?.assignedTechId !== null && input?.assignedTechId !== undefined ? Number(input.assignedTechId) : null;
     const assignee = await this._resolveAssignee(assignedTechId, workspaceId);
-    const dueAt = input?.dueAt ? new Date(input.dueAt) : null;
+    const dueAt = parseDueAt(input?.dueAt);
+    const remindBeforeMinutes = parseRemindBefore(input?.remindBeforeMinutes);
     const notifyAgent = input?.notifyAgent !== false;
 
     const maxOrder = await prisma.ticketTask.aggregate({ where: { ticketId, workspaceId }, _max: { sortOrder: true } });
@@ -89,6 +122,7 @@ class TicketTaskService {
       workspaceId, ticketId, title,
       description: input?.description ? String(input.description) : null,
       status, assignedTechId: assignee?.id ?? null, dueAt, notifyAgent,
+      remindBeforeMinutes: dueAt ? remindBeforeMinutes : null,
       sortOrder: (maxOrder._max.sortOrder ?? 0) + 1,
       createdBy: actor?.email || null, createdByName: actor?.name || actor?.email || null,
       completedAt: status === 'done' ? new Date() : null,
@@ -132,7 +166,12 @@ class TicketTaskService {
       data.status = patch.status;
       data.completedAt = patch.status === 'done' ? new Date() : null;
     }
-    if (patch.dueAt !== undefined) data.dueAt = patch.dueAt ? new Date(patch.dueAt) : null;
+    if (patch.dueAt !== undefined) data.dueAt = parseDueAt(patch.dueAt);
+    if (patch.remindBeforeMinutes !== undefined) data.remindBeforeMinutes = parseRemindBefore(patch.remindBeforeMinutes);
+    // Re-arm the due reminder whenever the deadline or the notify-before
+    // setting moves — the old "sent" stamp described a reminder for a deadline
+    // that no longer exists (same rule the SLA trigger stamps follow).
+    if (data.dueAt !== undefined || data.remindBeforeMinutes !== undefined) data.reminderSentAt = null;
     if (patch.notifyAgent !== undefined) data.notifyAgent = patch.notifyAgent !== false;
     let reassignedTo = null;
     if (patch.assignedTechId !== undefined) {
@@ -225,28 +264,34 @@ class TicketTaskService {
     return mirrorService.getInteractiveClient(workspaceId);
   }
 
-  _toFsPayload(base, assignee) {
+  _toFsPayload(base, assignee, { includeReminder = false } = {}) {
     const payload = { title: base.title, status: TO_FS_STATUS[base.status] || 1 };
     if (base.description) payload.description = base.description;
     if (base.dueAt) payload.due_date = new Date(base.dueAt).toISOString();
     if (assignee?.freshserviceId) payload.agent_id = Number(assignee.freshserviceId);
+    // FS-born only: FreshService owns notifications there, so forward the
+    // notify-before as FS's own reminder (seconds). TP-born mirror copies never
+    // get it — TP sends that reminder itself and FS doubling it would spam.
+    if (includeReminder && base.remindBeforeMinutes) payload.notify_before = base.remindBeforeMinutes * 60;
     return payload;
   }
 
   async _fsCreate(ticket, base, assignee) {
     const client = await this._fsClient(ticket.workspaceId);
     if (!client) throw new ValidationError('FreshService is not configured for this workspace');
-    return client.createTicketTask(Number(ticket.freshserviceTicketId), this._toFsPayload(base, assignee));
+    return client.createTicketTask(Number(ticket.freshserviceTicketId), this._toFsPayload(base, assignee, { includeReminder: true }));
   }
 
   async _fsUpdate(ticket, task, data) {
     const client = await this._fsClient(ticket.workspaceId);
     if (!client) return;
+    const fsBorn = ticket.origin === TICKET_ORIGIN.FRESHSERVICE;
     const patch = {};
     if (data.title !== undefined) patch.title = data.title;
     if (data.description !== undefined) patch.description = data.description || '';
     if (data.status !== undefined) patch.status = TO_FS_STATUS[data.status] || 1;
     if (data.dueAt !== undefined) patch.due_date = data.dueAt ? new Date(data.dueAt).toISOString() : null;
+    if (fsBorn && data.remindBeforeMinutes !== undefined) patch.notify_before = data.remindBeforeMinutes ? data.remindBeforeMinutes * 60 : null;
     if (data.assignedTechId !== undefined) {
       const assignee = data.assignedTechId ? await prisma.technician.findUnique({ where: { id: data.assignedTechId }, select: { freshserviceId: true } }) : null;
       patch.agent_id = assignee?.freshserviceId ? Number(assignee.freshserviceId) : null;
@@ -298,22 +343,42 @@ class TicketTaskService {
     return { pushed };
   }
 
+  /**
+   * Shared task email body — the same left-aligned Arial column and slate
+   * palette the workflow-engine transactional emails use (640px cap,
+   * #1f2937 body / #64748b muted), with the task in a bordered card.
+   */
+  _taskEmailHtml({ ticket, row, intro, dueTone = '#1f2937' }) {
+    const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const publicBase = process.env.PUBLIC_APP_URL || process.env.FRONTEND_PUBLIC_URL || process.env.APP_URL || process.env.CORS_ORIGIN || 'http://localhost:5173';
+    const dueLine = row.dueAt
+      ? `<div style="font-size:13px;line-height:19px;color:${dueTone};margin-top:8px;font-weight:700;">Due ${new Date(row.dueAt).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}</div>`
+      : '';
+    return [
+      '<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:22px;color:#1f2937;max-width:640px;">',
+      `<p style="margin:0 0 14px;">${intro}</p>`,
+      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;max-width:640px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;">',
+      '<tr><td style="padding:14px 16px;font-family:Arial,Helvetica,sans-serif;">',
+      `<div style="font-size:15px;line-height:21px;font-weight:700;color:#0f172a;">${esc(row.title)}</div>`,
+      row.description ? `<div style="font-size:13px;line-height:19px;color:#64748b;margin-top:4px;">${esc(row.description)}</div>` : '',
+      dueLine,
+      '</td></tr></table>',
+      `<p style="margin:16px 0 0;"><a href="${publicBase}/tickets/${ticket.id}" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:#2563eb;color:#ffffff;font-size:13px;line-height:18px;font-weight:700;text-decoration:none;border-radius:8px;padding:10px 18px;">Open the ticket</a></p>`,
+      '<p style="margin:16px 0 0;color:#64748b;font-size:12px;line-height:18px;">Sent by Ticket Pulse — you can review the full task list on the ticket.</p>',
+      '</div>',
+    ].join('');
+  }
+
   /** Email a TP-born task's assignee (idempotent via notifiedAt). */
   async _maybeNotify(ticket, row, assignee) {
     if (!row.notifyAgent || row.notifiedAt || !assignee?.email) return null;
     const ref = ticketDisplayRef(ticket);
     const esc = (s) => String(s || '').replace(/</g, '&lt;');
-    const publicBase = process.env.PUBLIC_APP_URL || process.env.FRONTEND_PUBLIC_URL || process.env.APP_URL || process.env.CORS_ORIGIN || 'http://localhost:5173';
-    const html = [
-      `<p>You’ve been assigned a task on ticket <b>${ref}</b>${ticket.subject ? ` (“${esc(ticket.subject)}”)` : ''}.</p>`,
-      `<p><b>${esc(row.title)}</b></p>`,
-      row.description ? `<p>${esc(row.description)}</p>` : '',
-      row.dueAt ? `<p>Due: ${new Date(row.dueAt).toLocaleString()}</p>` : '',
-      `<p><a href="${publicBase}/tickets/${ticket.id}">Open the ticket</a> to see the full task list.</p>`,
-    ].join('');
+    const intro = `You’ve been assigned a task on ticket <b>${ref}</b>${ticket.subject ? ` (“${esc(ticket.subject)}”)` : ''}.`;
     const result = await sendTransactionalEmail({
       workspaceId: ticket.workspaceId, to: assignee.email, label: 'task assignment',
-      subject: `New task on ${ref}: ${row.title}`, html,
+      subject: `New task on ${ref}: ${row.title}`,
+      html: this._taskEmailHtml({ ticket, row, intro }),
     });
     // Only mark notified if the send actually succeeded — otherwise a transient
     // outage would permanently suppress the retry (notifiedAt is the guard).
@@ -322,6 +387,46 @@ class TicketTaskService {
       return null;
     }
     return prisma.ticketTask.update({ where: { id: row.id }, data: { notifiedAt: new Date() }, select: TASK_SELECT });
+  }
+
+  /**
+   * Send a "task due soon" reminder for one candidate row (called by the
+   * notification time-trigger worker's 5-minute scan).
+   *
+   * Origin rule: TP sends reminders for `origin='ticketpulse'` rows only —
+   * i.e. tasks TP owns, including ones mirrored to the FS fallback copy (the
+   * mirror payload deliberately omits notify_before so FS can't double-send).
+   * `origin='freshservice'` rows are FS-proxied/shadow rows — whether created
+   * through our UI on an FS-born ticket or pulled in by _syncFromFs (those are
+   * stored with notifyAgent=false) — and FreshService owns notifications
+   * there: we forward the setting as FS `notify_before` at create/update
+   * instead. The worker's query already filters on origin; the guard here is
+   * defense in depth.
+   */
+  async sendDueReminder(row) {
+    const ticket = row.ticket;
+    const assignee = row.assignedTech;
+    if (!ticket || !assignee?.email || row.origin !== TICKET_ORIGIN.TICKETPULSE) return false;
+    if (row.status === 'done' || !row.dueAt || row.reminderSentAt) return false;
+    const ref = ticketDisplayRef(ticket);
+    const overdue = new Date(row.dueAt).getTime() <= Date.now();
+    const esc = (s) => String(s || '').replace(/</g, '&lt;');
+    const intro = overdue
+      ? `Heads up — your task on ticket <b>${ref}</b>${ticket.subject ? ` (“${esc(ticket.subject)}”)` : ''} is now due.`
+      : `Reminder — your task on ticket <b>${ref}</b>${ticket.subject ? ` (“${esc(ticket.subject)}”)` : ''} is due soon.`;
+    const result = await sendTransactionalEmail({
+      workspaceId: ticket.workspaceId, to: assignee.email, label: 'task due reminder',
+      subject: `${overdue ? 'Task due' : 'Task due soon'} on ${ref}: ${row.title}`,
+      html: this._taskEmailHtml({ ticket, row, intro, dueTone: overdue ? '#dc2626' : '#b45309' }),
+    });
+    if (!result?.sent) {
+      logger.warn(`Task due reminder to ${assignee.email} not sent (${result?.reason || result?.error || 'unknown'}); leaving reminderSentAt clear for retry`);
+      return false;
+    }
+    // updateMany + the reminderSentAt-null guard keeps a concurrent scan from
+    // double-stamping (and re-sends stay impossible once stamped).
+    await prisma.ticketTask.updateMany({ where: { id: row.id, reminderSentAt: null }, data: { reminderSentAt: new Date() } });
+    return true;
   }
 
   /** TP-born mirrored ticket: pull status-only changes back from the FS copy.
@@ -379,4 +484,4 @@ class TicketTaskService {
 }
 
 export default new TicketTaskService();
-export { TicketTaskService, STATUSES };
+export { TicketTaskService, STATUSES, REMINDER_MINUTES, parseDueAt, parseRemindBefore };

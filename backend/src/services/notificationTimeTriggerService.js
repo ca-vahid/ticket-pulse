@@ -6,6 +6,14 @@ import { emitTicketEvent } from './ticketLifecycleNotificationService.js';
 const TICK_INTERVAL_MS = Number(process.env.NOTIFICATION_TIME_TRIGGER_INTERVAL_MS) || 5 * 60 * 1000;
 const MAX_TICKETS_PER_WORKFLOW_TICK = 200;
 const OPEN_STATUSES = ['Open', 'Pending'];
+// Task due reminders (QA 08-04 #8b): the longest "notify before" preset bounds
+// the scan's look-ahead; the grace window lets a reminder that elapsed while
+// the worker was down still go out up to 60 minutes PAST the due time (same
+// catch-up budget processScheduled uses) — "it's due / just came due" is still
+// actionable then, while a stale "due soon" hours later would be noise.
+const TASK_REMINDER_MAX_MINUTES = 120;
+const TASK_REMINDER_GRACE_MINUTES = 60;
+const MAX_TASK_REMINDERS_PER_TICK = 200;
 
 /**
  * Time-based workflow triggers: ticket.aging / ticket.sla_pre_breach /
@@ -39,6 +47,7 @@ class NotificationTimeTriggerService {
     this._timer = setInterval(() => {
       this.tick().catch((err) => logger.warn(`Time-trigger tick failed (non-fatal): ${err.message}`));
       this.processScheduled().catch((err) => logger.warn(`Scheduled-workflow sweep failed (non-fatal): ${err.message}`));
+      this.scanTaskReminders().catch((err) => logger.warn(`Task-reminder scan failed (non-fatal): ${err.message}`));
       this.resumeDueRuns().catch(() => {});
     }, TICK_INTERVAL_MS);
     this._timer.unref?.();
@@ -189,6 +198,61 @@ class NotificationTimeTriggerService {
         ageDays: Math.floor((now.getTime() - new Date(t.createdAt).getTime()) / 86400000),
       })),
     };
+  }
+
+  /**
+   * Task due reminders (QA 08-04 #8b) — same 5-minute cadence as the SLA
+   * pre-breach trigger, same idempotency shape (a per-row stamp instead of the
+   * engine's dedupe): tasks with a due time, a notify-before setting, an
+   * assignee, and no reminder sent yet get an email once `now >= dueAt −
+   * remindBeforeMinutes`, up to TASK_REMINDER_GRACE_MINUTES past due.
+   *
+   * Only TP-owned rows (origin='ticketpulse') are scanned — FS-born/shadow
+   * rows carry FreshService's own notify_before and FS owns notifications
+   * there (see ticketTaskService.sendDueReminder for the full rule).
+   */
+  async scanTaskReminders() {
+    if (!this.isEnabled()) return { skipped: true };
+    const now = new Date();
+    const candidates = await prisma.ticketTask.findMany({
+      where: {
+        origin: 'ticketpulse',
+        status: { not: 'done' },
+        assignedTechId: { not: null },
+        remindBeforeMinutes: { not: null },
+        reminderSentAt: null,
+        // Widest possible window: earliest interesting dueAt is grace-minutes
+        // ago; latest is the longest preset ahead. The per-row threshold
+        // (dueAt − remindBeforeMinutes) is checked below.
+        dueAt: {
+          gte: new Date(now.getTime() - TASK_REMINDER_GRACE_MINUTES * 60 * 1000),
+          lte: new Date(now.getTime() + TASK_REMINDER_MAX_MINUTES * 60 * 1000),
+        },
+      },
+      select: {
+        id: true, title: true, description: true, status: true, origin: true,
+        dueAt: true, remindBeforeMinutes: true, reminderSentAt: true,
+        assignedTech: { select: { id: true, name: true, email: true } },
+        ticket: { select: { id: true, workspaceId: true, origin: true, subject: true, nativeNumber: true, freshserviceTicketId: true } },
+      },
+      orderBy: { dueAt: 'asc' },
+      take: MAX_TASK_REMINDERS_PER_TICK,
+    });
+
+    let sent = 0;
+    if (candidates.length > 0) {
+      const { default: ticketTaskService } = await import('./ticketTaskService.js');
+      for (const task of candidates) {
+        const remindAt = new Date(task.dueAt).getTime() - task.remindBeforeMinutes * 60 * 1000;
+        if (now.getTime() < remindAt) continue; // not inside its window yet
+        try {
+          if (await ticketTaskService.sendDueReminder(task)) sent += 1;
+        } catch (err) {
+          logger.warn(`Task reminder for task ${task.id} failed (non-fatal): ${err.message}`);
+        }
+      }
+    }
+    return { candidates: candidates.length, sent };
   }
 
   /** Delay-node resume rides the same tick cadence as the time triggers. */
