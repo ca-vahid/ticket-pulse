@@ -54,3 +54,45 @@ describe('StatusPicker (queue rows)', () => {
     expect(onChanged).not.toHaveBeenCalled();
   });
 });
+
+describe('StatusPicker workspace custom statuses (Phase 8b)', () => {
+  const DEFS = [
+    { name: 'Open', baseStatus: 'Open', color: 'blue', sortOrder: 0, isSystem: true },
+    { name: 'Pending', baseStatus: 'Pending', color: 'amber', sortOrder: 1, isSystem: true },
+    { name: 'Resolved', baseStatus: 'Resolved', color: 'emerald', sortOrder: 2, isSystem: true },
+    { name: 'Closed', baseStatus: 'Closed', color: 'slate', sortOrder: 3, isSystem: true },
+    { name: 'Needs Rework', baseStatus: 'Pending', color: 'orange', sortOrder: 4, isSystem: false },
+  ];
+
+  test('TP-born: the menu offers the workspace registry, custom statuses included', async () => {
+    render(<StatusPicker ticketId={501} value="Open" statusDefs={DEFS} onChanged={() => {}} />);
+    fireEvent.click(screen.getByRole('button', { name: /status: open/i }));
+    expect(await screen.findByRole('option', { name: /needs rework/i })).toBeInTheDocument();
+    expect(screen.getAllByRole('option')).toHaveLength(5);
+  });
+
+  test('TP-born: picking a custom status confirms then applies it', async () => {
+    const onChanged = vi.fn();
+    render(<StatusPicker ticketId={501} value="Open" statusDefs={DEFS} onChanged={onChanged} />);
+    fireEvent.click(screen.getByRole('button', { name: /status: open/i }));
+    fireEvent.click(await screen.findByRole('option', { name: /needs rework/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^confirm$/i }));
+    await waitFor(() => expect(setStatus).toHaveBeenCalledWith(501, 'Needs Rework'));
+    expect(onChanged).toHaveBeenCalledWith('Needs Rework', 'Open');
+  });
+
+  test('FS-born: custom statuses never appear — FreshService keeps the canonical 4', async () => {
+    render(<StatusPicker ticketId={501} value="Open" statusDefs={DEFS} fsChange={vi.fn()} onChanged={() => {}} />);
+    fireEvent.click(screen.getByRole('button', { name: /status: open/i }));
+    expect(await screen.findByRole('option', { name: /closed/i })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /needs rework/i })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('option')).toHaveLength(4);
+  });
+
+  test('no defs (meta still loading) → canonical 4 fallback', async () => {
+    render(<StatusPicker ticketId={501} value="Open" onChanged={() => {}} />);
+    fireEvent.click(screen.getByRole('button', { name: /status: open/i }));
+    await screen.findByRole('option', { name: /resolved/i });
+    expect(screen.getAllByRole('option')).toHaveLength(4);
+  });
+});

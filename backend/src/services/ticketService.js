@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { Prisma } from '@prisma/client';
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { ValidationError, NotFoundError, ServiceBusyError } from '../utils/errors.js';
@@ -187,17 +188,23 @@ function stripHtml(html) {
 /**
  * Derived at-a-glance state for queue rows / detail header.
  * Priority order: overdue > response_due > requester_responded > new.
+ * `statusSets` (optional, Phase 8b): per-workspace base-keyed name Sets from
+ * statusService.baseStatusSets — custom terminal statuses get no chip, custom
+ * Pending-base statuses pause the SLA nags. Omitted → canonical behavior.
  */
-export function deriveStateChip(ticket, awaitingReply = false) {
-  if (['Resolved', 'Closed', 'Deleted', 'Spam'].includes(ticket.status)) return null;
+export function deriveStateChip(ticket, awaitingReply = false, statusSets = null) {
+  const isTerminal = statusSets
+    ? statusSets.terminal.has(ticket.status)
+    : ['Resolved', 'Closed'].includes(ticket.status);
+  if (isTerminal || ['Deleted', 'Spam'].includes(ticket.status)) return null;
   const now = Date.now();
   const fr = ticket.frDueBy ? new Date(ticket.frDueBy).getTime() : null;
   const due = ticket.dueBy ? new Date(ticket.dueBy).getTime() : null;
   const noFirstReply = !ticket.firstPublicAgentReplyAt;
-  // Pending = the clock is stopped (waiting on the requester/a third party):
-  // no overdue or response-due nags. A requester reply flips it back to Open
-  // via the normal status flow, so the SLA chips resume naturally.
-  const slaPaused = ticket.status === 'Pending';
+  // Pending-base = the clock is stopped (waiting on the requester/a third
+  // party): no overdue or response-due nags. A requester reply flips it back
+  // to Open via the normal status flow, so the SLA chips resume naturally.
+  const slaPaused = statusSets ? statusSets.pending.has(ticket.status) : ticket.status === 'Pending';
   if (!slaPaused && ((due && due < now) || (fr && fr < now && noFirstReply))) return 'overdue';
   if (!slaPaused && fr && fr >= now && noFirstReply) return 'response_due';
   if (awaitingReply) return 'requester_responded';
@@ -543,11 +550,13 @@ class TicketService {
       const dueWeekOut = new Date(dueNow.getTime() + 7 * 24 * 3600 * 1000);
       const buckets = asList(query.due);
       const or = [];
-      // Due buckets only apply to Open tickets — Pending pauses the SLA clock
-      // (and Resolved/Closed obviously don't nag).
-      if (buckets.includes('overdue')) or.push({ dueBy: { lt: dueNow }, status: 'Open' });
-      if (buckets.includes('today')) or.push({ dueBy: { gte: dueNow, lte: dueEndOfDay }, status: 'Open' });
-      if (buckets.includes('week')) or.push({ dueBy: { gte: dueNow, lte: dueWeekOut }, status: 'Open' });
+      // Due buckets only apply to Open-BASE tickets — Pending-base statuses
+      // pause the SLA clock (and terminal ones obviously don't nag). Custom
+      // Open-base statuses (Phase 8b) stay in the due/overdue buckets.
+      const dueOpen = { in: await statusService.statusNamesForBase(workspaceId, 'Open') };
+      if (buckets.includes('overdue')) or.push({ dueBy: { lt: dueNow }, status: dueOpen });
+      if (buckets.includes('today')) or.push({ dueBy: { gte: dueNow, lte: dueEndOfDay }, status: dueOpen });
+      if (buckets.includes('week')) or.push({ dueBy: { gte: dueNow, lte: dueWeekOut }, status: dueOpen });
       if (buckets.includes('none')) or.push({ dueBy: null });
       if (or.length) where.AND = [...(where.AND || []), { OR: or }];
     }
@@ -590,15 +599,20 @@ class TicketService {
       ];
     }
 
-    // Stat-card segments (single-select quick filters layered on top)
+    // Stat-card segments (single-select quick filters layered on top).
+    // Status scopes resolve through the per-workspace registry (Phase 8b):
+    // "open" = every Open/Pending-BASE name (custom statuses included),
+    // "resolved" = every Resolved/Closed-base name. With only the canonical 4
+    // configured these resolve to exactly the old hardcoded lists.
     const now = new Date();
-    if (query.segment === 'open') where.status = { in: ['Open', 'Pending'] };
-    else if (query.segment === 'unassigned') {
-      where.status = { in: ['Open', 'Pending'] };
+    if (query.segment === 'open') {
+      where.status = { in: await statusService.statusNamesForBase(workspaceId, ['Open', 'Pending']) };
+    } else if (query.segment === 'unassigned') {
+      where.status = { in: await statusService.statusNamesForBase(workspaceId, ['Open', 'Pending']) };
       where.assignedTechId = null;
     } else if (query.segment === 'due_today') {
-      // SLA segments are Open-only: Pending pauses the clock (no nags).
-      where.status = 'Open';
+      // SLA segments are Open-base only: Pending pauses the clock (no nags).
+      where.status = { in: await statusService.statusNamesForBase(workspaceId, 'Open') };
       const endOfDay = new Date(now); endOfDay.setHours(23, 59, 59, 999);
       where.AND = [...(where.AND || []), {
         OR: [
@@ -607,7 +621,7 @@ class TicketService {
         ],
       }];
     } else if (query.segment === 'overdue') {
-      where.status = 'Open';
+      where.status = { in: await statusService.statusNamesForBase(workspaceId, 'Open') };
       where.AND = [...(where.AND || []), {
         OR: [
           { dueBy: { lt: now } },
@@ -615,9 +629,9 @@ class TicketService {
         ],
       }];
     } else if (query.segment === 'resolved') {
-      where.status = { in: ['Resolved', 'Closed'] };
+      where.status = { in: await statusService.statusNamesForBase(workspaceId, ['Resolved', 'Closed']) };
     } else if (query.segment === 'awaiting') {
-      where.status = { in: ['Open', 'Pending'] };
+      where.status = { in: await statusService.statusNamesForBase(workspaceId, ['Open', 'Pending']) };
       const awaitingIds = await this._awaitingReplyTicketIds(workspaceId);
       where.id = { in: awaitingIds.length ? awaitingIds : [-1] };
     } else if (query.segment === 'deleted') {
@@ -660,6 +674,8 @@ class TicketService {
     const pageSize = Math.min(maxPageSize, Math.max(1, Number(query.pageSize) || 25));
     const where = await this.buildListWhere(workspaceId, query);
     const internalDomains = await workspaceInternalDomains(workspaceId);
+    // Resolved once per page for the per-row stateChip derivation (Phase 8b).
+    const statusSets = await statusService.baseStatusSets(workspaceId);
 
     // Public-API cursor (keyset) pagination: opt-in via ?cursor=, keyed on id
     // descending. Efficient for large/growing tables and stable under inserts;
@@ -694,7 +710,7 @@ class TicketService {
           ...t, tagLinks: undefined, tags: ticketTags(t), displayRef: ticketDisplayRef(t),
           lastActivityAt: t.lastRealActivityAt || t.freshserviceUpdatedAt || t.updatedAt,
           isExternal: isExternalRequester(t.requester?.email, internalDomains),
-          stateChip: deriveStateChip(t, incoming.get(t.id) === true),
+          stateChip: deriveStateChip(t, incoming.get(t.id) === true, statusSets),
           ai: ai.get(t.id) || null, aiBypass: bypass.get(t.id) || null,
           hasProposedReply: proposed.has(t.id),
         })),
@@ -757,7 +773,7 @@ class TicketService {
         // truthful "last activity" for display: FS's timestamp for FS-born rows
         lastActivityAt: t.lastRealActivityAt || t.freshserviceUpdatedAt || t.updatedAt,
         isExternal: isExternalRequester(t.requester?.email, internalDomains),
-        stateChip: deriveStateChip(t, incomingByTicket.get(t.id) === true),
+        stateChip: deriveStateChip(t, incomingByTicket.get(t.id) === true, statusSets),
         ai: aiByTicket.get(t.id) || null,
         aiBypass: bypassByTicket.get(t.id) || null,
         // A workflow-drafted reply is waiting for a human (QA 07-07 #4:
@@ -966,13 +982,16 @@ class TicketService {
   /** Open tickets whose latest public conversation entry came from the requester. */
   async _awaitingReplyTicketIds(workspaceId) {
     try {
+      // Registry-resolved open scope (Phase 8b): the name list is interpolated
+      // via Prisma.join so custom names stay parameterized, never string-built.
+      const openNames = await statusService.statusNamesForBase(workspaceId, ['Open', 'Pending']);
       const rows = await prisma.$queryRaw`
         SELECT ticket_id FROM (
           SELECT DISTINCT ON (te.ticket_id) te.ticket_id, te.incoming, te.author_type
           FROM ticket_thread_entries te
           JOIN tickets t ON t.id = te.ticket_id
           WHERE t.workspace_id = ${workspaceId}
-            AND t.status IN ('Open','Pending')
+            AND t.status IN (${Prisma.join(openNames)})
             AND t.is_noise = false
             AND (te.is_private = false OR te.is_private IS NULL)
             AND (te.body_text IS NOT NULL OR te.content IS NOT NULL)
@@ -991,18 +1010,25 @@ class TicketService {
   async getQueueStats(workspaceId) {
     const now = new Date();
     const endOfDay = new Date(now); endOfDay.setHours(23, 59, 59, 999);
-    const open = { workspaceId, isNoise: false, status: { in: ['Open', 'Pending'] } };
+    // Registry-resolved scopes (Phase 8b) so custom statuses count where their
+    // base counts — one lookup for the whole stat batch, not one per count.
+    const [openNames, openBaseNames, resolvedNames] = await Promise.all([
+      statusService.statusNamesForBase(workspaceId, ['Open', 'Pending']),
+      statusService.statusNamesForBase(workspaceId, 'Open'),
+      statusService.statusNamesForBase(workspaceId, ['Resolved', 'Closed']),
+    ]);
+    const open = { workspaceId, isNoise: false, status: { in: openNames } };
 
     const [all, openCount, unassigned, dueToday, overdue, resolved, deleted, noise, awaitingIds, awaitingApproval, technicianOpen] = await Promise.all([
       prisma.ticket.count({ where: { workspaceId, isNoise: false, status: { notIn: ['Deleted', 'Spam'] } } }),
       prisma.ticket.count({ where: open }),
       prisma.ticket.count({ where: { ...open, assignedTechId: null } }),
-      // dueToday/overdue count Open tickets only: Pending pauses the SLA
-      // clock, so a pending ticket is never "due" or "overdue".
+      // dueToday/overdue count Open-BASE tickets only: Pending-base statuses
+      // pause the SLA clock, so a pending ticket is never "due" or "overdue".
       prisma.ticket.count({
         where: {
           ...open,
-          status: 'Open',
+          status: { in: openBaseNames },
           OR: [
             { dueBy: { gte: now, lte: endOfDay } },
             { frDueBy: { gte: now, lte: endOfDay }, firstPublicAgentReplyAt: null },
@@ -1012,14 +1038,14 @@ class TicketService {
       prisma.ticket.count({
         where: {
           ...open,
-          status: 'Open',
+          status: { in: openBaseNames },
           OR: [
             { dueBy: { lt: now } },
             { frDueBy: { lt: now }, firstPublicAgentReplyAt: null },
           ],
         },
       }),
-      prisma.ticket.count({ where: { workspaceId, isNoise: false, status: { in: ['Resolved', 'Closed'] } } }),
+      prisma.ticket.count({ where: { workspaceId, isNoise: false, status: { in: resolvedNames } } }),
       prisma.ticket.count({ where: { workspaceId, status: { in: ['Deleted', 'Spam'] } } }),
       prisma.ticket.count({ where: { workspaceId, isNoise: true } }),
       this._awaitingReplyTicketIds(workspaceId),
@@ -1179,7 +1205,7 @@ class TicketService {
       approvals,
       attachments,
       latestPipelineRun: ticket.pipelineRuns?.[0] || null,
-      stateChip: deriveStateChip(ticket, incomingByTicket.get(ticket.id) === true),
+      stateChip: deriveStateChip(ticket, incomingByTicket.get(ticket.id) === true, await statusService.baseStatusSets(workspaceId)),
       lastActivityAt: ticket.lastRealActivityAt || ticket.freshserviceUpdatedAt || ticket.updatedAt,
     };
   }
@@ -1580,8 +1606,8 @@ class TicketService {
     const base = { workspaceId, requesterId: id, isNoise: false };
     const [total, open, resolved, last] = await Promise.all([
       prisma.ticket.count({ where: base }),
-      prisma.ticket.count({ where: { ...base, status: { in: ['Open', 'Pending'] } } }),
-      prisma.ticket.count({ where: { ...base, status: { in: ['Resolved', 'Closed'] } } }),
+      prisma.ticket.count({ where: { ...base, status: { in: await statusService.statusNamesForBase(workspaceId, ['Open', 'Pending']) } } }),
+      prisma.ticket.count({ where: { ...base, status: { in: await statusService.statusNamesForBase(workspaceId, ['Resolved', 'Closed']) } } }),
       prisma.ticket.findFirst({ where: base, orderBy: { createdAt: 'desc' }, select: { createdAt: true } }),
     ]);
     return { total, open, resolved, lastTicketAt: last?.createdAt || null };

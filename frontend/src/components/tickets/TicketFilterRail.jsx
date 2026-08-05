@@ -10,6 +10,7 @@ import {
   GripVertical, LayoutList, ListFilter, Plus, Search, Sparkles, Star, Trash2, Users, VolumeX, X,
 } from 'lucide-react';
 import { PersonAvatar, PRIORITY_LABELS, PRIORITY_STRIP_COLORS, TagChip, formatDay } from './ticketUi';
+import { statusDefsFromMeta, statusDotClass, statusNamesForBase } from './statusDefs';
 import { ticketsAPI } from '../../services/api';
 import { useTicketTypes } from '../../hooks/useTicketTypes';
 import 'react-day-picker/style.css';
@@ -34,7 +35,6 @@ const DUE_OPTIONS = [
   { value: 'none', label: 'No due date' },
 ];
 
-const STATUS_OPTIONS = ['Open', 'Pending', 'Resolved', 'Closed'];
 // Legacy fallback while the per-workspace type registry loads.
 const TYPE_OPTIONS_FALLBACK = ['Incident', 'Service Request'];
 
@@ -194,9 +194,24 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
     setParams({ [key]: next.join(',') });
   };
 
-  // Status keeps its special default (Open+Pending when the param is absent).
+  // Workspace status registry from the queue meta (Phase 8b) — canonical 4
+  // until meta loads. Facets, defaults and the URL parser all key off it so
+  // custom statuses round-trip through ?status=.
+  const statusDefs = useMemo(() => statusDefsFromMeta(meta), [meta]);
+  const statusNames = useMemo(() => statusDefs.map((d) => d.name), [statusDefs]);
+  // The default scope is every Open/Pending-BASE status (custom ones included).
+  const defaultStatuses = useMemo(() => statusNamesForBase(statusDefs, ['Open', 'Pending']), [statusDefs]);
+
+  // Status keeps its special default (Open+Pending bases when the param is
+  // absent). The URL parser drops names the workspace doesn't define — but
+  // ONLY once meta has loaded; before that, unknown names pass through so a
+  // shared link with a custom status never silently loses it on first paint.
   const statusRaw = searchParams.get('status');
-  const statuses = statusRaw === 'any' ? [] : (statusRaw ? statusRaw.split(',').filter((s) => STATUS_OPTIONS.includes(s)) : ['Open', 'Pending']);
+  const statuses = statusRaw === 'any'
+    ? []
+    : (statusRaw
+      ? statusRaw.split(',').filter((s) => (meta?.statuses?.length ? statusNames.includes(s) : Boolean(s)))
+      : defaultStatuses);
   const segment = get('segment');
   const toggleStatus = (status) => {
     const next = statuses.includes(status) ? statuses.filter((s) => s !== status) : [...statuses, status];
@@ -315,8 +330,9 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
     { key: 'all', label: 'All tickets', params: { status: 'any' } },
     // "My open" is explicit about its status scope — an assignee-only filter
     // left board mode (which once fetched every status) showing closed cards
-    // under an "open" label (QA 08-04 #15).
-    ...(meta?.actor?.technicianId ? [{ key: 'mine', label: 'My open', params: { assignee: String(meta.actor.technicianId), status: 'Open,Pending' } }] : []),
+    // under an "open" label (QA 08-04 #15). Scope = Open/Pending-BASE names
+    // so custom open statuses stay in "my open" (Phase 8b).
+    ...(meta?.actor?.technicianId ? [{ key: 'mine', label: 'My open', params: { assignee: String(meta.actor.technicianId), status: defaultStatuses.join(',') } }] : []),
     { key: 'unassigned', label: 'Unassigned', params: { segment: 'unassigned' } },
     { key: 'awaiting_approval', label: 'Awaiting AI approval', params: { aiState: 'suggested' }, icon: Sparkles },
     { key: 'awaiting', label: 'Awaiting reply', params: { segment: 'awaiting' } },
@@ -516,9 +532,10 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
             onClear={() => setParams({ status: null, segment: null })}
             defaultOpen
           >
-            {STATUS_OPTIONS.map((s) => (
-              <Facet key={s} checked={segment === '' && statuses.includes(s)} onToggle={() => toggleStatus(s)}>
-                {s}
+            {statusDefs.map((d) => (
+              <Facet key={d.name} checked={segment === '' && statuses.includes(d.name)} onToggle={() => toggleStatus(d.name)}>
+                <span aria-hidden="true" className={`w-2 h-2 rounded-full flex-shrink-0 ${statusDotClass(d)}`} />
+                <span className="truncate">{d.name}</span>
               </Facet>
             ))}
           </Section>

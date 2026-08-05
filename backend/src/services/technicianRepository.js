@@ -1,5 +1,6 @@
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
+import statusService from './statusService.js';
 import { DatabaseError, NotFoundError } from '../utils/errors.js';
 
 const ticketCategoryInclude = {
@@ -97,11 +98,18 @@ class TechnicianRepository {
       const techWhere = { isActive: true };
       if (workspaceId) techWhere.workspaceId = workspaceId;
 
+      // Open/Pending-BASE names from the workspace status registry (Phase 8b)
+      // so tickets sitting in custom statuses still load as current workload.
+      // Workspace-less calls can't resolve a registry — canonical fallback.
+      const openNames = workspaceId
+        ? await statusService.statusNamesForBase(workspaceId, ['Open', 'Pending'])
+        : ['Open', 'Pending'];
+
       const ticketWhere = {
         OR: [
           { firstAssignedAt: { gte: dateStart, lte: dateEnd } },
           { firstAssignedAt: null, createdAt: { gte: dateStart, lte: dateEnd } },
-          { status: { in: ['Open', 'Pending'] } },
+          { status: { in: openNames } },
           { csatSubmittedAt: { gte: dateStart, lte: dateEnd } },
         ],
       };

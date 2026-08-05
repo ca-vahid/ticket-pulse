@@ -875,3 +875,83 @@ describe('ticketService custom workspace statuses (Phase 8a)', () => {
     ]);
   });
 });
+
+describe('ticketService queue consumers resolve the workspace registry (Phase 8b)', () => {
+  // 'Needs Rework' is the QA acceptance case: a custom Pending-base status
+  // must keep counting as open everywhere.
+  const ROWS_8B = [
+    { id: 1, workspaceId: 1, name: 'Open', baseStatus: 'Open', sortOrder: 0, isSystem: true, isActive: true },
+    { id: 2, workspaceId: 1, name: 'Pending', baseStatus: 'Pending', sortOrder: 1, isSystem: true, isActive: true },
+    { id: 3, workspaceId: 1, name: 'Resolved', baseStatus: 'Resolved', sortOrder: 2, isSystem: true, isActive: true },
+    { id: 4, workspaceId: 1, name: 'Closed', baseStatus: 'Closed', sortOrder: 3, isSystem: true, isActive: true },
+    { id: 5, workspaceId: 1, name: 'Needs Rework', baseStatus: 'Pending', sortOrder: 4, isSystem: false, isActive: true },
+    { id: 6, workspaceId: 1, name: 'In Triage', baseStatus: 'Open', sortOrder: 5, isSystem: false, isActive: true },
+    { id: 7, workspaceId: 1, name: 'Fixed', baseStatus: 'Resolved', sortOrder: 6, isSystem: false, isActive: true },
+  ];
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    invalidateStatusCache();
+    prismaMock.ticketStatusDefinition.findMany.mockResolvedValue(ROWS_8B);
+    prismaMock.workspace.findUnique.mockResolvedValue({ id: 1, internalDomains: [] });
+  });
+
+  test('open segment scope includes every Open/Pending-BASE name (custom included)', async () => {
+    const where = await ticketService.buildListWhere(1, { segment: 'open' });
+    expect(where.status).toEqual({ in: ['Open', 'Pending', 'Needs Rework', 'In Triage'] });
+  });
+
+  test('resolved segment scope includes custom terminal-base names', async () => {
+    const where = await ticketService.buildListWhere(1, { segment: 'resolved' });
+    expect(where.status).toEqual({ in: ['Resolved', 'Closed', 'Fixed'] });
+  });
+
+  test('due/overdue segments stay Open-BASE only (Pending-base pauses the clock)', async () => {
+    const where = await ticketService.buildListWhere(1, { segment: 'overdue' });
+    expect(where.status).toEqual({ in: ['Open', 'In Triage'] });
+  });
+
+  test('due-bucket facet only nags Open-BASE names', async () => {
+    const where = await ticketService.buildListWhere(1, { due: 'overdue' });
+    const dueClause = where.AND.find((c) => Array.isArray(c.OR));
+    expect(dueClause.OR[0]).toEqual({ dueBy: { lt: expect.any(Date) }, status: { in: ['Open', 'In Triage'] } });
+  });
+
+  test('getQueueStats counts custom statuses under their base (open/resolved/dueToday)', async () => {
+    prismaMock.ticket.count.mockResolvedValue(0);
+    prismaMock.ticket.groupBy.mockResolvedValue([]);
+    prismaMock.$queryRaw.mockResolvedValue([]);
+
+    await ticketService.getQueueStats(1);
+
+    const countWheres = prismaMock.ticket.count.mock.calls.map((c) => c[0].where);
+    // open count: every Open/Pending-base name
+    expect(countWheres).toContainEqual(expect.objectContaining({
+      status: { in: ['Open', 'Pending', 'Needs Rework', 'In Triage'] }, isNoise: false, workspaceId: 1,
+    }));
+    // resolved count: terminal-base names incl. 'Fixed'
+    expect(countWheres).toContainEqual(expect.objectContaining({
+      status: { in: ['Resolved', 'Closed', 'Fixed'] },
+    }));
+    // dueToday/overdue: Open-base only
+    const dueWheres = countWheres.filter((w) => Array.isArray(w?.OR));
+    expect(dueWheres.length).toBeGreaterThanOrEqual(2);
+    for (const w of dueWheres.slice(0, 2)) {
+      expect(w.status).toEqual({ in: ['Open', 'In Triage'] });
+    }
+  });
+
+  test('registry lookups are served from the statusService cache — one DB read per request burst', async () => {
+    prismaMock.ticket.count.mockResolvedValue(0);
+    prismaMock.ticket.groupBy.mockResolvedValue([]);
+    prismaMock.$queryRaw.mockResolvedValue([]);
+
+    await ticketService.getQueueStats(1);
+    await ticketService.buildListWhere(1, { segment: 'open' });
+    await ticketService.buildListWhere(1, { due: 'overdue,today' });
+
+    // getQueueStats alone resolves 3 base scopes + the awaiting SQL — the
+    // registry must be read ONCE, not per lookup (hot-path contract).
+    expect(prismaMock.ticketStatusDefinition.findMany).toHaveBeenCalledTimes(1);
+  });
+});

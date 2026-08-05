@@ -23,6 +23,7 @@ import {
   AgentFirstName, ExternalChip, PersonAvatar, PriorityDot, SlaChip, StateChip, StatusPill, TagChip, TypePill, UnassignedBadge,
   PRIORITY_LABELS, PRIORITY_STRIP_COLORS, ticketCategoryLabels, timeAgo,
 } from '../components/tickets/ticketUi';
+import { baseStatusOf, isTerminalStatus, statusDefsFromMeta, statusNamesForBase, statusToneFromDefs } from '../components/tickets/statusDefs';
 import { ticketsAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
@@ -30,8 +31,8 @@ import { useWorkspaceRole } from '../components/nav/navDestinations';
 import { useSSE } from '../hooks/useSSE';
 import ticketsHeroArt from '../assets/tickets-hero.png';
 
-const STATUS_FILTERS = ['Open', 'Pending', 'Resolved', 'Closed'];
-const DEFAULT_STATUSES = ['Open', 'Pending'];
+// Status vocabulary comes from the workspace registry in the queue meta
+// (Phase 8b, statusDefs.js) — canonical 4 until meta loads.
 const PAGE_SIZE = 25;
 
 /**
@@ -324,11 +325,22 @@ export default function Tickets() {
 
   // ---- URL-persisted list state (shareable, refresh/back-proof) ----
   const page = Math.max(1, Number(searchParams.get('page')) || 1);
+  // Workspace status registry (Phase 8b): meta.statuses drives the filterable
+  // vocabulary, the default Open+Pending-BASE scope, and pill colors. Falls
+  // back to the canonical 4 until meta loads.
+  const statusDefs = useMemo(() => statusDefsFromMeta(meta), [meta]);
+  const statusFilterNames = useMemo(() => statusDefs.map((d) => d.name), [statusDefs]);
+  const defaultStatuses = useMemo(() => statusNamesForBase(statusDefs, ['Open', 'Pending']), [statusDefs]);
+  const metaStatusesLoaded = (meta?.statuses?.length || 0) > 0;
   const statuses = useMemo(() => {
     const raw = searchParams.get('status');
     if (raw === 'any') return [];
-    return raw ? raw.split(',').filter((s) => STATUS_FILTERS.includes(s)) : DEFAULT_STATUSES;
-  }, [searchParams]);
+    if (!raw) return defaultStatuses;
+    // Drop names the workspace doesn't define — but only once meta has
+    // loaded; before that, custom names in a shared URL must pass through
+    // untouched instead of being silently dropped on first paint.
+    return raw.split(',').filter((s) => (metaStatusesLoaded ? statusFilterNames.includes(s) : Boolean(s)));
+  }, [searchParams, metaStatusesLoaded, statusFilterNames, defaultStatuses]);
   const assignee = searchParams.get('assignee') || '';
   const priority = searchParams.get('priority') || '';
   const origin = searchParams.get('origin') || '';
@@ -424,7 +436,7 @@ export default function Tickets() {
     // and show closed cards under "My open"); its Closed column explains
     // itself when the scope excludes terminal statuses.
     if (segment !== 'all') params.segment = segment;
-    else if (statuses.length > 0 && statuses.length < STATUS_FILTERS.length) params.status = statuses.join(',');
+    else if (statuses.length > 0 && statuses.length < statusFilterNames.length) params.status = statuses.join(',');
     if (assignee) params.assignedTechId = assignee;
     if (priority) params.priority = priority;
     if (origin) params.origin = origin;
@@ -447,7 +459,7 @@ export default function Tickets() {
     if (requesterId) params.requesterId = requesterId;
     if (debouncedSearch) params.q = debouncedSearch;
     return params;
-  }, [page, statuses, assignee, priority, origin, segment, sort, dir, debouncedSearch,
+  }, [page, statuses, statusFilterNames, assignee, priority, origin, segment, sort, dir, debouncedSearch,
     type, category, subcategory, group, source, createdFrom, createdTo, due, noise, tag, tagMode, impactFilter, urgencyFilter, aiState, requesterId]);
 
   // Post-refresh row highlights: ticketId → 'new' | 'updated'. Set when a
@@ -1067,14 +1079,16 @@ export default function Tickets() {
 
   // Board "Closed hidden" affordance: does the effective fetch scope exclude
   // terminal statuses? Segments carry their own scope; otherwise the rail's
-  // status checkboxes decide (default Open+Pending → yes, hidden).
+  // status checkboxes decide (default Open+Pending bases → yes, hidden).
+  // Terminal = Resolved/Closed-BASE, so custom terminal statuses count too
+  // (Phase 8b).
   const boardClosedExcluded = segment !== 'all'
     ? ['open', 'unassigned', 'awaiting', 'due_today', 'overdue'].includes(segment)
-    : statuses.length > 0 && !statuses.includes('Resolved') && !statuses.includes('Closed');
+    : statuses.length > 0 && !statuses.some((s) => isTerminalStatus(statusDefs, s));
   // One-click widen — only meaningful in checkbox scope (a segment's scope
   // isn't expressible as a status list, so there the empty-state is text-only).
   const onBoardShowClosed = segment === 'all' && boardClosedExcluded
-    ? () => setParams({ status: [...statuses, 'Resolved', 'Closed'].join(',') })
+    ? () => setParams({ status: [...statuses, ...statusNamesForBase(statusDefs, ['Resolved', 'Closed'])].join(',') })
     : null;
   const groupNames = useMemo(() => {
     const map = new Map();
@@ -1371,6 +1385,7 @@ export default function Tickets() {
                       <TicketBoard
                         tickets={tickets}
                         ticketingOn={ticketingOn}
+                        statusDefs={statusDefs}
                         onCardClick={onRowClick}
                         onCardDoubleClick={onRowDoubleClick}
                         onStatusDrop={onBoardStatusDrop}
@@ -1479,7 +1494,7 @@ export default function Tickets() {
                           const isEditable = ticket.origin === 'ticketpulse' && ticketingOn;
                           // FS-born rows can be reassigned too, via a confirmed FreshService write-back.
                           const fsRowEditable = ticket.origin !== 'ticketpulse' && Boolean(ticket.freshserviceTicketId);
-                          const resolvedLike = ['Resolved', 'Closed'].includes(ticket.status);
+                          const resolvedLike = isTerminalStatus(statusDefs, ticket.status);
                           // Deleted/Spam are removed — no SLA/due date applies.
                           const removedLike = ['Deleted', 'Spam'].includes(ticket.status);
                           const mobileAssignable = isEditable || fsRowEditable;
@@ -1709,6 +1724,7 @@ export default function Tickets() {
                                 <StatusPicker
                                   ticketId={ticket.id}
                                   value={ticket.status}
+                                  statusDefs={statusDefs}
                                   fsChange={fsRowEditable ? ((next) => fsStatusChange(ticket, next)) : null}
                                   onChanged={(next, prev) => {
                                     refreshAfterEdit();
@@ -1718,7 +1734,7 @@ export default function Tickets() {
                                   }}
                                 />
                               ) : (
-                                <StatusPill status={ticket.status} size="sm" />
+                                <StatusPill status={ticket.status} size="sm" tone={statusToneFromDefs(statusDefs, ticket.status)} />
                               )}
                             </span>
                           );
@@ -1729,7 +1745,7 @@ export default function Tickets() {
                                 : resolvedLike
                                   ? <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold border bg-emerald-50 text-emerald-700 border-emerald-200">Done</span>
                                   : ticket.dueBy
-                                    ? <SlaChip value={ticket.dueBy} paused={ticket.status === 'Pending'} className="!px-1.5 !text-[10px]" />
+                                    ? <SlaChip value={ticket.dueBy} paused={baseStatusOf(statusDefs, ticket.status) === 'Pending'} className="!px-1.5 !text-[10px]" />
                                     : <span className="text-xs text-slate-300">—</span>}
                             </span>
                           );
@@ -1860,7 +1876,7 @@ export default function Tickets() {
                                         AI
                                       </button>
                                     )}
-                                    <StatusPill status={ticket.status} className="ml-auto" />
+                                    <StatusPill status={ticket.status} className="ml-auto" tone={statusToneFromDefs(statusDefs, ticket.status)} />
                                   </div>
                                   <p className={`text-sm font-medium text-slate-800 line-clamp-2 ${
                                     fx === 'new' ? 'tp-subject-flash-new' : fx === 'updated' ? 'tp-subject-flash-updated' : ''
@@ -2133,8 +2149,10 @@ export default function Tickets() {
                 aria-label="Bulk status"
                 className="tp-focus-ring text-sm bg-white border border-input rounded-lg px-2.5 py-1.5 text-slate-700"
               >
+                {/* Bulk edits are TP-born-only, so the workspace registry
+                    (custom statuses included) is the right vocabulary here. */}
                 <option value="">Bulk status…</option>
-                {['Open', 'Pending', 'Resolved', 'Closed'].map((s) => <option key={s} value={s}>{s}</option>)}
+                {statusFilterNames.map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
               {queryScope && (meta?.tags?.length || 0) > 0 && (
                 <select

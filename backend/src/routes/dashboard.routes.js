@@ -11,6 +11,7 @@ import { readCache } from '../services/dashboardReadCache.js';
 import { computeDashboardAvoidance, computeWeeklyDashboardAvoidance, computeTechnicianAvoidanceDetail, computeTechnicianAvoidanceWeeklyDetail, computeTechnicianAvoidanceMonthlyDetail } from '../services/avoidanceAnalysisService.js';
 import vtService from '../services/vacationTrackerService.js';
 import settingsRepository from '../services/settingsRepository.js';
+import statusService from '../services/statusService.js';
 import { buildTicketCategoryAliases, getCategoryMode } from '../utils/ticketCategoryNormalizer.js';
 import { getActivityCalendar } from '../services/activityCalendarService.js';
 
@@ -223,10 +224,13 @@ router.get(
       todayEnd = result.end;
     }
 
-    // Fetch active technicians and service account names in parallel
-    const [technicians, serviceAccountNames] = await Promise.all([
+    // Fetch active technicians, service account names and the workspace's
+    // status registry (Phase 8b — resolved ONCE per request; the per-ticket
+    // loops in statsCalculator test the resulting Sets synchronously).
+    const [technicians, serviceAccountNames, statusSets] = await Promise.all([
       technicianRepository.getAllActiveScoped(todayStart, todayEnd, { excludeNoise, workspaceId: req.workspaceId }),
       settingsRepository.getServiceAccountNames(),
+      statusService.baseStatusSets(req.workspaceId),
     ]);
 
     // Compute the date string for leave lookup
@@ -234,7 +238,7 @@ router.get(
 
     // Run stats calculation (sync), avoidance analysis, and leave info in parallel
     const [dashboardData, avoidanceMap, leaveInfoMap] = await Promise.all([
-      Promise.resolve(calculateDailyDashboard(technicians, todayStart, todayEnd, isViewingToday, serviceAccountNames)),
+      Promise.resolve(calculateDailyDashboard(technicians, todayStart, todayEnd, isViewingToday, serviceAccountNames, statusSets)),
       computeDashboardAvoidance(technicians, todayStart, todayEnd, req.workspaceId).catch(err => {
         logger.error('Avoidance analysis failed for daily dashboard:', err);
         return {};
@@ -423,10 +427,12 @@ router.get(
     const weekStartRange = getTodayRange(timezone, weekStartDate);
     const weekEndRange = getTodayRange(timezone, weekEndDate);
 
-    // Fetch active technicians and service account names in parallel
-    const [technicians, serviceAccountNames] = await Promise.all([
+    // Fetch active technicians, service account names and status registry in
+    // parallel (statusSets resolved once per request — Phase 8b).
+    const [technicians, serviceAccountNames, statusSets] = await Promise.all([
       technicianRepository.getAllActiveScoped(weekStartRange.start, weekEndRange.end, { excludeNoise, workspaceId: req.workspaceId }),
       settingsRepository.getServiceAccountNames(),
+      statusService.baseStatusSets(req.workspaceId),
     ]);
 
     const weekStartStr = formatDateInTimezone(weekStartDate, timezone);
@@ -434,7 +440,7 @@ router.get(
 
     // Run stats calculation (sync), avoidance analysis, and leave info in parallel
     const [dashboardData, avoidanceMap, leaveInfoMap] = await Promise.all([
-      Promise.resolve(calculateWeeklyDashboard(technicians, weekStartDate, weekEndDate, timezone, serviceAccountNames)),
+      Promise.resolve(calculateWeeklyDashboard(technicians, weekStartDate, weekEndDate, timezone, serviceAccountNames, statusSets)),
       computeWeeklyDashboardAvoidance(technicians, weekStartDate, weekEndDate, timezone, req.workspaceId).catch(err => {
         logger.error('Avoidance analysis failed for weekly dashboard:', err);
         return {};
@@ -528,13 +534,16 @@ router.get(
       todayEnd = result.end;
     }
 
-    // Use statsCalculator for consistent calculations
+    // Use statsCalculator for consistent calculations (statusSets: Phase 8b —
+    // resolved once per request so custom statuses count under their base)
+    const statusSets = await statusService.baseStatusSets(req.workspaceId);
     const technicianData = calculateTechnicianDetail(
       technician,
       todayStart,
       todayEnd,
       isViewingToday,
       serviceAccountNames,
+      statusSets,
     );
 
     // Compute avoidance analysis for this technician
@@ -636,13 +645,15 @@ router.get(
 
     logger.debug(`Week range for technician: ${formatDateInTimezone(weekStartDate, timezone)} to ${formatDateInTimezone(weekEndDate, timezone)}`);
 
-    // Use statsCalculator for weekly stats
+    // Use statsCalculator for weekly stats (statusSets: Phase 8b, once per request)
+    const statusSets = await statusService.baseStatusSets(req.workspaceId);
     const weeklyStats = calculateTechnicianWeeklyStats(
       technician,
       weekStartDate,
       weekEndDate,
       timezone,
       serviceAccountNames,
+      statusSets,
     );
 
     // Get tickets assigned during the week for display (timezone-aware boundaries)
@@ -667,12 +678,12 @@ router.get(
     // Closed tickets = tickets ASSIGNED during the week that are now closed
     // Note: Filter by assignment date + status (not close date) because closedAt/resolvedAt may be null
     const closedTickets = weeklyTickets.filter(ticket =>
-      ['Resolved', 'Closed'].includes(ticket.status),
+      statusSets.terminal.has(ticket.status),
     );
 
     // Currently open tickets (snapshot)
     const openTickets = technician.tickets.filter(ticket =>
-      ['Open', 'Pending'].includes(ticket.status),
+      statusSets.openLike.has(ticket.status),
     );
 
     // Compute avoidance analysis for this technician's week
@@ -770,13 +781,15 @@ router.get(
       return res.status(404).json({ success: false, message: 'Technician not found' });
     }
 
-    // Calculate monthly stats
+    // Calculate monthly stats (statusSets: Phase 8b, once per request)
+    const statusSets = await statusService.baseStatusSets(req.workspaceId);
     const monthlyStats = calculateTechnicianMonthlyStats(
       technician,
       monthStartDate,
       monthEndDate,
       timezone,
       serviceAccountNames,
+      statusSets,
     );
 
     // Get tickets assigned during the month for display
@@ -796,10 +809,10 @@ router.get(
       !ticket.isSelfPicked && ticket.assignedBy !== technician.name,
     );
     const closedTickets = monthlyTickets.filter(ticket =>
-      ['Resolved', 'Closed'].includes(ticket.status),
+      statusSets.terminal.has(ticket.status),
     );
     const openTickets = technician.tickets.filter(ticket =>
-      ['Open', 'Pending'].includes(ticket.status),
+      statusSets.openLike.has(ticket.status),
     );
 
     // Compute avoidance analysis for the month
@@ -1003,10 +1016,12 @@ router.get(
     const monthStartRange = getTodayRange(timezone, monthStartDate);
     const monthEndRange = getTodayRange(timezone, monthEndDate);
 
-    // Fetch active technicians and service account names in parallel
-    const [technicians, serviceAccountNames] = await Promise.all([
+    // Fetch active technicians, service account names and status registry in
+    // parallel (statusSets resolved once per request — Phase 8b).
+    const [technicians, serviceAccountNames, statusSets] = await Promise.all([
       technicianRepository.getAllActiveScoped(monthStartRange.start, monthEndRange.end, { excludeNoise, workspaceId: req.workspaceId }),
       settingsRepository.getServiceAccountNames(),
+      statusService.baseStatusSets(req.workspaceId),
     ]);
 
     // Use statsCalculator for consistent calculations
@@ -1016,6 +1031,7 @@ router.get(
       monthEndDate,
       timezone,
       serviceAccountNames,
+      statusSets,
     );
 
     // Fetch leave info for the month

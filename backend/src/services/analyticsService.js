@@ -1,13 +1,29 @@
 import { formatInTimeZone } from 'date-fns-tz';
 import prisma from './prisma.js';
 import competencyRepository from './competencyRepository.js';
+import statusService from './statusService.js';
 import { getTodayRange } from '../utils/timezone.js';
 import { ticketSourceLabel, ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { getCategoryMode, normalizeTicketCategory } from '../utils/ticketCategoryNormalizer.js';
 
 const DEFAULT_TIMEZONE = 'America/Los_Angeles';
+// Canonical fallbacks. Since Phase 8b every per-workspace site resolves the
+// registry through the helpers below so custom statuses count under their
+// base; 'Waiting on Customer' is a legacy FS label that predates the registry
+// and stays in the open scope for FS-born rows.
 const OPEN_STATUSES = ['Open', 'Pending', 'Waiting on Customer'];
-const CLOSED_STATUSES = ['Closed', 'Resolved'];
+const LEGACY_OPEN_EXTRAS = ['Waiting on Customer'];
+
+/** Per-workspace open-scope names (Open+Pending bases + legacy FS labels). */
+async function openStatusesFor(workspaceId) {
+  const names = await statusService.statusNamesForBase(workspaceId, ['Open', 'Pending']);
+  return [...new Set([...names, ...LEGACY_OPEN_EXTRAS])];
+}
+
+/** Per-workspace terminal-scope names (Resolved+Closed bases). */
+async function closedStatusesFor(workspaceId) {
+  return statusService.statusNamesForBase(workspaceId, ['Resolved', 'Closed']);
+}
 const RANGE_DAYS = {
   '7d': 7,
   '30d': 30,
@@ -905,7 +921,11 @@ export function buildCategoryIntelligence({
   pipelineRuns = [],
   serviceAccountNames = [],
   technicianPhotos = new Map(),
+  // Phase 8b: per-workspace open-scope names resolved ONCE by the caller —
+  // this builder loops per ticket and must stay synchronous.
+  openStatuses = OPEN_STATUSES,
 }) {
+  const openStatusSet = new Set(openStatuses);
   const rowsByKey = new Map();
   const previousByKey = new Map();
   const trendMap = new Map();
@@ -921,7 +941,7 @@ export function buildCategoryIntelligence({
     const row = ensureRow(identity);
     row.created += 1;
     // Range-scoped pressure: this range's tickets that are still open / overdue.
-    if (OPEN_STATUSES.includes(ticket.status)) {
+    if (openStatusSet.has(ticket.status)) {
       row.rangeOpen += 1;
       if (ticket.dueBy && new Date(ticket.dueBy) < now) row.rangeOverdue += 1;
     }
@@ -1149,7 +1169,7 @@ async function _fetchOpenTicketsUncached(workspaceId, excludeNoise, categoryWher
     where: withCategoryWhere({
       workspaceId,
       ...(excludeNoise ? { isNoise: false } : {}),
-      status: { in: OPEN_STATUSES },
+      status: { in: await openStatusesFor(workspaceId) },
     }, categoryWhere),
     select: {
       id: true,
@@ -1207,7 +1227,8 @@ async function periodCounts(workspaceId, rangeInfo, excludeNoise, period = 'curr
       select: { csatScore: true, csatTotalScore: true },
     }),
   ]);
-  const resolved = assignedTickets.filter((t) => CLOSED_STATUSES.includes(t.status)).length;
+  const closedSet = new Set(await closedStatusesFor(workspaceId));
+  const resolved = assignedTickets.filter((t) => closedSet.has(t.status)).length;
   const resolutionSeconds = summarizeNumeric(assignedTickets.map((t) => t.resolutionTimeSeconds).filter((v) => v !== null));
   const csatAverage = csatTickets.length
     ? Number((csatTickets.reduce((sum, t) => sum + (t.csatScore || 0), 0) / csatTickets.length).toFixed(2))
@@ -1260,6 +1281,7 @@ export async function getOverview(workspaceId, query = {}) {
 
     // Tag breakdown (gap plan 2 P1.4): created-in-range per tag, top 12 +
     // untagged bucket. Open counts ride along for a pressure hint.
+    const tagOpenSet = new Set(await statusService.statusNamesForBase(workspaceId, ['Open', 'Pending']));
     const tagRows = new Map();
     let untagged = 0;
     for (const t of rangeTickets) {
@@ -1268,7 +1290,7 @@ export async function getOverview(workspaceId, query = {}) {
       for (const tag of tags) {
         const row = tagRows.get(tag.id) || { id: tag.id, name: tag.name, color: tag.color, created: 0, open: 0 };
         row.created += 1;
-        if (['Open', 'Pending'].includes(t.status)) row.open += 1;
+        if (tagOpenSet.has(t.status)) row.open += 1;
         tagRows.set(tag.id, row);
       }
     }
@@ -1377,8 +1399,9 @@ export async function getDemandFlow(workspaceId, query = {}) {
       increment(heatmap, `${dow}|${hour}`);
     }
 
+    const demandClosedSet = new Set(await closedStatusesFor(workspaceId));
     for (const ticket of assignedTickets) {
-      if (!CLOSED_STATUSES.includes(ticket.status)) continue;
+      if (!demandClosedSet.has(ticket.status)) continue;
       const key = groupKey(assignedAt(ticket), rangeInfo);
       const row = trendMap.get(key) || { date: key, created: 0, resolved: 0, net: 0 };
       row.resolved += 1;
@@ -1470,6 +1493,7 @@ export async function getCategoryIntelligence(workspaceId, query = {}) {
       pipelineRuns,
       serviceAccountNames,
       technicianPhotos,
+      openStatuses: await openStatusesFor(workspaceId),
     });
 
     return {
@@ -1589,6 +1613,10 @@ export async function getTeamBalance(workspaceId, query = {}) {
     let unassignedTickets = 0;
     let hiddenAssignedTickets = 0;
 
+    // Phase 8b: base-aware Sets resolved once, outside the per-ticket loops.
+    const teamClosedSet = new Set(await closedStatusesFor(workspaceId));
+    const teamOpenBaseSet = new Set(await statusService.statusNamesForBase(workspaceId, 'Open'));
+
     for (const ticket of tickets) {
       if (!ticket.assignedTechId) {
         unassignedTickets += 1;
@@ -1608,7 +1636,7 @@ export async function getTeamBalance(workspaceId, query = {}) {
         timelineRow.assigned += 1;
         timelineRow[source] += 1;
       }
-      if (CLOSED_STATUSES.includes(ticket.status)) {
+      if (teamClosedSet.has(ticket.status)) {
         row.closed += 1;
         if (timelineRow) timelineRow.closed += 1;
       }
@@ -1629,8 +1657,8 @@ export async function getTeamBalance(workspaceId, query = {}) {
       const id = ticket.assignedTech?.id;
       if (!id || !byTech.has(id)) continue;
       const row = byTech.get(id);
-      if (ticket.status === 'Open') row.openNow += 1;
-      else row.pendingNow += 1; // 'Pending' and 'Waiting on Customer'
+      if (teamOpenBaseSet.has(ticket.status)) row.openNow += 1;
+      else row.pendingNow += 1; // Pending-base statuses and 'Waiting on Customer'
     }
     for (const episode of episodes) {
       if (!byTech.has(episode.technicianId)) continue;

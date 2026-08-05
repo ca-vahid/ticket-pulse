@@ -1,11 +1,17 @@
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
+import statusService from './statusService.js';
 import { TIME_TRIGGER_EVENT_TYPES } from './notificationWorkflowDefinition.js';
 import { emitTicketEvent } from './ticketLifecycleNotificationService.js';
 
 const TICK_INTERVAL_MS = Number(process.env.NOTIFICATION_TIME_TRIGGER_INTERVAL_MS) || 5 * 60 * 1000;
 const MAX_TICKETS_PER_WORKFLOW_TICK = 200;
-const OPEN_STATUSES = ['Open', 'Pending'];
+// Phase 8b: status scopes resolve per workspace through the registry —
+// CRITICAL for custom statuses: a ticket sitting in an Open-base custom
+// status ("In triage") must keep its SLA pre-breach/breach triggers alive,
+// and a Pending-base one must keep aging. Every scan below is already
+// per-workflow (which carries workspaceId), so the lookup is per-workspace
+// by construction and served from the 60s statusService cache.
 // Task due reminders (QA 08-04 #8b): the longest "notify before" preset bounds
 // the scan's look-ahead; the grace window lets a reminder that elapsed while
 // the worker was down still go out up to 60 minutes PAST the due time (same
@@ -168,7 +174,11 @@ class NotificationTimeTriggerService {
   async _digestFor(workspaceId) {
     const now = new Date();
     const endOfDay = new Date(now); endOfDay.setHours(23, 59, 59, 999);
-    const openWhere = { workspaceId, status: { in: OPEN_STATUSES }, isNoise: false };
+    const openWhere = {
+      workspaceId,
+      status: { in: await statusService.statusNamesForBase(workspaceId, ['Open', 'Pending']) },
+      isNoise: false,
+    };
     const [openCount, unassignedCount, overdueCount, dueTodayCount, oldest] = await Promise.all([
       prisma.ticket.count({ where: openWhere }),
       prisma.ticket.count({ where: { ...openWhere, assignedTechId: null } }),
@@ -299,15 +309,19 @@ class NotificationTimeTriggerService {
       return 0;
     }
 
-    // SLA triggers fire for Open tickets only — Pending pauses the clock, so
-    // pre-breach/breach nags must not chase tickets waiting on the requester.
-    // The generic aging trigger keeps Open+Pending (workflows legitimately
-    // target "pending too long" with it).
+    // SLA triggers fire for Open-BASE tickets only — Pending-base statuses
+    // pause the clock, so pre-breach/breach nags must not chase tickets
+    // waiting on the requester. The generic aging trigger keeps Open+Pending
+    // bases (workflows legitimately target "pending too long" with it).
     const slaTrigger = workflow.triggerType !== 'ticket.aging';
+    const scanStatuses = await statusService.statusNamesForBase(
+      workflow.workspaceId,
+      slaTrigger ? 'Open' : ['Open', 'Pending'],
+    );
     const tickets = await prisma.ticket.findMany({
       where: {
         workspaceId: workflow.workspaceId,
-        status: slaTrigger ? 'Open' : { in: OPEN_STATUSES },
+        status: { in: scanStatuses },
         isNoise: false,
         ...where,
       },

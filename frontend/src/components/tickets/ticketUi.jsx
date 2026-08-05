@@ -291,12 +291,15 @@ const SLA_TARGET_DATETIME = { month: 'short', day: 'numeric', year: 'numeric', h
  *
  * kind: 'response' (first response) | 'resolution'.
  */
-export function SlaTargetChip({ target, metAt = null, status, kind = 'response', className = '' }) {
-  const isTerminal = ['Resolved', 'Closed'].includes(status);
+export function SlaTargetChip({ target, metAt = null, status, kind = 'response', className = '', terminal = null, paused = null }) {
+  // `terminal` / `paused` (optional, Phase 8b): base-aware overrides from the
+  // workspace status registry so a custom Resolved-base status freezes the
+  // chip and a custom Pending-base status pauses it.
+  const isTerminal = terminal ?? ['Resolved', 'Closed'].includes(status);
   const info = slaTargetState({ target, metAt, isTerminal });
   if (!info) return null;
   if (info.state === 'live') {
-    return <SlaChip value={target} paused={status === 'Pending'} className={className} />;
+    return <SlaChip value={target} paused={paused ?? status === 'Pending'} className={className} />;
   }
   const base = `inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap border ${className}`;
   const targetLabel = new Date(target).toLocaleString(undefined, SLA_TARGET_DATETIME);
@@ -387,8 +390,15 @@ export function initials(name) {
     .toUpperCase() || '?';
 }
 
-export function StatusPill({ status, className = '', size = 'md' }) {
-  const tone = STATUS_COLORS[status] || 'bg-slate-100 text-slate-500';
+/**
+ * Status pill. `tone` (optional) is a resolved bg/text class pair from the
+ * workspace status registry — see statusDefs.statusToneFromDefs (Phase 8b):
+ * custom statuses and recolored system rows pass their token tone here;
+ * absent/null keeps the classic STATUS_COLORS palette with the tolerant
+ * slate fallback for unknown labels.
+ */
+export function StatusPill({ status, className = '', size = 'md', tone: toneOverride = null }) {
+  const tone = toneOverride || STATUS_COLORS[status] || 'bg-slate-100 text-slate-500';
   // Deleted/Spam are terminal removals — solid red/orange + icon so they read as
   // "removed", not a quiet grey chip. `size='sm'` (dense queue rows) keeps it
   // compact so it fits its column; `md` (headers) is more prominent.

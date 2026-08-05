@@ -2,6 +2,7 @@ import { formatInTimeZone, toZonedTime } from 'date-fns-tz';
 import config from '../config/index.js';
 import logger from '../utils/logger.js';
 import availabilityService from './availabilityService.js';
+import statusService from './statusService.js';
 import prisma from './prisma.js';
 
 function buildZonedLocalInstantUtc({ referenceDate, timezone, hhmm }) {
@@ -25,8 +26,13 @@ class QueueStatsService {
   async getQueueStats(options = {}) {
     const timezone = options.timezone || config.sync.defaultTimezone;
     const staleDays = options.staleDays ?? 3;
-    const openStatuses = options.openStatuses || ['Open', 'Pending', 'In Progress'];
     const workspaceId = options.workspaceId ?? 1;
+    // Phase 8b: default open scope = the workspace registry's Open/Pending-
+    // BASE names. This also removes the orphan 'In Progress' literal — no
+    // ticket row has ever carried that label in this system (statuses are the
+    // canonical 4 + registry customs), it matched nothing.
+    const openStatuses = options.openStatuses
+      || await statusService.statusNamesForBase(workspaceId, ['Open', 'Pending']);
 
     const now = new Date();
 

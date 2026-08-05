@@ -13,6 +13,7 @@ import AssigneePicker from './AssigneePicker';
 import AiAssignModal from './AiAssignModal';
 import FsSyncConfirm from './FsSyncConfirm';
 import { assignmentAPI, ticketsAPI } from '../../services/api';
+import { CANONICAL_STATUS_NAMES, baseStatusOf, isTerminalStatus, statusDefsFromMeta, statusToneFromDefs } from './statusDefs';
 import { FRESHSERVICE_DOMAIN } from '../tech-detail/constants';
 import { useWorkspaceRole } from '../nav/navDestinations';
 
@@ -110,6 +111,16 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
   }, [onClose]);
 
   const isNative = ticket?.origin === 'ticketpulse';
+  // Workspace status registry (Phase 8b): TP-born tickets edit against it
+  // (custom statuses included); FS-born stay canonical. Base-aware terminal/
+  // paused checks keep custom statuses honest in the chips below.
+  const statusDefs = useMemo(() => statusDefsFromMeta(meta), [meta]);
+  const statusOptions = useMemo(
+    () => (ticket?.origin === 'ticketpulse' ? statusDefs.map((d) => d.name) : CANONICAL_STATUS_NAMES),
+    [ticket?.origin, statusDefs],
+  );
+  const ticketTerminal = ticket ? isTerminalStatus(statusDefs, ticket.status) : false;
+  const ticketSlaPaused = ticket ? baseStatusOf(statusDefs, ticket.status) === 'Pending' : false;
   const ticketingOn = meta?.nativeTicketingEnabled !== false;
   const fsUrl = ticket?.freshserviceTicketId
     ? `https://${FRESHSERVICE_DOMAIN}/a/tickets/${ticket.freshserviceTicketId}`
@@ -317,9 +328,9 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
             <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
               <StateChip state={ticket.stateChip} />
               <TypePill type={ticket.ticketType} full />
-              <StatusPill status={ticket.status} />
+              <StatusPill status={ticket.status} tone={statusToneFromDefs(statusDefs, ticket.status)} />
               <PriorityDot priority={ticket.priority} withLabel />
-              {(ticket.frDueBy && !ticket.firstPublicAgentReplyAt && !['Resolved', 'Closed', 'Deleted', 'Spam'].includes(ticket.status)) && <SlaChip value={ticket.frDueBy} paused={ticket.status === 'Pending'} />}
+              {(ticket.frDueBy && !ticket.firstPublicAgentReplyAt && !ticketTerminal && !['Deleted', 'Spam'].includes(ticket.status)) && <SlaChip value={ticket.frDueBy} paused={ticketSlaPaused} />}
               {(ticket.tags || []).map((tag) => <TagChip key={tag.id} tag={tag} size="xs" />)}
               {(ticket.impact || ticket.urgency) && (
                 <span className="text-[10px] text-slate-400">
@@ -442,8 +453,8 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                   className={fieldClass}
                   aria-label="Status"
                 >
-                  {['Open', 'Pending', 'Resolved', 'Closed'].map((s) => <option key={s} value={s}>{s}</option>)}
-                  {!['Open', 'Pending', 'Resolved', 'Closed'].includes(ticket.status) && <option value={ticket.status}>{ticket.status}</option>}
+                  {statusOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+                  {!statusOptions.includes(ticket.status) && <option value={ticket.status}>{ticket.status}</option>}
                 </select>
               </label>
               <label className="block">
@@ -547,7 +558,7 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                     <dt className="text-slate-400 w-24 flex-shrink-0 pl-[18px]">First response</dt>
                     <dd className="flex items-center gap-1.5 min-w-0">
                       <span className="text-slate-600" title={`${new Date(ticket.frDueBy).toLocaleString()}${isNative ? '' : ' — FreshService owns this date'}`}>{formatDayTime(ticket.frDueBy)}</span>
-                      <SlaTargetChip target={ticket.frDueBy} metAt={ticket.firstPublicAgentReplyAt} status={ticket.status} kind="response" className="!px-1.5 !text-[10px]" />
+                      <SlaTargetChip target={ticket.frDueBy} metAt={ticket.firstPublicAgentReplyAt} status={ticket.status} terminal={ticketTerminal} paused={ticketSlaPaused} kind="response" className="!px-1.5 !text-[10px]" />
                       {canWrite && (
                         <button
                           onClick={openFullTicket}
@@ -572,7 +583,7 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                       {ticket.dueBy ? (
                         <>
                           <span className="text-slate-600" title={`${new Date(ticket.dueBy).toLocaleString()}${isNative ? '' : ' — FreshService owns this date'}`}>{formatDayTime(ticket.dueBy)}</span>
-                          <SlaTargetChip target={ticket.dueBy} metAt={ticket.resolvedAt || ticket.closedAt} status={ticket.status} kind="resolution" className="!px-1.5 !text-[10px]" />
+                          <SlaTargetChip target={ticket.dueBy} metAt={ticket.resolvedAt || ticket.closedAt} status={ticket.status} terminal={ticketTerminal} paused={ticketSlaPaused} kind="resolution" className="!px-1.5 !text-[10px]" />
                         </>
                       ) : (
                         <span className="text-slate-300">Not set</span>
@@ -714,7 +725,7 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
               {confirmPickup ? 'Confirm?' : 'Pick up'}
             </button>
           )}
-          {canWrite && !['Resolved', 'Closed'].includes(ticket.status) && (
+          {canWrite && !ticketTerminal && (
             <button
               onClick={() => act('resolve', () => ticketsAPI.setStatus(ticketId, 'Resolved'))}
               disabled={saving === 'resolve'}
