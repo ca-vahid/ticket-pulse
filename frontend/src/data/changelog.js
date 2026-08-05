@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.0.98-preview';
+export const APP_VERSION = '3.0.99-preview';
 
 export const changelog = [
+  {
+    version: '3.0.99-preview',
+    date: 'August 4, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>📊 Automation Ops, decluttered</strong> — the five metric cards sit in one tidy row, and every card has an ⓘ with a plain-language definition (including what a “rebound” is). Rebounds now count <em>unique tickets</em> — the same definition Assignment Review uses — so the two pages finally agree. (QA 07-31)' },
+      { type: 'improved', html: '<strong>📅 Today stands out on the dashboard</strong> — today’s tile carries an obvious violet ring in every weekly view, and the agent captions (“Heaviest load on the team”, “Steady week”, leave notes) are now proper status pills under the names, matching the prototype. (QA 07-31)' },
+    ],
+  },
   {
     version: '3.0.98-preview',
     date: 'August 4, 2026',
