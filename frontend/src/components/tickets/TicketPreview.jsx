@@ -149,10 +149,12 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
     if (!fsConfirm) return;
     setFsBusy(true); setFsError(null);
     try {
-      await ticketsAPI.fsUpdate(ticketId, fsConfirm.payload);
+      const res = await ticketsAPI.fsUpdate(ticketId, fsConfirm.payload);
       await load({ silent: true });
       onChanged?.();
-      fsConfirm.resolve?.();
+      // Resolve WITH the {success, data} envelope so the awaiting picker sees
+      // data.aiOverride and can raise the "why the override?" prompt (QA 08-04 #9).
+      fsConfirm.resolve?.(res);
       setFsConfirm(null);
     } catch (err) {
       setFsError(err.response?.data?.message || err.message || 'FreshService rejected the change');

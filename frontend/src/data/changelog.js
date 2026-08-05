@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.96-preview';
+export const APP_VERSION = '3.0.97-preview';
 
 export const changelog = [
+  {
+    version: '3.0.97-preview',
+    date: 'August 4, 2026',
+    entries: [
+      { type: 'new', html: '<strong>🤔 “Why the override?” is live</strong> — reassigning an AI-routed ticket away from its pick now shows the promised one-click prompt (Wrong skill / Load balancing / Availability / Other) on every surface: queue, ticket page, peek preview, mobile assign sheet — and bulk assign shows one aggregated prompt for all affected tickets. Reasons feed the assignment AI’s learning loop. (QA 07-31)' },
+    ],
+  },
   {
     version: '3.0.96-preview',
     date: 'August 4, 2026',

@@ -780,11 +780,13 @@ export default function TicketDetail() {
     setFsBusy(true);
     setFsError(null);
     try {
-      await ticketsAPI.fsUpdate(ticketId, fsConfirm.payload);
+      const res = await ticketsAPI.fsUpdate(ticketId, fsConfirm.payload);
       lastLocalMutationRef.current = Date.now();
       await fetchTicket({ silent: true });
       showToast('sky', 'Written to FreshService & verified ✓');
-      fsConfirm.resolve?.();
+      // Resolve WITH the {success, data} envelope so the awaiting picker sees
+      // data.aiOverride and can raise the "why the override?" prompt (QA 08-04 #9).
+      fsConfirm.resolve?.(res);
       setFsConfirm(null);
     } catch (err) {
       // FS refused (or didn't accept the value) — nothing changed locally.

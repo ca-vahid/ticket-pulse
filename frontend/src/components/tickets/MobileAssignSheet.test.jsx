@@ -21,12 +21,17 @@ vi.mock('vaul', () => {
 
 const assign = vi.fn().mockResolvedValue({});
 const decide = vi.fn().mockResolvedValue({});
+const recordOverrideReason = vi.fn().mockResolvedValue({});
 vi.mock('../../services/api', () => ({
   ticketsAPI: { assign: (...a) => assign(...a), triage: vi.fn() },
-  assignmentAPI: { decide: (...a) => decide(...a) },
+  assignmentAPI: { decide: (...a) => decide(...a), recordOverrideReason: (...a) => recordOverrideReason(...a) },
 }));
 
-afterEach(() => { cleanup(); assign.mockClear(); decide.mockClear(); });
+afterEach(() => {
+  cleanup();
+  assign.mockReset(); assign.mockResolvedValue({});
+  decide.mockClear(); recordOverrideReason.mockClear();
+});
 
 const team = [
   { id: 10, name: 'Alison Norton', origin: 'freshservice' },
@@ -88,5 +93,27 @@ describe('MobileAssignSheet', () => {
     fireEvent.click(screen.getByRole('radio', { name: /Benjamin Rabel/ }));
     fireEvent.click(screen.getByRole('button', { name: /^Approve$/ }));
     await waitFor(() => expect(decide).toHaveBeenCalledWith(7, { decision: 'approved', assignedTechId: 50 }));
+  });
+
+  // QA 08-04 #9: the sheet raises the same "Why the override?" toast as the
+  // desktop picker when the assign response flags an AI override — and the
+  // toast survives the sheet closing (it portals outside the drawer).
+  test('assigning over a completed AI decision raises the override prompt and records the reason', async () => {
+    assign.mockResolvedValue({ success: true, data: { aiOverride: true } });
+    render(<MobileAssignSheet open ticket={suggestedTicket} technicians={team} canReview onClose={() => {}} onAssigned={() => {}} />);
+    fireEvent.click(screen.getByText('Brendan Navoa'));
+
+    expect(await screen.findByText('Why the override?')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Load balancing' }));
+    await waitFor(() => expect(recordOverrideReason).toHaveBeenCalledWith(
+      1, { toTechnicianId: 11, reasonCode: 'load_balancing' },
+    ));
+  });
+
+  test('no override prompt when the assign response carries no flag', async () => {
+    render(<MobileAssignSheet open ticket={suggestedTicket} technicians={team} canReview onClose={() => {}} onAssigned={() => {}} />);
+    fireEvent.click(screen.getByText('Brendan Navoa'));
+    await waitFor(() => expect(assign).toHaveBeenCalledWith(1, 11));
+    expect(screen.queryByText('Why the override?')).not.toBeInTheDocument();
   });
 });

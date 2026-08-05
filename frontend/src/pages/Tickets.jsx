@@ -15,6 +15,7 @@ import AssigneePicker from '../components/tickets/AssigneePicker';
 import StatusPicker from '../components/tickets/StatusPicker';
 import TicketBoard from '../components/tickets/TicketBoard';
 import MobileAssignSheet from '../components/tickets/MobileAssignSheet';
+import { OverridePromptToast, useOverridePrompt } from '../components/tickets/OverridePrompt';
 import AiAssignModal from '../components/tickets/AiAssignModal';
 import LiveUpdatePill from '../components/tickets/LiveUpdatePill';
 import FsSyncConfirm from '../components/tickets/FsSyncConfirm';
@@ -836,9 +837,11 @@ export default function Tickets() {
     if (!fsConfirm) return;
     setFsBusy(true); setFsError(null);
     try {
-      await ticketsAPI.fsUpdate(fsConfirm.ticketId, fsConfirm.payload);
+      const res = await ticketsAPI.fsUpdate(fsConfirm.ticketId, fsConfirm.payload);
       refreshAfterEdit();
-      fsConfirm.resolve?.();
+      // Resolve WITH the {success, data} envelope so the awaiting picker sees
+      // data.aiOverride and can raise the "why the override?" prompt (QA 08-04 #9).
+      fsConfirm.resolve?.(res);
       setFsConfirm(null);
     } catch (err) {
       setFsError(err.response?.data?.message || err.message || 'FreshService rejected the change');
@@ -917,6 +920,10 @@ export default function Tickets() {
   }, [previewId, tickets, stepPreview, openTicket, setParams]);
   const [bulkAction, setBulkAction] = useState(null); // { type: 'assign'|'status', value, label }
   const [bulkBusy, setBulkBusy] = useState(false);
+  // Aggregated correction loop for bulk assign: if any of the assigned tickets
+  // overrode a completed AI decision, ONE toast asks why and records the chosen
+  // reason for every overridden ticket (QA 08-04 #9).
+  const bulkOverride = useOverridePrompt();
   const [bulkResult, setBulkResult] = useState(null); // { ok, failed: [{ref, message}], skipped }
   // Query scope (gap plan P2.2): the action applies to EVERYTHING matching the
   // current filter, not just the visible page. Set via the preview call.
@@ -996,6 +1003,13 @@ export default function Tickets() {
         });
       }
     });
+    // Bulk assign over completed AI decisions → one aggregated "why?" prompt.
+    if (bulkAction.type === 'assign' && bulkAction.value != null) {
+      const overriddenIds = targets
+        .filter((_, i) => results[i].status === 'fulfilled' && results[i].value?.data?.aiOverride)
+        .map((t) => t.id);
+      if (overriddenIds.length > 0) bulkOverride.openPrompt(overriddenIds, bulkAction.value);
+    }
     setBulkResult({ ok: targets.length - failed.length, failed, skipped: bulkSkipCount, label: bulkAction.label });
     setBulkBusy(false);
     setBulkAction(null);
@@ -1977,6 +1991,14 @@ export default function Tickets() {
           )}
         </div>
       )}
+
+      {/* Aggregated "why the override?" toast after a bulk assign (QA 08-04 #9) */}
+      <OverridePromptToast
+        prompt={bulkOverride.prompt}
+        state={bulkOverride.state}
+        onReason={bulkOverride.sendReason}
+        onDismiss={bulkOverride.dismiss}
+      />
 
       {/* Mobile touch-first assignment (bottom sheet) */}
       <MobileAssignSheet
