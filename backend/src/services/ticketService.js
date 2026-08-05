@@ -2217,7 +2217,13 @@ class TicketService {
     await this._audit(ticket.id, 'fs_write_back', actor, { changes, fsTicketId: Number(ticket.freshserviceTicketId) });
     this._broadcast(workspaceId, 'fs_update', updated, { changes: Object.keys(changes) });
     logger.info(`FS write-back OK for #${ticket.freshserviceTicketId} (ticket ${ticket.id}): ${Object.keys(changes).join(', ')} by ${actor?.email || 'unknown'}`);
-    return { ...updated, displayRef: ticketDisplayRef(updated), synced: Object.keys(changes) };
+    // Parity with assignTicket: a manual reassignment that overrode a completed
+    // AI decision is flagged so the UI can ask for a one-click reason (the
+    // correction feedback loop). Unassignments never prompt.
+    const aiOverride = typeof localPatch.assignedTechId === 'number'
+      ? await this._isAiOverride(ticket.id, workspaceId, localPatch.assignedTechId)
+      : false;
+    return { ...updated, displayRef: ticketDisplayRef(updated), synced: Object.keys(changes), aiOverride };
   }
 
   /**

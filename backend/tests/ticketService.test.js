@@ -19,6 +19,7 @@ const prismaMock = {
     ]),
   },
   slaPolicy: { findFirst: jest.fn() },
+  assignmentPipelineRun: { findFirst: jest.fn() },
   $queryRaw: jest.fn(),
 };
 const noiseRuleServiceMock = { evaluate: jest.fn() };
@@ -32,6 +33,7 @@ const runPipelineMock = jest.fn();
 const fsClientMock = {
   createReply: jest.fn(),
   addNote: jest.fn(),
+  updateTicketFields: jest.fn(),
 };
 const mirrorServiceMock = {
   enqueueTicketCreate: jest.fn().mockResolvedValue({ id: 1 }),
@@ -376,6 +378,98 @@ describe('ticketService conversation + status + assignment', () => {
     expect(prismaMock.ticketAssignmentEpisode.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ technicianId: 7, startMethod: 'coordinator_assigned' }),
     }));
+  });
+});
+
+// QA 08-04 #9: the FS-born write-back must flag manual reassignments that
+// override a completed AI decision (aiOverride), exactly like assignTicket —
+// this is what feeds the "Why the override?" one-click prompt in the UI.
+describe('ticketService.updateFsTicket (FS-born write-back)', () => {
+  const fsBornTicket = {
+    id: 601,
+    workspaceId: 1,
+    origin: 'freshservice',
+    nativeNumber: null,
+    freshserviceTicketId: BigInt(231309),
+    subject: 'Payment receipt',
+    status: 'Open',
+    priority: 3,
+    createdAt: new Date('2026-08-01T10:00:00Z'),
+    assignedTechId: 3,
+    firstAssignedAt: new Date('2026-08-01T11:00:00Z'),
+    resolvedAt: null,
+    closedAt: null,
+    internalCategoryId: null,
+    internalSubcategoryId: null,
+    tpSkill: null,
+    tpSubskill: null,
+    requester: { id: 40, name: 'Rita Requester', email: 'rita@example.com' },
+    assignedTech: { id: 3, name: 'Ava Original' },
+    internalCategory: null,
+    internalSubcategory: null,
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prismaMock.workspace.findUnique.mockResolvedValue({
+      id: 1, name: 'IT', isActive: true, tpSkillCustomField: 'tp_skill', tpSubskillCustomField: 'tp_subskill',
+    });
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...fsBornTicket });
+    prismaMock.ticket.update.mockImplementation(({ data }) => Promise.resolve({
+      ...fsBornTicket, ...data, assignedTech: data.assignedTechId ? { id: data.assignedTechId, name: 'Terry Tech' } : null,
+    }));
+    prismaMock.technician.findFirst.mockResolvedValue({ id: 7, name: 'Terry Tech', freshserviceId: '9007', origin: 'freshservice' });
+    fsClientMock.updateTicketFields.mockResolvedValue({ responder_id: 9007, updated_at: '2026-08-04T10:00:00Z' });
+    ticketActivityRepositoryMock.create.mockResolvedValue({});
+  });
+
+  test('reassigning away from the AI pick returns aiOverride: true (parity with assignTicket)', async () => {
+    prismaMock.assignmentPipelineRun.findFirst.mockResolvedValue({
+      decision: 'auto_assigned', status: 'completed', assignedTechId: 3,
+    });
+
+    const result = await ticketService.updateFsTicket(601, 1, { assignedTechId: 7 }, actor);
+
+    expect(fsClientMock.updateTicketFields).toHaveBeenCalledWith(231309, expect.objectContaining({ responder_id: 9007 }));
+    expect(result.synced).toEqual(['assignee']);
+    expect(result.aiOverride).toBe(true);
+  });
+
+  test('reassigning to the AI pick itself returns aiOverride: false', async () => {
+    prismaMock.assignmentPipelineRun.findFirst.mockResolvedValue({
+      decision: 'auto_assigned', status: 'completed', assignedTechId: 7,
+    });
+
+    const result = await ticketService.updateFsTicket(601, 1, { assignedTechId: 7 }, actor);
+
+    expect(result.aiOverride).toBe(false);
+  });
+
+  test('no completed AI decision on record returns aiOverride: false', async () => {
+    prismaMock.assignmentPipelineRun.findFirst.mockResolvedValue(null);
+
+    const result = await ticketService.updateFsTicket(601, 1, { assignedTechId: 7 }, actor);
+
+    expect(result.aiOverride).toBe(false);
+  });
+
+  test('unassigning never flags an override (and skips the pipeline lookup)', async () => {
+    fsClientMock.updateTicketFields.mockResolvedValue({ responder_id: null, updated_at: '2026-08-04T10:00:00Z' });
+
+    const result = await ticketService.updateFsTicket(601, 1, { assignedTechId: null }, actor);
+
+    expect(result.aiOverride).toBe(false);
+    expect(prismaMock.assignmentPipelineRun.findFirst).not.toHaveBeenCalled();
+  });
+
+  test('non-assignment changes skip the override check entirely', async () => {
+    fsClientMock.updateTicketFields.mockResolvedValue({ priority: 2, updated_at: '2026-08-04T10:00:00Z' });
+
+    const result = await ticketService.updateFsTicket(601, 1, { priority: 2 }, actor);
+
+    expect(result.synced).toEqual(['priority']);
+    expect(result.aiOverride).toBe(false);
+    expect(prismaMock.assignmentPipelineRun.findFirst).not.toHaveBeenCalled();
   });
 });
 
