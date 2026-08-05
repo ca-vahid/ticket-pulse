@@ -1963,6 +1963,7 @@ export async function getAutomationOps(workspaceId, query = {}) {
         where: pipelineRunWhere,
         select: {
           id: true,
+          ticketId: true,
           status: true,
           decision: true,
           triggerSource: true,
@@ -2057,18 +2058,23 @@ export async function getAutomationOps(workspaceId, query = {}) {
     const funnel = {};
     const triggerSources = {};
     const pipelineTrend = new Map();
-    let rebounds = 0;
+    // Rebounds count UNIQUE tickets with at least one rebound run — the same
+    // deliberate definition Assignment Review uses ("a single ticket bounced
+    // 3 times" must not read as 3 rebounds). Trend buckets apply the same
+    // rule per bucket (unique rebounding tickets within that period).
+    const reboundTicketKeys = new Set();
     for (const run of runs) {
       const key = run.decision || run.status || 'unknown';
       funnel[key] = (funnel[key] || 0) + 1;
       triggerSources[run.triggerSource || 'unknown'] = (triggerSources[run.triggerSource || 'unknown'] || 0) + 1;
       const isRebound = Boolean(run.reboundFrom || ['rebound', 'rebound_exhausted'].includes(run.triggerSource));
-      if (isRebound) rebounds += 1;
+      const reboundKey = run.ticketId != null ? `t:${run.ticketId}` : `run:${run.id}`;
+      if (isRebound) reboundTicketKeys.add(reboundKey);
       const period = groupKey(run.createdAt, rangeInfo);
-      const trendRow = pipelineTrend.get(period) || { period, runs: 0, errors: 0, rebounds: 0, durationValues: [] };
+      const trendRow = pipelineTrend.get(period) || { period, runs: 0, errors: 0, reboundTicketKeys: new Set(), durationValues: [] };
       trendRow.runs += 1;
       if (run.errorMessage || run.status === 'failed') trendRow.errors += 1;
-      if (isRebound) trendRow.rebounds += 1;
+      if (isRebound) trendRow.reboundTicketKeys.add(reboundKey);
       if (Number.isFinite(run.totalDurationMs)) trendRow.durationValues.push(run.totalDurationMs);
       pipelineTrend.set(period, trendRow);
     }
@@ -2106,14 +2112,15 @@ export async function getAutomationOps(workspaceId, query = {}) {
         totalRuns: runs.length,
         funnel,
         triggerSources,
-        rebounds,
+        // Unique tickets with >=1 rebound in range (Assignment Review parity).
+        rebounds: reboundTicketKeys.size,
         trend: Array.from(pipelineTrend.values()).map((row) => {
           const durations = summarizeNumeric(row.durationValues);
           return {
             period: row.period,
             runs: row.runs,
             errors: row.errors,
-            rebounds: row.rebounds,
+            rebounds: row.reboundTicketKeys.size,
             avgDurationMs: durations.avg,
           };
         }).sort((a, b) => a.period.localeCompare(b.period)),

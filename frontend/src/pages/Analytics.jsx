@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -347,7 +347,66 @@ function chartBase(type = 'column') {
   };
 }
 
-function StatCard({ title, value, subtitle, icon: Icon = Info, tone = 'blue', delta }) {
+/**
+ * Small ⓘ affordance for StatCard metric definitions. Internal implementation
+ * (no tooltip lib): shows a positioned popover on hover AND keyboard focus,
+ * closes on Escape/blur, clamps to the viewport edges, and only animates when
+ * the user hasn't asked for reduced motion (motion-safe).
+ */
+function StatCardInfo({ title, info }) {
+  const [open, setOpen] = useState(false);
+  const [shiftX, setShiftX] = useState(0);
+  const popoverRef = useRef(null);
+  const popoverId = useId();
+
+  // Edge clamp: once open, nudge the popover back inside the viewport.
+  useLayoutEffect(() => {
+    if (!open) {
+      setShiftX(0);
+      return;
+    }
+    const el = popoverRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const margin = 8;
+    let dx = 0;
+    if (rect.left < margin) dx = margin - rect.left;
+    else if (rect.right > window.innerWidth - margin) dx = window.innerWidth - margin - rect.right;
+    if (dx !== 0) setShiftX(dx);
+  }, [open]);
+
+  return (
+    <span className="relative inline-flex">
+      <button
+        type="button"
+        aria-label={`What "${title}" means`}
+        aria-describedby={open ? popoverId : undefined}
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
+        onKeyDown={(e) => { if (e.key === 'Escape') setOpen(false); }}
+        className="tp-focus-ring -m-1 rounded-full p-1 text-slate-400 transition-colors hover:text-slate-600"
+      >
+        <Info className="h-3.5 w-3.5" aria-hidden="true" />
+      </button>
+      {open && (
+        <div
+          ref={popoverRef}
+          id={popoverId}
+          role="tooltip"
+          style={shiftX ? { transform: `translateX(${shiftX}px)` } : undefined}
+          className="animate-fadeIn absolute right-0 top-full z-30 mt-1.5 w-60 rounded-lg border border-slate-200 bg-white p-2.5 text-left shadow-lg"
+        >
+          <p className="text-[10px] font-semibold uppercase tracking-normal text-slate-400">{title}</p>
+          <p className="mt-1 text-xs font-normal normal-case leading-relaxed tracking-normal text-slate-600">{info}</p>
+        </div>
+      )}
+    </span>
+  );
+}
+
+export function StatCard({ title, value, subtitle, icon: Icon = Info, tone = 'blue', delta, info }) {
   const toneClass = {
     blue: 'border-blue-100 bg-blue-50 text-blue-700',
     green: 'border-emerald-100 bg-emerald-50 text-emerald-700',
@@ -361,12 +420,17 @@ function StatCard({ title, value, subtitle, icon: Icon = Info, tone = 'blue', de
     <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-xs font-semibold uppercase tracking-normal text-slate-500">{title}</p>
+          <p className="flex items-center gap-1 text-xs font-semibold uppercase tracking-normal text-slate-500">
+            <span className="truncate">{title}</span>
+          </p>
           <p className="mt-1 text-xl font-bold text-slate-900 sm:text-2xl">{value}</p>
           {subtitle && <p className="mt-1 text-xs text-slate-500">{subtitle}</p>}
         </div>
-        <div className={`rounded-lg border p-2 ${toneClass}`}>
-          <Icon className="h-4 w-4 sm:h-5 sm:w-5" />
+        <div className="flex shrink-0 items-start gap-1.5">
+          {info && <StatCardInfo title={title} info={info} />}
+          <div className={`rounded-lg border p-2 ${toneClass}`}>
+            <Icon className="h-4 w-4 sm:h-5 sm:w-5" />
+          </div>
         </div>
       </div>
       {delta !== undefined && delta !== null && (
@@ -3567,18 +3631,45 @@ export default function Analytics({ view = 'standard' }) {
 
   const renderOps = () => (
     <div className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard title="Pipeline Runs" value={formatNumber(ops?.pipeline?.totalRuns)} icon={Sparkles} tone="purple" />
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+        <StatCard
+          title="Pipeline Runs"
+          value={formatNumber(ops?.pipeline?.totalRuns)}
+          icon={Sparkles}
+          tone="purple"
+          info="AI assignment pipeline executions in the selected range — every run counts, including reruns and rebound-triggered runs."
+        />
         <StatCard
           title="Routing accuracy"
           value={ops?.routingAccuracy?.heldPct != null ? `${ops.routingAccuracy.heldPct}%` : '—'}
           subtitle="auto-assignments that stuck ≥7 days"
           icon={Gauge}
           tone={ops?.routingAccuracy?.heldPct != null && ops.routingAccuracy.heldPct < 80 ? 'amber' : 'green'}
+          info="Percentage of auto-assigned tickets still with the AI's pick after 7 days. A ticket counts against accuracy when a human reassigned it away within 7 days of the AI's decision."
         />
-        <StatCard title="Rebounds" value={formatNumber(ops?.pipeline?.rebounds)} icon={RefreshCw} tone="amber" />
-        <StatCard title="Sync Failure Rate" value={`${ops?.sync?.failureRatePct ?? 0}%`} subtitle={`${formatNumber(ops?.sync?.failed)} failed logs`} icon={AlertTriangle} tone={ops?.sync?.failureRatePct > 5 ? 'red' : 'green'} />
-        <StatCard title="Stale Started Syncs" value={formatNumber(ops?.sync?.staleStarted)} icon={Clock} tone={ops?.sync?.staleStarted > 0 ? 'red' : 'green'} />
+        <StatCard
+          title="Rebounds"
+          value={formatNumber(ops?.pipeline?.rebounds)}
+          subtitle="unique tickets"
+          icon={RefreshCw}
+          tone="amber"
+          info="Unique tickets that bounced back and re-entered the assignment pipeline at least once in this range. Multiple rebounds on the same ticket count once — the same definition Assignment Review uses."
+        />
+        <StatCard
+          title="Sync Failure Rate"
+          value={`${ops?.sync?.failureRatePct ?? 0}%`}
+          subtitle={`${formatNumber(ops?.sync?.failed)} failed logs`}
+          icon={AlertTriangle}
+          tone={ops?.sync?.failureRatePct > 5 ? 'red' : 'green'}
+          info="Percentage of FreshService sync jobs in this range that logged a failure (failed sync logs divided by all sync logs, most recent 500)."
+        />
+        <StatCard
+          title="Stale Started Syncs"
+          value={formatNumber(ops?.sync?.staleStarted)}
+          icon={Clock}
+          tone={ops?.sync?.staleStarted > 0 ? 'red' : 'green'}
+          info="Sync jobs still marked 'started' more than 30 minutes after they began — likely stuck or crashed mid-run and worth investigating."
+        />
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">

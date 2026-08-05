@@ -6,6 +6,7 @@ import { getLeaveForDate, getLeaveBadge, getLeaveTooltip, getLeaveDotClass, getL
 import { prefetchTechDetail } from '../hooks/usePrefetch';
 import ExpandableTicketList, { useGroupedTickets, getTicketsForView } from './ExpandableTicketList';
 import { getCompactGridTemplate } from './compactLayout';
+import AgentStatusPill from './AgentStatusPill';
 
 /**
  * Deep-link URL for the Bounced tab with a date range matching the current
@@ -337,9 +338,7 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
               >
                 {technician.name}
               </button>
-              <span className={`text-[10px] truncate ${leaveBadge ? leaveBadge.badgeText : topLoad ? 'text-violet-600 font-medium' : 'text-slate-400'}`}>
-                {leaveBadge ? getLeaveTooltip(activeLeave)?.split('\n')[0] : topLoad ? 'Heaviest load on the team' : 'Steady week'}
-              </span>
+              <AgentStatusPill leaveBadge={leaveBadge} activeLeave={activeLeave} topLoad={topLoad} className="mt-0.5" />
             </span>
           ) : (
             <button
@@ -381,24 +380,29 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
               const holidayTooltip = getHolidayTooltip(day.date);
               const isWeekendDay = dateStyling.isWeekend;
               const isHolidayDay = dateStyling.isHoliday;
+              const isTodayDay = dateStyling.isToday;
 
               const dayLeave = getLeaveForDate(technician.leaveInfo, day.date);
               const leaveTooltip = getLeaveTooltip(dayLeave);
               const leaveDot = getLeaveDotClass(dayLeave);
 
               const baseTooltip = `${dayNames[index]}: ${day.total} tickets (${day.self} self, ${day.assigned} assigned, ${day.closed} closed)`;
-              const tooltipParts = [baseTooltip];
+              const tooltipParts = isTodayDay ? ['Today', baseTooltip] : [baseTooltip];
               if (holidayTooltip) tooltipParts.push(holidayTooltip);
               if (leaveTooltip) tooltipParts.push(leaveTooltip);
               const fullTooltip = tooltipParts.join('\n');
 
+              // Holiday label colors keep priority (they carry meaning); the
+              // today ring below is what marks today on holiday tiles.
               const labelClass = isHolidayDay
                 ? dateStyling.isCanadian
                   ? 'text-rose-600 font-bold'
                   : 'text-indigo-500 font-bold'
-                : isWeekendDay
-                  ? 'text-slate-500 font-semibold'
-                  : 'text-gray-500 font-semibold';
+                : isTodayDay
+                  ? 'text-violet-700 font-bold'
+                  : isWeekendDay
+                    ? 'text-slate-500 font-semibold'
+                    : 'text-gray-500 font-semibold';
 
               const leaveStyle = dayLeave ? getLeaveStyle(dayLeave.category) : null;
               const dayLeaveIsHalf = isHalfDayLeave(dayLeave);
@@ -476,7 +480,7 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
                       <span className="text-[7px] opacity-60 ml-0.5">{parseInt(day.date.split('-')[2], 10)}</span>
                     </div>
                   </div>
-                  <div className={`relative w-7 h-7 rounded flex items-center justify-center text-[10px] font-bold border overflow-hidden transition-all duration-150 hover:scale-125 hover:shadow-lg hover:ring-2 hover:ring-blue-400 hover:ring-offset-1 ${getBoxClasses()}`}>
+                  <div className={`relative w-7 h-7 rounded flex items-center justify-center text-[10px] font-bold border overflow-hidden transition-all duration-150 hover:scale-125 hover:shadow-lg hover:ring-2 hover:ring-blue-400 hover:ring-offset-1 ${isTodayDay ? 'ring-2 ring-violet-500 ring-offset-1' : ''} ${getBoxClasses()}`}>
                     {dayLeaveSplit?.isSplit && (
                       <div className={`absolute inset-0 ${dayLeaveSplit.overlayClass} pointer-events-none`} />
                     )}

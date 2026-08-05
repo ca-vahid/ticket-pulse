@@ -5,6 +5,7 @@ import { getDateStyling, getHolidayTooltip } from '../utils/holidays';
 import { getLeaveForDate, getLeaveBadge, getLeaveTooltip, getLeaveDotClass, getLeaveStyle, isHalfDayLeave, getLeaveSplit } from '../utils/leaveInfo';
 import { prefetchTechDetail } from '../hooks/usePrefetch';
 import ExpandableTicketList, { useGroupedTickets, getTicketsForView } from './ExpandableTicketList';
+import AgentStatusPill from './AgentStatusPill';
 
 /**
  * Build a deep-link URL to the Bounced tab with a date range matching the
@@ -337,10 +338,10 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
 
             </div>
 
-            {/* Simple style: one calm caption instead of pills (QA 07-30 #9) */}
+            {/* Simple style: one calm status pill instead of badges (QA 08-04 #11) */}
             {simple && (
-              <div className={`text-[11px] truncate mt-0.5 ${leaveBadge ? leaveBadge.badgeText : topLoad ? 'text-violet-600 font-medium' : 'text-slate-400'}`}>
-                {leaveBadge ? getLeaveTooltip(activeLeave)?.split('\n')[0] : topLoad ? 'Heaviest load on the team' : 'Steady week'}
+              <div className="mt-1 min-w-0">
+                <AgentStatusPill leaveBadge={leaveBadge} activeLeave={activeLeave} topLoad={topLoad} />
               </div>
             )}
           </div>
@@ -359,7 +360,8 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
                 const holidayTooltip = getHolidayTooltip(day.date);
                 const isWeekendDay = dateStyling.isWeekend;
                 const isHolidayDay = dateStyling.isHoliday;
-                
+                const isTodayDay = dateStyling.isToday;
+
                 // Leave info for this day
                 const dayLeave = getLeaveForDate(technician.leaveInfo, day.date);
                 const leaveTooltip = getLeaveTooltip(dayLeave);
@@ -367,19 +369,22 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
 
                 // Build tooltip
                 const baseTooltip = `${dayNames[index]}: ${day.total} tickets (${day.self} self, ${day.assigned} assigned, ${day.closed} closed)`;
-                const tooltipParts = [baseTooltip];
+                const tooltipParts = isTodayDay ? ['Today', baseTooltip] : [baseTooltip];
                 if (holidayTooltip) tooltipParts.push(holidayTooltip);
                 if (leaveTooltip) tooltipParts.push(leaveTooltip);
                 const fullTooltip = tooltipParts.join('\n');
-                
-                // Determine label styling
-                const labelClass = isHolidayDay 
-                  ? dateStyling.isCanadian 
-                    ? 'text-rose-600 font-bold' 
+
+                // Determine label styling — holiday colors keep priority (they
+                // carry meaning); the today ring is what marks today there.
+                const labelClass = isHolidayDay
+                  ? dateStyling.isCanadian
+                    ? 'text-rose-600 font-bold'
                     : 'text-indigo-500 font-bold'
-                  : isWeekendDay 
-                    ? 'text-slate-500 font-semibold' 
-                    : 'text-gray-500 font-semibold';
+                  : isTodayDay
+                    ? 'text-violet-700 font-bold'
+                    : isWeekendDay
+                      ? 'text-slate-500 font-semibold'
+                      : 'text-gray-500 font-semibold';
                 
                 const leaveStyle = dayLeave ? getLeaveStyle(dayLeave.category) : null;
                 const dayLeaveIsHalf = isHalfDayLeave(dayLeave);
@@ -470,7 +475,7 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
                         <span className="text-[7px] opacity-60 ml-0.5">{parseInt(day.date.split('-')[2], 10)}</span>
                       </div>
                     </div>
-                    <div className={`relative h-8 w-full max-w-9 rounded flex items-center justify-center text-[10px] font-bold border overflow-hidden transition-all duration-150 hover:scale-110 hover:shadow-lg hover:ring-2 hover:ring-blue-400 hover:ring-offset-1 ${getBoxClasses()}`}>
+                    <div className={`relative h-8 w-full max-w-9 rounded flex items-center justify-center text-[10px] font-bold border overflow-hidden transition-all duration-150 hover:scale-110 hover:shadow-lg hover:ring-2 hover:ring-blue-400 hover:ring-offset-1 ${isTodayDay ? 'ring-2 ring-violet-500 ring-offset-1' : ''} ${getBoxClasses()}`}>
                       {/* Half-day overlay: gradient fades from the leave colour
                           at the AM/PM edge into transparent at the midline,
                           so there is no hard 50/50 split. */}

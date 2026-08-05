@@ -225,13 +225,26 @@ export const getHolidayTooltip = (date) => {
 };
 
 /**
+ * True when the given date is today's LOCAL calendar date.
+ * Mirrors formatDateLocal (utils/dateHelpers) semantics: local Y-M-D, never UTC.
+ * @param {Date|string} date - Date object or date string (YYYY-MM-DD)
+ * @returns {boolean}
+ */
+export const isDateToday = (date) => formatDateToKey(date) === formatDateToKey(new Date());
+
+/**
  * Get CSS classes for holiday/weekend styling
  * @param {Date|string} date - Date object or date string (YYYY-MM-DD)
  * @param {Object} options - Styling options
  * @param {string} options.variant - 'cell' | 'box' | 'button' - different component contexts
- * @returns {Object} Object with bgClass, borderClass, and indicatorClass
+ * @returns {Object} Object with bgClass, borderClass, indicatorClass + isHoliday/isWeekend/isToday flags
  */
-export const getDateStyling = (date, options = {}) => {
+export const getDateStyling = (date, options = {}) => ({
+  ...computeDateStyling(date, options),
+  isToday: isDateToday(date),
+});
+
+const computeDateStyling = (date, options = {}) => {
   const { variant = 'cell' } = options;
   const info = getHolidayInfo(date);
   const weekend = isWeekend(date);
