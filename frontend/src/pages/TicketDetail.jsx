@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
-  Activity, AlertCircle, ArrowLeft, Bell, BellRing, Bot, Building2, Check, CheckCircle2,
+  Activity, AlertCircle, ArrowLeft, Bell, BellRing, Bot, Building2, CalendarClock, Check, CheckCircle2,
   CheckSquare, ChevronDown, ChevronLeft, ChevronRight, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Flame, Forward, Hand,
   GitMerge, History, Image as ImageIcon, Link2, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, Paperclip, Pencil, Phone, Plus,
   RefreshCw, Send, ShieldCheck, Smartphone, Smile, Sparkles, Stamp, StickyNote, Trash2, UserRound, VolumeX, X, XCircle,
@@ -17,6 +17,7 @@ import AppHeader from '../components/AppHeader';
 import MobileTabBar from '../components/nav/MobileTabBar';
 import AiAssignModal from '../components/tickets/AiAssignModal';
 import AssigneePicker from '../components/tickets/AssigneePicker';
+import DueDateEditor from '../components/tickets/DueDateEditor';
 import MobileAssignSheet from '../components/tickets/MobileAssignSheet';
 import CcChips from '../components/tickets/CcChips';
 import FsSyncConfirm from '../components/tickets/FsSyncConfirm';
@@ -73,6 +74,7 @@ const HISTORY_STYLES = {
   noise_cleared: { icon: VolumeX, tone: 'bg-slate-100 text-slate-500' },
   ai_triage: { icon: Sparkles, tone: 'bg-indigo-100 text-indigo-600' },
   fields_updated: { icon: Pencil, tone: 'bg-slate-100 text-slate-500' },
+  due_changed: { icon: CalendarClock, tone: 'bg-amber-100 text-amber-600' },
   task_status_changed: { icon: CheckSquare, tone: 'bg-amber-100 text-amber-600' },
   rejected: { icon: X, tone: 'bg-red-100 text-red-600' },
   group_changed: { icon: Building2, tone: 'bg-sky-100 text-sky-600' },
@@ -881,6 +883,11 @@ export default function TicketDetail() {
         bits.push(`${d.fromTechId ? techNameById.get(d.fromTechId) || `tech ${d.fromTechId}` : 'Unassigned'} → ${d.toTechId ? techNameById.get(d.toTechId) || `tech ${d.toTechId}` : 'Unassigned'}`);
       }
       if (Array.isArray(d.to)) bits.push(`to ${d.to.join(', ')}`);
+      // due_changed details carry {changes: {dueBy|frDueBy: {from, to}}}.
+      for (const [key, name] of [['frDueBy', 'First response'], ['dueBy', 'Resolution']]) {
+        const c = d.changes?.[key];
+        if (c && (c.from || c.to)) bits.push(`${name}: ${c.from ? formatDayTime(c.from) : 'not set'} → ${c.to ? formatDayTime(c.to) : 'removed'}`);
+      }
       if (d.note) bits.push(d.note);
       items.push({
         key: `a-${a.id}`,
@@ -2458,20 +2465,60 @@ export default function TicketDetail() {
                     </select>
                   </SidebarField>
 
-                  {(ticket.frDueBy || ticket.dueBy) && !['Deleted', 'Spam'].includes(ticket.status) && (
+                  {/* SLA clocks. TP-born (canWrite): pencil-editable — presets
+                      or a custom datetime, null clears (QA 08-04 #13). The
+                      rows render even without a clock so agents can SET one.
+                      FS-born: read-only, FreshService owns the dates. */}
+                  {(ticket.frDueBy || ticket.dueBy || canWrite) && !['Deleted', 'Spam'].includes(ticket.status) && (
                     <div className="pt-1 border-t border-slate-100 space-y-2">
-                      {ticket.frDueBy && (
+                      {(ticket.frDueBy || canWrite) && (
                         <div className="flex items-center gap-2 text-xs">
                           <span className="text-slate-500 font-medium">First response</span>
-                          <span className="ml-auto text-slate-400" title={new Date(ticket.frDueBy).toLocaleString()}>{formatDayTime(ticket.frDueBy)}</span>
-                          <SlaTargetChip target={ticket.frDueBy} metAt={ticket.firstPublicAgentReplyAt} status={ticket.status} kind="response" />
+                          {ticket.frDueBy ? (
+                            <span className="ml-auto text-slate-400" title={`${new Date(ticket.frDueBy).toLocaleString()}${isNative ? '' : ' — FreshService owns this date'}`}>{formatDayTime(ticket.frDueBy)}</span>
+                          ) : (
+                            <span className="ml-auto text-slate-300">Not set</span>
+                          )}
+                          {ticket.frDueBy && <SlaTargetChip target={ticket.frDueBy} metAt={ticket.firstPublicAgentReplyAt} status={ticket.status} kind="response" />}
+                          {canWrite && (
+                            <DueDateEditor
+                              label="First response"
+                              value={ticket.frDueBy}
+                              saving={savingField === 'frDueBy'}
+                              onSave={(iso) => {
+                                const prev = ticket.frDueBy ? new Date(ticket.frDueBy).toISOString() : null;
+                                applyChange('frDueBy', () => ticketsAPI.update(ticketId, { frDueBy: iso }), {
+                                  label: iso ? `First response due → ${formatDayTime(iso)}` : 'First response due removed',
+                                  undo: () => ticketsAPI.update(ticketId, { frDueBy: prev }),
+                                });
+                              }}
+                            />
+                          )}
                         </div>
                       )}
-                      {ticket.dueBy && (
+                      {(ticket.dueBy || canWrite) && (
                         <div className="flex items-center gap-2 text-xs">
                           <span className="text-slate-500 font-medium">Resolution</span>
-                          <span className="ml-auto text-slate-400" title={new Date(ticket.dueBy).toLocaleString()}>{formatDayTime(ticket.dueBy)}</span>
-                          <SlaTargetChip target={ticket.dueBy} metAt={ticket.resolvedAt || ticket.closedAt} status={ticket.status} kind="resolution" />
+                          {ticket.dueBy ? (
+                            <span className="ml-auto text-slate-400" title={`${new Date(ticket.dueBy).toLocaleString()}${isNative ? '' : ' — FreshService owns this date'}`}>{formatDayTime(ticket.dueBy)}</span>
+                          ) : (
+                            <span className="ml-auto text-slate-300">Not set</span>
+                          )}
+                          {ticket.dueBy && <SlaTargetChip target={ticket.dueBy} metAt={ticket.resolvedAt || ticket.closedAt} status={ticket.status} kind="resolution" />}
+                          {canWrite && (
+                            <DueDateEditor
+                              label="Resolution"
+                              value={ticket.dueBy}
+                              saving={savingField === 'dueBy'}
+                              onSave={(iso) => {
+                                const prev = ticket.dueBy ? new Date(ticket.dueBy).toISOString() : null;
+                                applyChange('dueBy', () => ticketsAPI.update(ticketId, { dueBy: iso }), {
+                                  label: iso ? `Resolution due → ${formatDayTime(iso)}` : 'Resolution due removed',
+                                  undo: () => ticketsAPI.update(ticketId, { dueBy: prev }),
+                                });
+                              }}
+                            />
+                          )}
                         </div>
                       )}
                     </div>

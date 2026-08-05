@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   Activity, Bot, CalendarDays, Check, ChevronDown, ChevronUp, ExternalLink, Hand, Inbox,
-  Loader2, Lock, Mail, MapPin, Phone, Sparkles, Trash2, VolumeX, X,
+  Loader2, Lock, Mail, MapPin, Pencil, Phone, Sparkles, Trash2, VolumeX, X,
 } from 'lucide-react';
 import {
   ExternalChip, MirrorChip, OriginChip, PersonAvatar, PriorityDot, ProvenanceChip, SafeHtml, SlaChip, SlaTargetChip, StateChip, StatusPill,
@@ -546,17 +546,47 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                   <div className="flex items-center gap-2 px-2.5 py-1.5">
                     <dt className="text-slate-400 w-24 flex-shrink-0 pl-[18px]">First response</dt>
                     <dd className="flex items-center gap-1.5 min-w-0">
-                      <span className="text-slate-600" title={new Date(ticket.frDueBy).toLocaleString()}>{formatDayTime(ticket.frDueBy)}</span>
+                      <span className="text-slate-600" title={`${new Date(ticket.frDueBy).toLocaleString()}${isNative ? '' : ' — FreshService owns this date'}`}>{formatDayTime(ticket.frDueBy)}</span>
                       <SlaTargetChip target={ticket.frDueBy} metAt={ticket.firstPublicAgentReplyAt} status={ticket.status} kind="response" className="!px-1.5 !text-[10px]" />
+                      {canWrite && (
+                        <button
+                          onClick={openFullTicket}
+                          aria-label="Edit first response due date on the full ticket"
+                          title="Edit due date on the full ticket"
+                          className="tp-focus-ring rounded p-0.5 text-slate-300 hover:bg-slate-100 hover:text-slate-600"
+                        >
+                          <Pencil className="h-3 w-3" aria-hidden="true" />
+                        </button>
+                      )}
                     </dd>
                   </div>
                 )}
-                {ticket.dueBy && !['Deleted', 'Spam'].includes(ticket.status) && (
+                {/* The pencil deep-links into the full ticket, where the due
+                    editor lives (QA 08-04 #13) — no inline editing in the peek.
+                    TP-born tickets without a clock still get the row so the
+                    affordance is discoverable. */}
+                {(ticket.dueBy || canWrite) && !['Deleted', 'Spam'].includes(ticket.status) && (
                   <div className="flex items-center gap-2 px-2.5 py-1.5">
                     <dt className="text-slate-400 w-24 flex-shrink-0 pl-[18px]">Resolution</dt>
                     <dd className="flex items-center gap-1.5 min-w-0">
-                      <span className="text-slate-600" title={new Date(ticket.dueBy).toLocaleString()}>{formatDayTime(ticket.dueBy)}</span>
-                      <SlaTargetChip target={ticket.dueBy} metAt={ticket.resolvedAt || ticket.closedAt} status={ticket.status} kind="resolution" className="!px-1.5 !text-[10px]" />
+                      {ticket.dueBy ? (
+                        <>
+                          <span className="text-slate-600" title={`${new Date(ticket.dueBy).toLocaleString()}${isNative ? '' : ' — FreshService owns this date'}`}>{formatDayTime(ticket.dueBy)}</span>
+                          <SlaTargetChip target={ticket.dueBy} metAt={ticket.resolvedAt || ticket.closedAt} status={ticket.status} kind="resolution" className="!px-1.5 !text-[10px]" />
+                        </>
+                      ) : (
+                        <span className="text-slate-300">Not set</span>
+                      )}
+                      {canWrite && (
+                        <button
+                          onClick={openFullTicket}
+                          aria-label="Edit resolution due date on the full ticket"
+                          title="Edit due date on the full ticket"
+                          className="tp-focus-ring rounded p-0.5 text-slate-300 hover:bg-slate-100 hover:text-slate-600"
+                        >
+                          <Pencil className="h-3 w-3" aria-hidden="true" />
+                        </button>
+                      )}
                     </dd>
                   </div>
                 )}

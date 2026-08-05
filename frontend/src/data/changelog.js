@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.0.99-preview';
+export const APP_VERSION = '3.1.0-preview';
 
 export const changelog = [
+  {
+    version: '3.1.0-preview',
+    date: 'August 5, 2026',
+    entries: [
+      { type: 'new', html: '<strong>📆 Editable due dates on Ticket Pulse tickets</strong> — TP-born tickets now let you set or change the resolution (and first-response) due date right from the ticket page: quick presets (Today · Tomorrow · This week · Next week · This month, each 11:59 PM) or pick an exact date and time, with undo. Manual dates are never overwritten by SLA policies, every change is audited in the activity timeline, and SLA countdown chips update instantly. FreshService-born tickets keep their FS-owned dates (clearly labeled). (QA 07-31)' },
+    ],
+  },
   {
     version: '3.0.99-preview',
     date: 'August 4, 2026',
