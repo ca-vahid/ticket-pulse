@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Activity, AlertCircle, CalendarClock, Check, Loader2, Play, Repeat, Trash2 } from 'lucide-react';
 import { ticketsAPI } from '../../services/api';
-import { timeAgo } from './ticketUi';
+import { formatDayTime, timeAgo } from './ticketUi';
 
 function inFuture(value) {
   const target = new Date(value).getTime();
@@ -107,7 +107,7 @@ export default function ScheduledTicketsPanel({ ticketingOn = true }) {
                 }`}
                 >
                   <CalendarClock className="w-3 h-3" aria-hidden="true" />
-                  {new Date(row.scheduledForAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                  {formatDayTime(row.scheduledForAt)}
                   <span className="font-normal">· {inFuture(row.scheduledForAt)}</span>
                 </span>
                 {row.recurrence && row.recurrence !== 'none' && (

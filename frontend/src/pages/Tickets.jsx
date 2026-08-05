@@ -72,9 +72,15 @@ const SORT_OPTIONS = [
   { value: 'updatedAt', label: 'Last activity' },
   { value: 'createdAt', label: 'Created date' },
   { value: 'priority', label: 'Priority' },
+  { value: 'status', label: 'Status' },
+  { value: 'dueBy', label: 'Due date' },
   { value: 'subject', label: 'Subject' },
   { value: 'requester', label: 'Requester' },
 ];
+// Fields whose FIRST click sorts ascending — status asc walks the lifecycle
+// Open-first (QA 08-04 #14a) and due asc puts the soonest deadline on top;
+// desc-first only makes sense for recency/priority fields.
+const ASC_FIRST_SORTS = new Set(['status', 'dueBy']);
 
 // KPI stat cards (mockup: colored icon tile + large number + label). Clicking a
 // card applies that segment. Unassigned lives in the sidebar Views, not here.
@@ -378,10 +384,10 @@ export default function Tickets() {
 
   // Row layout — the two ends of the old density spectrum plus the drag-drop
   // Board (QA 07-27 #3). Persisted; migrates the old 3-way density value.
-  // DECLARED BEFORE queryParams: its useMemo dependency array reads boardMode
-  // at render time, and a later declaration is a temporal-dead-zone crash in
-  // the production bundle ("Cannot access 'Vt' before initialization" — the
-  // /tickets page rendered blank until this moved up. QA 07-28 hotfix).
+  // KEEP DECLARED BEFORE queryParams: a hook below reading boardMode before
+  // this declaration is a temporal-dead-zone crash in the production bundle
+  // ("Cannot access 'Vt' before initialization" — the /tickets page rendered
+  // blank until this moved up. QA 07-28 hotfix; guarded by the smoke test).
   const [layout, setLayout] = useState(() => {
     try {
       const v = localStorage.getItem('tp_ticket_layout');
@@ -397,10 +403,11 @@ export default function Tickets() {
   const queryParams = useMemo(() => {
     const params = { page, pageSize: PAGE_SIZE, sort, dir };
     // A segment supplies its own status scope; the checkboxes apply otherwise.
-    // Board mode needs every status so its Closed column isn't empty — the
-    // default checkbox scope is Open+Pending only.
+    // Board mode sends the SAME status scope as the list (QA 08-04 #16/#15 —
+    // silently fetching every status made the board disagree with the rail
+    // and show closed cards under "My open"); its Closed column explains
+    // itself when the scope excludes terminal statuses.
     if (segment !== 'all') params.segment = segment;
-    else if (boardMode) { /* all statuses */ }
     else if (statuses.length > 0 && statuses.length < STATUS_FILTERS.length) params.status = statuses.join(',');
     if (assignee) params.assignedTechId = assignee;
     if (priority) params.priority = priority;
@@ -424,7 +431,7 @@ export default function Tickets() {
     if (requesterId) params.requesterId = requesterId;
     if (debouncedSearch) params.q = debouncedSearch;
     return params;
-  }, [page, statuses, assignee, priority, origin, segment, sort, dir, debouncedSearch, boardMode,
+  }, [page, statuses, assignee, priority, origin, segment, sort, dir, debouncedSearch,
     type, category, subcategory, group, source, createdFrom, createdTo, due, noise, tag, tagMode, impactFilter, urgencyFilter, aiState, requesterId]);
 
   // Post-refresh row highlights: ticketId → 'new' | 'updated'. Set when a
@@ -987,7 +994,7 @@ export default function Tickets() {
   };
   const headerSort = (field) => {
     if (sort === field) setSort(field, dir === 'desc' ? 'asc' : 'desc');
-    else setSort(field, 'desc');
+    else setSort(field, ASC_FIRST_SORTS.has(field) ? 'asc' : 'desc');
   };
   const sortIndicator = (field) => (sort === field ? (dir === 'desc' ? ' ↓' : ' ↑') : '');
 
@@ -1028,6 +1035,18 @@ export default function Tickets() {
     } catch { /* cancelled confirm or failed save — refresh already shows truth */ }
   }, [ticketingOn, refreshAfterEdit, showToast, fsStatusChange]);
   const sortLabel = SORT_OPTIONS.find((o) => o.value === sort)?.label || 'Last activity';
+
+  // Board "Closed hidden" affordance: does the effective fetch scope exclude
+  // terminal statuses? Segments carry their own scope; otherwise the rail's
+  // status checkboxes decide (default Open+Pending → yes, hidden).
+  const boardClosedExcluded = segment !== 'all'
+    ? ['open', 'unassigned', 'awaiting', 'due_today', 'overdue'].includes(segment)
+    : statuses.length > 0 && !statuses.includes('Resolved') && !statuses.includes('Closed');
+  // One-click widen — only meaningful in checkbox scope (a segment's scope
+  // isn't expressible as a status list, so there the empty-state is text-only).
+  const onBoardShowClosed = segment === 'all' && boardClosedExcluded
+    ? () => setParams({ status: [...statuses, 'Resolved', 'Closed'].join(',') })
+    : null;
   const groupNames = useMemo(() => {
     const map = new Map();
     for (const g of meta?.groups || []) map.set(String(g.freshserviceId), g.name);
@@ -1115,7 +1134,11 @@ export default function Tickets() {
                 return (
                   <button
                     key={seg.key}
-                    onClick={() => setParams({ segment: seg.key === 'all' ? null : seg.key, status: null })}
+                    // "All tickets" widens the status scope to match its count
+                    // (every non-Deleted/Spam status, like the rail's view) —
+                    // clearing to the Open+Pending default made the card lie
+                    // (QA 08-04 #1). Other cards carry their own segment scope.
+                    onClick={() => setParams({ segment: seg.key === 'all' ? null : seg.key, status: seg.key === 'all' ? 'any' : null })}
                     aria-pressed={active}
                     className={`tp-focus-ring flex items-center gap-3 text-left px-3.5 py-3 rounded-xl bg-white border transition-all ${
                       active ? 'border-blue-300 ring-2 ring-blue-400/40 shadow-soft' : 'border-slate-100 shadow-subtle hover:border-slate-200 hover:shadow-soft'
@@ -1217,7 +1240,7 @@ export default function Tickets() {
                         {SORT_OPTIONS.map((o) => (
                           <button
                             key={o.value}
-                            onClick={() => setSort(o.value, sort === o.value ? dir : 'desc')}
+                            onClick={() => setSort(o.value, sort === o.value ? dir : (ASC_FIRST_SORTS.has(o.value) ? 'asc' : 'desc'))}
                             className={`tp-focus-ring w-full text-left px-2.5 py-1.5 text-sm rounded-md hover:bg-blue-50 ${sort === o.value ? 'font-semibold text-blue-700' : 'text-slate-600'}`}
                             role="menuitem"
                           >
@@ -1315,13 +1338,24 @@ export default function Tickets() {
                       <p className="text-sm text-slate-500 mt-1">Try a different segment or clear the filters in the rail.</p>
                     </div>
                   ) : boardMode ? (
-                    <TicketBoard
-                      tickets={tickets}
-                      ticketingOn={ticketingOn}
-                      onCardClick={onRowClick}
-                      onCardDoubleClick={onRowDoubleClick}
-                      onStatusDrop={onBoardStatusDrop}
-                    />
+                    <>
+                      <TicketBoard
+                        tickets={tickets}
+                        ticketingOn={ticketingOn}
+                        onCardClick={onRowClick}
+                        onCardDoubleClick={onRowDoubleClick}
+                        onStatusDrop={onBoardStatusDrop}
+                        closedExcluded={boardClosedExcluded}
+                        onShowClosed={onBoardShowClosed}
+                        paginated={total > PAGE_SIZE}
+                      />
+                      {/* Same pagination as the list — the board renders one
+                          page sliced into columns, so without this the rest of
+                          the queue was simply unreachable (QA 08-04 #16). */}
+                      <div className="mt-3 tp-card rounded-xl px-4 py-3">
+                        <Pagination page={page} totalPages={totalPages} total={total} pageSize={PAGE_SIZE} onPage={goPage} />
+                      </div>
+                    </>
                   ) : (
                     <div className="tp-card rounded-xl overflow-hidden">
                       {/* Header */}
@@ -1350,8 +1384,16 @@ export default function Tickets() {
                               </button>
                             </span>
                             <span className={`${CELL} py-2`}>Assignee</span>
-                            <span className={`${CELL} py-2`}>Status</span>
-                            <span className={`${CELL} py-2`}>Due</span>
+                            <span className={`${CELL} py-2`}>
+                              <button onClick={() => headerSort('status')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 rounded" title="Sort by status (Open first)">
+                                Status{sortIndicator('status')}
+                              </button>
+                            </span>
+                            <span className={`${CELL} py-2`}>
+                              <button onClick={() => headerSort('dueBy')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 rounded" title="Sort by due date (soonest first)">
+                                Due{sortIndicator('dueBy')}
+                              </button>
+                            </span>
                             <span className={`${CELL} py-2 justify-end`}>
                               <button onClick={() => headerSort('updatedAt')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 rounded text-right">
                                 Updated{sortIndicator('updatedAt')}
@@ -1368,8 +1410,16 @@ export default function Tickets() {
                             </span>
                             <span className={`${CELL} ${cellPad}`}>Category</span>
                             <span className={`${CELL} ${cellPad}`}>Assignee</span>
-                            <span className={`${CELL} ${cellPad}`}>Status</span>
-                            <span className={`${CELL} ${cellPad}`}>Due</span>
+                            <span className={`${CELL} ${cellPad}`}>
+                              <button onClick={() => headerSort('status')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 rounded" title="Sort by status (Open first)">
+                                Status{sortIndicator('status')}
+                              </button>
+                            </span>
+                            <span className={`${CELL} ${cellPad}`}>
+                              <button onClick={() => headerSort('dueBy')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 rounded" title="Sort by due date (soonest first)">
+                                Due{sortIndicator('dueBy')}
+                              </button>
+                            </span>
                             <span className={`${CELL} ${cellPad} justify-end`}>
                               <button onClick={() => headerSort('updatedAt')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 rounded text-right">
                                 Updated{sortIndicator('updatedAt')}

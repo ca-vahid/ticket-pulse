@@ -18,6 +18,11 @@ import { sseManager } from '../routes/sse.routes.js';
 export const NATIVE_TICKET_STATUSES = ['Open', 'Pending', 'Resolved', 'Closed'];
 const TERMINAL_STATUSES = ['Resolved', 'Closed'];
 
+// Lifecycle order for sort=status (QA 08-04 #14a): alphabetical is meaningless
+// to operators — asc walks the ticket lifecycle Open-first (matching
+// FreshService), desc reverses it. Unknown statuses sort after these.
+const STATUS_SORT_ORDER = ['Open', 'Pending', 'Waiting on Customer', 'Waiting on Third Party', 'Resolved', 'Closed'];
+
 // External-requester flagging (QA 07-27 #4). Derived at read time from the
 // workspace's internalDomains list — no per-ticket column, so editing the
 // list in Settings retroactively re-labels every ticket. Empty list = off.
@@ -667,32 +672,44 @@ class TicketService {
       };
     }
 
-    const sortField = ['createdAt', 'updatedAt', 'priority', 'status', 'subject', 'requester'].includes(query.sort) ? query.sort : 'createdAt';
+    const sortField = ['createdAt', 'updatedAt', 'priority', 'status', 'subject', 'requester', 'dueBy'].includes(query.sort) ? query.sort : 'createdAt';
     const sortDir = query.dir === 'asc' ? 'asc' : 'desc';
 
-    // "updatedAt" means LAST REAL ACTIVITY: last_real_activity_at is derived
-    // only from messages/assignments/status changes (backfilled + maintained
-    // on write paths). Neither our @updatedAt (sync bookkeeping) nor FS's
-    // updated_at (FS-side automations touch idle tickets) can be trusted.
-    let orderBy;
-    if (sortField === 'updatedAt') {
-      orderBy = [{ lastRealActivityAt: { sort: sortDir, nulls: 'last' } }, { id: 'desc' }];
-    } else if (sortField === 'requester') {
-      orderBy = [{ requester: { name: sortDir } }, { id: 'desc' }];
+    let total;
+    let items;
+    if (sortField === 'status') {
+      // Lifecycle rank, not alphabetical — Prisma can't ORDER BY CASE, so the
+      // page is assembled bucket-by-bucket (see _statusRankedPage).
+      ({ total, items } = await this._statusRankedPage(where, { page, pageSize, sortDir }));
     } else {
-      orderBy = [{ [sortField]: sortDir }, { id: 'desc' }];
-    }
+      // "updatedAt" means LAST REAL ACTIVITY: last_real_activity_at is derived
+      // only from messages/assignments/status changes (backfilled + maintained
+      // on write paths). Neither our @updatedAt (sync bookkeeping) nor FS's
+      // updated_at (FS-side automations touch idle tickets) can be trusted.
+      let orderBy;
+      if (sortField === 'updatedAt') {
+        orderBy = [{ lastRealActivityAt: { sort: sortDir, nulls: 'last' } }, { id: 'desc' }];
+      } else if (sortField === 'dueBy') {
+        // Undated tickets always trail — for both directions — so the sort
+        // reads as "soonest/latest due first", never a wall of blanks.
+        orderBy = [{ dueBy: { sort: sortDir, nulls: 'last' } }, { id: 'desc' }];
+      } else if (sortField === 'requester') {
+        orderBy = [{ requester: { name: sortDir } }, { id: 'desc' }];
+      } else {
+        orderBy = [{ [sortField]: sortDir }, { id: 'desc' }];
+      }
 
-    const [total, items] = await Promise.all([
-      prisma.ticket.count({ where }),
-      prisma.ticket.findMany({
-        where,
-        include: TICKET_INCLUDE,
-        orderBy,
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-      }),
-    ]);
+      [total, items] = await Promise.all([
+        prisma.ticket.count({ where }),
+        prisma.ticket.findMany({
+          where,
+          include: TICKET_INCLUDE,
+          orderBy,
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+        }),
+      ]);
+    }
 
     const [incomingByTicket, aiByTicket, bypassByTicket, proposedTicketIds] = await Promise.all([
       this._lastPublicEntryIncoming(items.map((t) => t.id)),
@@ -721,6 +738,51 @@ class TicketService {
       page,
       pageSize,
     };
+  }
+
+  /**
+   * sort=status page: lifecycle rank (STATUS_SORT_ORDER), not alphabetical.
+   * Prisma has no ORDER BY CASE, and the list query is a plain findMany —
+   * rather than dropping to raw SQL (and re-implementing the whole filter
+   * `where` by hand), the page is assembled bucket-by-bucket: one cheap
+   * groupBy gives per-status counts, then only the status buckets that
+   * intersect the requested page window are fetched (id desc within each
+   * bucket, matching every other sort's tiebreaker). Honest across pages —
+   * page 2 continues exactly where page 1 left off.
+   */
+  async _statusRankedPage(where, { page, pageSize, sortDir }) {
+    const grouped = await prisma.ticket.groupBy({ by: ['status'], where, _count: { _all: true } });
+    const rank = new Map(STATUS_SORT_ORDER.map((s, i) => [s, i]));
+    const buckets = grouped
+      .map((g) => ({ status: g.status, count: g._count._all }))
+      .sort((a, b) => {
+        const ra = rank.has(a.status) ? rank.get(a.status) : STATUS_SORT_ORDER.length;
+        const rb = rank.has(b.status) ? rank.get(b.status) : STATUS_SORT_ORDER.length;
+        return ra !== rb ? ra - rb : a.status.localeCompare(b.status);
+      });
+    if (sortDir === 'desc') buckets.reverse();
+
+    const total = buckets.reduce((sum, b) => sum + b.count, 0);
+    // Walk the ranked buckets to find which slices cover [skip, skip+take).
+    const slices = [];
+    let skip = (page - 1) * pageSize;
+    let take = pageSize;
+    for (const bucket of buckets) {
+      if (take <= 0) break;
+      if (skip >= bucket.count) { skip -= bucket.count; continue; }
+      const sliceTake = Math.min(take, bucket.count - skip);
+      slices.push({ status: bucket.status, skip, take: sliceTake });
+      take -= sliceTake;
+      skip = 0;
+    }
+    const rows = await Promise.all(slices.map((s) => prisma.ticket.findMany({
+      where: { AND: [where, { status: s.status }] },
+      include: TICKET_INCLUDE,
+      orderBy: [{ id: 'desc' }],
+      skip: s.skip,
+      take: s.take,
+    })));
+    return { total, items: rows.flat() };
   }
 
   async _openProposalTicketIds(ticketIds) {

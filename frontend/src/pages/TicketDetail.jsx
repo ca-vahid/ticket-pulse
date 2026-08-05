@@ -28,7 +28,7 @@ import TicketTasksTab from '../components/tickets/TicketTasksTab';
 import TicketFamilyCard from '../components/tickets/TicketFamilyCard';
 import {
   ExternalChip, MirrorChip, OriginChip, PersonAvatar, PriorityDot, ProvenanceChip, SafeHtml, SlaTargetChip, StateChip, StatusPill,
-  TypePill, PRIORITY_LABELS, SOURCE_OPTIONS, formatBytes, isConversationEntry, pipelineRunLabel,
+  TypePill, PRIORITY_LABELS, SOURCE_OPTIONS, formatBytes, formatDayTime, isConversationEntry, pipelineRunLabel,
   pipelineTriggerLabel, ticketCategoryLabels, ticketSourceLabel, timeAgo,
 } from '../components/tickets/ticketUi';
 import { FRESHSERVICE_DOMAIN } from '../components/tech-detail/constants';
@@ -397,7 +397,7 @@ function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, photoFor,
               <Copy className="w-3 h-3" aria-hidden="true" />
             </button>
             <span className="text-xs text-slate-400 whitespace-nowrap" title={new Date(entry.occurredAt).toLocaleString()}>
-              {new Date(entry.occurredAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+              {formatDayTime(entry.occurredAt)}
               {' · '}{timeAgo(entry.occurredAt)}
             </span>
           </span>
@@ -1620,7 +1620,7 @@ export default function TicketDetail() {
                   )}
 
                   <p className="text-xs text-slate-400 mt-1">
-                Created {timeAgo(ticket.createdAt)}
+                Created <span title={new Date(ticket.createdAt).toLocaleString()}>{timeAgo(ticket.createdAt)}</span>
                     {ticket.requester?.name ? <> by <span className="text-slate-600 font-medium">{ticket.requester.name}</span></> : null}
                     {ticket.resolvedAt ? <> · resolved {timeAgo(ticket.resolvedAt)}</> : null}
                     {ticket.lastActivityAt ? <> · last activity {timeAgo(ticket.lastActivityAt)}</> : null}
@@ -2461,14 +2461,14 @@ export default function TicketDetail() {
                       {ticket.frDueBy && (
                         <div className="flex items-center gap-2 text-xs">
                           <span className="text-slate-500 font-medium">First response</span>
-                          <span className="ml-auto text-slate-400" title={new Date(ticket.frDueBy).toLocaleString()}>{new Date(ticket.frDueBy).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
+                          <span className="ml-auto text-slate-400" title={new Date(ticket.frDueBy).toLocaleString()}>{formatDayTime(ticket.frDueBy)}</span>
                           <SlaTargetChip target={ticket.frDueBy} metAt={ticket.firstPublicAgentReplyAt} status={ticket.status} kind="response" />
                         </div>
                       )}
                       {ticket.dueBy && (
                         <div className="flex items-center gap-2 text-xs">
                           <span className="text-slate-500 font-medium">Resolution</span>
-                          <span className="ml-auto text-slate-400" title={new Date(ticket.dueBy).toLocaleString()}>{new Date(ticket.dueBy).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
+                          <span className="ml-auto text-slate-400" title={new Date(ticket.dueBy).toLocaleString()}>{formatDayTime(ticket.dueBy)}</span>
                           <SlaTargetChip target={ticket.dueBy} metAt={ticket.resolvedAt || ticket.closedAt} status={ticket.status} kind="resolution" />
                         </div>
                       )}

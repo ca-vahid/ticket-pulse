@@ -346,6 +346,30 @@ export function timeAgo(value) {
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: date.getFullYear() === new Date().getFullYear() ? undefined : 'numeric' });
 }
 
+/**
+ * "Jul 27, 3:42 PM" — with the year spelled out ("Jul 27, 2025, 3:42 PM")
+ * whenever the date isn't in the current year (QA 08-04 #17a: a year-less
+ * "Jul 27" on an old ticket read as this year). Same rule timeAgo uses.
+ */
+export function formatDayTime(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  const opts = { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' };
+  if (date.getFullYear() !== new Date().getFullYear()) opts.year = 'numeric';
+  return date.toLocaleString(undefined, opts);
+}
+
+/** Date-only sibling of formatDayTime: "Jul 27", or "Jul 27, 2025" off-year. */
+export function formatDay(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  const opts = { month: 'short', day: 'numeric' };
+  if (date.getFullYear() !== new Date().getFullYear()) opts.year = 'numeric';
+  return date.toLocaleDateString(undefined, opts);
+}
+
 export function formatBytes(bytes) {
   const n = Number(bytes) || 0;
   if (n < 1024) return `${n} B`;

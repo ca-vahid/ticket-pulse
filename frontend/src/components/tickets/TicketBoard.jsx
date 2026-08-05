@@ -122,7 +122,7 @@ function BoardCard({ ticket, canDrag, dragging, onClick, onDoubleClick }) {
   );
 }
 
-function BoardColumn({ column, tickets, activeBucket, children }) {
+function BoardColumn({ column, tickets, activeBucket, paginated, emptyState, children }) {
   const { setNodeRef, isOver } = useDroppable({ id: column.key });
   const highlight = isOver && activeBucket && activeBucket !== column.key;
   return (
@@ -136,7 +136,16 @@ function BoardColumn({ column, tickets, activeBucket, children }) {
       <header className={`flex items-center gap-2 rounded-t-xl border-b px-3 py-2 ${column.headerBg}`}>
         <column.Icon className={`h-4 w-4 ${column.accent}`} aria-hidden="true" />
         <h3 className="text-sm font-bold text-slate-800">{column.label}</h3>
-        <span className="ml-auto rounded-full bg-white px-2 py-0.5 text-xs font-bold text-slate-500 shadow-subtle">{tickets.length}</span>
+        {/* Honest count: the board renders ONE page of the queue, so when more
+            pages exist the number says so instead of posing as a workspace
+            total (QA 08-04 #16). */}
+        <span
+          className="ml-auto rounded-full bg-white px-2 py-0.5 text-xs font-bold text-slate-500 shadow-subtle"
+          title={paginated ? `${tickets.length} ${column.label} ticket${tickets.length === 1 ? '' : 's'} on this page — more may match on other pages (use the pager below)` : undefined}
+        >
+          {tickets.length}
+          {paginated && <span className="font-medium text-slate-400"> on page</span>}
+        </span>
       </header>
       {/* Column body: guarantee 4–5 cards visible before scrolling (QA 07-30 —
           a viewport-only cap collapsed columns to ~2 cards on short screens),
@@ -144,14 +153,17 @@ function BoardColumn({ column, tickets, activeBucket, children }) {
       <div className="settings-scrollbar flex min-h-[26rem] max-h-[max(30rem,calc(100vh-300px))] flex-col gap-2 overflow-y-auto p-2">
         {children}
         {tickets.length === 0 && (
-          <p className="py-6 text-center text-xs text-slate-400">Nothing here — drag a card over.</p>
+          emptyState || <p className="py-6 text-center text-xs text-slate-400">Nothing here — drag a card over.</p>
         )}
       </div>
     </section>
   );
 }
 
-export default function TicketBoard({ tickets, ticketingOn, onCardClick, onCardDoubleClick, onStatusDrop }) {
+export default function TicketBoard({
+  tickets, ticketingOn, onCardClick, onCardDoubleClick, onStatusDrop,
+  closedExcluded = false, onShowClosed = null, paginated = false,
+}) {
   const [activeId, setActiveId] = useState(null);
   const sensors = useSensors(
     // 8px activation distance so plain clicks still peek/open the ticket.
@@ -198,7 +210,29 @@ export default function TicketBoard({ tickets, ticketingOn, onCardClick, onCardD
     >
       <div className="flex gap-3 overflow-x-auto pb-2" role="list" aria-label="Ticket board">
         {BOARD_COLUMNS.map((column) => (
-          <BoardColumn key={column.key} column={column} tickets={buckets[column.key]} activeBucket={activeBucket}>
+          <BoardColumn
+            key={column.key}
+            column={column}
+            tickets={buckets[column.key]}
+            activeBucket={activeBucket}
+            paginated={paginated}
+            // The board honors the queue's status scope (QA 08-04 #15/#16) —
+            // when that scope excludes Resolved/Closed, say so instead of
+            // presenting an empty Closed column as "no closed tickets".
+            emptyState={column.key === 'closed' && closedExcluded ? (
+              <div className="py-6 text-center">
+                <p className="text-xs text-slate-400">Closed hidden by current filters</p>
+                {onShowClosed && (
+                  <button
+                    onClick={onShowClosed}
+                    className="tp-focus-ring mt-2 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-600 shadow-subtle transition-colors hover:border-emerald-300 hover:text-emerald-700"
+                  >
+                    Show closed
+                  </button>
+                )}
+              </div>
+            ) : null}
+          >
             {buckets[column.key].map((ticket) => (
               <BoardCard
                 key={ticket.id}

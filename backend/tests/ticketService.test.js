@@ -2,7 +2,7 @@ import { jest } from '@jest/globals';
 
 const prismaMock = {
   workspace: { findUnique: jest.fn() },
-  ticket: { create: jest.fn(), findFirst: jest.fn(), findUnique: jest.fn(), update: jest.fn(), count: jest.fn(), findMany: jest.fn() },
+  ticket: { create: jest.fn(), findFirst: jest.fn(), findUnique: jest.fn(), update: jest.fn(), count: jest.fn(), findMany: jest.fn(), groupBy: jest.fn() },
   competencyCategory: { findFirst: jest.fn(), findMany: jest.fn() },
   group: { findFirst: jest.fn(), findMany: jest.fn() },
   technician: { findFirst: jest.fn(), findMany: jest.fn() },
@@ -375,6 +375,88 @@ describe('ticketService conversation + status + assignment', () => {
     }));
     expect(prismaMock.ticketAssignmentEpisode.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ technicianId: 7, startMethod: 'coordinator_assigned' }),
+    }));
+  });
+});
+
+// QA 08-04 #14: queue sorting — dueBy joins the whitelist (nulls last) and
+// sort=status orders by LIFECYCLE rank (Open first asc), not alphabetically.
+// Status pages are assembled bucket-by-bucket (groupBy counts → per-status
+// findMany slices), so these tests pin the slice math across pages.
+describe('ticketService.listTickets sorting', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prismaMock.workspace.findUnique.mockResolvedValue({ id: 1, internalDomains: [] });
+    prismaMock.ticket.count.mockResolvedValue(0);
+    prismaMock.ticket.findMany.mockResolvedValue([]);
+    prismaMock.$queryRaw.mockResolvedValue([]);
+  });
+
+  test('sort=dueBy orders by due date with undated tickets last', async () => {
+    await ticketService.listTickets(1, { sort: 'dueBy', dir: 'asc' });
+
+    expect(prismaMock.ticket.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      orderBy: [{ dueBy: { sort: 'asc', nulls: 'last' } }, { id: 'desc' }],
+    }));
+  });
+
+  test('unknown sort values still fall back to createdAt', async () => {
+    await ticketService.listTickets(1, { sort: 'evil;drop', dir: 'asc' });
+
+    expect(prismaMock.ticket.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      orderBy: [{ createdAt: 'asc' }, { id: 'desc' }],
+    }));
+  });
+
+  test('sort=status asc assembles the page Open-first (lifecycle rank, not alphabetical)', async () => {
+    // Alphabetically Closed < Open < Pending — the ranked page must still
+    // start with Open even though groupBy returns Closed first.
+    prismaMock.ticket.groupBy.mockResolvedValue([
+      { status: 'Closed', _count: { _all: 2 } },
+      { status: 'Open', _count: { _all: 1 } },
+      { status: 'Pending', _count: { _all: 30 } },
+    ]);
+
+    const result = await ticketService.listTickets(1, { sort: 'status', dir: 'asc', pageSize: 25 });
+
+    expect(result.total).toBe(33);
+    const calls = prismaMock.ticket.findMany.mock.calls.map(([args]) => args);
+    expect(calls).toHaveLength(2); // Closed never reached on page 1
+    expect(calls[0]).toEqual(expect.objectContaining({
+      where: { AND: [expect.any(Object), { status: 'Open' }] },
+      orderBy: [{ id: 'desc' }],
+      skip: 0,
+      take: 1,
+    }));
+    expect(calls[1]).toEqual(expect.objectContaining({
+      where: { AND: [expect.any(Object), { status: 'Pending' }] },
+      skip: 0,
+      take: 24,
+    }));
+  });
+
+  test('sort=status desc page 2 continues the reversed rank exactly where page 1 ended', async () => {
+    prismaMock.ticket.groupBy.mockResolvedValue([
+      { status: 'Closed', _count: { _all: 2 } },
+      { status: 'Open', _count: { _all: 1 } },
+      { status: 'Pending', _count: { _all: 30 } },
+    ]);
+
+    // desc rank: Closed(2), Pending(30), Open(1); page 2 skips the first 25.
+    const result = await ticketService.listTickets(1, { sort: 'status', dir: 'desc', page: 2, pageSize: 25 });
+
+    expect(result.total).toBe(33);
+    const calls = prismaMock.ticket.findMany.mock.calls.map(([args]) => args);
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toEqual(expect.objectContaining({
+      where: { AND: [expect.any(Object), { status: 'Pending' }] },
+      skip: 23, // 25 - Closed's 2
+      take: 7,  // Pending's remaining rows
+    }));
+    expect(calls[1]).toEqual(expect.objectContaining({
+      where: { AND: [expect.any(Object), { status: 'Open' }] },
+      skip: 0,
+      take: 1,
     }));
   });
 });
