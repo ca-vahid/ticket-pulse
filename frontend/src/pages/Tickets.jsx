@@ -1228,7 +1228,7 @@ export default function Tickets() {
                       type="search"
                       value={search}
                       onChange={(e) => setSearch(e.target.value)}
-                      placeholder="Search subject, requester, TP-1042 or #12345…"
+                      placeholder="Search subject, requester, TP-1042 or #12345… · Ctrl-K for everything"
                       aria-label="Search tickets"
                       className="tp-focus-ring w-full pl-9 pr-8 min-h-[44px] py-2 text-sm bg-white border border-input rounded-lg placeholder:text-slate-400"
                     />

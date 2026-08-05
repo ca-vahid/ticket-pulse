@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.1.0-preview';
+export const APP_VERSION = '3.1.1-preview';
 
 export const changelog = [
+  {
+    version: '3.1.1-preview',
+    date: 'August 5, 2026',
+    entries: [
+      { type: 'new', html: '<strong>🔍 Search everything with Ctrl-K</strong> — the command palette now searches across five entity types with FreshService-style pills: <em>Tickets · Tasks · Agents · Requesters · Departments</em>. Tasks jump straight to their ticket’s Tasks tab, agents open their page, requesters filter the queue. Ticket search also matches requester <em>email</em> now, everywhere. (QA 07-31)' },
+    ],
+  },
   {
     version: '3.1.0-preview',
     date: 'August 5, 2026',

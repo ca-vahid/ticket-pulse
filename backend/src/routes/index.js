@@ -24,6 +24,7 @@ import summitRoutes, { summitPublicRouter } from './summit.routes.js';
 import { publicTicketStatusPublicRouter } from './publicTicketStatus.routes.js';
 import agentRoutes from './agent.routes.js';
 import ticketsRoutes, { ticketApprovalPublicRouter } from './tickets.routes.js';
+import searchRoutes from './search.routes.js';
 import apiV1Routes from './apiV1.routes.js';
 import backupRoutes from './backup.routes.js';
 import { requireWorkspace } from '../middleware/workspace.js';
@@ -81,6 +82,10 @@ router.use('/agent', agentRoutes);
 // agent-role users (no workspace_access rows) are first-class here — the router
 // applies requireWorkspace + its own access resolution internally.
 router.use('/tickets', ticketsRoutes);
+// Multi-entity search (command palette): same access model as /tickets —
+// agent-role users (no workspace_access rows) search too, so the router
+// applies requireWorkspace + its own membership resolution internally.
+router.use('/search', searchRoutes);
 // Settings has both global app configuration and a few workspace-specific
 // helpers. Mount it before global workspace enforcement so one-time global
 // settings are not blocked by a stale selected workspace.
