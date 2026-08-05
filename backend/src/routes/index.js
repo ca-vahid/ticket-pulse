@@ -24,6 +24,7 @@ import summitRoutes, { summitPublicRouter } from './summit.routes.js';
 import { publicTicketStatusPublicRouter } from './publicTicketStatus.routes.js';
 import agentRoutes from './agent.routes.js';
 import ticketsRoutes, { ticketApprovalPublicRouter } from './tickets.routes.js';
+import statusesRoutes from './statuses.routes.js';
 import searchRoutes from './search.routes.js';
 import apiV1Routes from './apiV1.routes.js';
 import backupRoutes from './backup.routes.js';
@@ -98,6 +99,8 @@ router.use(requireWorkspaceAccess);
 
 // Mount route modules (individual route files no longer need requireAuth)
 router.use('/dashboard', dashboardRoutes);
+// Ticket-status registry (Phase 8a): Settings CRUD, admin-gated in the router.
+router.use('/ticket-statuses', statusesRoutes);
 router.use('/sync', syncRoutes);
 router.use('/sse', sseRoutes);
 router.use('/photos', photosRoutes);

@@ -5,6 +5,7 @@ import { ValidationError, NotFoundError, ServiceBusyError } from '../utils/error
 import { TICKET_ORIGIN, TICKET_SOURCE, TICKET_SOURCE_LABELS, APP_NATIVE_TRIGGER_SOURCE, AGENT_SELECTABLE_SOURCES, ticketDisplayRef } from '../utils/ticketOrigin.js';
 import noiseRuleService from './noiseRuleService.js';
 import ticketTypeService from './ticketTypeService.js';
+import statusService from './statusService.js';
 import ticketActivityRepository from './ticketActivityRepository.js';
 import ticketThreadRepository from './ticketThreadRepository.js';
 import ticketLifecycleNotificationService from './ticketLifecycleNotificationService.js';
@@ -15,6 +16,11 @@ import attachmentService from './attachmentService.js';
 import watcherNotificationService from './watcherNotificationService.js';
 import { sseManager } from '../routes/sse.routes.js';
 
+// The 4 canonical statuses. Since Phase 8a these are the BASE statuses of the
+// per-workspace registry (statusService) — TP-born validation goes through
+// assertValidStatus/baseStatusOf so workspaces can add custom labels. This
+// list remains the allowlist for FS write-back (updateFsTicket): FreshService
+// only understands the canonical set until the 8c mapping work.
 export const NATIVE_TICKET_STATUSES = ['Open', 'Pending', 'Resolved', 'Closed'];
 const TERMINAL_STATUSES = ['Resolved', 'Closed'];
 
@@ -101,7 +107,10 @@ const createTicketSchema = z.object({
   // (per-workspace vocabulary — 'Case' for Accounting, 'Incident'/'Service
   // Request'/'Major Incident' for IT…). Omitted -> workspace default type.
   ticketType: z.string().trim().min(1).max(40).optional().nullable(),
-  status: z.enum(['Open', 'Pending']).default('Open'),
+  // Validated against the workspace's status registry in createTicket (Phase
+  // 8a): any ACTIVE status whose BASE is Open or Pending — new tickets can't
+  // be born terminal, same rule the old z.enum(['Open','Pending']) enforced.
+  status: z.string().trim().min(1).max(50).default('Open'),
   requesterId: z.number().int().positive().optional().nullable(),
   requesterEmail: z.string().trim().email().optional().nullable(),
   requesterName: z.string().trim().min(1).max(255).optional().nullable(),
@@ -260,6 +269,19 @@ class TicketService {
       );
     }
     return ticket;
+  }
+
+  /**
+   * Create-path status gate (Phase 8a): any ACTIVE workspace status whose
+   * BASE is Open or Pending. Returns the canonical-cased name.
+   */
+  async _assertCreatableStatus(workspaceId, status) {
+    const normalized = await statusService.assertValidStatus(workspaceId, status);
+    const base = await statusService.baseStatusOf(workspaceId, normalized);
+    if (base !== 'Open' && base !== 'Pending') {
+      throw new ValidationError('New tickets must start in an Open- or Pending-based status');
+    }
+    return normalized;
   }
 
   async _nextNativeNumber() {
@@ -1450,7 +1472,7 @@ class TicketService {
 
   /** Reference data for the ticket composer / filters. */
   async getMeta(workspaceId) {
-    const [workspace, groups, technicians, categories, sourceRows, approvalCategories, tags, categoryGroupLinks, impactUsage] = await Promise.all([
+    const [workspace, groups, technicians, categories, sourceRows, approvalCategories, tags, categoryGroupLinks, impactUsage, statusDefs] = await Promise.all([
       this._getWorkspace(workspaceId),
       prisma.group.findMany({
         where: { workspaceId, isActive: true },
@@ -1487,6 +1509,7 @@ class TicketService {
         select: { categoryId: true, groupId: true },
       }),
       prisma.ticket.count({ where: { workspaceId, OR: [{ impact: { not: null } }, { urgency: { not: null } }] } }),
+      statusService.listStatuses(workspaceId),
     ]);
 
     const tops = categories.filter((c) => c.parentId === null);
@@ -1507,7 +1530,17 @@ class TicketService {
 
     return {
       nativeTicketingEnabled: workspace.nativeTicketingEnabled === true,
-      statuses: NATIVE_TICKET_STATUSES,
+      // Phase 8a: per-workspace status registry (active only). Shape changed
+      // from string[] to rich objects — audited 2026-08-05: NOTHING consumed
+      // meta.statuses (frontend constant sets are still hardcoded until 8b),
+      // so the richer shape ships without a compat alias.
+      statuses: statusDefs.map((s) => ({
+        name: s.name,
+        baseStatus: s.baseStatus,
+        color: s.color || null,
+        sortOrder: s.sortOrder,
+        isSystem: s.isSystem === true,
+      })),
       priorities: [
         { value: 1, label: 'Low' },
         { value: 2, label: 'Medium' },
@@ -1718,6 +1751,7 @@ class TicketService {
     const parsed = createTicketSchema.safeParse(input);
     if (!parsed.success) throw new ValidationError(zodMessage(parsed.error));
     const data = parsed.data;
+    data.status = await this._assertCreatableStatus(workspaceId, data.status);
     await this._validateTaxonomy(workspaceId, data.internalCategoryId, data.internalSubcategoryId);
     await this._validateGroup(workspaceId, data.groupId ?? null);
     if (data.assignedTechId) await this._validateTechnician(workspaceId, data.assignedTechId);
@@ -1735,6 +1769,10 @@ class TicketService {
     const parsed = createTicketSchema.safeParse(input);
     if (!parsed.success) throw new ValidationError(zodMessage(parsed.error));
     const data = parsed.data;
+
+    // Status against the workspace registry (Phase 8a): active, Open/Pending
+    // base only — a ticket can't be born Resolved (same rule as the old enum).
+    data.status = await this._assertCreatableStatus(workspaceId, data.status);
 
     // Resolve type against the workspace's registry: explicit value must be
     // a known (or aliased) type; omitted falls back to the workspace default.
@@ -2353,24 +2391,32 @@ class TicketService {
   }
 
   async changeStatus(ticketId, workspaceId, status, actor) {
-    if (!NATIVE_TICKET_STATUSES.includes(status)) {
-      throw new ValidationError(`Status must be one of: ${NATIVE_TICKET_STATUSES.join(', ')}`);
-    }
+    // Per-workspace registry validation (Phase 8a) — replaces the hardcoded
+    // NATIVE_TICKET_STATUSES allowlist. Returns the canonical-cased label.
+    status = await statusService.assertValidStatus(workspaceId, status);
     const ticket = await this._requireNativeTicket(ticketId, workspaceId);
     if (ticket.status === status) {
       return { ...ticket, displayRef: ticketDisplayRef(ticket), changed: false };
     }
 
+    // Lifecycle logic keys on the BASE status, never the label, so custom
+    // statuses behave like the base they map to (a Pending-base "Waiting on
+    // vendor" pauses nothing terminal; a Resolved-base "Fixed" stamps
+    // resolvedAt). Unknown legacy labels ('Deleted', pre-registry strings)
+    // resolve to null base = non-terminal, matching the old literal checks.
+    const oldBase = await statusService.baseStatusOf(workspaceId, ticket.status);
+    const newBase = await statusService.baseStatusOf(workspaceId, status);
+
     const now = new Date();
     const patch = { status, mirrorState: 'pending' };
-    const wasTerminal = TERMINAL_STATUSES.includes(ticket.status);
-    const isTerminal = TERMINAL_STATUSES.includes(status);
+    const wasTerminal = TERMINAL_STATUSES.includes(oldBase);
+    const isTerminal = TERMINAL_STATUSES.includes(newBase);
 
-    if (status === 'Resolved') {
+    if (newBase === 'Resolved') {
       patch.resolvedAt = now;
       patch.resolutionTimeSeconds = ticket.resolutionTimeSeconds
         ?? Math.max(0, Math.round((now.getTime() - new Date(ticket.createdAt).getTime()) / 1000));
-    } else if (status === 'Closed') {
+    } else if (newBase === 'Closed') {
       patch.closedAt = now;
       if (!ticket.resolvedAt) {
         patch.resolvedAt = now;

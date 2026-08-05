@@ -154,6 +154,7 @@ model Workspace {
   webhookSubscriptions              WebhookSubscription[]
   ticketEmbeddings                  TicketEmbedding[]
   ticketTypeDefinitions             TicketTypeDefinition[]
+  ticketStatusDefinitions           TicketStatusDefinition[]
   analyticsReports                  AnalyticsReport[]
 
   @@map("workspaces")
@@ -754,6 +755,31 @@ model TicketTypeDefinition {
   @@unique([workspaceId, name])
   @@index([workspaceId, isActive])
   @@map("ticket_type_definitions")
+}
+
+// Per-workspace ticket-status vocabulary (QA 08-04 #12). Every status maps to
+// one of the 4 canonical BASE statuses (Open/Pending/Resolved/Closed) so
+// lifecycle logic — SLA clocks, terminal detection, assignment episodes, FS
+// write-back (8c) — keys on baseStatus, never the label. The 4 canonical rows
+// are seeded per workspace as system rows: rename/recolor allowed, base
+// fixed, deactivate blocked. Custom rows retire (isActive=false), never
+// delete — historical tickets keep the label, resolvable via inactive lookup.
+model TicketStatusDefinition {
+  id          Int       @id @default(autoincrement())
+  workspaceId Int       @map("workspace_id")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name        String    @db.VarChar(50) // canonical value stored on tickets.status
+  baseStatus  String    @map("base_status") @db.VarChar(10) // Open|Pending|Resolved|Closed (DB CHECK)
+  color       String?   @db.VarChar(20) // pill accent token (TYPE_COLOR_TONES keys)
+  sortOrder   Int       @default(0) @map("sort_order")
+  isSystem    Boolean   @default(false) @map("is_system")
+  isActive    Boolean   @default(true) @map("is_active")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId, isActive])
+  @@map("ticket_status_definitions")
 }
 
 // Agent quick-action bundles: one click applies status/priority/assignment/

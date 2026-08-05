@@ -415,6 +415,13 @@ export const settingsAPI = {
   updateTicketType: (id, data) => api.patch(`/settings/ticket-types/${id}`, data),
   retireTicketType: (id) => api.delete(`/settings/ticket-types/${id}`),
   syncTicketTypes: () => api.post('/settings/ticket-types/sync'),
+  // Ticket-status registry (per-workspace status vocabulary, Phase 8a).
+  // Admin-only; list includes retired rows for the Settings manager.
+  getTicketStatuses: () => api.get('/ticket-statuses'),
+  createTicketStatus: (data) => api.post('/ticket-statuses', data),
+  updateTicketStatus: (id, data) => api.patch(`/ticket-statuses/${id}`, data),
+  deactivateTicketStatus: (id) => api.post(`/ticket-statuses/${id}/deactivate`),
+  reactivateTicketStatus: (id) => api.post(`/ticket-statuses/${id}/reactivate`),
   getMacros: () => api.get('/settings/macros'),
   createMacro: (data) => api.post('/settings/macros', data),
   updateMacro: (id, data) => api.patch(`/settings/macros/${id}`, data),

@@ -18,6 +18,16 @@ const prismaMock = {
       { id: 2, workspaceId: 1, name: 'Service Request', aliases: ['service request', 'sr'], isActive: true, aiAssignable: true, isDefault: false, fsTypeValue: 'Service Request', sortOrder: 1 },
     ]),
   },
+  // Per-workspace status registry (Phase 8a): canonical 4 by default;
+  // custom-status tests override + invalidate the statusService cache.
+  ticketStatusDefinition: {
+    findMany: jest.fn().mockResolvedValue([
+      { id: 1, workspaceId: 1, name: 'Open', baseStatus: 'Open', color: 'blue', sortOrder: 0, isSystem: true, isActive: true },
+      { id: 2, workspaceId: 1, name: 'Pending', baseStatus: 'Pending', color: 'amber', sortOrder: 1, isSystem: true, isActive: true },
+      { id: 3, workspaceId: 1, name: 'Resolved', baseStatus: 'Resolved', color: 'emerald', sortOrder: 2, isSystem: true, isActive: true },
+      { id: 4, workspaceId: 1, name: 'Closed', baseStatus: 'Closed', color: 'slate', sortOrder: 3, isSystem: true, isActive: true },
+    ]),
+  },
   slaPolicy: { findFirst: jest.fn() },
   assignmentPipelineRun: { findFirst: jest.fn() },
   $queryRaw: jest.fn(),
@@ -68,6 +78,7 @@ jest.unstable_mockModule('../src/services/mirrorService.js', () => ({
 }));
 
 const { default: ticketService } = await import('../src/services/ticketService.js');
+const { invalidateStatusCache } = await import('../src/services/statusService.js');
 const { ValidationError } = await import('../src/utils/errors.js');
 
 const actor = { email: 'coord@example.com', name: 'Cora Coordinator', role: 'viewer', technicianId: null, kind: 'member' };
@@ -716,5 +727,151 @@ describe('ticketService.buildListWhere q matching', () => {
       { freshserviceTicketId: 1042n },
       { requester: { is: { email: { contains: '#1042', mode: 'insensitive' } } } },
     ]));
+  });
+});
+
+describe('ticketService custom workspace statuses (Phase 8a)', () => {
+  const CUSTOM_ROWS = [
+    { id: 1, workspaceId: 1, name: 'Open', baseStatus: 'Open', sortOrder: 0, isSystem: true, isActive: true },
+    { id: 2, workspaceId: 1, name: 'Pending', baseStatus: 'Pending', sortOrder: 1, isSystem: true, isActive: true },
+    { id: 3, workspaceId: 1, name: 'Resolved', baseStatus: 'Resolved', sortOrder: 2, isSystem: true, isActive: true },
+    { id: 4, workspaceId: 1, name: 'Closed', baseStatus: 'Closed', sortOrder: 3, isSystem: true, isActive: true },
+    { id: 5, workspaceId: 1, name: 'Waiting on vendor', baseStatus: 'Pending', sortOrder: 4, isSystem: false, isActive: true },
+    { id: 6, workspaceId: 1, name: 'Fixed', baseStatus: 'Resolved', sortOrder: 5, isSystem: false, isActive: true },
+  ];
+
+  const nativeTicket = {
+    id: 501,
+    workspaceId: 1,
+    origin: 'ticketpulse',
+    nativeNumber: 1042,
+    freshserviceTicketId: null,
+    subject: 'Laptop will not boot',
+    status: 'Open',
+    priority: 3,
+    createdAt: new Date('2026-07-01T10:00:00Z'),
+    assignedTechId: 7,
+    resolutionTimeSeconds: null,
+    resolvedAt: null,
+    requester: { id: 40, name: 'Rita Requester', email: 'rita@example.com' },
+    assignedTech: { id: 7, name: 'Terry Tech' },
+    internalCategory: null,
+    internalSubcategory: null,
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    invalidateStatusCache();
+    prismaMock.ticketStatusDefinition.findMany.mockResolvedValue(CUSTOM_ROWS);
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...nativeTicket });
+    prismaMock.ticket.update.mockImplementation(({ data }) => Promise.resolve({
+      ...nativeTicket, ...data, assignedTech: nativeTicket.assignedTech,
+    }));
+    prismaMock.ticketAssignmentEpisode.create.mockResolvedValue({ id: 2 });
+    prismaMock.ticketAssignmentEpisode.updateMany.mockResolvedValue({ count: 1 });
+    ticketActivityRepositoryMock.create.mockResolvedValue({});
+    lifecycleMock.emitTicketLifecycleNotifications.mockResolvedValue({ status: 'completed' });
+    mirrorServiceMock.enqueueFieldSync.mockResolvedValue({ id: 2 });
+  });
+
+  test('changeStatus accepts a custom Pending-base status: no resolution stamps, episode stays open', async () => {
+    const result = await ticketService.changeStatus(501, 1, 'Waiting on vendor', actor);
+
+    expect(prismaMock.ticket.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: { status: 'Waiting on vendor', mirrorState: 'pending' },
+    }));
+    // Not terminal: the active assignment episode is untouched.
+    expect(prismaMock.ticketAssignmentEpisode.updateMany).not.toHaveBeenCalled();
+    expect(result.changed).toBe(true);
+  });
+
+  test('changeStatus normalizes casing to the stored label', async () => {
+    await ticketService.changeStatus(501, 1, 'waiting ON vendor', actor);
+    expect(prismaMock.ticket.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'Waiting on vendor' }),
+    }));
+  });
+
+  test('a custom Resolved-base status ("Fixed") stamps resolution fields and closes the episode', async () => {
+    await ticketService.changeStatus(501, 1, 'Fixed', actor);
+
+    expect(prismaMock.ticket.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        status: 'Fixed',
+        resolvedAt: expect.any(Date),
+        resolutionTimeSeconds: expect.any(Number),
+      }),
+    }));
+    expect(prismaMock.ticketAssignmentEpisode.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ endMethod: 'closed' }),
+    }));
+  });
+
+  test('reopening FROM a custom Resolved-base status clears resolution fields and restarts the episode', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue({
+      ...nativeTicket, status: 'Fixed', resolvedAt: new Date(), resolutionTimeSeconds: 3600,
+    });
+
+    await ticketService.changeStatus(501, 1, 'Open', actor);
+
+    expect(prismaMock.ticket.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'Open', resolvedAt: null, closedAt: null, resolutionTimeSeconds: null }),
+    }));
+    expect(prismaMock.ticketAssignmentEpisode.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ technicianId: 7, startedAt: expect.any(Date) }),
+    }));
+  });
+
+  test('changeStatus rejects labels outside the workspace registry, naming the valid set', async () => {
+    await expect(ticketService.changeStatus(501, 1, 'Bogus', actor)).rejects.toThrow(
+      /Status must be one of: Open, Pending, Resolved, Closed, Waiting on vendor, Fixed/,
+    );
+  });
+
+  test('createTicket accepts a custom Pending-base status but refuses terminal-base ones', async () => {
+    prismaMock.workspace.findUnique.mockResolvedValue({ id: 1, name: 'IT', isActive: true, nativeTicketingEnabled: true });
+    requesterRepositoryMock.findByEmail.mockResolvedValue({ id: 40, name: 'Rita', email: 'rita@example.com', department: null, freshserviceId: null });
+    noiseRuleServiceMock.evaluate.mockResolvedValue({ isNoise: false, ruleId: null });
+    prismaMock.$queryRaw.mockResolvedValue([{ nextval: 1043 }]);
+    prismaMock.ticket.create.mockImplementation(({ data }) => Promise.resolve({
+      id: 502, ...data, requester: { id: 40, name: 'Rita', email: 'rita@example.com' }, assignedTech: null, internalCategory: null, internalSubcategory: null,
+    }));
+
+    await expect(ticketService.createTicket(1, {
+      subject: 'Born done?', requesterEmail: 'rita@example.com', status: 'Fixed',
+    }, actor)).rejects.toThrow(/Open- or Pending-based/);
+
+    await ticketService.createTicket(1, {
+      subject: 'Waiting from the start', requesterEmail: 'rita@example.com', status: 'waiting on vendor',
+    }, actor);
+    expect(prismaMock.ticket.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'Waiting on vendor' }),
+    }));
+  });
+
+  test('getMeta serves the workspace status registry as rich objects (active only)', async () => {
+    prismaMock.workspace.findUnique.mockResolvedValue({ id: 1, name: 'IT', isActive: true, nativeTicketingEnabled: true });
+    prismaMock.group.findMany.mockResolvedValue([]);
+    prismaMock.technician.findMany.mockResolvedValue([]);
+    prismaMock.competencyCategory.findMany.mockResolvedValue([]);
+    prismaMock.ticket.groupBy.mockResolvedValue([]);
+    prismaMock.ticket.count.mockResolvedValue(0);
+    const approvalCategoryMock = { findMany: jest.fn().mockResolvedValue([]) };
+    const ticketTagMock = { findMany: jest.fn().mockResolvedValue([]) };
+    const categoryGroupLinkMock = { findMany: jest.fn().mockResolvedValue([]) };
+    prismaMock.approvalCategory = approvalCategoryMock;
+    prismaMock.ticketTag = ticketTagMock;
+    prismaMock.categoryGroupLink = categoryGroupLinkMock;
+
+    const meta = await ticketService.getMeta(1);
+
+    expect(meta.statuses).toEqual([
+      { name: 'Open', baseStatus: 'Open', color: null, sortOrder: 0, isSystem: true },
+      { name: 'Pending', baseStatus: 'Pending', color: null, sortOrder: 1, isSystem: true },
+      { name: 'Resolved', baseStatus: 'Resolved', color: null, sortOrder: 2, isSystem: true },
+      { name: 'Closed', baseStatus: 'Closed', color: null, sortOrder: 3, isSystem: true },
+      { name: 'Waiting on vendor', baseStatus: 'Pending', color: null, sortOrder: 4, isSystem: false },
+      { name: 'Fixed', baseStatus: 'Resolved', color: null, sortOrder: 5, isSystem: false },
+    ]);
   });
 });

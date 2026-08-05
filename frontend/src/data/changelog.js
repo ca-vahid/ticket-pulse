@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.1.1-preview';
+export const APP_VERSION = '3.1.2-preview';
 
 export const changelog = [
+  {
+    version: '3.1.2-preview',
+    date: 'August 5, 2026',
+    entries: [
+      { type: 'new', html: '<strong>🏷️ Custom ticket statuses (foundation)</strong> — Settings → Ticket Ops gains a “Ticket statuses” manager: define per-workspace statuses like <em>Needs Rework</em> or <em>Follow-Up Required</em>, each mapped to a base status (Open / Pending / Resolved / Closed) with its own color and order. Custom statuses can be set on Ticket Pulse-born tickets (status changes, macros, workflow actions) and behave correctly for SLA clocks and resolution tracking via their base. Queue filters, board columns, and workflow triggers light up in the next two updates. (QA 07-31 — major feature, part 1 of 3)' },
+    ],
+  },
   {
     version: '3.1.1-preview',
     date: 'August 5, 2026',
