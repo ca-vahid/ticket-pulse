@@ -1191,7 +1191,7 @@ class TicketService {
         this._refreshFsBornThread(ticket).catch(() => null);
       }
     }
-    const [thread, activities, approvals, attachments] = await Promise.all([
+    const [thread, activities, approvals, attachments, pinnedCards] = await Promise.all([
       ticketThreadRepository.listForTicket(ticket.id, { limit: 300 }),
       prisma.ticketActivity.findMany({
         where: { ticketId: ticket.id },
@@ -1218,6 +1218,13 @@ class TicketService {
           threadEntryId: true, source: true, uploadedBy: true, createdAt: true,
         },
       }),
+      // Active pinned workflow cards (field cards) — dismissed ones stay in the
+      // table for re-run bookkeeping but never ship to the client.
+      prisma.ticketPinnedCard.findMany({
+        where: { ticketId: ticket.id, dismissedAt: null },
+        orderBy: { id: 'asc' },
+        select: { id: true, kind: true, payload: true, createdAt: true },
+      }),
     ]);
 
     const incomingByTicket = await this._lastPublicEntryIncoming([ticket.id]);
@@ -1238,10 +1245,48 @@ class TicketService {
       activities,
       approvals,
       attachments,
+      pinnedCards,
       latestPipelineRun: ticket.pipelineRuns?.[0] || null,
       stateChip: deriveStateChip(ticket, incomingByTicket.get(ticket.id) === true, await statusService.baseStatusSets(workspaceId)),
       lastActivityAt: ticket.lastRealActivityAt || ticket.freshserviceUpdatedAt || ticket.updatedAt,
     };
+  }
+
+  /**
+   * Dismiss a pinned workflow card (any agent, ticket-level). Idempotent — a
+   * second dismiss is a no-op success. The row is KEPT (dismissed_at stamped)
+   * so the workflow's next re-run can revive it via its upsert; the dismissal
+   * is audited on the ticket activity trail.
+   */
+  async dismissPinnedCard(ticketId, workspaceId, cardId, actor = null) {
+    const ticket = await prisma.ticket.findFirst({
+      where: { id: ticketId, workspaceId },
+      select: { id: true, workspaceId: true, origin: true, status: true, assignedTechId: true, nativeNumber: true, freshserviceTicketId: true },
+    });
+    if (!ticket) throw new NotFoundError(`Ticket ${ticketId} not found in this workspace`);
+
+    const id = Number(cardId);
+    if (!Number.isInteger(id) || id <= 0) throw new ValidationError('Invalid pinned card id');
+    const card = await prisma.ticketPinnedCard.findFirst({ where: { id, ticketId: ticket.id } });
+    if (!card) throw new NotFoundError('Pinned card not found on this ticket');
+    if (card.dismissedAt) {
+      return { dismissed: true, alreadyDismissed: true, cardId: card.id };
+    }
+
+    await prisma.ticketPinnedCard.update({
+      where: { id: card.id },
+      data: { dismissedAt: new Date(), dismissedBy: actor?.email || null },
+    });
+    await ticketActivityRepository.create({
+      ticketId: ticket.id,
+      activityType: 'pinned_card_dismissed',
+      performedBy: actor?.name || actor?.email || 'Ticket Pulse',
+      performedAt: new Date(),
+      details: { cardId: card.id, kind: card.kind, workflowId: card.workflowId || null },
+    }).catch(() => null);
+
+    this._broadcast(workspaceId, 'pinned-card', ticket, { cardId: card.id });
+    return { dismissed: true, cardId: card.id };
   }
 
   /**

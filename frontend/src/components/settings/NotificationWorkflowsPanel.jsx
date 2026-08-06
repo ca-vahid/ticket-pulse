@@ -47,6 +47,7 @@ import {
   Save,
   Search,
   Send,
+  StickyNote,
   ToggleLeft,
   ToggleRight,
   Trash2,
@@ -62,6 +63,7 @@ import {
 import { AnimatePresence, motion } from 'motion/react';
 import { notificationWorkflowAPI, ticketsAPI } from '../../services/api';
 import ConditionGroupBuilder from './ConditionGroupBuilder';
+import FieldCardNote, { FIELD_CARD_ACCENTS } from '../tickets/FieldCardNote';
 import WorkflowIndex from './WorkflowIndex';
 
 const WORKFLOW_EDITOR_LAYOUT_ID = 'ticket-pulse-notification-workflow-editor-v3';
@@ -200,6 +202,15 @@ const WORKFLOW_NODE_REGISTRY = {
     outputHandles: ['default'],
     addable: true,
   },
+  add_note: {
+    label: 'Add note',
+    icon: StickyNote,
+    color: '#8b5cf6',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['default'],
+    addable: true,
+  },
   branch: {
     label: 'Branch',
     icon: Waypoints,
@@ -321,6 +332,7 @@ const NODE_PALETTE_GROUPS = [
     label: 'Ticket actions',
     hints: {
       update_ticket: 'Assign / set status, priority, category or group',
+      add_note: 'Post an internal note or interactive field card to the conversation',
       create_child_ticket: 'Spawn a linked follow-up ticket',
       request_approval: 'Route an approval to a category of managers',
       propose_reply: 'Stage the draft on the ticket for human approval',
@@ -1750,6 +1762,21 @@ function defaultNodeData(type, triggerType = 'ticket.created') {
       note: 'Requested automatically because: {{ event.type }} on {{ ticket.subject }}',
     };
   }
+  if (type === 'add_note') {
+    // Data keys mirror the Phase-1 add_note engine contract: mode text
+    // (Liquid HTML body, sanitized server-side) or field_card (structured
+    // fields snapshot); placement note | pinned | both.
+    return {
+      label: 'Add note',
+      mode: 'field_card',
+      title: 'Ticket details',
+      intro: '',
+      body: '<p>Ticket <strong>#{{ ticket.freshserviceTicketId }}</strong>: {{ ticket.subject }}</p>',
+      fields: [],
+      accent: 'violet',
+      placement: 'note',
+    };
+  }
   if (type === 'propose_reply') {
     return { label: 'Stage for approval' };
   }
@@ -2003,9 +2030,9 @@ export function validateWorkflowDefinitionClient(definition, triggerType = null)
   }
   // Mirrors the server rule: any ACTION node qualifies — a propose_reply-only
   // workflow (e.g. the AI first-reply template) is valid without a send node.
-  const CLIENT_ACTION_NODE_TYPES = ['send_email', 'update_ticket', 'call_webhook', 'create_child_ticket', 'request_approval', 'propose_reply'];
+  const CLIENT_ACTION_NODE_TYPES = ['send_email', 'update_ticket', 'add_note', 'call_webhook', 'create_child_ticket', 'request_approval', 'propose_reply'];
   if (!nodes.some((node) => CLIENT_ACTION_NODE_TYPES.includes(node.type))) {
-    errors.push('Workflow must include at least one action node (send email, update ticket, webhook, child ticket, approval, or stage-for-approval)');
+    errors.push('Workflow must include at least one action node (send email, update ticket, add note, webhook, child ticket, approval, or stage-for-approval)');
   }
 
   for (const edge of edges) {
@@ -2093,6 +2120,258 @@ function formatJson(value) {
   }
 }
 
+// ---- Add note node editor (custom-fields activation Phase 1) ----
+
+const ADD_NOTE_ACCENT_SWATCHES = {
+  violet: 'bg-violet-500',
+  blue: 'bg-blue-500',
+  emerald: 'bg-emerald-500',
+  amber: 'bg-amber-500',
+  slate: 'bg-slate-400',
+};
+
+const ADD_NOTE_MAX_FIELDS = 12;
+
+/** Representative sample value per definition type for the live preview. */
+function addNoteSampleValue(definition) {
+  if (definition.type === 'boolean') return true;
+  if (definition.type === 'number') return 42;
+  if (definition.type === 'date') return new Date().toISOString();
+  if (definition.type === 'select') return definition.options?.[0] || 'Option A';
+  if (/link|url/i.test(definition.key)) return 'https://example.sharepoint.com/records/1042';
+  return 'Sample value';
+}
+
+/**
+ * Editor panel for the add_note workflow action: Rich text (Liquid) or a
+ * structured Field Card built from the workspace's custom-field definitions,
+ * with a live preview rendering the real FieldCardNote card.
+ */
+export function AddNoteNodeEditor({ data = {}, defs = [], variables = [], workflowName = 'This workflow', onChange }) {
+  const [variableSearch, setVariableSearch] = useState('');
+  const [activeField, setActiveField] = useState(null); // 'title' | 'intro' | 'body'
+  const inputRefs = useRef({});
+  const mode = data.mode === 'text' ? 'text' : 'field_card';
+  const placement = data.placement || 'note';
+  const accent = data.accent || 'violet';
+  const selectedKeys = Array.isArray(data.fields) ? data.fields : [];
+
+  const register = (key) => (element) => { if (element) inputRefs.current[key] = element; };
+  const insertVariableToken = (variable) => {
+    const token = variable.token || variable;
+    if (!activeField) return;
+    const element = inputRefs.current[activeField];
+    const current = String(data[activeField] || '');
+    const start = element?.selectionStart ?? current.length;
+    const end = element?.selectionEnd ?? start;
+    onChange({ [activeField]: `${current.slice(0, start)}${token}${current.slice(end)}` });
+  };
+  const toggleFieldKey = (key) => {
+    const next = selectedKeys.includes(key)
+      ? selectedKeys.filter((candidate) => candidate !== key)
+      : [...selectedKeys, key];
+    onChange({ fields: next });
+  };
+
+  const previewFields = selectedKeys
+    .map((key) => defs.find((definition) => definition.key === key))
+    .filter(Boolean)
+    .map((definition) => ({
+      key: definition.key,
+      label: definition.label,
+      type: definition.type,
+      value: addNoteSampleValue(definition),
+    }));
+  const previewEntry = {
+    authorType: 'system',
+    isPrivate: true,
+    occurredAt: new Date().toISOString(),
+    rawPayload: {
+      kind: 'field_card',
+      v: 1,
+      title: data.title || '',
+      intro: data.intro || '',
+      accent,
+      workflowName,
+      fields: previewFields,
+    },
+  };
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-gray-600">
+        Posts an <strong>internal note</strong> on the ticket (system-authored, never mirrored to FreshService, never emailed).
+      </p>
+
+      <div className="flex flex-wrap gap-1 rounded-md bg-gray-100 p-1" role="group" aria-label="Note mode">
+        {[
+          ['text', 'Rich text', Type],
+          ['field_card', 'Field card', Rows3],
+        ].map(([id, label, Icon]) => (
+          <button
+            key={id}
+            type="button"
+            aria-pressed={mode === id}
+            // Pinning is field_card-only (a text note with placement pinned
+            // writes the note but reports pinnedSkipped) — switching to Rich
+            // text coerces the placement back to a plain conversation note.
+            onClick={() => onChange(id === 'text' && placement !== 'note' ? { mode: id, placement: 'note' } : { mode: id })}
+            className={cls(
+              'inline-flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-semibold',
+              mode === id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:bg-white/70',
+            )}
+          >
+            <Icon className="h-3.5 w-3.5" />
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {mode === 'text' ? (
+        <div>
+          <label className="block text-xs font-medium uppercase text-gray-500">
+            Note body (Liquid HTML)
+            <textarea
+              ref={register('body')}
+              value={data.body || ''}
+              onFocus={() => setActiveField('body')}
+              onChange={(event) => onChange({ body: event.target.value })}
+              className="mt-1 h-32 w-full rounded-md border border-gray-200 px-3 py-2 font-mono text-xs normal-case focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            />
+          </label>
+          <p className="mt-1 text-[11px] text-gray-400">
+            Liquid enabled — e.g. <code>{'{{ ticket.subject }}'}</code> or <code>{'{{ ticket.customFields.client_name }}'}</code>. The HTML is sanitized server-side before it is written.
+          </p>
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 gap-2">
+            <label className="block text-xs font-medium uppercase text-gray-500">
+              Card title (Liquid)
+              <input
+                ref={register('title')}
+                value={data.title || ''}
+                onFocus={() => setActiveField('title')}
+                onChange={(event) => onChange({ title: event.target.value })}
+                placeholder="Ticket details"
+                className="mt-1 w-full rounded-md border border-gray-200 px-3 py-2 text-sm normal-case focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+              />
+            </label>
+            <label className="block text-xs font-medium uppercase text-gray-500">
+              Intro line (Liquid, optional)
+              <input
+                ref={register('intro')}
+                value={data.intro || ''}
+                onFocus={() => setActiveField('intro')}
+                onChange={(event) => onChange({ intro: event.target.value })}
+                placeholder="e.g. Captured from the intake form"
+                className="mt-1 w-full rounded-md border border-gray-200 px-3 py-2 text-sm normal-case focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+              />
+            </label>
+          </div>
+
+          <div className="rounded-lg border border-slate-200 p-2.5">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Fields on the card <span className="font-normal normal-case text-slate-400">(snapshot at run time, up to {ADD_NOTE_MAX_FIELDS})</span>
+            </p>
+            {defs.length === 0 ? (
+              <p className="mt-1 text-[11px] text-amber-600 normal-case">
+                No custom fields defined yet — add them in Settings → Ticket Ops → Custom fields first.
+              </p>
+            ) : (
+              <div className="mt-1.5 grid grid-cols-1 gap-1 sm:grid-cols-2">
+                {defs.map((definition) => {
+                  const checked = selectedKeys.includes(definition.key);
+                  const capped = !checked && selectedKeys.length >= ADD_NOTE_MAX_FIELDS;
+                  return (
+                    <label key={definition.key} className={cls('flex items-center gap-2 rounded-md px-1.5 py-1 text-sm normal-case', capped ? 'text-gray-300' : 'text-gray-700 hover:bg-violet-50/60')}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={capped}
+                        onChange={() => toggleFieldKey(definition.key)}
+                        className="rounded border-gray-300"
+                      />
+                      <span className="min-w-0 truncate">{definition.label}</span>
+                      <span className="ml-auto text-[10px] uppercase text-gray-300">{definition.type}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div>
+            <p className="text-xs font-medium uppercase text-gray-500">Accent</p>
+            <div className="mt-1 flex items-center gap-1.5" role="group" aria-label="Card accent">
+              {FIELD_CARD_ACCENTS.map((tone) => (
+                <button
+                  key={tone}
+                  type="button"
+                  onClick={() => onChange({ accent: tone })}
+                  aria-label={`${tone} accent`}
+                  aria-pressed={accent === tone}
+                  title={tone}
+                  className={cls(
+                    'h-6 w-6 rounded-full border-2 transition',
+                    ADD_NOTE_ACCENT_SWATCHES[tone] || 'bg-violet-500',
+                    accent === tone ? 'border-gray-800 scale-110' : 'border-transparent hover:scale-105',
+                  )}
+                />
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+
+      <label className="block text-xs font-medium uppercase text-gray-500">
+        Placement
+        <select
+          value={placement}
+          onChange={(event) => onChange({ placement: event.target.value })}
+          className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+        >
+          <option value="note">Note in conversation</option>
+          <option value="pinned" disabled={mode === 'text'}>Pinned card above the conversation</option>
+          <option value="both" disabled={mode === 'text'}>Both</option>
+        </select>
+        {mode === 'text' && (
+          <span className="mt-0.5 block text-[11px] font-normal normal-case text-gray-400">Pinned cards require Field card mode.</span>
+        )}
+      </label>
+
+      {mode === 'field_card' && (
+        <div>
+          <p className="text-xs font-medium uppercase text-gray-500">Preview (sample values)</p>
+          <div className="mt-1 rounded-xl border border-slate-200/70 bg-gradient-to-b from-slate-100/90 to-blue-50/40 p-3">
+            {previewFields.length === 0 && !data.title && !data.intro ? (
+              <p className="text-center text-xs text-slate-400">Pick fields above to preview the card.</p>
+            ) : (
+              <ul className="list-none">
+                <FieldCardNote entry={previewEntry} />
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div>
+        <p className="text-xs font-medium uppercase text-gray-500">Variables</p>
+        <p className="text-[11px] text-gray-400 normal-case">Focus the {mode === 'text' ? 'body' : 'title or intro'} field, then click a variable to insert it as a Liquid token.</p>
+        <div className="mt-1 max-h-64 overflow-y-auto settings-scrollbar rounded-md border border-gray-100">
+          <VariablePicker
+            variables={variables}
+            search={variableSearch}
+            onSearch={setVariableSearch}
+            onInsert={insertVariableToken}
+            activeTarget={activeField}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function summarizePreviewStep(step) {
   const output = step?.output || {};
   if (step?.nodeType === 'trigger') return output.eventType || 'Workflow started';
@@ -2108,6 +2387,7 @@ function summarizePreviewStep(step) {
     return [llm.provider, llm.model].filter(Boolean).join(' / ') || 'LLM generated email content';
   }
   if (step?.nodeType === 'template_render') return output.email?.subject || 'Template rendered';
+  if (step?.nodeType === 'add_note') return output.summary || output.reason || 'Note added to the ticket';
   if (step?.nodeType === 'send_email') return output.reason || 'Email delivery simulated';
   if (step?.nodeType === 'stop') return output.reason || 'Workflow stopped';
   return step?.status || 'Step completed';
@@ -6873,7 +7153,7 @@ export default function NotificationWorkflowsPanel({
 
   useEffect(() => {
     if (!selectedNode || customFieldDefs) return;
-    if (selectedNode.type !== 'update_ticket') return;
+    if (!['update_ticket', 'add_note'].includes(selectedNode.type)) return;
     ticketsAPI.customFieldDefinitions()
       .then((res) => setCustomFieldDefs(res?.data || []))
       .catch(() => setCustomFieldDefs([]));
@@ -8989,6 +9269,7 @@ export default function NotificationWorkflowsPanel({
           {(customFieldDefs || []).length > 0 && (
             <div className="rounded-lg border border-slate-200 p-2.5 space-y-1.5">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Set custom fields</p>
+              <p className="text-[11px] text-slate-400 normal-case">Values support Liquid — e.g. <code>{'{{ ticket.subject }}'}</code> or <code>{'{{ requester.name }}'}</code> render when the workflow runs.</p>
               {(customFieldDefs || []).map((definition) => (
                 <label key={definition.key} className="block text-[11px] text-slate-500">
                   {definition.label}
@@ -9054,6 +9335,18 @@ export default function NotificationWorkflowsPanel({
             />
           </label>
         </div>
+      );
+    }
+
+    if (selectedNode.type === 'add_note') {
+      return (
+        <AddNoteNodeEditor
+          data={selectedNode.data || {}}
+          defs={customFieldDefs || []}
+          variables={availableVariables}
+          workflowName={selected ? workflowDisplayName(selected) : 'This workflow'}
+          onChange={updateNodeData}
+        />
       );
     }
 

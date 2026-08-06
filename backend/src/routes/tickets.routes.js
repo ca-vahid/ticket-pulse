@@ -1122,6 +1122,17 @@ router.post('/:id/proposed-replies/:proposalId/dismiss', asyncHandler(async (req
   res.json({ success: true, data: proposal });
 }));
 
+// Dismiss a pinned workflow card (Custom Fields Activation Phase 1). Ticket-
+// level (any actor with ticket access), idempotent, audited. Deliberately NOT
+// behind requireNativeTicketing — workflow cards annotate BOTH origins, like
+// custom fields themselves.
+router.post('/:id/pinned-cards/:cardId/dismiss', asyncHandler(async (req, res) => {
+  const result = await ticketService.dismissPinnedCard(
+    parseTicketId(req), req.workspaceId, req.params.cardId, req.ticketActor,
+  );
+  res.json({ success: true, data: result });
+}));
+
 // Forward the public thread to any address, recorded as a private entry.
 router.post('/:id/forward', requireNativeTicketing, asyncHandler(async (req, res) => {
   const result = await ticketService.forwardTicket(

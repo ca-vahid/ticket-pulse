@@ -278,6 +278,9 @@ class TicketApprovalService {
           content: `Clarification requested by ${actorLabel} — "${question}"`,
           occurredAt: new Date(),
           mirrorState: null,
+          // Structured discriminator so the frontend can dispatch approval
+          // event cards without regexing the body (body kept for legacy).
+          rawPayload: { kind: 'approval_event', v: 1, event: 'clarification' },
         },
       }).catch((err) => logger.warn(`Clarification note write failed (non-fatal): ${err.message}`));
 
@@ -376,6 +379,9 @@ class TicketApprovalService {
             content: `Clarification reply from ${actorLabel}${question ? ` (asked: "${question}")` : ''} — "${answer}"`,
             occurredAt: new Date(),
             mirrorState: null,
+            // Resubmit puts the request back in front of the approver —
+            // classified as a (re-)request for the frontend card dispatch.
+            rawPayload: { kind: 'approval_event', v: 1, event: 'requested' },
           },
         }).catch((err) => logger.warn(`Clarification reply note write failed (non-fatal): ${err.message}`));
       }
@@ -675,6 +681,9 @@ class TicketApprovalService {
           content: noteBody,
           occurredAt: new Date(),
           mirrorState: null,
+          // 'changed' = an already-decided approval was flipped; otherwise the
+          // fresh decision itself ('approved' | 'rejected').
+          rawPayload: { kind: 'approval_event', v: 1, event: changedFrom ? 'changed' : normalized },
         },
       }).catch((err) => logger.warn(`Approval note write failed (non-fatal): ${err.message}`));
 

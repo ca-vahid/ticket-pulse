@@ -1,6 +1,14 @@
+import sanitizeHtml from 'sanitize-html';
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import statusService from './statusService.js';
+import { prettifyKeyLabel } from './customFieldService.js';
+import {
+  ADD_NOTE_ACCENTS,
+  ADD_NOTE_MAX_FIELDS,
+  ADD_NOTE_MAX_TITLE_CHARS,
+  ADD_NOTE_PLACEMENTS,
+} from './notificationWorkflowDefinition.js';
 
 /**
  * Executors for the Phase 3 orchestrator action nodes (assign, webhook, child
@@ -252,12 +260,248 @@ export async function resolveInternalGroupEmails(tokens = []) {
   }
 }
 
+// ------------------------------------------------------------------ add note
+
+/**
+ * Server-side sanitizer for text-mode workflow notes. Conservative allowlist
+ * kept consistent with the frontend's DOMPurify config for thread bodies:
+ * structural/table/list/inline tags plus href/class/style/target survive;
+ * script, event handlers (on*), and form controls (button/input/form) are
+ * stripped. sanitize-html drops every attribute not allowlisted, which covers
+ * the on* family, and discards script content entirely.
+ */
+export function sanitizeWorkflowNoteHtml(html) {
+  return sanitizeHtml(String(html || ''), {
+    allowedTags: [
+      'p', 'div', 'span', 'a', 'table', 'tr', 'td', 'th',
+      'ul', 'ol', 'li', 'b', 'strong', 'i', 'em', 'br', 'hr', 'code', 'pre',
+    ],
+    allowedAttributes: {
+      a: ['href', 'target', 'class', 'style'],
+      '*': ['class', 'style'],
+    },
+    allowedSchemes: ['http', 'https', 'mailto'],
+  }).trim();
+}
+
+const escapeHtml = (value) => String(value ?? '')
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+function truncateRendered(value, max = ADD_NOTE_MAX_TITLE_CHARS) {
+  const text = String(value || '').trim();
+  if (!text) return null;
+  return text.length > max ? text.slice(0, max) : text;
+}
+
+function fieldValueText(value) {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  return String(value);
+}
+
+/** Plain-text card fallback: title/intro lines then "Label: value" lines. */
+function fieldCardBodyText({ title, intro, fields }) {
+  return [
+    ...(title ? [title] : []),
+    ...(intro ? [intro] : []),
+    ...fields.map((field) => `${field.label}: ${fieldValueText(field.value)}`),
+  ].join('\n');
+}
+
+/** Sanitizer-safe HTML table fallback for renderers that don't know the
+ * field_card discriminator (peek previews, exports). */
+function fieldCardBodyHtml({ title, intro, fields }) {
+  const rows = fields
+    .map((field) => `<tr><th>${escapeHtml(field.label)}</th><td>${escapeHtml(fieldValueText(field.value))}</td></tr>`)
+    .join('');
+  return [
+    '<div class="tp-field-card-fallback">',
+    title ? `<p><strong>${escapeHtml(title)}</strong></p>` : '',
+    intro ? `<p>${escapeHtml(intro)}</p>` : '',
+    `<table>${rows}</table>`,
+    '</div>',
+  ].join('');
+}
+
+/**
+ * `add_note` action node (Custom Fields Activation Phase 1): write a protected
+ * system note — and/or a pinned card — onto the event's ticket.
+ *
+ * RE-ENTRANCY: the write is a DIRECT prisma.ticketThreadEntry.create using the
+ * approval system-note pattern (ticketApprovalService._decide) on purpose. It
+ * must NOT go through ticketService._addThreadEntry, which emits the
+ * `ticket.note_added` workflow event — a note-writing workflow triggered by
+ * note_added would loop forever. Writing directly means no lifecycle event, no
+ * FS mirror job (mirrorState: null), and no way for this node to re-trigger
+ * any workflow, by construction.
+ */
+export async function executeAddNoteNode(node, eventContext, {
+  renderedBody = null,
+  renderedTitle = null,
+  renderedIntro = null,
+  workflowId = null,
+  workflowName = null,
+  runId = null,
+  dryRun = false,
+} = {}) {
+  const ticketId = Number(eventContext.ticket?.id);
+  if (!Number.isFinite(ticketId) || ticketId <= 0) return { skipped: true, reason: 'No ticket in event context' };
+
+  const mode = node.data?.mode;
+  if (!['text', 'field_card'].includes(mode)) {
+    return { skipped: true, reason: 'add_note node has no mode configured' };
+  }
+  const placement = ADD_NOTE_PLACEMENTS.includes(node.data?.placement) ? node.data.placement : 'note';
+  const accent = ADD_NOTE_ACCENTS.includes(node.data?.accent) ? node.data.accent : null;
+  const title = truncateRendered(renderedTitle);
+  const intro = truncateRendered(renderedIntro);
+
+  // ---- text mode: Liquid already rendered by the engine; sanitize here.
+  if (mode === 'text') {
+    const bodyHtml = sanitizeWorkflowNoteHtml(renderedBody);
+    if (!bodyHtml) return { skipped: true, reason: 'Rendered note body is empty after sanitization' };
+    const bodyText = sanitizeHtml(bodyHtml, { allowedTags: [], allowedAttributes: {} }).trim();
+    if (dryRun) {
+      return { dryRun: true, wouldAddNote: { mode, placement: 'note', bodyPreview: bodyText.slice(0, 300) } };
+    }
+    const ticket = await prisma.ticket.findUnique({
+      where: { id: ticketId },
+      select: { id: true, workspaceId: true },
+    });
+    if (!ticket) return { skipped: true, reason: 'Ticket not found' };
+    const entry = await writeSystemNote(ticket, { bodyHtml, bodyText, rawPayload: null });
+    return {
+      noteEntryId: entry.id,
+      mode,
+      placement: 'note',
+      // Pinned cards are structured (kind='field_card') — free HTML can't pin.
+      ...(placement !== 'note' ? { pinnedSkipped: 'Only field-card notes can be pinned' } : {}),
+    };
+  }
+
+  // ---- field_card mode: structured payload per the frozen client contract.
+  const keys = [...new Set((Array.isArray(node.data?.fields) ? node.data.fields : [])
+    .map((key) => String(key || '').trim()).filter(Boolean))]
+    .slice(0, ADD_NOTE_MAX_FIELDS);
+  if (keys.length === 0) return { skipped: true, reason: 'add_note field card has no fields configured' };
+  if (dryRun) {
+    return { dryRun: true, wouldAddNote: { mode, placement, fields: keys, ...(title ? { title } : {}) } };
+  }
+
+  const ticket = await prisma.ticket.findUnique({
+    where: { id: ticketId },
+    select: { id: true, workspaceId: true, customFields: true },
+  });
+  if (!ticket) return { skipped: true, reason: 'Ticket not found' };
+
+  // Inactive definitions included — a retired definition still owns its key's
+  // label/type. Keys with no definition fall back to a prettified label.
+  const definitions = await prisma.customFieldDefinition.findMany({
+    where: { workspaceId: ticket.workspaceId, key: { in: keys } },
+  });
+  const defByKey = new Map(definitions.map((d) => [d.key, d]));
+  const includeEmpty = node.data?.includeEmpty === true;
+  const values = ticket.customFields || {};
+  const fields = [];
+  const skippedEmpty = [];
+  for (const key of keys) {
+    const definition = defByKey.get(key) || null;
+    const raw = values[key];
+    const hasValue = raw !== null && raw !== undefined && raw !== '';
+    if (!hasValue && !includeEmpty) {
+      skippedEmpty.push(key);
+      continue;
+    }
+    fields.push({
+      key,
+      label: definition?.label || prettifyKeyLabel(key),
+      type: definition?.type || 'text',
+      value: hasValue ? raw : null, // snapshot: what the workflow saw at write time
+    });
+  }
+  if (fields.length === 0) {
+    return { skipped: true, reason: 'No custom-field values to show (every selected field is empty)', skippedEmpty };
+  }
+
+  // Frozen contract — the frontend FieldCardNote/PinnedIntakeCard renderers
+  // are built against this exact shape. Do not add/rename keys casually.
+  const rawPayload = {
+    kind: 'field_card',
+    v: 1,
+    title,
+    intro,
+    accent,
+    fields,
+    workflowId,
+    runId,
+    workflowName,
+  };
+  const bodyText = fieldCardBodyText({ title, intro, fields });
+  const bodyHtml = fieldCardBodyHtml({ title, intro, fields });
+
+  const output = { mode, placement, fieldCount: fields.length, ...(skippedEmpty.length ? { skippedEmpty } : {}) };
+
+  if (placement === 'note' || placement === 'both') {
+    const entry = await writeSystemNote(ticket, { bodyHtml, bodyText, rawPayload });
+    output.noteEntryId = entry.id;
+  }
+
+  if (placement === 'pinned' || placement === 'both') {
+    if (!Number.isFinite(Number(workflowId)) || Number(workflowId) <= 0) {
+      output.pinnedSkipped = 'No workflow id on this run — pinned cards key on (ticket, kind, workflow)';
+    } else {
+      // Re-runs refresh the payload and clear any dismissal (per contract).
+      const card = await prisma.ticketPinnedCard.upsert({
+        where: {
+          ticketId_kind_workflowId: { ticketId: ticket.id, kind: 'field_card', workflowId: Number(workflowId) },
+        },
+        create: {
+          ticketId: ticket.id,
+          kind: 'field_card',
+          payload: rawPayload,
+          workflowId: Number(workflowId),
+        },
+        update: { payload: rawPayload, dismissedAt: null, dismissedBy: null },
+      });
+      output.pinnedCardId = card.id;
+    }
+  }
+
+  return output;
+}
+
+/** Direct system-note write — see executeAddNoteNode's re-entrancy note. */
+async function writeSystemNote(ticket, { bodyHtml, bodyText, rawPayload }) {
+  return prisma.ticketThreadEntry.create({
+    data: {
+      ticketId: ticket.id,
+      workspaceId: ticket.workspaceId,
+      source: 'ticketpulse_user',
+      eventType: 'note',
+      actorName: 'Notification workflow',
+      actorEmail: null,
+      authorType: 'system',
+      incoming: false,
+      isPrivate: true,
+      visibility: 'private',
+      bodyText,
+      bodyHtml,
+      content: bodyText,
+      occurredAt: new Date(),
+      mirrorState: null, // never mirrored to the FreshService fallback copy
+      ...(rawPayload ? { rawPayload } : {}),
+    },
+  });
+}
+
 export default {
   resolveAssignmentTarget,
   applyWorkflowAssignment,
   executeWebhookNode,
   executeCreateChildTicketNode,
   executeRequestApprovalNode,
+  executeAddNoteNode,
+  sanitizeWorkflowNoteHtml,
   resolveInternalGroupEmails,
   webhookUrlProblem,
 };

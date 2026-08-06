@@ -11,6 +11,8 @@ import TicketTagEditor from '../components/tickets/TicketTagEditor';
 import ApprovalTimeline from '../components/tickets/ApprovalTimeline';
 import ProposedReplyCard from '../components/tickets/ProposedReplyCard';
 import { CustomFieldsCard, MacroMenu, TicketLinksCard } from '../components/tickets/TicketOpsCards';
+import FieldCardNote from '../components/tickets/FieldCardNote';
+import PinnedIntakeCard from '../components/tickets/PinnedIntakeCard';
 import ThreadSummaryCard from '../components/tickets/ThreadSummaryCard';
 import RequestApprovalModal from '../components/tickets/RequestApprovalModal';
 import AppHeader from '../components/AppHeader';
@@ -136,12 +138,30 @@ function RichBody({ html, text, onImageRef, className = '' }) {
  * notes) get their own compact, color-coded event style so approved / rejected /
  * needs-info reads at a glance — distinct from ordinary internal notes.
  */
-function approvalEventMeta(entry) {
+const APPROVAL_EVENT_STYLES = {
+  approved: { Icon: CheckCircle2, wrap: 'bg-emerald-50 border-emerald-200', accent: 'bg-emerald-500', text: 'text-emerald-800', chip: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
+  rejected: { Icon: XCircle, wrap: 'bg-red-50 border-red-200', accent: 'bg-red-500', text: 'text-red-800', chip: 'bg-red-100 text-red-700 border-red-200' },
+  clarification: { Icon: MessageCircleQuestion, wrap: 'bg-violet-50 border-violet-200', accent: 'bg-violet-500', text: 'text-violet-800', chip: 'bg-violet-100 text-violet-700 border-violet-200' },
+};
+
+export function approvalEventMeta(entry) {
   if (entry?.authorType !== 'system') return null;
+  // Structured discriminator first: the approval service stamps
+  // rawPayload.kind === 'approval_event' with an `event` name at write time
+  // (custom-fields activation Phase 1). The body-text regexes below stay as
+  // the legacy fallback for entries written before the discriminator existed.
+  if (entry.rawPayload?.kind === 'approval_event') {
+    const event = String(entry.rawPayload.event || '').toLowerCase();
+    const changed = entry.rawPayload.changed === true || event.includes('changed');
+    if (event.includes('reject')) return { label: changed ? 'Rejected (changed)' : 'Rejected', ...APPROVAL_EVENT_STYLES.rejected };
+    if (event.includes('clarif') || event.includes('info')) return { label: 'Clarification requested', ...APPROVAL_EVENT_STYLES.clarification };
+    if (event.includes('approv')) return { label: changed ? 'Approved (changed)' : 'Approved', ...APPROVAL_EVENT_STYLES.approved };
+    // Unknown event name — fall through to the text heuristics.
+  }
   const t = String(entry.bodyText || entry.content || '');
-  if (/^Approval (CHANGED to )?APPROVED/i.test(t)) return { label: /CHANGED/i.test(t) ? 'Approved (changed)' : 'Approved', Icon: CheckCircle2, wrap: 'bg-emerald-50 border-emerald-200', accent: 'bg-emerald-500', text: 'text-emerald-800', chip: 'bg-emerald-100 text-emerald-700 border-emerald-200' };
-  if (/^Approval (CHANGED to )?REJECTED/i.test(t)) return { label: /CHANGED/i.test(t) ? 'Rejected (changed)' : 'Rejected', Icon: XCircle, wrap: 'bg-red-50 border-red-200', accent: 'bg-red-500', text: 'text-red-800', chip: 'bg-red-100 text-red-700 border-red-200' };
-  if (/^Clarification requested/i.test(t)) return { label: 'Clarification requested', Icon: MessageCircleQuestion, wrap: 'bg-violet-50 border-violet-200', accent: 'bg-violet-500', text: 'text-violet-800', chip: 'bg-violet-100 text-violet-700 border-violet-200' };
+  if (/^Approval (CHANGED to )?APPROVED/i.test(t)) return { label: /CHANGED/i.test(t) ? 'Approved (changed)' : 'Approved', ...APPROVAL_EVENT_STYLES.approved };
+  if (/^Approval (CHANGED to )?REJECTED/i.test(t)) return { label: /CHANGED/i.test(t) ? 'Rejected (changed)' : 'Rejected', ...APPROVAL_EVENT_STYLES.rejected };
+  if (/^Clarification requested/i.test(t)) return { label: 'Clarification requested', ...APPROVAL_EVENT_STYLES.clarification };
   return null;
 }
 
@@ -276,7 +296,7 @@ function AttachmentChip({ attachment, onPreview }) {
  * replies sit RIGHT with a blue tint (avatars + role + channel on both sides),
  * internal notes stay full-width amber so they can't be mistaken for either.
  */
-function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, photoFor, onCopy, canDelete = false, onDelete, deleting = false }) {
+export function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, photoFor, onCopy, canDelete = false, onDelete, deleting = false, customFields = null, onEditField = null, onCopied = null }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const isNote = entry.eventType === 'note' || entry.isPrivate === true;
   const body = entry.bodyText || entry.content || '';
@@ -289,6 +309,19 @@ function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, photoFor,
   const viaEmail = entry.source === 'email_inbound' || Boolean(entry.emailMessageId)
     || (entry.incoming === true && isAgentAuthor);
   const apEvent = approvalEventMeta(entry);
+
+  // Workflow-written field cards (structured rawPayload discriminator — never
+  // regex): a dedicated interactive card that keeps its timeline position.
+  if (entry.rawPayload?.kind === 'field_card') {
+    return (
+      <FieldCardNote
+        entry={entry}
+        currentValues={customFields}
+        onEditField={onEditField}
+        onCopied={onCopied}
+      />
+    );
+  }
 
   // Approval-lifecycle events read as their own compact, color-coded card so
   // approved / rejected / needs-info is obvious at a glance vs. ordinary notes.
@@ -314,8 +347,10 @@ function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, photoFor,
     );
   }
 
-  // TP-authored notes (assignment/system) get the brand mark, not "TP" initials.
-  const isTicketPulse = entry.actorName === 'Ticket Pulse';
+  // TP-authored notes (assignment/system) get the brand mark, not "TP"
+  // initials — keyed off authorType so renamed system actors still read as
+  // "Ticket Pulse · Auto" (audit cleanup: never key off the actorName string).
+  const isTicketPulse = entry.authorType === 'system';
   const avatar = (
     <div className="flex-shrink-0 flex flex-col items-center gap-1 pt-0.5 w-12">
       {isTicketPulse ? (
@@ -1188,6 +1223,20 @@ export default function TicketDetail() {
 
   const copyLink = () => copyText(window.location.href);
 
+  // Field-card pencils jump to the right-rail custom-fields editor: scroll it
+  // into view and flash a short-lived ring so the eye lands on the right card.
+  const customFieldsCardRef = useRef(null);
+  const cfFlashTimerRef = useRef(null);
+  const [cfCardFlash, setCfCardFlash] = useState(false);
+  const focusCustomFields = useCallback(() => {
+    customFieldsCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setCfCardFlash(true);
+    clearTimeout(cfFlashTimerRef.current);
+    cfFlashTimerRef.current = setTimeout(() => setCfCardFlash(false), 2400);
+  }, []);
+  useEffect(() => () => clearTimeout(cfFlashTimerRef.current), []);
+  const notifyCopied = useCallback(() => showToast('emerald', 'Copied'), [showToast]);
+
   const cloneTicket = () => applyChange('clone', async () => {
     const res = await ticketsAPI.clone(ticketId);
     showToast('emerald', `Cloned as ${res.data.displayRef}`);
@@ -2055,6 +2104,16 @@ export default function TicketDetail() {
                     )}
 
                     <section aria-label="Conversation">
+                      {/* Pinned workflow field cards — intake context that stays
+                          visible above the thread even after older notes fold. */}
+                      <PinnedIntakeCard
+                        ticketId={ticketId}
+                        cards={ticket.pinnedCards || []}
+                        currentValues={ticket.customFields || {}}
+                        canDismiss={canConverse}
+                        onCopied={notifyCopied}
+                        onDismissed={() => { lastLocalMutationRef.current = Date.now(); fetchTicket({ silent: true }); }}
+                      />
                       {/* On-demand AI thread summary (read-only, never stored) */}
                       <ThreadSummaryCard ticketId={ticketId} />
                       <div className="flex flex-wrap items-center gap-2 mb-2 px-1">
@@ -2110,6 +2169,9 @@ export default function TicketDetail() {
                                     canDelete={isAdmin && ticket?.origin === 'ticketpulse'}
                                     onDelete={deleteNote}
                                     deleting={deletingNoteId === item.e.id}
+                                    customFields={ticket?.customFields || {}}
+                                    onEditField={focusCustomFields}
+                                    onCopied={notifyCopied}
                                   />
                                 </ul>
                               </li>
@@ -2798,13 +2860,20 @@ export default function TicketDetail() {
                   onNavigate={(id) => navigate(`/tickets/${id}`)}
                 />
 
-                {/* Per-workspace custom fields (TP annotation layer, both origins) */}
-                <CustomFieldsCard
-                  ticketId={ticketId}
-                  values={ticket?.customFields || {}}
-                  canWrite={canConverse}
-                  onSaved={() => { lastLocalMutationRef.current = Date.now(); fetchTicket({ silent: true }); showToast('emerald', 'Custom fields saved'); }}
-                />
+                {/* Per-workspace custom fields (TP annotation layer, both origins).
+                    Wrapper ref is the scroll/flash target for field-card pencils. */}
+                <div
+                  ref={customFieldsCardRef}
+                  className={`rounded-xl transition-shadow duration-500 ${cfCardFlash ? 'ring-2 ring-violet-400 shadow-soft' : ''}`}
+                  data-testid="custom-fields-card-slot"
+                >
+                  <CustomFieldsCard
+                    ticketId={ticketId}
+                    values={ticket?.customFields || {}}
+                    canWrite={canConverse}
+                    onSaved={() => { lastLocalMutationRef.current = Date.now(); fetchTicket({ silent: true }); showToast('emerald', 'Custom fields saved'); }}
+                  />
+                </div>
 
                 {/* Related tickets: facts first, suggestions clearly labeled */}
                 {related && (related.sameRequester.length > 0 || (related.nearDuplicates.length > 0 && !dupeDismissed) || (related.similarByContent?.length > 0)) && (
