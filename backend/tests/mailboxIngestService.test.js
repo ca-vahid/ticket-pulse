@@ -27,7 +27,7 @@ jest.unstable_mockModule('../src/utils/logger.js', () => ({
   default: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() },
 }));
 
-const { default: mailboxIngestService, looksLikeLoopMail, referencedMessageIds } =
+const { default: mailboxIngestService, looksLikeLoopMail, referencedMessageIds, emailRecipients } =
   await import('../src/services/mailboxIngestService.js');
 
 const connection = { id: 1, workspaceId: 1, address: 'helpdesk-pilot@example.com' };
@@ -163,5 +163,99 @@ describe('matching ladder', () => {
     const outcome = await mailboxIngestService.processEmail(connection, baseEmail, senderCreates);
     expect(outcome).toBe('skipped');
     expect(ticketServiceMock.createTicket).not.toHaveBeenCalled();
+  });
+});
+
+// QA 08-05 #3 — Cc visibility: graphMailClient already fetches to/cc; ingest
+// must PERSIST them (ticket row for creates, rawPayload for thread entries)
+// instead of discarding them.
+describe('recipient capture', () => {
+  test('emailRecipients normalizes, lowercases, dedupes, drops non-addresses, nulls when empty', () => {
+    expect(emailRecipients({
+      to: ['Helpdesk@Example.com', 'helpdesk@example.com', 'not-an-address'],
+      cc: ['Boss@Example.com', ' peer@example.com '],
+    })).toEqual({
+      to_emails: ['helpdesk@example.com'],
+      cc_emails: ['boss@example.com', 'peer@example.com'],
+    });
+    expect(emailRecipients({ to: [], cc: [] })).toBeNull();
+    expect(emailRecipients({})).toBeNull();
+    expect(emailRecipients(null)).toBeNull();
+  });
+
+  test('created tickets persist To/Cc onto the ticket row and the original-email entry', async () => {
+    const outcome = await mailboxIngestService.processEmail(connection, {
+      ...baseEmail,
+      to: ['helpdesk-pilot@example.com'],
+      cc: ['Boss@Example.com', 'boss@example.com'],
+    });
+
+    expect(outcome).toBe('created');
+    expect(prismaMock.ticket.update).toHaveBeenCalledWith({
+      where: { id: 700 },
+      data: {
+        toEmails: ['helpdesk-pilot@example.com'],
+        ccEmails: ['boss@example.com'],
+      },
+    });
+    expect(prismaMock.ticketThreadEntry.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        eventType: 'original_email',
+        rawPayload: {
+          to_emails: ['helpdesk-pilot@example.com'],
+          cc_emails: ['boss@example.com'],
+        },
+      }),
+    }));
+  });
+
+  test('created tickets without to/cc touch neither the row nor rawPayload', async () => {
+    const outcome = await mailboxIngestService.processEmail(connection, baseEmail);
+
+    expect(outcome).toBe('created');
+    expect(prismaMock.ticket.update).not.toHaveBeenCalled();
+    const { data } = prismaMock.ticketThreadEntry.create.mock.calls[0][0];
+    expect(data.eventType).toBe('original_email');
+    expect(data.rawPayload).toBeUndefined();
+  });
+
+  test('ingested replies stash {to_emails, cc_emails} in rawPayload', async () => {
+    prismaMock.ticketThreadEntry.findFirst
+      .mockResolvedValueOnce(null) // dedupe check
+      .mockResolvedValueOnce({ ticketId: 501 }); // header match
+    prismaMock.ticket.findUnique.mockResolvedValue({ id: 501, workspaceId: 1, origin: 'ticketpulse', nativeNumber: 1042 });
+
+    const outcome = await mailboxIngestService.processEmail(connection, {
+      ...baseEmail,
+      subject: 'Re: anything at all',
+      inReplyTo: '<sent-by-tp@example.com>',
+      to: ['helpdesk-pilot@example.com'],
+      cc: ['peer@example.com'],
+    });
+
+    expect(outcome).toBe('reply');
+    expect(prismaMock.ticketThreadEntry.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        eventType: 'reply',
+        rawPayload: {
+          to_emails: ['helpdesk-pilot@example.com'],
+          cc_emails: ['peer@example.com'],
+        },
+      }),
+    }));
+  });
+
+  test('replies without recipients omit rawPayload entirely', async () => {
+    prismaMock.ticketThreadEntry.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ ticketId: 501 });
+    prismaMock.ticket.findUnique.mockResolvedValue({ id: 501, workspaceId: 1, origin: 'ticketpulse', nativeNumber: 1042 });
+
+    await mailboxIngestService.processEmail(connection, {
+      ...baseEmail, subject: 'Re: anything at all', inReplyTo: '<sent-by-tp@example.com>',
+    });
+
+    const { data } = prismaMock.ticketThreadEntry.create.mock.calls[0][0];
+    expect(data.rawPayload).toBeUndefined();
   });
 });

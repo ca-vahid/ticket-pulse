@@ -20,6 +20,7 @@ import AssigneePicker from '../components/tickets/AssigneePicker';
 import DueDateEditor from '../components/tickets/DueDateEditor';
 import MobileAssignSheet from '../components/tickets/MobileAssignSheet';
 import CcChips from '../components/tickets/CcChips';
+import RecipientsLine, { seedReplyCc } from '../components/tickets/RecipientsLine';
 import FsSyncConfirm from '../components/tickets/FsSyncConfirm';
 import RichTextEditor, { isRichContent } from '../components/tickets/RichTextEditor';
 import StagedFileChip from '../components/tickets/StagedFileChip';
@@ -408,6 +409,15 @@ function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, photoFor,
             </span>
           </span>
         </div>
+        {/* Per-message recipients (QA 08-05 #3): rawPayload carries the FS
+            conversation shape for every origin. Cc always earns the line;
+            To only for forwards (elsewhere it's just the requester). */}
+        <RecipientsLine
+          to={entry.eventType === 'forward' ? entry.rawPayload?.to_emails : null}
+          cc={entry.rawPayload?.cc_emails}
+          compact
+          className="-mt-1 mb-2.5"
+        />
         <RichBody html={entry.bodyHtml} text={body} onImageRef={onImageRef} />
         {attachments.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1.5">
@@ -613,6 +623,9 @@ export default function TicketDetail() {
   const composerRef = useRef(null);
   const composerFileInputRef = useRef(null);
   const pasteCountRef = useRef(0);
+  // Cc seeding guard (QA 08-05 #3): true once the reply composer was seeded
+  // (or deliberately left alone) for THIS ticket; reset on ticket change.
+  const ccSeededRef = useRef(false);
 
   const showToast = useCallback((tone, message, { undo = null, duration = 3500 } = {}) => {
     setToast({ tone, message, undo });
@@ -629,6 +642,7 @@ export default function TicketDetail() {
   };
   useEffect(() => {
     draftLoadedRef.current = false;
+    ccSeededRef.current = false;
     setComposerBody('');
     setComposerText('');
     setComposerCc([]);
@@ -671,7 +685,18 @@ export default function TicketDetail() {
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
   }, [composerText]);
 
+  // Cc seeding (QA 08-05 #3, FS parity): opening the REPLY composer starts
+  // from the ticket's reply-cc (or cc) list — initial value only, once per
+  // ticket. User edits (including clearing) stay authoritative, restored
+  // drafts win, and notes/forwards never seed.
   const switchComposerMode = (mode) => {
+    if (mode === 'reply' && !ccSeededRef.current) {
+      ccSeededRef.current = true;
+      if (composerCc.length === 0) {
+        const seed = seedReplyCc(ticket);
+        if (seed.length > 0) setComposerCc(seed);
+      }
+    }
     setComposerMode(mode);
     setTimeout(() => composerRef.current?.focus(), 0);
   };
@@ -1989,6 +2014,8 @@ export default function TicketDetail() {
                             </button>
                           )}
                         </div>
+                        {/* Who else received the original email (QA 08-05 #3) */}
+                        <RecipientsLine to={ticket.toEmails} cc={ticket.ccEmails} className="-mt-0.5 mb-2" />
                         <CollapsibleBody html={ticket.description} text={ticket.descriptionText} />
                         <DescriptionImageStrip ticketId={ticketId} images={descriptionImages} onPreview={previewImage} />
                         {descriptionFiles.length > 0 && (

@@ -1,6 +1,7 @@
 import { createHash } from 'crypto';
 import logger from '../utils/logger.js';
 import { FRESHSERVICE_TZ_TO_IANA } from '../config/constants.js';
+import { cleanDisplayName } from '../utils/textEncoding.js';
 
 /**
  * Transform FreshService API data to our database schema
@@ -546,7 +547,10 @@ export function transformTicketThreadEntries(fsActivities, context) {
  * match (QA 07-08). Split it into { name, email }.
  */
 export function parseRfc822Address(raw) {
-  const value = String(raw || '').trim();
+  // Display names can arrive RFC 2047-encoded ('=?utf-8?Q?...?=') and/or as
+  // UTF-8-mis-decoded mojibake ('RÃ³genes') — clean both before parsing
+  // (FR 08-05 item 2).
+  const value = cleanDisplayName(String(raw || '').trim());
   if (!value) return { name: null, email: null };
   const match = value.match(/^"?([^"<]*)"?\s*<([^>]+)>$/);
   if (match) {
@@ -592,7 +596,7 @@ export function transformTicketConversationEntry(conversation, { ticketId, works
       ...(() => {
         const parsed = parseRfc822Address(conversation.from_email || conversation.support_email);
         return {
-          actorName: conversation.user?.name || parsed.name || parsed.email || null,
+          actorName: cleanDisplayName(conversation.user?.name) || parsed.name || parsed.email || null,
           actorEmail: (conversation.user?.email || parsed.email || null),
         };
       })(),

@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.1.5-preview';
+export const APP_VERSION = '3.1.6-preview';
 
 export const changelog = [
+  {
+    version: '3.1.6-preview',
+    date: 'August 5, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>🔤 Accented names display correctly</strong> — names like “Rógenes” no longer turn into garbled characters. The root cause (a sync rule that preferred the corrupted variant) is fixed, email display-name encoding is now decoded properly, and existing corrupted names are being repaired. (QA 08-05)' },
+      { type: 'new', html: '<strong>📧 See who’s on the email</strong> — the ticket page now shows To/Cc recipients under the description (with “+N more” expand), each reply shows its Cc line, and the peek preview shows them too. Replying pre-fills the Cc field with the original recipients, like FreshService. Cc is now also captured on tickets born from email. (QA 08-05)' },
+    ],
+  },
   {
     version: '3.1.5-preview',
     date: 'August 5, 2026',

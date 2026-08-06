@@ -1,5 +1,29 @@
 import logger from '../utils/logger.js';
 import prisma from './prisma.js';
+import { looksMojibake, repairMojibake } from '../utils/textEncoding.js';
+
+/**
+ * Choose the better of two display-name candidates (FR 08-05 item 2).
+ * Both are repaired first; a clean candidate always beats a mojibake one
+ * REGARDLESS of length — the corrupted variant of an accented name is always
+ * longer ("RÃ³genes" vs "Rógenes"), which is exactly how the old
+ * longest-wins tiebreak kept re-applying corruption every sync. When both are
+ * clean, the longer wins, compared in codepoints (not UTF-16 units); ties go
+ * to `fallback` to preserve the original apiName-wins behavior.
+ * @param {string|null|undefined} preferred - embedded display name candidate
+ * @param {string|null|undefined} fallback - API-built name candidate
+ * @returns {string} best candidate ('' when both empty)
+ */
+function pickBetterName(preferred, fallback) {
+  const a = repairMojibake(String(preferred || '').trim());
+  const b = repairMojibake(String(fallback || '').trim());
+  if (!a) return b;
+  if (!b) return a;
+  const aBad = looksMojibake(a);
+  const bBad = looksMojibake(b);
+  if (aBad !== bBad) return aBad ? b : a;
+  return [...a].length > [...b].length ? a : b;
+}
 
 /**
  * Requester Repository
@@ -67,7 +91,7 @@ class RequesterRepository {
       return await prisma.requester.create({
         data: {
           freshserviceId: null,
-          name: name || email,
+          name: repairMojibake(name) || email,
           email,
           department,
           jobTitle,
@@ -111,8 +135,10 @@ class RequesterRepository {
       // display name from the ticket list API when it produces a fuller result.
       // FreshService sometimes has incomplete first_name/last_name for
       // auto-created requesters while the ticket-embedded name is correct.
+      // Both candidates are mojibake-repaired and a clean variant always beats
+      // a corrupted one regardless of length (see pickBetterName).
       const apiName = [first_name, last_name].filter(Boolean).join(' ');
-      const name = (embeddedName && embeddedName.length > apiName.length ? embeddedName : apiName) || 'Unknown';
+      const name = pickBetterName(embeddedName, apiName) || 'Unknown';
 
       return await prisma.requester.upsert({
         where: { freshserviceId: BigInt(freshserviceId) },
@@ -176,8 +202,10 @@ class RequesterRepository {
   }
 
   /**
-   * Fix requesters whose stored name is shorter than the embedded display name
-   * from ticket payloads. This corrects incomplete first_name/last_name data.
+   * Fix requesters whose stored name is incomplete (shorter than the embedded
+   * display name from ticket payloads) or mojibake-corrupted. Candidates are
+   * repaired before comparison and a clean stored name is NEVER overwritten
+   * with a corrupted candidate.
    * @param {Map<string, string>} embeddedNames - Map of freshserviceId.toString() → display name
    * @returns {Promise<number>} Number of requesters updated
    */
@@ -191,14 +219,21 @@ class RequesterRepository {
       });
 
       for (const req of existing) {
-        const betterName = embeddedNames.get(req.freshserviceId.toString());
-        if (betterName && betterName.length > req.name.length) {
-          await prisma.requester.update({
-            where: { id: req.id },
-            data: { name: betterName },
-          });
-          fixed++;
-        }
+        const stored = req.name || '';
+        const candidate = repairMojibake(embeddedNames.get(req.freshserviceId.toString()) || '');
+        if (!candidate || candidate === stored) continue;
+        // Never overwrite a stored name with a mojibake candidate — this sweep
+        // used to re-corrupt clean names every sync because the corrupted
+        // variant is always longer (FR 08-05 item 2).
+        if (looksMojibake(candidate)) continue;
+        const repairsCorruption = looksMojibake(stored);
+        const isFuller = [...candidate].length > [...stored].length;
+        if (!repairsCorruption && !isFuller) continue;
+        await prisma.requester.update({
+          where: { id: req.id },
+          data: { name: candidate },
+        });
+        fixed++;
       }
     } catch (error) {
       logger.error('Error fixing incomplete requester names:', error);

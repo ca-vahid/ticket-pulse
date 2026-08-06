@@ -5,6 +5,7 @@ import ticketActivityRepository from './ticketActivityRepository.js';
 import attachmentService from './attachmentService.js';
 import { createFreshServiceClient } from '../integrations/freshservice.js';
 import { TICKET_ORIGIN, ticketDisplayRef } from '../utils/ticketOrigin.js';
+import { cleanDisplayName } from '../utils/textEncoding.js';
 import ticketTypeService from './ticketTypeService.js';
 import statusService from './statusService.js';
 import { sseManager } from '../routes/sse.routes.js';
@@ -712,6 +713,12 @@ class MirrorService {
         select: { id: true },
       });
       if (exists) continue;
+      // Per-message To/Cc (QA 08-05 #3): FS conversation objects carry
+      // to_emails/cc_emails — keep them in rawPayload (the same shape the
+      // regular FS conversation sync stores) so the UI can show recipients.
+      const recipients = {};
+      if (Array.isArray(conv.to_emails) && conv.to_emails.length) recipients.to_emails = conv.to_emails;
+      if (Array.isArray(conv.cc_emails) && conv.cc_emails.length) recipients.cc_emails = conv.cc_emails;
       await prisma.ticketThreadEntry.create({
         data: {
           ticketId: ticket.id,
@@ -719,7 +726,9 @@ class MirrorService {
           externalEntryId,
           source: 'freshservice_reconciliation',
           eventType: conv.private ? 'note' : 'reply',
-          actorName: conv.user_name || conv.from_email || 'FreshService user',
+          // RFC 2047 encoded-words + mojibake repair for display names
+          // (FR 08-05 item 2) — same treatment as parseRfc822Address.
+          actorName: cleanDisplayName(conv.user_name || conv.from_email) || 'FreshService user',
           actorEmail: conv.from_email || null,
           authorType: conv.incoming ? 'requester' : 'agent',
           incoming: conv.incoming === true,
@@ -729,6 +738,7 @@ class MirrorService {
           bodyText: conv.body_text || null,
           content: conv.body_text || null,
           occurredAt: conv.created_at ? new Date(conv.created_at) : new Date(),
+          ...(Object.keys(recipients).length ? { rawPayload: recipients } : {}),
         },
       });
       imported += 1;
