@@ -22,6 +22,7 @@ export const WEBHOOK_EVENTS = [
   'ticket.reply_received',
   'ticket.public_reply_added',
   'ticket.tags_changed',
+  'ticket.custom_fields_changed',
   'approval.requested',
   'approval.decided',
 ];

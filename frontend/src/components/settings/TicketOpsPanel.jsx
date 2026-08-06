@@ -430,6 +430,17 @@ export function CustomFieldsSection() {
   const isFreshFromApi = (field) => isApiBorn(field) && field.createdAt
     && (Date.now() - new Date(field.createdAt).getTime() < API_FIELD_FRESH_DAYS * 24 * 60 * 60 * 1000);
 
+  // Featured field (Phase 2): the ONE definition surfaced as a chip on queue
+  // rows + the peek. Optimistic single-select — the server enforces one max
+  // (featuring one unfeatures the rest), so mirror that locally and reconcile
+  // with a reload.
+  const toggleFeatured = async (field) => {
+    const next = !field.isFeatured;
+    setFields((prev) => prev.map((f) => ({ ...f, isFeatured: f.id === field.id ? next : false })));
+    try { await settingsAPI.updateCustomField(field.id, { isFeatured: next }); } catch { /* reload shows truth */ }
+    load();
+  };
+
   return (
     <SectionCard icon={Plus} title="Custom fields" hint="Per-workspace fields shown on every ticket (Ticket Pulse's own annotation layer — never written to FreshService). API senders can set values at creation — unknown keys auto-provision a definition here, badged API, for you to curate. Usable in workflow conditions as custom:<key>.">
       <ul className="space-y-1 mb-2">
@@ -454,6 +465,17 @@ export function CustomFieldsSection() {
             {isFreshFromApi(field) && <span className="text-[10px] text-indigo-500 italic">new from API</span>}
             {!field.isActive && <span className="text-[10px] text-slate-300 italic">retired</span>}
             <span className="flex-1" />
+            <button
+              onClick={() => toggleFeatured(field)}
+              aria-label={field.isFeatured ? `Unfeature ${field.label}` : `Feature ${field.label} on queue rows`}
+              aria-pressed={field.isFeatured}
+              title={field.isFeatured
+                ? 'Featured: shown as a chip on queue rows and in the peek. Click to unfeature.'
+                : 'Feature this field: shows as a chip on queue rows and in the peek (one per workspace — featuring this unfeatures the current one)'}
+              className={`tp-focus-ring p-1 rounded ${field.isFeatured ? 'text-amber-400 hover:text-amber-500' : 'text-slate-300 hover:text-amber-400'}`}
+            >
+              <Star className={`w-3.5 h-3.5 ${field.isFeatured ? 'fill-amber-400' : ''}`} aria-hidden="true" />
+            </button>
             <button
               onClick={() => startEdit(field)}
               className="tp-focus-ring text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 hover:bg-slate-50"

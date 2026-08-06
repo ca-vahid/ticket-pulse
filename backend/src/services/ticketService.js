@@ -669,6 +669,13 @@ class TicketService {
       where.status = { notIn: ['Deleted', 'Spam'] };
     }
 
+    // Custom-field filters (Custom Fields Activation Phase 2): cf_<key>=<value>
+    // (equals for select/boolean/number, case-insensitive contains for text)
+    // plus cf_<key>_gte / cf_<key>_lte ranges for number/date. Keys validate
+    // against the workspace's definitions; unknown keys are ignored silently —
+    // same posture as every other unrecognized query param.
+    await this._applyCustomFieldFilters(workspaceId, query, where);
+
     const q = String(query.q || '').trim();
     if (q) {
       const or = [
@@ -1038,6 +1045,103 @@ class TicketService {
       logger.warn(`awaiting-reply lookup failed (non-fatal): ${err.message}`);
       return [];
     }
+  }
+
+  /**
+   * Custom-field list filters (Custom Fields Activation Phase 2).
+   *
+   * Grammar (query params): `cf_<key>=<value>` — equals for select/boolean/
+   * number, case-insensitive CONTAINS for text, whole-day match for date-only
+   * values on date fields — plus `cf_<key>_gte` / `cf_<key>_lte` ranges for
+   * number and date fields. Anything else (ranges on text/select/boolean,
+   * non-numeric values on number fields, unknown keys) is ignored silently,
+   * matching how the rest of buildListWhere treats unrecognized params.
+   *
+   * Keys validate against the workspace's definitions — inactive included,
+   * because a retired definition still owns its key and its stored ticket
+   * values remain filterable (Settings "retire" keeps values). The defs are
+   * fetched ONCE per request and only when a cf_ param is actually present.
+   *
+   * JSONB approach (Prisma 5.22): native Json `path` filters cover equals
+   * (select/boolean) and numeric equals/ranges — `{ customFields: { path:
+   * [key], equals|gte|lte } }`. Prisma's Json filters do NOT support
+   * `mode: 'insensitive'` (String-only), so case-insensitive text contains —
+   * and date-string range comparison — run through ONE parameterized
+   * `$queryRaw` that resolves matching ticket ids (`custom_fields->>key ILIKE
+   * / >= / <=`), AND-composed into the where as `id IN (...)`. Raw SQL can't
+   * be spliced into a Prisma `where` object directly; this id-prefilter is
+   * the same pattern the 'awaiting' segment uses (_awaitingReplyTicketIds).
+   * Date compares are lexicographic on the stored `toISOString()` values,
+   * which is chronologically correct for the fixed-width UTC format.
+   */
+  async _applyCustomFieldFilters(workspaceId, query, where) {
+    const cfParams = Object.keys(query || {})
+      .filter((k) => k.startsWith('cf_') && query[k] !== undefined && query[k] !== null && String(query[k]).trim() !== '');
+    if (!cfParams.length) return;
+
+    const { default: customFieldService } = await import('./customFieldService.js');
+    const definitions = await customFieldService.listDefinitions(workspaceId, { includeInactive: true });
+    const byKey = new Map(definitions.map((d) => [d.key, d]));
+
+    const and = [];
+    const rawConds = []; // Prisma.sql fragments for the ILIKE / date-range lane
+    // ILIKE wildcards in user input must match literally (ESCAPE '\' default).
+    const likeEscape = (s) => s.replace(/[\\%_]/g, '\\$&');
+
+    for (const param of cfParams) {
+      const rest = param.slice(3);
+      let key = rest;
+      let op = 'eq';
+      if (!byKey.has(key)) {
+        // A def key may itself end in _gte/_lte, so exact match wins above.
+        const m = rest.match(/^(.+)_(gte|lte)$/);
+        if (m && byKey.has(m[1])) { key = m[1]; op = m[2]; } else continue; // unknown key → ignored
+      }
+      const def = byKey.get(key);
+      const value = String(query[param]).trim();
+
+      if (def.type === 'number') {
+        const n = Number(value);
+        if (!Number.isFinite(n)) continue;
+        and.push({ customFields: { path: [key], [op === 'eq' ? 'equals' : op]: n } });
+      } else if (op !== 'eq') {
+        if (def.type !== 'date') continue; // ranges only exist for number/date
+        // Date-only lower bounds compare fine lexicographically ('T…' > '');
+        // date-only UPPER bounds must stretch to the end of that day.
+        const bound = op === 'lte' && /^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T23:59:59.999Z` : value;
+        rawConds.push(op === 'gte'
+          ? Prisma.sql`(t.custom_fields->>${key}) >= ${bound}`
+          : Prisma.sql`(t.custom_fields->>${key}) <= ${bound}`);
+      } else if (def.type === 'boolean') {
+        and.push({ customFields: { path: [key], equals: value.toLowerCase() === 'true' } });
+      } else if (def.type === 'select') {
+        and.push({ customFields: { path: [key], equals: value } });
+      } else if (def.type === 'date') {
+        if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+          // Whole-day match for a date-only equals.
+          rawConds.push(Prisma.sql`(t.custom_fields->>${key}) >= ${value}`);
+          rawConds.push(Prisma.sql`(t.custom_fields->>${key}) <= ${`${value}T23:59:59.999Z`}`);
+        } else {
+          and.push({ customFields: { path: [key], equals: value } });
+        }
+      } else {
+        // text → case-insensitive contains
+        rawConds.push(Prisma.sql`(t.custom_fields->>${key}) ILIKE ${`%${likeEscape(value)}%`}`);
+      }
+    }
+
+    if (rawConds.length) {
+      const rows = await prisma.$queryRaw`
+        SELECT t.id FROM tickets t
+        WHERE t.workspace_id = ${workspaceId}
+          AND t.custom_fields IS NOT NULL
+          AND ${Prisma.join(rawConds, ' AND ')}
+        LIMIT 10000`;
+      const ids = rows.map((r) => Number(r.id));
+      and.push({ id: { in: ids.length ? ids : [-1] } });
+    }
+
+    if (and.length) where.AND = [...(where.AND || []), ...and];
   }
 
   /** Segment counts for the stat-card row. */

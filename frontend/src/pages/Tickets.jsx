@@ -20,7 +20,7 @@ import AiAssignModal from '../components/tickets/AiAssignModal';
 import LiveUpdatePill from '../components/tickets/LiveUpdatePill';
 import FsSyncConfirm from '../components/tickets/FsSyncConfirm';
 import {
-  AgentFirstName, ExternalChip, PersonAvatar, PriorityDot, SlaChip, StateChip, StatusPill, TagChip, TypePill, UnassignedBadge,
+  AgentFirstName, ExternalChip, FeaturedFieldChip, PersonAvatar, PriorityDot, SlaChip, StateChip, StatusPill, TagChip, TypePill, UnassignedBadge,
   PRIORITY_LABELS, PRIORITY_STRIP_COLORS, ticketCategoryLabels, timeAgo,
 } from '../components/tickets/ticketUi';
 import { baseStatusOf, isTerminalStatus, statusDefsFromMeta, statusNamesForBase, statusToneFromDefs } from '../components/tickets/statusDefs';
@@ -366,6 +366,14 @@ export default function Tickets() {
   const aiState = searchParams.get('aiState') || '';
   const requesterId = searchParams.get('requesterId') || '';
   const requesterName = searchParams.get('requesterName') || '';
+  // Custom-field filters (Phase 2): the dynamic cf_* param family forwards to
+  // the API verbatim. Serialized so unrelated URL churn (peek, page) doesn't
+  // recompute queryParams and refetch the list.
+  const cfSerialized = useMemo(() => {
+    const pairs = [];
+    for (const [k, v] of searchParams.entries()) if (k.startsWith('cf_') && v) pairs.push([k, v]);
+    return JSON.stringify(pairs);
+  }, [searchParams]);
 
   const [search, setSearch] = useState(urlSearch);
   const [debouncedSearch, setDebouncedSearch] = useState(urlSearch);
@@ -409,6 +417,18 @@ export default function Tickets() {
     ticketsAPI.stats().then((res) => setStats(res.data)).catch(() => {});
   }, []);
   useEffect(() => { fetchStats(); }, [fetchStats, workspaceId]);
+
+  // Featured custom field (Phase 2): the one workspace definition flagged
+  // isFeatured renders as a quiet chip on rows that carry a value.
+  const [featuredDef, setFeaturedDef] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    Promise.resolve()
+      .then(() => ticketsAPI.customFieldDefinitions())
+      .then((res) => { if (!cancelled) setFeaturedDef((res?.data || []).find((d) => d.isFeatured) || null); })
+      .catch(() => { if (!cancelled) setFeaturedDef(null); });
+    return () => { cancelled = true; };
+  }, [workspaceId]);
 
   // Row layout — the two ends of the old density spectrum plus the drag-drop
   // Board (QA 07-27 #3). Persisted; migrates the old 3-way density value.
@@ -457,10 +477,11 @@ export default function Tickets() {
     if (urgencyFilter) params.urgency = urgencyFilter;
     if (aiState) params.aiState = aiState;
     if (requesterId) params.requesterId = requesterId;
+    for (const [k, v] of JSON.parse(cfSerialized)) params[k] = v;
     if (debouncedSearch) params.q = debouncedSearch;
     return params;
   }, [page, statuses, statusFilterNames, assignee, priority, origin, segment, sort, dir, debouncedSearch,
-    type, category, subcategory, group, source, createdFrom, createdTo, due, noise, tag, tagMode, impactFilter, urgencyFilter, aiState, requesterId]);
+    type, category, subcategory, group, source, createdFrom, createdTo, due, noise, tag, tagMode, impactFilter, urgencyFilter, aiState, requesterId, cfSerialized]);
 
   // Post-refresh row highlights: ticketId → 'new' | 'updated'. Set when a
   // refresh is asked to diff against the previous page (update-pill apply,
@@ -1553,6 +1574,8 @@ export default function Tickets() {
                                   +{ticket.tags.length - 3}
                                 </span>
                               )}
+                              {/* Featured custom field (Phase 2): quiet slate chip on rows with a value */}
+                              {featuredDef && <FeaturedFieldChip def={featuredDef} value={ticket.customFields?.[featuredDef.key]} />}
                             </>
                           );
                           const subjectMeta = (

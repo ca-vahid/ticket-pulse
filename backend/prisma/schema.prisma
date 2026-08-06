@@ -836,6 +836,9 @@ model CustomFieldDefinition {
   options     String[] @default([]) // for select
   source      String   @default("manual") @db.VarChar(10) // manual (Settings) | api (auto-provisioned at intake)
   isActive    Boolean  @default(true) @map("is_active")
+  // The ONE definition per workspace surfaced as a chip on queue rows and in
+  // the peek Details (single-featured enforced in updateDefinition).
+  isFeatured  Boolean  @default(false) @map("is_featured")
   sortOrder   Int      @default(0) @map("sort_order")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
@@ -1172,6 +1175,9 @@ model Ticket {
 
   @@index([workspaceId])
   @@index([workspaceId, lastRealActivityAt(sort: Desc)])
+  // Queue cf_* filters (Custom Fields Activation Phase 2): GIN over the JSONB
+  // values so containment probes stay cheap as the table grows.
+  @@index([customFields(ops: JsonbPathOps)], map: "idx_tickets_custom_fields_gin", type: Gin)
   @@index([assignedTechId])
   // Dashboard workload scan: open/pending tickets per tech, scoped to a
   // workspace. Serves getAllActiveScoped's unbounded status branch so a large

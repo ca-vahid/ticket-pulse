@@ -94,3 +94,22 @@ describe('docs page — sender guide sections', () => {
     expect(html).not.toMatch(/<link[^>]+href="http/);
   });
 });
+
+// Phase 2 — cf_* list filters are part of the documented contract.
+describe('OpenAPI spec + docs — cf_* list filters (Phase 2)', () => {
+  test('GET /tickets documents the cf_{key} / _gte / _lte query params', () => {
+    const params = spec.paths['/tickets'].get.parameters || [];
+    const names = params.map((p) => p.name);
+    expect(names).toEqual(expect.arrayContaining(['cf_{key}', 'cf_{key}_gte', 'cf_{key}_lte']));
+    const eq = params.find((p) => p.name === 'cf_{key}');
+    expect(eq.in).toBe('query');
+    expect(eq.description).toMatch(/contains/i);
+    expect(eq.description).toMatch(/ignored/i);
+  });
+
+  test('the docs page carries the filtering one-liner', () => {
+    const page = renderDocsPage('https://tp.example');
+    expect(page).toContain('cf_&lt;key&gt;');
+    expect(page).toMatch(/case-insensitive contains/);
+  });
+});

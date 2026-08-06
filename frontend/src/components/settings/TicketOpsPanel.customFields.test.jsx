@@ -11,10 +11,10 @@ import { settingsAPI } from '../../services/api';
 
 const NOW = Date.now();
 const FIELDS = [
-  { id: 1, key: 'cost_centre', label: 'Cost centre', type: 'text', options: [], source: 'manual', isActive: true, createdAt: new Date(NOW - 90 * 86400000).toISOString() },
-  { id: 2, key: 'client_name', label: 'Client Name', type: 'text', options: [], source: 'api', isActive: true, createdAt: new Date(NOW - 86400000).toISOString() },
-  { id: 3, key: 'power_app_record_id', label: 'Power App Record Id', type: 'number', options: [], source: 'api', isActive: true, createdAt: new Date(NOW - 30 * 86400000).toISOString() },
-  { id: 4, key: 'old_field', label: 'Old field', type: 'text', options: [], source: 'manual', isActive: false, createdAt: new Date(NOW - 90 * 86400000).toISOString() },
+  { id: 1, key: 'cost_centre', label: 'Cost centre', type: 'text', options: [], source: 'manual', isActive: true, isFeatured: true, createdAt: new Date(NOW - 90 * 86400000).toISOString() },
+  { id: 2, key: 'client_name', label: 'Client Name', type: 'text', options: [], source: 'api', isActive: true, isFeatured: false, createdAt: new Date(NOW - 86400000).toISOString() },
+  { id: 3, key: 'power_app_record_id', label: 'Power App Record Id', type: 'number', options: [], source: 'api', isActive: true, isFeatured: false, createdAt: new Date(NOW - 30 * 86400000).toISOString() },
+  { id: 4, key: 'old_field', label: 'Old field', type: 'text', options: [], source: 'manual', isActive: false, isFeatured: false, createdAt: new Date(NOW - 90 * 86400000).toISOString() },
 ];
 
 vi.mock('../../services/api', () => ({
@@ -108,5 +108,30 @@ describe('CustomFieldsSection (Phase 1c manager)', () => {
     await waitFor(() => expect(settingsAPI.createCustomField).toHaveBeenCalledWith({
       key: 'region', label: 'Region', type: 'text', options: [],
     }));
+  });
+});
+
+// Phase 2 — the "Featured" star: ONE definition per workspace surfaces as a
+// chip on queue rows and in the peek. The server enforces single-featured;
+// the UI mirrors that optimistically.
+describe('CustomFieldsSection — featured toggle (Phase 2)', () => {
+  test('the featured definition shows a pressed star; the rest are unpressed', async () => {
+    await renderLoaded();
+    expect(screen.getByRole('button', { name: 'Unfeature Cost centre' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Feature Client Name on queue rows' })).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  test('featuring another field PATCHes isFeatured and optimistically unfeatures the current one', async () => {
+    await renderLoaded();
+    fireEvent.click(screen.getByRole('button', { name: 'Feature Client Name on queue rows' }));
+    // Optimistic single-select: Cost centre's star flips off immediately.
+    expect(screen.getByRole('button', { name: 'Feature Cost centre on queue rows' })).toBeInTheDocument();
+    await waitFor(() => expect(settingsAPI.updateCustomField).toHaveBeenCalledWith(2, { isFeatured: true }));
+  });
+
+  test('clicking the pressed star unfeatures it', async () => {
+    await renderLoaded();
+    fireEvent.click(screen.getByRole('button', { name: 'Unfeature Cost centre' }));
+    await waitFor(() => expect(settingsAPI.updateCustomField).toHaveBeenCalledWith(1, { isFeatured: false }));
   });
 });

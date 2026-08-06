@@ -11,14 +11,24 @@ import { fileURLToPath } from 'node:url';
 
 const prismaMock = {
   customFieldDefinition: {
-    findMany: jest.fn(), findFirst: jest.fn(), create: jest.fn(),
+    findMany: jest.fn(), findFirst: jest.fn(), create: jest.fn(), update: jest.fn(), updateMany: jest.fn(),
   },
-  ticket: { findFirst: jest.fn(), update: jest.fn() },
+  ticket: { findFirst: jest.fn(), update: jest.fn(), findUnique: jest.fn() },
+  ticketActivity: { create: jest.fn() },
+  $transaction: jest.fn((ops) => Promise.all(ops)),
 };
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
 jest.unstable_mockModule('../src/utils/logger.js', () => ({
   default: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() },
+}));
+// Phase 2: setValues dispatches ticket.custom_fields_changed after the audit
+// write — mocked so the tests assert the dispatch without the outbox machinery.
+const dispatchWebhookEventMock = jest.fn();
+jest.unstable_mockModule('../src/services/webhookDispatchService.js', () => ({
+  default: { dispatchWebhookEvent: dispatchWebhookEventMock },
+  dispatchWebhookEvent: dispatchWebhookEventMock,
+  WEBHOOK_EVENTS: ['ticket.custom_fields_changed'],
 }));
 
 const {
@@ -281,5 +291,123 @@ describe('updateDefinition — type curation (Phase 1c)', () => {
       where: { id: 9 },
       data: { label: 'Client', isActive: false },
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 2 — featured definition (queue-row chip) + change webhook.
+
+describe('updateDefinition — single featured per workspace (Phase 2)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prismaMock.$transaction.mockImplementation((ops) => Promise.all(ops));
+    prismaMock.customFieldDefinition.update.mockImplementation(({ where, data }) => Promise.resolve({ id: where.id, ...data }));
+    prismaMock.customFieldDefinition.updateMany.mockResolvedValue({ count: 1 });
+  });
+
+  const arm = (definition) => prismaMock.customFieldDefinition.findFirst.mockResolvedValue(definition);
+
+  test('featuring one atomically unfeatures every other definition in the workspace', async () => {
+    arm({ id: 9, workspaceId: 2, key: 'client_name', label: 'Client Name', type: 'text', options: [], isActive: true, isFeatured: false });
+    const updated = await customFieldService.updateDefinition(2, 9, { isFeatured: true });
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+    expect(prismaMock.customFieldDefinition.updateMany).toHaveBeenCalledWith({
+      where: { workspaceId: 2, isFeatured: true, id: { not: 9 } },
+      data: { isFeatured: false },
+    });
+    expect(prismaMock.customFieldDefinition.update).toHaveBeenCalledWith({
+      where: { id: 9 },
+      data: { isFeatured: true },
+    });
+    expect(updated.isFeatured).toBe(true);
+  });
+
+  test('unfeaturing is a plain update — no transaction, nobody else touched', async () => {
+    arm({ id: 9, workspaceId: 2, key: 'client_name', label: 'Client Name', type: 'text', options: [], isActive: true, isFeatured: true });
+    await customFieldService.updateDefinition(2, 9, { isFeatured: false });
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    expect(prismaMock.customFieldDefinition.updateMany).not.toHaveBeenCalled();
+    expect(prismaMock.customFieldDefinition.update).toHaveBeenCalledWith({
+      where: { id: 9 },
+      data: { isFeatured: false },
+    });
+  });
+
+  test('isFeatured rides alongside other edits through the settings PATCH body', async () => {
+    arm({ id: 9, workspaceId: 2, key: 'client_name', label: 'Client Name', type: 'text', options: [], isActive: true, isFeatured: false });
+    await customFieldService.updateDefinition(2, 9, { label: 'Client', isFeatured: true });
+    expect(prismaMock.customFieldDefinition.update).toHaveBeenCalledWith({
+      where: { id: 9 },
+      data: { label: 'Client', isFeatured: true },
+    });
+  });
+});
+
+describe('setValues — ticket.custom_fields_changed webhook (Phase 2)', () => {
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prismaMock.customFieldDefinition.findMany.mockResolvedValue([
+      { id: 1, workspaceId: 1, key: 'client_name', label: 'Client Name', type: 'text', options: [], isActive: true },
+    ]);
+    prismaMock.ticket.findFirst.mockResolvedValue({ id: 100, workspaceId: 1, customFields: { client_name: 'Old Corp' } });
+    prismaMock.ticket.update.mockResolvedValue({});
+    prismaMock.ticketActivity.create.mockResolvedValue({});
+    prismaMock.ticket.findUnique.mockResolvedValue({
+      id: 100,
+      origin: 'ticketpulse',
+      status: 'Open',
+      nativeNumber: 1042,
+      freshserviceTicketId: null,
+      subject: 'Setup',
+      priority: 2,
+      internalCategory: { name: 'Project Setup' },
+      internalSubcategory: null,
+      tagLinks: [{ tag: { name: 'intake' } }],
+    });
+  });
+
+  test('a real change dispatches AFTER the audit write with changedKeys + merged values', async () => {
+    await customFieldService.setValues(100, 1, { client_name: 'ACME Inc' }, { email: 'ada@x.io' });
+    await flush();
+    expect(dispatchWebhookEventMock).toHaveBeenCalledWith(1, 'ticket.custom_fields_changed', expect.objectContaining({
+      changedKeys: ['client_name'],
+      ticket: expect.objectContaining({
+        id: 100,
+        ref: 'TP-1042',
+        category: 'Project Setup',
+        tags: ['intake'],
+        customFields: { client_name: 'ACME Inc' },
+      }),
+    }));
+    // Audit first, webhook second.
+    expect(prismaMock.ticketActivity.create).toHaveBeenCalled();
+  });
+
+  test('a no-op write (same value) does not dispatch', async () => {
+    await customFieldService.setValues(100, 1, { client_name: 'Old Corp' }, { email: 'ada@x.io' });
+    await flush();
+    expect(dispatchWebhookEventMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('migration ↔ model sync (GIN index + is_featured, Phase 2)', () => {
+  const backendRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+  test('the Phase 2 migration is idempotent: GIN index + is_featured rider', () => {
+    const sql = fs.readFileSync(
+      path.join(backendRoot, 'prisma/migrations/20260806120000_custom_fields_gin/migration.sql'), 'utf8',
+    );
+    expect(sql).toMatch(/CREATE INDEX IF NOT EXISTS "idx_tickets_custom_fields_gin"/);
+    expect(sql).toMatch(/USING GIN \("custom_fields" jsonb_path_ops\)/);
+    expect(sql).toMatch(/ALTER TABLE "custom_field_definitions"\s+ADD COLUMN IF NOT EXISTS "is_featured" BOOLEAN NOT NULL DEFAULT false/);
+  });
+
+  test('the Prisma models carry the matching isFeatured field and GIN index', () => {
+    const schema = fs.readFileSync(path.join(backendRoot, 'prisma/schema.prisma'), 'utf8');
+    const model = schema.split('model CustomFieldDefinition {')[1].split('\n}')[0];
+    expect(model).toMatch(/isFeatured\s+Boolean\s+@default\(false\)\s+@map\("is_featured"\)/);
+    expect(schema).toMatch(/@@index\(\[customFields\(ops: JsonbPathOps\)\], map: "idx_tickets_custom_fields_gin", type: Gin\)/);
   });
 });

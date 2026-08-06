@@ -160,6 +160,7 @@ describe('test-ping + safety', () => {
 
   test('event catalogue is the documented set', () => {
     expect(WEBHOOK_EVENTS).toContain('ticket.created');
-    expect(WEBHOOK_EVENTS).toHaveLength(8);
+    expect(WEBHOOK_EVENTS).toContain('ticket.custom_fields_changed'); // Phase 2
+    expect(WEBHOOK_EVENTS).toHaveLength(9);
   });
 });

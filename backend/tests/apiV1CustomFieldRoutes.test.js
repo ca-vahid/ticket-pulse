@@ -13,6 +13,7 @@ const prismaMock = {};
 const ticketServiceMock = {
   createTicket: jest.fn(),
   getTicket: jest.fn(),
+  listTickets: jest.fn(),
   updateTicketFields: jest.fn(),
   changeStatus: jest.fn(),
   assignTicket: jest.fn(),
@@ -186,5 +187,21 @@ describe('PATCH /api/v1/tickets/:id — category/subcategory by name', () => {
     expect(ticketServiceMock.updateTicketFields).toHaveBeenCalledWith(
       501, 1, expect.objectContaining({ internalCategoryId: 12 }), expect.anything(),
     );
+  });
+});
+
+// Phase 2 — the v1 list endpoint inherits cf_* custom-field filters by riding
+// listTickets verbatim (buildListWhere speaks the grammar; nothing v1-specific).
+describe('GET /api/v1/tickets — cf_* filter inheritance', () => {
+  test('cf_* query params reach listTickets untouched', async () => {
+    ticketServiceMock.listTickets.mockResolvedValue({ items: [], nextCursor: null, pageSize: 25, total: 0 });
+    await request(buildApp())
+      .get('/api/v1/tickets?cf_client_name=acme&cf_amount_gte=10')
+      .set('Authorization', 'Bearer tp_live_x')
+      .expect(200);
+    expect(ticketServiceMock.listTickets).toHaveBeenCalledWith(1, expect.objectContaining({
+      cf_client_name: 'acme',
+      cf_amount_gte: '10',
+    }));
   });
 });

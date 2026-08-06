@@ -117,9 +117,36 @@ describe('FieldCardNote', () => {
     expect(screen.getByText('Acme Corp')).toBeInTheDocument();
   });
 
-  test('"Filter queue by this value" stays feature-flagged off until Phase 2', () => {
-    expect(CF_FILTERING_ENABLED).toBe(false);
+  test('Phase 2 live: the filter-queue action is on', () => {
+    expect(CF_FILTERING_ENABLED).toBe(true);
     renderCard();
+    expect(screen.getByRole('button', { name: 'Filter queue by Client name' })).toBeInTheDocument();
+  });
+
+  test('"Filter queue by this value" navigates to /tickets?cf_<key>=<encoded value>', () => {
+    const onFilterNavigate = vi.fn();
+    renderCard({ onFilterNavigate });
+    fireEvent.click(screen.getByRole('button', { name: 'Filter queue by Client name' }));
+    expect(onFilterNavigate).toHaveBeenCalledWith('/tickets?cf_client_name=Acme%20Corp');
+  });
+
+  test('the filter action prefers the CURRENT value when it drifted from the snapshot', () => {
+    const onFilterNavigate = vi.fn();
+    renderCard({ onFilterNavigate, currentValues: { client_name: 'Acme Corp (renamed)' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Filter queue by Client name' }));
+    expect(onFilterNavigate).toHaveBeenCalledWith('/tickets?cf_client_name=Acme%20Corp%20(renamed)');
+  });
+
+  test('empty snapshot values get no filter action', () => {
+    render(
+      <ul>
+        <FieldCardNote entry={{
+          ...ENTRY,
+          rawPayload: { ...ENTRY.rawPayload, fields: [{ key: 'po_number', label: 'PO number', type: 'text', value: '' }] },
+        }}
+        />
+      </ul>,
+    );
     expect(screen.queryByRole('button', { name: /Filter queue by/ })).not.toBeInTheDocument();
   });
 

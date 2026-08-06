@@ -133,7 +133,7 @@ const T = {
 
 const ref = (n) => ({ $ref: `#/components/schemas/${n}` });
 
-function op(summary, scope, { tag, body, responseRef, status = 200, list = false, meta, extraResponses } = {}) {
+function op(summary, scope, { tag, body, responseRef, status = 200, list = false, meta, extraResponses, parameters } = {}) {
   const successSchema = list
     ? { type: 'object', properties: { success: { type: 'boolean' }, data: { type: 'object', properties: { items: { type: 'array', items: responseRef || {} }, pagination: { $ref: '#/components/schemas/Pagination' } } } } }
     : { type: 'object', properties: { success: { type: 'boolean' }, data: responseRef || { type: 'object' } } };
@@ -153,8 +153,33 @@ function op(summary, scope, { tag, body, responseRef, status = 200, list = false
   const o = { summary, tags: [tag], security: [{ apiKey: [] }], responses };
   if (scope) o['x-required-scope'] = scope;
   if (body) o.requestBody = { required: true, content: { 'application/json': { schema: body } } };
+  if (parameters) o.parameters = parameters;
   return o;
 }
+
+// Custom-field list filters (Custom Fields Activation Phase 2): documented as
+// templated query-param names because the real names are per-workspace
+// (`cf_client_name`, `cf_amount_gte`, …). Unknown keys are ignored silently.
+const CF_FILTER_PARAMETERS = [
+  {
+    name: 'cf_{key}',
+    in: 'query',
+    schema: { type: 'string' },
+    description: 'Filter by a custom-field value ({key} = a definition key from GET /custom-fields). Equals for select/boolean/number fields; case-insensitive CONTAINS for text; a date-only value matches that whole day on date fields. Unknown keys are ignored.',
+  },
+  {
+    name: 'cf_{key}_gte',
+    in: 'query',
+    schema: { type: 'string' },
+    description: 'Lower bound (inclusive) for a number or date custom field.',
+  },
+  {
+    name: 'cf_{key}_lte',
+    in: 'query',
+    schema: { type: 'string' },
+    description: 'Upper bound (inclusive) for a number or date custom field. Date-only values are inclusive of that whole day.',
+  },
+];
 
 // Intake-transparency meta on the create response (FR 08-05 #1): what didn't
 // land, what got rejected inside customFields, and what auto-provisioned.
@@ -259,7 +284,7 @@ export function buildOpenApiSpec(baseUrl) {
       '/me': { get: op('Identity, workspace, and limits for the calling credential', null, { tag: 'discovery' }) },
       '/meta': { get: op('Enumerations: priorities, statuses, ticket types', null, { tag: 'discovery' }) },
       '/tickets': {
-        get: op('List tickets (cursor or offset; filters mirror the queue)', 'tickets:read', { tag: 'tickets', responseRef: ref('Ticket'), list: true }),
+        get: op('List tickets (cursor or offset; filters mirror the queue, incl. cf_* custom-field filters)', 'tickets:read', { tag: 'tickets', responseRef: ref('Ticket'), list: true, parameters: CF_FILTER_PARAMETERS }),
         post: op('Create a ticket (category by name, custom fields, cc)', 'tickets:write', {
           tag: 'tickets', body: ref('CreateTicket'), responseRef: ref('Ticket'), status: 201,
           meta: CREATE_TICKET_META, extraResponses: { 400: CATEGORY_VALIDATION_400 },
@@ -411,7 +436,8 @@ the ticket is still created.<br>
 • <b>Caps:</b> ≤ 40 keys per request · ≤ 2,000 chars per value · ≤ 200 definitions per workspace.<br>
 • <b>Updates:</b> <code>PATCH /tickets/{id}</code> merges values but <b>never auto-provisions</b> — unknown keys return
 <code>422 unknown_custom_fields</code> naming every offender. Creation is the intake path.<br>
-• <code>GET /custom-fields</code> lists the workspace's active definitions (<code>customfields:read</code>).
+• <code>GET /custom-fields</code> lists the workspace's active definitions (<code>customfields:read</code>).<br>
+• <b>Filtering:</b> <code>GET /tickets?cf_&lt;key&gt;=&lt;value&gt;</code> filters the list by a custom field (equals for select/boolean/number, case-insensitive contains for text) — plus <code>cf_&lt;key&gt;_gte</code>/<code>cf_&lt;key&gt;_lte</code> ranges for number/date fields; unknown keys are ignored.
 </div>
 <div class="card">
 <b>Worked example</b> — a Power App / SharePoint project-setup request:
