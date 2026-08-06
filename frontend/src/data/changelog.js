@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.1.4-preview';
+export const APP_VERSION = '3.1.5-preview';
 
 export const changelog = [
+  {
+    version: '3.1.5-preview',
+    date: 'August 5, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>🏢 Status changes no longer blocked by missing Department</strong> — when FreshService requires a Department the ticket doesn’t have (e.g. external Cambio requesters), Ticket Pulse now resolves one automatically — from the FS ticket, the requester, or their Entra office location — and retries. If truly unresolvable, the error now says exactly what’s missing instead of “Validation failed”. FreshService field-level errors surface properly everywhere. (QA 08-05)' },
+      { type: 'fixed', html: '<strong>📐 Weekly day tiles line up</strong> — the dashboard’s per-day tiles now sit in perfect vertical columns on laptop screens in both Simple and Detailed views (they previously drifted when holiday/leave dots widened a day).' },
+      { type: 'improved', html: '<strong>🟢 Calmer Today marker in Detailed view</strong> — today’s tile now carries a deep-green ring that fits the Detailed palette (Simple keeps its violet). Also fixed: dashboard rows were invisible for users with reduced-motion enabled.' },
+    ],
+  },
   {
     version: '3.1.4-preview',
     date: 'August 5, 2026',

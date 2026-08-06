@@ -371,7 +371,11 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
 
         {/* Col 3: Weekly heatmap (weekly) OR Open count (daily) */}
         {viewMode === 'weekly' ? (
-          <div className="flex items-center justify-center gap-1 no-row-nav">
+          /* 7 equal grid columns (not a shrinkable flex row): per-day min-content
+             differs (holiday/leave dots), so flex items shrank unevenly inside
+             the laptop minmax track and tiles drifted out of vertical alignment
+             across rows (QA 08-05 #4). Equal tracks keep every row columnar. */
+          <div className="grid grid-cols-7 items-center gap-1 w-full no-row-nav">
             {(technician.dailyBreakdown || []).map((day, index) => {
               const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
               const colorClass = getTicketColor(day.total, maxDailyCount);
@@ -394,12 +398,21 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
 
               // Holiday label colors keep priority (they carry meaning); the
               // today ring below is what marks today on holiday tiles.
+              // Today tint per view (QA 08-05 #5): violet is Simple's brand
+              // tint; Detailed uses a deep emerald that reads as a calm marker
+              // next to its green/rose/indigo/slate tiles (slate-400 vanished
+              // against the weekend tiles).
+              const todayRing = simple
+                ? 'ring-2 ring-violet-500 ring-offset-1'
+                : 'ring-2 ring-emerald-700 ring-offset-1';
               const labelClass = isHolidayDay
                 ? dateStyling.isCanadian
                   ? 'text-rose-600 font-bold'
                   : 'text-indigo-500 font-bold'
                 : isTodayDay
-                  ? 'text-violet-700 font-bold'
+                  ? simple
+                    ? 'text-violet-700 font-bold'
+                    : 'text-emerald-700 font-bold'
                   : isWeekendDay
                     ? 'text-slate-500 font-semibold'
                     : 'text-gray-500 font-semibold';
@@ -464,7 +477,7 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
               return (
                 <div
                   key={day.date}
-                  className={`flex flex-col items-center cursor-pointer w-[34px] ${containerClass}`}
+                  className={`flex flex-col items-center cursor-pointer min-w-0 w-full ${containerClass}`}
                   title={fullTooltip}
                   onClick={handleDayBoxClick}
                 >
@@ -480,7 +493,7 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
                       <span className="text-[7px] opacity-60 ml-0.5">{parseInt(day.date.split('-')[2], 10)}</span>
                     </div>
                   </div>
-                  <div className={`relative w-7 h-7 rounded flex items-center justify-center text-[10px] font-bold border overflow-hidden transition-all duration-150 hover:scale-125 hover:shadow-lg hover:ring-2 hover:ring-blue-400 hover:ring-offset-1 ${isTodayDay ? 'ring-2 ring-violet-500 ring-offset-1' : ''} ${getBoxClasses()}`}>
+                  <div className={`relative w-7 h-7 rounded flex items-center justify-center text-[10px] font-bold border overflow-hidden transition-all duration-150 hover:scale-125 hover:shadow-lg hover:ring-2 hover:ring-blue-400 hover:ring-offset-1 ${isTodayDay ? todayRing : ''} ${getBoxClasses()}`}>
                     {dayLeaveSplit?.isSplit && (
                       <div className={`absolute inset-0 ${dayLeaveSplit.overlayClass} pointer-events-none`} />
                     )}

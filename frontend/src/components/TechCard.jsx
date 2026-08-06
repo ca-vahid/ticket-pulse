@@ -376,12 +376,20 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
 
                 // Determine label styling — holiday colors keep priority (they
                 // carry meaning); the today ring is what marks today there.
+                // Today tint per view (QA 08-05 #5): violet is Simple's brand
+                // tint; Detailed uses a deep emerald that reads as a calm
+                // marker next to its green/rose/indigo/slate tiles.
+                const todayRing = simple
+                  ? 'ring-2 ring-violet-500 ring-offset-1'
+                  : 'ring-2 ring-emerald-700 ring-offset-1';
                 const labelClass = isHolidayDay
                   ? dateStyling.isCanadian
                     ? 'text-rose-600 font-bold'
                     : 'text-indigo-500 font-bold'
                   : isTodayDay
-                    ? 'text-violet-700 font-bold'
+                    ? simple
+                      ? 'text-violet-700 font-bold'
+                      : 'text-emerald-700 font-bold'
                     : isWeekendDay
                       ? 'text-slate-500 font-semibold'
                       : 'text-gray-500 font-semibold';
@@ -475,7 +483,7 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
                         <span className="text-[7px] opacity-60 ml-0.5">{parseInt(day.date.split('-')[2], 10)}</span>
                       </div>
                     </div>
-                    <div className={`relative h-8 w-full max-w-9 rounded flex items-center justify-center text-[10px] font-bold border overflow-hidden transition-all duration-150 hover:scale-110 hover:shadow-lg hover:ring-2 hover:ring-blue-400 hover:ring-offset-1 ${isTodayDay ? 'ring-2 ring-violet-500 ring-offset-1' : ''} ${getBoxClasses()}`}>
+                    <div className={`relative h-8 w-full max-w-9 rounded flex items-center justify-center text-[10px] font-bold border overflow-hidden transition-all duration-150 hover:scale-110 hover:shadow-lg hover:ring-2 hover:ring-blue-400 hover:ring-offset-1 ${isTodayDay ? todayRing : ''} ${getBoxClasses()}`}>
                       {/* Half-day overlay: gradient fades from the leave colour
                           at the AM/PM edge into transparent at the midline,
                           so there is no hard 50/50 split. */}

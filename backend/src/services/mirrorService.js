@@ -361,14 +361,19 @@ class MirrorService {
   }
 
   /**
-   * Resolve the FS department id for a mirror create. FreshService made
+   * Resolve the FS department id for a ticket. FreshService made
    * department_id a REQUIRED create field (QA 07-28: TP-1058's create job
    * dead-lettered 8 times on "department_id … missing_field"), so we match the
    * ticket's department name — else the requester's Entra office/department —
    * against the FS department list, falling back to "Non-BGC Email" and then
    * the first department. Cached 10 min per workspace.
+   *
+   * Public since QA 08-05 #6 (Cambio #236253): ticketService's status-change
+   * retry reuses this as step 3 of its department ladder when neither the FS
+   * ticket nor its FS requester carries a department. Never throws — returns
+   * undefined when resolution is impossible.
    */
-  async _resolveDepartmentId(client, ticket) {
+  async resolveDepartmentId(client, ticket) {
     try {
       const wsId = ticket.workspaceId;
       let entry = this._departmentsCache.get(wsId);
@@ -398,6 +403,11 @@ class MirrorService {
       logger.warn(`Mirror: department resolution failed (non-fatal): ${err.message}`);
       return undefined;
     }
+  }
+
+  /** Old private name — kept delegating for compatibility with existing callers. */
+  _resolveDepartmentId(client, ticket) {
+    return this.resolveDepartmentId(client, ticket);
   }
 
   /**
@@ -435,7 +445,7 @@ class MirrorService {
       workspace_id: ticket.workspace?.freshserviceWorkspaceId ? Number(ticket.workspace.freshserviceWorkspaceId) : undefined,
       group_id: ticket.groupId ? Number(ticket.groupId) : undefined,
       responder_id: ticket.assignedTech?.freshserviceId ? Number(ticket.assignedTech.freshserviceId) : undefined,
-      department_id: await this._resolveDepartmentId(client, ticket),
+      department_id: await this.resolveDepartmentId(client, ticket),
     };
     // Ticket type rides along only when the registry maps it to an FS choice
     // for this workspace — TP-native-only types (fsTypeValue null) stay

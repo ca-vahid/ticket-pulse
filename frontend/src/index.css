@@ -48,7 +48,9 @@
     :root {
       --tp-compact-grid-weekly: 24px minmax(150px, 1.2fr) minmax(250px, 1fr) 56px 48px 48px 48px 50px 48px 58px;
       --tp-compact-grid-daily: 24px minmax(150px, 1fr) 64px 64px 50px 50px 50px 52px 50px minmax(58px, 1fr);
-      --tp-compact-grid-weekly-simple: 24px minmax(150px, 1.2fr) minmax(230px, 1fr) 52px 84px 76px 100px 70px 66px 76px;
+      /* Week track min 230→250px so the 7 equal day columns keep breathing
+         room on laptops (QA 08-05 #4). getCompactMinWidth mirrors the sum. */
+      --tp-compact-grid-weekly-simple: 24px minmax(150px, 1.2fr) minmax(250px, 1fr) 52px 84px 76px 100px 70px 66px 76px;
       --tp-compact-grid-daily-simple: 24px minmax(150px, 1fr) 60px 60px 84px 76px 100px 70px 66px minmax(76px, 1fr);
     }
   }
@@ -604,6 +606,14 @@ code {
   .animate-scaleIn,
   .animate-slide-in-right {
     animation: none;
+  }
+  /* slideInLeft/scaleIn start at opacity 0 and rely on the animation's
+     `forwards` fill to become visible — with the animation disabled the
+     content stayed invisible for reduced-motion users (dashboard rows
+     rendered fully transparent). Show them statically instead. */
+  .animate-slideInLeft,
+  .animate-scaleIn {
+    opacity: 1;
   }
   /* Static fallbacks: no motion, but the moment still shows for the few
      seconds each fx class is applied (cleared by the same JS timer). */
