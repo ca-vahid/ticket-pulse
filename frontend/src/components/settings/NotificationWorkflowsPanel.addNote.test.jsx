@@ -180,3 +180,31 @@ describe('workflow validation with add_note', () => {
     ]));
   });
 });
+
+describe('unknown node types (frontend/backend version skew)', () => {
+  const definition = {
+    version: 1,
+    nodes: [
+      { id: 'trigger', type: 'trigger', data: { triggerType: 'ticket.created' } },
+      { id: 'mystery', type: 'quantum_note', data: {} },
+      { id: 'stop', type: 'stop', data: {} },
+    ],
+    edges: [
+      { id: 'trigger-to-mystery', source: 'trigger', target: 'mystery' },
+      { id: 'mystery-to-stop', source: 'mystery', target: 'stop' },
+    ],
+    metadata: {},
+  };
+
+  test('publish stays blocked, but the message guides a hard refresh instead of a bare error', () => {
+    const errors = validateWorkflowDefinitionClient(definition, 'ticket.created');
+    expect(errors.length).toBeGreaterThan(0); // still blocking
+    const message = errors.find((error) => error.includes("('quantum_note')"));
+    expect(message).toBeDefined();
+    expect(message).toContain("this app version doesn't recognize");
+    expect(message).toContain('hard-refresh (Ctrl+Shift+R)');
+    expect(message).toContain('contact support');
+    // The old unhelpful wording must be gone.
+    expect(errors.some((error) => error.startsWith('Unsupported node type'))).toBe(false);
+  });
+});
