@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.2.02-preview';
+export const APP_VERSION = '3.2.03-preview';
 
 export const changelog = [
+  {
+    version: '3.2.03-preview',
+    date: 'August 6, 2026',
+    entries: [
+      { type: 'new', html: '<strong>🗃️ Categories page, rebuilt</strong> — the Competencies → Categories tab is now a proper two-level tree with full editing: rename inline, edit descriptions and order, retire/reactivate (with a Retired section), merge into a sibling, and delete with honest guardrails. Rows show ticket & technician counts, descriptions, and source chips. Search keeps parent context.' },
+      { type: 'new', html: '<strong>👥 Same subcategory name under different categories</strong> — “Quebec” can now exist under both Project Setup and Proposal Setup: names are unique per parent instead of workspace-wide. Conflict errors name the parent, Detect Duplicates no longer flags legitimate same-named siblings, and merging remaps tickets safely instead of orphaning them. Renames keep ticket history consistent.' },
+    ],
+  },
   {
     version: '3.2.02-preview',
     date: 'August 6, 2026',

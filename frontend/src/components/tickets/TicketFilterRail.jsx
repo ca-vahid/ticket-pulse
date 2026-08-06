@@ -1148,7 +1148,10 @@ export function ActiveFilterBar({ meta }) {
     for (const c of meta?.categoryTree || []) {
       if (String(c.id) === id) return c.name;
       const sub = c.subcategories.find((s) => String(s.id) === id);
-      if (sub) return sub.name;
+      // Subcategory chips carry their parent for context — bare sub names
+      // ("Quebec") are ambiguous now that same-name subs can exist under
+      // different parents.
+      if (sub) return `${c.name} / ${sub.name}`;
     }
     return `Category ${id}`;
   };

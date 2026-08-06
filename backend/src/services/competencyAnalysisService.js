@@ -585,7 +585,16 @@ class CompetencyAnalysisService {
       }
 
       if (!category) {
-        category = allExisting.find((c) => c.name.toLowerCase() === normalizedName.toLowerCase());
+        // Names are only unique PER PARENT: prefer the row under the parent
+        // the assessment names, else the top-level row, else an unambiguous
+        // single match. Ambiguous same-named subs without parent context fall
+        // through to fuzzy matching below (documented fuzziness — legacy
+        // assessments are advisory input, not taxonomy writes).
+        const exactMatches = allExisting.filter((c) => c.name.toLowerCase() === normalizedName.toLowerCase());
+        const suggestedParentId = resolveSuggestedParentId(comp, allExisting);
+        category = (suggestedParentId ? exactMatches.find((c) => c.parentId === suggestedParentId) : null)
+          || exactMatches.find((c) => !c.parentId)
+          || (exactMatches.length === 1 ? exactMatches[0] : undefined);
       }
 
       if (!category) {

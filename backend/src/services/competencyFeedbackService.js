@@ -52,8 +52,20 @@ class CompetencyFeedbackService {
         select: { id: true, name: true, parentId: true },
       });
 
-      const directMatch = targetCategoryId ? existingCategories.find((category) => category.id === targetCategoryId) : null;
-      const { match } = directMatch ? { match: directMatch } : findBestCategoryMatch(ticketCategory, existingCategories);
+      let match = targetCategoryId
+        ? existingCategories.find((category) => category.id === targetCategoryId) || null
+        : null;
+      if (!match) {
+        // Fuzzy fallback (ticket has no internal classification, so no parent
+        // context exists). Names are only unique PER PARENT and a bare FS
+        // category string names no parent — prefer a top-level match, and only
+        // if none scores do we fall back to the full list, where a same-named
+        // sub under some parent may win. Documented fuzziness: this feeds a
+        // coaching signal, not the taxonomy itself.
+        const topLevel = existingCategories.filter((category) => !category.parentId);
+        match = findBestCategoryMatch(ticketCategory, topLevel).match
+          || findBestCategoryMatch(ticketCategory, existingCategories).match;
+      }
       if (!match) {
         logger.debug('Competency feedback: no matching competency category', { runId, ticketCategory });
         return;

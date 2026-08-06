@@ -18,6 +18,40 @@ import { TICKET_ORIGIN, ticketDisplayRef } from '../utils/ticketOrigin.js';
 
 const TP_SKILL_OBJECT_TITLE = 'Ticket Pulse Skills';
 const TP_SUBSKILL_OBJECT_TITLE = 'Ticket Pulse Subskills';
+const TP_SUBSKILL_PARENT_FIELD = 'parent_skill';
+
+/** Display id referenced by a subskill record's parent_skill lookup value
+ *  (FS returns either a scalar id or a {id/value} object). */
+function recordParentDisplayId(record) {
+  const value = record?.data?.[TP_SUBSKILL_PARENT_FIELD];
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value === 'object') {
+    const id = value.id;
+    if (id && typeof id === 'object' && Object.keys(id).length === 0) return null;
+    const candidate = id ?? value.bo_display_id ?? value.display_id ?? value.value ?? null;
+    return candidate === undefined || candidate === null || candidate === '' ? null : Number(candidate);
+  }
+  return Number(value);
+}
+
+/**
+ * Pick the FS subskill record for (name, parent). Subskill names are only
+ * unique PER PARENT in Ticket Pulse, while FS records keep BARE names — two
+ * same-named siblings are distinguishable only via their parent_skill lookup
+ * (a residual FS-side constraint: they look identical in the FS UI). Match by
+ * parent first, then a record without a parent set, then — only when the name
+ * is unambiguous — the single bare-name match.
+ */
+function pickSubskillRecord(records, subskillName, parentDisplayId) {
+  const candidates = (records || []).filter((record) => keyFor(recordName(record)) === keyFor(subskillName));
+  if (candidates.length === 0) return null;
+  const exact = parentDisplayId
+    ? candidates.find((record) => recordParentDisplayId(record) === Number(parentDisplayId))
+    : null;
+  return exact
+    || candidates.find((record) => !recordParentDisplayId(record))
+    || (candidates.length === 1 ? candidates[0] : null);
+}
 
 function mapClosedStatus(status) {
   if (Number(status) === 5) return 'Closed';
@@ -68,10 +102,13 @@ export async function resolveTpSkillLookupIds(client, { skill, subskill, workspa
     subcategoryObject ? client.listCustomObjectRecords(subcategoryObject.id) : Promise.resolve([]),
   ]);
   const catByName = new Map((categoryRecords || []).map((r) => [keyFor(recordName(r)), recordDisplayId(r)]));
-  const subByName = new Map((subcategoryRecords || []).map((r) => [keyFor(recordName(r)), recordDisplayId(r)]));
+  const categoryDisplayId = catByName.get(keyFor(skill)) ?? null;
+  // Subskill names are only unique per parent — scope the record match by the
+  // resolved parent (see pickSubskillRecord for the FS naming caveat).
+  const subcategoryRecord = subskill ? pickSubskillRecord(subcategoryRecords, subskill, categoryDisplayId) : null;
   return {
-    categoryDisplayId: catByName.get(keyFor(skill)) ?? null,
-    subcategoryDisplayId: subskill ? (subByName.get(keyFor(subskill)) ?? null) : null,
+    categoryDisplayId,
+    subcategoryDisplayId: subcategoryRecord ? recordDisplayId(subcategoryRecord) : null,
   };
 }
 
@@ -1612,9 +1649,13 @@ class FreshServiceActionService {
       client.listCustomObjectRecords(subcategoryObject.id),
     ]);
     const categoriesByName = new Map(categoryRecords.map((record) => [keyFor(recordName(record)), recordDisplayId(record)]));
-    const subcategoriesByName = new Map(subcategoryRecords.map((record) => [keyFor(recordName(record)), recordDisplayId(record)]));
     const categoryDisplayId = categoriesByName.get(keyFor(categoryName));
-    const subcategoryDisplayId = subcategoryName ? subcategoriesByName.get(keyFor(subcategoryName)) : null;
+    // Per-parent subskill names: scope the record match by the resolved
+    // parent category (see pickSubskillRecord for the FS naming caveat).
+    const subcategoryRecord = subcategoryName
+      ? pickSubskillRecord(subcategoryRecords, subcategoryName, categoryDisplayId)
+      : null;
+    const subcategoryDisplayId = subcategoryRecord ? recordDisplayId(subcategoryRecord) : null;
 
     if (!categoryDisplayId) {
       throw new Error(`FreshService lookup record not found for Ticket Pulse category "${categoryName}"`);

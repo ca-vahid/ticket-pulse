@@ -1666,7 +1666,16 @@ router.get('/tools', requireAdmin, asyncHandler(async (req, res) => {
 router.get('/competencies/duplicates', requireAdmin, asyncHandler(async (req, res) => {
   const { findDuplicateGroups } = await import('../utils/categoryMatcher.js');
   const categories = await competencyRepository.getCategories(req.workspaceId);
-  const groups = findDuplicateGroups(categories.map((c) => ({ id: c.id, name: c.name })));
+  // Names are only unique per parent now — pass the parent through so the
+  // matcher never pairs legit same-named siblings under different parents,
+  // and labels can disambiguate ("Project Setup > Quebec").
+  const nameById = new Map(categories.map((c) => [c.id, c.name]));
+  const groups = findDuplicateGroups(categories.map((c) => ({
+    id: c.id,
+    name: c.name,
+    parentId: c.parentId ?? null,
+    parentName: c.parentId ? nameById.get(c.parentId) ?? null : null,
+  })));
 
   for (const group of groups) {
     const keepMappings = await competencyRepository.getTechniciansWithCompetency(req.workspaceId, group.keepId);
@@ -1716,8 +1725,9 @@ router.post('/competency-requests/:id/decision', requireAdmin, asyncHandler(asyn
 }));
 
 router.post('/competencies/merge', requireAdmin, asyncHandler(async (req, res) => {
-  const { keepId, mergeIds } = req.body;
-  if (!keepId || !Array.isArray(mergeIds) || mergeIds.length === 0) {
+  const keepId = Number(req.body?.keepId);
+  const mergeIds = Array.isArray(req.body?.mergeIds) ? req.body.mergeIds.map(Number) : [];
+  if (!Number.isInteger(keepId) || mergeIds.length === 0 || !mergeIds.every(Number.isInteger)) {
     return res.status(400).json({ success: false, message: 'keepId and mergeIds[] are required' });
   }
 
@@ -1726,6 +1736,8 @@ router.post('/competencies/merge', requireAdmin, asyncHandler(async (req, res) =
     return res.status(403).json({ success: false, message: 'Category belongs to a different workspace' });
   }
 
+  // Same-level (and same-parent for subs) is enforced in the repository;
+  // allowCrossParent is intentionally NOT exposed over the API.
   const result = await competencyRepository.mergeCategories(req.workspaceId, keepId, mergeIds);
   logger.info('Categories merged', { workspaceId: req.workspaceId, keepId, mergeIds, merged: result.merged });
   res.json({ success: true, data: result });
@@ -1821,15 +1833,17 @@ router.post('/tickets/reclassify/runs/:id/rollback', requireAdmin, asyncHandler(
 router.get('/competencies', requireAdmin, asyncHandler(async (req, res) => {
   const categories = await competencyRepository.getActiveCategories(req.workspaceId);
   const categoryTree = competencyRepository.buildCategoryTree(categories);
-  const [mappings, suggestedCategories] = await Promise.all([
+  const [mappings, suggestedCategories, categoriesDetailed] = await Promise.all([
     competencyRepository.getAllCompetenciesForWorkspace(req.workspaceId),
     competencyRepository.getSystemSuggestedCategories(req.workspaceId),
+    competencyRepository.getCategoriesDetailed(req.workspaceId),
   ]);
   res.json({
     success: true,
     data: {
       categories,
       categoryTree,
+      categoriesDetailed,
       mappings,
       suggestedCategories,
       suggestedCategoryCount: suggestedCategories.length,
@@ -1886,7 +1900,19 @@ router.put('/competencies/categories/:id', requireAdmin, asyncHandler(async (req
   if (category.workspaceId !== req.workspaceId) {
     return res.status(403).json({ success: false, message: 'Category belongs to a different workspace' });
   }
-  const updated = await competencyRepository.updateCategory(id, req.body);
+  // Whitelist the editable surface: name/description/isActive/sortOrder plus
+  // guarded parentId moves. source/isSystemSuggested stay server-owned.
+  const { name, description, isActive, sortOrder, parentId } = req.body || {};
+  if (name !== undefined && !String(name).trim()) {
+    return res.status(400).json({ success: false, message: 'Category name cannot be empty' });
+  }
+  const updated = await competencyRepository.updateCategory(id, {
+    ...(name !== undefined && { name: String(name).trim() }),
+    ...(description !== undefined && { description }),
+    ...(isActive !== undefined && { isActive: Boolean(isActive) }),
+    ...(sortOrder !== undefined && { sortOrder }),
+    ...(parentId !== undefined && { parentId }),
+  });
   res.json({ success: true, data: updated });
 }));
 

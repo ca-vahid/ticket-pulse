@@ -18,6 +18,7 @@ import {
 } from './StreamingComponents';
 import { formatDateTimeInTimezone } from '../../utils/dateHelpers';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
+import CategoriesManagementTab, { ParentCategoryPicker } from './CategoriesManagementTab';
 
 const PROFICIENCY_LEVELS = [
   { value: 'basic', label: 'Basic', num: '1', color: 'bg-yellow-100 text-yellow-800' },
@@ -86,51 +87,8 @@ function getCategoryGroup(name) {
   return 'Other';
 }
 
-// ─── Duplicate Detector ──────────────────────────────────────────────────
-
-function DuplicateDetector({ onMerged }) {
-  const [groups, setGroups] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [scanned, setScanned] = useState(false);
-  const [merging, setMerging] = useState(null);
-  const [msg, setMsg] = useState(null);
-
-  const handleDetect = async () => {
-    try { setLoading(true); const res = await assignmentAPI.detectDuplicateCategories(); setGroups(res?.data || []); setScanned(true); } catch (err) { console.error('Failed to detect duplicates:', err); } finally { setLoading(false); }
-  };
-
-  const handleMerge = async (keepId, mergeIds, keepName) => {
-    try { setMerging(keepId); await assignmentAPI.mergeCategories({ keepId, mergeIds }); setMsg(`Merged into "${keepName}"`); setGroups((prev) => prev.filter((g) => g.keepId !== keepId)); onMerged?.(); setTimeout(() => setMsg(null), 3000); } catch (err) { console.error('Merge failed:', err); } finally { setMerging(null); }
-  };
-
-  return (
-    <div className="mb-3">
-      <div className="flex items-center gap-2">
-        <button onClick={handleDetect} disabled={loading} className="px-3 py-1.5 border rounded-lg text-xs font-medium hover:bg-gray-50 disabled:opacity-50 flex items-center gap-1 transition-colors">
-          {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Search className="w-3 h-3" />}
-          Detect Duplicates
-        </button>
-        {scanned && groups.length === 0 && <span className="text-xs text-green-600">No duplicates found</span>}
-        {msg && <span className="text-xs text-green-600">{msg}</span>}
-      </div>
-      {groups.length > 0 && (
-        <div className="mt-3 space-y-2">
-          {groups.map((group) => (
-            <div key={group.keepId} className="border border-orange-200 bg-orange-50 rounded-lg p-3 flex items-start justify-between">
-              <div>
-                <p className="text-sm font-medium text-orange-800">Keep: <span className="font-bold">{group.keepName}</span></p>
-                {group.duplicates.map((dup) => <p key={dup.id} className="text-xs text-orange-700">Merge: {dup.name} ({Math.round(dup.score * 100)}%)</p>)}
-              </div>
-              <button onClick={() => handleMerge(group.keepId, group.duplicates.map((d) => d.id), group.keepName)} disabled={merging === group.keepId} className="px-3 py-1.5 bg-orange-600 text-white rounded-lg text-xs font-medium hover:bg-orange-700 disabled:opacity-50 flex-shrink-0">
-                {merging === group.keepId ? 'Merging...' : 'Merge'}
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
+// DuplicateDetector and ParentCategoryPicker moved to ./CategoriesManagementTab.jsx
+// as part of the Categories page overhaul (tree editor, rename/edit/retire/merge).
 
 // ─── Technician Editor Panel ─────────────────────────────────────────────
 
@@ -292,91 +250,6 @@ function TechnicianEditor({ tech, categories, savedMappings, onClose, onSaved, o
           ))}
         </div>
       </div>
-    </div>
-  );
-}
-
-function ParentCategoryPicker({ value, categories, onChange }) {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState('');
-  const ref = useRef(null);
-
-  useEffect(() => {
-    if (!open) return undefined;
-    const handlePointerDown = (event) => {
-      if (ref.current && !ref.current.contains(event.target)) setOpen(false);
-    };
-    document.addEventListener('pointerdown', handlePointerDown);
-    return () => document.removeEventListener('pointerdown', handlePointerDown);
-  }, [open]);
-
-  const selected = categories.find((category) => String(category.id) === String(value));
-  const filtered = categories.filter((category) => (
-    !query.trim() || category.name.toLowerCase().includes(query.trim().toLowerCase())
-  ));
-
-  return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        onClick={() => {
-          setOpen((prev) => !prev);
-          setQuery('');
-        }}
-        className="flex h-full min-h-[34px] w-full items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50"
-      >
-        <span className="truncate">{selected ? selected.name : 'Top-level skill'}</span>
-        <ChevronDown className={`h-3.5 w-3.5 flex-shrink-0 text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`} />
-      </button>
-
-      {open && (
-        <div className="absolute bottom-full left-0 z-50 mb-1 w-[min(360px,calc(100vw-2rem))] rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
-          <div className="relative mb-2">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
-            <input
-              autoFocus
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Filter parent skills..."
-              className="w-full rounded-lg border border-slate-200 bg-slate-50 py-2 pl-8 pr-2 text-xs outline-none focus:border-blue-300 focus:bg-white"
-            />
-          </div>
-          <div className="max-h-64 overflow-y-auto">
-            <button
-              type="button"
-              onClick={() => {
-                onChange('');
-                setOpen(false);
-              }}
-              className={`flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-xs font-semibold ${
-                !value ? 'bg-blue-50 text-blue-700' : 'text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              <span>Top-level skill</span>
-              <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">none</span>
-            </button>
-            {filtered.map((category) => (
-              <button
-                key={category.id}
-                type="button"
-                onClick={() => {
-                  onChange(String(category.id));
-                  setOpen(false);
-                }}
-                className={`mt-1 flex w-full items-center justify-between gap-3 rounded-lg px-2.5 py-2 text-left text-xs ${
-                  String(value) === String(category.id) ? 'bg-blue-50 text-blue-700' : 'text-slate-700 hover:bg-slate-50'
-                }`}
-              >
-                <span className="truncate font-medium">{category.name}</span>
-                <span className="flex-shrink-0 rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">parent</span>
-              </button>
-            ))}
-            {filtered.length === 0 && (
-              <div className="px-2.5 py-4 text-center text-xs text-slate-400">No matching skills</div>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -1602,104 +1475,6 @@ function SkillsMigrationPanel({ onPublished }) {
 }
 
 // ─── Matrix Tab (Overview + Editor) ──────────────────────────────────────
-
-function CategoriesManagementTab({ showMigrationControls = false }) {
-  const [categories, setCategories] = useState([]);
-  const [categoryTree, setCategoryTree] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [newCatName, setNewCatName] = useState('');
-  const [newCatDesc, setNewCatDesc] = useState('');
-  const [newCatParentId, setNewCatParentId] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState(null);
-
-  const fetchData = useCallback(async () => {
-    try {
-      setLoading(true);
-      const compRes = await assignmentAPI.getCompetencies();
-      const payload = compRes?.data || {};
-      setCategories(payload.categories || []);
-      setCategoryTree(payload.categoryTree || []);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { fetchData(); }, [fetchData]);
-
-  const handleCreateCategory = async () => {
-    if (!newCatName.trim()) return;
-    try {
-      setSaving(true);
-      await assignmentAPI.createCategory({
-        name: newCatName.trim(),
-        description: newCatDesc.trim() || null,
-        parentId: newCatParentId ? Number(newCatParentId) : null,
-      });
-      setNewCatName('');
-      setNewCatDesc('');
-      setNewCatParentId('');
-      await fetchData();
-    } catch (err) { setError(err.message); } finally { setSaving(false); }
-  };
-
-  const handleDeleteCategory = async (id) => {
-    if (!confirm('Delete this category/subcategory and all its mappings?')) return;
-    try { await assignmentAPI.deleteCategory(id); await fetchData(); } catch (err) { setError(err.message); }
-  };
-
-  const topLevelCategories = categories.filter((category) => !category.parentId);
-  const displayCategories = (categoryTree.length ? categoryTree : topLevelCategories).flatMap((category) => [
-    { ...category, depth: 0 },
-    ...(category.subcategories || []).map((subcategory) => ({ ...subcategory, depth: 1, parentName: category.name })),
-  ]);
-
-  if (loading) return <div className="flex justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-blue-600" /></div>;
-
-  return (
-    <div className="space-y-4">
-      {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
-          {error} <button onClick={() => setError(null)} className="ml-2 underline">Dismiss</button>
-        </div>
-      )}
-
-      {showMigrationControls && <SkillsMigrationPanel onPublished={fetchData} />}
-
-      <DuplicateDetector onMerged={fetchData} />
-
-      <details className="border rounded-lg" open={!showMigrationControls}>
-        <summary className="px-4 py-2.5 text-sm font-medium text-slate-700 cursor-pointer hover:bg-slate-50 select-none flex items-center gap-2">
-          <span>Manage Published Categories ({categories.length})</span>
-        </summary>
-        <div className="px-4 pb-4 pt-2 border-t space-y-3">
-          {categories.length > 0 && (
-            <div className="flex flex-wrap gap-1.5">
-              {displayCategories.map((cat) => (
-                <div key={cat.id} className="flex items-center gap-1 bg-white border rounded px-2 py-1 text-xs">
-                  <span className="font-medium">{cat.depth === 1 ? `${cat.parentName} > ${cat.name}` : cat.name}</span>
-                  <button onClick={() => handleDeleteCategory(cat.id)} className="ml-0.5 text-red-400 hover:text-red-600"><Trash2 className="w-3 h-3" /></button>
-                </div>
-              ))}
-            </div>
-          )}
-          <div className="grid gap-2 md:grid-cols-[1fr_1fr_220px_auto]">
-            <input type="text" value={newCatName} onChange={(e) => setNewCatName(e.target.value)} placeholder="Skill or subskill name" className="flex-1 border rounded-lg px-3 py-1.5 text-xs" />
-            <input type="text" value={newCatDesc} onChange={(e) => setNewCatDesc(e.target.value)} placeholder="Description (optional)" className="flex-1 border rounded-lg px-3 py-1.5 text-xs" />
-            <ParentCategoryPicker
-              value={newCatParentId}
-              categories={topLevelCategories}
-              onChange={setNewCatParentId}
-            />
-            <button onClick={handleCreateCategory} disabled={saving || !newCatName.trim()} className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1"><Plus className="w-3.5 h-3.5" /> Add</button>
-          </div>
-        </div>
-      </details>
-    </div>
-  );
-}
 
 function MatrixTab({ onAnalyze }) {
   const [categories, setCategories] = useState([]);
@@ -3099,7 +2874,7 @@ export default function CompetencyManager({ deepRunId, deepAnalyzeTechId, worksp
       </div>
 
       {effectiveTab === 'matrix' && <MatrixTab onAnalyze={(id) => handleAnalyze(id)} />}
-      {effectiveTab === 'categories' && <CategoriesManagementTab showMigrationControls={useHierarchyEditor} />}
+      {effectiveTab === 'categories' && <CategoriesManagementTab showMigrationControls={useHierarchyEditor} MigrationPanel={SkillsMigrationPanel} />}
       {effectiveTab === 'suggestions' && <CategorySuggestionsTab onCountChange={setSuggestionCount} />}
       {effectiveTab === 'history' && <RunHistoryTab deepRunId={deepRunId} workspaceTimezone={workspaceTimezone} />}
       {effectiveTab === 'prompt' && <CompetencyPromptTab />}
