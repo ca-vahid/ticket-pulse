@@ -14,7 +14,9 @@ const {
 describe('API v1 scopes', () => {
   test('the scope catalogue covers the FreshService-parity resources', () => {
     for (const s of ['tickets:read', 'tickets:write', 'conversations:write', 'contacts:read',
-      'agents:read', 'groups:read', 'tasks:write', 'webhooks:manage', 'search:read']) {
+      'agents:read', 'groups:read', 'tasks:write', 'webhooks:manage', 'search:read',
+      // FR 08-05 #1: custom-field definitions read + values write (conditional gate).
+      'customfields:read', 'customfields:write']) {
       expect(API_KEY_SCOPES).toContain(s);
     }
   });

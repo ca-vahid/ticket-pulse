@@ -7,13 +7,14 @@ import groupRepository from '../services/groupRepository.js';
 import { TICKET_SOURCE } from '../utils/ticketOrigin.js';
 import logger from '../utils/logger.js';
 import {
-  API_KEY_SCOPES, generateApiKey, hashApiKey,
+  API_KEY_SCOPES, generateApiKey, hashApiKey, scopeSatisfies,
 } from '../services/apiKeyService.js';
 import { requireApiKey, apiRequestContext, clientIp } from '../middleware/apiKeyAuth.js';
 import { verifyClientCredentials, issueAccessToken } from '../services/oauthClientService.js';
 import rateLimiter from '../services/apiRateLimitService.js';
 import { withIdempotency } from '../middleware/apiIdempotency.js';
-import { apiProblemHandler, problems } from '../utils/apiProblem.js';
+import { apiProblemHandler, problems, ApiProblem } from '../utils/apiProblem.js';
+import { resolveCategoryNames } from '../services/categoryNameResolver.js';
 import { buildOpenApiSpec, renderDocsPage } from './apiV1.openapi.js';
 
 /**
@@ -81,6 +82,9 @@ function ticketShape(t) {
     categoryReviewNeeded: t.taxonomyReviewNeeded === true,
     isNoise: t.isNoise === true,
     assignedBy: t.assignedBy || null,
+    // Structured intake metadata (FR 08-05 #1) — the workspace's custom-field
+    // values keyed by definition key. {} when none are set.
+    customFields: t.customFields || {},
     createdAt: t.createdAt,
     updatedAt: t.updatedAt,
     resolvedAt: t.resolvedAt || null,
@@ -199,17 +203,67 @@ router.get('/tickets', S('tickets:read'), asyncHandler(async (req, res) => {
   res.json({ success: true, data: { items: result.items.map(ticketShape), pagination } });
 }));
 
+// Body keys the create endpoint consumes (FR 08-05 #1). Anything else stays
+// tolerated-but-dropped — and is now REPORTED back via meta.ignoredFields so
+// senders can see what didn't land (extra intake data belongs inside
+// `customFields`, where it is stored and auto-provisioned).
+const CREATE_BODY_KEYS = new Set([
+  'subject', 'description', 'priority', 'requesterEmail', 'requesterName',
+  'runAiTriage', 'category', 'subcategory', 'customFields', 'ccEmails',
+  'source', 'ticketType', 'type',
+]);
+
+// customfields:write is demanded ONLY when the payload actually carries
+// custom fields — plain ticket writes keep working with tickets:write alone.
+function assertCustomFieldsWriteScope(req) {
+  if (!scopeSatisfies(req.apiKey.scopes, 'customfields:write')) {
+    throw problems.forbidden(
+      "This credential is missing the 'customfields:write' scope (required because the payload contains customFields)",
+      'insufficient_scope',
+    );
+  }
+}
+
 router.post('/tickets', S('tickets:write'), withIdempotency, asyncHandler(async (req, res) => {
+  const body = req.body || {};
+  if (body.customFields !== undefined) assertCustomFieldsWriteScope(req);
+  const ignoredFields = Object.keys(body).filter((k) => !CREATE_BODY_KEYS.has(k));
+  const ticketType = body.ticketType ?? body.type;
   const ticket = await ticketService.createTicket(req.workspaceId, {
-    subject: req.body?.subject,
-    description: req.body?.description || null,
-    priority: req.body?.priority || 2,
-    requesterEmail: req.body?.requesterEmail,
-    requesterName: req.body?.requesterName || null,
-    runAiTriage: req.body?.runAiTriage !== false,
+    subject: body.subject,
+    description: body.description || null,
+    priority: body.priority || 2,
+    requesterEmail: body.requesterEmail,
+    requesterName: body.requesterName || null,
+    runAiTriage: body.runAiTriage !== false,
+    // Category/subcategory BY NAME (resolved against the workspace taxonomy;
+    // unknown names 400 with the allowed values listed).
+    ...(body.category !== undefined ? { category: body.category } : {}),
+    ...(body.subcategory !== undefined ? { subcategory: body.subcategory } : {}),
+    // Arbitrary structured metadata — stored on the ticket; unknown keys
+    // auto-provision a definition (source:'api').
+    ...(body.customFields !== undefined ? { customFields: body.customFields } : {}),
+    ...(body.ccEmails !== undefined ? { ccEmails: body.ccEmails } : {}),
+    // Arrival-channel override, validated against the agent-selectable list
+    // by the schema. 100 (API) is this route's default — omit it so the
+    // default applies rather than tripping the schema's allowlist.
+    ...(body.source !== undefined && Number(body.source) !== TICKET_SOURCE.API ? { source: body.source } : {}),
+    // `ticketType` (or its read-shape alias `type`) — validated against the
+    // workspace type registry; omitted → workspace default.
+    ...(ticketType !== undefined && ticketType !== null ? { ticketType } : {}),
   }, apiActor(req), { sourceChannel: TICKET_SOURCE.API });
   logger.info(`API v1: ticket ${ticket.displayRef} created via key "${req.apiKey.name}"`);
-  res.status(201).json({ success: true, data: ticketShape(ticket) });
+  res.status(201).json({
+    success: true,
+    data: ticketShape(ticket),
+    // Intake transparency (FR 08-05 #1): what didn't land and what got
+    // auto-provisioned. rejected entries are {key, reason}.
+    meta: {
+      ignoredFields,
+      rejectedCustomFields: ticket.customFieldIntake?.rejected || [],
+      provisionedCustomFields: ticket.customFieldIntake?.provisioned || [],
+    },
+  });
 }));
 
 router.get('/tickets/:id', S('tickets:read'), asyncHandler(async (req, res) => {
@@ -228,13 +282,39 @@ router.patch('/tickets/:id', S('tickets:write'), withIdempotency, asyncHandler(a
   const id = (await tid(req));
   const body = req.body || {};
   const actor = apiActor(req);
+  if (body.customFields !== undefined) assertCustomFieldsWriteScope(req);
   if (body.status !== undefined) await ticketService.changeStatus(id, req.workspaceId, body.status, actor);
   if (body.assignedTechId !== undefined) {
     await ticketService.assignTicket(id, req.workspaceId, body.assignedTechId ? Number(body.assignedTechId) : null, actor);
   }
   const fieldKeys = ['subject', 'priority', 'internalCategoryId', 'internalSubcategoryId', 'groupId'];
   const fields = Object.fromEntries(fieldKeys.filter((k) => body[k] !== undefined).map((k) => [k, body[k]]));
+  // Category/subcategory BY NAME (FR 08-05 #1) — explicit IDs win when both
+  // spellings are sent; `category: null` clears the pair.
+  if ((body.category !== undefined || body.subcategory !== undefined) && body.internalCategoryId === undefined) {
+    const resolved = await resolveCategoryNames(req.workspaceId, body.category, body.subcategory);
+    fields.internalCategoryId = resolved.categoryId;
+    fields.internalSubcategoryId = resolved.subcategoryId;
+  }
   if (Object.keys(fields).length) await ticketService.updateTicketFields(id, req.workspaceId, fields, actor);
+  if (body.customFields !== undefined) {
+    // NO auto-provisioning on PATCH — creation is the intake path that
+    // provisions definitions. Unknown keys are a 422 naming every offender
+    // (setValues alone would stop at the first one).
+    const { default: customFieldService } = await import('../services/customFieldService.js');
+    const known = new Set((await customFieldService.listDefinitions(req.workspaceId)).map((d) => d.key));
+    const unknown = Object.keys(body.customFields || {}).filter((k) => !known.has(k));
+    if (unknown.length) {
+      throw new ApiProblem({
+        status: 422,
+        code: 'unknown_custom_fields',
+        title: 'Unknown custom fields',
+        detail: `Unknown custom field key(s): ${unknown.join(', ')}. Definitions are created in Settings or auto-provisioned at ticket creation — see GET /api/v1/custom-fields for this workspace's fields.`,
+        errors: unknown.map((k) => ({ field: `customFields.${k}`, code: 'unknown_field' })),
+      });
+    }
+    await customFieldService.setValues(id, req.workspaceId, body.customFields, actor);
+  }
   const ticket = await ticketService.getTicket(id, req.workspaceId);
   res.json({ success: true, data: ticketShape(ticket) });
 }));
@@ -412,6 +492,20 @@ router.get('/types', S('types:read'), asyncHandler(async (req, res) => {
     select: { id: true, name: true, description: true, isDefault: true }, orderBy: { name: 'asc' },
   });
   res.json({ success: true, data: types });
+}));
+
+// Active custom-field definitions (FR 08-05 #1) — what keys/types this
+// workspace's tickets can carry, incl. which were auto-provisioned by intake
+// (source:'api') vs created by an admin (source:'manual').
+router.get('/custom-fields', S('customfields:read'), asyncHandler(async (req, res) => {
+  const { default: customFieldService } = await import('../services/customFieldService.js');
+  const definitions = await customFieldService.listDefinitions(req.workspaceId);
+  res.json({
+    success: true,
+    data: definitions.map((d) => ({
+      key: d.key, label: d.label, type: d.type, options: d.options || [], source: d.source || 'manual',
+    })),
+  });
 }));
 
 // ------------------------------------------------------------------ search

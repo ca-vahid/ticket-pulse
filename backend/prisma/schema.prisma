@@ -834,6 +834,7 @@ model CustomFieldDefinition {
   label       String   @db.VarChar(120)
   type        String   @default("text") @db.VarChar(20) // text | number | select | boolean | date
   options     String[] @default([]) // for select
+  source      String   @default("manual") @db.VarChar(10) // manual (Settings) | api (auto-provisioned at intake)
   isActive    Boolean  @default(true) @map("is_active")
   sortOrder   Int      @default(0) @map("sort_order")
   createdAt   DateTime @default(now()) @map("created_at")
