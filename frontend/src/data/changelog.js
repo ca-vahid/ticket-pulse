@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.1.6-preview';
+export const APP_VERSION = '3.1.7-preview';
 
 export const changelog = [
+  {
+    version: '3.1.7-preview',
+    date: 'August 5, 2026',
+    entries: [
+      { type: 'new', html: '<strong>🔌 API intake enrichment (part 1 of 3)</strong> — the Create Ticket API now accepts <em>category</em> and <em>subcategory</em> by name (validated against your workspace’s taxonomy, with helpful errors listing allowed values) and a <em>customFields</em> object that captures any structured data the sender includes — client names, SharePoint links, record IDs, anything. Unknown fields are stored automatically and appear as manageable definitions in Settings → Ticket Ops. New API scopes (customfields:read/write), a definitions endpoint, and response metadata showing exactly what was stored, provisioned, or rejected. Works for every workspace. (QA 08-05 — Power App / Project Accounting integration)' },
+      { type: 'fixed', html: '<strong>🔤 Name repair covers the real corruption</strong> — the accented-name fix now also detects and repairs the DOS-codepage variant actually found in production (“R├│genes” → “Rógenes”); stored names are being repaired.' },
+    ],
+  },
   {
     version: '3.1.6-preview',
     date: 'August 5, 2026',

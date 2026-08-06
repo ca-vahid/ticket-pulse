@@ -16,6 +16,8 @@ import mirrorService from './mirrorService.js';
 import { getFreshServiceDetail } from '../integrations/freshservice.js';
 import attachmentService from './attachmentService.js';
 import watcherNotificationService from './watcherNotificationService.js';
+import customFieldService from './customFieldService.js';
+import { resolveCategoryNames } from './categoryNameResolver.js';
 import { sseManager } from '../routes/sse.routes.js';
 
 // The 4 canonical statuses. Since Phase 8a these are the BASE statuses of the
@@ -126,6 +128,16 @@ const createTicketSchema = z.object({
   requesterName: z.string().trim().min(1).max(255).optional().nullable(),
   internalCategoryId: z.number().int().positive().optional().nullable(),
   internalSubcategoryId: z.number().int().positive().optional().nullable(),
+  // Category/subcategory BY NAME (FR 08-05 #1, Phase 1a — API intake): resolved
+  // case-insensitively against the workspace's active taxonomy in createTicket,
+  // BEFORE _validateTaxonomy checks the resulting IDs. An explicit
+  // internalCategoryId always wins over names when both are sent.
+  category: z.string().trim().min(1).max(120).optional().nullable(),
+  subcategory: z.string().trim().min(1).max(120).optional().nullable(),
+  // Arbitrary structured intake metadata (FR 08-05 #1): known keys validate
+  // against the workspace's custom-field definitions; unknown keys
+  // auto-provision a definition (source:'api'). Scalar values only.
+  customFields: z.record(z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
   groupId: z.union([z.number().int(), z.string().regex(/^\d+$/)]).optional().nullable(),
   internalGroupId: z.number().int().positive().optional().nullable(),
   assignedTechId: z.number().int().positive().optional().nullable(),
@@ -167,6 +179,10 @@ const updateTicketSchema = z.object({
   // clears it. FS-born tickets never reach this schema — FS owns their SLA.
   dueBy: z.string().datetime({ offset: true }).optional().nullable(),
   frDueBy: z.string().datetime({ offset: true }).optional().nullable(),
+  // Custom-field edits ride the same PATCH but are applied through
+  // customFieldService.setValues — NO auto-provisioning on update (creation
+  // is the intake path); unknown keys are a hard ValidationError.
+  customFields: z.record(z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
 }).strict();
 
 const threadBodySchema = z.object({
@@ -1796,10 +1812,27 @@ class TicketService {
     if (!parsed.success) throw new ValidationError(zodMessage(parsed.error));
     const data = parsed.data;
     data.status = await this._assertCreatableStatus(workspaceId, data.status);
+    this._resolveCategoryNamesInto(data, await this._maybeResolveCategoryNames(workspaceId, data));
     await this._validateTaxonomy(workspaceId, data.internalCategoryId, data.internalSubcategoryId);
     await this._validateGroup(workspaceId, data.groupId ?? null);
     if (data.assignedTechId) await this._validateTechnician(workspaceId, data.assignedTechId);
     return data;
+  }
+
+  /**
+   * Category/subcategory NAMES → internal IDs (FR 08-05 #1). Only consulted
+   * when no explicit internalCategoryId was sent — an explicit ID wins over
+   * names. Returns null when there's nothing to resolve.
+   */
+  async _maybeResolveCategoryNames(workspaceId, data) {
+    if (data.internalCategoryId || (!data.category && !data.subcategory)) return null;
+    return resolveCategoryNames(workspaceId, data.category, data.subcategory);
+  }
+
+  _resolveCategoryNamesInto(data, resolved) {
+    if (!resolved) return;
+    data.internalCategoryId = resolved.categoryId;
+    data.internalSubcategoryId = resolved.subcategoryId;
   }
 
   // ------------------------------------------------------------------ create
@@ -1826,12 +1859,26 @@ class TicketService {
       data.ticketType = (await ticketTypeService.getDefaultType(workspaceId))?.name ?? null;
     }
 
+    // Names → IDs first (FR 08-05 #1); _validateTaxonomy then validates the
+    // resolved IDs exactly as it always did for explicit ones.
+    this._resolveCategoryNamesInto(data, await this._maybeResolveCategoryNames(workspaceId, data));
     await this._validateTaxonomy(workspaceId, data.internalCategoryId, data.internalSubcategoryId);
     const groupId = await this._validateGroup(workspaceId, data.groupId ?? null);
     const internalGroupId = await this._validateInternalGroup(workspaceId, data.internalGroupId ?? null);
     const assignee = data.assignedTechId
       ? await this._validateTechnician(workspaceId, data.assignedTechId)
       : null;
+
+    // Custom-field intake (FR 08-05 #1): known keys validate/coerce against
+    // the definitions; unknown keys auto-provision (source:'api'). Never
+    // throws — unusable entries come back in `rejected` and are surfaced via
+    // the created audit + the public API's response meta.
+    let customFieldIntake = { values: {}, provisioned: [], rejected: [] };
+    if (data.customFields && Object.keys(data.customFields).length) {
+      customFieldIntake = await customFieldService.setValuesAtCreate(
+        workspaceId, data.customFields, { autoProvision: true, actor },
+      );
+    }
 
     const requester = await this.resolveRequester(workspaceId, data);
 
@@ -1891,6 +1938,9 @@ class TicketService {
         // FS-born tickets — so the UI renders To/Cc for both origins from one
         // place.
         ...(data.ccEmails.length ? { ccEmails: data.ccEmails } : {}),
+        // Cleaned custom-field values land on the row at creation (FR 08-05
+        // #1) — same Json column setValues merges into later.
+        ...(Object.keys(customFieldIntake.values).length ? { customFields: customFieldIntake.values } : {}),
         // dueBySetBy marker contract (QA 08-04 #13): 'sla' = the policy clock
         // stamped dueBy here at creation; 'manual' = an agent edited it via
         // updateTicketFields. dueDatesFor is only ever applied HERE — if an
@@ -1923,6 +1973,11 @@ class TicketService {
       via: 'ticketpulse_app',
       ...(data.ccEmails.length ? { ccEmails: data.ccEmails } : {}),
       ...(data.notifyRequester === false ? { requesterEmailSuppressed: true } : {}),
+      // Intake bookkeeping (FR 08-05 #1): which keys were auto-provisioned
+      // and which were rejected (with reasons) — the audit trail an admin
+      // reads when a sender asks "where did my field go?".
+      ...(customFieldIntake.provisioned.length ? { provisionedCustomFields: customFieldIntake.provisioned } : {}),
+      ...(customFieldIntake.rejected.length ? { rejectedCustomFields: customFieldIntake.rejected } : {}),
     });
 
     if (assignee) {
@@ -1964,7 +2019,9 @@ class TicketService {
     this._refreshEmbedding(ticket.id, workspaceId);
 
     logger.info(`Native ticket created: ${ticketDisplayRef(ticket)} (id ${ticket.id}, ws ${workspaceId}) by ${actor?.email || 'unknown'}`);
-    return { ...ticket, displayRef: ticketDisplayRef(ticket), triage };
+    // customFieldIntake rides the return (not the row) so the public API can
+    // report provisioned/rejected keys in its response meta.
+    return { ...ticket, displayRef: ticketDisplayRef(ticket), triage, customFieldIntake };
   }
 
   _refreshEmbedding(ticketId, workspaceId) {
@@ -2000,6 +2057,17 @@ class TicketService {
     if (!parsed.success) throw new ValidationError(zodMessage(parsed.error));
     const data = parsed.data;
     if (Object.keys(data).length === 0) throw new ValidationError('Nothing to update');
+
+    // Custom-field values are applied through setValues (its own merge +
+    // audit; NO auto-provisioning on update — creation is the intake path, so
+    // an unknown key here is a hard ValidationError). Runs before the field
+    // patch: the prisma update below re-reads the row, so its return already
+    // carries the merged customFields.
+    let customFieldsResult = null;
+    if (data.customFields !== undefined) {
+      customFieldsResult = await customFieldService.setValues(ticketId, workspaceId, data.customFields, actor);
+      delete data.customFields;
+    }
 
     // Per-workspace type vocabulary (registry): normalize aliases/case; null
     // clears the type (FS allows type-less tickets).
@@ -2118,6 +2186,11 @@ class TicketService {
     }
 
     if (Object.keys(patch).length === 0) {
+      // A customFields-only PATCH is still a change — setValues already
+      // persisted + audited it; reflect the merged values in the return.
+      if (customFieldsResult) {
+        return { ...ticket, customFields: customFieldsResult.customFields, displayRef: ticketDisplayRef(ticket), changed: true };
+      }
       return { ...ticket, displayRef: ticketDisplayRef(ticket), changed: false };
     }
     // The FS fallback mirror doesn't carry due dates (FS SLA policies own

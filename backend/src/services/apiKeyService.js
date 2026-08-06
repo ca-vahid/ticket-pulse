@@ -16,6 +16,10 @@ export const API_KEY_SCOPES = [
   'agents:read', 'groups:read',
   'tags:read', 'tags:write',
   'categories:read', 'types:read',
+  // Custom fields (FR 08-05 #1): read = GET /custom-fields definitions;
+  // write = gate on create/PATCH payloads that carry `customFields` (checked
+  // inside those handlers — plain ticket writes need only tickets:write).
+  'customfields:read', 'customfields:write',
   'tasks:read', 'tasks:write',
   'timeentries:read', 'timeentries:write',
   'approvals:read', 'approvals:write',

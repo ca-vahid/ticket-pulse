@@ -3,9 +3,11 @@
 // ("Erick RÃ³genes Soares" → "Erick Rógenes Soares").
 //
 // Scans requesters.name and ticket_thread_entries.actor_name for the
-// UTF-8-as-Latin-1/CP1252 signature (looksMojibake) and repairs rows with the
-// round-trip-guarded repairMojibake. Raw SQL — prod schema trails the dev
-// Prisma schema.
+// UTF-8-as-Latin-1/CP1252 signature AND the CP437/CP850 DOS-codepage
+// signature (looksMojibake) and repairs rows with the round-trip-guarded
+// repairMojibake. Prod evidence: "Erick R├│genes Soares" — UTF-8 bytes
+// decoded as CP437 (0xC3 → '├' U+251C, 0xB3 → '│' U+2502). Raw SQL — prod
+// schema trails the dev Prisma schema.
 //
 // IMPORTANT: run ONLY AFTER the heuristic fix (requesterRepository tiebreaks,
 // v3.1.6-preview train) is deployed — otherwise the sweep re-corrupts the
@@ -32,9 +34,21 @@ const prisma = new PrismaClient({ datasources: { db: { url } } });
 const APPLY = process.env.APPLY === '1';
 const SAMPLE_LIMIT = 40;
 
-// SQL pre-filter: every mojibake signature starts with one of these lead
-// chars; JS looksMojibake() is the authoritative check on the narrowed rows.
-const LEAD_FILTER = (col) => `(${col} LIKE '%Ã%' OR ${col} LIKE '%Â%' OR ${col} LIKE '%â%')`;
+// SQL pre-filter; JS looksMojibake() is the authoritative check on the
+// narrowed rows.
+//  - CP1252/Latin-1 signature leads: Ã Â â.
+//  - CP437/CP850 signature: box-drawing/block chars (never legit in a name).
+//    Deliberately NOT filtering on á í ó ú ñ etc. — under CP437 those are
+//    bytes 0xA0-0xA5 but they are also plain legitimate accented text.
+//    Known gap: CP437-corrupted 3-byte punctuation with no box char (e.g.
+//    "ΓÇÖ" = ’) is not pre-filtered; acceptable for name columns, where the
+//    corruption always includes a 2-byte Latin sequence → a box char.
+const LEAD_CHARS = [
+  'Ã', 'Â', 'â', // CP1252/Latin-1
+  '├', '│', '─', '┤', '┐', '└', '┴', '┬', '┼', '═', '║', // CP437/CP850 box
+  '╔', '╗', '╚', '╝', '▒', '░', '█', // double-line corners + blocks
+];
+const LEAD_FILTER = (col) => `(${LEAD_CHARS.map((ch) => `${col} LIKE '%${ch}%'`).join(' OR ')})`;
 
 console.log(`${APPLY ? 'APPLY' : 'DRY RUN'} — mojibake name repair\n`);
 

@@ -4,6 +4,51 @@ import { NotFoundError, ValidationError } from '../utils/errors.js';
 const FIELD_TYPES = ['text', 'number', 'select', 'boolean', 'date'];
 const KEY_PATTERN = /^[a-z][a-z0-9_]{1,59}$/;
 
+// Intake caps (FR 08-05 #1, Phase 1a) — keep a single misbehaving sender from
+// flooding a workspace with definitions or bloating the Json column.
+const MAX_KEYS_PER_CALL = 40;
+const MAX_VALUE_CHARS = 2000;
+const MAX_DEFINITIONS_PER_WORKSPACE = 200;
+
+// A full date is the minimum; time + zone optional (ISO-8601 shapes only —
+// bare numbers or "March 5" stay text).
+const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/;
+
+/**
+ * Normalize an incoming API key to the definition-key alphabet: camelCase →
+ * snake_case, spaces/hyphens/dots → underscores, lowered, squeezed. The result
+ * still has to pass KEY_PATTERN — keys that don't (digits-first, non-ASCII,
+ * punctuation…) are REJECTED by setValuesAtCreate rather than mangled further.
+ */
+export function normalizeFieldKey(raw) {
+  return String(raw ?? '')
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2') // clientName → client_Name
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2') // PONumber → PO_Number
+    .replace(/[\s\-.]+/g, '_')
+    .toLowerCase()
+    .replace(/_{2,}/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+/** 'client_name' → 'Client Name' (labels for auto-provisioned definitions). */
+export function prettifyKeyLabel(key) {
+  return String(key)
+    .split('_')
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
+/** Infer a definition type from the first value an unknown key arrives with. */
+export function inferFieldType(value) {
+  if (typeof value === 'boolean') return 'boolean';
+  if (typeof value === 'number' && Number.isFinite(value)) return 'number';
+  if (typeof value === 'string' && ISO_DATE_PATTERN.test(value.trim())
+    && !Number.isNaN(new Date(value.trim()).getTime())) return 'date';
+  return 'text';
+}
+
 /**
  * Per-workspace user-defined ticket fields (pragmatic JSON UDF): definitions
  * live in custom_field_definitions; values live in Ticket.customFields keyed
@@ -62,6 +107,114 @@ class CustomFieldService {
     // deleting the definition just removes the field from forms/conditions.
     await prisma.customFieldDefinition.delete({ where: { id: definition.id } });
     return { deleted: true };
+  }
+
+  /**
+   * Create-time intake (FR 08-05 #1, Phase 1a): validate/coerce a values
+   * object BEFORE the ticket row exists, so createTicket can write the result
+   * straight into its prisma `create` data. Never throws for a bad key or
+   * value — unusable entries come back in `rejected` (reason included) so the
+   * caller can surface them (API response meta + created audit).
+   *
+   * - Keys are normalized (camelCase/spaces → snake_case) then matched against
+   *   the workspace's definitions (inactive included — a retired definition
+   *   still owns its key; the value is stored, nothing is re-provisioned).
+   * - Unknown keys AUTO-PROVISION a definition when `autoProvision` is on:
+   *   type inferred from the value, label prettified from the key,
+   *   `source:'api'`, active, sorted after the existing fields.
+   * - Caps: ≤40 keys/call, values ≤2000 chars stringified, ≤200
+   *   definitions/workspace — everything over a cap lands in `rejected`.
+   *
+   * @returns {Promise<{values: object, provisioned: string[], rejected: Array<{key: string, reason: string}>}>}
+   */
+  async setValuesAtCreate(workspaceId, values, { autoProvision = true, actor = null } = {}) { // eslint-disable-line no-unused-vars
+    if (!values || typeof values !== 'object' || Array.isArray(values)) {
+      throw new ValidationError('Custom field values must be an object');
+    }
+    const rejected = [];
+    const provisioned = [];
+    const clean = {};
+
+    // Normalize + dedupe (two spellings of the same key — 'clientName' and
+    // 'client_name' — collapse to one entry; the LAST occurrence wins).
+    const seen = new Map();
+    const normalized = [];
+    for (const [rawKey, value] of Object.entries(values)) {
+      const key = normalizeFieldKey(rawKey);
+      if (!KEY_PATTERN.test(key)) {
+        rejected.push({ key: String(rawKey), reason: 'invalid_key' });
+        continue;
+      }
+      if (seen.has(key)) {
+        normalized[seen.get(key)] = [key, value];
+        continue;
+      }
+      seen.set(key, normalized.length);
+      normalized.push([key, value]);
+    }
+    while (normalized.length > MAX_KEYS_PER_CALL) {
+      const [key] = normalized.pop();
+      rejected.push({ key, reason: 'too_many_keys' });
+    }
+
+    const definitions = await this.listDefinitions(workspaceId, { includeInactive: true });
+    const byKey = new Map(definitions.map((d) => [d.key, d]));
+    let definitionCount = definitions.length;
+    let nextSortOrder = definitions.reduce((max, d) => Math.max(max, d.sortOrder || 0), 0) + 1;
+
+    for (const [key, raw] of normalized) {
+      if (raw === undefined) continue;
+      const stringified = typeof raw === 'string' ? raw : JSON.stringify(raw);
+      if (typeof stringified === 'string' && stringified.length > MAX_VALUE_CHARS) {
+        rejected.push({ key, reason: 'value_too_long' });
+        continue;
+      }
+
+      let definition = byKey.get(key);
+      if (!definition) {
+        if (!autoProvision) {
+          rejected.push({ key, reason: 'unknown_field' });
+          continue;
+        }
+        if (definitionCount >= MAX_DEFINITIONS_PER_WORKSPACE) {
+          rejected.push({ key, reason: 'definition_cap_reached' });
+          continue;
+        }
+        try {
+          definition = await prisma.customFieldDefinition.create({
+            data: {
+              workspaceId,
+              key,
+              label: prettifyKeyLabel(key),
+              type: inferFieldType(raw),
+              options: [],
+              source: 'api',
+              sortOrder: nextSortOrder++,
+            },
+          });
+        } catch {
+          // Unique race (two creates provisioning the same key) — take the row
+          // the other writer won with.
+          definition = await prisma.customFieldDefinition.findFirst({ where: { workspaceId, key } });
+        }
+        if (!definition) {
+          rejected.push({ key, reason: 'provision_failed' });
+          continue;
+        }
+        byKey.set(key, definition);
+        definitionCount += 1;
+        provisioned.push(key);
+      }
+
+      try {
+        const value = coerceValue(definition, raw);
+        if (value !== null) clean[key] = value;
+      } catch (err) {
+        rejected.push({ key, reason: err.message });
+      }
+    }
+
+    return { values: clean, provisioned, rejected };
   }
 
   /** Validate + merge values into a ticket's customFields JSON. Unknown keys are rejected. */

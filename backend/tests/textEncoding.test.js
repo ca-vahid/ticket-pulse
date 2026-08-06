@@ -2,14 +2,15 @@
  * FR 08-05 item 2 — mojibake detection/repair + RFC 2047 decoding.
  *
  * Corrupted fixtures are built programmatically (utf8 bytes re-decoded as
- * latin1/cp1252) so the test source stays encoding-agnostic: moji('Rógenes')
- * === 'RÃ³genes'.
+ * latin1/cp1252/cp437) so the test source stays encoding-agnostic:
+ * moji('Rógenes') === 'RÃ³genes', mojiCp437('Rógenes') === 'R├│genes'.
  */
 import {
   looksMojibake,
   repairMojibake,
   decodeRfc2047,
   cleanDisplayName,
+  CP437_BYTE_TO_CHAR,
 } from '../src/utils/textEncoding.js';
 
 const CP1252_REMAP = {
@@ -28,8 +29,14 @@ const moji = (s) => Buffer.from(s, 'utf8').toString('latin1');
 const mojiCp1252 = (s) => [...Buffer.from(s, 'utf8')]
   .map((b) => CP1252_REMAP[b] || String.fromCharCode(b))
   .join('');
+/** utf8 bytes mis-decoded as IBM CP437 — the DOS-codepage corruption in prod */
+const mojiCp437 = (s) => [...Buffer.from(s, 'utf8')]
+  .map((b) => (b < 0x80 ? String.fromCharCode(b) : CP437_BYTE_TO_CHAR.get(b)))
+  .join('');
 
 const CLEAN = 'Erick Rógenes Soares';
+// Literal prod row (queried live 2026-08): '├' U+251C, '│' U+2502.
+const PROD_CP437 = 'Erick R├│genes Soares';
 
 describe('looksMojibake', () => {
   test.each([
@@ -39,10 +46,19 @@ describe('looksMojibake', () => {
     ['latin1-corrupted u-umlaut', moji('Müller'), true],
     ['cp1252-corrupted apostrophe', mojiCp1252('don’t'), true],
     ['full corrupted name', moji(CLEAN), true],
+    ['cp437-corrupted o-acute (prod evidence)', PROD_CP437, true],
+    ['cp437-corrupted e-acute', mojiCp437('José'), true],
+    ['cp437-corrupted n-tilde', mojiCp437('España'), true],
+    ['cp437-corrupted u-umlaut', mojiCp437('Müller'), true],
+    ['cp437-corrupted apostrophe (Greek 3-byte shape)', mojiCp437('don’t'), true],
+    ['lone box-drawing char (never legit in a name)', 'x│y', true],
     ['clean accented name', CLEAN, false],
     ['clean ASCII', 'John Smith', false],
     ['clean A-tilde name (letter follows)', 'Ãngela', false],
     ['clean a-tilde name', 'João', false],
+    ['lone Greek letters (no continuation pair)', 'α β Ω delta', false],
+    ['micro-units', '5µm fiber', false],
+    ['math symbols', '±5 ÷ 2 ≈ 2.5°', false],
     ['CJK', '田中太郎', false],
     ['emoji', 'Party \u{1F389}', false],
     ['empty string', '', false],
@@ -104,6 +120,74 @@ describe('repairMojibake', () => {
     const corrupted = moji(CLEAN);
     const repaired = repairMojibake(corrupted);
     expect([...repaired].length).toBeLessThan([...corrupted].length);
+  });
+});
+
+describe('repairMojibake — CP437/CP850 (DOS codepages, the prod pattern)', () => {
+  test('CP437 reverse table maps the signature chars to the right bytes', () => {
+    expect(CP437_BYTE_TO_CHAR.size).toBe(128);
+    expect(CP437_BYTE_TO_CHAR.get(0xC3)).toBe('├'); // U+251C
+    expect(CP437_BYTE_TO_CHAR.get(0xB3)).toBe('│'); // U+2502
+    expect(CP437_BYTE_TO_CHAR.get(0xA9)).toBe('⌐'); // U+2310
+    expect('├'.codePointAt(0)).toBe(0x251C);
+    expect('│'.codePointAt(0)).toBe(0x2502);
+  });
+
+  test('EXACT prod case: "Erick R├│genes Soares" → "Erick Rógenes Soares"', () => {
+    // ó = UTF-8 0xC3 0xB3; decoded as CP437 → U+251C U+2502.
+    expect([...PROD_CP437].map((c) => c.codePointAt(0)))
+      .toEqual(expect.arrayContaining([0x251C, 0x2502]));
+    expect(mojiCp437(CLEAN)).toBe(PROD_CP437); // helper reproduces the live row
+    expect(looksMojibake(PROD_CP437)).toBe(true);
+    expect(repairMojibake(PROD_CP437)).toBe(CLEAN);
+    expect(cleanDisplayName(PROD_CP437)).toBe(CLEAN);
+  });
+
+  test('é as CP437: 0xC3 0xA9 → "├⌐"', () => {
+    expect(mojiCp437('José')).toBe('Jos├⌐');
+    expect(repairMojibake('Jos├⌐')).toBe('José');
+  });
+
+  test.each([
+    ['España'], ['Müller'], ['João'], ['Çelik'], ['Rógenes'],
+  ])('round-trips %s through CP437 corruption', (clean) => {
+    expect(repairMojibake(mojiCp437(clean))).toBe(clean);
+  });
+
+  test('CP437-corrupted smart quote (3-byte UTF-8, Greek lead)', () => {
+    expect(mojiCp437('don’t')).toBe('donΓÇÖt'); // ’ = E2 80 99 → Γ Ç Ö
+    expect(repairMojibake('donΓÇÖt')).toBe('don’t');
+  });
+
+  test('CP850 variant: é arrives as "├®" (0xA9 = ® under CP850)', () => {
+    expect(repairMojibake('Jos├®')).toBe('José');
+  });
+
+  test('double-encoded CP437 repairs by iterating', () => {
+    expect(repairMojibake(mojiCp437(mojiCp437(CLEAN)))).toBe(CLEAN);
+  });
+
+  test('box-drawing diagram text flags but survives repair untouched', () => {
+    // Repair-if-valid semantics: these flag as mojibake (box chars are never
+    // legit in a NAME), but stray box chars re-encode to invalid UTF-8 byte
+    // sequences, so every repair guard rejects and the input passes through.
+    // A diagram string that DID round-trip as valid UTF-8 would be repaired —
+    // accepted, since that shape is exactly the corruption we hunt.
+    for (const s of ['│ Legend │ Value │', '├─ item ─┤', '░░ 50% ░░']) {
+      expect(looksMojibake(s)).toBe(true);
+      expect(repairMojibake(s)).toBe(s);
+    }
+  });
+
+  test('mixed CP1252+CP437 corruption is left untouched (no single byte stream)', () => {
+    const mixed = `${moji('ó')} ${mojiCp437('ó')}`; // "Ã³ ├│"
+    expect(looksMojibake(mixed)).toBe(true);
+    expect(repairMojibake(mixed)).toBe(mixed);
+  });
+
+  test('CP1252 corruption still repairs (regression: codec order)', () => {
+    expect(repairMojibake(moji(CLEAN))).toBe(CLEAN);
+    expect(repairMojibake(mojiCp1252('don’t'))).toBe('don’t');
   });
 });
 
