@@ -80,3 +80,53 @@ describe('Phase 5: generalized workflow events + update_ticket action', () => {
     expect(result.errors).toEqual([]);
   });
 });
+
+// FR 08-05 Phase 1b: update_ticket can set the category BY NAME (templates and
+// API-intake mappings can't know workspace IDs) — save-time validation checks
+// shape only; resolution happens against the workspace taxonomy at run time.
+describe('update_ticket category by name (FR 08-05 Phase 1b)', () => {
+  function categoryDefinition(updateData) {
+    return {
+      version: 2,
+      metadata: {},
+      nodes: [
+        { id: 'trigger', type: 'trigger', data: { triggerType: 'ticket.created' } },
+        { id: 'route', type: 'update_ticket', data: updateData },
+        { id: 'end', type: 'stop', data: {} },
+      ],
+      edges: [
+        { id: 'e1', source: 'trigger', target: 'route' },
+        { id: 'e2', source: 'route', target: 'end' },
+      ],
+    };
+  }
+
+  test('a category name (with optional child subcategory name) validates', () => {
+    expect(validateWorkflowDefinition(
+      categoryDefinition({ setCategoryName: 'Project Setup' }),
+      { triggerType: 'ticket.created' },
+    ).errors).toEqual([]);
+    expect(validateWorkflowDefinition(
+      categoryDefinition({ setCategoryName: 'Project Setup', setSubcategoryName: 'New Project' }),
+      { triggerType: 'ticket.created' },
+    ).errors).toEqual([]);
+  });
+
+  test('blank or over-long names are rejected at save time', () => {
+    expect(validateWorkflowDefinition(
+      categoryDefinition({ setCategoryName: '   ' }),
+      { triggerType: 'ticket.created' },
+    ).errors.join(' ')).toMatch(/category name/i);
+    expect(validateWorkflowDefinition(
+      categoryDefinition({ setCategoryName: 'x'.repeat(121) }),
+      { triggerType: 'ticket.created' },
+    ).errors.join(' ')).toMatch(/max 120/i);
+  });
+
+  test('a subcategory name without its parent category name is rejected', () => {
+    expect(validateWorkflowDefinition(
+      categoryDefinition({ setSubcategoryName: 'New Project' }),
+      { triggerType: 'ticket.created' },
+    ).errors.join(' ')).toMatch(/needs its parent category name/i);
+  });
+});

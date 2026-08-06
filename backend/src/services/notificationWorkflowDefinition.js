@@ -226,6 +226,61 @@ export const WORKFLOW_TEMPLATES = [
     ]),
   },
   {
+    key: 'api_intake_router',
+    name: 'API intake router (custom field → category)',
+    description: 'Route API-created tickets by an intake custom field: when a field like source_request_type matches a value, set the ticket\'s category by name and email the assignee a heads-up. Edit the field key, the match value, and the target category after installing — the condition builder lists this workspace\'s custom fields, and category names resolve against its taxonomy at run time.',
+    triggerType: 'ticket.created',
+    build: () => templateNodes([
+      { id: 'trigger', type: 'trigger', data: { triggerType: 'ticket.created' } },
+      {
+        id: 'match-intake',
+        type: 'condition',
+        data: {
+          label: 'Intake field matches?',
+          // Placeholders: swap the custom-field key and value for the ones your
+          // API sender uses (Settings → Ticket Ops → Custom fields lists them;
+          // fields auto-provision on first API use).
+          conditionGroup: {
+            logic: 'all',
+            conditions: [{ field: 'custom:source_request_type', operator: 'is', value: 'Project Setup' }],
+          },
+        },
+      },
+      {
+        id: 'route',
+        type: 'update_ticket',
+        data: {
+          label: 'Set category',
+          // Placeholder: replace with one of this workspace's category names —
+          // resolved case-insensitively when the workflow runs.
+          setCategoryName: 'Project Setup',
+          note: 'Categorized by the API intake router workflow.',
+        },
+      },
+      { id: 'recipients', type: 'recipient_resolver', data: { to: ['assigned_agent'], cc: [], bcc: [] } },
+      {
+        id: 'template',
+        type: 'template_render',
+        data: {
+          contentSource: 'template_only',
+          subject: 'API intake routed: {{ ticket.subject }}',
+          html: '<p>An API-created ticket matched the intake router (<strong>{{ ticket.customFields.source_request_type }}</strong>) and was categorized automatically.</p><p><strong>{{ ticket.subject }}</strong></p><p>Review the ticket if the routing looks wrong.</p>',
+          text: 'An API-created ticket matched the intake router ({{ ticket.customFields.source_request_type }}) and was categorized automatically.\n\n{{ ticket.subject }}\n\nReview the ticket if the routing looks wrong.',
+          plainTextMode: 'auto',
+        },
+      },
+      { id: 'send', type: 'send_email', data: { provider: 'sendgrid', includeFooter: false, includeHeader: false } },
+      { id: 'end', type: 'stop', data: {} },
+    ], [
+      { id: 'e1', source: 'trigger', target: 'match-intake' },
+      { id: 'e2', source: 'match-intake', sourceHandle: 'true', target: 'route' },
+      { id: 'e3', source: 'match-intake', sourceHandle: 'false', target: 'end' },
+      { id: 'e4', source: 'route', target: 'recipients' },
+      { id: 'e5', source: 'recipients', target: 'template' },
+      { id: 'e6', source: 'template', target: 'send' },
+    ]),
+  },
+  {
     key: 'daily_open_tickets_digest',
     name: 'Daily open-tickets digest',
     description: 'Every morning, email a configured list a plain-language digest: open/unassigned/overdue counts and the oldest open tickets. Deterministic template — no AI. Configure the recipients and send time after installing.',
@@ -704,6 +759,24 @@ function validateGraph(definition, triggerType) {
       const minutes = Number(node.data?.minutes);
       if (!Number.isFinite(minutes) || minutes < 1 || minutes > 7 * 24 * 60) {
         errors.push(`Delay node ${node.id} must wait between 1 minute and 7 days`);
+      }
+    }
+
+    if (node.type === 'update_ticket' && reachable.has(node.id)) {
+      // Category by NAME (FR 08-05 Phase 1b): resolved against the workspace
+      // taxonomy at run time, so save-time validation only checks shape.
+      const badName = (v) => v !== undefined && v !== null
+        && (typeof v !== 'string' || !v.trim() || v.trim().length > 120);
+      if (badName(node.data?.setCategoryName)) {
+        errors.push(`Update-ticket node ${node.id}: category name must be a non-empty string (max 120 chars)`);
+      }
+      if (badName(node.data?.setSubcategoryName)) {
+        errors.push(`Update-ticket node ${node.id}: subcategory name must be a non-empty string (max 120 chars)`);
+      }
+      const hasCategoryName = typeof node.data?.setCategoryName === 'string' && node.data.setCategoryName.trim();
+      const hasSubcategoryName = typeof node.data?.setSubcategoryName === 'string' && node.data.setSubcategoryName.trim();
+      if (hasSubcategoryName && !hasCategoryName) {
+        errors.push(`Update-ticket node ${node.id}: a subcategory name needs its parent category name`);
       }
     }
 

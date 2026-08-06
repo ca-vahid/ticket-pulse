@@ -8946,6 +8946,34 @@ export default function NotificationWorkflowsPanel({
             </label>
           </div>
 
+          <div className="rounded-lg border border-slate-200 p-2.5 space-y-1.5">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Category by name</p>
+            <p className="text-[11px] text-slate-400 normal-case">For API-intake mappings and installed templates: names are matched against this workspace&apos;s categories when the workflow runs (case-insensitive). The pickers above take precedence when set.</p>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="block text-[11px] text-slate-500">
+                Category name
+                <input
+                  value={selectedNode.data?.setCategoryName || ''}
+                  onChange={(event) => updateNodeData(event.target.value
+                    ? { setCategoryName: event.target.value }
+                    : { setCategoryName: null, setSubcategoryName: null })}
+                  placeholder="e.g. Project Setup"
+                  className="mt-0.5 w-full rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm normal-case text-gray-900"
+                />
+              </label>
+              <label className="block text-[11px] text-slate-500">
+                Subcategory name
+                <input
+                  value={selectedNode.data?.setSubcategoryName || ''}
+                  onChange={(event) => updateNodeData({ setSubcategoryName: event.target.value || null })}
+                  placeholder="optional"
+                  disabled={!selectedNode.data?.setCategoryName}
+                  className="mt-0.5 w-full rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm normal-case text-gray-900 disabled:bg-gray-50 disabled:text-gray-400"
+                />
+              </label>
+            </div>
+          </div>
+
           <label className="block text-xs font-medium uppercase text-gray-500">
             Move to group
             <select

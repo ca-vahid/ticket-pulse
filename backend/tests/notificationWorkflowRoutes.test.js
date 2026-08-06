@@ -1374,4 +1374,46 @@ describe('GET /condition-fields', () => {
     const status = response.body.data.find((f) => f.value === 'ticket.status');
     expect(status.options).toEqual(['Open', 'Pending', 'Resolved', 'Closed']);
   });
+
+  // FR 08-05 Phase 1b: the catalog appends the workspace's custom fields TYPED
+  // from their definitions — the builder renders number/date/boolean operators
+  // and select options from these entries.
+  test('custom fields are served typed from their definitions', async () => {
+    prismaMock.customFieldDefinition = {
+      findMany: jest.fn().mockResolvedValue([
+        { id: 1, workspaceId: 1, key: 'budget', label: 'Budget', type: 'number', options: [], isActive: true },
+        { id: 2, workspaceId: 1, key: 'kickoff_date', label: 'Kickoff Date', type: 'date', options: [], isActive: true },
+        { id: 3, workspaceId: 1, key: 'is_billable', label: 'Is Billable', type: 'boolean', options: [], isActive: true },
+        { id: 4, workspaceId: 1, key: 'tier', label: 'Tier', type: 'select', options: ['Gold', 'Silver'], isActive: true },
+        { id: 5, workspaceId: 1, key: 'client_name', label: 'Client Name', type: 'text', options: [], isActive: true },
+      ]),
+    };
+    try {
+      const response = await request(buildApp(1))
+        .get('/api/notification-workflows/condition-fields')
+        .expect(200);
+
+      const byValue = Object.fromEntries(response.body.data.map((f) => [f.value, f]));
+      expect(byValue['custom:budget']).toEqual({ value: 'custom:budget', label: 'Custom: Budget', type: 'number' });
+      expect(byValue['custom:kickoff_date'].type).toBe('date');
+      expect(byValue['custom:is_billable'].type).toBe('boolean');
+      expect(byValue['custom:tier']).toEqual(expect.objectContaining({ type: 'enum', options: ['Gold', 'Silver'] }));
+      expect(byValue['custom:client_name'].type).toBe('string');
+    } finally {
+      delete prismaMock.customFieldDefinition;
+    }
+  });
+
+  test('a failing custom-field lookup never breaks the static catalog', async () => {
+    prismaMock.customFieldDefinition = { findMany: jest.fn().mockRejectedValue(new Error('db down')) };
+    try {
+      const response = await request(buildApp(1))
+        .get('/api/notification-workflows/condition-fields')
+        .expect(200);
+      expect(response.body.data.some((f) => f.value === 'ticket.status')).toBe(true);
+      expect(response.body.data.some((f) => String(f.value).startsWith('custom:'))).toBe(false);
+    } finally {
+      delete prismaMock.customFieldDefinition;
+    }
+  });
 });

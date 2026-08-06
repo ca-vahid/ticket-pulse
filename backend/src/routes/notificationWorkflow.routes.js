@@ -1275,7 +1275,7 @@ router.get(
 router.get(
   '/condition-fields',
   asyncHandler(async (req, res) => {
-    const { CONDITION_FIELDS } = await import('../services/notificationConditionModel.js');
+    const { CONDITION_FIELDS, CUSTOM_FIELD_CONDITION_TYPES } = await import('../services/notificationConditionModel.js');
     const { default: statusService } = await import('../services/statusService.js');
     const fields = [];
     for (const [value, spec] of Object.entries(CONDITION_FIELDS)) {
@@ -1287,6 +1287,25 @@ router.get(
       }
       fields.push(field);
     }
+    // Custom fields, TYPED from their definitions (FR 08-05 Phase 1b): the
+    // builder renders number/date/boolean operators + inputs from `type`, and
+    // select definitions surface their options as an enum. Failure to load
+    // defs never breaks the static catalog.
+    try {
+      const { default: customFieldService } = await import('../services/customFieldService.js');
+      const definitions = await customFieldService.listDefinitions(req.workspaceId);
+      for (const definition of definitions) {
+        const field = {
+          value: `custom:${definition.key}`,
+          label: `Custom: ${definition.label}`,
+          type: CUSTOM_FIELD_CONDITION_TYPES[definition.type] || 'string',
+        };
+        if (definition.type === 'select' && Array.isArray(definition.options) && definition.options.length > 0) {
+          field.options = definition.options;
+        }
+        fields.push(field);
+      }
+    } catch { /* custom fields are additive — the static catalog stands alone */ }
     res.json({ success: true, data: fields });
   }),
 );

@@ -15,6 +15,9 @@ const prismaMock = {
   publicTicketStatusSettings: { upsert: jest.fn() },
   publicTicketStatusLink: { findUnique: jest.fn() },
   ticket: { findFirst: jest.fn(), findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
+  // FR 08-05 Phase 1b: typed custom-field conditions + category-by-name.
+  customFieldDefinition: { findMany: jest.fn() },
+  competencyCategory: { findMany: jest.fn(), findFirst: jest.fn() },
   ticketActivity: { create: jest.fn() },
   mirrorJob: { findFirst: jest.fn(), create: jest.fn() },
   ticketThreadEntry: { findMany: jest.fn() },
@@ -49,7 +52,12 @@ const {
   validateWorkflowDefinition,
   WORKFLOW_TEMPLATES,
 } = await import('../src/services/notificationWorkflowDefinition.js');
-const { default: engine, executeDefinition, resumeWaitingRuns } = await import('../src/services/notificationWorkflowEngine.js');
+const {
+  default: engine,
+  executeDefinition,
+  resumeWaitingRuns,
+  invalidateCustomFieldConditionTypesCache,
+} = await import('../src/services/notificationWorkflowEngine.js');
 
 const eventContext = (over = {}) => ({
   event: { type: 'ticket.created', source: 'test', occurredAt: '2026-07-07T10:00:00.000Z', dedupeStamp: `t-${Math.random()}` },
@@ -112,6 +120,10 @@ beforeEach(() => {
   prismaMock.notificationDelivery.upsert.mockImplementation(({ create }) => Promise.resolve({ id: 700, ...create }));
   prismaMock.notificationDelivery.update.mockResolvedValue({});
   prismaMock.notificationDelivery.create.mockImplementation(({ data }) => Promise.resolve({ id: 700, ...data }));
+  prismaMock.customFieldDefinition.findMany.mockResolvedValue([]);
+  prismaMock.competencyCategory.findMany.mockResolvedValue([]);
+  prismaMock.competencyCategory.findFirst.mockResolvedValue(null);
+  invalidateCustomFieldConditionTypesCache();
 });
 
 describe('branch node validation', () => {
@@ -881,5 +893,181 @@ describe('custom-status conditions (Phase 8c)', () => {
     expect(condition.data.conditionGroup.conditions[0]).toEqual({ field: 'ticket.status', operator: 'is', value: 'Needs Rework' });
     const recipients = definition.nodes.find((n) => n.type === 'recipient_resolver');
     expect(recipients.data.to).toEqual(['assigned_agent', 'requester']);
+  });
+});
+
+// FR 08-05 Phase 1b: API intake enrichment wired into automation — typed
+// custom-field conditions evaluate through the engine, and update_ticket can
+// set the category BY NAME (resolved against the workspace taxonomy at run
+// time), which is what makes QA's sourceRequestType→category mapping
+// self-service.
+describe('API intake routing (FR 08-05 Phase 1b)', () => {
+  const TAXONOMY = [
+    { id: 11, workspaceId: 1, name: 'Project Setup', parentId: null, isActive: true },
+    { id: 12, workspaceId: 1, name: 'Accounting', parentId: null, isActive: true },
+    { id: 21, workspaceId: 1, name: 'New Project', parentId: 11, isActive: true },
+  ];
+
+  function intakeDefinition(updateData) {
+    return {
+      version: 2,
+      metadata: {},
+      nodes: [
+        { id: 'trigger', type: 'trigger', data: { triggerType: 'ticket.created' } },
+        {
+          id: 'match',
+          type: 'condition',
+          data: {
+            conditionGroup: {
+              logic: 'all',
+              conditions: [{ field: 'custom:source_request_type', operator: 'is', value: 'Project Setup' }],
+            },
+          },
+        },
+        { id: 'route', type: 'update_ticket', data: updateData },
+        { id: 'end-hit', type: 'stop', data: {} },
+        { id: 'end-miss', type: 'stop', data: {} },
+      ],
+      edges: [
+        { id: 'e1', source: 'trigger', target: 'match' },
+        { id: 'e2', source: 'match', sourceHandle: 'true', target: 'route' },
+        { id: 'e3', source: 'match', sourceHandle: 'false', target: 'end-miss' },
+        { id: 'e4', source: 'route', target: 'end-hit' },
+      ],
+    };
+  }
+
+  function intakeContext(value = 'Project Setup') {
+    return eventContext({
+      ticket: {
+        id: 100,
+        workspaceId: 1,
+        subject: 'Project Setup - Coyote Landslide',
+        status: 'Open',
+        isNoise: false,
+        customFields: { source_request_type: value },
+      },
+    });
+  }
+
+  beforeEach(() => {
+    prismaMock.customFieldDefinition.findMany.mockResolvedValue([{ key: 'source_request_type', type: 'text' }]);
+    prismaMock.competencyCategory.findMany.mockResolvedValue(TAXONOMY);
+    prismaMock.competencyCategory.findFirst.mockImplementation(({ where }) => Promise.resolve(
+      TAXONOMY.find((c) => c.id === where.id
+        && (where.parentId === null ? c.parentId === null : c.parentId === where.parentId)) || null,
+    ));
+    prismaMock.ticket.findUnique.mockResolvedValue({
+      id: 100,
+      workspaceId: 1,
+      origin: 'ticketpulse',
+      status: 'Open',
+      priority: 2,
+      internalCategoryId: null,
+      internalSubcategoryId: null,
+      createdAt: new Date('2026-08-01T10:00:00.000Z'),
+    });
+  });
+
+  test('end-to-end: intake custom field matches → category (and child subcategory) set by name', async () => {
+    const result = await executeDefinition({
+      workflow: { id: 70, workspaceId: 1, triggerType: 'ticket.created', publishedVersion: 1, versions: [] },
+      definition: intakeDefinition({ setCategoryName: 'project setup', setSubcategoryName: 'new project' }),
+      eventContext: intakeContext(),
+      executionMode: 'live',
+    });
+
+    expect(result.status).toBe('completed');
+    const conditionStep = result.steps.find((s) => s.nodeType === 'condition');
+    expect(conditionStep.output.passed).toBe(true);
+
+    const updateStep = result.steps.find((s) => s.nodeId === 'route');
+    // Case-insensitive resolution returns the canonical names.
+    expect(updateStep.output.resolvedCategory).toEqual(expect.objectContaining({
+      categoryId: 11,
+      subcategoryId: 21,
+      categoryName: 'Project Setup',
+      subcategoryName: 'New Project',
+    }));
+    expect(updateStep.output.updated.internalCategoryId).toEqual({ from: null, to: 11 });
+
+    const patchCall = prismaMock.ticket.update.mock.calls.find((c) => c[0].data?.internalCategoryId === 11);
+    expect(patchCall).toBeTruthy();
+    expect(patchCall[0].data.internalSubcategoryId).toBe(21);
+  });
+
+  test('non-matching intake value takes the false path — no category write', async () => {
+    const result = await executeDefinition({
+      workflow: { id: 71, workspaceId: 1, triggerType: 'ticket.created', publishedVersion: 1, versions: [] },
+      definition: intakeDefinition({ setCategoryName: 'Project Setup' }),
+      eventContext: intakeContext('Invoice Question'),
+      executionMode: 'live',
+    });
+
+    expect(result.status).toBe('completed');
+    expect(result.steps.some((s) => s.nodeId === 'route')).toBe(false);
+    expect(result.steps.some((s) => s.nodeId === 'end-miss')).toBe(true);
+    expect(prismaMock.ticket.update.mock.calls.some((c) => c[0].data?.internalCategoryId)).toBe(false);
+  });
+
+  test('a bad category name surfaces as a run error (categoryError), never a crash', async () => {
+    const result = await executeDefinition({
+      workflow: { id: 72, workspaceId: 1, triggerType: 'ticket.created', publishedVersion: 1, versions: [] },
+      definition: intakeDefinition({ setCategoryName: 'No Such Category' }),
+      eventContext: intakeContext(),
+      executionMode: 'live',
+    });
+
+    expect(result.status).toBe('completed');
+    const updateStep = result.steps.find((s) => s.nodeId === 'route');
+    expect(updateStep.output.categoryError).toMatch(/unknown category/i);
+    expect(updateStep.output.categoryError).toMatch(/Project Setup/); // lists the allowed values
+    expect(prismaMock.ticket.update.mock.calls.some((c) => c[0].data?.internalCategoryId)).toBe(false);
+  });
+
+  test('typed numeric custom-field conditions coerce through the engine', async () => {
+    prismaMock.customFieldDefinition.findMany.mockResolvedValue([{ key: 'budget', type: 'number' }]);
+    invalidateCustomFieldConditionTypesCache();
+    const definition = intakeDefinition({ setPriority: 4 });
+    definition.nodes.find((n) => n.id === 'match').data.conditionGroup = {
+      logic: 'all',
+      conditions: [{ field: 'custom:budget', operator: 'gt', value: 1000 }],
+    };
+    const contextFor = (budget) => eventContext({
+      ticket: { id: 100, workspaceId: 1, subject: 'Budget check', status: 'Open', isNoise: false, customFields: { budget } },
+    });
+
+    const hit = await engine.executePreview({
+      workflow: { id: 73, workspaceId: 1, triggerType: 'ticket.created', draftDefinition: definition, publishedVersion: 0, versions: [] },
+      definition,
+      eventContext: contextFor('1500'), // string on the ticket, number in the rule
+      executeLlm: false,
+    });
+    expect(hit.steps.find((s) => s.nodeType === 'condition').output.passed).toBe(true);
+
+    invalidateCustomFieldConditionTypesCache();
+    const miss = await engine.executePreview({
+      workflow: { id: 74, workspaceId: 1, triggerType: 'ticket.created', draftDefinition: definition, publishedVersion: 0, versions: [] },
+      definition,
+      eventContext: contextFor('500'),
+      executeLlm: false,
+    });
+    expect(miss.steps.find((s) => s.nodeType === 'condition').output.passed).toBe(false);
+  });
+
+  test('the api_intake_router template wires condition → category-by-name → assignee notify', () => {
+    const template = WORKFLOW_TEMPLATES.find((t) => t.key === 'api_intake_router');
+    expect(template).toBeDefined();
+    expect(template.triggerType).toBe('ticket.created');
+    const definition = template.build();
+    expect(validateWorkflowDefinition(definition, { triggerType: 'ticket.created' }).errors).toEqual([]);
+    const condition = definition.nodes.find((n) => n.type === 'condition');
+    expect(condition.data.conditionGroup.conditions[0]).toEqual({
+      field: 'custom:source_request_type', operator: 'is', value: 'Project Setup',
+    });
+    const update = definition.nodes.find((n) => n.type === 'update_ticket');
+    expect(update.data.setCategoryName).toBe('Project Setup');
+    const recipients = definition.nodes.find((n) => n.type === 'recipient_resolver');
+    expect(recipients.data.to).toEqual(['assigned_agent']);
   });
 });

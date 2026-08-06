@@ -58,7 +58,11 @@ import {
   EMAIL_FEEDBACK_ROCKS_BY_THEME,
 } from './notificationEmailIcons.js';
 
-import { compileConditionGroup } from './notificationConditionModel.js';
+import {
+  compileConditionGroup,
+  groupReferencesCustomFields,
+  registerCustomFieldConditionOps,
+} from './notificationConditionModel.js';
 
 const liquid = new Liquid({
   strictFilters: false,
@@ -87,6 +91,55 @@ jsonLogic.add_operation('list_has_all', (haystack, wanted) => {
   const want = asLowerList(wanted);
   return want.length > 0 && want.every((w) => have.has(w));
 });
+
+// Typed custom-field conditions (FR 08-05 Phase 1b): cf_number / cf_epoch /
+// cf_bool coerce both sides of a comparison consistently.
+registerCustomFieldConditionOps(jsonLogic);
+
+/**
+ * Custom-field definition types per workspace, for typed `custom:<key>`
+ * condition rows. Tiny bounded TTL cache — definitions change rarely, but
+ * every condition node referencing a custom field would otherwise pay a query
+ * per evaluation. A DB failure returns null → the model's string fallback
+ * keeps legacy (untyped) behavior.
+ */
+const CUSTOM_FIELD_TYPES_TTL_MS = 60_000;
+const CUSTOM_FIELD_TYPES_CACHE_MAX = 50;
+const customFieldTypesCache = new Map(); // workspaceId -> { at, types }
+
+export function invalidateCustomFieldConditionTypesCache() {
+  customFieldTypesCache.clear();
+}
+
+async function workspaceCustomFieldTypes(workspaceId) {
+  const id = Number(workspaceId);
+  if (!Number.isFinite(id) || id <= 0) return null;
+  const hit = customFieldTypesCache.get(id);
+  if (hit && Date.now() - hit.at < CUSTOM_FIELD_TYPES_TTL_MS) return hit.types;
+  try {
+    // Inactive definitions included — a retired definition still owns its key
+    // and stored values, so existing typed conditions keep evaluating.
+    const defs = await prisma.customFieldDefinition.findMany({
+      where: { workspaceId: id },
+      select: { key: true, type: true },
+    });
+    const types = Object.fromEntries(defs.map((d) => [d.key, d.type]));
+    if (customFieldTypesCache.size >= CUSTOM_FIELD_TYPES_CACHE_MAX) {
+      customFieldTypesCache.delete(customFieldTypesCache.keys().next().value);
+    }
+    customFieldTypesCache.set(id, { at: Date.now(), types });
+    return types;
+  } catch {
+    return null;
+  }
+}
+
+/** Definition types for a condition group — only loads when the group actually
+ * references a `custom:<key>` field. */
+async function conditionCustomFieldTypes(group, eventContext) {
+  if (!groupReferencesCustomFields(group)) return null;
+  return workspaceCustomFieldTypes(eventContext?.workspace?.id ?? eventContext?.ticket?.workspaceId);
+}
 
 /**
  * Derived relative-time fields for conditions ("older than 30m", "due within
@@ -1844,7 +1897,8 @@ async function executeNode({
     let compileError = null;
     if (node.data?.conditionGroup) {
       try {
-        rule = compileConditionGroup(node.data.conditionGroup);
+        const customFieldTypes = await conditionCustomFieldTypes(node.data.conditionGroup, eventContext);
+        rule = compileConditionGroup(node.data.conditionGroup, { customFieldTypes });
       } catch (error) {
         compileError = error.message;
         rule = false;
@@ -1864,11 +1918,17 @@ async function executeNode({
     // N-way switch: first matching branch wins; no match → 'otherwise'.
     const { compileConditionGroup: compileGroup } = await import('./notificationConditionModel.js');
     const branches = Array.isArray(node.data?.branches) ? node.data.branches : [];
+    const branchNeedsTypes = branches.some((b) => b?.conditionGroup && groupReferencesCustomFields(b.conditionGroup));
+    const branchCustomFieldTypes = branchNeedsTypes
+      ? await workspaceCustomFieldTypes(eventContext?.workspace?.id ?? eventContext?.ticket?.workspaceId)
+      : null;
     for (const candidate of branches) {
       const key = String(candidate?.key || '').trim().toLowerCase();
       if (!key) continue;
       try {
-        const rule = candidate.conditionGroup ? compileGroup(candidate.conditionGroup) : (candidate.rule || false);
+        const rule = candidate.conditionGroup
+          ? compileGroup(candidate.conditionGroup, { customFieldTypes: branchCustomFieldTypes })
+          : (candidate.rule || false);
         if (jsonLogic.apply(rule, scope)) {
           return { matchedBranch: key, label: candidate.label || key };
         }
@@ -3019,6 +3079,10 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false } = 
   const setPriority = node.data?.setPriority ? Number(node.data.setPriority) : null;
   const setInternalCategoryId = node.data?.setInternalCategoryId ? Number(node.data.setInternalCategoryId) : null;
   const setInternalSubcategoryId = node.data?.setInternalSubcategoryId ? Number(node.data.setInternalSubcategoryId) : null;
+  // Category by NAME (FR 08-05 Phase 1b): installable templates and API-intake
+  // mappings can't know workspace IDs, so nodes may carry names instead.
+  const setCategoryName = typeof node.data?.setCategoryName === 'string' ? node.data.setCategoryName.trim() : '';
+  const setSubcategoryName = typeof node.data?.setSubcategoryName === 'string' ? node.data.setSubcategoryName.trim() : '';
   const setInternalGroupId = node.data?.setInternalGroupId ? Number(node.data.setInternalGroupId) : null;
   const setCustomFields = node.data?.setCustomFields && typeof node.data.setCustomFields === 'object'
     && Object.keys(node.data.setCustomFields).length > 0
@@ -3033,8 +3097,8 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false } = 
   const removeTags = normalizeTagNames(node.data?.removeTags);
 
   if (!Number.isFinite(ticketId) || ticketId <= 0) return { skipped: true, reason: 'No ticket in event context' };
-  if (!setStatus && !setPriority && !setInternalCategoryId && !setInternalGroupId && !assignTo && !setCustomFields
-    && !addTags.length && !removeTags.length) {
+  if (!setStatus && !setPriority && !setInternalCategoryId && !setCategoryName && !setInternalGroupId
+    && !assignTo && !setCustomFields && !addTags.length && !removeTags.length) {
     return { skipped: true, reason: 'update_ticket node has no changes configured' };
   }
   if (setStatus) {
@@ -3051,19 +3115,46 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false } = 
     }
     setStatus = normalized;
   }
+
+  // Resolve category NAMES → workspace taxonomy IDs (Phase-1a resolver).
+  // Explicit IDs always win; a bad name surfaces as `categoryError` on the
+  // step output (visible in the run detail) and never crashes the run.
+  let effectiveCategoryId = setInternalCategoryId;
+  let effectiveSubcategoryId = setInternalSubcategoryId;
+  let resolvedCategory = null;
+  let categoryError = null;
+  if (!setInternalCategoryId && setCategoryName) {
+    try {
+      const { resolveCategoryNames } = await import('./categoryNameResolver.js');
+      resolvedCategory = await resolveCategoryNames(
+        Number(eventContext.workspace?.id ?? eventContext.ticket?.workspaceId) || 0,
+        setCategoryName,
+        setSubcategoryName || null,
+      );
+      effectiveCategoryId = resolvedCategory.categoryId;
+      effectiveSubcategoryId = resolvedCategory.subcategoryId;
+    } catch (error) {
+      categoryError = error.message;
+    }
+  }
+
   if (dryRun) {
     return {
       dryRun: true,
       wouldSet: {
         status: setStatus || undefined,
         priority: setPriority || undefined,
-        internalCategoryId: setInternalCategoryId || undefined,
-        internalSubcategoryId: setInternalSubcategoryId || undefined,
+        internalCategoryId: effectiveCategoryId || undefined,
+        internalSubcategoryId: effectiveSubcategoryId || undefined,
+        categoryName: setCategoryName || undefined,
+        subcategoryName: setSubcategoryName || undefined,
         internalGroupId: setInternalGroupId || undefined,
         assignTo: assignTo || undefined,
         addTags: addTags.length ? addTags : undefined,
         removeTags: removeTags.length ? removeTags : undefined,
       },
+      ...(resolvedCategory ? { resolvedCategory } : {}),
+      ...(categoryError ? { categoryError } : {}),
     };
   }
 
@@ -3123,11 +3214,16 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false } = 
         ...(assignment ? { assignment } : {}),
         ...(customFieldResult ? { customFields: customFieldResult } : {}),
         ...(tagResult ? { tags: tagResult } : {}),
+        ...(categoryError ? { categoryError } : {}),
         skipped: true,
         reason: 'FS-born ticket: only assignment write-back and TP annotations (custom fields, tags) applied',
       };
     }
-    return { skipped: true, reason: 'Workflow ticket updates only apply to tickets born in Ticket Pulse' };
+    return {
+      skipped: true,
+      reason: 'Workflow ticket updates only apply to tickets born in Ticket Pulse',
+      ...(categoryError ? { categoryError } : {}),
+    };
   }
 
   const now = new Date();
@@ -3165,22 +3261,22 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false } = 
     patch.priority = setPriority;
     changes.priority = { from: ticket.priority, to: setPriority };
   }
-  if (setInternalCategoryId && setInternalCategoryId !== ticket.internalCategoryId) {
+  if (effectiveCategoryId && effectiveCategoryId !== ticket.internalCategoryId) {
     const category = await prisma.competencyCategory.findFirst({
-      where: { id: setInternalCategoryId, workspaceId: ticket.workspaceId, parentId: null, isActive: true },
+      where: { id: effectiveCategoryId, workspaceId: ticket.workspaceId, parentId: null, isActive: true },
       select: { id: true },
     });
     if (category) {
-      patch.internalCategoryId = setInternalCategoryId;
-      changes.internalCategoryId = { from: ticket.internalCategoryId, to: setInternalCategoryId };
-      if (setInternalSubcategoryId) {
+      patch.internalCategoryId = effectiveCategoryId;
+      changes.internalCategoryId = { from: ticket.internalCategoryId, to: effectiveCategoryId };
+      if (effectiveSubcategoryId) {
         const sub = await prisma.competencyCategory.findFirst({
-          where: { id: setInternalSubcategoryId, workspaceId: ticket.workspaceId, parentId: setInternalCategoryId, isActive: true },
+          where: { id: effectiveSubcategoryId, workspaceId: ticket.workspaceId, parentId: effectiveCategoryId, isActive: true },
           select: { id: true },
         });
         if (sub) {
-          patch.internalSubcategoryId = setInternalSubcategoryId;
-          changes.internalSubcategoryId = { from: ticket.internalSubcategoryId, to: setInternalSubcategoryId };
+          patch.internalSubcategoryId = effectiveSubcategoryId;
+          changes.internalSubcategoryId = { from: ticket.internalSubcategoryId, to: effectiveSubcategoryId };
         }
       } else {
         patch.internalSubcategoryId = null;
@@ -3204,9 +3300,10 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false } = 
         ...(assignment ? { assignment } : {}),
         ...(customFieldResult ? { customFields: customFieldResult } : {}),
         ...(tagResult ? { tags: tagResult } : {}),
+        ...(categoryError ? { categoryError } : {}),
       };
     }
-    return { skipped: true, reason: 'No effective changes' };
+    return { skipped: true, reason: 'No effective changes', ...(categoryError ? { categoryError } : {}) };
   }
   patch.mirrorState = 'pending';
   await prisma.ticket.update({ where: { id: ticket.id }, data: patch });
@@ -3243,6 +3340,8 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false } = 
     ...(assignment ? { assignment } : {}),
     ...(customFieldResult ? { customFields: customFieldResult } : {}),
     ...(tagResult ? { tags: tagResult } : {}),
+    ...(resolvedCategory ? { resolvedCategory } : {}),
+    ...(categoryError ? { categoryError } : {}),
   };
 }
 

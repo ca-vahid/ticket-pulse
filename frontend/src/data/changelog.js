@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.1.7-preview';
+export const APP_VERSION = '3.1.8-preview';
 
 export const changelog = [
+  {
+    version: '3.1.8-preview',
+    date: 'August 5, 2026',
+    entries: [
+      { type: 'new', html: '<strong>🔌 API intake enrichment (part 2 of 3): automation wiring</strong> — custom fields are now first-class in automations: workflow conditions understand their types (numbers compare numerically, dates get before/after, booleans true/false, selects offer their options), the update-ticket action can set <em>category by name</em>, and a new installable “API intake router” template maps incoming request types to categories automatically — QA’s Power App mapping is now self-service. Webhook payloads carry customFields + category/subcategory names.' },
+    ],
+  },
   {
     version: '3.1.7-preview',
     date: 'August 5, 2026',
