@@ -742,6 +742,10 @@ export const ticketsAPI = {
   customFieldDefinitions: async () => await api.get('/tickets/custom-fields/definitions'),
   setCustomFields: async (id, values) => await api.patch(`/tickets/${id}/custom-fields`, { values }),
 
+  // Pinned workflow field cards (custom-fields activation Phase 1). Dismiss is
+  // ticket-level and one-way — the card returns only if the workflow runs again.
+  dismissPinnedCard: async (ticketId, cardId) => await api.post(`/tickets/${ticketId}/pinned-cards/${cardId}/dismiss`),
+
   sendProposedReply: async (id, proposalId, body = {}) => {
     return await api.post(`/tickets/${id}/proposed-replies/${proposalId}/send`, body);
   },

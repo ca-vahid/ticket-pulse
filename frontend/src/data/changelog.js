@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.1.9-preview';
+export const APP_VERSION = '3.2.00-preview';
 
 export const changelog = [
+  {
+    version: '3.2.00-preview',
+    date: 'August 6, 2026',
+    entries: [
+      { type: 'new', html: '<strong>📌 Workflows can now write notes & pin Field Cards</strong> — a new “Add note” workflow action posts to the ticket conversation: rich text (with Liquid variables) or an interactive <em>Field Card</em> that highlights chosen custom fields. Cards can pin above the conversation so intake details (client, project, SharePoint links) stay visible — with click-to-copy chips, clickable links, jump-to-edit, and a “updated since this note” marker when values change. Dismissible, re-pins on workflow re-run, never mirrored to FreshService.' },
+      { type: 'new', html: '<strong>🧩 Builder & template upgrades</strong> — the workflow builder gains the Add note editor with live card preview; the “API intake router” template now drops a Field Card, and a new “Intake field card” template pins API-submitted details automatically. “Set custom fields” action values now support Liquid (e.g. {{ ticket.subject }}).' },
+    ],
+  },
   {
     version: '3.1.9-preview',
     date: 'August 6, 2026',

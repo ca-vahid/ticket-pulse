@@ -11,6 +11,7 @@ import {
 } from './ticketUi';
 import AssigneePicker from './AssigneePicker';
 import AiAssignModal from './AiAssignModal';
+import { PinnedCardChipsRow } from './PinnedIntakeCard';
 import RecipientsLine from './RecipientsLine';
 import FsSyncConfirm from './FsSyncConfirm';
 import { assignmentAPI, ticketsAPI } from '../../services/api';
@@ -544,6 +545,9 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                 </div>
               </div>
             )}
+
+            {/* Pinned workflow field cards — compact chips-only row (Phase 1) */}
+            <PinnedCardChipsRow cards={ticket.pinnedCards || []} currentValues={ticket.customFields || {}} />
 
             {/* Ticket details */}
             <div>

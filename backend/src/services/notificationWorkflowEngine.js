@@ -8,6 +8,7 @@ import providerGateway from './aiProviders/providerGateway.js';
 import { processDelivery } from './notificationDeliveryService.js';
 import notificationWorkflowRepository from './notificationWorkflowRepository.js';
 import {
+  ADD_NOTE_MAX_PER_RUN,
   DEFAULT_LLM_OUTPUT_SCHEMA,
   assertValidWorkflowDefinition,
   normalizeLlmOutputSchema,
@@ -1911,6 +1912,39 @@ async function executeNode({
   if (node.type === 'update_ticket') {
     return executeUpdateTicketNode(node, eventContext, {
       dryRun: dryRun === true || executionMode === 'mock' || executionMode === 'preview',
+      // Run scope so setCustomFields values support Liquid ({{ ticket.subject }}).
+      scope,
+    });
+  }
+
+  if (node.type === 'add_note') {
+    // Run-level cap: a branching graph (or a copy-paste mistake) must not be
+    // able to spray unlimited system notes onto one ticket in a single run.
+    const priorExecutions = Number(state.addNoteExecutions || 0);
+    if (priorExecutions >= ADD_NOTE_MAX_PER_RUN) {
+      const message = `Add-note cap reached: at most ${ADD_NOTE_MAX_PER_RUN} add_note steps may execute per run — node ${node.id} skipped`;
+      state.workflowWarnings = [
+        ...(state.workflowWarnings || []),
+        { type: 'add_note_cap', nodeId: node.id, message },
+      ];
+      return { skipped: true, reason: message };
+    }
+    state.addNoteExecutions = priorExecutions + 1;
+
+    const { executeAddNoteNode } = await import('./notificationWorkflowActionNodes.js');
+    const renderedBody = node.data?.mode === 'text'
+      ? await renderLiquid(node.data?.bodyTemplate || '', scope)
+      : null;
+    const renderedTitle = await renderLiquid(node.data?.title || '', scope);
+    const renderedIntro = await renderLiquid(node.data?.intro || '', scope);
+    return executeAddNoteNode(node, eventContext, {
+      renderedBody,
+      renderedTitle,
+      renderedIntro,
+      workflowId: workflow?.id ?? null,
+      workflowName: workflow?.name ?? null,
+      runId: run?.id ?? null,
+      dryRun: dryRun === true || executionMode === 'mock' || executionMode === 'preview',
     });
   }
 
@@ -2748,6 +2782,10 @@ function workflowWarningsFromState(state = {}) {
       message: llm.warning || llm.error || 'LLM generation did not produce a usable requester-facing email.',
     });
   }
+  // Non-LLM run warnings (e.g. the add_note per-run cap) accumulate on state.
+  for (const warning of state.workflowWarnings || []) {
+    warnings.push(warning);
+  }
   return warnings;
 }
 
@@ -3073,7 +3111,7 @@ function routingResultForWorkflow({ workflow, timing, variantSelection }) {
  * workflows can set custom statuses; terminal/resolution stamping keys on the
  * status's BASE, never the label.
  */
-async function executeUpdateTicketNode(node, eventContext, { dryRun = false } = {}) {
+async function executeUpdateTicketNode(node, eventContext, { dryRun = false, scope = null } = {}) {
   const ticketId = Number(eventContext.ticket?.id);
   let setStatus = node.data?.setStatus || null;
   const setPriority = node.data?.setPriority ? Number(node.data.setPriority) : null;
@@ -3084,10 +3122,20 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false } = 
   const setCategoryName = typeof node.data?.setCategoryName === 'string' ? node.data.setCategoryName.trim() : '';
   const setSubcategoryName = typeof node.data?.setSubcategoryName === 'string' ? node.data.setSubcategoryName.trim() : '';
   const setInternalGroupId = node.data?.setInternalGroupId ? Number(node.data.setInternalGroupId) : null;
-  const setCustomFields = node.data?.setCustomFields && typeof node.data.setCustomFields === 'object'
+  let setCustomFields = node.data?.setCustomFields && typeof node.data.setCustomFields === 'object'
     && Object.keys(node.data.setCustomFields).length > 0
     ? node.data.setCustomFields
     : null;
+  // Liquid in custom-field values (Custom Fields Activation Phase 1 rider):
+  // string values render through the run scope ({{ ticket.subject }} etc.)
+  // before customFieldService.setValues; non-strings pass through untouched.
+  if (setCustomFields && scope) {
+    const rendered = {};
+    for (const [key, value] of Object.entries(setCustomFields)) {
+      rendered[key] = typeof value === 'string' ? await renderLiquid(value, scope) : value;
+    }
+    setCustomFields = rendered;
+  }
   const assignTo = node.data?.assignTo && node.data.assignTo.mode && node.data.assignTo.mode !== 'none'
     ? node.data.assignTo
     : null;
@@ -3150,6 +3198,7 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false } = 
         subcategoryName: setSubcategoryName || undefined,
         internalGroupId: setInternalGroupId || undefined,
         assignTo: assignTo || undefined,
+        customFields: setCustomFields || undefined, // post-Liquid, so previews show real values
         addTags: addTags.length ? addTags : undefined,
         removeTags: removeTags.length ? removeTags : undefined,
       },

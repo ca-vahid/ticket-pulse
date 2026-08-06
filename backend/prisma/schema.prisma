@@ -1165,6 +1165,7 @@ model Ticket {
   tagLinks                 TicketTagLink[]
   tasks                    TicketTask[]
   embedding                TicketEmbedding?
+  pinnedCards              TicketPinnedCard[]
 
   // Per-workspace user-defined fields — values keyed by CustomFieldDefinition.key.
   customFields Json? @map("custom_fields")
@@ -1277,6 +1278,28 @@ model TicketThreadEntry {
   @@index([eventType])
   @@index([emailMessageId])
   @@map("ticket_thread_entries")
+}
+
+// Pinned workflow cards (Custom Fields Activation Phase 1): an add_note node
+// with placement pinned/both upserts one card per (ticket, kind, workflow) so
+// re-runs refresh the payload instead of stacking duplicates. Dismiss is
+// ticket-level (any agent), audited, and clears on the next workflow re-run
+// (upsert nulls dismissed_at). Payload = the same field_card shape stored on
+// thread-entry rawPayload.
+model TicketPinnedCard {
+  id          Int       @id @default(autoincrement())
+  ticketId    Int       @map("ticket_id")
+  ticket      Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  kind        String    @db.VarChar(30) // field_card (future: other card kinds)
+  payload     Json
+  workflowId  Int?      @map("workflow_id")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  dismissedAt DateTime? @map("dismissed_at")
+  dismissedBy String?   @map("dismissed_by") @db.VarChar(255)
+
+  @@unique([ticketId, kind, workflowId])
+  @@index([ticketId, dismissedAt])
+  @@map("ticket_pinned_cards")
 }
 
 // Outbox for the FreshService fallback mirror. Every TP-born mutation that must

@@ -175,6 +175,61 @@ describe('ticketApprovalService.resubmit', () => {
   });
 });
 
+// Custom Fields Activation Phase 1 rider: approval notes carry a structured
+// rawPayload discriminator so the frontend dispatches approval event cards
+// without regexing bodies (the regex stays as legacy fallback — bodies are
+// unchanged, asserted here too).
+describe('approval note rawPayload kinds (structured discriminator)', () => {
+  const noteRawPayload = () => prismaMock.ticketThreadEntry.create.mock.calls[0][0].data.rawPayload;
+  const noteBody = () => prismaMock.ticketThreadEntry.create.mock.calls[0][0].data.bodyText;
+
+  test('approve note → event: approved', async () => {
+    prismaMock.ticketApproval.findFirst.mockResolvedValue({
+      id: 2, ticketId: 501, workspaceId: 1, status: 'pending', approverEmail: 'alice@x.io',
+    });
+    await ticketApprovalService.decideInApp(501, 1, 2, 'approved', 'ok', { email: 'alice@x.io', name: 'Alice' });
+    expect(noteRawPayload()).toEqual({ kind: 'approval_event', v: 1, event: 'approved' });
+    expect(noteBody()).toContain('APPROVED'); // body unchanged for the regex fallback
+  });
+
+  test('reject note → event: rejected', async () => {
+    prismaMock.ticketApproval.findFirst.mockResolvedValue({
+      id: 2, ticketId: 501, workspaceId: 1, status: 'pending', approverEmail: 'alice@x.io',
+    });
+    await ticketApprovalService.decideInApp(501, 1, 2, 'rejected', 'no', { email: 'alice@x.io', name: 'Alice' });
+    expect(noteRawPayload()).toEqual({ kind: 'approval_event', v: 1, event: 'rejected' });
+    expect(noteBody()).toContain('REJECTED');
+  });
+
+  test('changed decision note → event: changed', async () => {
+    prismaMock.ticketApproval.findFirst.mockResolvedValue({
+      id: 2, ticketId: 501, workspaceId: 1, status: 'approved', approverEmail: 'alice@x.io',
+    });
+    await ticketApprovalService.changeDecision(501, 1, 2, 'rejected', 'reconsidered', { email: 'alice@x.io', name: 'Alice' });
+    expect(noteRawPayload()).toEqual({ kind: 'approval_event', v: 1, event: 'changed' });
+    expect(noteBody()).toContain('CHANGED');
+  });
+
+  test('clarification request note → event: clarification', async () => {
+    prismaMock.ticketApproval.findFirst.mockResolvedValue({
+      id: 2, ticketId: 501, workspaceId: 1, status: 'pending', approverEmail: 'alice@x.io', requestedBy: 'req@x.io',
+    });
+    await ticketApprovalService.requestClarification(501, 1, 2, 'Which model?', { email: 'alice@x.io', name: 'Alice' });
+    expect(noteRawPayload()).toEqual({ kind: 'approval_event', v: 1, event: 'clarification' });
+  });
+
+  test('resubmit reply note → event: requested (back in front of the approver)', async () => {
+    prismaMock.ticketApproval.findFirst.mockResolvedValue({
+      id: 2, ticketId: 501, workspaceId: 1, status: 'info_requested', approverEmail: 'alice@x.io', requestedBy: 'req@x.io',
+      approvalCategoryId: 9, decisionNote: 'Which budget code?',
+      clarificationLog: [{ question: 'Which budget code?', askedBy: 'alice@x.io', askedAt: '2026-07-14T00:00:00.000Z' }],
+    });
+    prismaMock.approvalCategory.findUnique.mockResolvedValue({ name: 'Laptop purchase' });
+    await ticketApprovalService.resubmit(501, 1, 2, { email: 'req@x.io' }, { note: 'IT-204' });
+    expect(noteRawPayload()).toEqual({ kind: 'approval_event', v: 1, event: 'requested' });
+  });
+});
+
 describe('ticketApprovalService.request notifyApprover toggle (QA 07-14 #2)', () => {
   test('notifyApprover: false suppresses the approver email but still creates the request', async () => {
     prismaMock.approvalCategory.findFirst.mockResolvedValue({ id: 9, name: 'Laptop purchase', managerEmails: ['alice@x.io'] });

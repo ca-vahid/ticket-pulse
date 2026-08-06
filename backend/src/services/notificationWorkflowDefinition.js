@@ -257,6 +257,21 @@ export const WORKFLOW_TEMPLATES = [
           note: 'Categorized by the API intake router workflow.',
         },
       },
+      {
+        id: 'intake-note',
+        type: 'add_note',
+        data: {
+          label: 'Record intake field card',
+          mode: 'field_card',
+          title: 'API intake',
+          intro: 'Routed automatically from {{ ticket.customFields.source_request_type }}.',
+          // Placeholder keys: swap for the custom fields your API sender
+          // populates (Settings → Ticket Ops → Custom fields lists them).
+          fields: ['source_request_type'],
+          accent: 'violet',
+          placement: 'note',
+        },
+      },
       { id: 'recipients', type: 'recipient_resolver', data: { to: ['assigned_agent'], cc: [], bcc: [] } },
       {
         id: 'template',
@@ -275,9 +290,52 @@ export const WORKFLOW_TEMPLATES = [
       { id: 'e1', source: 'trigger', target: 'match-intake' },
       { id: 'e2', source: 'match-intake', sourceHandle: 'true', target: 'route' },
       { id: 'e3', source: 'match-intake', sourceHandle: 'false', target: 'end' },
-      { id: 'e4', source: 'route', target: 'recipients' },
+      { id: 'e4', source: 'route', target: 'intake-note' },
+      { id: 'e4b', source: 'intake-note', target: 'recipients' },
       { id: 'e5', source: 'recipients', target: 'template' },
       { id: 'e6', source: 'template', target: 'send' },
+    ]),
+  },
+  {
+    key: 'intake_field_card',
+    name: 'Intake field card (pin API fields on the ticket)',
+    description: 'When an API-created ticket arrives with a source_system custom field, write a structured field card into the conversation AND pin it above the thread so agents see the intake payload at a glance. Edit the field keys after installing — the builder lists this workspace\'s custom fields.',
+    triggerType: 'ticket.created',
+    build: () => templateNodes([
+      { id: 'trigger', type: 'trigger', data: { triggerType: 'ticket.created' } },
+      {
+        id: 'has-intake',
+        type: 'condition',
+        data: {
+          label: 'Sent by an API system?',
+          // Placeholder: swap source_system for the custom-field key your API
+          // sender always populates (fields auto-provision on first API use).
+          conditionGroup: {
+            logic: 'all',
+            conditions: [{ field: 'custom:source_system', operator: 'is_not_empty' }],
+          },
+        },
+      },
+      {
+        id: 'card',
+        type: 'add_note',
+        data: {
+          label: 'Pin intake field card',
+          mode: 'field_card',
+          title: 'Intake details',
+          intro: 'Submitted via {{ ticket.customFields.source_system }}.',
+          // Placeholder keys: replace with the fields your sender populates.
+          fields: ['source_system', 'source_request_type', 'client_name'],
+          accent: 'violet',
+          placement: 'both',
+        },
+      },
+      { id: 'end', type: 'stop', data: {} },
+    ], [
+      { id: 'e1', source: 'trigger', target: 'has-intake' },
+      { id: 'e2', source: 'has-intake', sourceHandle: 'true', target: 'card' },
+      { id: 'e3', source: 'has-intake', sourceHandle: 'false', target: 'end' },
+      { id: 'e4', source: 'card', target: 'end' },
     ]),
   },
   {
@@ -424,6 +482,16 @@ export const NOTIFICATION_NODE_REGISTRY = Object.freeze({
     inputHandles: ['default'],
     outputHandles: ['default'],
   },
+  // Write a protected system note onto the ticket conversation (Custom Fields
+  // Activation Phase 1): mode 'text' = Liquid-rendered HTML body (sanitized
+  // server-side), mode 'field_card' = structured custom-field card stored on
+  // rawPayload; placement note | pinned | both.
+  add_note: {
+    label: 'Add note',
+    terminal: false,
+    inputHandles: ['default'],
+    outputHandles: ['default'],
+  },
   // N-way switch: output handles are the configured branch keys + 'otherwise'
   // (validated dynamically against node.data.branches).
   branch: {
@@ -538,6 +606,16 @@ const TEMPLATE_CONTENT_SOURCES = new Set([
   'llm_only',
   'advanced_liquid',
 ]);
+
+// add_note node vocabulary (Custom Fields Activation Phase 1). Accents map to
+// the frontend FieldCardNote's tp palette tokens; caps are enforced again at
+// execution time (title/intro truncated to 300 rendered chars, fields sliced).
+export const ADD_NOTE_MODES = Object.freeze(['text', 'field_card']);
+export const ADD_NOTE_PLACEMENTS = Object.freeze(['note', 'pinned', 'both']);
+export const ADD_NOTE_ACCENTS = Object.freeze(['violet', 'blue', 'emerald', 'amber', 'slate']);
+export const ADD_NOTE_MAX_FIELDS = 12;
+export const ADD_NOTE_MAX_TITLE_CHARS = 300;
+export const ADD_NOTE_MAX_PER_RUN = 3;
 
 const idSchema = z.string().trim().min(1).max(120);
 
@@ -679,7 +757,9 @@ function validateGraph(definition, triggerType) {
     errors.push(`Trigger node must use triggerType ${triggerType}`);
   }
 
-  const ACTION_NODE_TYPES = ['send_email', 'update_ticket', 'call_webhook', 'create_child_ticket', 'request_approval', 'propose_reply'];
+  // Keep in sync with the client mirror in NotificationWorkflowsPanel.jsx
+  // (the builder repeats this "at least one action" check for save-time UX).
+  const ACTION_NODE_TYPES = ['send_email', 'update_ticket', 'add_note', 'call_webhook', 'create_child_ticket', 'request_approval', 'propose_reply'];
   if (!definition.nodes.some((node) => ACTION_NODE_TYPES.includes(node.type))) {
     errors.push(`Workflow must include at least one action node (${ACTION_NODE_TYPES.join(', ')})`);
   }
@@ -777,6 +857,34 @@ function validateGraph(definition, triggerType) {
       const hasSubcategoryName = typeof node.data?.setSubcategoryName === 'string' && node.data.setSubcategoryName.trim();
       if (hasSubcategoryName && !hasCategoryName) {
         errors.push(`Update-ticket node ${node.id}: a subcategory name needs its parent category name`);
+      }
+    }
+
+    if (node.type === 'add_note' && reachable.has(node.id)) {
+      const mode = node.data?.mode;
+      if (!ADD_NOTE_MODES.includes(mode)) {
+        errors.push(`Add-note node ${node.id} must set mode to "text" or "field_card"`);
+      } else if (mode === 'text') {
+        if (typeof node.data?.bodyTemplate !== 'string' || !node.data.bodyTemplate.trim()) {
+          errors.push(`Add-note node ${node.id} (text mode) needs a body template`);
+        }
+      } else {
+        const keys = (Array.isArray(node.data?.fields) ? node.data.fields : [])
+          .map((key) => String(key || '').trim()).filter(Boolean);
+        if (keys.length === 0) {
+          errors.push(`Add-note node ${node.id} (field card) needs at least one custom-field key`);
+        }
+        if (keys.length > ADD_NOTE_MAX_FIELDS) {
+          errors.push(`Add-note node ${node.id} (field card) lists too many fields (max ${ADD_NOTE_MAX_FIELDS})`);
+        }
+      }
+      if (node.data?.accent !== undefined && node.data?.accent !== null
+        && !ADD_NOTE_ACCENTS.includes(node.data.accent)) {
+        errors.push(`Add-note node ${node.id} has an unsupported accent (use ${ADD_NOTE_ACCENTS.join(', ')})`);
+      }
+      if (node.data?.placement !== undefined && node.data?.placement !== null
+        && !ADD_NOTE_PLACEMENTS.includes(node.data.placement)) {
+        errors.push(`Add-note node ${node.id} placement must be note, pinned, or both`);
       }
     }
 
