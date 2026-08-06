@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.1.8-preview';
+export const APP_VERSION = '3.1.9-preview';
 
 export const changelog = [
+  {
+    version: '3.1.9-preview',
+    date: 'August 6, 2026',
+    entries: [
+      { type: 'new', html: '<strong>🔌 API intake enrichment (part 3 of 3): portal & docs</strong> — Settings → Ticket Ops now badges custom fields by origin (Manual / API) with inline editing and retire/reactivate; the ticket page renders link values (SharePoint / Power App) as clickable links and keeps retired-field values visible; the New Ticket form gains an optional custom-fields section. The API docs page has a full “Ticket intake enrichment” reference — field tables, validation rules, worked examples with QA’s own payload — plus a step-by-step “Calling from Power Apps / Power Automate” guide (HTTP action config, idempotency, retries, secure key storage, custom-connector notes). This completes the intake feature. (QA 08-05)' },
+    ],
+  },
   {
     version: '3.1.8-preview',
     date: 'August 5, 2026',

@@ -37,6 +37,12 @@ const T = {
       categoryReviewNeeded: { type: 'boolean', description: 'AI flagged the category as a weak fit' },
       isNoise: { type: 'boolean' },
       assignedBy: { type: 'string', nullable: true },
+      customFields: {
+        type: 'object',
+        additionalProperties: true,
+        description: 'Workspace custom-field values keyed by definition key (snake_case). {} when none are set. See GET /custom-fields for this workspace’s definitions.',
+        example: { client_name: 'ACME Inc', share_point_item_link: 'https://…/DispForm.aspx?ID=1260' },
+      },
       createdAt: { type: 'string', format: 'date-time' }, updatedAt: { type: 'string', format: 'date-time' },
       resolvedAt: { type: 'string', format: 'date-time', nullable: true },
     },
@@ -56,8 +62,41 @@ const T = {
       priority: { type: 'integer', enum: [1, 2, 3, 4], default: 2 },
       requesterEmail: { type: 'string', format: 'email' }, requesterName: { type: 'string' },
       runAiTriage: { type: 'boolean', default: true },
+      category: {
+        type: 'string',
+        description: 'Category BY NAME, matched case-insensitively against the workspace taxonomy (GET /categories). Unknown names 400 with the allowed values listed. Omit to let AI triage classify.',
+        example: 'Project Setup',
+      },
+      subcategory: {
+        type: 'string',
+        description: 'Subcategory BY NAME — must be a child of `category` (validated; a wrong parent 400s naming the valid children).',
+        example: 'Quebec',
+      },
+      customFields: {
+        type: 'object',
+        additionalProperties: { type: ['string', 'number', 'boolean', 'null'] },
+        description: 'Arbitrary structured intake metadata: an object of scalar values. Keys are normalized to snake_case; known keys validate against the workspace’s custom-field definitions; unknown keys AUTO-PROVISION a definition (type inferred, source “api”). Nothing is silently dropped — unusable entries are reported in the create response’s meta.rejectedCustomFields. Caps: ≤40 keys/request, ≤2000 chars per value, ≤200 definitions/workspace. Requires the customfields:write scope.',
+        example: { clientName: 'ACME Inc', powerAppRecordId: '1260', sharePointItemLink: 'https://…/DispForm.aspx?ID=1260' },
+      },
+      ccEmails: {
+        type: 'array', items: { type: 'string', format: 'email' },
+        description: 'Addresses cc’d on the ticket (stored on the ticket and shown on the detail page).',
+      },
+      source: {
+        type: 'integer',
+        description: 'Arrival-channel override (1 Email, 2 Portal, 3 Phone, 9 Walk-up, 102 MS Teams, 103 Agent). Defaults to 100 (API) — only set this when relaying a request that reached you another way.',
+      },
+      ticketType: {
+        type: 'string',
+        description: 'Ticket type by name, validated against the workspace type registry (GET /types). Omitted → workspace default. `type` is accepted as an alias.',
+      },
     },
-    example: { subject: 'Laptop won’t boot', description: 'Black screen after update.', priority: 3, requesterEmail: 'jane@acme.com', requesterName: 'Jane Doe' },
+    example: {
+      subject: 'Coyote Landslide', description: 'Created from Power Automate', priority: 2,
+      requesterEmail: 'jdoe@bgcengineering.ca', requesterName: 'Jane Doe',
+      category: 'Project Setup', subcategory: 'Quebec',
+      customFields: { clientName: 'ACME Inc', powerAppRecordId: '1260' },
+    },
   },
   UpdateTicket: {
     type: 'object',
@@ -65,6 +104,26 @@ const T = {
       status: { type: 'string', example: 'Pending' }, priority: { type: 'integer', enum: [1, 2, 3, 4] },
       subject: { type: 'string' }, assignedTechId: { type: 'integer', nullable: true },
       internalCategoryId: { type: 'integer' }, internalSubcategoryId: { type: 'integer' }, groupId: { type: 'integer' },
+      category: {
+        type: 'string', nullable: true,
+        description: 'Category BY NAME (same resolution as create). Explicit internalCategoryId wins when both are sent; `category: null` clears the pair.',
+      },
+      subcategory: { type: 'string', nullable: true, description: 'Subcategory BY NAME — must be a child of the (new) category.' },
+      customFields: {
+        type: 'object',
+        additionalProperties: { type: ['string', 'number', 'boolean', 'null'] },
+        description: 'Merge custom-field values (a null value clears a key). NO auto-provisioning on update — unknown keys 422 `unknown_custom_fields` listing every offender. Requires the customfields:write scope.',
+      },
+    },
+  },
+  CustomFieldDefinition: {
+    type: 'object',
+    properties: {
+      key: { type: 'string', example: 'client_name', description: 'Stable snake_case key — what `customFields` objects are keyed by.' },
+      label: { type: 'string', example: 'Client Name' },
+      type: { type: 'string', enum: ['text', 'number', 'select', 'boolean', 'date'] },
+      options: { type: 'array', items: { type: 'string' }, description: 'Allowed values (select type only).' },
+      source: { type: 'string', enum: ['manual', 'api'], description: '“api” = auto-provisioned by ticket-create intake; “manual” = created by an admin in Settings.' },
     },
   },
   Message: { type: 'object', required: ['body'], properties: { body: { type: 'string' }, bodyHtml: { type: 'string' } } },
@@ -72,19 +131,24 @@ const T = {
   Task: { type: 'object', properties: { id: { type: 'integer' }, title: { type: 'string' }, description: { type: 'string', nullable: true }, status: { type: 'string', enum: ['open', 'in_progress', 'done'] }, assignee: { type: 'object', nullable: true }, dueAt: { type: 'string', format: 'date-time', nullable: true } } },
 };
 
-function op(summary, scope, { tag, body, responseRef, status = 200, list = false } = {}) {
+const ref = (n) => ({ $ref: `#/components/schemas/${n}` });
+
+function op(summary, scope, { tag, body, responseRef, status = 200, list = false, meta, extraResponses } = {}) {
+  const successSchema = list
+    ? { type: 'object', properties: { success: { type: 'boolean' }, data: { type: 'object', properties: { items: { type: 'array', items: responseRef || {} }, pagination: { $ref: '#/components/schemas/Pagination' } } } } }
+    : { type: 'object', properties: { success: { type: 'boolean' }, data: responseRef || { type: 'object' } } };
+  if (meta) successSchema.properties.meta = meta;
   const responses = {
     [status]: {
       description: 'OK',
-      content: { 'application/json': { schema: list
-        ? { type: 'object', properties: { success: { type: 'boolean' }, data: { type: 'object', properties: { items: { type: 'array', items: responseRef || {} }, pagination: { $ref: '#/components/schemas/Pagination' } } } } }
-        : { type: 'object', properties: { success: { type: 'boolean' }, data: responseRef || { type: 'object' } } } } },
+      content: { 'application/json': { schema: successSchema } },
     },
     400: { $ref: '#/components/responses/Problem' },
     401: { $ref: '#/components/responses/Problem' },
     403: { $ref: '#/components/responses/Problem' },
     404: { $ref: '#/components/responses/Problem' },
     429: { $ref: '#/components/responses/Problem' },
+    ...(extraResponses || {}),
   };
   const o = { summary, tags: [tag], security: [{ apiKey: [] }], responses };
   if (scope) o['x-required-scope'] = scope;
@@ -92,7 +156,58 @@ function op(summary, scope, { tag, body, responseRef, status = 200, list = false
   return o;
 }
 
-const ref = (n) => ({ $ref: `#/components/schemas/${n}` });
+// Intake-transparency meta on the create response (FR 08-05 #1): what didn't
+// land, what got rejected inside customFields, and what auto-provisioned.
+const CREATE_TICKET_META = {
+  type: 'object',
+  description: 'Intake transparency: what didn’t land and what was auto-provisioned.',
+  properties: {
+    ignoredFields: {
+      type: 'array', items: { type: 'string' },
+      description: 'Unknown TOP-LEVEL body keys that were dropped. Extra intake data belongs inside `customFields`, where it is stored and auto-provisioned.',
+    },
+    rejectedCustomFields: {
+      type: 'array',
+      items: { type: 'object', properties: { key: { type: 'string' }, reason: { type: 'string' } } },
+      description: 'customFields entries that could not be stored, with a machine-readable reason (invalid_key, too_many_keys, value_too_long, definition_cap_reached, or a type-coercion message). The ticket is still created.',
+    },
+    provisionedCustomFields: {
+      type: 'array', items: { type: 'string' },
+      description: 'Keys for which a new custom-field definition was auto-provisioned (source “api”) by this request.',
+    },
+  },
+};
+
+// Worked 400 for a category name that doesn't resolve (docs promise the
+// allowed values are listed so senders can self-correct).
+const CATEGORY_VALIDATION_400 = {
+  description: 'Validation error (problem+json). Unknown category/subcategory names list the allowed values.',
+  content: {
+    'application/problem+json': {
+      schema: ref('Problem'),
+      example: {
+        type: 'about:blank', title: 'Validation failed', status: 400, code: 'validation_failed',
+        detail: 'Unknown category "Acounts Payable" for this workspace. Allowed categories: Project Setup, Proposal Setup, Client Maintenance…',
+        request_id: 'req_abc',
+      },
+    },
+  },
+};
+
+const UNKNOWN_CUSTOM_FIELDS_422 = {
+  description: 'Unknown custom-field key(s) on update (problem+json). PATCH never auto-provisions — definitions are created in Settings or at ticket creation.',
+  content: {
+    'application/problem+json': {
+      schema: ref('Problem'),
+      example: {
+        type: 'about:blank', title: 'Unknown custom fields', status: 422, code: 'unknown_custom_fields',
+        detail: 'Unknown custom field key(s): client_nane. Definitions are created in Settings or auto-provisioned at ticket creation — see GET /api/v1/custom-fields for this workspace\'s fields.',
+        errors: [{ field: 'customFields.client_nane', code: 'unknown_field' }],
+        request_id: 'req_abc',
+      },
+    },
+  },
+};
 
 export function buildOpenApiSpec(baseUrl) {
   return {
@@ -145,11 +260,17 @@ export function buildOpenApiSpec(baseUrl) {
       '/meta': { get: op('Enumerations: priorities, statuses, ticket types', null, { tag: 'discovery' }) },
       '/tickets': {
         get: op('List tickets (cursor or offset; filters mirror the queue)', 'tickets:read', { tag: 'tickets', responseRef: ref('Ticket'), list: true }),
-        post: op('Create a ticket', 'tickets:write', { tag: 'tickets', body: ref('CreateTicket'), responseRef: ref('Ticket'), status: 201 }),
+        post: op('Create a ticket (category by name, custom fields, cc)', 'tickets:write', {
+          tag: 'tickets', body: ref('CreateTicket'), responseRef: ref('Ticket'), status: 201,
+          meta: CREATE_TICKET_META, extraResponses: { 400: CATEGORY_VALIDATION_400 },
+        }),
       },
       '/tickets/{id}': {
         get: op('Get a ticket with its public conversation', 'tickets:read', { tag: 'tickets', responseRef: ref('Ticket') }),
-        patch: op('Update a ticket (status/priority/assignee/fields)', 'tickets:write', { tag: 'tickets', body: ref('UpdateTicket'), responseRef: ref('Ticket') }),
+        patch: op('Update a ticket (status/priority/assignee/fields/custom fields)', 'tickets:write', {
+          tag: 'tickets', body: ref('UpdateTicket'), responseRef: ref('Ticket'),
+          extraResponses: { 400: CATEGORY_VALIDATION_400, 422: UNKNOWN_CUSTOM_FIELDS_422 },
+        }),
       },
       '/tickets/{id}/merge': { post: op('Merge another ticket into this one', 'tickets:write', { tag: 'tickets', body: { type: 'object', required: ['targetTicketId'], properties: { targetTicketId: { type: 'integer' }, notifyRequester: { type: 'boolean' } } } }) },
       '/tickets/{id}/family': { get: op('Parent + children of a ticket', 'tickets:read', { tag: 'tickets' }) },
@@ -182,6 +303,7 @@ export function buildOpenApiSpec(baseUrl) {
       '/groups': { get: op('List groups', 'groups:read', { tag: 'directory' }) },
       '/categories': { get: op('List categories & subcategories', 'categories:read', { tag: 'taxonomy' }) },
       '/types': { get: op('List ticket types', 'types:read', { tag: 'taxonomy' }) },
+      '/custom-fields': { get: op('List active custom-field definitions (incl. API-provisioned)', 'customfields:read', { tag: 'taxonomy', responseRef: { type: 'array', items: ref('CustomFieldDefinition') } }) },
       '/search/tickets': { get: op('Search tickets (?query=…)', 'search:read', { tag: 'tickets', responseRef: ref('Ticket'), list: true }) },
     },
   };
@@ -239,6 +361,189 @@ Both resolve to a single workspace; a credential can never read or write another
 • Lists page by <code>?cursor=</code> (keyset, use the returned <code>next_cursor</code>) or <code>?page=&amp;pageSize=</code>.
 </div>
 ${sections}
+<h2>Ticket intake enrichment</h2>
+<p><code>POST /tickets</code> accepts more than the basics — senders can classify the ticket against the workspace
+taxonomy <b>by name</b> and attach arbitrary structured metadata that Ticket Pulse keeps, displays, and can automate on.</p>
+<div class="card">
+<b>Create-body fields</b>
+<table><tbody>
+<tr><td class="p">subject</td><td><b>Required.</b> Short summary.</td></tr>
+<tr><td class="p">description</td><td>Plain text or HTML body.</td></tr>
+<tr><td class="p">priority</td><td>1 Low · 2 Medium (default) · 3 High · 4 Urgent.</td></tr>
+<tr><td class="p">requesterEmail</td><td><b>Required.</b> The requester is found or created by this address.</td></tr>
+<tr><td class="p">requesterName</td><td>Display name for a new requester.</td></tr>
+<tr><td class="p">runAiTriage</td><td>Default <code>true</code> — AI classifies + recommends an assignee. Set <code>false</code> when your integration sets the category itself.</td></tr>
+<tr><td class="p">category</td><td>Category <b>by name</b>, matched case-insensitively against the workspace taxonomy (<code>GET /categories</code>).</td></tr>
+<tr><td class="p">subcategory</td><td>Subcategory <b>by name</b> — must be a child of <code>category</code>.</td></tr>
+<tr><td class="p">customFields</td><td>Object of scalar values — your structured metadata. Stored on the ticket, shown on the ticket page, usable in workflow conditions. Needs the <code>customfields:write</code> scope.</td></tr>
+<tr><td class="p">ccEmails</td><td>Array of addresses cc’d on the ticket.</td></tr>
+<tr><td class="p">source</td><td>Arrival channel override (1 Email, 2 Portal, 3 Phone, 9 Walk-up, 102 MS Teams, 103 Agent). Defaults to 100 = API.</td></tr>
+<tr><td class="p">ticketType</td><td>Type by name from the workspace registry (<code>GET /types</code>); omitted → workspace default.</td></tr>
+</tbody></table>
+Anything else at the top level is dropped and reported back in <code>meta.ignoredFields</code> —
+extra intake data belongs <b>inside <code>customFields</code></b>, where it is kept.
+</div>
+<div class="card">
+<b>Category validation</b><br>
+Names resolve case-insensitively against the workspace's <b>active</b> taxonomy; a subcategory must belong to the
+resolved category. An unknown name fails the whole request with a <code>400</code> problem+json that lists the
+allowed values, so senders can self-correct:
+<pre>{
+  "title": "Validation failed", "status": 400, "code": "validation_failed",
+  "detail": "Unknown category \\"Acounts Payable\\" for this workspace.
+             Allowed categories: Project Setup, Proposal Setup, Client Maintenance…",
+  "request_id": "req_abc"
+}</pre>
+Nothing is created on a validation failure — safe to retry after fixing the name.
+</div>
+<div class="card">
+<b>Custom fields — semantics</b><br>
+• <b>Keys normalize</b> to <code>snake_case</code> (<code>clientName</code> → <code>client_name</code>; spaces/hyphens/dots → underscores;
+must then match <code>[a-z][a-z0-9_]{1,59}</code>).<br>
+• <b>Known keys</b> validate against the definition's type (text / number / select / boolean / date).<br>
+• <b>Unknown keys auto-provision</b> a definition on create: type inferred from the first value
+(boolean / number / ISO-date / text), label prettified from the key, marked <code>source: "api"</code>, active immediately.
+Admins curate these in <b>Settings → Ticket Ops → Custom fields</b> (relabel, retype, retire).<br>
+• <b>Nothing is silently dropped</b> — entries that can't be stored come back in
+<code>meta.rejectedCustomFields</code> as <code>{key, reason}</code>
+(<code>invalid_key</code>, <code>too_many_keys</code>, <code>value_too_long</code>, <code>definition_cap_reached</code>, or a type-coercion message);
+the ticket is still created.<br>
+• <b>Caps:</b> ≤ 40 keys per request · ≤ 2,000 chars per value · ≤ 200 definitions per workspace.<br>
+• <b>Updates:</b> <code>PATCH /tickets/{id}</code> merges values but <b>never auto-provisions</b> — unknown keys return
+<code>422 unknown_custom_fields</code> naming every offender. Creation is the intake path.<br>
+• <code>GET /custom-fields</code> lists the workspace's active definitions (<code>customfields:read</code>).
+</div>
+<div class="card">
+<b>Worked example</b> — a Power App / SharePoint project-setup request:
+<pre>curl -X POST ${baseUrl}/api/v1/tickets \\
+  -H "Authorization: Bearer tp_live_xxx" \\
+  -H "Content-Type: application/json" \\
+  -H "Idempotency-Key: sp-proposal-1260" \\
+  -d '{
+  "subject": "Coyote Landslide",
+  "description": "Created from Power Automate",
+  "priority": 2,
+  "requesterEmail": "jdoe@bgcengineering.ca",
+  "requesterName": "Jane Doe",
+  "category": "Project Setup",
+  "subcategory": "Quebec",
+  "customFields": {
+    "clientName": "ACME Inc",
+    "clientLocation": "Quebec",
+    "projectOrProposalName": "Coyote Landslide",
+    "powerAppRecordId": "1260",
+    "sharePointItemLink": "https://example.sharepoint.com/sites/ProjectProposalSetup/Lists/Project%20Requests/DispForm.aspx?ID=1260",
+    "powerAppFormLink": "https://apps.powerapps.com/play/…",
+    "sourceSystem": "Power App / Coreshack",
+    "sourceRequestType": "Project Setup"
+  }
+}'</pre>
+Response (<code>201</code>) — note the snake_cased keys and the intake transparency in <code>meta</code>:
+<pre>{
+  "success": true,
+  "data": {
+    "id": 501, "ref": "TP-1042", "origin": "ticketpulse",
+    "subject": "Coyote Landslide", "status": "Open", "priority": 2,
+    "category": "Project Setup", "subcategory": "Quebec",
+    "customFields": {
+      "client_name": "ACME Inc", "client_location": "Quebec",
+      "project_or_proposal_name": "Coyote Landslide", "power_app_record_id": "1260",
+      "share_point_item_link": "https://example.sharepoint.com/…?ID=1260",
+      "power_app_form_link": "https://apps.powerapps.com/play/…",
+      "source_system": "Power App / Coreshack", "source_request_type": "Project Setup"
+    }, "…": "…"
+  },
+  "meta": {
+    "ignoredFields": [],
+    "rejectedCustomFields": [],
+    "provisionedCustomFields": ["client_name", "client_location", "project_or_proposal_name",
+      "power_app_record_id", "share_point_item_link", "power_app_form_link",
+      "source_system", "source_request_type"]
+  }
+}</pre>
+Want <code>sourceRequestType</code> to drive the category automatically? Build it as a workflow —
+condition <code>custom:source_request_type is "Project Setup"</code> → update-ticket “Category by name”.
+The installable <b>API intake router</b> template (Settings → Mail Workflows → Templates) is exactly this.
+</div>
+<h2>Calling from Power Apps / Power Automate</h2>
+<p>The recommended shape: a cloud flow (SharePoint trigger or Power Apps V2 trigger) with the built-in
+<b>HTTP</b> action. <b>The HTTP connector is Premium</b> — covered by Power Automate Premium / Process or
+Power Apps Premium licenses (flows running in context of a premium-licensed canvas app are covered by it).
+The free “Send an HTTP request” actions (SharePoint, Office 365) only reach Microsoft endpoints and cannot call this API.</p>
+<div class="card">
+<b>HTTP action configuration</b>
+<table><tbody>
+<tr><td class="p">Method</td><td><code>POST</code></td></tr>
+<tr><td class="p">URI</td><td><code>${baseUrl}/api/v1/tickets</code></td></tr>
+<tr><td class="p">Headers</td><td><code>Content-Type: application/json</code><br><code>Authorization: Bearer tp_live_…</code> (a plain header row — leave the action's “Authentication” dropdown on <b>None</b>; it has no API-key mode)<br><code>Idempotency-Key: concat('sp-', triggerOutputs()?['body/ID'])</code></td></tr>
+<tr><td class="p">Settings → Secure Inputs</td><td><b>On</b> once the flow works — hides the key (and body) from run history.</td></tr>
+<tr><td class="p">Settings → Retry policy</td><td>Default is fine — see the retry note below.</td></tr>
+</tbody></table>
+Body — insert dynamic content where marked <code>«»</code>:
+<pre>{
+  "subject": "New project request: «Title»",
+  "description": "Submitted by «Created By DisplayName» («Created By Email»).",
+  "priority": 2,
+  "requesterEmail": "«Created By Email»",
+  "requesterName": "«Created By DisplayName»",
+  "category": "Project Setup",
+  "subcategory": "«Region choice value»",
+  "customFields": {
+    "clientName": "«Client column»",
+    "powerAppRecordId": "«ID»",
+    "sharePointItemLink": "«Link to item»",
+    "sourceSystem": "Power App / SharePoint",
+    "sourceRequestType": "«Request type choice value»"
+  }
+}</pre>
+<b>Escaping gotcha:</b> dynamic tokens dropped into a hand-typed JSON string are <b>not</b> escaped — a title
+containing <code>"</code> or a newline produces invalid JSON and a 400. Keep free text out of hand-built strings
+(compose the body as an object / <code>setProperty()</code> chain), or run risky fields through
+<code>replace(replace(«v», '\\', '\\\\'), '"', '\\"')</code>. Constrained fields (choice columns, emails, IDs) are safe as-is.
+</div>
+<div class="card">
+<b>Retries &amp; idempotency</b><br>
+Power Automate auto-retries an action on 408, 429 and 5xx (up to 12 times on most plans) — each retry
+<b>re-sends the POST</b>. The <code>Idempotency-Key</code> header is what makes that safe: same key + same body → the
+cached response replays, no duplicate ticket. Key it per <b>source record</b>
+(<code>concat('sp-', triggerOutputs()?['body/ID'])</code>) rather than per run — a resubmitted run then still can't
+double-create. Same key with a <i>different</i> body → <code>422 idempotency_key_reused</code>. Our <code>429</code>s carry
+<code>Retry-After</code>, which the retry runtime honors.
+</div>
+<div class="card">
+<b>Reading the response</b> — add a <b>Parse JSON</b> action over <code>body('HTTP')</code>:
+<pre>{ "type": "object", "properties": {
+  "success": { "type": "boolean" },
+  "data": { "type": "object", "properties": {
+    "id": { "type": "integer" }, "ref": { "type": "string" },
+    "subject": { "type": "string" }, "status": { "type": "string" },
+    "category": { "type": ["string", "null"] }, "createdAt": { "type": "string" } } },
+  "meta": { "type": "object", "properties": {
+    "ignoredFields": { "type": "array" },
+    "rejectedCustomFields": { "type": "array" },
+    "provisionedCustomFields": { "type": "array" } } } } }</pre>
+Write <code>ref</code> / <code>id</code> back to the source item (SharePoint “Update item”) so the record links to its ticket.
+<br><br>
+<b>Failures (4xx):</b> add a Parse JSON on the error branch (<b>Configure run after → has failed</b>) with the
+problem+json shape — <code>{ "title", "status", "code", "detail", "request_id" }</code> — then alert on
+<code>code</code>/<code>detail</code>. Quote <code>request_id</code> when contacting us. Watch for: <code>api_key_required</code> /
+<code>invalid_api_key</code> (401), <code>insufficient_scope</code> (403 — the key needs <code>customfields:write</code> for
+custom fields), <code>validation_failed</code> (400 — check <code>detail</code> for the allowed category values),
+<code>test_mode_read_only</code> (403 — swap the <code>tp_test_</code> key for a live one).
+</div>
+<div class="card">
+<b>Storing the key</b> — best: a Power Platform <b>environment variable of type Secret</b> backed by Azure Key Vault
+(retrieved in-flow via the Dataverse <code>RetrieveEnvironmentVariableSecretValue</code> unbound action, with Secure
+Outputs on). Acceptable: a plain-text environment variable + Secure Inputs on the HTTP action. Never paste the key
+into many flows by hand — rotation becomes guesswork.
+<br><br>
+<b>Custom connector instead of HTTP?</b> Worth it when several flows/makers call Ticket Pulse (the key is entered
+once per connection, never visible in flow definitions) or you want the API as a canvas-app data source. Note the
+connector wizard requires <b>OpenAPI 2.0 (Swagger)</b> — it does not import our 3.1 <a href="openapi.json">openapi.json</a>
+as-is; hand-build a minimal 2.0 file with just <code>POST /tickets</code> (+ <code>GET /tickets/{id}</code>), auth type
+<b>API Key</b>, parameter name <code>Authorization</code>, location <code>Header</code> — and users must paste
+<code>Bearer tp_live_…</code> <b>including the “Bearer ” prefix</b> when creating a connection. Same premium licensing as HTTP.
+</div>
 <h2>Outbound webhooks</h2>
 <p>Subscribe in <b>Settings → API Keys → Outbound webhooks</b>. Deliveries follow the <a href="https://www.standardwebhooks.com">Standard Webhooks</a> spec — headers <code>webhook-id</code>, <code>webhook-timestamp</code>, <code>webhook-signature</code> (<code>v1,&lt;base64 HMAC-SHA256 of id.timestamp.body&gt;</code>, secret <code>whsec_…</code>). Verify with a constant-time compare and a timestamp tolerance; treat <code>webhook-id</code> as an idempotency key. Legacy <code>X-TicketPulse-Signature</code> headers are sent in parallel during migration. Failed deliveries retry with exponential backoff and are visible (with a redeliver action) in the webhook’s delivery log.</p>
 </body></html>`;

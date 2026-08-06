@@ -1,77 +1,127 @@
 # Ticket Pulse Integration API (v1)
 
-Key-authenticated REST API for creating and querying native tickets from other
-systems. Base path: `https://<your-ticket-pulse-host>/api/v1`.
+Key-authenticated, workspace-scoped REST API — a FreshService-replacement
+surface for creating and querying tickets from other systems.
+Base path: `https://ticketpulse.bgcsaas.com/api/v1`.
+
+**The living reference is the API itself**: human docs at
+[`/api/v1/docs`](https://ticketpulse.bgcsaas.com/api/v1/docs) (includes the
+intake-enrichment guide and the Power Apps / Power Automate sender guide) and
+the machine-readable spec at `/api/v1/openapi.json` (OpenAPI 3.1). This file is
+the repo-side summary.
 
 ## Authentication
 
-Create a key (workspace admin): `POST /api/tickets/api-keys` with
-`{ "name": "My integration", "scopes": ["tickets:read", "tickets:write"] }`
-— the raw key (`tpk_…`) is returned **once**; store it securely.
+Two options, both resolving to a single workspace:
 
-Send it on every request:
+1. **API key** (simplest). Issue in **Settings → API Keys**, scoped to exactly
+   what the integration needs. The raw key (`tp_live_…`, or `tp_test_…` for a
+   read-only test key) is shown **once**. Legacy `tpk_…` keys keep working.
+   Keys can be rotated, disabled, IP-allowlisted, and given expiry dates.
+2. **OAuth2 client-credentials** (for apps). Create a client in **Settings →
+   API Keys → OAuth clients**, exchange at `POST /api/v1/oauth/token` for a
+   short-lived bearer token.
+
+Send on every request:
 
 ```
-Authorization: Bearer tpk_xxxxxxxxxxxxxxxx
+Authorization: Bearer tp_live_xxxxxxxxxxxxxxxx
 ```
 
-Keys are workspace-scoped (the key determines the workspace), can be disabled
-or deleted at any time, and are rate-limited to **120 requests/minute** each
-(HTTP 429 + `Retry-After` beyond that).
+Rate limits: **120 req/min per key** (overridable per key) + 300 req/min per
+IP; every response carries `X-RateLimit-*` and `X-Request-Id`; `429` includes
+`Retry-After`. Errors are RFC 9457 `application/problem+json` with a stable
+`code`. Send `Idempotency-Key: <unique>` on writes to make retries safe
+(same key + same body replays the cached response).
 
-| Scope | Grants |
+### Scopes
+
+Deny-by-default `resource:action` scopes with wildcards (`tickets:*`, `*:read`,
+`*`): `tickets`, `conversations`, `contacts` (read), `agents` (read), `groups`
+(read), `tags`, `categories` (read), `types` (read), **`customfields`**,
+`tasks`, `timeentries`, `approvals`, `attachments`, `webhooks`
+(read/manage), `search` (read). `customfields:write` is demanded only when a
+create/update payload actually carries `customFields`.
+
+## Surface (summary — see `/api/v1/docs` for all endpoints)
+
+- **Tickets**: list/search (cursor or offset pagination), get with public
+  conversation, create, PATCH (status/priority/assignee/subject/group/category/
+  custom fields), merge, parent/child links.
+- **Conversations**: full thread incl. private notes; post replies (emails the
+  requester; FS-born tickets reply through FreshService) and internal notes.
+- **Tasks, approvals, attachments, tags** per ticket.
+- **Directory/taxonomy**: contacts, agents, groups, categories, types,
+  **`GET /custom-fields`** (active custom-field definitions incl. which were
+  auto-provisioned by API intake — `source: "api"` vs `"manual"`).
+- **Outbound webhooks** (Settings → API Keys → Outbound webhooks): Standard
+  Webhooks-signed deliveries; payloads carry `customFields` + category names.
+
+## Creating tickets — intake enrichment (FR 08-05)
+
+`POST /tickets` accepts, beyond `subject` (required), `description`,
+`priority`, `requesterEmail` (required), `requesterName`, `runAiTriage`:
+
+| Field | Behavior |
 |---|---|
-| `tickets:read` | `GET /tickets`, `GET /tickets/:id` |
-| `tickets:write` | `POST /tickets`, `POST /tickets/:id/replies` |
+| `category` / `subcategory` | **By name**, case-insensitive against the workspace taxonomy; a wrong name 400s listing the allowed values (nothing is created). Subcategory must be a child of category. |
+| `customFields` | Object of scalar values. Keys normalize to snake_case (`clientName` → `client_name`); known keys validate against their definition; **unknown keys auto-provision** a definition (type inferred, `source:'api'`, active immediately, curatable in Settings → Ticket Ops → Custom fields). Nothing is silently dropped — unusable entries return in `meta.rejectedCustomFields` `{key, reason}`. Caps: ≤40 keys/request, ≤2000 chars/value, ≤200 definitions/workspace. Requires `customfields:write`. |
+| `ccEmails` | Array of cc addresses, stored and shown on the ticket. |
+| `source` | Arrival-channel override (1 Email, 2 Portal, 3 Phone, 9 Walk-up, 102 MS Teams, 103 Agent); defaults to 100 = API. |
+| `ticketType` (alias `type`) | Type by name from the workspace registry; omitted → default. |
 
-## Endpoints
+Unknown **top-level** keys are dropped but reported via `meta.ignoredFields` —
+extra data belongs inside `customFields`. The `201` response also carries
+`meta.provisionedCustomFields`. `PATCH /tickets/{id}` merges `customFields`
+but **never auto-provisions** — unknown keys → `422 unknown_custom_fields`
+naming every offender.
 
-### `GET /api/v1/tickets`
-Query parameters: `status` (comma list: Open,Pending,Resolved,Closed),
-`priority` (1–4, comma list), `origin` (`ticketpulse` \| `freshservice`),
-`assignedTechId` (`unassigned` or an id), `q` (search subject / requester /
-`TP-1042` / `#12345`), `page`, `pageSize` (≤100), `sort`
-(`createdAt|updatedAt|priority|status`), `dir` (`asc|desc`).
-
-```json
-{ "success": true, "data": { "items": [ { "id": 12, "ref": "TP-1042", "origin": "ticketpulse", "subject": "…", "status": "Open", "priority": 3, "requester": { "name": "…", "email": "…" }, "assignee": null, "category": "Devices & Hardware", "createdAt": "…", "updatedAt": "…" } ], "total": 1, "page": 1, "pageSize": 25 } }
-```
-
-### `GET /api/v1/tickets/:id`
-Full ticket incl. `description` and the conversation `thread`
-(`[{ id, type, author, authorType, isPrivate, body, at }]`).
-
-### `POST /api/v1/tickets`
 ```json
 {
-  "subject": "Printer jammed on 3rd floor",
-  "description": "<p>optional HTML</p>",
+  "subject": "Coyote Landslide",
   "priority": 2,
-  "requesterEmail": "person@company.com",
-  "requesterName": "Optional Name",
-  "runAiTriage": true
+  "requesterEmail": "jdoe@bgcengineering.ca",
+  "category": "Project Setup",
+  "subcategory": "Quebec",
+  "customFields": {
+    "clientName": "ACME Inc",
+    "powerAppRecordId": "1260",
+    "sharePointItemLink": "https://…/DispForm.aspx?ID=1260",
+    "sourceRequestType": "Project Setup"
+  }
 }
 ```
-Creates a TP-born ticket (native number, AI triage unless disabled, workflow
-acknowledgement email, FreshService fallback mirror). Returns `201` with the
-ticket shape above.
 
-### `POST /api/v1/tickets/:id/replies`
-```json
-{ "body": "Plain-text reply to the requester" }
-```
-Posts a public agent reply (the requester is emailed; FS-born tickets reply
-through FreshService). Returns `201` with `{ entryId, emailed }`.
+Route on the metadata with workflows: condition
+`custom:source_request_type is "Project Setup"` → update-ticket "Category by
+name". The installable **API intake router** workflow template is exactly this.
 
-## Errors
+## Power Automate recipe (compact)
 
-`401 api_key_required | invalid_api_key`, `403 insufficient_scope`,
-`429 rate_limited`, `400` with a message for validation failures (e.g. native
-ticketing disabled for the workspace, missing requester).
+Full guide (licensing, escaping, Parse JSON schemas, custom-connector notes):
+`/api/v1/docs` → "Calling from Power Apps / Power Automate"; research notes in
+[`docs/research/POWER_PLATFORM_API_NOTES.md`](research/POWER_PLATFORM_API_NOTES.md).
+
+1. Trigger: SharePoint **"When an item is created"** (or Power Apps V2).
+2. **HTTP** action (Premium): `POST https://ticketpulse.bgcsaas.com/api/v1/tickets`,
+   headers `Content-Type: application/json`,
+   `Authorization: Bearer tp_live_…`,
+   `Idempotency-Key: concat('sp-', triggerOutputs()?['body/ID'])` — the
+   per-item key makes Power Automate's automatic retries (and resubmits)
+   at-most-once. Turn on **Settings → Secure Inputs** once tested.
+3. Body: the JSON above with dynamic content (`Title`, `Created By Email`,
+   `Link to item` → `customFields.sharePointItemLink`). Keep free text out of
+   hand-typed JSON strings (quote/newline escaping).
+4. **Parse JSON** over `body('HTTP')`, then SharePoint **"Update item"**
+   writing back `ref` (`TP-1042`) and `id`.
+5. Error branch (**run after → has failed**): Parse JSON with the problem+json
+   shape (`title/status/code/detail/request_id`), alert with `code` + `detail`.
 
 ## Notes
 
-- Creating tickets requires the workspace to have **native ticketing enabled**.
-- `origin: "freshservice"` tickets are readable and reply-able, not editable.
-- Webhooks out to third parties are a later addition; poll `GET /tickets`
-  with `sort=updatedAt` for changes in the meantime.
+- Creating tickets requires **native ticketing enabled** on the workspace.
+- `origin: "freshservice"` tickets are readable and reply-able, not editable;
+  TP-born tickets (`TP-<n>`) are fully editable and mirrored to FreshService
+  as fallback copies.
+- Test-mode keys (`tp_test_…`) are read-only — writes return
+  `403 test_mode_read_only`.

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Check, ChevronDown, Copy, Link2, Loader2, Wand2, X } from 'lucide-react';
+import { Check, ChevronDown, Copy, ExternalLink, Link2, Loader2, Pencil, Wand2, X } from 'lucide-react';
 import { ticketsAPI } from '../../services/api';
 
 /**
@@ -194,27 +194,62 @@ export function TicketLinksCard({ ticketId, canWrite = false, canMerge = false, 
   );
 }
 
+/** Is this stored custom-field value a web link? (QA's SharePoint/PowerApp links.) */
+const isUrlValue = (v) => typeof v === 'string' && /^https?:\/\/\S+$/i.test(v.trim());
+
+/** 'share_point_item_link' → 'Share Point Item Link' (labels for orphaned keys). */
+const prettifyKey = (key) => String(key).split('_').filter(Boolean)
+  .map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+
+function UrlValueLink({ href, label }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      title={href}
+      className="tp-focus-ring inline-flex max-w-full items-center gap-1 text-xs text-blue-600 hover:text-blue-700 hover:underline"
+      aria-label={`${label} (opens in a new tab)`}
+    >
+      <span className="truncate">{href.replace(/^https?:\/\//i, '')}</span>
+      <ExternalLink className="w-3 h-3 flex-shrink-0" aria-hidden="true" />
+    </a>
+  );
+}
+
 export function CustomFieldsCard({ ticketId, values = {}, canWrite = false, onSaved }) {
   const [definitions, setDefinitions] = useState(null);
   const [draft, setDraft] = useState({});
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  // URL-valued text fields render as links; a per-key toggle switches one back
+  // to a plain input for editing.
+  const [editingKeys, setEditingKeys] = useState(() => new Set());
 
   useEffect(() => {
     ticketsAPI.customFieldDefinitions()
       .then((res) => setDefinitions(res?.data || []))
       .catch(() => setDefinitions([]));
   }, []);
-  useEffect(() => { setDraft(values || {}); setDirty(false); }, [values]);
+  useEffect(() => { setDraft(values || {}); setDirty(false); setEditingKeys(new Set()); }, [values]);
 
-  if (!definitions || definitions.length === 0) return null;
+  // Keys with a stored value but no ACTIVE definition (retired or deleted in
+  // Settings). Values are never dropped, so keep showing them — read-only.
+  const definedKeys = new Set((definitions || []).map((d) => d.key));
+  const orphanKeys = Object.keys(values || {})
+    .filter((k) => !definedKeys.has(k) && values[k] !== null && values[k] !== undefined && values[k] !== '');
+
+  if (!definitions || (definitions.length === 0 && orphanKeys.length === 0)) return null;
 
   const save = async () => {
     if (busy) return;
     setBusy(true); setError(null);
     try {
-      await ticketsAPI.setCustomFields(ticketId, draft);
+      // Send only defined keys — orphaned values are read-only (the backend
+      // rejects keys without a definition).
+      const payload = Object.fromEntries(Object.entries(draft).filter(([k]) => definedKeys.has(k)));
+      await ticketsAPI.setCustomFields(ticketId, payload);
       setDirty(false);
       onSaved?.();
     } catch (e) {
@@ -242,6 +277,25 @@ export function CustomFieldsCard({ ticketId, values = {}, canWrite = false, onSa
           <option value="true">Yes</option>
           <option value="false">No</option>
         </select>
+      );
+    }
+    // Link values display as clickable links (SharePoint / Power App refs);
+    // the pencil swaps in the plain input for edits.
+    if (isUrlValue(value) && !editingKeys.has(definition.key)) {
+      return (
+        <span className="flex items-center gap-1 min-w-0">
+          <UrlValueLink href={String(value).trim()} label={definition.label} />
+          {canWrite && (
+            <button
+              type="button"
+              onClick={() => setEditingKeys((prev) => new Set(prev).add(definition.key))}
+              aria-label={`Edit ${definition.label}`}
+              className="tp-focus-ring p-0.5 rounded text-slate-300 hover:text-slate-500 flex-shrink-0"
+            >
+              <Pencil className="w-3 h-3" aria-hidden="true" />
+            </button>
+          )}
+        </span>
       );
     }
     return (
@@ -278,6 +332,25 @@ export function CustomFieldsCard({ ticketId, values = {}, canWrite = false, onSa
             {input(definition)}
           </label>
         ))}
+        {orphanKeys.map((key) => {
+          const value = values[key];
+          return (
+            <div key={key} className="block">
+              <span className="block text-[10px] text-slate-400 mb-0.5">{prettifyKey(key)}</span>
+              {isUrlValue(value) ? (
+                <UrlValueLink href={String(value).trim()} label={prettifyKey(key)} />
+              ) : (
+                <span
+                  className="inline-flex max-w-full items-center rounded-md bg-slate-50 border border-slate-200 px-2 py-1 text-xs text-slate-500"
+                  title="This field's definition was retired — the value is kept read-only"
+                >
+                  <span className="truncate">{String(value)}</span>
+                </span>
+              )}
+              <span className="block text-[9px] text-slate-300 mt-0.5 italic" title="This field's definition was retired — the value is kept read-only">definition retired</span>
+            </div>
+          );
+        })}
       </div>
       {error && <p className="mt-1 text-[10px] text-red-500">{error}</p>}
     </div>

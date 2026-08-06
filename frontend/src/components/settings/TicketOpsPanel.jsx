@@ -381,9 +381,14 @@ function MacrosSection() {
   );
 }
 
-function CustomFieldsSection() {
+// Fields provisioned by API intake in the last 7 days get a "new from API"
+// highlight so admins spot what arrived and curate it (FR 08-05 #1, Phase 1c).
+const API_FIELD_FRESH_DAYS = 7;
+
+export function CustomFieldsSection() {
   const [fields, setFields] = useState([]);
   const [draft, setDraft] = useState(null); // { key, label, type, options }
+  const [editingId, setEditingId] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const load = useCallback(() => {
@@ -394,29 +399,75 @@ function CustomFieldsSection() {
   const save = async () => {
     setBusy(true); setError(null);
     try {
-      await settingsAPI.createCustomField({
-        ...draft,
+      const payload = {
+        label: draft.label,
+        type: draft.type,
         options: draft.type === 'select' ? String(draft.options || '').split(',').map((v) => v.trim()).filter(Boolean) : [],
-      });
-      setDraft(null);
+      };
+      if (editingId) {
+        await settingsAPI.updateCustomField(editingId, payload);
+      } else {
+        await settingsAPI.createCustomField({ ...payload, key: draft.key });
+      }
+      setDraft(null); setEditingId(null);
       load();
     } catch (e) { setError(e.response?.data?.message || e.message); }
     setBusy(false);
   };
 
+  const startEdit = (field) => {
+    setEditingId(field.id);
+    setError(null);
+    setDraft({
+      key: field.key,
+      label: field.label,
+      type: field.type,
+      options: (field.options || []).join(', '),
+    });
+  };
+
+  const isApiBorn = (field) => field.source === 'api';
+  const isFreshFromApi = (field) => isApiBorn(field) && field.createdAt
+    && (Date.now() - new Date(field.createdAt).getTime() < API_FIELD_FRESH_DAYS * 24 * 60 * 60 * 1000);
+
   return (
-    <SectionCard icon={Plus} title="Custom fields" hint="Per-workspace fields shown on every ticket (Ticket Pulse's own annotation layer — never written to FreshService). Usable in workflow conditions as custom:<key>.">
+    <SectionCard icon={Plus} title="Custom fields" hint="Per-workspace fields shown on every ticket (Ticket Pulse's own annotation layer — never written to FreshService). API senders can set values at creation — unknown keys auto-provision a definition here, badged API, for you to curate. Usable in workflow conditions as custom:<key>.">
       <ul className="space-y-1 mb-2">
         {fields.map((field) => (
-          <li key={field.id} className="flex items-center gap-2 text-xs">
+          <li
+            key={field.id}
+            className={`flex items-center gap-2 text-xs rounded-md px-1.5 py-1 -mx-1.5 ${isFreshFromApi(field) ? 'bg-indigo-50/70' : ''}`}
+          >
             <span className={`font-semibold ${field.isActive ? 'text-slate-700' : 'text-slate-300 line-through'}`}>{field.label}</span>
             <code className="text-[10px] bg-slate-100 rounded px-1 text-slate-500">{field.key}</code>
-            <span className="text-slate-400">{field.type}{field.type === 'select' ? ` (${field.options.length})` : ''}</span>
+            <span className="text-slate-400">{field.type}{field.type === 'select' ? ` (${(field.options || []).length})` : ''}</span>
+            {isApiBorn(field) ? (
+              <span
+                className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-indigo-600 bg-indigo-50 border border-indigo-100 rounded-full px-1.5 py-px"
+                title="Auto-provisioned by API intake — type inferred from the first value; edit to curate"
+              >
+                <Sparkles className="w-2.5 h-2.5" aria-hidden="true" /> API
+              </span>
+            ) : (
+              <span className="text-[10px] text-slate-400 border border-slate-200 rounded-full px-1.5 py-px" title="Created by an admin in Settings">Manual</span>
+            )}
+            {isFreshFromApi(field) && <span className="text-[10px] text-indigo-500 italic">new from API</span>}
+            {!field.isActive && <span className="text-[10px] text-slate-300 italic">retired</span>}
+            <span className="flex-1" />
+            <button
+              onClick={() => startEdit(field)}
+              className="tp-focus-ring text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 hover:bg-slate-50"
+            >
+              Edit
+            </button>
             <button
               onClick={async () => { await settingsAPI.updateCustomField(field.id, { isActive: !field.isActive }).catch(() => {}); load(); }}
-              className="tp-focus-ring ml-auto text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 hover:bg-slate-50"
+              className="tp-focus-ring text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 hover:bg-slate-50"
+              title={field.isActive
+                ? 'Retire: hides the field from forms and conditions; stored ticket values are kept'
+                : 'Reactivate this field'}
             >
-              {field.isActive ? 'Disable' : 'Enable'}
+              {field.isActive ? 'Deactivate' : 'Reactivate'}
             </button>
             <button
               onClick={async () => { await settingsAPI.deleteCustomField(field.id).catch(() => {}); load(); }}
@@ -433,7 +484,15 @@ function CustomFieldsSection() {
         <div className="rounded-lg border border-slate-200 p-2.5 space-y-1.5 text-xs">
           <div className="grid grid-cols-2 gap-1.5">
             <input value={draft.label} onChange={(e) => setDraft({ ...draft, label: e.target.value })} placeholder="Label (e.g. Cost centre)" aria-label="Field label" className="tp-focus-ring border border-slate-200 rounded-md px-2 py-1" />
-            <input value={draft.key} onChange={(e) => setDraft({ ...draft, key: e.target.value })} placeholder="key (e.g. cost_centre)" aria-label="Field key" className="tp-focus-ring border border-slate-200 rounded-md px-2 py-1 font-mono" />
+            <input
+              value={draft.key}
+              disabled={Boolean(editingId)}
+              onChange={(e) => setDraft({ ...draft, key: e.target.value })}
+              placeholder="key (e.g. cost_centre)"
+              aria-label="Field key"
+              title={editingId ? 'Keys are permanent — ticket values are stored under them' : undefined}
+              className="tp-focus-ring border border-slate-200 rounded-md px-2 py-1 font-mono disabled:bg-slate-50 disabled:text-slate-400"
+            />
           </div>
           <div className="flex gap-1.5">
             <select value={draft.type} onChange={(e) => setDraft({ ...draft, type: e.target.value })} aria-label="Field type" className="tp-focus-ring border border-slate-200 rounded-md px-1.5 py-1">
@@ -443,10 +502,15 @@ function CustomFieldsSection() {
               <input value={draft.options} onChange={(e) => setDraft({ ...draft, options: e.target.value })} placeholder="Options, comma-separated" aria-label="Options" className="tp-focus-ring flex-1 border border-slate-200 rounded-md px-2 py-1" />
             )}
           </div>
+          {editingId && (
+            <p className="text-[10px] text-slate-400">Existing ticket values keep their stored shape — the new type applies from the next edit or API write.</p>
+          )}
           {error && <p className="text-red-500">{error}</p>}
           <div className="flex gap-1.5">
-            <button onClick={save} disabled={busy} className="tp-focus-ring px-2.5 py-1 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-60">Create</button>
-            <button onClick={() => setDraft(null)} className="tp-focus-ring px-2.5 py-1 rounded-md text-slate-500 hover:bg-slate-50">Cancel</button>
+            <button onClick={save} disabled={busy || !String(draft.label || '').trim()} className="tp-focus-ring px-2.5 py-1 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-60">
+              {busy ? <Loader2 className="w-3 h-3 animate-spin inline" aria-hidden="true" /> : (editingId ? 'Save' : 'Create')}
+            </button>
+            <button onClick={() => { setDraft(null); setEditingId(null); setError(null); }} className="tp-focus-ring px-2.5 py-1 rounded-md text-slate-500 hover:bg-slate-50">Cancel</button>
           </div>
         </div>
       ) : (
