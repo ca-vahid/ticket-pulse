@@ -34,6 +34,7 @@ import logger from '../utils/logger.js';
 import { clearReadCache } from './dashboardReadCache.js';
 import { ExternalAPIError } from '../utils/errors.js';
 import { TICKET_ORIGIN, isTicketPulseOrigin } from '../utils/ticketOrigin.js';
+import { repairMojibake } from '../utils/textEncoding.js';
 import groupSyncService from './groupSyncService.js';
 import ticketTypeService from './ticketTypeService.js';
 import statusService from './statusService.js';
@@ -1061,10 +1062,14 @@ class SyncService {
     }
 
     const requesterIdString = BigInt(requesterFreshserviceId).toString();
-    const embeddedName = fsTicket?.requester?.name
+    // Repair-on-write: never hand a mojibake display name to the requester
+    // upsert (FR 08-05 item 2).
+    const embeddedName = repairMojibake(
+      fsTicket?.requester?.name
       || preparedTicket?.requesterName
       || this._embeddedRequesterNames.get(requesterIdString)
-      || null;
+      || null,
+    );
 
     let requester = null;
     try {

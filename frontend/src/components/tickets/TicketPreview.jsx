@@ -11,6 +11,7 @@ import {
 } from './ticketUi';
 import AssigneePicker from './AssigneePicker';
 import AiAssignModal from './AiAssignModal';
+import RecipientsLine from './RecipientsLine';
 import FsSyncConfirm from './FsSyncConfirm';
 import { assignmentAPI, ticketsAPI } from '../../services/api';
 import { CANONICAL_STATUS_NAMES, baseStatusOf, isTerminalStatus, statusDefsFromMeta, statusToneFromDefs } from './statusDefs';
@@ -530,6 +531,8 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
             {(ticket.descriptionText || ticket.description) && (
               <div>
                 <span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-1">Description</span>
+                {/* Who else received the original email (QA 08-05 #3) */}
+                <RecipientsLine to={ticket.toEmails} cc={ticket.ccEmails} compact className="mb-1" />
                 <div className="rounded-lg border border-slate-100 bg-white p-2.5 max-h-64 overflow-y-auto settings-scrollbar">
                   {looksLikeHtml(ticket.description) ? (
                     <SafeHtml html={ticket.description} className="!text-xs" />

@@ -37,6 +37,24 @@ export function referencedMessageIds(email) {
 }
 
 /**
+ * Normalized To/Cc for an ingested Graph email (QA 08-05 #3 — Cc visibility).
+ * Returns {to_emails, cc_emails} — the SAME rawPayload key shape FreshService
+ * conversations use, so one UI path renders recipients for every origin — or
+ * null when the message carries neither.
+ */
+export function emailRecipients(email) {
+  const norm = (list) => [...new Set(
+    (Array.isArray(list) ? list : [])
+      .map((s) => String(s || '').trim().toLowerCase())
+      .filter((s) => s.includes('@')),
+  )];
+  const to = norm(email?.to);
+  const cc = norm(email?.cc);
+  if (!to.length && !cc.length) return null;
+  return { to_emails: to, cc_emails: cc };
+}
+
+/**
  * Email → ticket ingestion for native ticketing.
  *
  * Matching ladder (per inbound message):
@@ -268,6 +286,7 @@ class MailboxIngestService {
 
   async ingestReply(connection, ticket, email, via) {
     const now = new Date();
+    const recipients = emailRecipients(email);
     const entry = await prisma.ticketThreadEntry.create({
       data: {
         ticketId: ticket.id,
@@ -288,6 +307,8 @@ class MailboxIngestService {
         emailMessageId: email.internetMessageId,
         // Requester replies belong on the FS fallback copy too
         mirrorState: ticket.origin === TICKET_ORIGIN.TICKETPULSE ? 'pending' : null,
+        // Who else the sender addressed (QA 08-05 #3) — FS conversation shape.
+        ...(recipients ? { rawPayload: recipients } : {}),
       },
     });
 
@@ -367,6 +388,19 @@ class MailboxIngestService {
       ...(connection.defaultTicketType ? { ticketType: connection.defaultTicketType } : {}),
     }, SYSTEM_ACTOR, { sourceChannel: TICKET_SOURCE.EMAIL });
 
+    // Persist who the email was addressed to (QA 08-05 #3): graphMailClient
+    // already fetched to/cc — store them on the ticket row (same columns FS
+    // sync fills) instead of discarding them. Non-fatal on failure.
+    const recipients = emailRecipients(email);
+    if (recipients) {
+      await prisma.ticket.update({
+        where: { id: ticket.id },
+        data: { toEmails: recipients.to_emails, ccEmails: recipients.cc_emails },
+      }).catch((err) => {
+        logger.warn(`Email recipients not persisted for ${ticket.displayRef} (non-fatal): ${err.message}`);
+      });
+    }
+
     // Remember the originating message id so follow-ups thread to this ticket.
     if (email.internetMessageId) {
       await prisma.ticketThreadEntry.create({
@@ -387,6 +421,7 @@ class MailboxIngestService {
           occurredAt: email.receivedAt || new Date(),
           emailMessageId: email.internetMessageId,
           title: 'Original email',
+          ...(recipients ? { rawPayload: recipients } : {}),
         },
       }).catch(() => {});
     }

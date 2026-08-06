@@ -1848,6 +1848,10 @@ class TicketService {
       slaDueDates = await slaPolicyService.dueDatesFor(workspaceId, data.priority, now, { typeName: data.ticketType });
     } catch { /* no policy — no clocks */ }
 
+    // Dedupe once so the ticket row AND the created audit agree (the schema
+    // already lowercased/trimmed each address).
+    data.ccEmails = [...new Set(data.ccEmails)];
+
     const ticket = await prisma.ticket.create({
       data: {
         origin: TICKET_ORIGIN.TICKETPULSE,
@@ -1882,6 +1886,11 @@ class TicketService {
         source: data.source ?? sourceChannel,
         lastIngestSource: 'ticketpulse_native',
         lastIngestedAt: now,
+        // Cc visibility (QA 08-05 #3): carbon-copy addresses live on the
+        // Ticket row itself — the same ccEmails column FS sync fills for
+        // FS-born tickets — so the UI renders To/Cc for both origins from one
+        // place.
+        ...(data.ccEmails.length ? { ccEmails: data.ccEmails } : {}),
         // dueBySetBy marker contract (QA 08-04 #13): 'sla' = the policy clock
         // stamped dueBy here at creation; 'manual' = an agent edited it via
         // updateTicketFields. dueDatesFor is only ever applied HERE — if an
@@ -2681,6 +2690,17 @@ class TicketService {
       externalEntryId = fsEntryId ? `fs-conv-${fsEntryId}` : null;
     }
 
+    // Per-message recipients (QA 08-05 #3), stored in the SAME rawPayload
+    // shape FS conversations carry ({to_emails, cc_emails}) so one UI reads
+    // both origins. Public replies only — notes have no recipients.
+    const requesterEmail = String(ticket.requester?.email || '').trim().toLowerCase();
+    const recipients = !isPrivate && (cc.length || requesterEmail)
+      ? {
+        ...(requesterEmail ? { to_emails: [requesterEmail] } : {}),
+        ...(cc.length ? { cc_emails: cc } : {}),
+      }
+      : null;
+
     const entry = await prisma.ticketThreadEntry.create({
       data: {
         ticketId: ticket.id,
@@ -2701,6 +2721,7 @@ class TicketService {
         // Native entries queue for the mirror; FS-born entries are already there.
         mirrorState: isNative ? 'pending' : 'mirrored',
         mirroredAt: isNative ? null : now,
+        ...(recipients ? { rawPayload: recipients } : {}),
       },
     });
 
