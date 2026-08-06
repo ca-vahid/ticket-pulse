@@ -95,7 +95,7 @@ export function getCompactColumns(viewMode, simple = false) {
 // min-width so header and rows scroll together, perfectly aligned.
 // Monthly shares the daily template (see getCompactGridTemplate).
 export function getCompactMinWidth(viewMode, simple = false) {
-  if (viewMode === 'weekly') return simple ? 1060 : 920;
+  if (viewMode === 'weekly') return simple ? 1080 : 920;
   return simple ? 900 : 760;
 }
 

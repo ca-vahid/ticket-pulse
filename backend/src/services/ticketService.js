@@ -13,6 +13,7 @@ import ticketLifecycleNotificationService from './ticketLifecycleNotificationSer
 import requesterRepository from './requesterRepository.js';
 import sendgridNotificationService from './sendgridNotificationService.js';
 import mirrorService from './mirrorService.js';
+import { getFreshServiceDetail } from '../integrations/freshservice.js';
 import attachmentService from './attachmentService.js';
 import watcherNotificationService from './watcherNotificationService.js';
 import { sseManager } from '../routes/sse.routes.js';
@@ -69,7 +70,12 @@ const FS_FIELD_LABELS = {
   custom_fields: 'a custom field',
 };
 function fsValidationError(err) {
-  const fieldErrors = Array.isArray(err.freshserviceDetail?.errors) ? err.freshserviceDetail.errors : [];
+  // getFreshServiceDetail reads the detail wherever it survived wrapping —
+  // `.freshserviceDetail` from the FS client's catch, or the raw axios body
+  // under `.originalError` when only the interceptor's ExternalAPIError
+  // reached us (the QA 08-05 dead-branch bug).
+  const detail = getFreshServiceDetail(err);
+  const fieldErrors = Array.isArray(detail?.errors) ? detail.errors : [];
   if (!fieldErrors.length) return err;
   const parts = fieldErrors.map((fe) => {
     const label = FS_FIELD_LABELS[fe.field] || fe.field || 'a field';
@@ -2275,7 +2281,8 @@ class TicketService {
     } catch (err) {
       // Queue-wait timeout = the PUT never launched; nothing changed anywhere.
       if (isFsQueueTimeout(err)) throw new ServiceBusyError(FS_BUSY_MESSAGE);
-      const fieldErrors = Array.isArray(err.freshserviceDetail?.errors) ? err.freshserviceDetail.errors : [];
+      const fsDetail = getFreshServiceDetail(err);
+      const fieldErrors = Array.isArray(fsDetail?.errors) ? fsDetail.errors : [];
       // FreshService closure rules can demand a department the ticket never
       // got (QA 07-10, #231072: closing failed with an opaque "Validation
       // failed"). Auto-fill it from the ticket/requester — what the FS UI
@@ -2289,19 +2296,27 @@ class TicketService {
             const fsRequester = await client.fetchRequester(fsCurrent.requester_id);
             departmentId = fsRequester?.department_ids?.[0] || null;
           }
-        } catch { /* fall through to the descriptive error below */ }
+        } catch { /* fall through to the resolver / descriptive error below */ }
+        // Step 3 (QA 08-05 #6, Cambio #236253): neither the FS ticket nor its
+        // FS requester has a department — reuse the mirror-create resolver
+        // (TP department → requester's Entra office location / department →
+        // workspace fallback). Retry-on-failure ONLY: we never proactively
+        // send department_id, which could overwrite a correct FS value.
+        if (!departmentId) {
+          departmentId = (await mirrorService.resolveDepartmentId(client, ticket)) || null;
+        }
         if (departmentId) {
           try {
             fsTicket = await client.updateTicketFields(
               Number(ticket.freshserviceTicketId),
               { ...fsPayload, department_id: Number(departmentId) },
             );
-            logger.info(`FS write-back: auto-filled required department ${departmentId} for #${ticket.freshserviceTicketId} (requester's department)`);
+            logger.info(`FS write-back: auto-filled required department ${departmentId} for #${ticket.freshserviceTicketId} (ticket → FS requester → Entra ladder)`);
           } catch (retryErr) {
             throw fsValidationError(retryErr);
           }
         } else {
-          throw new ValidationError('FreshService requires a Department before this change, and neither the ticket nor its requester has one on file — set the Department in FreshService first, then try again.');
+          throw new ValidationError('FreshService requires a Department before this change, and none could be resolved — no department on the FS ticket, its requester, or an Entra office-location match for the requester. Set the Department in FreshService, then try again.');
         }
       } else {
         throw fsValidationError(err);

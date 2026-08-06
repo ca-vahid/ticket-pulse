@@ -57,18 +57,37 @@ describe('isDateToday / getDateStyling.isToday', () => {
 });
 
 describe('TechCardCompact — today tile ring (weekly heatmap)', () => {
+  // Per-view ring color (QA 08-05 #5): violet stays Simple's brand tint;
+  // Detailed uses a calmer deep emerald beside its green/rose/indigo tiles.
   test.each([
-    ['normal view', {}],
-    ['simple view', { simple: true, topLoad: true }],
-  ])('%s: exactly today\'s tile gets the violet ring', (_label, props) => {
+    ['detailed view', {}, '.ring-emerald-700', '.ring-violet-500'],
+    ['simple view', { simple: true, topLoad: true }, '.ring-violet-500', '.ring-emerald-700'],
+  ])('%s: exactly today\'s tile gets its view\'s ring', (_label, props, ringSelector, otherRingSelector) => {
     const { container } = renderCard(props);
-    const ringed = container.querySelectorAll('.ring-violet-500');
+    const ringed = container.querySelectorAll(ringSelector);
     expect(ringed).toHaveLength(1);
     expect(ringed[0].className).toContain('ring-2');
     expect(ringed[0].className).toContain('ring-offset-1');
+    // The other view's ring color never leaks in.
+    expect(container.querySelectorAll(otherRingSelector)).toHaveLength(0);
     // The ringed tile lives inside the tile whose tooltip is marked "Today".
     const todayTile = ringed[0].closest('[title]');
     expect(todayTile?.getAttribute('title')).toMatch(/^Today\n/);
+  });
+
+  test('weekly day strip renders as 7 equal grid columns (QA 08-05 #4)', () => {
+    const { container } = renderCard();
+    const strip = container.querySelector('.grid-cols-7');
+    expect(strip).not.toBeNull();
+    expect(strip.className).toContain('w-full');
+    // Day cells fill their grid column instead of a shrinkable fixed width.
+    const cells = strip.querySelectorAll(':scope > [title]');
+    expect(cells).toHaveLength(7);
+    cells.forEach((cell) => {
+      expect(cell.className).toContain('w-full');
+      expect(cell.className).toContain('min-w-0');
+      expect(cell.className).not.toContain('w-[34px]');
+    });
   });
 
   test('simple view renders the caption as a status pill', () => {

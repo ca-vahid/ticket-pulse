@@ -44,6 +44,8 @@ const fsClientMock = {
   createReply: jest.fn(),
   addNote: jest.fn(),
   updateTicketFields: jest.fn(),
+  getTicket: jest.fn(),
+  fetchRequester: jest.fn(),
 };
 const mirrorServiceMock = {
   enqueueTicketCreate: jest.fn().mockResolvedValue({ id: 1 }),
@@ -51,6 +53,7 @@ const mirrorServiceMock = {
   enqueueThreadEntry: jest.fn().mockResolvedValue({ id: 3 }),
   getClient: jest.fn().mockResolvedValue(fsClientMock),
   getInteractiveClient: jest.fn().mockResolvedValue(fsClientMock),
+  resolveDepartmentId: jest.fn(),
 };
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
@@ -79,7 +82,7 @@ jest.unstable_mockModule('../src/services/mirrorService.js', () => ({
 
 const { default: ticketService } = await import('../src/services/ticketService.js');
 const { invalidateStatusCache } = await import('../src/services/statusService.js');
-const { ValidationError } = await import('../src/utils/errors.js');
+const { ValidationError, ExternalAPIError } = await import('../src/utils/errors.js');
 
 const actor = { email: 'coord@example.com', name: 'Cora Coordinator', role: 'viewer', technicianId: null, kind: 'member' };
 
@@ -481,6 +484,155 @@ describe('ticketService.updateFsTicket (FS-born write-back)', () => {
     expect(result.synced).toEqual(['priority']);
     expect(result.aiOverride).toBe(false);
     expect(prismaMock.assignmentPipelineRun.findFirst).not.toHaveBeenCalled();
+  });
+});
+
+// QA 08-05 #6 (Cambio #236253): FS demands a department_id on status changes
+// but the interceptor-wrapped error hid the field-level detail, so the
+// retry-with-department branch never fired ("Validation failed", no retry).
+// These tests pin the error shape the axios interceptor actually produces
+// (ExternalAPIError; raw axios error only under .originalError) and the
+// three-step department ladder: FS ticket → FS requester → mirror resolver
+// (TP department / Entra office location / workspace fallback).
+describe('ticketService.updateFsTicket — required-department auto-resolution', () => {
+  const fsBornTicket = {
+    id: 601,
+    workspaceId: 1,
+    origin: 'freshservice',
+    nativeNumber: null,
+    freshserviceTicketId: BigInt(236253),
+    subject: 'Cambio access',
+    status: 'Open',
+    priority: 3,
+    createdAt: new Date('2026-08-01T10:00:00Z'),
+    assignedTechId: 3,
+    firstAssignedAt: new Date('2026-08-01T11:00:00Z'),
+    resolvedAt: null,
+    closedAt: null,
+    internalCategoryId: null,
+    internalSubcategoryId: null,
+    tpSkill: null,
+    tpSubskill: null,
+    department: null,
+    requester: { id: 40, name: 'Rita Requester', email: 'rita@example.com', entraOfficeLocation: 'Toronto', entraDepartment: null },
+    assignedTech: { id: 3, name: 'Ava Original' },
+    internalCategory: null,
+    internalSubcategory: null,
+  };
+
+  // The exact shape thrown by the freshservice.js response interceptor: an
+  // ExternalAPIError whose `.response` is UNDEFINED — the axios error (with
+  // response.data.errors[]) survives only under `.originalError`. With
+  // `direct: true` the interceptor's own freshserviceDetail/Status stamps are
+  // included too; `direct: false` simulates detail surviving ONLY via
+  // originalError, which is what the old `error.response?.data` reads missed.
+  function interceptorWrappedError({ direct = true, errors } = {}) {
+    const detail = {
+      description: 'Validation failed',
+      errors: errors || [{ field: 'department_id', message: "It should be a/an Positive Integer,It should not be blank if 'Status' is 'Closed'", code: 'invalid_value' }],
+    };
+    const axiosError = new Error('Request failed with status code 400');
+    axiosError.response = { status: 400, data: detail };
+    axiosError.config = { url: '/tickets/236253' };
+    const wrapped = new ExternalAPIError('FreshService', detail.description, axiosError);
+    if (direct) {
+      wrapped.freshserviceStatus = 400;
+      wrapped.freshserviceDetail = detail;
+    }
+    return wrapped;
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prismaMock.workspace.findUnique.mockResolvedValue({
+      id: 1, name: 'IT', isActive: true, tpSkillCustomField: 'tp_skill', tpSubskillCustomField: 'tp_subskill',
+    });
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...fsBornTicket });
+    prismaMock.ticket.update.mockImplementation(({ data }) => Promise.resolve({ ...fsBornTicket, ...data }));
+    ticketActivityRepositoryMock.create.mockResolvedValue({});
+  });
+
+  test('regression: interceptor-wrapped error (detail only under .originalError) still enters the department retry', async () => {
+    fsClientMock.updateTicketFields
+      .mockRejectedValueOnce(interceptorWrappedError({ direct: false }))
+      .mockResolvedValueOnce({ priority: 2, updated_at: '2026-08-05T10:00:00Z' });
+    fsClientMock.getTicket.mockResolvedValue({ id: 236253, department_id: 555 });
+
+    const result = await ticketService.updateFsTicket(601, 1, { priority: 2 }, actor);
+
+    expect(fsClientMock.updateTicketFields).toHaveBeenCalledTimes(2);
+    expect(fsClientMock.updateTicketFields).toHaveBeenLastCalledWith(236253, expect.objectContaining({ priority: 2, department_id: 555 }));
+    expect(fsClientMock.fetchRequester).not.toHaveBeenCalled();
+    expect(mirrorServiceMock.resolveDepartmentId).not.toHaveBeenCalled();
+    expect(result.synced).toEqual(['priority']);
+  });
+
+  test('ladder step 2: FS requester department fills in when the FS ticket has none', async () => {
+    fsClientMock.updateTicketFields
+      .mockRejectedValueOnce(interceptorWrappedError())
+      .mockResolvedValueOnce({ priority: 2, updated_at: '2026-08-05T10:00:00Z' });
+    fsClientMock.getTicket.mockResolvedValue({ id: 236253, department_id: null, requester_id: 9040 });
+    fsClientMock.fetchRequester.mockResolvedValue({ id: 9040, department_ids: [777] });
+
+    await ticketService.updateFsTicket(601, 1, { priority: 2 }, actor);
+
+    expect(fsClientMock.fetchRequester).toHaveBeenCalledWith(9040);
+    expect(fsClientMock.updateTicketFields).toHaveBeenLastCalledWith(236253, expect.objectContaining({ department_id: 777 }));
+    expect(mirrorServiceMock.resolveDepartmentId).not.toHaveBeenCalled();
+  });
+
+  test('ladder step 3 (Cambio case): no FS department anywhere — Entra office-location resolution supplies it', async () => {
+    fsClientMock.updateTicketFields
+      .mockRejectedValueOnce(interceptorWrappedError())
+      .mockResolvedValueOnce({ status: 4, updated_at: '2026-08-05T10:00:00Z' });
+    fsClientMock.getTicket.mockResolvedValue({ id: 236253, department_id: null, requester_id: 9040 });
+    fsClientMock.fetchRequester.mockResolvedValue({ id: 9040, department_ids: [] });
+    mirrorServiceMock.resolveDepartmentId.mockResolvedValue(1000131297);
+
+    const result = await ticketService.updateFsTicket(601, 1, { status: 'Resolved' }, actor);
+
+    expect(fsClientMock.getTicket).toHaveBeenCalled();
+    expect(fsClientMock.fetchRequester).toHaveBeenCalled();
+    expect(mirrorServiceMock.resolveDepartmentId).toHaveBeenCalledWith(fsClientMock, expect.objectContaining({ id: 601 }));
+    expect(fsClientMock.updateTicketFields).toHaveBeenLastCalledWith(236253, expect.objectContaining({ status: 4, department_id: 1000131297 }));
+    expect(result.synced).toEqual(['status']);
+  });
+
+  test('genuinely unresolvable department fails with the full-ladder message', async () => {
+    fsClientMock.updateTicketFields.mockRejectedValue(interceptorWrappedError());
+    fsClientMock.getTicket.mockResolvedValue({ id: 236253, department_id: null, requester_id: null });
+    mirrorServiceMock.resolveDepartmentId.mockResolvedValue(undefined);
+
+    await expect(ticketService.updateFsTicket(601, 1, { priority: 2 }, actor))
+      .rejects.toThrow(/no department on the FS ticket, its requester, or an Entra office-location match/);
+    expect(fsClientMock.updateTicketFields).toHaveBeenCalledTimes(1); // no retry without a department
+  });
+
+  test('non-department validation errors render field labels via the wrapped detail', async () => {
+    fsClientMock.updateTicketFields.mockRejectedValue(interceptorWrappedError({
+      direct: false,
+      errors: [{ field: 'group_id', message: 'incorrect group for this workspace' }],
+    }));
+
+    await expect(ticketService.updateFsTicket(601, 1, { priority: 2 }, actor))
+      .rejects.toThrow(/FreshService rejected the change — Group: incorrect group for this workspace/);
+    expect(fsClientMock.getTicket).not.toHaveBeenCalled(); // not a department problem → no retry ladder
+  });
+
+  test('department retry that fails again surfaces the friendly field-label error', async () => {
+    fsClientMock.updateTicketFields
+      .mockRejectedValueOnce(interceptorWrappedError({
+        errors: [{ field: 'department_id', message: 'It should be of type Null', code: 'missing_field' }],
+      }))
+      .mockRejectedValueOnce(interceptorWrappedError({
+        direct: false,
+        errors: [{ field: 'department_id', message: 'It should be of type Null', code: 'missing_field' }],
+      }));
+    fsClientMock.getTicket.mockResolvedValue({ id: 236253, department_id: 555 });
+
+    await expect(ticketService.updateFsTicket(601, 1, { priority: 2 }, actor))
+      .rejects.toThrow(/Department is required but not set/);
+    expect(fsClientMock.updateTicketFields).toHaveBeenCalledTimes(2);
   });
 });
 

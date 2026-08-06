@@ -25,14 +25,25 @@ function getSharedRateLimiter() {
   return SHARED_RATE_LIMITER;
 }
 
-function getFreshServiceStatus(error) {
+// Accessors for FS error detail/status that survive the response interceptor.
+// The interceptor (below) replaces the axios error with an ExternalAPIError:
+// the raw axios error only lives on `.originalError`, and the FS status/body
+// are stamped as `.freshserviceStatus`/`.freshserviceDetail`. Catch blocks
+// MUST use these instead of `error.response?.*` (which is undefined on the
+// wrapped error — the QA 08-05 "Validation failed with no detail" bug).
+// Exported so services (e.g. ticketService's department retry) can read the
+// same detail regardless of which layer wrapped the error.
+export function getFreshServiceStatus(error) {
+  // `statusCode` last: it is the WRAPPER's own HTTP status (ExternalAPIError
+  // is always 502), not FreshService's — the real status lives in
+  // freshserviceStatus / originalError once the interceptor has wrapped it.
   return error.response?.status
-    || error.statusCode
     || error.freshserviceStatus
-    || error.originalError?.response?.status;
+    || error.originalError?.response?.status
+    || error.statusCode;
 }
 
-function getFreshServiceDetail(error) {
+export function getFreshServiceDetail(error) {
   return error.response?.data
     || error.freshserviceDetail
     || error.originalError?.response?.data
@@ -303,7 +314,7 @@ class FreshServiceClient {
         return await this._get(endpoint, config);
       } catch (error) {
         lastError = error;
-        const status = error.response?.status;
+        const status = getFreshServiceStatus(error);
         if (status === 429 && attempt < maxRetries) {
           // limiter.on429 was already called in the interceptor; the queue is
           // now paused for Retry-After. Just re-enqueue.
@@ -429,7 +440,7 @@ class FreshServiceClient {
         const response = await this._get(`/tickets/${ticketId}`);
         return response.data.ticket;
       } catch (error) {
-        const status = error.response?.status || error.originalError?.response?.status;
+        const status = getFreshServiceStatus(error);
         if (status === 404) return null;
         if (status === 403) return FORBIDDEN_TICKET;
         if (status === 429 && attempt < 3) continue;
@@ -455,7 +466,7 @@ class FreshServiceClient {
       //         workspace (common on dev keys). Treat as "no CSAT" so we
       //         stamp csat_checked_at and stop re-hitting it every sweep
       //         instead of spamming error logs.
-      const status = error.response?.status || error.originalError?.response?.status;
+      const status = getFreshServiceStatus(error);
       if (status === 404 || status === 403) return null;
       logger.error(`Error fetching CSAT for ticket ${ticketId}:`, error);
       throw error;
@@ -643,8 +654,8 @@ class FreshServiceClient {
       });
       return response.data.ticket;
     } catch (error) {
-      const detail = error.response?.data;
-      const httpStatus = error.response?.status;
+      const detail = getFreshServiceDetail(error);
+      const httpStatus = getFreshServiceStatus(error);
       logger.error(`Error assigning ticket ${ticketId} to agent ${agentId}:`, { status: httpStatus, detail });
       const wrapped = new Error(detail?.description || detail?.message || error.message);
       wrapped.freshserviceDetail = detail;
@@ -663,8 +674,8 @@ class FreshServiceClient {
       const response = await this._put(`/tickets/${ticketId}`, { ticket: ticketPayload });
       return response.data.ticket;
     } catch (error) {
-      const detail = error.response?.data;
-      const httpStatus = error.response?.status;
+      const detail = getFreshServiceDetail(error);
+      const httpStatus = getFreshServiceStatus(error);
       logger.error(`Error writing fields back to ticket ${ticketId}:`, { status: httpStatus, detail });
       const wrapped = new Error(detail?.description || detail?.message || error.message);
       wrapped.freshserviceDetail = detail;
@@ -681,8 +692,8 @@ class FreshServiceClient {
       });
       return response.data.ticket;
     } catch (error) {
-      const detail = error.response?.data;
-      const httpStatus = error.response?.status;
+      const detail = getFreshServiceDetail(error);
+      const httpStatus = getFreshServiceStatus(error);
       logger.error(`Error updating custom fields for ticket ${ticketId}:`, { status: httpStatus, detail });
       const wrapped = new Error(detail?.description || detail?.message || error.message);
       wrapped.freshserviceDetail = detail;
@@ -698,8 +709,8 @@ class FreshServiceClient {
       });
       return response.data.ticket;
     } catch (error) {
-      const detail = error.response?.data;
-      const httpStatus = error.response?.status;
+      const detail = getFreshServiceDetail(error);
+      const httpStatus = getFreshServiceStatus(error);
       logger.error(`Error updating group for ticket ${ticketId}:`, { status: httpStatus, detail });
       const wrapped = new Error(detail?.description || detail?.message || error.message);
       wrapped.freshserviceDetail = detail;
@@ -715,8 +726,8 @@ class FreshServiceClient {
       });
       return response.data.ticket;
     } catch (error) {
-      const detail = error.response?.data;
-      const httpStatus = error.response?.status;
+      const detail = getFreshServiceDetail(error);
+      const httpStatus = getFreshServiceStatus(error);
       logger.error(`Error updating priority for ticket ${ticketId}:`, { status: httpStatus, detail });
       const wrapped = new Error(detail?.description || detail?.message || error.message);
       wrapped.freshserviceDetail = detail;
@@ -732,8 +743,8 @@ class FreshServiceClient {
       });
       return response.data.ticket;
     } catch (error) {
-      const detail = error.response?.data;
-      const httpStatus = error.response?.status;
+      const detail = getFreshServiceDetail(error);
+      const httpStatus = getFreshServiceStatus(error);
       logger.error(`Error updating type for ticket ${ticketId}:`, { status: httpStatus, detail });
       const wrapped = new Error(detail?.description || detail?.message || error.message);
       wrapped.freshserviceDetail = detail;
@@ -1049,7 +1060,7 @@ class FreshServiceClient {
       });
       return response.data;
     } catch (error) {
-      const httpStatus = error.response?.status || error.statusCode;
+      const httpStatus = getFreshServiceStatus(error);
       if (httpStatus === 404 || httpStatus === 405) {
         logger.info(`Ticket ${ticketId} is deleted or in terminal state, skipping note`);
         return { ticketId, skipped: true, reason: 'ticket_deleted_or_terminal' };
@@ -1069,8 +1080,8 @@ class FreshServiceClient {
       const response = await this._post('/tickets', compactObject(payload));
       return response.data.ticket;
     } catch (error) {
-      const detail = error.response?.data;
-      const httpStatus = error.response?.status;
+      const detail = getFreshServiceDetail(error);
+      const httpStatus = getFreshServiceStatus(error);
       logger.error('Error creating FreshService ticket:', { status: httpStatus, detail: JSON.stringify(detail) });
       // Surface FS field-level errors in the message — "Validation failed"
       // alone is undebuggable from a mirror-job lastError (QA 07-28 TP-1058:
@@ -1100,8 +1111,8 @@ class FreshServiceClient {
       const response = await this._put(`/tickets/${ticketId}`, { ticket: payload });
       return response.data.ticket;
     } catch (error) {
-      const detail = error.response?.data;
-      const httpStatus = error.response?.status;
+      const detail = getFreshServiceDetail(error);
+      const httpStatus = getFreshServiceStatus(error);
       logger.error(`Error updating ticket ${ticketId}:`, { status: httpStatus, detail });
       const wrapped = new Error(detail?.description || detail?.message || error.message);
       wrapped.freshserviceDetail = detail;
@@ -1129,7 +1140,7 @@ class FreshServiceClient {
       }
       return response.data;
     } catch (error) {
-      const httpStatus = error.response?.status || error.statusCode;
+      const httpStatus = getFreshServiceStatus(error);
       if (httpStatus === 404 || httpStatus === 405) {
         logger.info(`Ticket ${ticketId} is deleted or in terminal state, skipping note`);
         return { ticketId, skipped: true, reason: 'ticket_deleted_or_terminal' };
@@ -1160,8 +1171,8 @@ class FreshServiceClient {
       }
       return response.data;
     } catch (error) {
-      const detail = error.response?.data;
-      const httpStatus = error.response?.status;
+      const detail = getFreshServiceDetail(error);
+      const httpStatus = getFreshServiceStatus(error);
       logger.error(`Error replying to ticket ${ticketId}:`, { status: httpStatus, detail });
       const wrapped = new Error(detail?.description || detail?.message || error.message);
       wrapped.freshserviceDetail = detail;
