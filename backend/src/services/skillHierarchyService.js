@@ -40,7 +40,10 @@ function asArray(value) {
 export function normalizeSkillState(input = {}) {
   const sourceSkills = asArray(input.skills || input.categories || input.categoryTree);
   const warnings = [];
-  const seenNames = new Set();
+  // Name uniqueness is PER PARENT (matching the DB's partial unique indexes):
+  // skills dedupe against other skills, subskills against siblings under the
+  // same skill. "Quebec" may exist under two different parents.
+  const seenSkillNames = new Set();
   const skills = [];
 
   sourceSkills.forEach((rawSkill, skillIndex) => {
@@ -51,13 +54,14 @@ export function normalizeSkillState(input = {}) {
     }
 
     const skillKey = keyFor(name);
-    if (seenNames.has(skillKey)) {
+    if (seenSkillNames.has(skillKey)) {
       warnings.push({ type: 'duplicate_removed', level: 'skill', name });
       return;
     }
-    seenNames.add(skillKey);
+    seenSkillNames.add(skillKey);
 
     const subskills = [];
+    const seenSiblingNames = new Set();
     for (const [subIndex, rawSubskill] of asArray(rawSkill.subskills || rawSkill.subcategories || rawSkill.children).entries()) {
       const subName = normalizeName(rawSubskill?.name);
       if (!subName || isPlaceholderName(subName) || rawSubskill?.deleted) {
@@ -65,11 +69,11 @@ export function normalizeSkillState(input = {}) {
         continue;
       }
       const subKey = keyFor(subName);
-      if (seenNames.has(subKey)) {
+      if (seenSiblingNames.has(subKey)) {
         warnings.push({ type: 'duplicate_removed', level: 'subskill', name: subName, parent: name });
         continue;
       }
-      seenNames.add(subKey);
+      seenSiblingNames.add(subKey);
       subskills.push({
         id: rawSubskill.id || tempId('subskill', subName, subIndex),
         name: subName,
@@ -227,6 +231,82 @@ function recordsByName(records = []) {
     .filter(([name]) => name));
 }
 
+/** All records sharing a (normalized) name. FS custom-object records keep
+ *  BARE subskill names, so per-parent duplicate subs ("Quebec" under two
+ *  parents) appear as same-named records — callers disambiguate via the
+ *  parent_skill lookup field, never by collapsing them into one map slot. */
+function groupRecordsByName(records = []) {
+  const map = new Map();
+  for (const record of records) {
+    const key = keyFor(recordName(record));
+    if (!key) continue;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(record);
+  }
+  return map;
+}
+
+function recordParentDisplayId(record) {
+  return lookupRecordId(record?.data?.[TP_SUBSKILL_PARENT_FIELD]);
+}
+
+/**
+ * Parent-aware mirror comparison for the subskill custom-lookup object.
+ * Published subskills are keyed by (parent skill, name); mirror records
+ * resolve their parent through the parent_skill lookup. A record without a
+ * resolvable parent satisfies a bare-name match (the parent-drift pass adopts
+ * and re-points it) instead of being flagged missing+extra. Counts are
+ * consumed one-for-one so per-parent duplicate names reconcile correctly.
+ * (Dropdown-choice mirrors stay a flat name-set compare — choices carry no
+ * parent, a residual FS-side constraint.)
+ */
+export function compareSubskillLookupMirror(published, skillRecords = [], subskillRecords = []) {
+  const skillKeyByDisplayId = new Map();
+  for (const record of skillRecords) {
+    const displayId = recordDisplayId(record);
+    const nameKey = keyFor(recordName(record));
+    if (displayId && nameKey) skillKeyByDisplayId.set(displayId, nameKey);
+  }
+
+  const scopedCounts = new Map(); // `${parentKey}\u0000${nameKey}` -> count
+  const bareCounts = new Map(); // nameKey -> count (records without a resolvable parent)
+  const displayNameByKey = new Map();
+  for (const record of subskillRecords) {
+    const name = recordName(record);
+    const nameKey = keyFor(name);
+    if (!nameKey) continue;
+    const parentId = recordParentDisplayId(record);
+    const parentKey = parentId ? skillKeyByDisplayId.get(parentId) : null;
+    const counts = parentKey ? scopedCounts : bareCounts;
+    const key = parentKey ? `${parentKey}\u0000${nameKey}` : nameKey;
+    counts.set(key, (counts.get(key) || 0) + 1);
+    displayNameByKey.set(key, name);
+  }
+
+  const missing = [];
+  for (const skill of asArray(published?.skills)) {
+    for (const subskill of asArray(skill.subskills)) {
+      const scopedKey = `${keyFor(skill.name)}\u0000${keyFor(subskill.name)}`;
+      if ((scopedCounts.get(scopedKey) || 0) > 0) {
+        scopedCounts.set(scopedKey, scopedCounts.get(scopedKey) - 1);
+        continue;
+      }
+      const bareKey = keyFor(subskill.name);
+      if ((bareCounts.get(bareKey) || 0) > 0) {
+        bareCounts.set(bareKey, bareCounts.get(bareKey) - 1);
+        continue;
+      }
+      missing.push(subskill.name);
+    }
+  }
+
+  const extra = [];
+  for (const [key, count] of [...scopedCounts.entries(), ...bareCounts.entries()]) {
+    for (let i = 0; i < count; i += 1) extra.push(displayNameByKey.get(key));
+  }
+  return { missing, extra };
+}
+
 function expectedSubskillParents(published) {
   const expectations = [];
   for (const skill of asArray(published?.skills)) {
@@ -242,15 +322,17 @@ function expectedSubskillParents(published) {
 
 export function buildSubskillParentDrift(published, skillRecords = [], subskillRecords = []) {
   const skillByName = recordsByName(skillRecords);
-  const subskillByName = recordsByName(subskillRecords);
+  const subskillsByName = groupRecordsByName(subskillRecords);
   const missingParent = [];
   const wrongParent = [];
   const unresolved = [];
+  const claimed = new Set();
 
   for (const expected of expectedSubskillParents(published)) {
-    const subskillRecord = subskillByName.get(keyFor(expected.subskill));
+    const candidates = (subskillsByName.get(keyFor(expected.subskill)) || [])
+      .filter((record) => !claimed.has(record));
     const parentRecord = skillByName.get(keyFor(expected.parent));
-    if (!subskillRecord || !parentRecord) continue;
+    if (candidates.length === 0 || !parentRecord) continue;
 
     const expectedParentId = recordDisplayId(parentRecord);
     if (!expectedParentId) {
@@ -258,7 +340,24 @@ export function buildSubskillParentDrift(published, skillRecords = [], subskillR
       continue;
     }
 
-    const currentParentId = lookupRecordId(subskillRecord?.data?.[TP_SUBSKILL_PARENT_FIELD]);
+    // Same-named records are disambiguated by their parent lookup: an exact
+    // parent match means no drift; a parentless record can be adopted
+    // (missingParent); a single leftover record is a wrongParent fix; several
+    // leftover same-named records are ambiguous — report, never guess.
+    const exact = candidates.find((record) => recordParentDisplayId(record) === expectedParentId);
+    if (exact) {
+      claimed.add(exact);
+      continue;
+    }
+    const subskillRecord = candidates.find((record) => !recordParentDisplayId(record))
+      || (candidates.length === 1 ? candidates[0] : null);
+    if (!subskillRecord) {
+      unresolved.push({ subskill: expected.subskill, expectedParent: expected.parent, reason: 'ambiguous_same_named_records' });
+      continue;
+    }
+    claimed.add(subskillRecord);
+
+    const currentParentId = recordParentDisplayId(subskillRecord);
     const item = {
       subskill: expected.subskill,
       expectedParent: expected.parent,
@@ -269,7 +368,7 @@ export function buildSubskillParentDrift(published, skillRecords = [], subskillR
     };
     if (!currentParentId) {
       missingParent.push(item);
-    } else if (currentParentId !== expectedParentId) {
+    } else {
       wrongParent.push(item);
     }
   }
@@ -404,12 +503,33 @@ class SkillHierarchyService {
         where: { workspaceId },
         orderBy: [{ parentId: 'asc' }, { sortOrder: 'asc' }, { name: 'asc' }],
       });
-      const currentByName = new Map(current.map((category) => [keyFor(category.name), category]));
+      // Rows are matched by PARENT-SCOPED name (parents keyed separately from
+      // children, \u0000 separator) so same-named subs under different parents
+      // resolve to their own rows. A unique bare-name fallback preserves the
+      // old promote/move-across-parents behavior when it is unambiguous.
+      const topKeyOf = (name) => `\u0000${keyFor(name)}`;
+      const childKeyOf = (parentId, name) => `${parentId}\u0000${keyFor(name)}`;
+      const currentByScopedKey = new Map();
+      const currentByBareName = new Map();
+      for (const category of current) {
+        currentByScopedKey.set(
+          category.parentId ? childKeyOf(category.parentId, category.name) : topKeyOf(category.name),
+          category,
+        );
+        const bareKey = keyFor(category.name);
+        if (!currentByBareName.has(bareKey)) currentByBareName.set(bareKey, []);
+        currentByBareName.get(bareKey).push(category);
+      }
       const targetByTempId = new Map();
       const targetIds = new Set();
+      const uniqueBareMatch = (name, excludeId = null) => {
+        const rows = (currentByBareName.get(keyFor(name)) || [])
+          .filter((row) => row.id !== excludeId && !targetIds.has(row.id));
+        return rows.length === 1 ? rows[0] : null;
+      };
 
       for (const [skillIndex, skill] of state.skills.entries()) {
-        let skillRow = currentByName.get(keyFor(skill.name));
+        let skillRow = currentByScopedKey.get(topKeyOf(skill.name)) || uniqueBareMatch(skill.name);
         if (skillRow) {
           skillRow = await tx.competencyCategory.update({
             where: { id: skillRow.id },
@@ -437,7 +557,8 @@ class SkillHierarchyService {
         targetByTempId.set(skill.id, { skillId: skillRow.id, subskillId: null, skillName: skillRow.name, subskillName: null });
 
         for (const [subIndex, subskill] of asArray(skill.subskills).entries()) {
-          let subRow = currentByName.get(keyFor(subskill.name));
+          let subRow = currentByScopedKey.get(childKeyOf(skillRow.id, subskill.name))
+            || uniqueBareMatch(subskill.name, skillRow.id);
           if (subRow) {
             subRow = await tx.competencyCategory.update({
               where: { id: subRow.id },
@@ -603,7 +724,12 @@ class SkillHierarchyService {
       };
     };
     const skillDrift = compare(skillNames, fsSkillNames);
-    const subskillDrift = compare(subskillNames, fsSubskillNames);
+    // Subskill names are only unique PER PARENT — for lookup-object mirrors,
+    // compare by (parent, name) so same-named siblings reconcile; flat
+    // dropdown choices can't carry a parent, so they keep the name-set compare.
+    const subskillDrift = fieldReport.found.subskill?.field_type === 'custom_lookup'
+      ? compareSubskillLookupMirror(published, skillRecords, subskillRecords)
+      : compare(subskillNames, fsSubskillNames);
     const subskillParentDrift = fieldReport.found.skill?.field_type === 'custom_lookup'
       && fieldReport.found.subskill?.field_type === 'custom_lookup'
       ? buildSubskillParentDrift(published, skillRecords, subskillRecords)
@@ -679,22 +805,34 @@ class SkillHierarchyService {
     }
 
     const skillByName = recordsByName(skillRecords);
-    const existingSubskills = new Set(recordNames(subskillRecords).map(keyFor));
+    // Records keep BARE subskill names in FS (per-parent duplicates look
+    // identical in the FS UI — a residual FS-side constraint), so "already
+    // exists" is judged per (parent, name): an exact parent match counts, a
+    // parentless record is adopted (the parent-drift pass below re-points
+    // it), and each record satisfies at most one expected subskill.
+    const subskillsByName = groupRecordsByName(subskillRecords);
+    const claimedRecords = new Set();
     const createdSubskills = [];
     for (const { subskill: name, parent } of subskillTargets) {
-      if (!existingSubskills.has(keyFor(name))) {
-        const parentRecord = skillByName.get(keyFor(parent));
-        const parentDisplayId = recordDisplayId(parentRecord);
-        if (!parentDisplayId) {
-          throw new ValidationError(`Freshservice parent skill lookup record not found for "${parent}"`);
-        }
-        await client.createCustomObjectRecord(subskillObject.id, {
-          name,
-          [TP_SUBSKILL_PARENT_FIELD]: parentDisplayId,
-        });
-        existingSubskills.add(keyFor(name));
-        createdSubskills.push({ name, parent });
+      const parentRecord = skillByName.get(keyFor(parent));
+      const parentDisplayId = recordDisplayId(parentRecord);
+      if (!parentDisplayId) {
+        throw new ValidationError(`Freshservice parent skill lookup record not found for "${parent}"`);
       }
+      const candidates = (subskillsByName.get(keyFor(name)) || [])
+        .filter((record) => !claimedRecords.has(record));
+      const match = candidates.find((record) => recordParentDisplayId(record) === parentDisplayId)
+        || candidates.find((record) => !recordParentDisplayId(record))
+        || (candidates.length === 1 ? candidates[0] : null);
+      if (match) {
+        claimedRecords.add(match);
+        continue;
+      }
+      await client.createCustomObjectRecord(subskillObject.id, {
+        name,
+        [TP_SUBSKILL_PARENT_FIELD]: parentDisplayId,
+      });
+      createdSubskills.push({ name, parent });
     }
 
     if (createdSubskills.length > 0) {

@@ -293,8 +293,47 @@ const shapeTaxonomy = (record) => ({
   sortOrder: record.sortOrder ?? 0,
 });
 
-/** CompetencyCategory tree exported flat as {name, parentName}. Name is unique
- *  per workspace, so `name` is the match key; parents apply before children. */
+/** Category names are only unique PER PARENT (partial unique indexes, Aug
+ *  2026), so the taxonomy natural key is parentName + NUL + name. */
+const TAXONOMY_KEY_SEPARATOR = String.fromCharCode(0);
+const taxonomyKey = (row) => `${row.parentName ?? ''}${TAXONOMY_KEY_SEPARATOR}${row.name}`;
+
+/** Snapshots have always carried parentName on taxonomy rows, so old bundles
+ *  key cleanly under the compound key. Defensive legacy path: a row missing
+ *  the parentName PROPERTY altogether (pre-compound-key producers matched by
+ *  bare name) is adopted only when its bare name is unambiguous in the target
+ *  workspace — otherwise it is reported as a conflict, never guessed. */
+function resolveLegacyTaxonomyRows(rows, existingShaped) {
+  const resolved = [];
+  const conflicts = [];
+  const byBareName = new Map();
+  for (const row of existingShaped) {
+    if (!byBareName.has(row.name)) byBareName.set(row.name, []);
+    byBareName.get(row.name).push(row);
+  }
+  for (const raw of rows || []) {
+    const row = normalizeValue(raw);
+    if (!row || typeof row !== 'object' || 'parentName' in row) {
+      resolved.push(row);
+      continue;
+    }
+    const candidates = byBareName.get(String(row.name)) || [];
+    if (candidates.length > 1) {
+      conflicts.push({
+        key: String(row.name),
+        reason: 'Legacy snapshot row has no parentName and the name exists under multiple parents — resolve manually',
+      });
+      continue;
+    }
+    resolved.push({ ...row, parentName: candidates.length === 1 ? candidates[0].parentName : null });
+  }
+  return { resolved, conflicts };
+}
+
+/** CompetencyCategory tree exported flat as {name, parentName}. Names are
+ *  unique per PARENT (not per workspace), so the match key is
+ *  parentName+NUL+name; parents apply before children. Top-level names stay
+ *  workspace-unique, which is what lets parentName resolve to a parent id. */
 const taxonomyModule = {
   tier: 'config',
   restorable: true,
@@ -310,7 +349,13 @@ const taxonomyModule = {
     return [...shaped.filter((row) => !row.parentName), ...shaped.filter((row) => row.parentName)];
   },
 
-  diff: async (workspaceId, rows, db = prisma) => computeDiff(await taxonomyModule.export(workspaceId, db), rows, (row) => String(row.name)),
+  diff: async (workspaceId, rows, db = prisma) => {
+    const existing = await taxonomyModule.export(workspaceId, db);
+    const { resolved, conflicts } = resolveLegacyTaxonomyRows(rows, existing);
+    const diff = computeDiff(existing, resolved, taxonomyKey);
+    diff.conflicts.push(...conflicts);
+    return diff;
+  },
 
   apply: async (workspaceId, rows, mode, db = prisma) => {
     const counts = { created: 0, updated: 0, skipped: 0, deleted: 0, conflicts: 0 };
@@ -319,23 +364,31 @@ const taxonomyModule = {
       orderBy: { id: 'asc' },
       include: { parent: { select: { name: true } } },
     });
-    const byName = new Map(records.map((record) => [record.name, record]));
-    const idByName = new Map(records.map((record) => [record.name, record.id]));
-    const incoming = (rows || []).map(normalizeValue);
-    const incomingNames = new Set(incoming.map((row) => String(row.name)));
+    const byKey = new Map(records.map((record) => [taxonomyKey(shapeTaxonomy(record)), record]));
+    // Only top-level rows resolve parentName → id (they stay workspace-unique).
+    const topIdByName = new Map(records.filter((record) => !record.parentId).map((record) => [record.name, record.id]));
+    const { resolved: incoming, conflicts: legacyConflicts } = resolveLegacyTaxonomyRows(
+      rows,
+      records.map((record) => normalizeValue(shapeTaxonomy(record))),
+    );
+    counts.conflicts += legacyConflicts.length;
+    for (const conflict of legacyConflicts) {
+      logger.warn(`[backup] taxonomy restore skipped legacy row "${conflict.key}": ${conflict.reason}`);
+    }
+    const incomingKeys = new Set(incoming.map(taxonomyKey));
 
     if (mode === 'replace') {
       // Children before parents so FK order holds; failures (e.g. categories
       // still referenced by competencies) downgrade to conflicts.
       const doomed = records
-        .filter((record) => !incomingNames.has(record.name))
+        .filter((record) => !incomingKeys.has(taxonomyKey(shapeTaxonomy(record))))
         .sort((a, b) => (b.parentId ? 1 : 0) - (a.parentId ? 1 : 0));
       for (const record of doomed) {
         try {
           await db.competencyCategory.delete({ where: { id: record.id } });
           counts.deleted += 1;
-          byName.delete(record.name);
-          idByName.delete(record.name);
+          byKey.delete(taxonomyKey(shapeTaxonomy(record)));
+          if (!record.parentId) topIdByName.delete(record.name);
         } catch (err) {
           counts.conflicts += 1;
           logger.warn(`[backup] replace delete failed for category "${record.name}": ${err.message}`);
@@ -345,7 +398,7 @@ const taxonomyModule = {
 
     const ordered = [...incoming.filter((row) => !row.parentName), ...incoming.filter((row) => row.parentName)];
     for (const row of ordered) {
-      const parentId = row.parentName ? idByName.get(row.parentName) ?? null : null;
+      const parentId = row.parentName ? topIdByName.get(row.parentName) ?? null : null;
       if (row.parentName && parentId === null) {
         counts.conflicts += 1;
         continue;
@@ -359,10 +412,10 @@ const taxonomyModule = {
         source: row.source ?? 'manual',
         sortOrder: row.sortOrder ?? 0,
       };
-      const record = byName.get(row.name);
+      const record = byKey.get(taxonomyKey(row));
       if (!record) {
         const created = await db.competencyCategory.create({ data: { workspaceId, ...data } });
-        idByName.set(row.name, created.id);
+        if (!row.parentName) topIdByName.set(row.name, created.id);
         counts.created += 1;
       } else if (sameRow(shapeTaxonomy(record), row)) {
         counts.skipped += 1;

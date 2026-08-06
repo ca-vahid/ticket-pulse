@@ -925,11 +925,6 @@ ${JSON.stringify(context.snapshot, null, 2)}`,
     const payload = item.editedPayload || item.payload || {};
     const action = payload.action || item.actionType || 'update';
     const categories = await competencyRepository.getCategories(workspaceId);
-    const findCategory = () => {
-      if (payload.categoryId) return categories.find((cat) => cat.id === Number(payload.categoryId));
-      return categories.find((cat) => cat.name.toLowerCase() === String(payload.categoryName || '').toLowerCase());
-    };
-    const existing = findCategory();
     const resolveParentId = () => {
       if (payload.parentCategoryId) return Number(payload.parentCategoryId);
       if (payload.parentCategoryName) {
@@ -941,6 +936,20 @@ ${JSON.stringify(context.snapshot, null, 2)}`,
       }
       return payload.parentId === null ? null : undefined;
     };
+    // Names are only unique per parent — the leaf lookup must be scoped by
+    // the resolved parent. Without parent context, prefer the top-level row,
+    // else accept a bare-name match only when it is unambiguous.
+    const scopedParentId = resolveParentId(); // number | null (top-level) | undefined (no context)
+    const findCategory = () => {
+      if (payload.categoryId) return categories.find((cat) => cat.id === Number(payload.categoryId));
+      const nameKey = String(payload.categoryName || '').toLowerCase();
+      const named = categories.filter((cat) => cat.name.toLowerCase() === nameKey);
+      if (scopedParentId !== undefined) {
+        return named.find((cat) => (cat.parentId ?? null) === scopedParentId);
+      }
+      return named.find((cat) => !cat.parentId) || (named.length === 1 ? named[0] : undefined);
+    };
+    const existing = findCategory();
 
     if (action === 'add') {
       const parentId = resolveParentId();

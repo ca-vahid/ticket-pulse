@@ -1488,8 +1488,15 @@ class AssignmentPipelineService {
             },
             select: { id: true, name: true, parentId: true },
           });
+          // Names are only unique per parent: with a resolved parent the
+          // child must live UNDER that parent; without one, accept a child
+          // only when its name is unambiguous workspace-wide — never pick an
+          // arbitrary same-named sibling from another parent.
           const parent = matches.find((c) => !c.parentId);
-          const child = matches.find((c) => c.parentId && (!parent || c.parentId === parent.id));
+          const childMatches = matches.filter((c) => c.parentId);
+          const child = parent
+            ? (childMatches.find((c) => c.parentId === parent.id) || null)
+            : (childMatches.length === 1 ? childMatches[0] : null);
           categoryId = parent?.id || child?.parentId || null;
           subcategoryId = child?.id || null;
           if (categoryId || subcategoryId) {

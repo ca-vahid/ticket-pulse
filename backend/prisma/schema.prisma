@@ -1987,7 +1987,11 @@ model CompetencyCategory {
   ticketsAsInternalSubcategory Ticket[]                  @relation("TicketInternalSubcategory")
   groupLinks                   CategoryGroupLink[]
 
-  @@unique([workspaceId, name])
+  // Name uniqueness is PER PARENT, enforced by two partial unique indexes that
+  // Prisma cannot express (migration 20260806200000_category_scoped_names):
+  //   competency_categories_ws_name_toplevel_key  ON (workspace_id, name) WHERE parent_id IS NULL
+  //   competency_categories_ws_parent_name_key    ON (workspace_id, parent_id, name) WHERE parent_id IS NOT NULL
+  // Violations surface as P2002 keyed by index name — see competencyRepository.
   @@index([workspaceId])
   @@index([workspaceId, parentId])
   @@index([parentId])

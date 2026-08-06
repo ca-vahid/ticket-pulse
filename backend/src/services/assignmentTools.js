@@ -949,7 +949,7 @@ function buildInternalTaxonomyBreakdown(tickets = []) {
   };
 }
 
-async function resolveInternalCategorySelection(workspaceId, selection = {}) {
+export async function resolveInternalCategorySelection(workspaceId, selection = {}) {
   const requestedCategoryId = Number(selection.categoryId);
   const requestedSubcategoryId = Number(selection.subcategoryId);
   const categoryName = selection.categoryName || selection.category;
@@ -960,7 +960,20 @@ async function resolveInternalCategorySelection(workspaceId, selection = {}) {
     select: { id: true, name: true, parentId: true },
   });
   const byId = new Map(categories.map((c) => [c.id, c]));
-  const byName = new Map(categories.map((c) => [c.name.toLowerCase(), c]));
+  // Names are only unique PER PARENT: top-level names get their own map, and
+  // children are keyed under their parent so "Quebec" under two parents never
+  // collapses into one slot.
+  const topByName = new Map(categories.filter((c) => !c.parentId).map((c) => [c.name.toLowerCase(), c]));
+  const childrenByParent = new Map();
+  const childrenByBareName = new Map();
+  for (const c of categories) {
+    if (!c.parentId) continue;
+    const nameKey = c.name.toLowerCase();
+    if (!childrenByParent.has(c.parentId)) childrenByParent.set(c.parentId, new Map());
+    childrenByParent.get(c.parentId).set(nameKey, c);
+    if (!childrenByBareName.has(nameKey)) childrenByBareName.set(nameKey, []);
+    childrenByBareName.get(nameKey).push(c);
+  }
 
   let category = Number.isInteger(requestedCategoryId) ? byId.get(requestedCategoryId) : null;
   let subcategory = Number.isInteger(requestedSubcategoryId) ? byId.get(requestedSubcategoryId) : null;
@@ -971,18 +984,27 @@ async function resolveInternalCategorySelection(workspaceId, selection = {}) {
   }
 
   if (!category && categoryName) {
-    const named = byName.get(String(categoryName).toLowerCase());
-    if (named?.parentId) {
-      subcategory = subcategory || named;
-      category = byId.get(named.parentId) || null;
+    const nameKey = String(categoryName).toLowerCase();
+    const named = topByName.get(nameKey);
+    if (named) {
+      category = named;
     } else {
-      category = named || null;
+      // The name may actually be a subcategory's — accept it only when it is
+      // unambiguous across parents; with duplicates we cannot know which
+      // sibling was meant, so we resolve nothing rather than guess.
+      const childMatches = childrenByBareName.get(nameKey) || [];
+      if (childMatches.length === 1) {
+        subcategory = subcategory || childMatches[0];
+        category = byId.get(childMatches[0].parentId) || null;
+      }
     }
   }
 
-  if (!subcategory && subcategoryName) {
-    const namedSubcategory = byName.get(String(subcategoryName).toLowerCase());
-    if (namedSubcategory?.parentId) {
+  if (!subcategory && subcategoryName && category) {
+    // Subcategory resolution REQUIRES the resolved parent — bare-name matches
+    // across arbitrary parents are how the July orphaning class started.
+    const namedSubcategory = childrenByParent.get(category.id)?.get(String(subcategoryName).toLowerCase());
+    if (namedSubcategory) {
       subcategory = namedSubcategory;
     }
   }

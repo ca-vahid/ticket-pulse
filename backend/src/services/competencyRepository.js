@@ -74,6 +74,26 @@ function inferParentCompetenciesForSkillHierarchy(competencies = [], categories 
   return [...normalized, ...inferred];
 }
 
+/** True when the error is a unique violation of the per-parent category name
+ *  indexes (competency_categories_ws_name_toplevel_key /
+ *  competency_categories_ws_parent_name_key — raw partial indexes; Prisma
+ *  still raises P2002 with meta.target = DB column names, verified locally on
+ *  Prisma 5.22). */
+function isCategoryNameConflict(error) {
+  return error?.code === 'P2002';
+}
+
+/** Friendly duplicate-name error, scoped the way the constraint is scoped. */
+async function categoryNameConflictError(name, parentId, db = prisma) {
+  if (parentId) {
+    const parent = await db.competencyCategory
+      .findUnique({ where: { id: parentId }, select: { name: true } })
+      .catch(() => null);
+    return new ValidationError(`Subcategory "${name}" already exists under "${parent?.name || 'this category'}"`);
+  }
+  return new ValidationError(`Category "${name}" already exists in this workspace`);
+}
+
 class CompetencyRepository {
   // ─── Categories ───────────────────────────────────────────────────────
 
@@ -130,6 +150,73 @@ class CompetencyRepository {
     return buildCategoryTree(categories);
   }
 
+  /**
+   * Every category row (active AND inactive) with usage counts, for the admin
+   * category manager. Counts come from three groupBy queries — never N+1.
+   * FROZEN CONTRACT (frontend CompetencyManager): [{ id, name, description,
+   * parentId, parentName, isActive, source, sortOrder, isSystemSuggested,
+   * createdAt, updatedAt, ticketCount, techCount, childCount }].
+   */
+  async getCategoriesDetailed(workspaceId) {
+    try {
+      const [rows, techCounts, categoryTicketCounts, subcategoryTicketCounts, childCounts] = await Promise.all([
+        prisma.competencyCategory.findMany({
+          where: { workspaceId },
+          orderBy: categoryOrder(),
+        }),
+        prisma.technicianCompetency.groupBy({
+          by: ['competencyCategoryId'],
+          where: { workspaceId },
+          _count: { _all: true },
+        }),
+        prisma.ticket.groupBy({
+          by: ['internalCategoryId'],
+          where: { workspaceId, internalCategoryId: { not: null } },
+          _count: { _all: true },
+        }),
+        prisma.ticket.groupBy({
+          by: ['internalSubcategoryId'],
+          where: { workspaceId, internalSubcategoryId: { not: null } },
+          _count: { _all: true },
+        }),
+        prisma.competencyCategory.groupBy({
+          by: ['parentId'],
+          where: { workspaceId, parentId: { not: null } },
+          _count: { _all: true },
+        }),
+      ]);
+
+      const nameById = new Map(rows.map((row) => [row.id, row.name]));
+      const techByCategory = new Map(techCounts.map((row) => [row.competencyCategoryId, row._count._all]));
+      const ticketsAsCategory = new Map(categoryTicketCounts.map((row) => [row.internalCategoryId, row._count._all]));
+      const ticketsAsSubcategory = new Map(subcategoryTicketCounts.map((row) => [row.internalSubcategoryId, row._count._all]));
+      const childrenByParent = new Map(childCounts.map((row) => [row.parentId, row._count._all]));
+
+      return rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        description: row.description,
+        parentId: row.parentId,
+        parentName: row.parentId ? nameById.get(row.parentId) ?? null : null,
+        isActive: row.isActive,
+        source: row.source,
+        sortOrder: row.sortOrder,
+        isSystemSuggested: row.isSystemSuggested,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+        // A row is referenced via internal_category_id (top-level) or
+        // internal_subcategory_id (sub); the columns are disjoint per level so
+        // the sum is that row's ticket usage.
+        ticketCount: (ticketsAsCategory.get(row.id) || 0) + (ticketsAsSubcategory.get(row.id) || 0),
+        techCount: techByCategory.get(row.id) || 0,
+        childCount: childrenByParent.get(row.id) || 0,
+      }));
+    } catch (error) {
+      logger.error('Error fetching detailed competency categories:', error);
+      throw new DatabaseError('Failed to fetch detailed competency categories', error);
+    }
+  }
+
   async validateParent(workspaceId, parentId, categoryId = null) {
     if (parentId === undefined || parentId === null || parentId === '') return null;
     const parsedParentId = Number(parentId);
@@ -163,8 +250,9 @@ class CompetencyRepository {
   }
 
   async createCategory(workspaceId, data) {
+    let parentId = null;
     try {
-      const parentId = await this.validateParent(workspaceId, data.parentId);
+      parentId = await this.validateParent(workspaceId, data.parentId);
       return await prisma.competencyCategory.create({
         data: {
           workspaceId,
@@ -179,8 +267,8 @@ class CompetencyRepository {
       });
     } catch (error) {
       if (error instanceof ValidationError) throw error;
-      if (error.code === 'P2002') {
-        throw new DatabaseError(`Category "${data.name}" already exists in this workspace`);
+      if (isCategoryNameConflict(error)) {
+        throw await categoryNameConflictError(data.name, parentId);
       }
       logger.error('Error creating competency category:', error);
       throw new DatabaseError('Failed to create competency category', error);
@@ -188,6 +276,8 @@ class CompetencyRepository {
   }
 
   async updateCategory(id, data) {
+    let effectiveParentId;
+    let effectiveName;
     try {
       const current = await prisma.competencyCategory.findUnique({ where: { id } });
       if (!current) throw new NotFoundError(`Competency category ${id} not found`);
@@ -203,20 +293,52 @@ class CompetencyRepository {
         }
       }
 
-      return await prisma.competencyCategory.update({
-        where: { id },
-        data: {
-          ...(data.name !== undefined && { name: data.name }),
-          ...(data.description !== undefined && { description: data.description }),
-          ...(data.isActive !== undefined && { isActive: data.isActive }),
-          ...(data.parentId !== undefined && { parentId }),
-          ...(data.isSystemSuggested !== undefined && { isSystemSuggested: data.isSystemSuggested }),
-          ...(data.source !== undefined && { source: data.source || 'manual' }),
-          ...(data.sortOrder !== undefined && { sortOrder: Number(data.sortOrder) || 0 }),
-        },
+      // For the conflict message and the rename side-effect we need the row's
+      // level/name AFTER this update.
+      effectiveParentId = data.parentId !== undefined ? parentId : current.parentId;
+      effectiveName = data.name !== undefined ? data.name : current.name;
+      const nameChanged = data.name !== undefined && data.name !== current.name;
+
+      return await prisma.$transaction(async (tx) => {
+        const updated = await tx.competencyCategory.update({
+          where: { id },
+          data: {
+            ...(data.name !== undefined && { name: data.name }),
+            ...(data.description !== undefined && { description: data.description }),
+            ...(data.isActive !== undefined && { isActive: data.isActive }),
+            ...(data.parentId !== undefined && { parentId }),
+            ...(data.isSystemSuggested !== undefined && { isSystemSuggested: data.isSystemSuggested }),
+            ...(data.source !== undefined && { source: data.source || 'manual' }),
+            ...(data.sortOrder !== undefined && { sortOrder: Number(data.sortOrder) || 0 }),
+          },
+        });
+
+        // Renames must follow through to the denormalized name strings that
+        // ticket sync writes onto tickets (ticketService keeps tpSkill /
+        // tpSubskill in lockstep on categorization edits) — otherwise the old
+        // name lingers on every already-categorized ticket. Bounded: one
+        // updateMany per rename, scoped by the FK column for this level.
+        if (nameChanged) {
+          if (updated.parentId) {
+            await tx.ticket.updateMany({
+              where: { workspaceId: current.workspaceId, internalSubcategoryId: id },
+              data: { tpSubskill: updated.name },
+            });
+          } else {
+            await tx.ticket.updateMany({
+              where: { workspaceId: current.workspaceId, internalCategoryId: id },
+              data: { tpSkill: updated.name },
+            });
+          }
+        }
+
+        return updated;
       });
     } catch (error) {
       if (error instanceof NotFoundError || error instanceof ValidationError) throw error;
+      if (isCategoryNameConflict(error)) {
+        throw await categoryNameConflictError(effectiveName, effectiveParentId);
+      }
       logger.error('Error updating competency category:', error);
       throw new DatabaseError('Failed to update competency category', error);
     }
@@ -494,10 +616,75 @@ class CompetencyRepository {
       throw new DatabaseError('Failed to fetch technicians with competency', error);
     }
   }
-  async mergeCategories(workspaceId, keepId, mergeIds) {
+  /**
+   * Merge categories into keepId. Same-level only: merging subcategories
+   * remaps ticket.internalSubcategoryId, merging top-level categories remaps
+   * ticket.internalCategoryId and re-parents child rows onto keepId. Sub
+   * merges additionally require the SAME parent unless the caller explicitly
+   * passes { allowCrossParent: true } (the admin route never does).
+   *
+   * Deliberately NOT remapped (stale ids degrade gracefully): QuickNote
+   * .internalCategoryIds and TicketTemplate.internalCategoryId/SubcategoryId
+   * keep pointing at the deleted row — quick notes fall back to
+   * "shown everywhere"/hidden scoping and templates simply stop pre-filling
+   * the category, both easy to re-point in Settings → Ticket Ops. Same for
+   * TicketWatchSubscription / AgentAlertSubscription category filters, which
+   * just stop matching.
+   */
+  async mergeCategories(workspaceId, keepId, mergeIds, options = {}) {
     const LEVEL_ORDER = { basic: 1, intermediate: 2, advanced: 3, expert: 4 };
 
     try {
+      const rows = await prisma.competencyCategory.findMany({
+        where: { workspaceId, id: { in: [keepId, ...mergeIds] } },
+        select: { id: true, name: true, parentId: true },
+      });
+      const keep = rows.find((row) => row.id === keepId);
+      if (!keep) throw new ValidationError('Merge target not found in this workspace');
+      const mergeRows = rows.filter((row) => mergeIds.includes(row.id));
+      if (mergeRows.length !== mergeIds.length) {
+        throw new ValidationError('All categories being merged must belong to this workspace');
+      }
+      if (mergeRows.some((row) => row.id === keepId)) {
+        throw new ValidationError('A category cannot be merged into itself');
+      }
+
+      const keepIsSub = keep.parentId !== null;
+      const wrongLevel = mergeRows.find((row) => (row.parentId !== null) !== keepIsSub);
+      if (wrongLevel) {
+        throw new ValidationError(
+          `"${wrongLevel.name}" and "${keep.name}" are not at the same level — top-level categories and subcategories cannot be merged together`,
+        );
+      }
+      if (keepIsSub && options.allowCrossParent !== true) {
+        const crossParent = mergeRows.find((row) => row.parentId !== keep.parentId);
+        if (crossParent) {
+          throw new ValidationError(
+            `"${crossParent.name}" lives under a different parent than "${keep.name}" — move it first, or merge within one parent`,
+          );
+        }
+      }
+
+      if (!keepIsSub) {
+        // Re-parenting children of the merged categories onto keepId can
+        // collide with the per-parent unique name index — surface that as a
+        // clear pre-check instead of a mid-transaction failure.
+        const [keepChildren, mergeChildren] = await Promise.all([
+          prisma.competencyCategory.findMany({ where: { parentId: keepId }, select: { name: true } }),
+          prisma.competencyCategory.findMany({ where: { parentId: { in: mergeIds } }, select: { name: true } }),
+        ]);
+        const seen = new Set(keepChildren.map((child) => child.name.toLowerCase()));
+        for (const child of mergeChildren) {
+          const key = child.name.toLowerCase();
+          if (seen.has(key)) {
+            throw new ValidationError(
+              `Subcategory "${child.name}" exists under both "${keep.name}" and a category being merged — merge or rename those subcategories first`,
+            );
+          }
+          seen.add(key);
+        }
+      }
+
       return await prisma.$transaction(async (tx) => {
         const merging = await tx.technicianCompetency.findMany({
           where: { workspaceId, competencyCategoryId: { in: mergeIds } },
@@ -534,6 +721,50 @@ class CompetencyRepository {
           where: { competencyCategoryId: { in: mergeIds } },
         });
 
+        // Remap tickets BEFORE deleting the merged rows — the FKs are
+        // ON DELETE SET NULL, so skipping this silently orphaned tickets
+        // (the July 2026 Accounting incident class).
+        if (keepIsSub) {
+          await tx.ticket.updateMany({
+            where: { workspaceId, internalSubcategoryId: { in: mergeIds } },
+            data: {
+              internalSubcategoryId: keepId,
+              internalCategoryId: keep.parentId,
+              tpSubskill: keep.name,
+            },
+          });
+        } else {
+          await tx.ticket.updateMany({
+            where: { workspaceId, internalCategoryId: { in: mergeIds } },
+            data: { internalCategoryId: keepId, tpSkill: keep.name },
+          });
+          // Children of the merged categories move under keepId (name
+          // collisions were pre-checked above). Their tickets keep their
+          // internalSubcategoryId but must follow to the new parent.
+          await tx.competencyCategory.updateMany({
+            where: { workspaceId, parentId: { in: mergeIds } },
+            data: { parentId: keepId },
+          });
+        }
+
+        // Category→group routing links: move to keepId, skipping ones the
+        // keep category already has ((workspaceId, categoryId, groupId) is
+        // unique). Row counts are tiny, so per-row handling is fine.
+        const [keepLinks, mergeLinks] = await Promise.all([
+          tx.categoryGroupLink.findMany({ where: { workspaceId, categoryId: keepId }, select: { groupId: true } }),
+          tx.categoryGroupLink.findMany({ where: { workspaceId, categoryId: { in: mergeIds } } }),
+        ]);
+        const linkedGroupIds = new Set(keepLinks.map((link) => link.groupId.toString()));
+        for (const link of mergeLinks) {
+          const groupKey = link.groupId.toString();
+          if (linkedGroupIds.has(groupKey)) {
+            await tx.categoryGroupLink.delete({ where: { id: link.id } });
+          } else {
+            await tx.categoryGroupLink.update({ where: { id: link.id }, data: { categoryId: keepId } });
+            linkedGroupIds.add(groupKey);
+          }
+        }
+
         await tx.competencyCategory.deleteMany({
           where: { id: { in: mergeIds }, workspaceId },
         });
@@ -546,6 +777,7 @@ class CompetencyRepository {
         return { merged: mergeIds.length, remaining: remaining.length, categories: remaining };
       });
     } catch (error) {
+      if (error instanceof ValidationError || error instanceof NotFoundError) throw error;
       logger.error('Error merging competency categories:', error);
       throw new DatabaseError('Failed to merge competency categories', error);
     }

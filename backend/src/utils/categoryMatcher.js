@@ -146,13 +146,22 @@ export function findBestCategoryMatch(proposedName, existingCategories, threshol
   return { match: bestMatch, score: bestScore, reason: bestReason };
 }
 
+/** "Project Setup > Quebec" for subcategories, bare name for top-level rows. */
+function categoryLabel(category) {
+  return category.parentName ? `${category.parentName} > ${category.name}` : category.name;
+}
+
 /**
  * Find all duplicate groups among a list of categories.
  * Returns groups of 2+ categories that appear to be duplicates.
  *
- * @param {Array<{id: number, name: string}>} categories
+ * Rows may carry parentId/parentName. Two rows with DIFFERENT parentIds are
+ * never paired — same-named subcategories under different parents are
+ * legitimate siblings under the per-parent uniqueness model, not duplicates.
+ *
+ * @param {Array<{id: number, name: string, parentId?: number|null, parentName?: string|null}>} categories
  * @param {number} [threshold=0.7]
- * @returns {Array<{ keepId: number, keepName: string, duplicates: Array<{id: number, name: string, score: number, reason: string}> }>}
+ * @returns {Array<{ keepId: number, keepName: string, keepLabel: string, keepParentId: number|null, keepParentName: string|null, duplicates: Array<{id: number, name: string, label: string, parentId: number|null, parentName: string|null, score: number, reason: string}> }>}
  */
 export function findDuplicateGroups(categories, threshold = 0.7) {
   const groups = [];
@@ -164,6 +173,7 @@ export function findDuplicateGroups(categories, threshold = 0.7) {
     const duplicates = [];
     for (let j = i + 1; j < categories.length; j++) {
       if (consumed.has(categories[j].id)) continue;
+      if ((categories[i].parentId ?? null) !== (categories[j].parentId ?? null)) continue;
 
       const { score, reason } = findBestCategoryMatch(
         categories[j].name,
@@ -175,6 +185,9 @@ export function findDuplicateGroups(categories, threshold = 0.7) {
         duplicates.push({
           id: categories[j].id,
           name: categories[j].name,
+          label: categoryLabel(categories[j]),
+          parentId: categories[j].parentId ?? null,
+          parentName: categories[j].parentName ?? null,
           score,
           reason,
         });
@@ -187,6 +200,9 @@ export function findDuplicateGroups(categories, threshold = 0.7) {
       groups.push({
         keepId: categories[i].id,
         keepName: categories[i].name,
+        keepLabel: categoryLabel(categories[i]),
+        keepParentId: categories[i].parentId ?? null,
+        keepParentName: categories[i].parentName ?? null,
         duplicates,
       });
     }
