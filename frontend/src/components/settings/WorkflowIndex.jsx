@@ -82,32 +82,38 @@ function IndexRow({
   const runs = workflow._count?.runs || 0;
   const version = workflow.publishedVersion || 0;
 
+  // QA 08-02 (Susan): rows were hard to tell apart — each workflow is now a
+  // clearly bounded card. The colored left edge keeps the enabled/failed/
+  // archived state read; selection promotes to a full blue border.
   return (
     <div
       className={cx(
-        'group relative flex w-full items-start gap-2 border-l-4 px-3 py-2.5 transition-colors',
-        nested && 'pl-5',
+        'group relative flex w-full items-center gap-2 rounded-lg px-3 py-2.5 transition-[border-color,box-shadow,background-color]',
+        nested && 'ml-3',
         selected
-          ? 'z-[1] border-l-blue-600 bg-blue-50 shadow-md ring-2 ring-inset ring-blue-600'
-          : isArchived
-            ? 'border-l-slate-300 bg-slate-100 hover:bg-slate-200/70'
-            : failed && isEnabled
-              ? 'border-l-red-400 bg-red-50/40 hover:bg-red-50'
-              : isEnabled
-                ? 'border-l-emerald-400 bg-white hover:bg-slate-50'
-                : 'border-l-slate-300 bg-slate-50 hover:bg-slate-100',
+          ? 'z-[1] border-2 border-blue-500 bg-blue-50/70 shadow-subtle'
+          : cx(
+            'border border-l-4 border-slate-200 hover:border-slate-300 hover:shadow-subtle',
+            isArchived
+              ? 'border-l-slate-300 bg-slate-100'
+              : failed && isEnabled
+                ? 'border-l-red-400 bg-white hover:bg-red-50/40'
+                : isEnabled
+                  ? 'border-l-emerald-400 bg-white'
+                  : 'border-l-slate-300 bg-slate-50',
+          ),
       )}
     >
       <button
         type="button"
         onClick={() => onSelect(workflow.id)}
         aria-current={selected ? 'true' : undefined}
-        className="min-w-0 flex-1 text-left"
+        className="min-w-0 flex-1 self-start text-left"
       >
         <span
           className={cx(
-            'block text-[14px] font-semibold leading-5 line-clamp-2',
-            isArchived ? 'text-slate-500' : isEnabled ? 'text-slate-900' : 'text-slate-600',
+            'block text-sm font-semibold leading-5 line-clamp-2',
+            isArchived ? 'text-slate-500' : isEnabled ? 'text-slate-800' : 'text-slate-600',
           )}
           title={workflow.name}
         >
@@ -126,7 +132,7 @@ function IndexRow({
           )}
           {version > 0
             ? <span className="inline-flex items-center rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 ring-1 ring-slate-200">v{version}</span>
-            : <span className="inline-flex items-center rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600 ring-1 ring-amber-200">Draft</span>}
+            : <span className="inline-flex items-center rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 ring-1 ring-amber-200">Draft</span>}
           {isArchived && (
             <span
               className="inline-flex items-center rounded-md bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 ring-1 ring-slate-300"
@@ -144,7 +150,7 @@ function IndexRow({
               <span className="truncate">{failed ? 'failed' : lastRun.status} · {relativeTime(lastRun.startedAt)}</span>
             </span>
           ) : (
-            <span className="inline-flex items-center rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-400 ring-1 ring-slate-200">no runs</span>
+            <span className="inline-flex items-center rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 ring-1 ring-slate-200">no runs</span>
           )}
         </span>
       </button>
@@ -161,7 +167,7 @@ function IndexRow({
           title={!isEnabled && version === 0 ? 'Publish the workflow before enabling it' : isEnabled ? 'Disable' : 'Enable'}
           onClick={(e) => { e.stopPropagation(); onToggleEnabled(workflow); }}
           className={cx(
-            'relative mt-0.5 h-5 w-9 shrink-0 rounded-full border transition-colors disabled:cursor-not-allowed disabled:opacity-40',
+            'relative h-5 w-9 shrink-0 self-center rounded-full border transition-colors disabled:cursor-not-allowed disabled:opacity-40',
             isEnabled ? 'border-emerald-300 bg-emerald-500' : 'border-slate-300 bg-slate-200',
           )}
         >
@@ -357,8 +363,9 @@ export default function WorkflowIndex({
           const total = (bucket.default ? 1 : 0) + bucket.customs.length;
           const GroupIcon = getVisuals(triggerType).icon;
           const isCollapsed = collapsed.has(triggerType) && !searching;
+          // Slate wash behind each group so the white bordered cards pop.
           return (
-            <section key={triggerType} className="bg-white">
+            <section key={triggerType} className="bg-slate-50/80">
               <div className="sticky top-[76px] z-10 flex w-full items-center border-y border-l-4 border-indigo-100 border-l-indigo-500 bg-indigo-50 transition-colors hover:bg-indigo-100/70">
                 <button
                   type="button"
@@ -370,8 +377,8 @@ export default function WorkflowIndex({
                   <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-white text-indigo-600 ring-1 ring-indigo-200">
                     <GroupIcon className="h-3 w-3" />
                   </span>
-                  <span className="min-w-0 flex-1 truncate text-[11px] font-bold uppercase tracking-wider text-indigo-800">{eventLabels[triggerType] || triggerType}</span>
-                  <span className="shrink-0 rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-bold text-indigo-700">{total}</span>
+                  <span className="min-w-0 flex-1 truncate text-xs font-bold uppercase tracking-wide text-indigo-800">{eventLabels[triggerType] || triggerType}</span>
+                  <span className="shrink-0 rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-bold text-indigo-700 ring-1 ring-indigo-200">{total}</span>
                 </button>
                 {onCreateForTrigger && (
                   <button
@@ -385,31 +392,37 @@ export default function WorkflowIndex({
                   </button>
                 )}
               </div>
-              {!isCollapsed && bucket.default && (
-                <IndexRow
-                  workflow={bucket.default}
-                  selected={selectedId === bucket.default.id}
-                  nested={false}
-                  onSelect={onSelect}
-                  onToggleEnabled={onToggleEnabled}
-                  toggling={togglingId}
-                  getDisplayName={getDisplayName}
-                  isAfterHours={isAfterHours}
-                />
+              {/* gap-1.5 between the bounded cards so each workflow reads as
+                  its own item instead of the rows visually merging. */}
+              {!isCollapsed && (
+                <div className="flex flex-col gap-1.5 px-2 py-2">
+                  {bucket.default && (
+                    <IndexRow
+                      workflow={bucket.default}
+                      selected={selectedId === bucket.default.id}
+                      nested={false}
+                      onSelect={onSelect}
+                      onToggleEnabled={onToggleEnabled}
+                      toggling={togglingId}
+                      getDisplayName={getDisplayName}
+                      isAfterHours={isAfterHours}
+                    />
+                  )}
+                  {bucket.customs.map((workflow) => (
+                    <IndexRow
+                      key={workflow.id}
+                      workflow={workflow}
+                      selected={selectedId === workflow.id}
+                      nested={Boolean(bucket.default)}
+                      onSelect={onSelect}
+                      onToggleEnabled={onToggleEnabled}
+                      toggling={togglingId}
+                      getDisplayName={getDisplayName}
+                      isAfterHours={isAfterHours}
+                    />
+                  ))}
+                </div>
               )}
-              {!isCollapsed && bucket.customs.map((workflow) => (
-                <IndexRow
-                  key={workflow.id}
-                  workflow={workflow}
-                  selected={selectedId === workflow.id}
-                  nested={Boolean(bucket.default)}
-                  onSelect={onSelect}
-                  onToggleEnabled={onToggleEnabled}
-                  toggling={togglingId}
-                  getDisplayName={getDisplayName}
-                  isAfterHours={isAfterHours}
-                />
-              ))}
             </section>
           );
         })}

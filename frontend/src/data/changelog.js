@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.2.01-preview';
+export const APP_VERSION = '3.2.02-preview';
 
 export const changelog = [
+  {
+    version: '3.2.02-preview',
+    date: 'August 6, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>🗂️ Workflow list, easier to scan</strong> — each workflow in the sidebar is now a clearly bordered card with a larger name, distinct selection outline, tidier badges, and separated groups — no more rows blending together. (QA feedback, Susan)' },
+      { type: 'fixed', html: '<strong>🔄 Friendlier “unsupported node” handling</strong> — if the app is an older version than a workflow’s features, the editor now explains it and suggests a hard-refresh instead of a cryptic “Unsupported node type” error; unrecognized steps render as neutral cards instead of odd placeholders.' },
+    ],
+  },
   {
     version: '3.2.01-preview',
     date: 'August 6, 2026',

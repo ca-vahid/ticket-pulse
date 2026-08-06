@@ -1348,6 +1348,10 @@ function displayPositionForNode(node, definition, index) {
 
 function WorkflowGraphNode({ id, data }) {
   const registry = WORKFLOW_NODE_REGISTRY[data.nodeType] || {};
+  // A type missing from the registry means the definition came from a newer
+  // backend (version skew) — render a neutral gray card labeled with the raw
+  // type rather than crashing or going blank. Handles stay so edges still draw.
+  const isUnknown = !WORKFLOW_NODE_REGISTRY[data.nodeType];
   const NodeIcon = registry.icon;
   const color = registry.color || '#6b7280';
   const isTrigger = data.nodeType === 'trigger';
@@ -1356,7 +1360,8 @@ function WorkflowGraphNode({ id, data }) {
   return (
     <div
       className={cls(
-        'relative min-h-[62px] w-[180px] rounded-lg border bg-white px-3 py-2 transition-shadow duration-200',
+        'relative min-h-[62px] w-[180px] rounded-lg border px-3 py-2 transition-shadow duration-200',
+        isUnknown ? 'bg-slate-50' : 'bg-white',
         data.selected
           ? 'border-indigo-300 shadow-lg ring-2 ring-indigo-400/60'
           : 'border-slate-200 shadow-sm hover:border-slate-300 hover:shadow-md',
@@ -1376,6 +1381,11 @@ function WorkflowGraphNode({ id, data }) {
         {registry.label || data.nodeType}
       </div>
       <div className="truncate text-sm font-semibold text-slate-900">{data.label || id}</div>
+      {isUnknown && (
+        <div className="mt-0.5 text-[10px] font-medium leading-4 text-slate-500">
+          Unrecognized step — hard-refresh (Ctrl+Shift+R) to update this app.
+        </div>
+      )}
       {data.sourceCaption && (
         <div className="truncate text-[10px] font-medium text-indigo-500" title={data.sourceCaption}>{data.sourceCaption}</div>
       )}
@@ -2020,7 +2030,14 @@ export function validateWorkflowDefinitionClient(definition, triggerType = null)
     if (!node.id) errors.push('Every node needs an id');
     if (ids.has(node.id)) errors.push(`Duplicate node id: ${node.id}`);
     ids.add(node.id);
-    if (!WORKFLOW_NODE_REGISTRY[node.type]) errors.push(`Unsupported node type: ${node.type}`);
+    // The palette can only add registry types, so an unknown type means the
+    // definition came from the server (installed template / loaded workflow)
+    // and this bundle is older than the backend — guide the fix instead of a
+    // bare "Unsupported node type" (QA 08-02 version-skew report). Publishing
+    // stays blocked either way.
+    if (!WORKFLOW_NODE_REGISTRY[node.type]) {
+      errors.push(`This workflow uses a node type ('${node.type}') this app version doesn't recognize — hard-refresh (Ctrl+Shift+R) to update; if it persists, contact support.`);
+    }
   }
 
   const triggers = nodes.filter((node) => node.type === 'trigger');
@@ -10454,6 +10471,22 @@ export default function NotificationWorkflowsPanel({
             </label>
             <p className="text-[11px] text-gray-500 normal-case">Gates apply only when the email content came from the LLM. A blocked send is staged on the ticket as an AI proposed reply — never silently dropped.</p>
           </div>
+        </div>
+      );
+    }
+
+    // Unknown node type (version skew — the definition came from a newer
+    // backend). Neutral explainer instead of the stop-node "Reason" input;
+    // the node's settings are left untouched so nothing is lost.
+    if (!WORKFLOW_NODE_REGISTRY[selectedNode.type]) {
+      return (
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <p className="text-xs font-semibold text-slate-700">
+            Unrecognized step type: <code className="rounded bg-slate-200/70 px-1 py-0.5 font-mono text-[11px]">{selectedNode.type}</code>
+          </p>
+          <p className="mt-1.5 text-xs leading-5 text-slate-600">
+            This app version doesn&apos;t recognize this step — hard-refresh (Ctrl+Shift+R) to update; if it persists, contact support. The step&apos;s settings are preserved and nothing runs differently until you publish.
+          </p>
         </div>
       );
     }
