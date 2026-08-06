@@ -122,6 +122,28 @@ export function StateChip({ state, className = '' }) {
   );
 }
 
+/**
+ * Featured custom-field chip (Custom Fields Activation Phase 2): the ONE
+ * per-workspace definition flagged isFeatured renders as a quiet slate
+ * "Label: value" chip on queue rows (compact + roomy) and in the peek
+ * Details. Truncated to ~24 chars with the full text in the tooltip.
+ */
+export function FeaturedFieldChip({ def, value, className = '' }) {
+  if (!def || value === null || value === undefined || value === '') return null;
+  const text = typeof value === 'boolean' ? (value ? 'Yes' : 'No') : String(value);
+  const full = `${def.label}: ${text}`;
+  const shown = full.length > 24 ? `${full.slice(0, 23)}…` : full;
+  return (
+    <span
+      title={full}
+      data-testid="featured-field-chip"
+      className={`shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full bg-slate-100 border border-slate-200 text-[10px] font-medium text-slate-500 whitespace-nowrap ${className}`}
+    >
+      {shown}
+    </span>
+  );
+}
+
 // Registry color tokens → tile/text tones. Keep keys in sync with the backend
 // ticketTypeService COLORS whitelist.
 export const TYPE_COLOR_TONES = {

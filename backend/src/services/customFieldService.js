@@ -86,7 +86,7 @@ class CustomFieldService {
     });
   }
 
-  async updateDefinition(workspaceId, id, { label, type, options, isActive, sortOrder }) {
+  async updateDefinition(workspaceId, id, { label, type, options, isActive, sortOrder, isFeatured }) {
     const definition = await prisma.customFieldDefinition.findFirst({ where: { id: Number(id), workspaceId } });
     if (!definition) throw new NotFoundError('Custom field not found');
     // Type is editable so admins can curate API-provisioned definitions (the
@@ -101,16 +101,27 @@ class CustomFieldService {
     if (nextType === 'select' && nextOptions.length === 0) {
       throw new ValidationError('Select fields need at least one option');
     }
-    return prisma.customFieldDefinition.update({
-      where: { id: definition.id },
-      data: {
-        ...(label !== undefined ? { label: String(label).trim().slice(0, 120) } : {}),
-        ...(type !== undefined ? { type: nextType } : {}),
-        ...(options !== undefined || type !== undefined ? { options: nextType === 'select' ? nextOptions : [] } : {}),
-        ...(isActive !== undefined ? { isActive: isActive !== false } : {}),
-        ...(sortOrder !== undefined ? { sortOrder: Number(sortOrder) || 0 } : {}),
-      },
-    });
+    const data = {
+      ...(label !== undefined ? { label: String(label).trim().slice(0, 120) } : {}),
+      ...(type !== undefined ? { type: nextType } : {}),
+      ...(options !== undefined || type !== undefined ? { options: nextType === 'select' ? nextOptions : [] } : {}),
+      ...(isActive !== undefined ? { isActive: isActive !== false } : {}),
+      ...(sortOrder !== undefined ? { sortOrder: Number(sortOrder) || 0 } : {}),
+      ...(isFeatured !== undefined ? { isFeatured: isFeatured === true } : {}),
+    };
+    // At most ONE featured definition per workspace (it drives the queue-row
+    // chip): featuring this one unfeatures the rest, atomically.
+    if (isFeatured === true) {
+      const [, updated] = await prisma.$transaction([
+        prisma.customFieldDefinition.updateMany({
+          where: { workspaceId, isFeatured: true, id: { not: definition.id } },
+          data: { isFeatured: false },
+        }),
+        prisma.customFieldDefinition.update({ where: { id: definition.id }, data }),
+      ]);
+      return updated;
+    }
+    return prisma.customFieldDefinition.update({ where: { id: definition.id }, data });
   }
 
   async removeDefinition(workspaceId, id) {
@@ -262,7 +273,63 @@ class CustomFieldService {
         details: { changes },
       });
     } catch { /* non-fatal */ }
+
+    // Outbound webhook (Custom Fields Activation Phase 2): custom-field edits
+    // don't ride the lifecycle pipeline, so dispatch directly AFTER the audit
+    // write — same pattern as ticket.tags_changed in ticketService.setTags.
+    // Payload mirrors webhookPayloadFromContext (taxonomy NAMES + the merged
+    // customFields) plus the machine-readable changedKeys list.
+    const changedKeys = Object.keys(changes)
+      .filter((key) => JSON.stringify(changes[key].from ?? null) !== JSON.stringify(changes[key].to ?? null));
+    if (changedKeys.length) this._dispatchChangeWebhook(ticket.id, workspaceId, merged, changedKeys);
+
     return { customFields: merged, changes };
+  }
+
+  /** Fire-and-forget ticket.custom_fields_changed dispatch (never throws). */
+  _dispatchChangeWebhook(ticketId, workspaceId, mergedValues, changedKeys) {
+    try {
+      this._dispatchChangeWebhookAsync(ticketId, workspaceId, mergedValues, changedKeys);
+    } catch { /* integrations never break the edit */ }
+  }
+
+  _dispatchChangeWebhookAsync(ticketId, workspaceId, mergedValues, changedKeys) {
+    Promise.all([
+      import('./webhookDispatchService.js'),
+      import('../utils/ticketOrigin.js'),
+      prisma.ticket.findUnique({
+        where: { id: ticketId },
+        select: {
+          id: true,
+          origin: true,
+          status: true,
+          nativeNumber: true,
+          freshserviceTicketId: true,
+          subject: true,
+          priority: true,
+          internalCategory: { select: { name: true } },
+          internalSubcategory: { select: { name: true } },
+          tagLinks: { select: { tag: { select: { name: true } } } },
+        },
+      }),
+    ]).then(([{ dispatchWebhookEvent }, { ticketDisplayRef }, fresh]) => {
+      if (!fresh) return;
+      dispatchWebhookEvent(workspaceId, 'ticket.custom_fields_changed', {
+        ticket: {
+          id: fresh.id,
+          ref: ticketDisplayRef(fresh),
+          subject: fresh.subject,
+          status: fresh.status,
+          priority: fresh.priority,
+          origin: fresh.origin,
+          tags: fresh.tagLinks.map((l) => l.tag.name).sort(),
+          category: fresh.internalCategory?.name || null,
+          subcategory: fresh.internalSubcategory?.name || null,
+          customFields: mergedValues || {},
+        },
+        changedKeys,
+      });
+    }).catch(() => { /* integrations never break the edit */ });
   }
 }
 

@@ -17,10 +17,9 @@ import { formatDayTime, timeAgo } from './ticketUi';
  * in the tooltip).
  */
 
-// Phase 2 flips this on: field chips gain a "Filter queue by this value"
-// action navigating to /tickets?cf_<key>=<value> once the queue understands
-// cf_* filter params. The code path is present but disabled until then.
-export const CF_FILTERING_ENABLED = false;
+// Phase 2 (live): field chips carry a "Filter queue by this value" action
+// navigating to /tickets?cf_<key>=<value> — the queue's cf_* filter grammar.
+export const CF_FILTERING_ENABLED = true;
 
 const ACCENT_TONES = {
   violet: { bar: 'bg-violet-500', wrap: 'bg-violet-50/60 border-violet-200', icon: 'text-violet-500', chip: 'bg-violet-100 text-violet-700 border-violet-200' },
@@ -135,7 +134,12 @@ export function FieldValueChip({ field, currentValues = null, onCopied = null, c
  * structured discriminator (keeps its timeline position). `as="div"` renders
  * a non-list variant for previews outside a thread <ul>.
  */
-export default function FieldCardNote({ entry, currentValues = null, onEditField = null, onCopied = null, as = 'li' }) {
+export default function FieldCardNote({
+  entry, currentValues = null, onEditField = null, onCopied = null, as = 'li',
+  // Router hosts (TicketDetail) pass a SPA navigate; the default hard-navigates
+  // so the card stays usable outside a Router context (builder preview).
+  onFilterNavigate = (url) => window.location.assign(url),
+}) {
   const payload = fieldCardPayload(entry) || {};
   const tones = accentTones(payload.accent);
   const fields = Array.isArray(payload.fields) ? payload.fields : [];
@@ -183,7 +187,7 @@ export default function FieldCardNote({ entry, currentValues = null, onEditField
                     onClick={() => {
                       const current = currentValues && Object.prototype.hasOwnProperty.call(currentValues, field.key)
                         ? currentValues[field.key] : field.value;
-                      window.location.assign(`/tickets?cf_${encodeURIComponent(field.key)}=${encodeURIComponent(String(current))}`);
+                      onFilterNavigate(`/tickets?cf_${encodeURIComponent(field.key)}=${encodeURIComponent(String(current))}`);
                     }}
                     aria-label={`Filter queue by ${field.label || field.key}`}
                     title="Filter queue by this value"

@@ -7,7 +7,7 @@ import {
 } from 'date-fns';
 import {
   CalendarClock, CalendarDays, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight,
-  GripVertical, LayoutList, ListFilter, Plus, Search, Sparkles, Star, Trash2, Users, VolumeX, X,
+  GripVertical, LayoutList, ListFilter, Plus, Search, SlidersHorizontal, Sparkles, Star, Trash2, Users, VolumeX, X,
 } from 'lucide-react';
 import { PersonAvatar, PRIORITY_LABELS, PRIORITY_STRIP_COLORS, TagChip, formatDay } from './ticketUi';
 import { statusDefsFromMeta, statusDotClass, statusNamesForBase } from './statusDefs';
@@ -93,6 +93,138 @@ function Facet({ checked, onToggle, children, count }) {
   );
 }
 
+/** Text/number input that commits to the URL only after a typing pause. */
+function DebouncedParamInput({ value, onCommit, type = 'text', placeholder, ariaLabel, className = '' }) {
+  const [draft, setDraft] = useState(value);
+  // External resets (clear all, applied views) snap the box to the URL truth.
+  useEffect(() => { setDraft(value); }, [value]);
+  useEffect(() => {
+    if (draft === value) return undefined;
+    const t = setTimeout(() => onCommit(draft), 350);
+    return () => clearTimeout(t);
+  }, [draft]); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <input
+      type={type}
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      placeholder={placeholder}
+      aria-label={ariaLabel}
+      className={`tp-focus-ring w-full px-2 py-1 text-xs bg-slate-50 border border-slate-200 rounded-md placeholder:text-slate-400 ${className}`}
+    />
+  );
+}
+
+/**
+ * Min/max pair with ONE debounce committing both bounds in a single URL
+ * update. Two independent inputs would fire two same-tick setSearchParams
+ * calls, and react-router's functional updater works from the render-time
+ * params — the second write would clobber the first bound.
+ */
+function DebouncedRangePair({ type, gte, lte, onCommit, label }) {
+  const [draft, setDraft] = useState({ gte, lte });
+  useEffect(() => { setDraft({ gte, lte }); }, [gte, lte]);
+  useEffect(() => {
+    if (draft.gte === gte && draft.lte === lte) return undefined;
+    const t = setTimeout(() => onCommit(draft), 350);
+    return () => clearTimeout(t);
+  }, [draft]); // eslint-disable-line react-hooks/exhaustive-deps
+  const box = 'tp-focus-ring w-full px-2 py-1 text-xs bg-slate-50 border border-slate-200 rounded-md placeholder:text-slate-400';
+  return (
+    <div className="flex items-center gap-1">
+      <input
+        type={type}
+        value={draft.gte}
+        onChange={(e) => setDraft((d) => ({ ...d, gte: e.target.value }))}
+        placeholder="Min"
+        aria-label={`${label} minimum`}
+        className={box}
+      />
+      <span className="text-[10px] text-slate-300 flex-shrink-0" aria-hidden="true">–</span>
+      <input
+        type={type}
+        value={draft.lte}
+        onChange={(e) => setDraft((d) => ({ ...d, lte: e.target.value }))}
+        placeholder="Max"
+        aria-label={`${label} maximum`}
+        className={box}
+      />
+    </div>
+  );
+}
+
+/**
+ * One typed input in the "Custom fields" facet (Phase 2), keyed to the
+ * workspace definition's type: select → dropdown, boolean → any/yes/no
+ * tri-state, text → debounced contains box, number/date → min/max pair.
+ * Reads/writes the queue's `cf_<key>` / `cf_<key>_gte` / `cf_<key>_lte`
+ * URL params — the same grammar the backend list filter speaks.
+ */
+function CustomFieldFacetInput({ def, get, setParams }) {
+  const eqKey = `cf_${def.key}`;
+  const eq = get(eqKey);
+  const gte = get(`${eqKey}_gte`);
+  const lte = get(`${eqKey}_lte`);
+
+  let control;
+  if (def.type === 'select') {
+    control = (
+      <select
+        value={eq}
+        onChange={(e) => setParams({ [eqKey]: e.target.value || null })}
+        aria-label={`Filter by ${def.label}`}
+        className="tp-focus-ring w-full px-1.5 py-1 text-xs bg-slate-50 border border-slate-200 rounded-md text-slate-600"
+      >
+        <option value="">Any</option>
+        {(def.options || []).map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+      </select>
+    );
+  } else if (def.type === 'boolean') {
+    control = (
+      <div className="flex items-center gap-1" role="group" aria-label={`Filter by ${def.label}`}>
+        {[['', 'Any'], ['true', 'Yes'], ['false', 'No']].map(([v, label]) => (
+          <button
+            key={label}
+            onClick={() => setParams({ [eqKey]: v || null })}
+            aria-pressed={eq === v}
+            className={`tp-focus-ring px-1.5 py-0.5 rounded text-[11px] font-medium ${
+              eq === v ? 'bg-blue-100 text-blue-700' : 'text-slate-500 hover:bg-slate-50'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+    );
+  } else if (def.type === 'number' || def.type === 'date') {
+    control = (
+      <DebouncedRangePair
+        type={def.type === 'number' ? 'number' : 'date'}
+        gte={gte}
+        lte={lte}
+        onCommit={(d) => setParams({ [`${eqKey}_gte`]: d.gte || null, [`${eqKey}_lte`]: d.lte || null })}
+        label={def.label}
+      />
+    );
+  } else {
+    control = (
+      <DebouncedParamInput
+        value={eq}
+        onCommit={(v) => setParams({ [eqKey]: v || null })}
+        placeholder="Contains…"
+        ariaLabel={`Filter by ${def.label}`}
+      />
+    );
+  }
+
+  return (
+    <div className="px-1.5 py-1 min-w-0">
+      <span className="block text-[10px] font-semibold text-slate-400 mb-0.5 truncate" title={def.label}>{def.label}</span>
+      {control}
+    </div>
+  );
+}
+
 /**
  * Wraps a facet section to make it drag-reorderable (native HTML5 DnD). Only the
  * grip handle initiates the drag (so checkboxes/inputs stay clickable); the whole
@@ -149,9 +281,20 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
   };
   useEffect(() => { loadSavedViews(); }, [wsId]);
 
+  // Workspace custom-field definitions drive the "Custom fields" facet
+  // (defs-driven typed inputs — same source ConditionGroupBuilder uses).
+  const [cfDefs, setCfDefs] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    ticketsAPI.customFieldDefinitions()
+      .then((res) => { if (!cancelled) setCfDefs(res?.data || []); })
+      .catch(() => { if (!cancelled) setCfDefs([]); });
+    return () => { cancelled = true; };
+  }, [wsId]);
+
   // Personal, persisted facet-section order — drag to rearrange (e.g. Status
   // above Technician). New sections append so the list survives app updates.
-  const FACET_KEYS = ['status', 'technician', 'priority', 'type', 'category', 'tag', 'impact', 'group', 'source', 'created', 'due', 'origin'];
+  const FACET_KEYS = ['status', 'technician', 'priority', 'type', 'category', 'tag', 'impact', 'group', 'source', 'customFields', 'created', 'due', 'origin'];
   const [sectionOrder, setSectionOrder] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('tp_filter_section_order') || 'null');
@@ -237,10 +380,26 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
   const view = get('view');
   const aiState = get('aiState');
 
+  // Custom-field filter params (Phase 2): dynamic `cf_*` family — every param
+  // starting with cf_ is one active filter (capture/clear/count follow suit).
+  const cfActiveKeys = useMemo(
+    () => [...searchParams.keys()].filter((k) => k.startsWith('cf_') && searchParams.get(k)),
+    [searchParams],
+  );
+  const clearCustomFieldParams = () => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      for (const k of [...next.keys()]) if (k.startsWith('cf_')) next.delete(k);
+      next.delete('page');
+      return next;
+    }, { replace: true });
+  };
+
   const activeTotal = [
     segment && segment !== 'all', statusRaw, assignees.length, priorities.length, types.length,
     categories.length, subcategories.length, groups.length, sources.length, tags.length, impacts.length, urgencies.length, due.length,
     origin, createdFrom || createdTo, noise, view, aiState, get('q'),
+    ...cfActiveKeys, // each cf_ param counts like the URL param it is
   ].filter(Boolean).length;
 
   const clearAll = () => {
@@ -361,6 +520,9 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
   const captureParams = () => {
     const out = {};
     for (const k of FILTER_KEYS) { const val = searchParams.get(k); if (val) out[k] = val; }
+    // Dynamic cf_* family (Phase 2): saved views capture every custom-field
+    // param — the params blob is schema-free Json, so they round-trip as-is.
+    for (const k of cfActiveKeys) out[k] = searchParams.get(k);
     return out;
   };
   const saveCurrentView = async () => {
@@ -777,6 +939,24 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
           </SortableFacet>
         )}
 
+        {/* Custom fields (Phase 2) — defs-driven typed inputs over cf_* params */}
+        {cfDefs.length > 0 && (
+          <SortableFacet {...facetProps('customFields')}>
+            <Section
+              title="Custom fields"
+              icon={SlidersHorizontal}
+              activeCount={cfActiveKeys.length}
+              onClear={clearCustomFieldParams}
+            >
+              <div className="space-y-0.5">
+                {cfDefs.map((def) => (
+                  <CustomFieldFacetInput key={def.key} def={def} get={get} setParams={setParams} />
+                ))}
+              </div>
+            </Section>
+          </SortableFacet>
+        )}
+
         {/* Created */}
         <SortableFacet {...facetProps('created')}>
           <Section
@@ -1009,6 +1189,15 @@ export function ActiveFilterBar({ meta }) {
     });
   }
   for (const d of csvList(get('due'))) chips.push({ label: DUE_LABELS[d] || d, onRemove: () => removeFromCsv('due', d) });
+  // cf_* family (Phase 2): one generic chip for however many custom-field
+  // params are active — the rail's facet shows the per-field detail.
+  const cfKeys = [...searchParams.keys()].filter((k) => k.startsWith('cf_') && searchParams.get(k));
+  if (cfKeys.length) {
+    chips.push({
+      label: cfKeys.length > 1 ? `Custom fields (${cfKeys.length})` : 'Custom fields',
+      onRemove: () => patch(Object.fromEntries(cfKeys.map((k) => [k, null]))),
+    });
+  }
   const origin = get('origin');
   if (origin) chips.push({ label: origin === 'ticketpulse' ? 'Born in Ticket Pulse' : 'From FreshService', onRemove: () => patch({ origin: null }) });
   if (get('noise') === 'only') chips.push({ label: 'Noise & spam', onRemove: () => patch({ noise: null }) });

@@ -6,7 +6,7 @@ const prismaMock = {
   slaPolicy: { findMany: jest.fn(), findFirst: jest.fn(), upsert: jest.fn(), deleteMany: jest.fn() },
   ticketMacro: { findMany: jest.fn(), findFirst: jest.fn(), create: jest.fn(), update: jest.fn(), delete: jest.fn() },
   customFieldDefinition: { findMany: jest.fn(), findFirst: jest.fn(), create: jest.fn(), update: jest.fn(), delete: jest.fn() },
-  ticket: { findFirst: jest.fn(), update: jest.fn() },
+  ticket: { findFirst: jest.fn(), update: jest.fn(), findUnique: jest.fn().mockResolvedValue(null) },
   ticketLink: { findMany: jest.fn(), findFirst: jest.fn(), upsert: jest.fn(), delete: jest.fn() },
 };
 const ticketServiceMock = {
@@ -24,6 +24,14 @@ jest.unstable_mockModule('../src/services/ticketActivityRepository.js', () => ({
 }));
 jest.unstable_mockModule('../src/utils/logger.js', () => ({
   default: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() },
+}));
+// setValues (Phase 2) fire-and-forgets a ticket.custom_fields_changed dispatch
+// after the audit write; mocked so the dynamic import resolves from the
+// registry instead of loading the outbox machinery mid-teardown.
+jest.unstable_mockModule('../src/services/webhookDispatchService.js', () => ({
+  default: { dispatchWebhookEvent: jest.fn() },
+  dispatchWebhookEvent: jest.fn(),
+  WEBHOOK_EVENTS: ['ticket.custom_fields_changed'],
 }));
 
 const { default: slaPolicyService } = await import('../src/services/slaPolicyService.js');
@@ -144,5 +152,8 @@ describe('custom fields', () => {
     expect(result.customFields).toEqual({ existing: 'kept', cost_centre: 'ENG', seats: 4 });
     await expect(customFieldService.setValues(501, 1, { nope: 1 }, null)).rejects.toThrow(/unknown custom field/i);
     await expect(customFieldService.setValues(501, 1, { cost_centre: 'HR' }, null)).rejects.toThrow(/must be one of/i);
+
+    // Let the fire-and-forget webhook chain settle inside the test lifetime.
+    await new Promise((resolve) => setTimeout(resolve, 0));
   });
 });

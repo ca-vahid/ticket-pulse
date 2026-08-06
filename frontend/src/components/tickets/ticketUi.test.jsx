@@ -3,7 +3,7 @@ import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, test } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import {
-  AgentFirstName, ExternalChip, MirrorChip, OriginChip, PersonAvatar, PriorityDot, SlaTargetChip, StatusPill, formatDay, formatDayTime, initials, slaTargetState, timeAgo,
+  AgentFirstName, ExternalChip, FeaturedFieldChip, MirrorChip, OriginChip, PersonAvatar, PriorityDot, SlaTargetChip, StatusPill, formatDay, formatDayTime, initials, slaTargetState, timeAgo,
 } from './ticketUi';
 
 afterEach(cleanup);
@@ -150,5 +150,31 @@ describe('ticketUi components', () => {
     cleanup();
     render(<SlaTargetChip target={pastTarget} metAt={null} status="Pending" kind="response" />);
     expect(screen.getByText('Paused')).toBeInTheDocument();
+  });
+
+  // Phase 2 — the featured custom-field chip on queue rows / peek.
+  test('FeaturedFieldChip renders "Label: value", truncated ~24ch with full text in the tooltip', () => {
+    const def = { key: 'client_name', label: 'Client Name' };
+    render(<FeaturedFieldChip def={def} value="ACME" />);
+    expect(screen.getByText('Client Name: ACME')).toBeInTheDocument();
+
+    cleanup();
+    render(<FeaturedFieldChip def={def} value="Coyote Landslide Geotechnical" />);
+    const chip = screen.getByTestId('featured-field-chip');
+    expect(chip).toHaveAttribute('title', 'Client Name: Coyote Landslide Geotechnical');
+    expect(chip.textContent.length).toBeLessThanOrEqual(24);
+    expect(chip.textContent.endsWith('…')).toBe(true);
+  });
+
+  test('FeaturedFieldChip: booleans render Yes/No; empty values render nothing', () => {
+    const def = { key: 'expedite', label: 'Expedite' };
+    render(<FeaturedFieldChip def={def} value={true} />);
+    expect(screen.getByText('Expedite: Yes')).toBeInTheDocument();
+    cleanup();
+    const { container } = render(<FeaturedFieldChip def={def} value="" />);
+    expect(container).toBeEmptyDOMElement();
+    cleanup();
+    const none = render(<FeaturedFieldChip def={null} value="x" />);
+    expect(none.container).toBeEmptyDOMElement();
   });
 });

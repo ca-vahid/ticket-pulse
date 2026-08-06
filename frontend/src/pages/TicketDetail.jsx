@@ -296,7 +296,7 @@ function AttachmentChip({ attachment, onPreview }) {
  * replies sit RIGHT with a blue tint (avatars + role + channel on both sides),
  * internal notes stay full-width amber so they can't be mistaken for either.
  */
-export function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, photoFor, onCopy, canDelete = false, onDelete, deleting = false, customFields = null, onEditField = null, onCopied = null }) {
+export function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, photoFor, onCopy, canDelete = false, onDelete, deleting = false, customFields = null, onEditField = null, onCopied = null, onFilterNavigate = undefined }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const isNote = entry.eventType === 'note' || entry.isPrivate === true;
   const body = entry.bodyText || entry.content || '';
@@ -319,6 +319,7 @@ export function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, ph
         currentValues={customFields}
         onEditField={onEditField}
         onCopied={onCopied}
+        {...(onFilterNavigate ? { onFilterNavigate } : {})}
       />
     );
   }
@@ -2172,6 +2173,7 @@ export default function TicketDetail() {
                                     customFields={ticket?.customFields || {}}
                                     onEditField={focusCustomFields}
                                     onCopied={notifyCopied}
+                                    onFilterNavigate={navigate}
                                   />
                                 </ul>
                               </li>

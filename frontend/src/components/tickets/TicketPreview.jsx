@@ -78,6 +78,19 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
   useEffect(() => { setTab('details'); setConfirmPickup(false); load(); }, [load]);
   useEffect(() => () => abortRef.current?.abort(), []);
 
+  // Featured custom field (Phase 2): mirrors the queue-row chip as a Details
+  // line. One fetch per mount — the peek outlives individual ticket steps.
+  const [featuredDef, setFeaturedDef] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    Promise.resolve()
+      .then(() => ticketsAPI.customFieldDefinitions())
+      .then((res) => { if (!cancelled) setFeaturedDef((res?.data || []).find((d) => d.isFeatured) || null); })
+      .catch(() => { if (!cancelled) setFeaturedDef(null); });
+    return () => { cancelled = true; };
+  }, []);
+  const featuredValue = featuredDef ? ticket?.customFields?.[featuredDef.key] : null;
+
   // SSE-driven refresh: the queue bumps `pulse` whenever tickets change.
   useEffect(() => { if (pulse > 0) load({ silent: true }); }, [pulse, load]);
 
@@ -615,6 +628,15 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                     {ticketCategoryLabels(ticket).subcategory && <span className="text-slate-400"> / {ticketCategoryLabels(ticket).subcategory}</span>}
                   </dd>
                 </div>
+                {/* Featured custom field (Phase 2) — same line the queue chip shows */}
+                {featuredDef && featuredValue !== null && featuredValue !== undefined && featuredValue !== '' && (
+                  <div className="flex items-center gap-2 px-2.5 py-1.5" data-testid="peek-featured-field">
+                    <dt className="text-slate-400 w-24 flex-shrink-0 pl-[18px] truncate" title={featuredDef.label}>{featuredDef.label}</dt>
+                    <dd className="text-slate-600 truncate" title={String(featuredValue)}>
+                      {typeof featuredValue === 'boolean' ? (featuredValue ? 'Yes' : 'No') : String(featuredValue)}
+                    </dd>
+                  </div>
+                )}
                 {ticket.groupId && (meta?.groups || []).some((g) => String(g.freshserviceId) === String(ticket.groupId)) && (
                   <div className="flex items-center gap-2 px-2.5 py-1.5">
                     <dt className="text-slate-400 w-24 flex-shrink-0 pl-[18px]">Group</dt>

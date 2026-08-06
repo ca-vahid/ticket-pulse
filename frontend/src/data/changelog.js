@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.2.00-preview';
+export const APP_VERSION = '3.2.01-preview';
 
 export const changelog = [
+  {
+    version: '3.2.01-preview',
+    date: 'August 6, 2026',
+    entries: [
+      { type: 'new', html: '<strong>🔎 Custom fields power the queue</strong> — filter tickets by any custom field from the new “Custom fields” section in the filter rail (typed inputs: dropdowns, yes/no, contains, number & date ranges), save and share views with those filters, and star one field per workspace as “featured” to show as a chip on every queue row and in the peek. Field Cards’ “filter by this value” action jumps straight to the matching tickets. CSV exports include custom-field columns, and the API supports the same cf_ filters.' },
+      { type: 'new', html: '<strong>🔔 New webhook: ticket.custom_fields_changed</strong> — external systems (e.g. Power Automate flows) get notified with the changed keys whenever custom fields are edited, completing the round-trip automation loop.' },
+    ],
+  },
   {
     version: '3.2.00-preview',
     date: 'August 6, 2026',

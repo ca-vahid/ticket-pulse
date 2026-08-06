@@ -286,11 +286,18 @@ router.get('/export.csv', asyncHandler(async (req, res) => {
     { ...req.query, page: 1, pageSize: 5000 },
     { maxPageSize: 5000 },
   );
+  // Custom-field columns (Custom Fields Activation Phase 2): one column per
+  // ACTIVE definition, capped at 10 by sortOrder (listDefinitions' order),
+  // header = the definition label. Appended whenever the workspace has any
+  // definitions — unconditional is simpler and more predictable for people
+  // diffing exports than appearing only when a cf_* filter is active.
+  const { default: customFieldService } = await import('../services/customFieldService.js');
+  const cfDefs = (await customFieldService.listDefinitions(req.workspaceId)).slice(0, 10);
   const esc = (v) => {
     const s = v === null || v === undefined ? '' : String(v);
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
-  const header = ['Ref', 'Subject', 'Status', 'Priority', 'Type', 'State', 'Requester', 'Requester Email', 'Assignee', 'Category', 'Subcategory', 'Tags', 'Origin', 'Created', 'Last Activity'];
+  const header = ['Ref', 'Subject', 'Status', 'Priority', 'Type', 'State', 'Requester', 'Requester Email', 'Assignee', 'Category', 'Subcategory', 'Tags', 'Origin', 'Created', 'Last Activity', ...cfDefs.map((d) => d.label)];
   const lines = [header.join(',')];
   for (const t of result.items) {
     lines.push([
@@ -301,6 +308,8 @@ router.get('/export.csv', asyncHandler(async (req, res) => {
       esc((t.tags || []).map((tag) => tag.name).join('; ')),
       esc(t.origin), esc(t.createdAt?.toISOString?.() || t.createdAt),
       esc(t.lastActivityAt?.toISOString?.() || t.lastActivityAt),
+      // Values stringified as stored (booleans → true/false, dates → ISO).
+      ...cfDefs.map((d) => esc(t.customFields?.[d.key])),
     ].join(','));
   }
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
