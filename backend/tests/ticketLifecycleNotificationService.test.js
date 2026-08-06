@@ -1,6 +1,7 @@
 import {
   deriveTicketLifecycleEvents,
   lifecycleNotificationFingerprint,
+  webhookPayloadFromContext,
 } from '../src/services/ticketLifecycleNotificationService.js';
 
 describe('ticket lifecycle notification event derivation', () => {
@@ -210,5 +211,49 @@ describe('ticket lifecycle notification event derivation', () => {
       { assignedTechId: 20, status: 'Open' },
       { assignedTechId: 20, status: 'Open' },
     )).toEqual([]);
+  });
+});
+
+// FR 08-05 Phase 1b: outbound webhook payloads carry the internal taxonomy
+// NAMES and the ticket's customFields, so API senders see their intake
+// enrichment round-trip without a follow-up read.
+describe('webhookPayloadFromContext', () => {
+  test('includes category/subcategory names and customFields from the event context', () => {
+    const payload = webhookPayloadFromContext({
+      event: { type: 'ticket.created', extra: null },
+      ticket: {
+        id: 42,
+        freshserviceTicketId: null,
+        subject: 'Project Setup - Coyote Landslide',
+        status: 'Open',
+        priority: 2,
+        origin: 'ticketpulse',
+        tags: ['api'],
+        internalCategory: { id: 11, name: 'Project Setup' },
+        internalSubcategory: { id: 21, name: 'New Project' },
+        customFields: { source_request_type: 'Project Setup', budget: 1500 },
+      },
+      requester: { name: 'Rita', email: 'rita@example.com' },
+      assignedAgent: null,
+    });
+
+    expect(payload.ticket.ref).toBe('TP-42');
+    expect(payload.ticket.category).toBe('Project Setup');
+    expect(payload.ticket.subcategory).toBe('New Project');
+    expect(payload.ticket.customFields).toEqual({ source_request_type: 'Project Setup', budget: 1500 });
+  });
+
+  test('uncategorized tickets degrade to nulls and an empty customFields object', () => {
+    const payload = webhookPayloadFromContext({
+      event: { type: 'ticket.created' },
+      ticket: { id: 7, freshserviceTicketId: 225010, subject: 'x', status: 'Open' },
+      requester: null,
+      assignedAgent: null,
+    });
+
+    expect(payload.ticket.ref).toBe('#225010');
+    expect(payload.ticket.category).toBeNull();
+    expect(payload.ticket.subcategory).toBeNull();
+    expect(payload.ticket.customFields).toEqual({});
   });
 });

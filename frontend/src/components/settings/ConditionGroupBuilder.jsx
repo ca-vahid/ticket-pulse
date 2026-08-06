@@ -66,6 +66,8 @@ const OPERATORS_BY_TYPE = {
   boolean: [['is_true', 'is true'], ['is_false', 'is false']],
   duration: [['gt', 'more than'], ['lt', 'less than'], ['gte', 'at least'], ['lte', 'at most']],
   number: [['is', 'is'], ['is_not', 'is not'], ['gt', 'more than'], ['lt', 'less than'], ['gte', 'at least'], ['lte', 'at most']],
+  // Date-typed custom fields (FR 08-05 Phase 1b).
+  date: [['before', 'is before'], ['after', 'is after'], ['is_empty', 'is empty'], ['is_not_empty', 'is not empty']],
   list: [
     ['has_any', 'has any of'], ['has_all', 'has all of'], ['has_none', 'has none of'],
     ['is_empty', 'is empty'], ['is_not_empty', 'is not empty'],
@@ -75,8 +77,12 @@ const OPERATORS_BY_TYPE = {
 const VALUELESS = new Set(['is_empty', 'is_not_empty', 'is_true', 'is_false']);
 const LIST_OPERATORS = new Set(['in', 'not_in', 'has_any', 'has_all', 'has_none']);
 
-// Custom-field definitions extend the catalog as `custom:<key>` string fields
-// (mirrors the backend's dynamic fieldSpec). Fetched once per session.
+// Custom-field definitions extend the catalog as TYPED `custom:<key>` fields
+// (mirrors backend fieldSpec + CUSTOM_FIELD_CONDITION_TYPES): number/date/
+// boolean defs get their operators + inputs; select defs become enums.
+// Fetched once per session — the server condition-field catalog (which now
+// also serves custom fields, per workspace) wins on overlap.
+const CF_CONDITION_TYPES = { text: 'string', number: 'number', boolean: 'boolean', date: 'date', select: 'enum' };
 let customFieldCache = null;
 // Server-resolved field catalog (Phase 8c): the backend serves the condition
 // fields with dynamicOptions resolved per workspace — ticket.status lists the
@@ -84,9 +90,10 @@ let customFieldCache = null;
 // workspace; CG_FIELDS stays the offline/first-paint fallback.
 const serverFieldsCache = new Map(); // workspaceId -> fields[]
 
-/** Status-registry CRUD changes the ticket.status options — drop the cache. */
+/** Status-registry / custom-field CRUD changes the options — drop the caches. */
 export function invalidateConditionFieldsCache() {
   serverFieldsCache.clear();
+  customFieldCache = null;
 }
 
 function useConditionFields() {
@@ -101,7 +108,10 @@ function useConditionFields() {
     ticketsAPI.customFieldDefinitions()
       .then((res) => {
         customFieldCache = (res?.data || []).map((d) => ({
-          value: `custom:${d.key}`, label: `Custom: ${d.label}`, type: 'string',
+          value: `custom:${d.key}`,
+          label: `Custom: ${d.label}`,
+          type: CF_CONDITION_TYPES[d.type] || 'string',
+          ...(d.type === 'select' && Array.isArray(d.options) && d.options.length > 0 ? { options: d.options } : {}),
         }));
         setCustomFields(customFieldCache);
       })
@@ -123,7 +133,11 @@ function useConditionFields() {
     return () => { cancelled = true; };
   }, [workspaceId]);
 
-  const fields = [...(serverFields || CG_FIELDS), ...customFields];
+  // The server catalog now includes this workspace's custom fields (typed);
+  // the session-cached defs fetch fills in when that catalog hasn't landed.
+  const base = serverFields || CG_FIELDS;
+  const known = new Set(base.map((f) => f.value));
+  const fields = [...base, ...customFields.filter((f) => !known.has(f.value))];
   // The ticket-type field is a per-workspace enum once the registry loads —
   // the backend keeps it a string, so any stored value still evaluates.
   if (activeTypes.length) {
@@ -203,6 +217,29 @@ function ValueInput({ row, onChange, fields }) {
         onChange={(e) => onChange(e.target.value === '' ? '' : Number(e.target.value))}
         placeholder="minutes (120 = 2h)"
         aria-label="Minutes"
+        className="w-full rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-slate-900 tabular-nums"
+      />
+    );
+  }
+  if (spec.type === 'number') {
+    return (
+      <input
+        type="number"
+        value={row.value ?? ''}
+        onChange={(e) => onChange(e.target.value === '' ? '' : Number(e.target.value))}
+        placeholder="number"
+        aria-label="Number"
+        className="w-full rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-slate-900 tabular-nums"
+      />
+    );
+  }
+  if (spec.type === 'date') {
+    return (
+      <input
+        type="date"
+        value={String(row.value ?? '').slice(0, 10)}
+        onChange={(e) => onChange(e.target.value)}
+        aria-label="Date"
         className="w-full rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-slate-900 tabular-nums"
       />
     );

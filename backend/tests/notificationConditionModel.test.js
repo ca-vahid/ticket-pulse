@@ -2,7 +2,10 @@ import jsonLogic from 'json-logic-js';
 import {
   CONDITION_FIELDS,
   CONDITION_OPERATORS,
+  CUSTOM_FIELD_CONDITION_TYPES,
   compileConditionGroup,
+  groupReferencesCustomFields,
+  registerCustomFieldConditionOps,
   validateConditionGroup,
 } from '../src/services/notificationConditionModel.js';
 import { TICKET_SOURCE, ticketSourceLabel } from '../src/utils/ticketOrigin.js';
@@ -11,6 +14,9 @@ import { TICKET_SOURCE, ticketSourceLabel } from '../src/utils/ticketOrigin.js';
 jsonLogic.add_operation('regex_match', (value, pattern) => {
   try { return new RegExp(String(pattern), 'i').test(String(value ?? '')); } catch { return false; }
 });
+// The typed custom-field coercion ops come from the model itself (single
+// source of truth) — register them exactly like the engine does.
+registerCustomFieldConditionOps(jsonLogic);
 
 const scope = {
   ticket: {
@@ -168,6 +174,109 @@ describe('condition validation', () => {
       expect(spec.path).toBeTruthy();
       expect(spec.label).toBeTruthy();
       expect(key).toBeTruthy();
+    }
+  });
+});
+
+// FR 08-05 Phase 1b: `custom:<key>` rows typed from the workspace's
+// CustomFieldDefinition types — numeric/date/boolean comparisons coerce BOTH
+// sides; unknown keys keep the legacy string semantics.
+describe('typed custom-field conditions', () => {
+  const customFieldTypes = {
+    budget: 'number',
+    kickoff_date: 'date',
+    is_billable: 'boolean',
+    client_name: 'text',
+    tier: 'select',
+  };
+  const cfScope = {
+    ticket: {
+      customFields: {
+        budget: '1500', // number stored as a string — coercion must handle it
+        kickoff_date: '2026-08-01T00:00:00.000Z',
+        is_billable: true,
+        client_name: 'Coyote Landslide',
+        tier: 'Gold',
+        source_request_type: 'Project Setup', // no definition → string fallback
+      },
+    },
+  };
+  const evalTyped = (row, scope = cfScope) => Boolean(jsonLogic.apply(
+    compileConditionGroup({ logic: 'all', conditions: [row] }, { customFieldTypes }),
+    scope,
+  ));
+
+  test('number: comparisons coerce stored strings and condition strings alike', () => {
+    expect(evalTyped({ field: 'custom:budget', operator: 'gt', value: 1000 })).toBe(true);
+    expect(evalTyped({ field: 'custom:budget', operator: 'gt', value: '1000' })).toBe(true);
+    expect(evalTyped({ field: 'custom:budget', operator: 'gt', value: 2000 })).toBe(false);
+    expect(evalTyped({ field: 'custom:budget', operator: 'lte', value: 1500 })).toBe(true);
+    expect(evalTyped({ field: 'custom:budget', operator: 'is', value: '1500' })).toBe(true);
+    expect(evalTyped({ field: 'custom:budget', operator: 'is_not', value: 1500 })).toBe(false);
+    // Missing / non-numeric values never match a numeric comparison.
+    expect(evalTyped({ field: 'custom:budget', operator: 'gt', value: 0 }, { ticket: { customFields: {} } })).toBe(false);
+    expect(evalTyped({ field: 'custom:budget', operator: 'is', value: 'abc' })).toBe(false);
+  });
+
+  test('date: before / after compare instants across ISO shapes', () => {
+    expect(evalTyped({ field: 'custom:kickoff_date', operator: 'before', value: '2026-09-01' })).toBe(true);
+    expect(evalTyped({ field: 'custom:kickoff_date', operator: 'after', value: '2026-07-01' })).toBe(true);
+    expect(evalTyped({ field: 'custom:kickoff_date', operator: 'after', value: '2026-09-01' })).toBe(false);
+    // Unparseable target or missing stored value → fails closed.
+    expect(evalTyped({ field: 'custom:kickoff_date', operator: 'before', value: 'not a date' })).toBe(false);
+    expect(evalTyped({ field: 'custom:kickoff_date', operator: 'before', value: '2026-09-01' }, { ticket: { customFields: {} } })).toBe(false);
+  });
+
+  test('boolean: is_true / is_false coerce like customFieldService (true / "true")', () => {
+    expect(evalTyped({ field: 'custom:is_billable', operator: 'is_true' })).toBe(true);
+    expect(evalTyped({ field: 'custom:is_billable', operator: 'is_false' })).toBe(false);
+    const stringy = { ticket: { customFields: { is_billable: 'true' } } };
+    expect(evalTyped({ field: 'custom:is_billable', operator: 'is_true' }, stringy)).toBe(true);
+    expect(evalTyped({ field: 'custom:is_billable', operator: 'is_false' }, { ticket: { customFields: {} } })).toBe(true);
+  });
+
+  test('text and select definitions keep string/enum semantics', () => {
+    expect(evalTyped({ field: 'custom:client_name', operator: 'contains', value: 'Coyote' })).toBe(true);
+    expect(evalTyped({ field: 'custom:tier', operator: 'is', value: 'Gold' })).toBe(true);
+    expect(evalTyped({ field: 'custom:tier', operator: 'in', value: ['Gold', 'Silver'] })).toBe(true);
+  });
+
+  test('unknown definitions (and calls without types) fall back to string', () => {
+    expect(evalTyped({ field: 'custom:source_request_type', operator: 'is', value: 'Project Setup' })).toBe(true);
+    // No types supplied at all — legacy behavior byte-for-byte.
+    const rule = compileConditionGroup({ logic: 'all', conditions: [{ field: 'custom:budget', operator: 'is', value: '1500' }] });
+    expect(rule).toEqual({ '==': [{ var: 'ticket.customFields.budget' }, '1500'] });
+    expect(Boolean(jsonLogic.apply(rule, cfScope))).toBe(true);
+  });
+
+  test('validation: typed operator sets per definition type, string fallback otherwise', () => {
+    const options = { customFieldTypes };
+    expect(validateConditionGroup({ logic: 'all', conditions: [{ field: 'custom:budget', operator: 'gt', value: 100 }] }, options)).toEqual([]);
+    expect(validateConditionGroup({ logic: 'all', conditions: [{ field: 'custom:kickoff_date', operator: 'before', value: '2026-09-01' }] }, options)).toEqual([]);
+    expect(validateConditionGroup({ logic: 'all', conditions: [{ field: 'custom:is_billable', operator: 'is_true' }] }, options)).toEqual([]);
+    // contains is a string operator — invalid on a number-typed field…
+    expect(validateConditionGroup({ logic: 'all', conditions: [{ field: 'custom:budget', operator: 'contains', value: '15' }] }, options)
+      .join(' ')).toMatch(/not valid/i);
+    // …and gt is invalid on an untyped (string-fallback) custom field.
+    expect(validateConditionGroup({ logic: 'all', conditions: [{ field: 'custom:budget', operator: 'gt', value: 100 }] })
+      .join(' ')).toMatch(/not valid/i);
+    // before/after still need a value.
+    expect(validateConditionGroup({ logic: 'all', conditions: [{ field: 'custom:kickoff_date', operator: 'before' }] }, options)
+      .join(' ')).toMatch(/needs a value/i);
+  });
+
+  test('groupReferencesCustomFields spots custom rows at any depth', () => {
+    expect(groupReferencesCustomFields({ logic: 'all', conditions: [{ field: 'ticket.status', operator: 'is', value: 'Open' }] })).toBe(false);
+    expect(groupReferencesCustomFields({
+      logic: 'any',
+      conditions: [{ logic: 'all', conditions: [{ field: 'custom:budget', operator: 'gt', value: 1 }] }],
+    })).toBe(true);
+    expect(groupReferencesCustomFields(null)).toBe(false);
+  });
+
+  test('every custom-field definition type maps to a condition type with operators', () => {
+    for (const conditionType of Object.values(CUSTOM_FIELD_CONDITION_TYPES)) {
+      expect(CONDITION_OPERATORS[conditionType]).toBeDefined();
     }
   });
 });

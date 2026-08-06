@@ -77,31 +77,127 @@ export const CONDITION_OPERATORS = Object.freeze({
   boolean: ['is_true', 'is_false'],
   duration: ['gt', 'lt', 'gte', 'lte'],
   number: ['is', 'is_not', 'gt', 'lt', 'gte', 'lte'],
+  // Date-typed custom fields (FR 08-05 Phase 1b): point-in-time comparisons.
+  date: ['before', 'after', 'is_empty', 'is_not_empty'],
   // Array-valued fields (e.g. ticket.tags): membership tests over the list.
   list: ['has_any', 'has_all', 'has_none', 'is_empty', 'is_not_empty'],
 });
 
 export const VALUELESS_OPERATORS = new Set(['is_empty', 'is_not_empty', 'is_true', 'is_false']);
 
+/**
+ * CustomFieldDefinition.type → condition field type (FR 08-05 Phase 1b).
+ * Unknown/absent definitions fall back to 'string' so pre-typed workflows and
+ * orphaned keys keep evaluating exactly as before.
+ */
+export const CUSTOM_FIELD_CONDITION_TYPES = Object.freeze({
+  text: 'string',
+  number: 'number',
+  boolean: 'boolean',
+  date: 'date',
+  select: 'enum',
+});
+
+/**
+ * Coercion ops for typed custom-field conditions. Custom-field values arrive
+ * from arbitrary API senders, so BOTH sides of a comparison must be coerced
+ * consistently ("1500" > 1000, ISO strings vs date pickers). Missing or
+ * unparseable values coerce to NaN, which no comparison matches — a typed
+ * condition on an absent field fails closed instead of accidentally matching.
+ * Registered on the engine's json-logic instance (tests mirror via this same
+ * export so compile→evaluate parity lives in one module).
+ */
+export function registerCustomFieldConditionOps(jsonLogicInstance) {
+  jsonLogicInstance.add_operation('cf_number', (v) => {
+    if (v === null || v === undefined || v === '' || typeof v === 'boolean') return NaN;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : NaN;
+  });
+  jsonLogicInstance.add_operation('cf_epoch', (v) => {
+    if (v === null || v === undefined || v === '') return NaN;
+    if (typeof v === 'number') return Number.isFinite(v) ? v : NaN;
+    const t = Date.parse(String(v));
+    return Number.isNaN(t) ? NaN : t;
+  });
+  // Mirrors customFieldService.coerceValue's boolean coercion.
+  jsonLogicInstance.add_operation('cf_bool', (v) => v === true || String(v).toLowerCase() === 'true');
+}
+
 function isGroup(entry) {
   return entry && typeof entry === 'object' && Array.isArray(entry.conditions);
 }
 
-function fieldSpec(fieldKey) {
+/** Does any row in the group target a `custom:<key>` field? (Cheap pre-check
+ * so callers only load custom-field definitions when they matter.) */
+export function groupReferencesCustomFields(group) {
+  if (!isGroup(group)) return false;
+  return group.conditions.some((entry) => (
+    isGroup(entry)
+      ? groupReferencesCustomFields(entry)
+      : String(entry?.field || '').startsWith('custom:')
+  ));
+}
+
+function fieldSpec(fieldKey, customFieldTypes = null) {
   const key = String(fieldKey || '');
   // Dynamic user-defined ticket fields: `custom:<key>` resolves to the value
-  // stored in Ticket.customFields (treated as string for operator purposes).
+  // stored in Ticket.customFields. When the caller supplies the workspace's
+  // definition types ({ key: 'number' | 'date' | … }), the field is TYPED —
+  // numeric/date/boolean operators become available and evaluation coerces
+  // both sides. Without types (or for unknown keys) it stays a string field.
   const customMatch = key.match(/^custom:([a-z][a-z0-9_]{1,59})$/);
   if (customMatch) {
-    return { label: `Custom: ${customMatch[1]}`, type: 'string', path: `ticket.customFields.${customMatch[1]}` };
+    const defType = customFieldTypes ? customFieldTypes[customMatch[1]] : null;
+    const type = CUSTOM_FIELD_CONDITION_TYPES[defType]
+      || (CONDITION_OPERATORS[defType] ? defType : 'string');
+    return { label: `Custom: ${customMatch[1]}`, type, path: `ticket.customFields.${customMatch[1]}`, custom: true };
   }
   return CONDITION_FIELDS[key] || null;
 }
 
-function compileRow(row) {
-  const spec = fieldSpec(row.field);
+/** Typed compile for custom-field rows — returns null when the operator isn't
+ * one this type coerces, letting the generic (string-semantics) switch run. */
+function compileTypedCustomRow(spec, v, row) {
+  const value = row.value;
+  if (spec.type === 'number') {
+    const n = { cf_number: [v] };
+    switch (row.operator) {
+    case 'is': return { '==': [n, Number(value)] };
+    case 'is_not': return { '!=': [n, Number(value)] };
+    case 'gt': return { '>': [n, Number(value)] };
+    case 'lt': return { '<': [n, Number(value)] };
+    case 'gte': return { '>=': [n, Number(value)] };
+    case 'lte': return { '<=': [n, Number(value)] };
+    default: return null;
+    }
+  }
+  if (spec.type === 'date') {
+    const t = { cf_epoch: [v] };
+    const target = Date.parse(String(value ?? ''));
+    switch (row.operator) {
+    case 'before': return { '<': [t, target] };
+    case 'after': return { '>': [t, target] };
+    default: return null;
+    }
+  }
+  if (spec.type === 'boolean') {
+    switch (row.operator) {
+    case 'is_true': return { '==': [{ cf_bool: [v] }, true] };
+    case 'is_false': return { '==': [{ cf_bool: [v] }, false] };
+    default: return null;
+    }
+  }
+  return null;
+}
+
+function compileRow(row, customFieldTypes = null) {
+  const spec = fieldSpec(row.field, customFieldTypes);
   if (!spec) throw new Error(`Unknown condition field: ${row.field}`);
   const v = { var: spec.path };
+  if (spec.custom) {
+    const typed = compileTypedCustomRow(spec, v, row);
+    if (typed) return typed;
+  }
   const value = row.value;
   switch (row.operator) {
   case 'is': return { '==': [v, value] };
@@ -129,27 +225,31 @@ function compileRow(row) {
   }
 }
 
-function compileGroup(group, depth) {
+function compileGroup(group, depth, customFieldTypes) {
   if (depth > MAX_DEPTH) throw new Error(`Condition groups can nest at most ${MAX_DEPTH - 1} level`);
   const parts = (group.conditions || []).map((entry) => (
-    isGroup(entry) ? compileGroup(entry, depth + 1) : compileRow(entry)
+    isGroup(entry) ? compileGroup(entry, depth + 1, customFieldTypes) : compileRow(entry, customFieldTypes)
   ));
   if (parts.length === 0) return true; // empty group matches everything
   if (parts.length === 1) return parts[0];
   return group.logic === 'any' ? { or: parts } : { and: parts };
 }
 
-/** Compile a stored condition group into a json-logic rule. Throws on invalid input. */
-export function compileConditionGroup(group) {
+/**
+ * Compile a stored condition group into a json-logic rule. Throws on invalid
+ * input. `options.customFieldTypes` ({ key → CustomFieldDefinition.type })
+ * types `custom:<key>` rows so their comparisons coerce (FR 08-05 Phase 1b).
+ */
+export function compileConditionGroup(group, { customFieldTypes = null } = {}) {
   if (!isGroup(group)) throw new Error('Condition group must have a conditions array');
-  return compileGroup(group, 1);
+  return compileGroup(group, 1, customFieldTypes);
 }
 
 /**
  * Validate a condition group for save-time feedback. Returns a string[] of
  * problems (empty = valid). Lenient about value shapes — the compiler coerces.
  */
-export function validateConditionGroup(group) {
+export function validateConditionGroup(group, { customFieldTypes = null } = {}) {
   const errors = [];
   let rowCount = 0;
 
@@ -166,7 +266,7 @@ export function validateConditionGroup(group) {
       return;
     }
     rowCount += 1;
-    const spec = fieldSpec(entry?.field);
+    const spec = fieldSpec(entry?.field, customFieldTypes);
     if (!spec) {
       errors.push(`${path}: unknown field "${entry?.field}"`);
       return;
@@ -193,7 +293,10 @@ export function validateConditionGroup(group) {
 export default {
   CONDITION_FIELDS,
   CONDITION_OPERATORS,
+  CUSTOM_FIELD_CONDITION_TYPES,
   VALUELESS_OPERATORS,
   compileConditionGroup,
   validateConditionGroup,
+  groupReferencesCustomFields,
+  registerCustomFieldConditionOps,
 };

@@ -296,7 +296,9 @@ async function hydratePreviousAgent(existingTicket) {
 
 // Compact webhook payload from an event context (gap plan 2 P3) — enough for
 // integrations to react without a follow-up read; full detail via /api/v1.
-function webhookPayloadFromContext(eventContext) {
+// Carries the internal taxonomy NAMES + customFields (FR 08-05 Phase 1b) so
+// API senders can see their intake enrichment round-trip.
+export function webhookPayloadFromContext(eventContext) {
   const t = eventContext.ticket || {};
   return {
     ticket: {
@@ -308,6 +310,9 @@ function webhookPayloadFromContext(eventContext) {
       priority: t.priority,
       origin: t.origin,
       tags: t.tags || [],
+      category: t.internalCategory?.name || null,
+      subcategory: t.internalSubcategory?.name || null,
+      customFields: t.customFields || {},
     },
     requester: eventContext.requester ? { name: eventContext.requester.name, email: eventContext.requester.email } : null,
     assignedAgent: eventContext.assignedAgent ? { name: eventContext.assignedAgent.name } : null,

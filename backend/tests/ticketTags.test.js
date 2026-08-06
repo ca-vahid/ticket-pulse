@@ -21,6 +21,11 @@ jest.unstable_mockModule('../src/utils/logger.js', () => ({
 jest.unstable_mockModule('../src/routes/sse.routes.js', () => ({
   sseManager: { broadcast: jest.fn() },
 }));
+// Outbound webhook capture (FR 08-05 Phase 1b payload assertions).
+const dispatchWebhookEventMock = jest.fn();
+jest.unstable_mockModule('../src/services/webhookDispatchService.js', () => ({
+  dispatchWebhookEvent: dispatchWebhookEventMock,
+}));
 
 const { compileConditionGroup, validateConditionGroup } = await import('../src/services/notificationConditionModel.js');
 const { default: jsonLogic } = await import('json-logic-js');
@@ -98,5 +103,39 @@ describe('ticketService.setTags', () => {
     expect(result.changed).toBe(false);
     expect(prismaMock.$transaction).not.toHaveBeenCalled();
     expect(activityMock.create).not.toHaveBeenCalled();
+  });
+
+  // FR 08-05 Phase 1b: the tags_changed webhook payload carries the internal
+  // taxonomy NAMES + customFields, mirroring the lifecycle webhook shape.
+  test('tags_changed webhook payload includes category names and customFields', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue({ id: 7, tagLinks: [] });
+    prismaMock.ticketTag.findMany.mockResolvedValueOnce([{ id: 3, name: 'vip' }]);
+    prismaMock.ticketTagLink.createMany.mockResolvedValue({ count: 1 });
+    prismaMock.ticketTagLink.findMany.mockResolvedValue([{ tag: { id: 3, name: 'vip', color: 'red' } }]);
+    prismaMock.ticket.findUnique.mockResolvedValue({
+      id: 7,
+      origin: 'ticketpulse',
+      status: 'Open',
+      assignedTechId: null,
+      nativeNumber: 7,
+      freshserviceTicketId: null,
+      customFields: { source_request_type: 'Project Setup' },
+      internalCategory: { name: 'Project Setup' },
+      internalSubcategory: { name: 'New Project' },
+    });
+
+    await ticketService.setTags(7, 1, [3], null);
+    // The dispatch rides a fire-and-forget dynamic import — let it settle.
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(dispatchWebhookEventMock).toHaveBeenCalledWith(1, 'ticket.tags_changed', expect.objectContaining({
+      ticket: expect.objectContaining({
+        id: 7,
+        category: 'Project Setup',
+        subcategory: 'New Project',
+        customFields: { source_request_type: 'Project Setup' },
+        tags: ['vip'],
+      }),
+    }));
   });
 });
