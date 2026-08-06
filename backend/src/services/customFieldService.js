@@ -86,14 +86,27 @@ class CustomFieldService {
     });
   }
 
-  async updateDefinition(workspaceId, id, { label, options, isActive, sortOrder }) {
+  async updateDefinition(workspaceId, id, { label, type, options, isActive, sortOrder }) {
     const definition = await prisma.customFieldDefinition.findFirst({ where: { id: Number(id), workspaceId } });
     if (!definition) throw new NotFoundError('Custom field not found');
+    // Type is editable so admins can curate API-provisioned definitions (the
+    // intake inference only sees the FIRST value — e.g. a numeric-looking id
+    // lands as `number` but should be `text`). Existing ticket values keep
+    // their stored shape; coercion applies from the next write.
+    if (type !== undefined && !FIELD_TYPES.includes(type)) {
+      throw new ValidationError(`Field type must be one of: ${FIELD_TYPES.join(', ')}`);
+    }
+    const nextType = type !== undefined ? type : definition.type;
+    const nextOptions = options !== undefined ? (options || []).map(String).filter(Boolean) : definition.options || [];
+    if (nextType === 'select' && nextOptions.length === 0) {
+      throw new ValidationError('Select fields need at least one option');
+    }
     return prisma.customFieldDefinition.update({
       where: { id: definition.id },
       data: {
         ...(label !== undefined ? { label: String(label).trim().slice(0, 120) } : {}),
-        ...(options !== undefined ? { options: (options || []).map(String).filter(Boolean) } : {}),
+        ...(type !== undefined ? { type: nextType } : {}),
+        ...(options !== undefined || type !== undefined ? { options: nextType === 'select' ? nextOptions : [] } : {}),
         ...(isActive !== undefined ? { isActive: isActive !== false } : {}),
         ...(sortOrder !== undefined ? { sortOrder: Number(sortOrder) || 0 } : {}),
       },

@@ -64,6 +64,12 @@ export default function TicketCreate() {
   const [groupId, setGroupId] = useState('');
   const [source, setSource] = useState(103); // arrival channel (QA 07-10 #7); Agent = logged in app
   const [tagIds, setTagIds] = useState([]); // gap plan 2 P1.3
+  // Workspace custom fields (FR 08-05 #1 Phase 1c) — same intake surface the
+  // public API offers, for parity. Collapsed by default; hidden when the
+  // workspace has no definitions.
+  const [customFieldDefs, setCustomFieldDefs] = useState([]);
+  const [customFieldsOpen, setCustomFieldsOpen] = useState(false);
+  const [customFieldValues, setCustomFieldValues] = useState({});
   const [assignMode, setAssignMode] = useState('none'); // ai | me | pick | none
   const [assignTechId, setAssignTechId] = useState('');
   const [aiClassify, setAiClassify] = useState(true); // AI classifies + assesses priority/type (independent of assignment)
@@ -104,6 +110,9 @@ export default function TicketCreate() {
     ticketsAPI.createTemplates()
       .then((res) => setCreateTemplates(res?.data || []))
       .catch(() => setCreateTemplates([]));
+    ticketsAPI.customFieldDefinitions()
+      .then((res) => setCustomFieldDefs(res?.data || []))
+      .catch(() => setCustomFieldDefs([]));
   }, []);
 
   // Pre-fill the form from a saved preset. Only fields the template SETS are
@@ -222,6 +231,8 @@ export default function TicketCreate() {
     setAssignTechId('');
     setCc([]);
     setNotifyRequester(true);
+    setCustomFieldValues({});
+    setCustomFieldsOpen(false);
     setFiles([]);
     setRequester(null);
     setRqQuery('');
@@ -260,6 +271,11 @@ export default function TicketCreate() {
         tagIds,
         source: Number(source),
       };
+      // Only send custom fields that were actually filled in.
+      const filledCustomFields = Object.fromEntries(
+        Object.entries(customFieldValues).filter(([, v]) => v !== '' && v !== null && v !== undefined),
+      );
+      if (Object.keys(filledCustomFields).length > 0) payload.customFields = filledCustomFields;
       if (assignMode === 'me' && canTakeMyself) payload.assignedTechId = meta.actor.technicianId;
       if (assignMode === 'pick' && assignTechId) payload.assignedTechId = Number(assignTechId);
 
@@ -797,6 +813,61 @@ export default function TicketCreate() {
                   </div>
                 )}
               </div>
+
+              {/* Custom fields (FR 08-05 #1 Phase 1c) — the workspace's own
+                  intake metadata, mirroring what API senders can set at create.
+                  Collapsed by default; absent when nothing is defined. */}
+              {customFieldDefs.length > 0 && (
+                <div className="tp-card rounded-2xl p-5">
+                  <button
+                    type="button"
+                    onClick={() => setCustomFieldsOpen((v) => !v)}
+                    aria-expanded={customFieldsOpen}
+                    className="tp-focus-ring w-full flex items-center gap-2 text-left"
+                  >
+                    <span className="text-sm font-semibold text-slate-700">Custom fields</span>
+                    <span className="text-[11px] text-slate-400">
+                      {Object.values(customFieldValues).filter((v) => v !== '' && v !== null && v !== undefined).length > 0
+                        ? `${Object.values(customFieldValues).filter((v) => v !== '' && v !== null && v !== undefined).length} set`
+                        : 'optional'}
+                    </span>
+                    <ChevronDown className={`w-4 h-4 text-slate-400 ml-auto transition-transform ${customFieldsOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
+                  </button>
+                  {customFieldsOpen && (
+                    <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {customFieldDefs.map((def) => {
+                        const value = customFieldValues[def.key] ?? '';
+                        const set = (v) => setCustomFieldValues((prev) => ({ ...prev, [def.key]: v }));
+                        return (
+                          <div key={def.key}>
+                            <label htmlFor={`tc-cf-${def.key}`} className={labelClass}>{def.label}</label>
+                            {def.type === 'select' ? (
+                              <select id={`tc-cf-${def.key}`} value={value} onChange={(e) => set(e.target.value)} className={fieldClass}>
+                                <option value="">—</option>
+                                {(def.options || []).map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+                              </select>
+                            ) : def.type === 'boolean' ? (
+                              <select id={`tc-cf-${def.key}`} value={String(value)} onChange={(e) => set(e.target.value === '' ? '' : e.target.value === 'true')} className={fieldClass}>
+                                <option value="">—</option>
+                                <option value="true">Yes</option>
+                                <option value="false">No</option>
+                              </select>
+                            ) : (
+                              <input
+                                id={`tc-cf-${def.key}`}
+                                type={def.type === 'number' ? 'number' : def.type === 'date' ? 'date' : 'text'}
+                                value={value}
+                                onChange={(e) => set(def.type === 'number' && e.target.value !== '' ? Number(e.target.value) : e.target.value)}
+                                className={fieldClass}
+                              />
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {error && (
                 <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-xl" role="alert">

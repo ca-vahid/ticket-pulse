@@ -238,3 +238,48 @@ describe('migration ↔ model sync (custom_field_definitions.source)', () => {
     expect(model).toMatch(/source\s+String\s+@default\("manual"\)\s+@db\.VarChar\(10\)/);
   });
 });
+
+// Phase 1c — updateDefinition gained `type` so admins can curate
+// API-provisioned definitions (the intake inference only sees the FIRST
+// value; a numeric-looking id lands as number but should be text).
+describe('updateDefinition — type curation (Phase 1c)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prismaMock.customFieldDefinition.update = jest.fn(({ data }) => Promise.resolve({ id: 9, ...data }));
+  });
+
+  const arm = (definition) => prismaMock.customFieldDefinition.findFirst.mockResolvedValue(definition);
+
+  test('changes the type (number → text) and clears stale options', async () => {
+    arm({ id: 9, workspaceId: 2, key: 'power_app_record_id', label: 'Power App Record Id', type: 'number', options: [], isActive: true });
+    await customFieldService.updateDefinition(2, 9, { type: 'text' });
+    expect(prismaMock.customFieldDefinition.update).toHaveBeenCalledWith({
+      where: { id: 9 },
+      data: { type: 'text', options: [] },
+    });
+  });
+
+  test('switching to select demands options (existing or supplied)', async () => {
+    arm({ id: 9, workspaceId: 2, key: 'region', label: 'Region', type: 'text', options: [], isActive: true });
+    await expect(customFieldService.updateDefinition(2, 9, { type: 'select' })).rejects.toThrow(/at least one option/);
+    await customFieldService.updateDefinition(2, 9, { type: 'select', options: ['Quebec', 'Ontario'] });
+    expect(prismaMock.customFieldDefinition.update).toHaveBeenCalledWith({
+      where: { id: 9 },
+      data: { type: 'select', options: ['Quebec', 'Ontario'] },
+    });
+  });
+
+  test('rejects an unknown type', async () => {
+    arm({ id: 9, workspaceId: 2, key: 'x', label: 'X', type: 'text', options: [], isActive: true });
+    await expect(customFieldService.updateDefinition(2, 9, { type: 'json' })).rejects.toThrow(/Field type must be one of/);
+  });
+
+  test('label/isActive edits still pass through untouched (no type in data)', async () => {
+    arm({ id: 9, workspaceId: 2, key: 'x', label: 'X', type: 'select', options: ['a'], isActive: true });
+    await customFieldService.updateDefinition(2, 9, { label: ' Client ', isActive: false });
+    expect(prismaMock.customFieldDefinition.update).toHaveBeenCalledWith({
+      where: { id: 9 },
+      data: { label: 'Client', isActive: false },
+    });
+  });
+});
