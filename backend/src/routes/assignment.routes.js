@@ -1744,23 +1744,49 @@ router.post('/competencies/merge', requireAdmin, asyncHandler(async (req, res) =
 }));
 
 // ─── Skills / Subskills Hierarchy Migration ─────────────────────────────
+// The draft editor UI was retired in the Aug 2026 surface unification (the
+// Categories tree is the single editor). saveDraft/importSummit/publish stay
+// admin-callable for emergencies, log their use, and publish is protected by
+// a stale-publish guard in skillHierarchyService.
+
+function logLegacyDraftEndpointUse(req, endpoint) {
+  logger.warn('Legacy draft endpoint used', {
+    endpoint,
+    workspaceId: req.workspaceId,
+    actorEmail: req.session?.user?.email,
+  });
+}
 
 router.get('/skills/draft', requireAdmin, asyncHandler(async (req, res) => {
   const data = await skillHierarchyService.getDraft(req.workspaceId);
   res.json({ success: true, data });
 }));
 
+router.delete('/skills/draft', requireAdmin, asyncHandler(async (req, res) => {
+  const draft = await skillHierarchyService.discardDraft(req.workspaceId, req.session?.user?.email);
+  logger.info('Legacy skill hierarchy draft discarded', {
+    workspaceId: req.workspaceId,
+    draftId: draft.id,
+    source: draft.source,
+    actorEmail: req.session?.user?.email,
+  });
+  res.json({ success: true, data: draft });
+}));
+
 router.post('/skills/draft', requireAdmin, asyncHandler(async (req, res) => {
+  logLegacyDraftEndpointUse(req, 'POST /skills/draft');
   const draft = await skillHierarchyService.saveDraft(req.workspaceId, req.body || {}, req.session?.user?.email);
   res.json({ success: true, data: draft });
 }));
 
 router.post('/skills/import-summit', requireAdmin, asyncHandler(async (req, res) => {
+  logLegacyDraftEndpointUse(req, 'POST /skills/import-summit');
   const draft = await skillHierarchyService.importSummit(req.workspaceId, req.session?.user?.email);
   res.status(201).json({ success: true, data: draft });
 }));
 
 router.post('/skills/publish', requireAdmin, asyncHandler(async (req, res) => {
+  logLegacyDraftEndpointUse(req, 'POST /skills/publish');
   const result = await skillHierarchyService.publish(req.workspaceId, req.session?.user?.email);
   logger.info('Skill hierarchy draft published', {
     workspaceId: req.workspaceId,
@@ -1778,6 +1804,7 @@ router.get('/skills/mappings', requireAdmin, asyncHandler(async (req, res) => {
 }));
 
 router.put('/skills/mappings', requireAdmin, asyncHandler(async (req, res) => {
+  logLegacyDraftEndpointUse(req, 'PUT /skills/mappings');
   const draft = await skillHierarchyService.updateMappings(req.workspaceId, req.body?.mappings || [], req.session?.user?.email);
   res.json({ success: true, data: draft });
 }));

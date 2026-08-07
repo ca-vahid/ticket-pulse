@@ -44,6 +44,7 @@ import { useTicketPresence } from '../hooks/useTicketPresence';
 import { useTicketTypes } from '../hooks/useTicketTypes';
 import MergeTicketsModal from '../components/tickets/MergeTicketsModal';
 import { baseStatusOf, isTerminalStatus, statusDefsFromMeta, statusToneFromDefs } from '../components/tickets/statusDefs';
+import { looksLikeRealHtml } from '../utils/htmlContent';
 
 // Canonical 4 — FS-born tickets keep this vocabulary (FreshService owns their
 // fields; custom labels can't write back until 8c). TP-born tickets use the
@@ -88,8 +89,10 @@ const HISTORY_STYLES = {
   default: { icon: History, tone: 'bg-slate-100 text-slate-500' },
 };
 
+// Known-tag detector (QA 08-06 #5): plain text carrying angle-bracket tokens
+// like <Processed> renders via the pre-wrap branch with the tokens intact.
 function looksLikeHtml(s) {
-  return /<[a-z][\s\S]*>/i.test(String(s || ''));
+  return looksLikeRealHtml(s);
 }
 
 function Body({ html, text, className = '' }) {

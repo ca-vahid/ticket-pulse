@@ -39,6 +39,7 @@ const processDeliveryMock = jest.fn();
 const providerSendJsonMock = jest.fn();
 const providerRunToolTurnMock = jest.fn();
 const listEnabledForEventMock = jest.fn();
+const recordSuppressionDecisionsMock = jest.fn().mockResolvedValue({ updated: 0 });
 const publicStatusUrl = 'https://ticketpulse.example/ticket-status/sample-token';
 const raiseUrgencyUrl = 'https://ticketpulse.example/ticket-urgency/sample-token';
 const immediateSupportUrl = 'https://ticketpulse.example/ticket-escalation/sample-token';
@@ -54,6 +55,7 @@ jest.unstable_mockModule('../src/services/notificationDeliveryService.js', () =>
 jest.unstable_mockModule('../src/services/notificationWorkflowRepository.js', () => ({
   default: {
     listEnabledForEvent: listEnabledForEventMock,
+    recordSuppressionDecisions: recordSuppressionDecisionsMock,
   },
 }));
 
@@ -331,6 +333,11 @@ describe('notification workflow engine persistence', () => {
     expect(runData.eventContext.requester).toBeUndefined();
     expect(runData.eventContext.hasRequester).toBe(true);
     expect(runData.eventContext.event.routing.variants.suppressed).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 7, reason: 'default_variant_not_needed' }),
+    ]));
+    // QA 08-06 #6: the suppression decision is persisted per workflow so the
+    // editor can show "last skipped: <reason>".
+    expect(recordSuppressionDecisionsMock).toHaveBeenCalledWith(expect.arrayContaining([
       expect.objectContaining({ id: 7, reason: 'default_variant_not_needed' }),
     ]));
   });

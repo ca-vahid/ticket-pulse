@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, ChevronDown, Loader2, Plus, Search, X } from 'lucide-react';
+import { AlertTriangle, ChevronDown, FlaskConical, Loader2, Plus, Search, X } from 'lucide-react';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 
 /**
@@ -129,6 +129,27 @@ function IndexRow({
           )}
           {isAfterHours(workflow) && (
             <span className="inline-flex items-center rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 ring-1 ring-amber-200">After-hours</span>
+          )}
+          {/* QA 08-06 (Susan, ws5): an enabled workflow in mock mode runs on
+              every matching ticket but takes NO real actions — the loudest
+              chip in the row, stronger than "Routed". */}
+          {isEnabled && workflow.mockModeEnabled && (
+            <span
+              className="inline-flex items-center gap-0.5 rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-800 ring-1 ring-amber-400"
+              title="Mock mode: this workflow runs on matching tickets but takes NO real actions (no emails, no ticket updates). Open it and turn off mock mode to make it act."
+            >
+              <FlaskConical className="h-2.5 w-2.5" />
+              Observe-only
+            </span>
+          )}
+          {/* QA 08-06 #6: a routing rule silently gates the workflow — say so. */}
+          {!workflow.isDefaultVariant && Boolean(workflow.routingRule) && (
+            <span
+              className="inline-flex items-center rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 ring-1 ring-amber-200"
+              title="Only runs when its routing rule matches"
+            >
+              Routed
+            </span>
           )}
           {version > 0
             ? <span className="inline-flex items-center rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 ring-1 ring-slate-200">v{version}</span>

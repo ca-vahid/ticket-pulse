@@ -210,7 +210,7 @@ router.get('/tickets', S('tickets:read'), asyncHandler(async (req, res) => {
 const CREATE_BODY_KEYS = new Set([
   'subject', 'description', 'priority', 'requesterEmail', 'requesterName',
   'runAiTriage', 'category', 'subcategory', 'customFields', 'ccEmails',
-  'source', 'ticketType', 'type',
+  'source', 'ticketType', 'type', 'groupId', 'internalGroupId',
 ]);
 
 // customfields:write is demanded ONLY when the payload actually carries
@@ -251,6 +251,11 @@ router.post('/tickets', S('tickets:write'), withIdempotency, asyncHandler(async 
     // `ticketType` (or its read-shape alias `type`) — validated against the
     // workspace type registry; omitted → workspace default.
     ...(ticketType !== undefined && ticketType !== null ? { ticketType } : {}),
+    // Group placement (QA 08-06 #1): senders can pin a FreshService group or
+    // an internal (TP-native) group; when BOTH are omitted the workspace's
+    // default internal group applies automatically.
+    ...(body.groupId !== undefined ? { groupId: body.groupId } : {}),
+    ...(body.internalGroupId !== undefined ? { internalGroupId: body.internalGroupId } : {}),
   }, apiActor(req), { sourceChannel: TICKET_SOURCE.API });
   logger.info(`API v1: ticket ${ticket.displayRef} created via key "${req.apiKey.name}"`);
   res.status(201).json({

@@ -18,6 +18,7 @@ import attachmentService from './attachmentService.js';
 import watcherNotificationService from './watcherNotificationService.js';
 import customFieldService from './customFieldService.js';
 import { resolveCategoryNames } from './categoryNameResolver.js';
+import { looksLikeRealHtml, plainTextToHtml } from '../utils/htmlContent.js';
 import { sseManager } from '../routes/sse.routes.js';
 
 // The 4 canonical statuses. Since Phase 8a these are the BASE statuses of the
@@ -208,6 +209,23 @@ function stripHtml(html) {
     .replace(/[ \t]+/g, ' ')
     .replace(/\n{3,}/g, '\n\n')
     .trim() || null;
+}
+
+/**
+ * Intake description handling (QA 08-06 #5). Real HTML keeps the historical
+ * behavior (description = the html, descriptionText = stripped). PLAIN TEXT —
+ * including API payloads carrying angle-bracket tokens like `<Processed>` —
+ * keeps the raw text in descriptionText (brackets intact) and stores an
+ * escaped, <br>-converted rendering in description so the tokens stay visible
+ * everywhere instead of being eaten by tag-stripping.
+ */
+function normalizeDescriptionInput(raw) {
+  const value = raw || null;
+  if (!value) return { description: null, descriptionText: null };
+  if (looksLikeRealHtml(value)) {
+    return { description: value, descriptionText: stripHtml(value) };
+  }
+  return { description: plainTextToHtml(value), descriptionText: String(value).trim() || null };
 }
 
 /**
@@ -2030,7 +2048,19 @@ class TicketService {
     this._resolveCategoryNamesInto(data, await this._maybeResolveCategoryNames(workspaceId, data));
     await this._validateTaxonomy(workspaceId, data.internalCategoryId, data.internalSubcategoryId);
     const groupId = await this._validateGroup(workspaceId, data.groupId ?? null);
-    const internalGroupId = await this._validateInternalGroup(workspaceId, data.internalGroupId ?? null);
+    let internalGroupId = await this._validateInternalGroup(workspaceId, data.internalGroupId ?? null);
+    // Workspace default group (QA 08-06 #1): when the caller sends NEITHER a
+    // FreshService group NOR an internal group, land the ticket in the
+    // workspace's default internal group. An invalid default (deleted group,
+    // wrong workspace) is ignored with a log — creation must never fail on it.
+    if (groupId === null && internalGroupId === null
+      && workspace.defaultInternalGroupId !== null && workspace.defaultInternalGroupId !== undefined) {
+      try {
+        internalGroupId = await this._validateInternalGroup(workspaceId, workspace.defaultInternalGroupId);
+      } catch (err) {
+        logger.warn(`Workspace ${workspaceId} default internal group ${workspace.defaultInternalGroupId} is invalid — ignored: ${err.message}`);
+      }
+    }
     const assignee = data.assignedTechId
       ? await this._validateTechnician(workspaceId, data.assignedTechId)
       : null;
@@ -2072,8 +2102,7 @@ class TicketService {
         freshserviceTicketId: null,
         mirrorState: 'pending',
         subject: data.subject,
-        description: data.description || null,
-        descriptionText: stripHtml(data.description),
+        ...normalizeDescriptionInput(data.description),
         status: data.status,
         priority: data.priority,
         ticketType: data.ticketType,
@@ -2254,8 +2283,9 @@ class TicketService {
       changes.subject = { from: ticket.subject, to: data.subject };
     }
     if (data.description !== undefined) {
-      patch.description = data.description || null;
-      patch.descriptionText = stripHtml(data.description);
+      const normalized = normalizeDescriptionInput(data.description);
+      patch.description = normalized.description;
+      patch.descriptionText = normalized.descriptionText;
       changes.description = { changed: true };
     }
     if (data.priority !== undefined && data.priority !== ticket.priority) {

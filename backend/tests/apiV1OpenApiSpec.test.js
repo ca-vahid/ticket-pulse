@@ -25,6 +25,14 @@ describe('OpenAPI spec — intake enrichment (FR 08-05 Phase 1c)', () => {
     expect(props.customFields.description).toMatch(/200 definitions/);
   });
 
+  test('CreateTicket documents group placement (QA 08-06 #1)', () => {
+    const props = schemas.CreateTicket.properties;
+    expect(props.groupId).toEqual(expect.objectContaining({ type: 'integer' }));
+    expect(props.internalGroupId).toEqual(expect.objectContaining({ type: 'integer' }));
+    expect(props.groupId.description).toMatch(/default internal group/i);
+    expect(props.internalGroupId.description).toMatch(/default internal group/i);
+  });
+
   test('Ticket (read shape) and UpdateTicket carry customFields + names', () => {
     expect(schemas.Ticket.properties.customFields).toBeDefined();
     const up = schemas.UpdateTicket.properties;

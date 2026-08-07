@@ -1468,7 +1468,9 @@ router.put(
 
 /**
  * GET /api/settings/groups
- * All groups (FreshService + internal) for the current workspace, with member counts.
+ * All groups (FreshService + internal) for the current workspace, with member
+ * counts. Each row carries `isDefault` — whether it is the workspace's default
+ * internal group for new tickets (QA 08-06 #1; at most one, workspace column).
  */
 router.get(
   '/groups',
@@ -1476,8 +1478,55 @@ router.get(
   requireWorkspaceAccess,
   requireAdmin,
   asyncHandler(async (req, res) => {
-    const groups = await groupRepository.listForWorkspace(req.workspaceId);
-    res.json({ success: true, data: groups });
+    const [groups, workspace] = await Promise.all([
+      groupRepository.listForWorkspace(req.workspaceId),
+      prisma.workspace.findUnique({
+        where: { id: req.workspaceId },
+        select: { defaultInternalGroupId: true },
+      }),
+    ]);
+    const defaultId = workspace?.defaultInternalGroupId ?? null;
+    res.json({
+      success: true,
+      data: groups.map((group) => ({ ...group, isDefault: group.id === defaultId })),
+    });
+  }),
+);
+
+/**
+ * PUT /api/settings/groups/default
+ * Set (or clear with groupId: null) the workspace's default internal group for
+ * new tickets. Internal, active groups only — a single workspace column, so
+ * "one max" is structural: setting a new default unsets the old one.
+ */
+router.put(
+  '/groups/default',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const raw = req.body?.groupId;
+    let groupId = null;
+    if (raw !== null && raw !== undefined && raw !== '') {
+      groupId = Number.parseInt(raw, 10);
+      if (!Number.isInteger(groupId) || groupId <= 0) {
+        return res.status(400).json({ success: false, message: 'groupId must be a group id or null' });
+      }
+      const group = await groupRepository.getById(groupId);
+      if (!group || group.workspaceId !== req.workspaceId || group.origin !== 'local') {
+        return res.status(400).json({ success: false, message: 'Default group must be an internal group in this workspace' });
+      }
+      if (!group.isActive) {
+        return res.status(400).json({ success: false, message: 'Reactivate the group before making it the default' });
+      }
+    }
+    await prisma.workspace.update({
+      where: { id: req.workspaceId },
+      data: { defaultInternalGroupId: groupId },
+    });
+    clearReadCache();
+    logger.info(`Workspace ${req.workspaceId} default internal group set to ${groupId ?? 'none'}`);
+    res.json({ success: true, data: { defaultInternalGroupId: groupId } });
   }),
 );
 

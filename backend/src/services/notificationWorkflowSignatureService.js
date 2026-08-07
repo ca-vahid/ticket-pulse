@@ -50,6 +50,45 @@ function removeInvalidDataImageSources(html) {
   });
 }
 
+/**
+ * Shared email-HTML sanitizer config (QA 08-06 #3). This is the permissive
+ * allowlist the signature editor always used; the engine's body sanitizer
+ * (sanitizeEmailHtml) now reuses it so template styling — h2 colors, divs,
+ * table layouts, class/align attributes — survives rendering instead of the
+ * two configs silently diverging.
+ */
+export const EMAIL_SANITIZE_OPTIONS = Object.freeze({
+  allowedTags: [
+    ...sanitizeHtml.defaults.allowedTags,
+    'div',
+    'span',
+    'img',
+    'table',
+    'thead',
+    'tbody',
+    'tfoot',
+    'tr',
+    'td',
+    'th',
+    'h1',
+    'h2',
+    'h3',
+  ],
+  allowedAttributes: {
+    '*': ['style', 'class', 'align'],
+    a: ['href', 'name', 'target', 'rel', 'style', 'class'],
+    img: ['src', 'alt', 'width', 'height', 'style', 'class'],
+    table: ['width', 'height', 'border', 'cellpadding', 'cellspacing', 'style', 'class'],
+    td: ['width', 'height', 'colspan', 'rowspan', 'style', 'class', 'align', 'valign'],
+    th: ['width', 'height', 'colspan', 'rowspan', 'style', 'class', 'align', 'valign'],
+  },
+  allowedSchemes: ['http', 'https', 'mailto'],
+  allowedSchemesByTag: {
+    img: ['http', 'https', 'data'],
+  },
+  allowProtocolRelative: false,
+});
+
 export function sanitizeSignatureHtml(html) {
   const raw = String(html || '').trim();
   if (!raw) return '';
@@ -57,37 +96,7 @@ export function sanitizeSignatureHtml(html) {
     throw new Error(`Signature HTML exceeds the ${Math.round(MAX_SIGNATURE_HTML_BYTES / 1024)} KB limit`);
   }
 
-  const sanitized = sanitizeHtml(raw, {
-    allowedTags: [
-      ...sanitizeHtml.defaults.allowedTags,
-      'div',
-      'span',
-      'img',
-      'table',
-      'thead',
-      'tbody',
-      'tfoot',
-      'tr',
-      'td',
-      'th',
-      'h1',
-      'h2',
-      'h3',
-    ],
-    allowedAttributes: {
-      '*': ['style', 'class', 'align'],
-      a: ['href', 'name', 'target', 'rel', 'style', 'class'],
-      img: ['src', 'alt', 'width', 'height', 'style', 'class'],
-      table: ['width', 'height', 'border', 'cellpadding', 'cellspacing', 'style', 'class'],
-      td: ['width', 'height', 'colspan', 'rowspan', 'style', 'class', 'align', 'valign'],
-      th: ['width', 'height', 'colspan', 'rowspan', 'style', 'class', 'align', 'valign'],
-    },
-    allowedSchemes: ['http', 'https', 'mailto'],
-    allowedSchemesByTag: {
-      img: ['http', 'https', 'data'],
-    },
-    allowProtocolRelative: false,
-  });
+  const sanitized = sanitizeHtml(raw, EMAIL_SANITIZE_OPTIONS);
   const cleaned = removeInvalidDataImageSources(sanitized);
   if (byteLength(cleaned) > MAX_SIGNATURE_HTML_BYTES) {
     throw new Error(`Signature HTML exceeds the ${Math.round(MAX_SIGNATURE_HTML_BYTES / 1024)} KB limit after sanitization`);

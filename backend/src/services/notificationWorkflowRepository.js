@@ -626,6 +626,37 @@ export async function getSampleContext(triggerType) {
   return sampleEventContext(triggerType);
 }
 
+/**
+ * Persist the most recent routing-suppression decision per workflow (QA 08-06
+ * #6). The engine computes `suppressed[].reason` on every event but used to
+ * discard it — a suppressed workflow looked identical to one that never fired.
+ * Chosen over deriving on read via the routing preview because this records
+ * the REAL decision for the REAL event (a preview against a sample ticket can
+ * disagree with what actually happened). Grouped updateMany per reason keeps
+ * it to a couple of cheap writes per event.
+ */
+export async function recordSuppressionDecisions(suppressed = []) {
+  const byReason = new Map();
+  for (const decision of suppressed || []) {
+    const id = Number(decision?.id);
+    const reason = String(decision?.reason || '').trim();
+    if (!Number.isFinite(id) || id <= 0 || !reason) continue;
+    if (!byReason.has(reason)) byReason.set(reason, []);
+    byReason.get(reason).push(id);
+  }
+  if (byReason.size === 0) return { updated: 0 };
+  const now = new Date();
+  let updated = 0;
+  for (const [reason, ids] of byReason) {
+    const result = await prisma.notificationWorkflow.updateMany({
+      where: { id: { in: ids } },
+      data: { lastSuppressedAt: now, lastSuppressedReason: reason.slice(0, 80) },
+    });
+    updated += result?.count || 0;
+  }
+  return { updated };
+}
+
 export default {
   ensureDefaultWorkflows,
   listWorkflows,
@@ -644,4 +675,5 @@ export default {
   listAuditRuns,
   listRuns,
   getSampleContext,
+  recordSuppressionDecisions,
 };

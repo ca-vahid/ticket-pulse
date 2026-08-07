@@ -39,12 +39,15 @@ vi.mock('../../services/api', () => ({
 }));
 
 const {
+  AuditModeBadge,
+  WorkflowEnableMockConfirmModal,
   LlmDiagnosticsList,
   LlmContextToolsPanel,
   TicketContextPicker,
   buildConditionRule,
   conditionBuilderFromRule,
   describeCondition,
+  routingRuleForSave,
   validateWorkflowDefinitionClient,
 } = await import('./NotificationWorkflowsPanel.jsx');
 
@@ -328,5 +331,106 @@ describe('workflow graph helpers', () => {
     expect(screen.getByText('classify')).toBeInTheDocument();
     expect(screen.getByText('draft_email')).toBeInTheDocument();
     expect(screen.getByText(/Guardrail passed/i)).toBeInTheDocument();
+  });
+});
+
+// QA 08-06 #6 — the workflow routing trap: what the Routing tab sends on save.
+describe('routingRuleForSave (QA 08-06 #6)', () => {
+  const EMPTY_BUILDER = { field: 'requester.regionKey', operator: 'equals', value: '' };
+
+  test('rule-less workflow + untouched builder saves NULL (no demo rule attached)', () => {
+    const workflow = { id: 42, isDefaultVariant: false, routingRule: null };
+    expect(routingRuleForSave({ workflow, builder: EMPTY_BUILDER, dirty: false })).toBeNull();
+  });
+
+  test('rule-less workflow + touched builder saves the built rule', () => {
+    const workflow = { id: 42, isDefaultVariant: false, routingRule: null };
+    const builder = { field: 'requester.regionKey', operator: 'equals', value: 'AU-BRISBANE' };
+    expect(routingRuleForSave({ workflow, builder, dirty: true }))
+      .toEqual({ '==': [{ var: 'requester.regionKey' }, 'AU-BRISBANE'] });
+  });
+
+  test('a stored rule round-trips unchanged through the builder', () => {
+    const stored = { '==': [{ var: 'requester.regionKey' }, 'AU-BRISBANE'] };
+    const workflow = { id: 42, isDefaultVariant: false, routingRule: stored };
+    const builder = conditionBuilderFromRule(stored);
+    expect(routingRuleForSave({ workflow, builder, dirty: false })).toEqual(stored);
+  });
+
+  test('default variants never carry a rule', () => {
+    const workflow = { id: 7, isDefaultVariant: true, routingRule: null };
+    const builder = { field: 'requester.regionKey', operator: 'equals', value: 'AU-BRISBANE' };
+    expect(routingRuleForSave({ workflow, builder, dirty: true })).toBeNull();
+  });
+});
+
+// QA 08-06 (Susan, ws5) — enabling a workflow whose mock mode is on must ask
+// whether to also turn mock off, since observe-only means NO real actions.
+describe('WorkflowEnableMockConfirmModal (QA 08-06 mock-mode visibility)', () => {
+  const mockWorkflow = { id: 11393, name: 'Intake field card', triggerType: 'ticket.created', mockModeEnabled: true };
+
+  function renderModal(overrides = {}) {
+    const props = {
+      workflow: mockWorkflow,
+      saving: false,
+      onCancel: vi.fn(),
+      onEnableLive: vi.fn(),
+      onKeepObserveOnly: vi.fn(),
+      ...overrides,
+    };
+    render(<WorkflowEnableMockConfirmModal {...props} />);
+    return props;
+  }
+
+  afterEach(() => cleanup());
+
+  test('explains observe-only mode and offers both choices', () => {
+    renderModal();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByText('Observe-only (mock) mode is on')).toBeInTheDocument();
+    expect(screen.getByText(/no real actions/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Enable \+ turn off mock/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Keep observe-only/ })).toBeInTheDocument();
+  });
+
+  test('"Enable + turn off mock" fires onEnableLive only', () => {
+    const props = renderModal();
+    fireEvent.click(screen.getByRole('button', { name: /Enable \+ turn off mock/ }));
+    expect(props.onEnableLive).toHaveBeenCalledTimes(1);
+    expect(props.onKeepObserveOnly).not.toHaveBeenCalled();
+  });
+
+  test('"Keep observe-only" fires onKeepObserveOnly only', () => {
+    const props = renderModal();
+    fireEvent.click(screen.getByRole('button', { name: /Keep observe-only/ }));
+    expect(props.onKeepObserveOnly).toHaveBeenCalledTimes(1);
+    expect(props.onEnableLive).not.toHaveBeenCalled();
+  });
+
+  test('Cancel closes without enabling anything; hidden without a workflow', () => {
+    const props = renderModal();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Cancel' })[1]);
+    expect(props.onCancel).toHaveBeenCalledTimes(1);
+    expect(props.onEnableLive).not.toHaveBeenCalled();
+    expect(props.onKeepObserveOnly).not.toHaveBeenCalled();
+    cleanup();
+    render(<WorkflowEnableMockConfirmModal workflow={null} saving={false} onCancel={vi.fn()} onEnableLive={vi.fn()} onKeepObserveOnly={vi.fn()} />);
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+});
+
+// Run-log rows label mock runs — pin the badge so it cannot silently regress.
+describe('AuditModeBadge (mock runs are visibly labeled)', () => {
+  afterEach(() => cleanup());
+
+  test('mock execution mode renders the sky "Mock" badge', () => {
+    render(<AuditModeBadge mode="mock" compact />);
+    const badge = screen.getByText('Mock');
+    expect(badge.closest('span')).toHaveClass('bg-sky-50');
+  });
+
+  test('live execution mode renders "Live"', () => {
+    render(<AuditModeBadge mode="live" compact />);
+    expect(screen.getByText('Live')).toBeInTheDocument();
   });
 });

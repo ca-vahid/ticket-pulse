@@ -506,6 +506,37 @@ const DEFAULT_ROUTING_METADATA = {
   sampleSize: 0,
 };
 
+// Empty routing builder (QA 08-06 #6). The builder used to be seeded with a
+// DEMO rule (requester.regionKey equals 'AU-BRISBANE') for any rule-less
+// workflow — saving the Routing tab then silently attached a never-matching
+// rule and the workflow stopped firing. The example now lives in placeholder
+// copy only; a rule is sent to the server ONLY after the builder is touched.
+const EMPTY_ROUTING_BUILDER = { field: 'requester.regionKey', operator: 'equals', value: '' };
+
+/**
+ * The routing rule a save/test should carry for the current builder state
+ * (QA 08-06 #6), pure so it is testable:
+ * - default variants never carry a rule;
+ * - a rule-less workflow whose builder is UNTOUCHED stays rule-less (null) —
+ *   opening the Routing tab and saving must never attach the example rule;
+ * - otherwise the builder's condition is used.
+ */
+export function routingRuleForSave({ workflow, builder, dirty }) {
+  if (!workflow || workflow.isDefaultVariant) return null;
+  if (!workflow.routingRule && !dirty) return null;
+  return buildConditionRule(builder);
+}
+
+// Friendly wording for the engine's suppression reasons ("last skipped" line).
+export const ROUTING_SUPPRESSION_REASON_LABELS = {
+  routing_rule_not_matched: 'its routing rule did not match the ticket',
+  missing_routing_rule: 'it has no routing rule and the default workflow ran instead',
+  lower_priority_exclusive_match_suppressed: 'a higher match-order variant matched first',
+  lower_priority_acting_default_suppressed: 'another rule-less workflow acted as the default',
+  default_variant_not_needed: 'a replacement variant matched instead',
+  schedule_policy_suppressed: 'the after-hours/holiday schedule routed the event elsewhere',
+};
+
 const CONDITION_OPERATOR_OPTIONS = [
   { value: 'equals', label: 'equals' },
   { value: 'not_equals', label: 'does not equal' },
@@ -4290,7 +4321,7 @@ function MockModeBadge({ compact = false }) {
   );
 }
 
-function AuditModeBadge({ mode, compact = false }) {
+export function AuditModeBadge({ mode, compact = false }) {
   const normalized = String(mode || 'live').toLowerCase();
   const config = {
     live: {
@@ -5176,6 +5207,88 @@ function WorkflowArchiveConfirmModal({ workflow, archived, saving, onCancel, onC
           >
             {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : isRestore ? <RefreshCw className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
             {isRestore ? 'Restore variant' : 'Archive variant'}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+/**
+ * Confirm dialog for enabling a workflow whose MOCK MODE is on (QA 08-06 —
+ * Susan's ws5 'Intake field card' ran on every ticket in mock mode and wrote
+ * nothing). The admin explicitly chooses: enable + turn mock off (real
+ * actions), or keep it observe-only on purpose.
+ */
+export function WorkflowEnableMockConfirmModal({ workflow, saving, onCancel, onEnableLive, onKeepObserveOnly }) {
+  if (!workflow) return null;
+  const workflowName = workflowDisplayName(workflow);
+
+  return (
+    <div className="fixed inset-0 z-[96] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm">
+      <button
+        type="button"
+        aria-label="Cancel enabling this workflow"
+        className="absolute inset-0 cursor-default"
+        onClick={saving ? undefined : onCancel}
+      />
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="workflow-enable-mock-confirm-title"
+        className="relative z-10 w-full max-w-lg overflow-hidden rounded-2xl border border-white/70 bg-white shadow-2xl"
+      >
+        <div className="flex items-start gap-3 border-b border-amber-100 bg-amber-50 px-5 py-4">
+          <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-amber-200 bg-white text-amber-700">
+            <FlaskConical className="h-4 w-4" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Observe-only (mock) mode is on</div>
+            <h3 id="workflow-enable-mock-confirm-title" className="mt-1 break-words text-lg font-semibold text-slate-950">
+              Enable {workflowName}?
+            </h3>
+            <p className="mt-1 text-sm leading-5 text-slate-600">
+              This workflow is in observe-only (mock) mode — it will run on matching tickets but take
+              <span className="font-semibold"> no real actions</span> (no emails, no ticket changes).
+              Turn off mock mode too?
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={saving}
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-slate-500 hover:bg-white/70 disabled:opacity-50"
+            title="Cancel"
+          >
+            <XCircle className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-4">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={saving}
+            className="inline-flex h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onKeepObserveOnly}
+            disabled={saving}
+            className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md border border-amber-300 bg-amber-50 px-3 text-sm font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+          >
+            <FlaskConical className="h-4 w-4" />
+            Keep observe-only
+          </button>
+          <button
+            type="button"
+            onClick={onEnableLive}
+            disabled={saving}
+            className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md bg-emerald-700 px-3 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
+          >
+            {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            Enable + turn off mock
           </button>
         </div>
       </section>
@@ -6936,8 +7049,13 @@ export default function NotificationWorkflowsPanel({
   // custom fields) for the action-node pickers — fetched lazily on first need.
   const [ticketMeta, setTicketMeta] = useState(null);
   const [customFieldDefs, setCustomFieldDefs] = useState(null);
-  const [routingBuilder, setRoutingBuilder] = useState({ field: 'requester.regionKey', operator: 'equals', value: 'AU-BRISBANE' });
-  const [routingMode, setRoutingMode] = useState('exclusive');
+  const [routingBuilder, setRoutingBuilder] = useState(EMPTY_ROUTING_BUILDER);
+  // Tracks whether the admin actually edited the builder — a rule-less
+  // workflow whose builder is untouched saves routingRule: null (QA 08-06 #6).
+  const [routingDirty, setRoutingDirty] = useState(false);
+  // Initialized from the workflow's stored mode (templates install
+  // 'additive'), never hardcoded back to 'exclusive' on save.
+  const [routingMode, setRoutingMode] = useState(() => selected?.routingMode || 'exclusive');
   const [routingPriority, setRoutingPriority] = useState(1);
   const [routingMetadata, setRoutingMetadata] = useState(DEFAULT_ROUTING_METADATA);
   const [routingMetadataLoading, setRoutingMetadataLoading] = useState(false);
@@ -6946,6 +7064,9 @@ export default function NotificationWorkflowsPanel({
   const [routingTestResult, setRoutingTestResult] = useState(null);
   const [routingTestLoading, setRoutingTestLoading] = useState(false);
   const [archiveConfirm, setArchiveConfirm] = useState(null);
+  // Enabling a workflow whose mock mode is ON (QA 08-06, Susan/ws5): it would
+  // run on every matching ticket but take NO real actions — confirm intent.
+  const [enableMockConfirm, setEnableMockConfirm] = useState(null);
   const [variantDialogOpen, setVariantDialogOpen] = useState(false);
   const [newWorkflowOpen, setNewWorkflowOpen] = useState(false);
   const [togglingWorkflowId, setTogglingWorkflowId] = useState(null);
@@ -7180,9 +7301,12 @@ export default function NotificationWorkflowsPanel({
     if (!selected) return;
     setRoutingMode(selected.routingMode || 'exclusive');
     setRoutingPriority(Number(selected.routingPriority || (selected.isDefaultVariant ? 100 : 1)));
+    // Rule-less workflows get an EMPTY builder (the AU-BRISBANE example moved
+    // into placeholder copy) — saving without touching it keeps the rule null.
     setRoutingBuilder(selected.routingRule
       ? conditionBuilderFromRule(selected.routingRule)
-      : { field: 'requester.regionKey', operator: 'equals', value: 'AU-BRISBANE' });
+      : EMPTY_ROUTING_BUILDER);
+    setRoutingDirty(false);
     setRoutingTestResult(null);
   }, [selected]);
 
@@ -7298,6 +7422,17 @@ export default function NotificationWorkflowsPanel({
     }
   }
 
+  // The routing rule the current builder state stands for (QA 08-06 #6) —
+  // see routingRuleForSave for the (tested) decision table.
+  function currentRoutingRule() {
+    return routingRuleForSave({ workflow: selected, builder: routingBuilder, dirty: routingDirty });
+  }
+
+  function touchRoutingBuilder(patch) {
+    setRoutingBuilder((current) => ({ ...current, ...patch }));
+    setRoutingDirty(true);
+  }
+
   async function runRoutingTest() {
     if (!selected) return;
     const freshserviceTicketId = String(routingTestTicketSearch || '').trim();
@@ -7317,7 +7452,7 @@ export default function NotificationWorkflowsPanel({
         triggerType: selected.triggerType,
         routingMode,
         routingPriority,
-        routingRule: selected.isDefaultVariant ? null : buildConditionRule(routingBuilder),
+        routingRule: currentRoutingRule(),
       });
       setRoutingTestResult(response.data || null);
     } catch (error) {
@@ -7798,7 +7933,9 @@ export default function NotificationWorkflowsPanel({
         name: (customName || '').trim() || `${eventLabel} custom variant`,
         routingMode: 'exclusive',
         routingPriority: 1,
-        routingRule: buildConditionRule({ field: 'requester.regionKey', operator: 'equals', value: 'AU-BRISBANE' }),
+        // No demo rule (QA 08-06 #6): new variants start rule-less; the admin
+        // adds a real rule in the Routing tab before it competes for tickets.
+        routingRule: null,
       });
       await loadWorkflows(response.data?.id);
       setWorkflowListCollapsed(false);
@@ -7837,6 +7974,11 @@ export default function NotificationWorkflowsPanel({
   // Inline list toggle (QA 07-07 #8): flip any workflow without opening it.
   async function toggleEnabledFor(workflow) {
     if (!workflow || togglingWorkflowId) return;
+    // Same observe-only guard as the editor's Live toggle (QA 08-06).
+    if (!workflow.isEnabled && workflow.mockModeEnabled === true) {
+      setEnableMockConfirm({ workflow });
+      return;
+    }
     setTogglingWorkflowId(workflow.id);
     try {
       const response = await notificationWorkflowAPI.setEnabled(workflow.id, !workflow.isEnabled);
@@ -7858,7 +8000,9 @@ export default function NotificationWorkflowsPanel({
         name: (customName || '').trim() || `${workflowDisplayName(selected)} variant`,
         routingMode: selected.routingMode || 'exclusive',
         routingPriority: selected.isDefaultVariant ? 1 : Math.min(999, Number(selected.routingPriority || 1) + 1),
-        routingRule: selected.routingRule || buildConditionRule({ field: 'requester.regionKey', operator: 'equals', value: 'AU-BRISBANE' }),
+        // Copies keep the source's rule; a rule-less source stays rule-less
+        // instead of inheriting the old never-matching demo rule (QA 08-06 #6).
+        routingRule: selected.routingRule || null,
       });
       await loadWorkflows(response.data?.id);
       setWorkflowListCollapsed(false);
@@ -7880,7 +8024,9 @@ export default function NotificationWorkflowsPanel({
       const response = await notificationWorkflowAPI.updateRouting(selected.id, {
         routingMode,
         routingPriority,
-        routingRule: selected.isDefaultVariant ? null : buildConditionRule(routingBuilder),
+        // Untouched builder on a rule-less workflow → null (QA 08-06 #6): a
+        // look at the Routing tab must never attach the example rule.
+        routingRule: currentRoutingRule(),
       });
       applyWorkflowUpdate(response.data, { shouldUpdateDraft: false });
       setMessage({ type: 'success', text: 'Routing settings saved' });
@@ -8007,6 +8153,13 @@ export default function NotificationWorkflowsPanel({
   async function toggleEnabled() {
     if (!selected) return;
     const nextEnabled = !selected.isEnabled;
+    // QA 08-06 (Susan, ws5 'Intake field card'): going Live while mock mode is
+    // on means the workflow runs but takes NO real actions — confirm intent
+    // instead of silently enabling an observe-only workflow.
+    if (nextEnabled && selected.mockModeEnabled === true) {
+      setEnableMockConfirm({ workflow: selected });
+      return;
+    }
     setSaving(true);
     setMessage(null);
     try {
@@ -8017,6 +8170,40 @@ export default function NotificationWorkflowsPanel({
         setAfterHoursDraft((current) => ({ ...current, afterHoursEnabled: response.data.isEnabled === true }));
       }
       setMessage({ type: 'success', text: response.data.isEnabled ? 'Workflow enabled' : 'Workflow disabled' });
+      await refreshHealth();
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  /**
+   * Enable a workflow after the observe-only confirm (QA 08-06):
+   * - alsoDisableMock: enable AND turn mock mode off — real actions run;
+   * - otherwise the workflow stays observe-only on purpose.
+   */
+  async function enableWorkflowResolvingMock(workflow, { alsoDisableMock = false } = {}) {
+    if (!workflow) return;
+    setSaving(true);
+    setMessage(null);
+    try {
+      let response = await notificationWorkflowAPI.setEnabled(workflow.id, true);
+      if (alsoDisableMock) {
+        response = await notificationWorkflowAPI.setMockMode(workflow.id, false);
+      }
+      applyWorkflowUpdate(response.data, { shouldUpdateDraft: false });
+      if (selectedIsAfterHoursWorkflow && workflow.id === selected?.id) {
+        setAfterHoursPolicy((current) => ({ ...current, afterHoursEnabled: response.data.isEnabled === true }));
+        setAfterHoursDraft((current) => ({ ...current, afterHoursEnabled: response.data.isEnabled === true }));
+      }
+      setMessage({
+        type: 'success',
+        text: alsoDisableMock
+          ? 'Workflow enabled — mock mode is off, real actions will run.'
+          : 'Workflow enabled in observe-only (mock) mode — it runs but takes no real actions.',
+      });
+      setEnableMockConfirm(null);
       await refreshHealth();
     } catch (error) {
       setMessage({ type: 'error', text: error.message });
@@ -8745,8 +8932,24 @@ export default function NotificationWorkflowsPanel({
             <p className="text-xs leading-5 text-slate-500">
               {selected.isDefaultVariant
                 ? 'Runs when no replacement workflow matches after schedule routing.'
-                : workflowRoutingDescription({ ...selected, routingRule: buildConditionRule(routingBuilder) })}
+                : workflowRoutingDescription({ ...selected, routingRule: currentRoutingRule() })}
             </p>
+            {!selected.isDefaultVariant && !selected.routingRule && !routingDirty && (
+              <div className="rounded-md border border-dashed border-slate-300 bg-white px-2.5 py-1.5 text-xs leading-5 text-slate-500">
+                No routing rule yet — this workflow follows its behavior setting for every ticket.
+                Build one above to target it, e.g. <span className="font-semibold text-slate-700">Requester region equals AU-BRISBANE</span>.
+              </div>
+            )}
+            {selected.lastSuppressedAt && !selected.isDefaultVariant && (
+              <div
+                className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs leading-5 text-amber-800"
+                data-testid="routing-last-skipped"
+              >
+                <span className="font-semibold">Last skipped</span>
+                {' '}{new Date(selected.lastSuppressedAt).toLocaleString()} —{' '}
+                {ROUTING_SUPPRESSION_REASON_LABELS[selected.lastSuppressedReason] || selected.lastSuppressedReason || 'routing did not select this workflow'}.
+              </div>
+            )}
             {!selected.isDefaultVariant && (
               <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
                 <div className="font-semibold text-slate-900">{behavior.label}</div>
@@ -8769,7 +8972,7 @@ export default function NotificationWorkflowsPanel({
                 <select
                   value={routingBuilder.field}
                   onChange={(event) => {
-                    setRoutingBuilder((current) => ({ ...current, field: event.target.value, value: '' }));
+                    touchRoutingBuilder({ field: event.target.value, value: '' });
                     setRoutingLookupSearch('');
                     setRoutingTestResult(null);
                   }}
@@ -8785,7 +8988,7 @@ export default function NotificationWorkflowsPanel({
                 Operator
                 <select
                   value={routingBuilder.operator}
-                  onChange={(event) => setRoutingBuilder((current) => ({ ...current, operator: event.target.value }))}
+                  onChange={(event) => touchRoutingBuilder({ operator: event.target.value })}
                   disabled={selected.isDefaultVariant || Boolean(selected.archivedAt)}
                   className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-2 text-sm normal-case text-slate-900 disabled:bg-slate-100 disabled:text-slate-500"
                 >
@@ -8800,7 +9003,7 @@ export default function NotificationWorkflowsPanel({
                   list={`routing-known-values-${selected.id}`}
                   value={routingBuilder.value}
                   onChange={(event) => {
-                    setRoutingBuilder((current) => ({ ...current, value: event.target.value }));
+                    touchRoutingBuilder({ value: event.target.value });
                     setRoutingTestResult(null);
                   }}
                   disabled={selected.isDefaultVariant || Boolean(selected.archivedAt) || valueDisabled}
@@ -8879,7 +9082,7 @@ export default function NotificationWorkflowsPanel({
                     <button
                       key={item.value}
                       type="button"
-                      onClick={() => setRoutingBuilder((current) => ({ ...current, value: item.value }))}
+                      onClick={() => touchRoutingBuilder({ value: item.value })}
                       disabled={selected.isDefaultVariant || Boolean(selected.archivedAt) || valueDisabled}
                       className="rounded-md border border-white bg-white px-2 py-1 text-left text-xs text-slate-700 shadow-sm ring-1 ring-slate-200 hover:bg-blue-50 hover:text-blue-800 disabled:opacity-50"
                       title={`${item.value}${item.sources?.length ? ` - ${item.sources.join(', ')}` : ''}`}
@@ -10653,6 +10856,19 @@ export default function NotificationWorkflowsPanel({
                   disabled={saving || !selected || !canToggleMockMode}
                   title={mockModeButtonTitle}
                 />
+                {/* QA 08-06 (Susan, ws5): Live + mock together looked healthy
+                    but sent nothing — spell the combination out loudly right
+                    next to the toggles. */}
+                {selected?.isEnabled === true && selected?.mockModeEnabled === true && (
+                  <span
+                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-amber-300 bg-amber-50 px-2.5 text-xs font-bold text-amber-800"
+                    data-testid="observe-only-warning"
+                    title="This workflow is Live AND in mock mode: it runs on matching tickets but takes no real actions (no emails, no ticket updates). Turn off mock mode to make it act."
+                  >
+                    <FlaskConical className="h-3.5 w-3.5" />
+                    Observe-only — no real actions
+                  </span>
+                )}
               </div>
             )}
           </div>
@@ -11082,6 +11298,13 @@ export default function NotificationWorkflowsPanel({
         saving={saving}
         onCancel={() => setArchiveConfirm(null)}
         onConfirm={() => toggleArchived(archiveConfirm?.archived === true)}
+      />
+      <WorkflowEnableMockConfirmModal
+        workflow={enableMockConfirm?.workflow || null}
+        saving={saving}
+        onCancel={() => setEnableMockConfirm(null)}
+        onEnableLive={() => enableWorkflowResolvingMock(enableMockConfirm?.workflow, { alsoDisableMock: true })}
+        onKeepObserveOnly={() => enableWorkflowResolvingMock(enableMockConfirm?.workflow, { alsoDisableMock: false })}
       />
       <WorkflowVariantDialog
         open={variantDialogOpen}

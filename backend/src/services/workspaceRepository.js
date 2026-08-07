@@ -68,6 +68,12 @@ class WorkspaceRepository {
       if (data.nativeTicketingEnabled !== undefined) {
         updateData.nativeTicketingEnabled = data.nativeTicketingEnabled === true;
       }
+      if (data.defaultInternalGroupId !== undefined) {
+        // Default internal group for new tickets (QA 08-06 #1); null clears it.
+        updateData.defaultInternalGroupId = data.defaultInternalGroupId === null
+          ? null
+          : Number(data.defaultInternalGroupId);
+      }
       if (data.internalDomains !== undefined) {
         // Normalize: lowercase bare domains ("BGCengineering.ca", "@x.com",
         // "user@x.com" all → "x.com"), deduped, empty entries dropped.
