@@ -3,7 +3,7 @@ import { settingsAPI } from '../../services/api';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 import {
   Users2, Plus, Loader, Cloud, Home, Power, PowerOff, Pencil, Check, X,
-  AlertCircle, CheckCircle2, UsersRound, Search,
+  AlertCircle, CheckCircle2, UsersRound, Search, Star,
 } from 'lucide-react';
 
 const EMPTY = { name: '', description: '' };
@@ -88,6 +88,19 @@ export default function GroupsPanel() {
       await load();
     } catch (err) { setError(err.message || 'Failed to change status'); }
     finally { setTogglingId(null); }
+  }, [load]);
+
+  // Default group for new tickets (QA 08-06 #1): one internal group max —
+  // a workspace column, so starring a new one unsets the previous default.
+  const toggleDefault = useCallback(async (g) => {
+    setError(null);
+    try {
+      await settingsAPI.setDefaultGroup(g.isDefault ? null : g.id);
+      flash(g.isDefault
+        ? 'Default cleared — new tickets without a group stay ungrouped.'
+        : `"${g.name}" is now the default group for new tickets.`);
+      await load();
+    } catch (err) { setError(err.message || 'Failed to change the default group'); }
   }, [load]);
 
   const openMembers = useCallback(async (g) => {
@@ -206,6 +219,12 @@ export default function GroupsPanel() {
               <Home className="w-4 h-4 text-blue-600" /> Internal groups
               <span className="text-xs font-normal text-gray-400">({internal.length})</span>
             </div>
+            {internal.length > 0 && !internal.some((g) => g.isDefault) && (
+              <p className="text-xs text-gray-400 px-1" data-testid="no-default-group-hint">
+                No default group — tickets created without a group stay ungrouped. Star a group to make
+                it the default for new tickets.
+              </p>
+            )}
             {internal.length === 0 ? (
               <p className="text-sm text-gray-400 italic px-1 py-2">
                 No internal groups yet. Create one to route mailboxes and Ticket Pulse tickets without a FreshService group.
@@ -222,6 +241,7 @@ export default function GroupsPanel() {
                       onCancelEdit={() => { setEditingId(null); setError(null); }}
                       onSaveEdit={() => saveEdit(g.id)}
                       onToggle={() => toggleActive(g)}
+                      onToggleDefault={() => toggleDefault(g)}
                       onManageMembers={() => openMembers(g)}
                       membersOpen={membersFor === g.id}
                       saving={saving}
@@ -301,7 +321,7 @@ function OriginBadge({ origin }) {
 
 function GroupRow({
   g, readOnly, editing, editForm, setEditForm,
-  onStartEdit, onCancelEdit, onSaveEdit, onToggle, onManageMembers, membersOpen, saving, toggling,
+  onStartEdit, onCancelEdit, onSaveEdit, onToggle, onToggleDefault, onManageMembers, membersOpen, saving, toggling,
 }) {
   if (editing) {
     return (
@@ -335,6 +355,14 @@ function GroupRow({
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium text-gray-900 truncate">{g.name}</span>
           <OriginBadge origin={g.origin} />
+          {g.isDefault && (
+            <span
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200"
+              title="New tickets created without a group land here"
+            >
+              <Star className="w-3 h-3 fill-amber-400 text-amber-400" /> Default for new tickets
+            </span>
+          )}
           {!g.isActive && <span className="text-[11px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">Inactive</span>}
         </div>
         <div className="flex items-center gap-3 text-xs text-gray-500 mt-0.5">
@@ -344,6 +372,17 @@ function GroupRow({
       </div>
       {!readOnly && (
         <div className="flex items-center gap-1 shrink-0">
+          {g.isActive && (
+            <button
+              onClick={onToggleDefault}
+              title={g.isDefault ? 'Clear the default group for new tickets' : 'Make this the default group for new tickets'}
+              aria-label={g.isDefault ? `Clear ${g.name} as default group` : `Make ${g.name} the default group for new tickets`}
+              aria-pressed={g.isDefault === true}
+              className={`p-2 rounded-lg tp-focus-ring ${g.isDefault ? 'text-amber-500 hover:text-amber-600' : 'text-gray-300 hover:text-amber-500'}`}
+            >
+              <Star className={`w-4 h-4 ${g.isDefault ? 'fill-amber-400' : ''}`} />
+            </button>
+          )}
           <button onClick={onManageMembers} title="Manage members"
             className={`px-2.5 py-1.5 rounded-lg text-xs font-medium tp-focus-ring ${membersOpen ? 'bg-blue-100 text-blue-700' : 'text-blue-600 hover:bg-blue-50'}`}>
             Members

@@ -1317,6 +1317,14 @@ export function sampleEventContext(triggerType = 'ticket.created') {
     ticket: {
       id: 123,
       freshserviceTicketId: 456,
+      displayRef: '#456',
+      nativeNumber: null,
+      origin: 'freshservice',
+      ticketType: 'Incident',
+      sourceLabel: 'Email',
+      tags: [],
+      dueBy: null,
+      customFields: {},
       subject: 'Cannot access VPN',
       status: 'Open',
       priority: 2,
@@ -1444,7 +1452,7 @@ function variable(path, label, group, description, example = '') {
   };
 }
 
-export function notificationVariableCatalog(extraOutputFields = []) {
+export function notificationVariableCatalog(extraOutputFields = [], { customFieldDefinitions = [] } = {}) {
   const extras = (extraOutputFields || [])
     .map((field) => String(field || '').trim())
     .filter((field) => field && /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(field))
@@ -1456,8 +1464,26 @@ export function notificationVariableCatalog(extraOutputFields = []) {
       '',
     ));
 
+  // Workspace custom fields (QA 08-06 #4): the /variables route passes the
+  // workspace's definitions so `ticket.customFields.<key>` rows are pickable.
+  const customFieldRows = (customFieldDefinitions || [])
+    .filter((definition) => definition && /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(String(definition.key || '')))
+    .map((definition) => variable(
+      `ticket.customFields.${definition.key}`,
+      `Custom: ${definition.label || definition.key}`,
+      'Custom fields',
+      `Workspace custom field "${definition.label || definition.key}". Blank when the ticket has no value.`,
+      '',
+    ));
+
   return [
-    variable('ticket.freshserviceTicketId', 'Ticket number', 'Ticket', 'FreshService ticket number.', '225001'),
+    // Primary origin-safe number (QA 08-06 #4): TP-born tickets have no
+    // FreshService id, so templates should print displayRef, not the FS id.
+    variable('ticket.displayRef', 'Ticket number', 'Ticket', 'Human-facing ticket number — "TP-1070" for Ticket Pulse-born tickets, "#225001" for FreshService tickets.', 'TP-1070'),
+    variable('ticket.freshserviceTicketId', 'FreshService ticket number', 'Ticket', 'FreshService ticket number — blank for Ticket Pulse-born tickets (use Ticket number instead).', '225001'),
+    variable('ticket.nativeNumber', 'Native ticket number', 'Ticket', 'Ticket Pulse native number (without the TP- prefix) — blank for FreshService-born tickets.', '1070'),
+    variable('ticket.id', 'Internal ticket id', 'Ticket', 'Ticket Pulse internal database id (stable across both origins).', '4821'),
+    variable('ticket.origin', 'Ticket origin', 'Ticket', 'Where the ticket was born: ticketpulse or freshservice.', 'ticketpulse'),
     variable('ticket.subject', 'Subject', 'Ticket', 'Ticket subject line.', 'VPN access problem'),
     variable('ticket.descriptionText', 'Description', 'Ticket', 'Plain-text ticket description.', 'User cannot connect to VPN from home.'),
     variable('ticket.status', 'Status', 'Ticket', 'Ticket status label.', 'Open'),
@@ -1469,6 +1495,10 @@ export function notificationVariableCatalog(extraOutputFields = []) {
     variable('ticket.ccEmails', 'Original CC emails', 'Ticket', 'Email addresses copied on the original FreshService request.', 'manager@example.com'),
     variable('ticket.replyCcEmails', 'Reply CC emails', 'Ticket', 'FreshService reply CC addresses associated with this ticket.', 'teamlead@example.com'),
     variable('ticket.fwdEmails', 'Forwarded emails', 'Ticket', 'FreshService forwarded email addresses associated with this ticket.', ''),
+    variable('ticket.ticketType', 'Ticket type', 'Ticket', 'Per-workspace ticket type (Incident, Case, ...).', 'Incident'),
+    variable('ticket.sourceLabel', 'Arrival channel', 'Ticket', 'How the request arrived (Email, Portal, Phone, API, Agent, ...).', 'Email'),
+    variable('ticket.tags', 'Tags', 'Ticket', 'Ticket tag names (lowercased).', 'vpn, urgent-review'),
+    variable('ticket.dueBy', 'Due by', 'Ticket', 'Resolution due timestamp (SLA or manually set), blank when none.', '2026-08-08T17:00:00.000Z'),
     variable('ticket.category', 'Category', 'Ticket', 'FreshService category.', 'Access'),
     variable('ticket.subCategory', 'Subcategory', 'Ticket', 'FreshService subcategory.', 'VPN'),
     variable('ticket.ticketCategory', 'Ticket category', 'Ticket', 'Configured custom category field.', 'IT'),
@@ -1545,6 +1575,7 @@ export function notificationVariableCatalog(extraOutputFields = []) {
     variable('state.llm.email.subject', 'LLM subject', 'LLM Output', 'Subject returned by the LLM step.', 'Re: VPN access problem'),
     variable('state.llm.email.html', 'LLM HTML', 'LLM Output', 'HTML body returned by the LLM step.', '<p>We received your VPN request.</p>'),
     variable('state.llm.email.text', 'LLM text', 'LLM Output', 'Plain-text body returned by the LLM step.', 'We received your VPN request.'),
+    ...customFieldRows,
     ...extras,
   ];
 }

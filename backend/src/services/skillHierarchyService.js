@@ -498,6 +498,27 @@ class SkillHierarchyService {
       throw new ValidationError(`Resolve ${unresolvedMappings.length} legacy category mappings before publishing`);
     }
 
+    // Stale-publish safety net (Aug 2026 surface unification): the draft
+    // editor UI is retired but this endpoint stays admin-callable. Publish
+    // replaces the WHOLE taxonomy (everything not in the draft is retired),
+    // and drafts never reconcile with live tree edits — so publishing a draft
+    // saved before later tree changes would duplicate-and-retire live rows.
+    // Refuse when any CompetencyCategory changed after the draft was saved.
+    if (draft.updatedAt) {
+      const driftedRows = await prisma.competencyCategory.findMany({
+        where: { workspaceId, updatedAt: { gt: draft.updatedAt } },
+        orderBy: { updatedAt: 'desc' },
+        take: 10,
+        select: { name: true },
+      });
+      if (driftedRows.length > 0) {
+        const names = driftedRows.map((row) => row.name).join(', ');
+        throw new ValidationError(
+          `Cannot publish this draft: the taxonomy changed after this draft was saved — re-save the draft or edit via the Categories tree. Rows changed since the draft was saved: ${names}`,
+        );
+      }
+    }
+
     return prisma.$transaction(async (tx) => {
       const current = await tx.competencyCategory.findMany({
         where: { workspaceId },
@@ -653,6 +674,25 @@ class SkillHierarchyService {
         remappedCompetencies,
         remappedTickets,
       };
+    });
+  }
+
+  /**
+   * Archive the unpublished migration-era draft (status -> 'discarded').
+   * The row is kept for audit; getDraft/publish only look at status 'draft',
+   * so a discarded draft disappears from the migration banner and can no
+   * longer be published.
+   */
+  async discardDraft(workspaceId, userEmail = null) {
+    assertSkillHierarchyWorkspace(workspaceId);
+    const draft = await prisma.skillHierarchyDraft.findFirst({
+      where: { workspaceId, status: 'draft' },
+      orderBy: { updatedAt: 'desc' },
+    });
+    if (!draft) throw new NotFoundError('No editable skill draft found');
+    return prisma.skillHierarchyDraft.update({
+      where: { id: draft.id },
+      data: { status: 'discarded', updatedBy: userEmail },
     });
   }
 

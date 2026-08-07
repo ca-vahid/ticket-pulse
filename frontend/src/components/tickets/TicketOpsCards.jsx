@@ -208,7 +208,7 @@ function UrlValueLink({ href, label }) {
       target="_blank"
       rel="noopener noreferrer"
       title={href}
-      className="tp-focus-ring inline-flex max-w-full items-center gap-1 text-xs text-blue-600 hover:text-blue-700 hover:underline"
+      className="tp-focus-ring inline-flex min-w-0 shrink items-center gap-1 text-xs text-blue-600 hover:text-blue-700 hover:underline"
       aria-label={`${label} (opens in a new tab)`}
     >
       <span className="truncate">{href.replace(/^https?:\/\//i, '')}</span>
@@ -283,7 +283,7 @@ export function CustomFieldsCard({ ticketId, values = {}, canWrite = false, onSa
     // the pencil swaps in the plain input for edits.
     if (isUrlValue(value) && !editingKeys.has(definition.key)) {
       return (
-        <span className="flex items-center gap-1 min-w-0">
+        <span className="flex w-full items-center gap-1 min-w-0">
           <UrlValueLink href={String(value).trim()} label={definition.label} />
           {canWrite && (
             <button
@@ -311,7 +311,7 @@ export function CustomFieldsCard({ ticketId, values = {}, canWrite = false, onSa
   };
 
   return (
-    <div className="tp-card rounded-xl p-3" data-testid="custom-fields-card">
+    <div className="tp-card rounded-xl p-3 overflow-hidden" data-testid="custom-fields-card">
       <div className="flex items-center gap-1.5 mb-2">
         <Copy className="w-3.5 h-3.5 text-slate-400" aria-hidden="true" />
         <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Custom fields</span>

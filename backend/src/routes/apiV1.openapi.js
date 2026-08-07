@@ -90,6 +90,14 @@ const T = {
         type: 'string',
         description: 'Ticket type by name, validated against the workspace type registry (GET /types). Omitted → workspace default. `type` is accepted as an alias.',
       },
+      groupId: {
+        type: 'integer',
+        description: 'FreshService group id (see GET /groups). When both groupId and internalGroupId are omitted, the workspace’s default internal group — if configured — is applied automatically.',
+      },
+      internalGroupId: {
+        type: 'integer',
+        description: 'Internal (Ticket Pulse–native) group id (see GET /groups). When both groupId and internalGroupId are omitted, the workspace’s default internal group — if configured — is applied automatically.',
+      },
     },
     example: {
       subject: 'Coyote Landslide', description: 'Created from Power Automate', priority: 2,

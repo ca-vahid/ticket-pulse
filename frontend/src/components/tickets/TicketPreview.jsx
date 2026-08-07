@@ -18,9 +18,12 @@ import { assignmentAPI, ticketsAPI } from '../../services/api';
 import { CANONICAL_STATUS_NAMES, baseStatusOf, isTerminalStatus, statusDefsFromMeta, statusToneFromDefs } from './statusDefs';
 import { FRESHSERVICE_DOMAIN } from '../tech-detail/constants';
 import { useWorkspaceRole } from '../nav/navDestinations';
+import { looksLikeRealHtml } from '../../utils/htmlContent';
 
+// Known-tag detector (QA 08-06 #5): plain text carrying angle-bracket tokens
+// like <Processed> renders via the plain-text branch with the tokens intact.
 function looksLikeHtml(s) {
-  return /<[a-z][\s\S]*>/i.test(String(s || ''));
+  return looksLikeRealHtml(s);
 }
 
 const TABS = [

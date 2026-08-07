@@ -384,6 +384,8 @@ export const settingsAPI = {
   updateTechnician: (id, data) => api.patch(`/settings/technicians/${id}`, data),
   getGroups: () => api.get('/settings/groups'),
   createInternalGroup: (data) => api.post('/settings/groups', data),
+  // Default internal group for new tickets (QA 08-06 #1); null clears it.
+  setDefaultGroup: (groupId) => api.put('/settings/groups/default', { groupId }),
   updateGroup: (id, data) => api.patch(`/settings/groups/${id}`, data),
   getGroupMembers: (id) => api.get(`/settings/groups/${id}/members`),
   setGroupMembers: (id, technicianIds) => api.put(`/settings/groups/${id}/members`, { technicianIds }),
@@ -1253,6 +1255,7 @@ export const assignmentAPI = {
   detectDuplicateCategories: () => api.get('/assignment/competencies/duplicates'),
   mergeCategories: (data) => api.post('/assignment/competencies/merge', data),
   getSkillDraft: () => api.get('/assignment/skills/draft'),
+  discardSkillDraft: () => api.delete('/assignment/skills/draft'),
   saveSkillDraft: (data) => api.post('/assignment/skills/draft', data),
   importSummitSkills: () => api.post('/assignment/skills/import-summit'),
   publishSkillDraft: () => api.post('/assignment/skills/publish'),

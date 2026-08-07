@@ -1,6 +1,6 @@
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
-import { ticketSourceLabel } from '../utils/ticketOrigin.js';
+import { ticketDisplayRef, ticketSourceLabel } from '../utils/ticketOrigin.js';
 import notificationWorkflowEngine from './notificationWorkflowEngine.js';
 import statusService, { TERMINAL_BASE_STATUSES } from './statusService.js';
 
@@ -337,7 +337,7 @@ async function maybeRefreshSentiment(eventContext) {
   } catch { /* sentiment is an annotation, never a pipeline step */ }
 }
 
-function buildEventContext({ event, ticket, previousAgent, source, statusBase = null }) {
+export function buildEventContext({ event, ticket, previousAgent, source, statusBase = null }) {
   return {
     event: {
       type: event.type,
@@ -355,6 +355,10 @@ function buildEventContext({ event, ticket, previousAgent, source, statusBase = 
     ticket: {
       id: ticket.id,
       freshserviceTicketId: ticket.freshserviceTicketId?.toString?.() || ticket.freshserviceTicketId,
+      // Human-facing reference (QA 08-06 #4): "TP-1070" for TP-born tickets,
+      // "#225001" for FS-born — the number templates should print.
+      displayRef: ticketDisplayRef(ticket),
+      nativeNumber: ticket.nativeNumber ?? null,
       subject: ticket.subject,
       descriptionText: ticket.descriptionText,
       status: ticket.status,

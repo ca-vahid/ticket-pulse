@@ -212,6 +212,42 @@ describe('notification workflow definitions', () => {
     expect(paths).toContain('state.llm.email.extra.summary');
   });
 
+  test('variable catalog leads with the origin-safe ticket number (QA 08-06 #4)', () => {
+    const variables = notificationVariableCatalog();
+    const byPath = Object.fromEntries(variables.map((variable) => [variable.path, variable]));
+
+    // displayRef is the primary "Ticket number" with a TP-born example.
+    expect(byPath['ticket.displayRef']).toEqual(expect.objectContaining({
+      label: 'Ticket number',
+      example: 'TP-1070',
+    }));
+    // The FS id is clearly relabeled — it is blank for TP-born tickets.
+    expect(byPath['ticket.freshserviceTicketId'].label).toBe('FreshService ticket number');
+    expect(byPath['ticket.freshserviceTicketId'].description).toMatch(/blank for Ticket Pulse-born/i);
+    // New origin/typing/context rows are pickable.
+    for (const path of ['ticket.nativeNumber', 'ticket.id', 'ticket.origin', 'ticket.ticketType', 'ticket.sourceLabel', 'ticket.tags', 'ticket.dueBy']) {
+      expect(byPath[path]).toBeDefined();
+    }
+  });
+
+  test('variable catalog appends workspace custom-field rows (QA 08-06 #4)', () => {
+    const variables = notificationVariableCatalog([], {
+      customFieldDefinitions: [
+        { key: 'client_name', label: 'Client Name' },
+        { key: 'power_app_record_id', label: 'Power App Record Id' },
+        { key: 'bad key!', label: 'Rejected' }, // unsafe key is skipped
+      ],
+    });
+    const byPath = Object.fromEntries(variables.map((variable) => [variable.path, variable]));
+    expect(byPath['ticket.customFields.client_name']).toEqual(expect.objectContaining({
+      label: 'Custom: Client Name',
+      group: 'Custom fields',
+      token: '{{ ticket.customFields.client_name }}',
+    }));
+    expect(byPath['ticket.customFields.power_app_record_id']).toBeDefined();
+    expect(Object.keys(byPath).some((path) => path.includes('bad key'))).toBe(false);
+  });
+
   test('validation rejects LLM schemas missing stable email fields', () => {
     const definition = buildDefaultWorkflowDefinition('ticket.created');
     definition.nodes.splice(3, 0, {

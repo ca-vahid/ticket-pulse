@@ -1,6 +1,18 @@
-export const APP_VERSION = '3.2.03-preview';
+export const APP_VERSION = '3.2.04-preview';
 
 export const changelog = [
+  {
+    version: '3.2.04-preview',
+    date: 'August 7, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>🔬 Workflows can’t silently do nothing anymore</strong> — Susan’s field-card mystery solved: her workflow was running in observe-only (mock) mode. Enabled mock workflows now wear a loud “Observe-only” chip, enabling one prompts “turn off mock mode too?”, mock runs are badged, and the Routing tab no longer sneaks a never-matching demo rule onto saved workflows (workflows also now record why they were last skipped). (QA 08-06)' },
+      { type: 'fixed', html: '<strong>✉️ Workflow emails keep their styling & real variables</strong> — heading colors and table styles survive sending; new {{ ticket.displayRef }} “Ticket number” variable works for Ticket Pulse-born tickets (TP-1070), plus nativeNumber/origin/type/tags/due variables and per-workspace {{ ticket.customFields.… }} entries in the picker. (QA 08-06)' },
+      { type: 'fixed', html: '<strong>📝 Plain-text descriptions keep their characters</strong> — “set the status to &lt;Processed&gt;” no longer loses &lt;Processed&gt;: plain text is detected and escaped instead of being treated as HTML. Custom-field edit pencils no longer overflow the panel. (QA 08-06)' },
+      { type: 'new', html: '<strong>👥 Default group for new tickets</strong> — each workspace can star a default group (Settings → Groups); tickets created without a group land there automatically (UI, API, and email intake). The API also accepts group ids now. (QA 08-06)' },
+      { type: 'new', html: '<strong>🗃️ Categories: modern add flow</strong> — the dated bottom form is gone: “+ New category” lives in the header and every category row has a “+” to add a subcategory right where it belongs, inline with keyboard support. (QA 08-06)' },
+      { type: 'new', html: '<strong>🔗 One categories surface, with the power tools kept</strong> — the legacy migration draft editor is retired; Check drift, Sync to FreshService, and batch Reclassify (with rollback) now live in the tree’s toolbar for IT & Accounting. A safety guard blocks stale legacy-draft publishes from clobbering tree edits, editing nudges you to check FreshService drift, and any leftover migration draft shows a banner with an admin discard. (QA 08-06)' },
+    ],
+  },
   {
     version: '3.2.03-preview',
     date: 'August 6, 2026',

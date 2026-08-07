@@ -370,3 +370,72 @@ describe('updateTicketFields — customFields via the strict update schema', () 
     }, actor)).rejects.toThrow(/mysteryTopLevel|unrecognized/i);
   });
 });
+
+// QA 08-06 #1 — group placement through the public create endpoint, plus the
+// workspace default internal group when no group is sent.
+describe('POST /api/v1/tickets — group placement (QA 08-06 #1)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    invalidateStatusCache();
+    armCreateDefaults();
+  });
+
+  test('internalGroupId passes through and lands on the ticket row', async () => {
+    prismaMock.group.findFirst.mockResolvedValue({ id: 9, isActive: true });
+
+    const response = await request(buildApp())
+      .post('/api/v1/tickets')
+      .set('Authorization', 'Bearer tp_live_x')
+      .send({ subject: 'Coyote Landslide', requesterEmail: 'jdoe@bgcengineering.ca', internalGroupId: 9 })
+      .expect(201);
+
+    expect(response.body.meta.ignoredFields).toEqual([]);
+    expect(prismaMock.ticket.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ internalGroupId: 9 }),
+    }));
+  });
+
+  test('groupId (FreshService) passes through', async () => {
+    prismaMock.group.findFirst.mockResolvedValue({ id: 3, name: 'Service Desk', isActive: true });
+
+    const response = await request(buildApp())
+      .post('/api/v1/tickets')
+      .set('Authorization', 'Bearer tp_live_x')
+      .send({ subject: 'Coyote Landslide', requesterEmail: 'jdoe@bgcengineering.ca', groupId: 1000210021 })
+      .expect(201);
+
+    expect(response.body.meta.ignoredFields).toEqual([]);
+    expect(prismaMock.ticket.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ groupId: BigInt(1000210021) }),
+    }));
+  });
+
+  test('no group sent → the workspace default internal group applies', async () => {
+    prismaMock.workspace.findUnique.mockResolvedValue({
+      id: 2, name: 'Project Accounting', isActive: true, nativeTicketingEnabled: true, defaultInternalGroupId: 9,
+    });
+    prismaMock.group.findFirst.mockResolvedValue({ id: 9, isActive: true });
+
+    await request(buildApp())
+      .post('/api/v1/tickets')
+      .set('Authorization', 'Bearer tp_live_x')
+      .send({ subject: 'Coyote Landslide', requesterEmail: 'jdoe@bgcengineering.ca' })
+      .expect(201);
+
+    expect(prismaMock.ticket.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ internalGroupId: 9 }),
+    }));
+  });
+
+  test('an unknown internal group 400s (nothing created)', async () => {
+    prismaMock.group.findFirst.mockResolvedValue(null);
+
+    await request(buildApp())
+      .post('/api/v1/tickets')
+      .set('Authorization', 'Bearer tp_live_x')
+      .send({ subject: 'Coyote Landslide', requesterEmail: 'jdoe@bgcengineering.ca', internalGroupId: 999 })
+      .expect(400);
+
+    expect(prismaMock.ticket.create).not.toHaveBeenCalled();
+  });
+});

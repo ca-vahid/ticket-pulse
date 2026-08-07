@@ -51,6 +51,7 @@ import {
 import {
   classifyNotificationWorkflowRun,
 } from '../services/notificationWorkflowRunHealth.js';
+import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 
 const router = express.Router();
 
@@ -477,6 +478,11 @@ async function buildPreviewEventContext({ ticket, triggerType }) {
     ticket: {
       id: ticket.id,
       freshserviceTicketId: ticket.freshserviceTicketId?.toString?.() || ticket.freshserviceTicketId,
+      // Mirror the live event context (QA 08-06 #4) so previews render the
+      // origin-safe ticket number variables exactly like a real send.
+      displayRef: ticketDisplayRef(ticket),
+      nativeNumber: ticket.nativeNumber ?? null,
+      origin: ticket.origin || 'freshservice',
       subject: ticket.subject,
       descriptionText: ticket.descriptionText,
       status: ticket.status,
@@ -1260,10 +1266,17 @@ router.get(
   }),
 );
 
+// Workspace-aware (QA 08-06 #4): the workspace's custom-field definitions are
+// appended as `ticket.customFields.<key>` rows so the picker offers them.
 router.get(
   '/variables',
-  asyncHandler(async (_req, res) => {
-    res.json({ success: true, data: notificationVariableCatalog() });
+  asyncHandler(async (req, res) => {
+    let customFieldDefinitions = [];
+    try {
+      const { default: customFieldService } = await import('../services/customFieldService.js');
+      customFieldDefinitions = await customFieldService.listDefinitions(req.workspaceId);
+    } catch { /* custom fields are additive — the static catalog stands alone */ }
+    res.json({ success: true, data: notificationVariableCatalog([], { customFieldDefinitions }) });
   }),
 );
 

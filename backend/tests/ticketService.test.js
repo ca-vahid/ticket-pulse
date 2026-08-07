@@ -1262,3 +1262,155 @@ describe('ticketService sort=status with custom statuses (Phase 8c)', () => {
     ]);
   });
 });
+
+// QA 08-06 #5 — plain-text descriptions must survive intake with angle-bracket
+// tokens intact (<Processed> was eaten by the bare tag-stripping regex).
+describe('ticketService plain-text descriptions (QA 08-06 #5)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    armCreateDefaults();
+  });
+
+  // Fraser's exact shape: a Power Automate plain-text body with a bracketed
+  // status token.
+  const FRASER_DESCRIPTION = 'Approval request update from Power Automate\nStatus changed to <Processed>\nRecord ID: 1260';
+
+  test("createTicket keeps <Processed> in descriptionText and escapes it into the HTML rendering", async () => {
+    await ticketService.createTicket(1, {
+      subject: 'Approval request update',
+      description: FRASER_DESCRIPTION,
+      requesterEmail: 'rita@example.com',
+    }, actor);
+
+    const { data } = prismaMock.ticket.create.mock.calls[0][0];
+    // Raw text (brackets intact) is the workflow-variable / API source.
+    expect(data.descriptionText).toBe(FRASER_DESCRIPTION);
+    expect(data.descriptionText).toContain('<Processed>');
+    // The stored HTML rendering escapes the token and converts newlines.
+    expect(data.description).toContain('&lt;Processed&gt;');
+    expect(data.description).toContain('<br>');
+    expect(data.description).not.toContain('<Processed>');
+  });
+
+  test('real HTML keeps the historical behavior (html stored, text stripped)', async () => {
+    await ticketService.createTicket(1, {
+      subject: 'Laptop will not boot',
+      description: '<p>Screen stays <strong>black</strong></p>',
+      requesterEmail: 'rita@example.com',
+    }, actor);
+
+    const { data } = prismaMock.ticket.create.mock.calls[0][0];
+    expect(data.description).toBe('<p>Screen stays <strong>black</strong></p>');
+    expect(data.descriptionText).toBe('Screen stays black');
+  });
+
+  test('updateTicketFields applies the same detector on edits', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue({
+      id: 501, workspaceId: 1, origin: 'ticketpulse', nativeNumber: 1042,
+      freshserviceTicketId: null, subject: 'Approval request update', status: 'Open',
+      priority: 2, description: null, descriptionText: null,
+      internalCategoryId: null, internalSubcategoryId: null, groupId: null, internalGroupId: null,
+      requester: { id: 40, name: 'Rita Requester', email: 'rita@example.com' },
+      assignedTech: null, internalCategory: null, internalSubcategory: null,
+    });
+    prismaMock.ticket.update.mockImplementation(({ data }) => Promise.resolve({ id: 501, ...data }));
+    ticketActivityRepositoryMock.create.mockResolvedValue({});
+
+    await ticketService.updateTicketFields(501, 1, { description: FRASER_DESCRIPTION }, actor);
+
+    const { data } = prismaMock.ticket.update.mock.calls[0][0];
+    expect(data.descriptionText).toBe(FRASER_DESCRIPTION);
+    expect(data.description).toContain('&lt;Processed&gt;');
+  });
+});
+
+// QA 08-06 #1 — workspace default internal group for new tickets.
+describe('ticketService workspace default group (QA 08-06 #1)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    armCreateDefaults();
+  });
+
+  function armWorkspaceDefault(defaultInternalGroupId) {
+    prismaMock.workspace.findUnique.mockResolvedValue({
+      id: 1, name: 'IT', isActive: true, nativeTicketingEnabled: true, defaultInternalGroupId,
+    });
+  }
+
+  test('applied when the caller sends neither groupId nor internalGroupId', async () => {
+    armWorkspaceDefault(9);
+    prismaMock.group.findFirst.mockResolvedValue({ id: 9, isActive: true });
+
+    await ticketService.createTicket(1, {
+      subject: 'Printer out of toner',
+      requesterEmail: 'rita@example.com',
+    }, actor);
+
+    expect(prismaMock.group.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: 9, workspaceId: 1, origin: 'local' }),
+    }));
+    const { data } = prismaMock.ticket.create.mock.calls[0][0];
+    expect(data.internalGroupId).toBe(9);
+  });
+
+  test('NOT applied when the caller sends an internal group (override wins)', async () => {
+    armWorkspaceDefault(9);
+    prismaMock.group.findFirst.mockResolvedValue({ id: 5, isActive: true });
+
+    await ticketService.createTicket(1, {
+      subject: 'Printer out of toner',
+      requesterEmail: 'rita@example.com',
+      internalGroupId: 5,
+    }, actor);
+
+    const { data } = prismaMock.ticket.create.mock.calls[0][0];
+    expect(data.internalGroupId).toBe(5);
+    // The default id was never validated — only the explicit one.
+    const validatedIds = prismaMock.group.findFirst.mock.calls.map(([args]) => args.where.id);
+    expect(validatedIds).toEqual([5]);
+  });
+
+  test('NOT applied when the caller sends a FreshService group', async () => {
+    armWorkspaceDefault(9);
+    prismaMock.group.findFirst.mockImplementation(({ where }) => Promise.resolve(
+      where.freshserviceId !== undefined
+        ? { id: 3, name: 'Service Desk', isActive: true }
+        : null,
+    ));
+
+    await ticketService.createTicket(1, {
+      subject: 'Printer out of toner',
+      requesterEmail: 'rita@example.com',
+      groupId: 1000210021,
+    }, actor);
+
+    const { data } = prismaMock.ticket.create.mock.calls[0][0];
+    expect(data.groupId).toBe(BigInt(1000210021));
+    expect(data.internalGroupId).toBeNull();
+  });
+
+  test('an invalid default is ignored with a log — creation still succeeds', async () => {
+    armWorkspaceDefault(999);
+    prismaMock.group.findFirst.mockResolvedValue(null); // deleted / wrong workspace
+
+    const result = await ticketService.createTicket(1, {
+      subject: 'Printer out of toner',
+      requesterEmail: 'rita@example.com',
+    }, actor);
+
+    expect(result.displayRef).toBe('TP-1042');
+    const { data } = prismaMock.ticket.create.mock.calls[0][0];
+    expect(data.internalGroupId).toBeNull();
+  });
+
+  test('no default configured — behavior unchanged (null group)', async () => {
+    await ticketService.createTicket(1, {
+      subject: 'Printer out of toner',
+      requesterEmail: 'rita@example.com',
+    }, actor);
+
+    expect(prismaMock.group.findFirst).not.toHaveBeenCalled();
+    const { data } = prismaMock.ticket.create.mock.calls[0][0];
+    expect(data.internalGroupId).toBeNull();
+  });
+});

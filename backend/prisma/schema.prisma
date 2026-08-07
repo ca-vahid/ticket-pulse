@@ -72,6 +72,10 @@ model Workspace {
   // email is OUTSIDE this list is flagged External in the UI (QA 07-27 #4).
   // Empty list = flagging off for this workspace.
   internalDomains         String[] @default([]) @map("internal_domains")
+  // Default INTERNAL (TP-native) group applied to newly created tickets when
+  // the caller sends neither groupId nor internalGroupId (QA 08-06 #1).
+  defaultInternalGroupId  Int?     @map("default_internal_group_id")
+  defaultInternalGroup    Group?   @relation("WorkspaceDefaultInternalGroup", fields: [defaultInternalGroupId], references: [id], onDelete: SetNull)
   isActive                Boolean  @default(true) @map("is_active")
   createdAt               DateTime @default(now()) @map("created_at")
   updatedAt               DateTime @updatedAt @map("updated_at")
@@ -1356,6 +1360,7 @@ model Group {
   members              GroupMember[]
   ticketsInternalGroup Ticket[]            @relation("TicketInternalGroup")
   mailboxDefaults      MailboxConnection[] @relation("MailboxDefaultInternalGroup")
+  workspaceDefaults    Workspace[]         @relation("WorkspaceDefaultInternalGroup")
 
   @@unique([workspaceId, freshserviceId])
   @@index([workspaceId, isActive])
@@ -2134,6 +2139,10 @@ model NotificationWorkflow {
   mockModeEnabled     Boolean   @default(false) @map("mock_mode_enabled")
   mockModeEnabledAt   DateTime? @map("mock_mode_enabled_at")
   mockModeUpdatedBy   String?   @map("mock_mode_updated_by") @db.VarChar(255)
+  // Last routing-suppression decision (QA 08-06 #6): why the engine most
+  // recently skipped this workflow (routing_rule_not_matched, ...).
+  lastSuppressedAt     DateTime? @map("last_suppressed_at")
+  lastSuppressedReason String?   @map("last_suppressed_reason") @db.VarChar(80)
   draftDefinition     Json      @map("draft_definition")
   publishedDefinition Json?     @map("published_definition")
   publishedVersion    Int       @default(0) @map("published_version")

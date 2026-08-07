@@ -16,6 +16,7 @@ import {
   validateLlmOutputSchema,
 } from './notificationWorkflowDefinition.js';
 import {
+  EMAIL_SANITIZE_OPTIONS,
   applyWorkspaceEmailBranding,
 } from './notificationWorkflowSignatureService.js';
 import { enrichEventContextWithPublicStatusUrl } from './publicTicketStatusService.js';
@@ -625,26 +626,12 @@ function textToEmailHtml(value) {
     .join('');
 }
 
-function sanitizeEmailHtml(html) {
+// Shared with the signature editor (QA 08-06 #3): one permissive allowlist so
+// h2/div/table styles and class/align attributes survive body rendering.
+export function sanitizeEmailHtml(html) {
   const rendered = String(html || '').trim();
   if (!rendered) return null;
-  return sanitizeHtml(rendered, {
-    allowedTags: [
-      ...sanitizeHtml.defaults.allowedTags,
-      'h1',
-      'h2',
-      'span',
-      'img',
-    ],
-    allowedAttributes: {
-      ...sanitizeHtml.defaults.allowedAttributes,
-      a: ['href', 'name', 'target', 'rel'],
-      img: ['src', 'alt', 'width', 'height'],
-      span: ['style'],
-      p: ['style'],
-    },
-    allowedSchemes: ['http', 'https', 'mailto'],
-  });
+  return sanitizeHtml(rendered, EMAIL_SANITIZE_OPTIONS);
 }
 
 function publicStatusUrlFromContext(context) {
@@ -3474,6 +3461,12 @@ export async function executeForEvent(eventContext, options = {}) {
   const variantSelection = selectWorkflowVariants(timing.selected || [], routedContext, {
     baseSuppressed: timing.suppressed || [],
   });
+  // Record "last skipped" per suppressed workflow (QA 08-06 #6) so the editor
+  // can explain silence. Fire-and-forget bookkeeping — never blocks the event.
+  try {
+    Promise.resolve(notificationWorkflowRepository.recordSuppressionDecisions?.(variantSelection.suppressed))
+      .catch(() => {});
+  } catch { /* bookkeeping only — never fails the event */ }
   const selectedWorkflows = variantSelection.selected || [];
   const results = [];
   for (const workflow of selectedWorkflows) {

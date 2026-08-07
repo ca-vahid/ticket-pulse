@@ -115,3 +115,52 @@ describe('WorkflowIndex sidebar cards (QA 08-02 legibility polish)', () => {
     expect(toggle).toHaveClass('shrink-0');
   });
 });
+
+describe('WorkflowIndex routing chip (QA 08-06 #6)', () => {
+  afterEach(() => cleanup());
+
+  test('workflows with a routing rule show the amber "Routed" chip with a tooltip', () => {
+    renderIndex({
+      workflows: [
+        WORKFLOWS[0],
+        { ...WORKFLOWS[1], routingRule: { '==': [{ var: 'requester.regionKey' }, 'AU-BRISBANE'] } },
+      ],
+    });
+    const chip = screen.getByText('Routed');
+    expect(chip).toHaveClass('bg-amber-50');
+    expect(chip).toHaveAttribute('title', 'Only runs when its routing rule matches');
+  });
+
+  test('rule-less workflows and default variants show no chip', () => {
+    renderIndex({
+      workflows: [
+        // Default variant WITH a rule would still not show the chip.
+        { ...WORKFLOWS[0], routingRule: { '==': [{ var: 'x' }, 'y'] } },
+        { ...WORKFLOWS[1], routingRule: null },
+      ],
+    });
+    expect(screen.queryByText('Routed')).toBeNull();
+  });
+});
+
+describe('WorkflowIndex observe-only chip (QA 08-06 mock-mode visibility)', () => {
+  afterEach(() => cleanup());
+
+  test('an ENABLED workflow with mock mode on shows the prominent Observe-only chip', () => {
+    renderIndex({
+      workflows: [{ ...WORKFLOWS[0], mockModeEnabled: true }, WORKFLOWS[1]],
+    });
+    const chip = screen.getByText('Observe-only');
+    // Stronger treatment than the Routed chip: amber-100 fill + amber-400 ring.
+    expect(chip).toHaveClass('bg-amber-100');
+    expect(chip).toHaveClass('ring-amber-400');
+    expect(chip.getAttribute('title')).toMatch(/NO real actions/);
+  });
+
+  test('a DISABLED workflow with mock mode on shows no chip (nothing runs anyway)', () => {
+    renderIndex({
+      workflows: [WORKFLOWS[0], { ...WORKFLOWS[1], isEnabled: false, mockModeEnabled: true }],
+    });
+    expect(screen.queryByText('Observe-only')).toBeNull();
+  });
+});

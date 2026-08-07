@@ -90,3 +90,29 @@ describe('CustomFieldsCard (Phase 1c)', () => {
     expect('legacy_code' in payload).toBe(false);
   });
 });
+
+// QA 08-06 #2 — long URL values must shrink inside the card instead of
+// pushing the edit pencil out of the visible area.
+describe('CustomFieldsCard pencil overflow (QA 08-06 #2)', () => {
+  test('the link can shrink (min-w-0 shrink), its wrapper fills the row, and the card clips overflow', async () => {
+    render(<CustomFieldsCard ticketId={501} values={{ share_point_item_link: SP_LINK }} canWrite />);
+    await waitFor(() => expect(screen.getByRole('link', { name: /Share Point Item Link/ })).toBeInTheDocument());
+
+    const link = screen.getByRole('link', { name: /Share Point Item Link/ });
+    expect(link).toHaveClass('min-w-0');
+    expect(link).toHaveClass('shrink');
+    expect(link).not.toHaveClass('max-w-full');
+
+    const wrapper = link.parentElement;
+    expect(wrapper).toHaveClass('w-full');
+    expect(wrapper).toHaveClass('min-w-0');
+
+    const card = screen.getByTestId('custom-fields-card');
+    expect(card).toHaveClass('overflow-hidden');
+
+    // The pencil stays rendered and un-shrunken next to the shrinking link.
+    const pencil = screen.getByRole('button', { name: 'Edit Share Point Item Link' });
+    expect(pencil).toHaveClass('flex-shrink-0');
+    expect(pencil.parentElement).toBe(wrapper);
+  });
+});
