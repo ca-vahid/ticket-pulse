@@ -123,6 +123,27 @@ Expected success response:
 
 To watch the live update: keep `/tickets` open in a browser, change the ticket's status in FreshService (or re-run the curl after changing it), and the affected row updates in place without a refresh.
 
+## Stop Service-bot note notifications
+
+**Problem (FR 08-07 #9):** every internal note written in Ticket Pulse lands in FreshService too (the fallback mirror on TP-born tickets, the direct FS note on FS-born tickets), and FreshService's own note-add automation ("Service bot" / notify-on-note observer rules) then emails agents about each one. Ticket Pulse never asks FreshService to notify anyone — since v3.2.08 every note payload carries `notify_emails: []` — so the remaining spam is FS-side automation reacting to the note-add event itself. That rule has to be told to skip Ticket Pulse traffic.
+
+**Markers to match on.** Every note Ticket Pulse pushes into FreshService now begins with a machine-matchable header line:
+
+- `[Ticket Pulse mirror]` — mirror pushes onto the FS fallback copies of TP-born tickets (notes, replies, attachments, the intro note).
+- `[Ticket Pulse note]` — internal notes written in Ticket Pulse on FS-born tickets (added in v3.2.08; edits re-send the same marker).
+
+**Recipe (FS admin, per workspace):** open the automator/observer rule that fires on *"Note is added"* (or the notification rule emailing agents about private notes) and add an exclusion condition group:
+
+1. Admin → Automation → Workflow Automator (or Observer) → the rule reacting to note adds.
+2. Add conditions (AND with the existing ones):
+   - `Note content` **does not contain** `[Ticket Pulse note]`
+   - `Note content` **does not contain** `[Ticket Pulse mirror]`
+3. Save and re-order so the exclusion is evaluated before any notify action.
+
+If the rule builder cannot inspect note content, the alternative is a first-step condition on the note author: exclude notes added by the API/service account whose key Ticket Pulse uses (all Ticket Pulse note pushes authenticate as that agent).
+
+After the rule change, verify: add an internal note in Ticket Pulse on an FS-born ticket → no Service-bot email; add a note directly in FreshService → notification still fires.
+
 ## Rollback
 
 Disable the workspace webhook in Assignment Review -> Configuration -> Ticket Detection. FreshService deliveries will be rejected for that workspace, while scheduled sync, the 60-second status-refresh lane, and assignment polling continue to catch missed tickets. To fully roll back, disable or delete the FreshService workflow automator rules (create and update) after disabling the Ticket Pulse config.

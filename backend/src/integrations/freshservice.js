@@ -1052,11 +1052,40 @@ class FreshServiceClient {
     }
   }
 
+  /**
+   * Edit a conversation entry's body in place (PUT /conversations/:id). Used
+   * when an agent edits an internal note in Ticket Pulse: the mirrored copy
+   * (TP-born) or the TP-authored FS conversation (FS-born) is updated so both
+   * systems agree. An already-gone or immutable entry (404/405) is tolerated
+   * like delete — the local edit stands either way.
+   */
+  async updateConversation(conversationId, { body }) {
+    try {
+      const response = await this._put(`/conversations/${conversationId}`, { body });
+      return response.data;
+    } catch (error) {
+      const httpStatus = getFreshServiceStatus(error);
+      if (httpStatus === 404 || httpStatus === 405) {
+        logger.info(`Conversation ${conversationId} cannot be updated in FreshService (${httpStatus}), skipping edit`);
+        return { id: conversationId, skipped: true, reason: 'conversation_gone_or_immutable' };
+      }
+      const detail = getFreshServiceDetail(error);
+      logger.error(`Error updating FreshService conversation ${conversationId}:`, { status: httpStatus, detail });
+      const wrapped = new Error(detail?.description || detail?.message || error.message);
+      wrapped.freshserviceDetail = detail;
+      wrapped.freshserviceStatus = httpStatus;
+      throw wrapped;
+    }
+  }
+
   async addPrivateNote(ticketId, body) {
     try {
       const response = await this._post(`/tickets/${ticketId}/notes`, {
         body,
         private: true,
+        // FS-side note-add automations spam agents on every internal note
+        // (FR 08-07 #9) — explicitly opt out of FS's own recipient defaults.
+        notify_emails: [],
       });
       return response.data;
     } catch (error) {
@@ -1130,12 +1159,17 @@ class FreshServiceClient {
     try {
       let response;
       if (Array.isArray(attachments) && attachments.length > 0) {
-        const form = this._buildAttachmentForm({ body, private: isPrivate === true }, attachments);
+        // notify_emails rides the fields too (FR 08-07 #9) — multipart cannot
+        // express an EMPTY array (nothing is appended), so suppression there
+        // relies on the FS-side marker exclusion rule; the JSON branch below
+        // sends the explicit [] opt-out.
+        const form = this._buildAttachmentForm({ body, private: isPrivate === true, notify_emails: [] }, attachments);
         response = await this._post(`/tickets/${ticketId}/notes`, form, { headers: form.getHeaders() });
       } else {
         response = await this._post(`/tickets/${ticketId}/notes`, {
           body,
           private: isPrivate === true,
+          notify_emails: [],
         });
       }
       return response.data;

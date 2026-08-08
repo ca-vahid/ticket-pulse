@@ -1217,6 +1217,18 @@ router.delete('/:id/notes/:entryId', requireNativeTicketing, asyncHandler(async 
   res.json({ success: true, data: result });
 }));
 
+// Edit an internal note (author-or-admin). Deliberately NOT behind
+// requireNativeTicketing: TP-authored notes on FS-BORN tickets are editable
+// too — the service gates by entry provenance (eventType/author/system).
+router.patch('/:id/notes/:entryId', asyncHandler(async (req, res) => {
+  const result = await ticketService.updateNote(
+    parseTicketId(req), req.workspaceId, Number(req.params.entryId),
+    { bodyHtml: req.body?.bodyHtml, bodyText: req.body?.bodyText },
+    req.ticketActor,
+  );
+  res.json({ success: true, data: result });
+}));
+
 // -------------------------------------------------------------- attachments
 
 router.get('/:id/attachments', asyncHandler(async (req, res) => {

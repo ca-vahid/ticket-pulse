@@ -10,6 +10,7 @@ const clientMock = {
   createTicket: jest.fn(),
   updateTicket: jest.fn(),
   addNote: jest.fn(),
+  updateConversation: jest.fn(),
   fetchTicketSafe: jest.fn(),
   fetchTicketConversations: jest.fn(),
   listCustomObjects: jest.fn(),
@@ -177,6 +178,44 @@ describe('mirrorService job processing', () => {
     });
     await mirrorService._processJob({ id: 5, ticketId: 501, workspaceId: 1, kind: 'thread_entry', threadEntryId: 9002, attempts: 0 });
     expect(clientMock.addNote).toHaveBeenLastCalledWith(90001, expect.stringContaining('internal'), { isPrivate: true, attachments: [] });
+  });
+
+  // FR 08-07 #8 — edited notes re-push onto their mirrored FS conversation.
+  test('thread_entry_update re-pushes the edited body with the mirror prefix onto the FS conversation', async () => {
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...baseTicket, freshserviceTicketId: BigInt(90001) });
+    prismaMock.ticketThreadEntry.findUnique.mockResolvedValue({
+      id: 9002, isPrivate: true, actorName: 'Cora', bodyHtml: '<p>edited body</p>',
+      externalEntryId: 'mirror-777', mirrorState: 'mirrored',
+    });
+    clientMock.updateConversation.mockResolvedValue({ conversation: { id: 777 } });
+
+    const ok = await mirrorService._processJob({ id: 20, ticketId: 501, workspaceId: 1, kind: 'thread_entry_update', threadEntryId: 9002, attempts: 0 });
+
+    expect(ok).toBe(true);
+    expect(clientMock.updateConversation).toHaveBeenCalledWith(777, {
+      body: expect.stringMatching(/\[Ticket Pulse mirror\][\s\S]*internal note[\s\S]*<p>edited body<\/p>/),
+    });
+  });
+
+  test('thread_entry_update on a never-mirrored entry is a clean no-op (local edit only)', async () => {
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...baseTicket, freshserviceTicketId: BigInt(90001) });
+    prismaMock.ticketThreadEntry.findUnique.mockResolvedValue({
+      id: 9003, isPrivate: true, actorName: 'Cora', bodyHtml: '<p>pending</p>',
+      externalEntryId: null, mirrorState: 'pending',
+    });
+
+    const ok = await mirrorService._processJob({ id: 21, ticketId: 501, workspaceId: 1, kind: 'thread_entry_update', threadEntryId: 9003, attempts: 0 });
+
+    expect(ok).toBe(true);
+    expect(clientMock.updateConversation).not.toHaveBeenCalled();
+  });
+
+  test('enqueueThreadEntryUpdate creates a thread_entry_update outbox job', async () => {
+    prismaMock.mirrorJob.create.mockResolvedValue({ id: 22 });
+    await mirrorService.enqueueThreadEntryUpdate(1, 501, 9002);
+    expect(prismaMock.mirrorJob.create).toHaveBeenCalledWith({
+      data: { workspaceId: 1, ticketId: 501, kind: 'thread_entry_update', threadEntryId: 9002, payload: null },
+    });
   });
 
   test('dead-letters after max attempts and flags the ticket mirrorState=error', async () => {

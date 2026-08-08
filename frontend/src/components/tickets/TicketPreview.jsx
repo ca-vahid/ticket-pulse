@@ -702,7 +702,17 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                     {e.isPrivate
                       ? <Lock className="w-2.5 h-2.5 text-amber-600" aria-label="Internal note" />
                       : <Mail className="w-2.5 h-2.5 text-blue-500" aria-label="Public reply" />}
-                    <span className="ml-auto text-[10px] text-slate-400 whitespace-nowrap">{timeAgo(e.occurredAt)}</span>
+                    <span className="ml-auto flex items-center gap-1 whitespace-nowrap">
+                      {e.editedAt && (
+                        <span
+                          className="text-[9px] font-medium text-slate-400 bg-slate-100/80 border border-slate-200 rounded-full px-1 py-px"
+                          title={`Edited ${e.editedBy ? `by ${e.editedBy} · ` : ''}${new Date(e.editedAt).toLocaleString()}`}
+                        >
+                          edited
+                        </span>
+                      )}
+                      <span className="text-[10px] text-slate-400">{timeAgo(e.occurredAt)}</span>
+                    </span>
                   </div>
                   {e.bodyHtml && looksLikeHtml(e.bodyHtml) ? (
                     <div className="max-h-44 overflow-y-auto settings-scrollbar">

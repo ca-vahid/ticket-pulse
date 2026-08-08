@@ -1281,6 +1281,10 @@ model TicketThreadEntry {
   occurredAt          DateTime  @map("occurred_at")
   syncedAt            DateTime  @default(now()) @map("synced_at")
   rawPayload          Json?     @map("raw_payload")
+  // Note editing (FR 08-07 #8): who/when last edited this entry in-app. Prior
+  // body versions append into rawPayload.editHistory — no extra column.
+  editedAt            DateTime? @map("edited_at")
+  editedBy            String?   @map("edited_by") @db.VarChar(255)
 
   @@unique([ticketId, externalEntryId])
   @@index([workspaceId, occurredAt])

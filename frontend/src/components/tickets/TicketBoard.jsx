@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import {
   DndContext, DragOverlay, KeyboardSensor, PointerSensor,
   useDraggable, useDroppable, useSensor, useSensors,
@@ -75,7 +76,13 @@ const makeBucketFor = (statusDefs) => (status) => {
   return null; // Deleted / Spam / unknown labels — not shown on the board
 };
 
-function BoardCard({ ticket, statusDefs, canDrag, dragging, onClick, onDoubleClick }) {
+// Anchor clicks on a card (QA 08-07 #7): plain left-click preventDefaults into
+// the card's own open/peek flow; Ctrl/Cmd/Shift/middle-click and the
+// right-click context menu keep NATIVE anchor behavior. Always stopPropagation
+// so the root card's onClick doesn't double-fire alongside a native open.
+const isModifiedClick = (e) => e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button === 1;
+
+function BoardCard({ ticket, statusDefs, canDrag, dragging, linkState, onClick, onDoubleClick }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: String(ticket.id),
     disabled: !canDrag,
@@ -83,6 +90,21 @@ function BoardCard({ ticket, statusDefs, canDrag, dragging, onClick, onDoubleCli
   const style = transform
     ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`, zIndex: 30 }
     : undefined;
+  // Ref + subject are real anchors for right-click/new-tab; `draggable={false}`
+  // keeps native HTML5 anchor-dragging from fighting dnd-kit's PointerSensor
+  // (its 8px activation distance is what still lets plain clicks through).
+  const ticketHref = `/tickets/${ticket.id}`;
+  const onAnchorClick = (e) => {
+    e.stopPropagation();
+    if (isModifiedClick(e)) return; // native new-tab / new-window path
+    e.preventDefault();
+    if (!isDragging) onClick?.(ticket.id);
+  };
+  const onAnchorDoubleClick = (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    onDoubleClick?.(ticket.id);
+  };
 
   // A card whose status name isn't its column's own label carries a small
   // status tag — keeps "Resolved" visible in the Closed column (QA 07-27 #2)
@@ -106,7 +128,16 @@ function BoardCard({ ticket, statusDefs, canDrag, dragging, onClick, onDoubleCli
       <span className={`absolute inset-y-1.5 left-0 w-1 rounded-r ${PRIORITY_STRIP_COLORS[ticket.priority] || 'bg-slate-200'}`} aria-hidden="true" />
       <div className="pl-2">
         <div className="flex items-center gap-1.5">
-          <span className="font-mono text-[11px] font-bold text-slate-500">{ticket.displayRef}</span>
+          <Link
+            to={ticketHref}
+            state={linkState}
+            draggable={false}
+            onClick={onAnchorClick}
+            onDoubleClick={onAnchorDoubleClick}
+            className="font-mono text-[11px] font-bold text-slate-500 hover:text-blue-600"
+          >
+            {ticket.displayRef}
+          </Link>
           {ticket.ticketType && <TypePill type={ticket.ticketType} />}
           {showStatusTag && (
             ticket.status === 'Resolved'
@@ -124,7 +155,20 @@ function BoardCard({ ticket, statusDefs, canDrag, dragging, onClick, onDoubleCli
             </span>
           )}
         </div>
-        <p className="mt-1 line-clamp-2 text-[13px] font-semibold leading-snug text-slate-900">{ticket.subject || '(no subject)'}</p>
+        <Link
+          to={ticketHref}
+          state={linkState}
+          draggable={false}
+          onClick={onAnchorClick}
+          onDoubleClick={onAnchorDoubleClick}
+          className="mt-1 line-clamp-2 text-[13px] font-semibold leading-snug text-slate-900 hover:text-blue-700"
+        >
+          {ticket.subject || '(no subject)'}
+        </Link>
+        {/* Requester line (QA 08-07 #6) — quiet, between subject and assignee */}
+        {ticket.requester?.name && (
+          <p className="mt-0.5 truncate text-[11px] text-slate-400">{ticket.requester.name}</p>
+        )}
         <div className="mt-2 flex items-center gap-1.5">
           {ticket.assignedTech ? (
             <span className="flex min-w-0 items-center gap-1.5">
@@ -173,10 +217,13 @@ function BoardColumn({ column, tickets, activeBucket, paginated, emptyState, chi
           {paginated && <span className="font-medium text-slate-400"> on page</span>}
         </span>
       </header>
-      {/* Column body: guarantee 4–5 cards visible before scrolling (QA 07-30 —
-          a viewport-only cap collapsed columns to ~2 cards on short screens),
-          and still grow to fill tall viewports. */}
-      <div className="settings-scrollbar flex min-h-[26rem] max-h-[max(30rem,calc(100vh-300px))] flex-col gap-2 overflow-y-auto p-2">
+      {/* Column body: guarantee a healthy stack of cards before scrolling
+          (QA 07-30 — a viewport-only cap collapsed columns to ~2 cards on
+          short screens), and still grow to fill tall viewports. Raised for
+          the 50-card board page (QA 08-07 #12): on 1080p the columns now run
+          to roughly the filter rail's Tags facet instead of stopping at a
+          third of the screen. */}
+      <div className="settings-scrollbar flex min-h-[42rem] max-h-[max(48rem,calc(100vh-200px))] flex-col gap-2 overflow-y-auto p-2">
         {children}
         {tickets.length === 0 && (
           emptyState || <p className="py-6 text-center text-xs text-slate-400">Nothing here — drag a card over.</p>
@@ -192,6 +239,10 @@ function TicketBoardInner({
   statusDefs = null, // workspace status registry (queue meta) — base-aware buckets
 }) {
   const [activeId, setActiveId] = useState(null);
+  // Return address for the card anchors (QA 08-07 #7) — the same state the
+  // queue's openTicket sends, so Back from a new-tab-less full open works.
+  const location = useLocation();
+  const linkState = { from: `${location.pathname}${location.search}` };
   const sensors = useSensors(
     // 8px activation distance so plain clicks still peek/open the ticket.
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -278,6 +329,7 @@ function TicketBoardInner({
                 ticket={ticket}
                 statusDefs={statusDefs}
                 canDrag={canDragTicket(ticket)}
+                linkState={linkState}
                 onClick={onCardClick}
                 onDoubleClick={onCardDoubleClick}
               />
@@ -288,7 +340,7 @@ function TicketBoardInner({
       <DragOverlay dropAnimation={null}>
         {activeTicket ? (
           <div className="w-[260px] rotate-2 opacity-95">
-            <BoardCard ticket={activeTicket} statusDefs={statusDefs} canDrag dragging />
+            <BoardCard ticket={activeTicket} statusDefs={statusDefs} canDrag dragging linkState={linkState} />
           </div>
         ) : null}
       </DragOverlay>

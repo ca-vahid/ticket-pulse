@@ -1,6 +1,17 @@
-export const APP_VERSION = '3.3.00-preview';
+export const APP_VERSION = '3.3.01-preview';
 
 export const changelog = [
+  {
+    version: '3.3.01-preview',
+    date: 'August 8, 2026',
+    entries: [
+      { type: 'new', html: '<strong>👤 Requesters everywhere in the queue</strong> — a sortable Requester column in Compact & Roomy (desktop widths; tablets keep it in the meta line), and board cards now show the requester. (QA 08-07)' },
+      { type: 'new', html: '<strong>🖱️ Right-click & new-tab everywhere</strong> — subjects, ticket refs, and board cards are real links now: right-click → open in new tab, Ctrl/Cmd-click, middle-click all work natively while plain clicks keep the peek/preview behavior. (QA 08-07)' },
+      { type: 'improved', html: '<strong>📋 Bigger board</strong> — 50 tickets per page (up from 25) and taller columns that use the full screen, so second-page tickets stop hiding. Also fixed: opening/closing the peek no longer blanks the queue rows — refreshes are now visually silent. (QA 08-07)' },
+      { type: 'new', html: '<strong>✏️ Edit internal notes</strong> — authors and admins can edit internal notes inline (rich text, Ctrl+Enter to save); notes show an “edited” chip with who/when, prior versions are kept in history, and edits sync to the FreshService copy. (QA 08-07)' },
+      { type: 'fixed', html: '<strong>🔕 Quieter FreshService notes</strong> — notes we post to FreshService now carry a clear “[Ticket Pulse note]” marker and an empty notify list, and the docs include the one-line FreshService rule to stop Service-bot emailing on every internal note. (QA 08-07)' },
+    ],
+  },
   {
     version: '3.3.00-preview',
     date: 'August 8, 2026',

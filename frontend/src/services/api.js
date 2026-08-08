@@ -704,6 +704,10 @@ export const ticketsAPI = {
     return await api.delete(`/tickets/${id}/notes/${entryId}`);
   },
 
+  updateNote: async (id, entryId, body) => {
+    return await api.patch(`/tickets/${id}/notes/${entryId}`, body);
+  },
+
   retryMirror: async (id) => {
     return await api.post(`/tickets/${id}/mirror/retry`);
   },
