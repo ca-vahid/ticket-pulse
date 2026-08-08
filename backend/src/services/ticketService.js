@@ -96,6 +96,18 @@ function isFsQueueTimeout(err) {
   return err?.code === 'FS_QUEUE_TIMEOUT' || /rate-limit queue/.test(err?.message || '');
 }
 
+// Marker for TP-authored notes pushed onto FS-BORN tickets (FR 08-07 #9).
+// Mirror pushes on TP-born tickets already carry '[Ticket Pulse mirror]';
+// FS-born notes carried nothing, so FreshService's own note-add automations
+// (the "Service bot" spam) had no way to exclude Ticket Pulse traffic. The
+// marker is a compact muted header line prepended ONLY to what is sent to
+// FreshService — the local thread entry stays clean.
+export const TP_NOTE_MARKER = '[Ticket Pulse note]';
+function tpNoteMarkerHtml(actorLabel) {
+  const esc = String(actorLabel || 'Ticket Pulse').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return `<p style="font-size:12px;color:#64748b;margin:0 0 6px"><b>${TP_NOTE_MARKER}</b> ${esc}</p>`;
+}
+
 // Arrival-channel labels live in utils/ticketOrigin.js (TICKET_SOURCE_LABELS):
 // FS's numeric codes 1–10 plus the TP extension range (API/Webhook/Agent).
 
@@ -2944,10 +2956,13 @@ class TicketService {
       if (!client) throw new ValidationError('FreshService is not configured for this workspace');
       const fsId = Number(ticket.freshserviceTicketId);
       const html = bodyHtml || `<p>${(bodyText || '').replace(/\n/g, '<br/>')}</p>`;
+      // Internal notes carry the TP marker so FS automation rules can exclude
+      // them (FR 08-07 #9); requester-facing replies go unmarked.
+      const fsNoteBody = `${tpNoteMarkerHtml(actor?.name || actor?.email)}${html}`;
       let result;
       try {
         result = isPrivate
-          ? await client.addNote(fsId, html, { isPrivate: true, attachments: fsAttachments })
+          ? await client.addNote(fsId, fsNoteBody, { isPrivate: true, attachments: fsAttachments })
           : await client.createReply(fsId, html, { ccEmails: cc, attachments: fsAttachments });
       } catch (err) {
         // Queue-wait timeout: the send never launched — safe to retry, and the
@@ -3104,6 +3119,115 @@ class TicketService {
     logger.info(`Note ${entry.id} on ticket ${ticket.id} deleted by ${actor?.email || 'unknown'}`);
     this._broadcast(workspaceId, 'note', ticket, { entryId: entry.id, deleted: true });
     return { deleted: true, entryId: entry.id };
+  }
+
+  /**
+   * Edit an internal note in place (FR 08-07 #8). Author-or-admin; `eventType
+   * 'note'` and non-system only — replies/forwards are the requester-facing
+   * record and stay immutable. Works for BOTH origins: TP-born notes re-mirror
+   * via a `thread_entry_update` job; TP-authored notes on FS-born tickets
+   * (`fs-conv-<id>`) update their FS conversation synchronously, exactly like
+   * the create path; entries with no FS id edit locally only. The prior body
+   * is appended into rawPayload.editHistory so nothing is ever lost. Does NOT
+   * re-fire ticket.note_added — an edit is not a new note.
+   */
+  async updateNote(ticketId, workspaceId, entryId, input, actor) {
+    const ticket = await prisma.ticket.findFirst({
+      where: { id: ticketId, workspaceId },
+      include: TICKET_INCLUDE,
+    });
+    if (!ticket) throw new NotFoundError(`Ticket ${ticketId} not found in this workspace`);
+
+    const entry = await prisma.ticketThreadEntry.findFirst({
+      where: { id: Number(entryId), ticketId, workspaceId },
+    });
+    if (!entry) throw new NotFoundError('Note not found on this ticket');
+    if (entry.eventType !== 'note') {
+      throw new ValidationError('Only internal notes can be edited');
+    }
+    if (entry.authorType === 'system') {
+      throw new ValidationError('System and approval notes cannot be edited');
+    }
+    const isAdmin = actor?.role === 'admin' || actor?.workspaceRole === 'admin';
+    const isAuthor = Boolean(entry.actorEmail && actor?.email)
+      && String(entry.actorEmail).toLowerCase() === String(actor.email).toLowerCase();
+    if (!isAuthor && !isAdmin) {
+      throw new ValidationError('Only the note author or an admin can edit this note');
+    }
+
+    // Same validation/derivation as the create path: zod-checked body, trimmed
+    // html, plain-text derived via stripHtml when the client sent none.
+    const parsed = threadBodySchema.safeParse({ bodyHtml: input?.bodyHtml, bodyText: input?.bodyText });
+    if (!parsed.success) throw new ValidationError(zodMessage(parsed.error));
+    const bodyHtml = parsed.data.bodyHtml?.trim() || null;
+    const bodyText = parsed.data.bodyText?.trim() || stripHtml(bodyHtml);
+
+    const now = new Date();
+    const editorEmail = actor?.email || null;
+    const ext = typeof entry.externalEntryId === 'string' ? entry.externalEntryId : '';
+    const isMirrored = ext.startsWith('mirror-');
+    const fsConversationId = ext.startsWith('fs-conv-') ? ext.slice('fs-conv-'.length) : null;
+
+    // FS-born (and reconcile-imported) conversations update synchronously
+    // BEFORE the local write — a rejected FS write leaves the note untouched,
+    // matching how the create path treats FS as the gatekeeper. 404/405 is
+    // tolerated inside the client (entry gone/immutable → local edit stands).
+    if (fsConversationId) {
+      const client = await mirrorService.getInteractiveClient(workspaceId);
+      if (!client) throw new ValidationError('FreshService is not configured for this workspace');
+      const html = bodyHtml || `<p>${(bodyText || '').replace(/\n/g, '<br/>')}</p>`;
+      // Our own sends carried the TP note marker — re-prepend it so the FS
+      // copy keeps matching the exclusion rule; imported FS-authored notes
+      // (source ≠ ticketpulse_user) go back unmarked, as they arrived.
+      const fsBody = entry.source === 'ticketpulse_user'
+        ? `${tpNoteMarkerHtml(entry.actorName || entry.actorEmail)}${html}`
+        : html;
+      try {
+        await client.updateConversation(Number(fsConversationId), { body: fsBody });
+      } catch (err) {
+        if (isFsQueueTimeout(err)) throw new ServiceBusyError(FS_BUSY_MESSAGE);
+        throw err;
+      }
+    }
+
+    // Append the PRIOR body to the edit history riding rawPayload.
+    const prevRaw = entry.rawPayload && typeof entry.rawPayload === 'object' && !Array.isArray(entry.rawPayload)
+      ? entry.rawPayload
+      : {};
+    const editHistory = Array.isArray(prevRaw.editHistory) ? [...prevRaw.editHistory] : [];
+    editHistory.push({
+      bodyHtml: entry.bodyHtml || null,
+      bodyText: entry.bodyText || entry.content || null,
+      editedAt: now.toISOString(),
+      editedBy: editorEmail,
+    });
+
+    const updated = await prisma.ticketThreadEntry.update({
+      where: { id: entry.id },
+      data: {
+        bodyHtml,
+        bodyText,
+        content: bodyText,
+        editedAt: now,
+        editedBy: editorEmail,
+        rawPayload: { ...prevRaw, editHistory },
+      },
+    });
+
+    // TP-born entries that already mirrored re-push via the outbox (retries,
+    // backoff, ordering). Still-pending entries need nothing — their create
+    // job reads the row and will carry the edited body.
+    if (isMirrored) {
+      await mirrorService.enqueueThreadEntryUpdate(workspaceId, ticket.id, entry.id);
+    }
+
+    await prisma.ticket.update({ where: { id: ticket.id }, data: { updatedAt: now } });
+    await this._audit(ticket.id, 'note.edited', actor, {
+      entryId: entry.id,
+      preview: (bodyText || '').slice(0, 140),
+    });
+    this._broadcast(workspaceId, 'note', ticket, { entryId: entry.id, edited: true });
+    return { entry: updated };
   }
 
   /**

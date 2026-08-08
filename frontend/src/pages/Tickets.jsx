@@ -113,11 +113,26 @@ const SEGMENT_COUNT_KEY = { all: 'all', open: 'open', unassigned: 'unassigned', 
 // line). The cutoff is xl, not lg, because iPad landscape (1024) IS lg and
 // shows the rail — the wide template only fits once the viewport clears it.
 // Headers and rows share these classes, so the templates always stay aligned.
-const GRID_COMPACT = 'grid md:grid-cols-[6px_minmax(0,2.4fr)_minmax(100px,0.8fr)_118px_96px_84px] xl:grid-cols-[6px_minmax(0,2.4fr)_minmax(150px,1fr)_210px_116px_88px_74px] items-center';
-const GRID_ROOMY = 'grid md:grid-cols-[6px_60px_minmax(100px,1fr)_118px_96px_84px] xl:grid-cols-[6px_60px_minmax(150px,1fr)_210px_116px_88px_74px] items-stretch';
+//
+// Requester column (QA 08-07 #6): xl-only 150px track between Subject and
+// Category — compact track 3, roomy row-2 track 3 (after the type slot). The
+// md templates stay untouched: the tablet band has no width budget for
+// another column (08-04 sweep), so below xl the requester keeps living in the
+// subject meta line instead.
+const GRID_COMPACT = 'grid md:grid-cols-[6px_minmax(0,2.4fr)_minmax(100px,0.8fr)_118px_96px_84px] xl:grid-cols-[6px_minmax(0,2.4fr)_150px_minmax(150px,1fr)_210px_116px_88px_74px] items-center';
+const GRID_ROOMY = 'grid md:grid-cols-[6px_60px_minmax(100px,1fr)_118px_96px_84px] xl:grid-cols-[6px_60px_150px_minmax(150px,1fr)_210px_116px_88px_74px] items-stretch';
 // The Updated column only exists at xl+ (see GRID templates above) — this
 // hides its header + cell together so track counts always match.
 const UPDATED_COL = 'hidden xl:flex';
+// The Requester column is xl-only too — same paired header/cell hiding as
+// UPDATED_COL so the md track counts never drift (QA 08-07 #6).
+const REQUESTER_COL = 'hidden xl:flex';
+// Row anchors (QA 08-07 #7): plain left-click keeps the in-app peek/navigate
+// behavior, but any modified click (Ctrl/Cmd new tab, Shift new window, Alt
+// download, middle-click) must fall through to NATIVE anchor semantics — do
+// not preventDefault those. Right-click needs no handler at all: real <a href>
+// gives the context menu its "Open in new tab" for free.
+const isModifiedClick = (e) => e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button === 1;
 // No vertical grid lines (modern list feel) — horizontal row dividers only.
 // px-2 below xl: the tablet band's narrower tracks need the padding back as
 // content width (px-3 alone truncated "Open" → "Op…" in the status column).
@@ -293,6 +308,9 @@ export default function Tickets() {
   const openTicket = useCallback((id) => navigate(`/tickets/${id}`, {
     state: { from: `${location.pathname}${location.search}` },
   }), [navigate, location.pathname, location.search]);
+  // Row anchors (QA 08-07 #7) carry the same return address openTicket sends,
+  // so a full-page open via anchor keeps the Back control working.
+  const linkState = { from: `${location.pathname}${location.search}` };
   const { user } = useAuth();
   const { currentWorkspace } = useWorkspace();
   // AI assignment/review is a reviewer/admin capability — its endpoints are
@@ -332,15 +350,19 @@ export default function Tickets() {
   const statusFilterNames = useMemo(() => statusDefs.map((d) => d.name), [statusDefs]);
   const defaultStatuses = useMemo(() => statusNamesForBase(statusDefs, ['Open', 'Pending']), [statusDefs]);
   const metaStatusesLoaded = (meta?.statuses?.length || 0) > 0;
+  // Keyed on the raw ?status VALUE, not the searchParams object — the object
+  // changes identity on every unrelated URL write (?peek= open/close, page),
+  // and a fresh `statuses` array identity cascades into queryParams → loud
+  // refetch + state clears. Value-keying kills that churn (QA 08-07 #10).
+  const statusesRaw = searchParams.get('status');
   const statuses = useMemo(() => {
-    const raw = searchParams.get('status');
-    if (raw === 'any') return [];
-    if (!raw) return defaultStatuses;
+    if (statusesRaw === 'any') return [];
+    if (!statusesRaw) return defaultStatuses;
     // Drop names the workspace doesn't define — but only once meta has
     // loaded; before that, custom names in a shared URL must pass through
     // untouched instead of being silently dropped on first paint.
-    return raw.split(',').filter((s) => (metaStatusesLoaded ? statusFilterNames.includes(s) : Boolean(s)));
-  }, [searchParams, metaStatusesLoaded, statusFilterNames, defaultStatuses]);
+    return statusesRaw.split(',').filter((s) => (metaStatusesLoaded ? statusFilterNames.includes(s) : Boolean(s)));
+  }, [statusesRaw, metaStatusesLoaded, statusFilterNames, defaultStatuses]);
   const assignee = searchParams.get('assignee') || '';
   const priority = searchParams.get('priority') || '';
   const origin = searchParams.get('origin') || '';
@@ -447,9 +469,14 @@ export default function Tickets() {
   useEffect(() => { try { localStorage.setItem('tp_ticket_layout', layout); } catch { /* no-op */ } }, [layout]);
   // Board view (QA 07-27 #3): Open / Pending / Closed columns with drag-drop.
   const boardMode = layout === 'board';
+  // Board density (QA 08-07 #12): cards are far shorter than list rows, so the
+  // board fetches a DOUBLE page — 50 cards fill the taller columns instead of
+  // stranding three shallow stacks above a pager (backend caps pageSize at
+  // 100, so no server change). Every PAGE_SIZE consumer below reads this.
+  const effectivePageSize = boardMode ? 50 : PAGE_SIZE;
 
   const queryParams = useMemo(() => {
-    const params = { page, pageSize: PAGE_SIZE, sort, dir };
+    const params = { page, pageSize: effectivePageSize, sort, dir };
     // A segment supplies its own status scope; the checkboxes apply otherwise.
     // Board mode sends the SAME status scope as the list (QA 08-04 #16/#15 —
     // silently fetching every status made the board disagree with the rail
@@ -480,8 +507,14 @@ export default function Tickets() {
     for (const [k, v] of JSON.parse(cfSerialized)) params[k] = v;
     if (debouncedSearch) params.q = debouncedSearch;
     return params;
-  }, [page, statuses, statusFilterNames, assignee, priority, origin, segment, sort, dir, debouncedSearch,
+  }, [page, effectivePageSize, statuses, statusFilterNames, assignee, priority, origin, segment, sort, dir, debouncedSearch,
     type, category, subcategory, group, source, createdFrom, createdTo, due, noise, tag, tagMode, impactFilter, urgencyFilter, aiState, requesterId, cfSerialized]);
+
+  // Serialized VALUE of queryParams. Effects that RESET live row state (the
+  // pending pill, row FX, bulk selection) key on this instead of the object,
+  // so an identity rebuild with identical values (meta arriving, URL churn)
+  // never blanks state the user is looking at (QA 08-07 #10).
+  const queryKey = useMemo(() => JSON.stringify(queryParams), [queryParams]);
 
   // Post-refresh row highlights: ticketId → 'new' | 'updated'. Set when a
   // refresh is asked to diff against the previous page (update-pill apply,
@@ -593,7 +626,17 @@ export default function Tickets() {
     }
   }, [queryParams, syncAiHold]);
 
-  useEffect(() => { fetchTickets(); }, [fetchTickets]);
+  // Loud (spinner) reloads are reserved for REAL param changes. queryParams
+  // can rebuild with identical values (meta landing, workspace re-render) —
+  // those refetch SILENTLY so the mounted rows never blank into the loading
+  // card mid-look (QA 08-07 #10 / deferred Phase-2 item: refreshes stay
+  // visibly non-destructive; the refresh pill and row FX carry the signal).
+  const lastFetchKeyRef = useRef(null);
+  useEffect(() => {
+    const silent = lastFetchKeyRef.current === queryKey;
+    lastFetchKeyRef.current = queryKey;
+    fetchTickets({ silent });
+  }, [fetchTickets, queryKey]);
 
   // Drop progress labels for rows a refetch shows are no longer analyzing
   // (missed terminal pings, page changes, etc.) so stale "step N" text never
@@ -791,12 +834,15 @@ export default function Tickets() {
     if (aiLiveTimerRef.current) clearTimeout(aiLiveTimerRef.current);
     if (aiHoldTimerRef.current) clearTimeout(aiHoldTimerRef.current);
   }, []);
-  // A filter/page change reloads the list anyway — drop stale pending state.
+  // A REAL filter/page change reloads the list anyway — drop stale pending
+  // state. Keyed on queryKey (values), NOT queryParams (identity): silent
+  // refreshes and same-value rebuilds must never blank row FX or the pending
+  // pill out from under the user (QA 08-07 #10).
   useEffect(() => {
     pendingIdsRef.current = new Set(); setPendingCount(0); setRowFx(new Map());
     aiHoldRef.current = new Map(); setAiHoldIds(new Set());
     manualWinRef.current = new Set(); setManualWinIds(new Set());
-  }, [queryParams]);
+  }, [queryKey]);
 
   const refreshAfterEdit = useCallback(() => {
     lastLocalMutationRef.current = Date.now(); // swallow our own SSE echo
@@ -961,7 +1007,9 @@ export default function Tickets() {
   // Query scope (gap plan P2.2): the action applies to EVERYTHING matching the
   // current filter, not just the visible page. Set via the preview call.
   const [queryScope, setQueryScope] = useState(null); // { total, editable, skippedFsBorn }
-  useEffect(() => { setSelectedIds(new Set()); setBulkAction(null); setQueryScope(null); }, [queryParams]);
+  // Value-keyed like the pending-state reset above: bulk selection survives
+  // silent refreshes and same-value queryParams rebuilds (QA 08-07 #10).
+  useEffect(() => { setSelectedIds(new Set()); setBulkAction(null); setQueryScope(null); }, [queryKey]);
 
   const bulkQueryParams = useMemo(() => {
     const { page: _p, pageSize: _s, sort: _sort, dir: _dir, ...rest } = queryParams;
@@ -1074,7 +1122,7 @@ export default function Tickets() {
     setIsExporting(false);
   };
 
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(total / effectivePageSize));
   const ticketingOn = meta ? meta.nativeTicketingEnabled : true;
   const isAgent = user?.role === 'agent';
 
@@ -1369,7 +1417,7 @@ export default function Tickets() {
                     )}
                     {tickets.length > 0 && (
                       <div className="ml-auto">
-                        <Pagination page={page} totalPages={totalPages} total={total} pageSize={PAGE_SIZE} onPage={goPage} compact />
+                        <Pagination page={page} totalPages={totalPages} total={total} pageSize={effectivePageSize} onPage={goPage} compact />
                       </div>
                     )}
                   </div>
@@ -1412,13 +1460,13 @@ export default function Tickets() {
                         onStatusDrop={onBoardStatusDrop}
                         closedExcluded={boardClosedExcluded}
                         onShowClosed={onBoardShowClosed}
-                        paginated={total > PAGE_SIZE}
+                        paginated={total > effectivePageSize}
                       />
                       {/* Same pagination as the list — the board renders one
                           page sliced into columns, so without this the rest of
                           the queue was simply unreachable (QA 08-04 #16). */}
                       <div className="mt-3 tp-card rounded-xl px-4 py-3">
-                        <Pagination page={page} totalPages={totalPages} total={total} pageSize={PAGE_SIZE} onPage={goPage} />
+                        <Pagination page={page} totalPages={totalPages} total={total} pageSize={effectivePageSize} onPage={goPage} />
                       </div>
                     </>
                   ) : (
@@ -1443,7 +1491,12 @@ export default function Tickets() {
                              tracks the title block sits over. */
                           <div className={`flex-1 ${GRID_ROOMY} text-[11px] font-semibold uppercase tracking-wide text-slate-400`}>
                             <span aria-hidden="true" />
-                            <span className={`${CELL} py-2`} style={{ gridColumn: '2 / 4' }}>
+                            {/* Span widens 2/4 → 2/5 at xl to absorb the new
+                                requester track (QA 08-07 #6), so Assignee and
+                                everything after keep sitting over their own
+                                columns. Responsive class, not inline style —
+                                gridColumn can't switch per breakpoint inline. */}
+                            <span className={`${CELL} py-2 [grid-column:2/4] xl:[grid-column:2/5]`}>
                               <button onClick={() => headerSort('subject')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 rounded">
                                 Ticket{sortIndicator('subject')}
                               </button>
@@ -1471,6 +1524,12 @@ export default function Tickets() {
                             <span className={`${CELL} ${cellPad}`}>
                               <button onClick={() => headerSort('subject')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 rounded">
                                 Subject{sortIndicator('subject')}
+                              </button>
+                            </span>
+                            {/* xl-only, paired with the row's requesterCell (QA 08-07 #6) */}
+                            <span className={`${CELL} ${REQUESTER_COL} ${cellPad}`}>
+                              <button onClick={() => headerSort('requester')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 rounded" title="Sort by requester name">
+                                Requester{sortIndicator('requester')}
                               </button>
                             </span>
                             <span className={`${CELL} ${cellPad}`}>Category</span>
@@ -1530,16 +1589,22 @@ export default function Tickets() {
                           const priorityEl = isEditable
                             ? <InlinePriorityPicker ticket={ticket} onChanged={refreshAfterEdit} />
                             : <span title="Synced from FreshService — read-only here"><PriorityDot priority={ticket.priority} /></span>;
+                          // Real anchor (QA 08-07 #7): right-click → "Open in
+                          // new tab" and modified clicks work natively; a plain
+                          // left-click preventDefaults into the peek flow.
+                          const ticketHref = `/tickets/${ticket.id}`;
                           const subjectBtn = (
-                            <button
-                              onClick={(e) => { e.stopPropagation(); onRowClick(ticket.id); }}
-                              onDoubleClick={(e) => { e.stopPropagation(); onRowDoubleClick(ticket.id); }}
+                            <Link
+                              to={ticketHref}
+                              state={linkState}
+                              onClick={(e) => { e.stopPropagation(); if (isModifiedClick(e)) return; e.preventDefault(); onRowClick(ticket.id); }}
+                              onDoubleClick={(e) => { e.stopPropagation(); e.preventDefault(); onRowDoubleClick(ticket.id); }}
                               className={`tp-focus-ring rounded text-left font-medium text-slate-800 truncate min-w-0 ${roomy ? 'text-[15px]' : 'text-sm'} ${
                                 fx === 'new' ? 'tp-subject-flash-new' : fx === 'updated' ? 'tp-subject-flash-updated' : ''
                               }`}
                             >
                               {ticket.subject || '(no subject)'}
-                            </button>
+                            </Link>
                           );
                           const subjectChips = (
                             <>
@@ -1580,11 +1645,25 @@ export default function Tickets() {
                           );
                           const subjectMeta = (
                             <span className="block w-full text-[11px] text-slate-400 truncate pl-4">
-                              <span className="font-mono">{ticket.displayRef}</span>
-                              {' · '}
-                              {ticket.requester?.name || 'Unknown requester'}
-                              {ticket.requester?.entraCity || ticket.requester?.entraOfficeLocation
-                                ? ` · ${ticket.requester.entraOfficeLocation || ticket.requester.entraCity}` : ''}
+                              {/* Ref is an anchor too (QA 08-07 #7) — same
+                                  modifier-aware behavior as the subject. */}
+                              <Link
+                                to={ticketHref}
+                                state={linkState}
+                                onClick={(e) => { e.stopPropagation(); if (isModifiedClick(e)) return; e.preventDefault(); onRowClick(ticket.id); }}
+                                className="tp-focus-ring rounded font-mono hover:text-blue-600"
+                              >
+                                {ticket.displayRef}
+                              </Link>
+                              {/* At xl the requester has a real column (QA 08-07
+                                  #6); below xl the meta line keeps name+office
+                                  so the tablet band loses nothing. */}
+                              <span className="xl:hidden">
+                                {' · '}
+                                {ticket.requester?.name || 'Unknown requester'}
+                                {ticket.requester?.entraCity || ticket.requester?.entraOfficeLocation
+                                  ? ` · ${ticket.requester.entraOfficeLocation || ticket.requester.entraCity}` : ''}
+                              </span>
                               {ticket.groupId && groupNames.get(String(ticket.groupId)) && (
                                 <span className="ml-1.5 text-indigo-500 font-medium">· {groupNames.get(String(ticket.groupId))}</span>
                               )}
@@ -1592,6 +1671,23 @@ export default function Tickets() {
                               {/* Below xl the Updated column is dropped (tablet band) —
                                   its relative time folds into this meta line instead. */}
                               <span className="xl:hidden">{` · updated ${timeAgo(ticket.lastActivityAt || ticket.updatedAt)}`}</span>
+                            </span>
+                          );
+                          // Requester column (QA 08-07 #6), xl-only: name on
+                          // the primary line, Entra office/city as the quiet
+                          // second line when present — mirrors catCell's shape.
+                          const requesterOffice = ticket.requester?.entraOfficeLocation || ticket.requester?.entraCity || null;
+                          const requesterCell = (
+                            <span
+                              className={`${CELL} ${REQUESTER_COL} ${cellPad} flex-col !items-start justify-center gap-0.5`}
+                              title={[ticket.requester?.name, requesterOffice].filter(Boolean).join(' · ') || undefined}
+                            >
+                              <span className="block w-full text-xs font-medium text-slate-700 truncate">
+                                {ticket.requester?.name || 'Unknown requester'}
+                              </span>
+                              {requesterOffice && (
+                                <span className="block w-full text-[10px] text-slate-400 truncate">{requesterOffice}</span>
+                              )}
                             </span>
                           );
                           // Category, leaf-first: the SUBCATEGORY is the most specific (= most
@@ -1780,14 +1876,16 @@ export default function Tickets() {
                               <span className="text-xs text-slate-400 whitespace-nowrap transition-opacity group-hover:opacity-0">
                                 {timeAgo(ticket.lastActivityAt || ticket.updatedAt)}
                               </span>
-                              <button
-                                onClick={(e) => { e.stopPropagation(); onRowDoubleClick(ticket.id); }}
+                              <Link
+                                to={ticketHref}
+                                state={linkState}
+                                onClick={(e) => { e.stopPropagation(); if (isModifiedClick(e)) return; e.preventDefault(); onRowDoubleClick(ticket.id); }}
                                 title="Open full ticket"
                                 aria-label={`Open ${ticket.displayRef}`}
                                 className="tp-focus-ring absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-md text-slate-400 hover:text-blue-600 hover:bg-blue-50"
                               >
                                 <ChevronRight className="w-4 h-4" aria-hidden="true" />
-                              </button>
+                              </Link>
                             </span>
                           );
                           return (
@@ -1841,8 +1939,9 @@ export default function Tickets() {
                                         </span>
                                         {subjectMeta}
                                       </span>
-                                      {/* Row 2: type, then the usual columns */}
+                                      {/* Row 2: type, requester (xl-only), then the usual columns */}
                                       <span className={`${CELL} ${cellPad}`}>{typePill}</span>
+                                      {requesterCell}
                                       {catCell}
                                       {assigneeCell}
                                       {statusCell}
@@ -1869,6 +1968,7 @@ export default function Tickets() {
                                         </span>
                                         {subjectMeta}
                                       </span>
+                                      {requesterCell}
                                       {catCell}
                                       {assigneeCell}
                                       {statusCell}
@@ -1901,12 +2001,19 @@ export default function Tickets() {
                                     )}
                                     <StatusPill status={ticket.status} className="ml-auto" tone={statusToneFromDefs(statusDefs, ticket.status)} />
                                   </div>
-                                  <p className={`text-sm font-medium text-slate-800 line-clamp-2 ${
-                                    fx === 'new' ? 'tp-subject-flash-new' : fx === 'updated' ? 'tp-subject-flash-updated' : ''
-                                  }`}
+                                  {/* Anchor for long-press / new-tab on touch +
+                                      right-click on small windows (QA 08-07 #7);
+                                      plain tap keeps the card's open behavior. */}
+                                  <Link
+                                    to={ticketHref}
+                                    state={linkState}
+                                    onClick={(e) => { e.stopPropagation(); if (isModifiedClick(e)) return; e.preventDefault(); onRowClick(ticket.id); }}
+                                    className={`text-sm font-medium text-slate-800 line-clamp-2 ${
+                                      fx === 'new' ? 'tp-subject-flash-new' : fx === 'updated' ? 'tp-subject-flash-updated' : ''
+                                    }`}
                                   >
                                     {ticket.subject || '(no subject)'}
-                                  </p>
+                                  </Link>
                                   {(() => {
                                     const { category: catLabel, subcategory: subLabel } = ticketCategoryLabels(ticket);
                                     const label = subLabel || catLabel;
@@ -1979,7 +2086,7 @@ export default function Tickets() {
 
                       {/* Full pagination */}
                       <div className="px-4 py-3 border-t border-slate-100 bg-slate-50/50">
-                        <Pagination page={page} totalPages={totalPages} total={total} pageSize={PAGE_SIZE} onPage={goPage} />
+                        <Pagination page={page} totalPages={totalPages} total={total} pageSize={effectivePageSize} onPage={goPage} />
                         {/* Keyboard hint (gap plan 2 P4.2) — desktop only, keys are pointless on touch */}
                         <p className="hidden lg:flex items-center justify-center gap-3 mt-2 text-[10px] text-slate-400">
                           <span><kbd className="font-mono border border-slate-200 rounded px-1 bg-white">j</kbd>/<kbd className="font-mono border border-slate-200 rounded px-1 bg-white">k</kbd> move</span>

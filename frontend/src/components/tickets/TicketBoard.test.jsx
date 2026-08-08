@@ -1,8 +1,13 @@
 /** @vitest-environment jsdom */
 import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render as rtlRender, screen, within } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import TicketBoard from './TicketBoard';
+
+// Card anchors (QA 08-07 #7) use <Link>/useLocation, so the board needs a
+// router context everywhere it renders.
+const render = (ui, options) => rtlRender(ui, { wrapper: MemoryRouter, ...options });
 
 afterEach(cleanup);
 
@@ -116,6 +121,62 @@ describe('TicketBoard workspace custom statuses (Phase 8b)', () => {
     expect(screen.queryByText('Ticket 1')).not.toBeInTheDocument();
     expect(screen.queryByText('Ticket 2')).not.toBeInTheDocument();
     expect(screen.getByText('Ticket 3')).toBeInTheDocument();
+  });
+});
+
+describe('TicketBoard queue UX batch (QA 08-07 #6/#7/#12, Phase 3)', () => {
+  test('card carries a muted requester line between subject and assignee row', () => {
+    render(
+      <TicketBoard
+        tickets={[t(1, 'Open', { requester: { name: 'Rita Requester' } }), t(2, 'Open')]}
+        ticketingOn
+      />,
+    );
+    const line = screen.getByText('Rita Requester');
+    expect(line).toBeInTheDocument();
+    expect(line).toHaveClass('text-[11px]', 'text-slate-400', 'truncate');
+    // No requester on the ticket → no empty line rendered.
+    const card2 = screen.getByText('Ticket 2').closest('[role="button"]');
+    expect(within(card2).queryByText(/requester/i)).not.toBeInTheDocument();
+  });
+
+  test('ref and subject are real anchors (href, draggable=false) with modifier-aware clicks', () => {
+    const onClick = vi.fn();
+    render(
+      <TicketBoard tickets={[t(1, 'Open')]} ticketingOn onCardClick={onClick} />,
+    );
+    const ref = screen.getByRole('link', { name: 'TP-1' });
+    const subject = screen.getByRole('link', { name: 'Ticket 1' });
+    for (const a of [ref, subject]) {
+      expect(a).toHaveAttribute('href', '/tickets/1');
+      // Native HTML5 anchor-drag must not fight dnd-kit's PointerSensor.
+      expect(a).toHaveAttribute('draggable', 'false');
+    }
+    // Plain left-click: preventDefault (fireEvent returns false) + peek/open path.
+    expect(fireEvent.click(subject)).toBe(false);
+    expect(onClick).toHaveBeenCalledWith(1);
+    // Ctrl-click: NOT prevented — the browser's new-tab behavior stays native,
+    // and the card's own open handler must not double-fire.
+    onClick.mockClear();
+    expect(fireEvent.click(subject, { ctrlKey: true })).toBe(true);
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  test('drag still starts with anchors in the card (keyboard fireEvent on the draggable root)', () => {
+    render(<TicketBoard tickets={[t(1, 'Open'), t(2, 'Pending')]} ticketingOn />);
+    const card = screen.getByText('Ticket 1').closest('[role="button"]');
+    // The draggable root keeps its dnd-kit listeners even though the ref and
+    // subject inside are now anchors — a drag still activates.
+    fireEvent.keyDown(card, { code: 'Enter' });
+    // Drag active → DragOverlay renders the second copy of the card.
+    expect(screen.getAllByText('Ticket 1').length).toBe(2);
+  });
+
+  test('column body uses the raised 50-card height caps (QA 08-07 #12)', () => {
+    render(<TicketBoard tickets={[t(1, 'Open')]} ticketingOn />);
+    const open = screen.getByRole('region', { name: 'Open column' });
+    const body = open.querySelector('.settings-scrollbar');
+    expect(body).toHaveClass('min-h-[42rem]', 'max-h-[max(48rem,calc(100vh-200px))]');
   });
 });
 

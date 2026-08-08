@@ -220,3 +220,82 @@ describe('FreshServiceClient FS error detail propagation (interceptor-wrapped er
     expect(thrown.freshserviceStatus).toBe(400);
   });
 });
+
+// FR 08-07 #8/#9 — note-edit write-back + FS notification suppression.
+describe('FreshServiceClient.updateConversation', () => {
+  test('PUTs the new body to /conversations/:id', async () => {
+    const client = new FreshServiceClient('example.freshservice.com', 'api-key');
+    client._put = jest.fn().mockResolvedValue({ data: { conversation: { id: 555 } } });
+
+    const result = await client.updateConversation(555, { body: '<p>edited</p>' });
+
+    expect(client._put).toHaveBeenCalledWith('/conversations/555', { body: '<p>edited</p>' });
+    expect(result.conversation.id).toBe(555);
+  });
+
+  test('tolerates 404/405 (entry gone or immutable) like deleteConversation', async () => {
+    const client = new FreshServiceClient('example.freshservice.com', 'api-key');
+    const gone = new Error('Request failed with status code 404');
+    gone.response = { status: 404, data: null };
+    client._put = jest.fn().mockRejectedValue(gone);
+
+    const result = await client.updateConversation(555, { body: '<p>edited</p>' });
+
+    expect(result).toEqual({ id: 555, skipped: true, reason: 'conversation_gone_or_immutable' });
+  });
+
+  test('other failures throw with the FS status/detail preserved', async () => {
+    const client = new FreshServiceClient('example.freshservice.com', 'api-key');
+    const denied = new Error('Request failed with status code 403');
+    denied.response = { status: 403, data: { description: 'Access denied' } };
+    client._put = jest.fn().mockRejectedValue(denied);
+
+    await expect(client.updateConversation(555, { body: '<p>x</p>' }))
+      .rejects.toMatchObject({ freshserviceStatus: 403, message: 'Access denied' });
+  });
+});
+
+describe('FreshService note payloads suppress FS notifications (notify_emails: [])', () => {
+  test('addPrivateNote sends notify_emails: []', async () => {
+    const client = new FreshServiceClient('example.freshservice.com', 'api-key');
+    client._post = jest.fn().mockResolvedValue({ data: { conversation: { id: 1 } } });
+
+    await client.addPrivateNote(9, '<p>note</p>');
+
+    expect(client._post).toHaveBeenCalledWith('/tickets/9/notes', {
+      body: '<p>note</p>',
+      private: true,
+      notify_emails: [],
+    });
+  });
+
+  test('addNote (JSON branch) sends notify_emails: []', async () => {
+    const client = new FreshServiceClient('example.freshservice.com', 'api-key');
+    client._post = jest.fn().mockResolvedValue({ data: { conversation: { id: 2 } } });
+
+    await client.addNote(9, '<p>note</p>', { isPrivate: true });
+
+    expect(client._post).toHaveBeenCalledWith('/tickets/9/notes', {
+      body: '<p>note</p>',
+      private: true,
+      notify_emails: [],
+    });
+  });
+
+  test('addNote (multipart branch) still posts a form when attachments ride along', async () => {
+    const client = new FreshServiceClient('example.freshservice.com', 'api-key');
+    client._post = jest.fn().mockResolvedValue({ data: { conversation: { id: 3 } } });
+
+    await client.addNote(9, '<p>note</p>', {
+      isPrivate: true,
+      attachments: [{ filename: 'a.txt', buffer: Buffer.from('hi'), contentType: 'text/plain' }],
+    });
+
+    const [url, form] = client._post.mock.calls[0];
+    expect(url).toBe('/tickets/9/notes');
+    // FormData cannot express an EMPTY array — nothing is appended for
+    // notify_emails there; suppression for attachment notes relies on the
+    // FS-side marker exclusion rule (docs/FRESHSERVICE_WEBHOOK_SETUP.md).
+    expect(typeof form.getHeaders).toBe('function');
+  });
+});

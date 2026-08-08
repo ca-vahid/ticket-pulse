@@ -299,8 +299,31 @@ function AttachmentChip({ attachment, onPreview }) {
  * replies sit RIGHT with a blue tint (avatars + role + channel on both sides),
  * internal notes stay full-width amber so they can't be mistaken for either.
  */
-export function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, photoFor, onCopy, canDelete = false, onDelete, deleting = false, customFields = null, onEditField = null, onCopied = null, onFilterNavigate = undefined }) {
+export function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, photoFor, onCopy, canDelete = false, onDelete, deleting = false, canEdit = false, onEdit, customFields = null, onEditField = null, onCopied = null, onFilterNavigate = undefined }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // Inline note editing (FR 08-07 #8): the pencil swaps the note body for the
+  // small rich-text composer variant; Save PATCHes through the parent.
+  const [editing, setEditing] = useState(false);
+  const [editSeed, setEditSeed] = useState('');
+  const [editDraft, setEditDraft] = useState({ html: '', text: '' });
+  const [savingEdit, setSavingEdit] = useState(false);
+  const startEdit = () => {
+    const seed = entry.bodyHtml || entry.bodyText || entry.content || '';
+    setEditSeed(seed);
+    setEditDraft({ html: entry.bodyHtml || '', text: entry.bodyText || entry.content || '' });
+    setEditing(true);
+  };
+  const saveEdit = async () => {
+    const text = (editDraft.text || '').trim();
+    if (!text || savingEdit) return;
+    setSavingEdit(true);
+    try {
+      await onEdit?.(entry.id, { bodyHtml: editDraft.html || null, bodyText: text });
+      setEditing(false);
+    } catch { /* parent shows the toast; keep the draft open */ } finally {
+      setSavingEdit(false);
+    }
+  };
   const isNote = entry.eventType === 'note' || entry.isPrivate === true;
   const body = entry.bodyText || entry.content || '';
   // Identity beats channel: an agent replying by email syncs from FS as
@@ -405,6 +428,16 @@ export function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, ph
           )}
           {viaEmail && <span className="text-[10px] text-slate-400">via email</span>}
           <span className="ml-auto flex items-center gap-1">
+            {canEdit && isNote && entry.authorType !== 'system' && !editing && (
+              <button
+                onClick={startEdit}
+                aria-label="Edit note"
+                title="Edit note"
+                className="tp-focus-ring p-1 rounded text-slate-300 hover:text-amber-700 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+              >
+                <Pencil className="w-3 h-3" aria-hidden="true" />
+              </button>
+            )}
             {canDelete && isNote && entry.authorType !== 'system' && (
               confirmDelete ? (
                 <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-red-700">
@@ -442,6 +475,14 @@ export function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, ph
             >
               <Copy className="w-3 h-3" aria-hidden="true" />
             </button>
+            {entry.editedAt && (
+              <span
+                className="inline-flex items-center text-[10px] font-medium text-slate-400 bg-slate-100/80 border border-slate-200 rounded-full px-1.5 py-0.5 whitespace-nowrap"
+                title={`Edited ${entry.editedBy ? `by ${entry.editedBy} · ` : ''}${new Date(entry.editedAt).toLocaleString()}`}
+              >
+                edited {timeAgo(entry.editedAt)}
+              </span>
+            )}
             <span className="text-xs text-slate-400 whitespace-nowrap" title={new Date(entry.occurredAt).toLocaleString()}>
               {formatDayTime(entry.occurredAt)}
               {' · '}{timeAgo(entry.occurredAt)}
@@ -457,7 +498,37 @@ export function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, ph
           compact
           className="-mt-1 mb-2.5"
         />
-        <RichBody html={entry.bodyHtml} text={body} onImageRef={onImageRef} />
+        {editing ? (
+          <div>
+            <RichTextEditor
+              value={editSeed}
+              onChange={({ html, text }) => setEditDraft({ html, text })}
+              onSubmit={saveEdit}
+              minHeight={110}
+              placeholder="Edit this note… (Ctrl+Enter to save)"
+              ariaLabel="Edit note body"
+              className="bg-white border-amber-300"
+            />
+            <div className="mt-2 flex items-center justify-end gap-1.5">
+              <button
+                onClick={() => setEditing(false)}
+                disabled={savingEdit}
+                className="tp-focus-ring px-2.5 py-1 rounded-lg text-xs font-semibold text-slate-500 hover:bg-slate-100 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveEdit}
+                disabled={savingEdit || !(editDraft.text || '').trim()}
+                className="tp-focus-ring px-2.5 py-1 rounded-lg text-xs font-semibold bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50"
+              >
+                {savingEdit ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <RichBody html={entry.bodyHtml} text={body} onImageRef={onImageRef} />
+        )}
         {attachments.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1.5">
             {attachments.map((a) => (
@@ -1165,6 +1236,39 @@ export default function TicketDetail() {
   }, [ticketId, showToast]);
 
   const isAdmin = meta?.actor?.kind === 'admin' || meta?.actor?.workspaceRole === 'admin';
+
+  // Note editing (FR 08-07 #8): author-or-admin, internal notes only, never
+  // system entries. Works on BOTH origins — FS-imported notes are eventType
+  // 'private_note', so only TP-authored/reconciled notes qualify (matching
+  // the server-side guard).
+  const actorEmail = String(meta?.actor?.email || '').toLowerCase();
+  const canEditEntry = useCallback((e) => {
+    if (e?.eventType !== 'note' || e?.authorType === 'system') return false;
+    if (isAdmin) return true;
+    const em = String(e?.actorEmail || '').toLowerCase();
+    return Boolean(em && em === actorEmail);
+  }, [isAdmin, actorEmail]);
+  const editNote = useCallback(async (entryId, { bodyHtml, bodyText }) => {
+    try {
+      await ticketsAPI.updateNote(ticketId, entryId, { bodyHtml, bodyText });
+    } catch (err) {
+      showToast('red', err.response?.data?.message || 'Could not save the note');
+      throw err; // keep the editor open with the draft
+    }
+    lastLocalMutationRef.current = Date.now();
+    // Optimistic: swap the body + edited stamp in place, then silently refetch
+    // for the server-derived truth (bodyText derivation, editedBy, history).
+    const editedAt = new Date().toISOString();
+    setTicket((prev) => (prev ? {
+      ...prev,
+      thread: (prev.thread || []).map((e) => (e.id === entryId
+        ? { ...e, bodyHtml, bodyText, content: bodyText, editedAt, editedBy: actorEmail || e.editedBy }
+        : e)),
+    } : prev));
+    fetchTicket({ silent: true });
+    showToast('emerald', 'Note updated');
+  }, [ticketId, actorEmail, fetchTicket, showToast]);
+
   const [deletingNoteId, setDeletingNoteId] = useState(null);
   const deleteNote = useCallback(async (entryId) => {
     setDeletingNoteId(entryId);
@@ -2173,6 +2277,8 @@ export default function TicketDetail() {
                                     canDelete={isAdmin && ticket?.origin === 'ticketpulse'}
                                     onDelete={deleteNote}
                                     deleting={deletingNoteId === item.e.id}
+                                    canEdit={canEditEntry(item.e)}
+                                    onEdit={editNote}
                                     customFields={ticket?.customFields || {}}
                                     onEditField={focusCustomFields}
                                     onCopied={notifyCopied}

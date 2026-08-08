@@ -100,6 +100,15 @@ class MirrorService {
   }
 
   /**
+   * Push an edited note's new body onto its already-mirrored FS conversation
+   * (FR 08-07 #8). The entry still exists locally — its `mirror-<id>` external
+   * id tells the job which FS conversation to update.
+   */
+  async enqueueThreadEntryUpdate(workspaceId, ticketId, threadEntryId) {
+    return this._enqueue(workspaceId, ticketId, 'thread_entry_update', threadEntryId);
+  }
+
+  /**
    * Delete a mirrored note/reply from the FS fallback copy. The local thread
    * entry is already gone, so the FS conversation id rides in `payload`.
    */
@@ -276,6 +285,7 @@ class MirrorService {
       if (job.kind === 'create_ticket') await this._mirrorCreate(job, client);
       else if (job.kind === 'update_fields') await this._mirrorFields(job, client);
       else if (job.kind === 'thread_entry') await this._mirrorThreadEntry(job, client);
+      else if (job.kind === 'thread_entry_update') await this._mirrorThreadEntryUpdate(job, client);
       else if (job.kind === 'delete_thread_entry') await this._mirrorThreadEntryDelete(job, client);
       else if (job.kind === 'delete_ticket') await this._mirrorDelete(job, client);
       else if (job.kind === 'attachment') await this._mirrorAttachment(job, client);
@@ -531,6 +541,13 @@ class MirrorService {
     this._broadcast(ticket, 'mirror');
   }
 
+  /** Mirror-prefixed FS body for a thread entry (create AND edit reuse this). */
+  _threadEntryMirrorBody(ticket, entry) {
+    const label = entry.isPrivate ? 'internal note' : 'reply to requester';
+    return `<p><b>${MIRROR_MARKER}</b> ${entry.actorName || 'Ticket Pulse'} · ${label} · ${ticketDisplayRef(ticket)}</p>`
+      + (entry.bodyHtml || textToHtml(entry.bodyText || entry.content || ''));
+  }
+
   async _mirrorThreadEntry(job, client) {
     const ticket = await this._loadTicket(job.ticketId);
     if (!ticket.freshserviceTicketId) {
@@ -540,9 +557,7 @@ class MirrorService {
     if (!entry) return; // deleted — nothing to mirror
     if (entry.mirrorState === 'mirrored') return; // idempotent
 
-    const label = entry.isPrivate ? 'internal note' : 'reply to requester';
-    const body = `<p><b>${MIRROR_MARKER}</b> ${entry.actorName || 'Ticket Pulse'} · ${label} · ${ticketDisplayRef(ticket)}</p>`
-      + (entry.bodyHtml || textToHtml(entry.bodyText || entry.content || ''));
+    const body = this._threadEntryMirrorBody(ticket, entry);
 
     // Re-attach any files staged on this entry so the FS copy carries them too.
     const attachments = await attachmentService.buffersForThreadEntry(entry.id);
@@ -598,6 +613,23 @@ class MirrorService {
     const body = `<p><b>${MIRROR_MARKER}</b> attachment uploaded in Ticket Pulse · ${ticketDisplayRef(ticket)}</p><p>${String(row.fileName).replace(/</g, '&lt;')}</p>`;
     await client.addNote(Number(ticket.freshserviceTicketId), body, { isPrivate: true, attachments: files });
     logger.info(`Mirror: attachment "${row.fileName}" pushed to FS copy of ticket ${job.ticketId}`);
+  }
+
+  /**
+   * Push an edited note's current body onto its mirrored FS conversation
+   * (FR 08-07 #8). Only entries that already mirrored (`mirror-<id>`) qualify —
+   * a still-pending entry's create job will carry the edited body anyway.
+   */
+  async _mirrorThreadEntryUpdate(job, client) {
+    const ticket = await this._loadTicket(job.ticketId);
+    const entry = await prisma.ticketThreadEntry.findUnique({ where: { id: job.threadEntryId } });
+    if (!entry) return; // deleted since the edit — nothing to update
+    const ext = typeof entry.externalEntryId === 'string' ? entry.externalEntryId : '';
+    if (!ext.startsWith('mirror-')) return; // never mirrored — local edit only
+    const fsConversationId = ext.slice('mirror-'.length);
+    const body = this._threadEntryMirrorBody(ticket, entry);
+    await client.updateConversation(Number(fsConversationId), { body });
+    logger.info(`Mirror: updated FS conversation ${fsConversationId} for edited note ${entry.id} (ticket ${job.ticketId})`);
   }
 
   async _mirrorThreadEntryDelete(job, client) {
