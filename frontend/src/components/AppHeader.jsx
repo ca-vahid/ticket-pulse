@@ -48,7 +48,10 @@ export default function AppHeader({
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const { currentWorkspace, availableWorkspaces, switchWorkspace } = useWorkspace();
-  const { isRefreshing, lastUpdated, sseConnectionStatus } = useDashboard();
+  const { isRefreshing, lastUpdated, sseConnectionStatus, sseRetry, sseEnabled } = useDashboard();
+  // Only offer the manual reconnect where the live feed is supposed to run —
+  // on routes with SSE intentionally off (e.g. Settings), "Offline" is normal.
+  const canRetrySse = Boolean(sseEnabled && sseRetry);
   const [showChangelog, setShowChangelog] = useState(false);
   const [manualSyncing, setManualSyncing] = useState(false);
 
@@ -228,10 +231,19 @@ export default function AppHeader({
     <div className="relative flex-shrink-0" data-tp-header-popup>
       <button
         type="button"
-        onClick={() => { setStatusOpen((o) => !o); setUserMenuOpen(false); setWorkspaceMenuOpen(false); }}
+        onClick={() => {
+          // Offline pill doubles as the manual retry (QA 08-07 #14): clicking
+          // it kicks a reconnect (budget reset) instead of opening the popup —
+          // the pill flipping to "Connecting" is the feedback.
+          if (statusTone === 'offline' && canRetrySse) {
+            sseRetry();
+            return;
+          }
+          setStatusOpen((o) => !o); setUserMenuOpen(false); setWorkspaceMenuOpen(false);
+        }}
         aria-haspopup="dialog"
         aria-expanded={statusOpen}
-        title="Data status & sync"
+        title={statusTone === 'offline' && canRetrySse ? 'Realtime feed offline — click to reconnect' : 'Data status & sync'}
         className={`inline-flex h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-semibold transition-colors tp-focus-ring ${STATUS_PILL[statusTone]}`}
       >
         {statusTone === 'sync' ? (
@@ -255,7 +267,7 @@ export default function AppHeader({
           <span className={`h-2 w-2 rounded-full ${statusTone === 'live' ? 'bg-emerald-500 shadow-[0_0_0_3px_rgb(16_185_129/0.18)]' : 'bg-amber-400 animate-pulse'}`} />
         )}
         <span>
-          {statusTone === 'sync' ? 'Syncing' : statusTone === 'live' ? 'Live' : statusTone === 'connecting' ? 'Connecting' : 'Offline'}
+          {statusTone === 'sync' ? 'Syncing' : statusTone === 'live' ? 'Live' : statusTone === 'connecting' ? 'Connecting' : canRetrySse ? 'Offline — Reconnect' : 'Offline'}
         </span>
         {timeLabel && statusTone !== 'offline' && (
           <span className="hidden font-medium opacity-70 lg:inline">· {timeLabel}</span>
@@ -271,6 +283,15 @@ export default function AppHeader({
             }`}>
               {sseConnectionStatus === 'connected' ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
               {sseConnectionStatus === 'connected' ? 'Connected' : sseConnectionStatus === 'connecting' ? 'Connecting…' : 'Disconnected'}
+              {sseConnectionStatus === 'disconnected' && canRetrySse && (
+                <button
+                  type="button"
+                  onClick={sseRetry}
+                  className="tp-focus-ring rounded border border-red-200 bg-red-50 px-1.5 py-0.5 font-semibold text-red-600 hover:bg-red-100"
+                >
+                  Reconnect
+                </button>
+              )}
             </span>
           </div>
           <div className="flex items-center justify-between py-1">

@@ -1,6 +1,16 @@
-export const APP_VERSION = '3.2.04-preview';
+export const APP_VERSION = '3.3.00-preview';
 
 export const changelog = [
+  {
+    version: '3.3.00-preview',
+    date: 'August 8, 2026',
+    entries: [
+      { type: 'new', html: '<strong>⚡ Instant FreshService sync + live queue</strong> — status changes now flow in seconds, not an hour: the FreshService webhook lane fully syncs tickets on update events, every sync broadcasts live so queue rows, the ticket page, and the peek update in place without a refresh (verified ~3s end-to-end), opening a ticket always pulls FreshService truth (closes/reopens included), the fast 60-second refresh lane runs for every workspace and no longer starves assigned tickets, and stuck syncs recover in 10 minutes instead of 30. (QA 08-07 — the “Reza’s close took an hour” overhaul)' },
+      { type: 'fixed', html: '<strong>🔑 Stay signed in for 7 days</strong> — sessions now slide (activity extends them) and last 7 days across all three auth layers, ending the 2-3×/day sign-outs. (QA 08-07)' },
+      { type: 'fixed', html: '<strong>📡 No more eternal “Connecting”</strong> — the live connection refreshes its credentials before reconnecting, and after repeated failures it honestly shows “Offline — Reconnect” with a working retry. Navigating between pages no longer resets the connection. (QA 08-07)' },
+      { type: 'fixed', html: '<strong>🛡️ Crash-proofing</strong> — the app now catches rendering errors with a friendly “Something went wrong” card instead of a white screen, and a board-drag edge case that could crash mid-refresh is fixed. (QA 08-07 — Adrian’s “page refreshes”)' },
+    ],
+  },
   {
     version: '3.2.04-preview',
     date: 'August 7, 2026',

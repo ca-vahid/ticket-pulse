@@ -6,6 +6,8 @@ import {
   analyzeTicketActivities,
   transformTicketThreadEntries,
   transformTicketConversationEntries,
+  getStatusString,
+  getPriorityNumber,
 } from '../integrations/freshserviceTransformer.js';
 import { formatInTimeZone } from 'date-fns-tz';
 import { runJobsInPool } from '../utils/parallelPool.js';
@@ -123,7 +125,9 @@ const getSSEManager = async () => {
 // (a hung 00:00Z run on 2026-07-07 silently blocked ALL ticket ingest for 64
 // minutes) and let the next scheduled run take the lock over. Normal cycles
 // finish in ~1 min; multi-day catch-up syncs stay well under this too.
-const SYNC_LOCK_STALE_MS = 30 * 60 * 1000;
+// FR 08-07 #13: 30min → 10min — a hung run stalling ingest for half an hour
+// was a major contributor to the "status takes 1h+ to sync" reports.
+const SYNC_LOCK_STALE_MS = 10 * 60 * 1000;
 
 /**
  * Service for syncing data from FreshService
@@ -1598,6 +1602,17 @@ class SyncService {
       clearReadCache();
     }
 
+    const assignmentChanged = Boolean(existingTicket && existingTicket.assignedTechId !== upsertedTicket.assignedTechId);
+    const statusChanged = Boolean(existingTicket && existingTicket.status !== upsertedTicket.status);
+
+    // Instant status sync (FR 08-07 #13): every ingest lane that lands a real
+    // status/assignee change — webhook, 60s fast lane, 5-min full sync —
+    // notifies open queue/detail views over SSE. No-op snapshots stay silent
+    // so re-syncs of unchanged tickets don't cause refetch storms.
+    if (statusChanged || assignmentChanged) {
+      await this._broadcastTicketChange(ticketWorkspaceId, upsertedTicket);
+    }
+
     return {
       ticket: upsertedTicket,
       existingTicket,
@@ -1607,8 +1622,8 @@ class SyncService {
       noiseRuleMatched: ruleId,
       noiseRuleCategory: normalizedNoiseCategory,
       assignmentClearVerification,
-      assignmentChanged: Boolean(existingTicket && existingTicket.assignedTechId !== upsertedTicket.assignedTechId),
-      statusChanged: Boolean(existingTicket && existingTicket.status !== upsertedTicket.status),
+      assignmentChanged,
+      statusChanged,
     };
   }
 
@@ -1999,6 +2014,12 @@ class SyncService {
     });
 
     const wsConfig = await this._getWorkspaceConfig(workspaceId);
+    if (!wsConfig?.domain || !wsConfig?.apiKey) {
+      // The 60s lane now runs for every active workspace (FR 08-07 #13), so a
+      // workspace without FS credentials must skip quietly, not error a log
+      // line every minute.
+      return { status: 'skipped', reason: 'freshservice_not_configured', ticketsFetched: 0, ticketsSynced: 0 };
+    }
     const client = createFreshServiceClient(wsConfig.domain, wsConfig.apiKey, {
       priority: 'high',
       source: 'assignment-fast-sync',
@@ -2019,23 +2040,37 @@ class SyncService {
         return bTime - aTime;
       });
     const unassignedTickets = sortedTickets.filter(isActionableUnassignedFreshServiceTicket);
+    // Budget split (FR 08-07 #13): unassigned tickets used to claim the ENTIRE
+    // per-cycle budget, starving assigned tickets' status changes out of the
+    // fast lane on busy days. Now unassigned get first claim on half the
+    // budget, assigned tickets (most-recently-updated first) get the reserved
+    // remainder, and any slots still left fall back to overall recency.
+    const unassignedBudget = Math.ceil(maxTickets / 2);
     const selectedTicketIds = new Set();
     const recentTickets = [];
-
-    for (const ticket of [...unassignedTickets, ...sortedTickets]) {
+    const take = (ticket) => {
       const id = ticket.id?.toString?.() || String(ticket.id);
-      if (selectedTicketIds.has(id)) continue;
-      if (recentTickets.length >= maxTickets && !isActionableUnassignedFreshServiceTicket(ticket)) {
-        continue;
-      }
+      if (selectedTicketIds.has(id)) return;
       selectedTicketIds.add(id);
       recentTickets.push(ticket);
+    };
+
+    for (const ticket of unassignedTickets.slice(0, unassignedBudget)) take(ticket);
+    for (const ticket of sortedTickets) {
+      if (recentTickets.length >= maxTickets) break;
+      if (isActionableUnassignedFreshServiceTicket(ticket)) continue; // reserved share is for the rest
+      take(ticket);
+    }
+    for (const ticket of sortedTickets) {
+      if (recentTickets.length >= maxTickets) break;
+      take(ticket); // leftover budget: overall recency, unassigned included
     }
 
-    if (unassignedTickets.length > maxTickets) {
-      logger.warn('Assignment fast sync: unassigned candidates exceed maxTickets; processing all unassigned candidates', {
+    if (unassignedTickets.length > unassignedBudget) {
+      logger.warn('Assignment fast sync: unassigned candidates exceed their reserved share; overflow competes on recency', {
         workspaceId,
         unassignedCandidates: unassignedTickets.length,
+        unassignedBudget,
         maxTickets,
       });
     }
@@ -2423,7 +2458,11 @@ class SyncService {
       }
       // Watchdog: the previous run hung (or died without cleanup). Take the
       // lock over so one bad run can't silently stop ingest indefinitely.
-      logger.error(`Sync lock for workspace ${workspaceId} held ${Math.round(heldMs / 60000)}min — presumed hung; taking over`);
+      logger.warn(`Breaking stale sync lock for workspace ${workspaceId}: held ${Math.round(heldMs / 60000)}min (> ${Math.round(SYNC_LOCK_STALE_MS / 60000)}min) — presumed hung; taking over`, {
+        workspaceId,
+        heldMs,
+        staleThresholdMs: SYNC_LOCK_STALE_MS,
+      });
       syncLogRepository.failStaleStarted(workspaceId, SYNC_LOCK_STALE_MS).catch(() => {});
     }
 
@@ -3761,9 +3800,16 @@ class SyncService {
 
     const ticket = await prisma.ticket.findFirst({
       where: { id: ticketId, workspaceId },
-      select: { id: true, origin: true, freshserviceTicketId: true, status: true, resolvedAt: true, createdAt: true },
+      select: { id: true, origin: true, freshserviceTicketId: true, status: true, priority: true, resolvedAt: true, createdAt: true },
     });
-    if (!ticket || !ticket.freshserviceTicketId || TERMINAL_STATUSES.includes(String(ticket.status))) {
+    if (!ticket || !ticket.freshserviceTicketId) {
+      return { changed: false };
+    }
+    // TP-born tickets already in a terminal state have nothing left to heal.
+    // FS-born tickets ALWAYS fetch FS truth on open (FR 08-07 #13) — a plain
+    // status flip (Open→Resolved) or even an FS-side reopen must show
+    // immediately, not wait for the batched background sweep.
+    if (ticket.origin === TICKET_ORIGIN.TICKETPULSE && TERMINAL_STATUSES.includes(String(ticket.status))) {
       return { changed: false };
     }
 
@@ -3820,16 +3866,47 @@ class SyncService {
     const isSoftDeleted = fsTicket?.deleted === true;
     const isSpam = fsTicket?.spam === true;
     if (!isGone && !isSoftDeleted && !isSpam) {
-      // Assignee reconcile (QA 07-09): a mid-cycle race can leave TP's
-      // assignee stale — the FS responder was set within the same second the
-      // sync wrote pre-assignment data, so the queue kept showing an AI
-      // "Suggested" chip while FS had a real assignee (#232260/Andrii). The
-      // detail we just fetched is ground truth; heal the row on open.
+      // The ticket is alive in FreshService — the detail we just fetched is
+      // ground truth, so heal ALL the plain drift on open (FR 08-07 #13):
+      //  - status (Open→Resolved, Pending→Open, even a reopen of Closed…)
+      //  - priority
+      //  - assignee (QA 07-09: a mid-cycle race can leave TP's assignee stale
+      //    — the FS responder was set within the same second the sync wrote
+      //    pre-assignment data — #232260/Andrii)
+      // Previously only the assignee healed here; plain status transitions
+      // waited for the batched sweep, so an open ticket could show a stale
+      // status for up to an hour.
       try {
-        const fsResponder = fsTicket.responder_id ? BigInt(fsTicket.responder_id) : null;
         const current = await prisma.ticket.findUnique({
-          where: { id: ticket.id }, select: { assignedTechId: true },
+          where: { id: ticket.id },
+          select: { assignedTechId: true, status: true, priority: true, resolvedAt: true, closedAt: true, createdAt: true },
         });
+        if (!current) return { changed: false };
+        const now = new Date();
+        const patch = {};
+
+        // Status
+        const fsStatusName = getStatusString(Number(fsTicket.status));
+        const statusChanged = fsStatusName !== current.status;
+        if (statusChanged) {
+          patch.status = fsStatusName;
+          patch.updatedAt = now;
+          if ((fsStatusName === 'Resolved' || fsStatusName === 'Closed') && !current.resolvedAt) {
+            patch.resolvedAt = fsTicket.stats?.resolved_at ? new Date(fsTicket.stats.resolved_at) : now;
+            patch.resolutionTimeSeconds = Math.max(0, Math.round((patch.resolvedAt.getTime() - new Date(current.createdAt).getTime()) / 1000));
+          }
+          if (fsStatusName === 'Closed' && !current.closedAt) {
+            patch.closedAt = fsTicket.stats?.closed_at ? new Date(fsTicket.stats.closed_at) : now;
+          }
+        }
+
+        // Priority
+        const fsPriority = getPriorityNumber(Number(fsTicket.priority));
+        const priorityChanged = Number.isFinite(Number(fsTicket.priority)) && fsPriority !== current.priority;
+        if (priorityChanged) patch.priority = fsPriority;
+
+        // Assignee
+        const fsResponder = fsTicket.responder_id ? BigInt(fsTicket.responder_id) : null;
         let targetTechId = null;
         let targetTechName = null;
         let mappable = true;
@@ -3840,33 +3917,66 @@ class SyncService {
           });
           if (tech) { targetTechId = tech.id; targetTechName = tech.name; } else mappable = false;
         }
-        if (mappable && (current?.assignedTechId ?? null) !== targetTechId) {
-          await prisma.ticket.update({
-            where: { id: ticket.id },
-            data: { assignedTechId: targetTechId },
+        const assigneeChanged = mappable && (current.assignedTechId ?? null) !== targetTechId;
+        if (assigneeChanged) patch.assignedTechId = targetTechId;
+
+        if (Object.keys(patch).length === 0) return { changed: false };
+
+        const updated = await prisma.ticket.update({ where: { id: ticket.id }, data: patch });
+        if (statusChanged) {
+          await ticketActivityRepository.create({
+            ticketId: ticket.id,
+            activityType: 'status_changed',
+            performedBy: 'FreshService',
+            performedAt: now,
+            details: {
+              oldStatus: current.status,
+              newStatus: fsStatusName,
+              note: `Status reconciled from FreshService on open: ${current.status} → ${fsStatusName}`,
+            },
           });
+          if (TERMINAL_STATUSES.includes(fsStatusName)) {
+            await prisma.assignmentPipelineRun.updateMany({
+              where: { ticketId: ticket.id, status: 'queued' },
+              data: { status: 'skipped_stale' },
+            }).catch(() => {});
+          }
+        }
+        if (assigneeChanged) {
           await ticketActivityRepository.create({
             ticketId: ticket.id,
             activityType: targetTechId ? 'assigned' : 'status_changed',
             performedBy: 'FreshService',
-            performedAt: new Date(),
+            performedAt: now,
             details: {
               note: targetTechId
                 ? `Assignee reconciled from FreshService on open: ${targetTechName}`
                 : 'FreshService shows this ticket unassigned — cleared the stale local assignee',
             },
           });
-          logger.info(`On-open reconcile: ticket ${ticket.id} assignee → ${targetTechName || 'unassigned'} (from FS)`);
-          await this._broadcastReconcile(workspaceId, ticket, ticket.status);
-          return { changed: true, assignee: targetTechName };
         }
+        logger.info(`On-open reconcile: ticket ${ticket.id} healed from FS`, {
+          workspaceId,
+          status: statusChanged ? `${current.status} → ${fsStatusName}` : undefined,
+          priority: priorityChanged ? `${current.priority} → ${fsPriority}` : undefined,
+          assignee: assigneeChanged ? (targetTechName || 'unassigned') : undefined,
+        });
+        await this._broadcastTicketChange(workspaceId, updated);
+        return {
+          changed: true,
+          ...(statusChanged ? { status: fsStatusName } : {}),
+          ...(assigneeChanged ? { assignee: targetTechName } : {}),
+        };
       } catch (err) {
-        logger.debug(`On-open assignee reconcile failed (non-fatal): ${err.message}`);
+        logger.debug(`On-open reconcile failed (non-fatal): ${err.message}`);
       }
       return { changed: false };
     }
 
     const newStatus = isSpam ? 'Spam' : 'Deleted';
+    // FS-born tickets now reconcile on EVERY open (no terminal early-return),
+    // so an already-Deleted/Spam row must not re-log the transition each time.
+    if (String(ticket.status) === newStatus) return { changed: false };
     const reason = isGone
       ? 'Ticket no longer exists in FreshService (hard deleted / 404)'
       : isSoftDeleted
@@ -3899,10 +4009,26 @@ class SyncService {
    * page load instantly without blocking on the FreshService round-trip.
    */
   async _broadcastReconcile(workspaceId, ticket, status) {
+    await this._broadcastTicketChange(workspaceId, { ...ticket, status });
+  }
+
+  /**
+   * Workspace-scoped SSE 'ticket-change' for a synced FS-side delta (FR 08-07
+   * #13). Same shape as the reconcile broadcast (action:'sync') plus the fields
+   * the queue needs to update a row in place. Never throws — a dead SSE layer
+   * must not fail an ingest.
+   */
+  async _broadcastTicketChange(workspaceId, ticket) {
     try {
       const mgr = await getSSEManager();
       mgr?.broadcast?.('ticket-change', {
-        action: 'sync', workspaceId, ticketId: ticket.id, origin: ticket.origin, status,
+        action: 'sync',
+        workspaceId,
+        ticketId: ticket.id,
+        origin: ticket.origin,
+        status: ticket.status,
+        assignedTechId: ticket.assignedTechId ?? null,
+        updatedAt: ticket.updatedAt || null,
       }, workspaceId);
     } catch { /* non-fatal */ }
   }

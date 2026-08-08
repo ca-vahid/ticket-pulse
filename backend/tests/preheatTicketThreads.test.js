@@ -42,6 +42,8 @@ jest.unstable_mockModule('../src/integrations/freshserviceTransformer.js', () =>
   transformAgents: () => [],
   mapTechnicianIds: (x) => x,
   analyzeTicketActivities: () => ({}),
+  getStatusString: (id) => ({ 2: 'Open', 3: 'Pending', 4: 'Resolved', 5: 'Closed' }[id] || 'Open'),
+  getPriorityNumber: (id) => (id >= 1 && id <= 4 ? id : 3),
   transformTicketThreadEntries: (rows, ctx) =>
     rows.map((r, i) => ({
       ticketId: ctx.ticketId,

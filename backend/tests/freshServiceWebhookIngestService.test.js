@@ -110,6 +110,12 @@ describe('freshServiceWebhookIngestService', () => {
       assignmentTriggered: true,
     }));
     expect(workspaceWebhookServiceMock.recordReceived).toHaveBeenCalledWith(2);
+    // Webhook lane hardening (FR 08-07 #13): bounded queue wait so a congested
+    // FS rate-limit queue fails fast instead of hanging the delivery.
+    expect(createFreshServiceClientMock).toHaveBeenCalledWith('example', 'key', expect.objectContaining({
+      priority: 'high',
+      queueTimeoutMs: 15000,
+    }));
     expect(clientMock.fetchTicketSnapshot).toHaveBeenCalledWith('224183');
     expect(syncServiceMock.syncFreshServiceTicketSnapshot).toHaveBeenCalledWith(2, expect.objectContaining({ id: 224183 }), expect.objectContaining({
       source: 'freshservice_webhook',
@@ -167,5 +173,30 @@ describe('freshServiceWebhookIngestService', () => {
     })).rejects.toMatchObject({ code: 'freshservice_429', statusCode: 502 });
 
     expect(workspaceWebhookServiceMock.recordError).toHaveBeenCalledWith(2, 'FreshService ticket fetch failed with HTTP 429');
+  });
+
+  test('maps FS_QUEUE_TIMEOUT to a 503 so FreshService retries the delivery', async () => {
+    const error = new Error('FreshService rate-limit queue timeout after 15000ms');
+    error.code = 'FS_QUEUE_TIMEOUT';
+    clientMock.fetchTicketSnapshot.mockRejectedValue(error);
+
+    await expect(freshServiceWebhookIngestService.handleTicketWebhook({
+      workspaceSlug: 'it',
+      freshserviceTicketId: '224183',
+      suppliedSecret: 'secret',
+    })).rejects.toMatchObject({ code: 'freshservice_queue_timeout', statusCode: 503 });
+
+    expect(workspaceWebhookServiceMock.recordError).toHaveBeenCalledWith(2, expect.stringContaining('queue timed out'));
+  });
+
+  test('maps a queue timeout thrown from the shared sync path to 503 as well', async () => {
+    const error = new Error('Request timed out waiting in the FreshService rate-limit queue');
+    syncServiceMock.syncFreshServiceTicketSnapshot.mockRejectedValue(error);
+
+    await expect(freshServiceWebhookIngestService.handleTicketWebhook({
+      workspaceSlug: 'it',
+      freshserviceTicketId: '224183',
+      suppliedSecret: 'secret',
+    })).rejects.toMatchObject({ code: 'freshservice_queue_timeout', statusCode: 503 });
   });
 });

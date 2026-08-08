@@ -280,7 +280,7 @@ router.post(
         selectedWorkspaceId: ws.id,
       },
       config.session.secret,
-      { algorithm: 'HS256', expiresIn: '8h' },
+      { algorithm: 'HS256', expiresIn: config.session.jwtExpiresIn },
     );
 
     logger.info(`User ${user.email} selected workspace: ${ws.name}`);

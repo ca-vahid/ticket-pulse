@@ -29,6 +29,7 @@ import TicketDetail from './pages/TicketDetail';
 import ApprovalsInbox from './pages/ApprovalsInbox';
 import PublicApprovalDecision from './pages/PublicApprovalDecision';
 import DemoModeBanner from './components/DemoModeBanner';
+import ErrorBoundary from './components/ErrorBoundary';
 import EmailHealthBanner from './components/EmailHealthBanner';
 import CommandPalette from './components/CommandPalette';
 import { Activity } from 'lucide-react';
@@ -197,271 +198,276 @@ function App() {
         <WorkspaceProvider>
           <DashboardProvider>
             <SettingsProvider>
-              <Routes>
-                {/* Public Routes */}
-                <Route
-                  path="/login"
-                  element={
-                    <PublicRoute>
-                      <Login />
-                    </PublicRoute>
-                  }
-                />
+              {/* Top-level crash guard (QA 08-07 #10): a render throw anywhere
+                  in the routed tree shows a recoverable fallback card instead
+                  of white-screening ("the page refreshed itself"). */}
+              <ErrorBoundary>
+                <Routes>
+                  {/* Public Routes */}
+                  <Route
+                    path="/login"
+                    element={
+                      <PublicRoute>
+                        <Login />
+                      </PublicRoute>
+                    }
+                  />
 
-                {/* Workspace Selection (authenticated but no workspace yet) */}
-                <Route
-                  path="/workspace"
-                  element={
-                    <WorkspacePicker />
-                  }
-                />
+                  {/* Workspace Selection (authenticated but no workspace yet) */}
+                  <Route
+                    path="/workspace"
+                    element={
+                      <WorkspacePicker />
+                    }
+                  />
 
-                <Route
-                  path="/summit/vote/:token"
-                  element={<SummitVote />}
-                />
+                  <Route
+                    path="/summit/vote/:token"
+                    element={<SummitVote />}
+                  />
 
-                <Route
-                  path="/summit/report/:token"
-                  element={<SummitReport />}
-                />
+                  <Route
+                    path="/summit/report/:token"
+                    element={<SummitReport />}
+                  />
 
-                <Route
-                  path="/ticket-status/:token"
-                  element={<PublicTicketStatus />}
-                />
+                  <Route
+                    path="/ticket-status/:token"
+                    element={<PublicTicketStatus />}
+                  />
 
-                <Route
-                  path="/ticket-escalation/:token"
-                  element={<PublicTicketEscalation />}
-                />
+                  <Route
+                    path="/ticket-escalation/:token"
+                    element={<PublicTicketEscalation />}
+                  />
 
-                <Route
-                  path="/ticket-urgency/:token"
-                  element={<PublicTicketUrgency />}
-                />
+                  <Route
+                    path="/ticket-urgency/:token"
+                    element={<PublicTicketUrgency />}
+                  />
 
-                <Route
-                  path="/feedback/:token"
-                  element={<PublicTicketFeedback />}
-                />
+                  <Route
+                    path="/feedback/:token"
+                    element={<PublicTicketFeedback />}
+                  />
 
-                <Route
-                  path="/approval/:token"
-                  element={<PublicApprovalDecision />}
-                />
+                  <Route
+                    path="/approval/:token"
+                    element={<PublicApprovalDecision />}
+                  />
 
-                <Route
-                  path="/my-competencies"
-                  element={
-                    <AgentRoute>
-                      <MyCompetencies />
-                    </AgentRoute>
-                  }
-                />
+                  <Route
+                    path="/my-competencies"
+                    element={
+                      <AgentRoute>
+                        <MyCompetencies />
+                      </AgentRoute>
+                    }
+                  />
 
-                <Route
-                  path="/notifications"
-                  element={
-                    <AgentRoute>
-                      <Notifications />
-                    </AgentRoute>
-                  }
-                />
+                  <Route
+                    path="/notifications"
+                    element={
+                      <AgentRoute>
+                        <Notifications />
+                      </AgentRoute>
+                    }
+                  />
 
-                {/* Native ticketing (agents are first-class here) */}
-                <Route
-                  path="/tickets"
-                  element={
-                    <TicketsRoute>
-                      <Tickets />
-                    </TicketsRoute>
-                  }
-                />
-                <Route
-                  path="/tickets/new"
-                  element={
-                    <TicketsRoute>
-                      <TicketCreate />
-                    </TicketsRoute>
-                  }
-                />
-                <Route
-                  path="/approvals"
-                  element={
-                    <TicketsRoute>
-                      <ApprovalsInbox />
-                    </TicketsRoute>
-                  }
-                />
-                <Route
-                  path="/tickets/:id"
-                  element={
-                    <TicketsRoute>
-                      <TicketDetail />
-                    </TicketsRoute>
-                  }
-                />
+                  {/* Native ticketing (agents are first-class here) */}
+                  <Route
+                    path="/tickets"
+                    element={
+                      <TicketsRoute>
+                        <Tickets />
+                      </TicketsRoute>
+                    }
+                  />
+                  <Route
+                    path="/tickets/new"
+                    element={
+                      <TicketsRoute>
+                        <TicketCreate />
+                      </TicketsRoute>
+                    }
+                  />
+                  <Route
+                    path="/approvals"
+                    element={
+                      <TicketsRoute>
+                        <ApprovalsInbox />
+                      </TicketsRoute>
+                    }
+                  />
+                  <Route
+                    path="/tickets/:id"
+                    element={
+                      <TicketsRoute>
+                        <TicketDetail />
+                      </TicketsRoute>
+                    }
+                  />
 
-                {/* Protected Routes */}
-                <Route
-                  path="/dashboard"
-                  element={
-                    <ProtectedRoute>
-                      <Dashboard />
-                    </ProtectedRoute>
-                  }
-                />
+                  {/* Protected Routes */}
+                  <Route
+                    path="/dashboard"
+                    element={
+                      <ProtectedRoute>
+                        <Dashboard />
+                      </ProtectedRoute>
+                    }
+                  />
 
-                <Route
-                  path="/technician/:id"
-                  element={
-                    <ProtectedRoute>
-                      <TechnicianDetailNew />
-                    </ProtectedRoute>
-                  }
-                />
+                  <Route
+                    path="/technician/:id"
+                    element={
+                      <ProtectedRoute>
+                        <TechnicianDetailNew />
+                      </ProtectedRoute>
+                    }
+                  />
 
-                <Route
-                  path="/settings"
-                  element={
-                    <ProtectedRoute>
-                      <Settings />
-                    </ProtectedRoute>
-                  }
-                />
+                  <Route
+                    path="/settings"
+                    element={
+                      <ProtectedRoute>
+                        <Settings />
+                      </ProtectedRoute>
+                    }
+                  />
 
-                <Route
-                  path="/visuals"
-                  element={
-                    <ProtectedRoute>
-                      <Visuals />
-                    </ProtectedRoute>
-                  }
-                />
+                  <Route
+                    path="/visuals"
+                    element={
+                      <ProtectedRoute>
+                        <Visuals />
+                      </ProtectedRoute>
+                    }
+                  />
 
-                <Route
-                  path="/timeline"
-                  element={
-                    <ProtectedRoute>
-                      <TimelineExplorer />
-                    </ProtectedRoute>
-                  }
-                />
+                  <Route
+                    path="/timeline"
+                    element={
+                      <ProtectedRoute>
+                        <TimelineExplorer />
+                      </ProtectedRoute>
+                    }
+                  />
 
-                <Route
-                  path="/analytics"
-                  element={
-                    <ProtectedRoute>
-                      <Analytics />
-                    </ProtectedRoute>
-                  }
-                />
+                  <Route
+                    path="/analytics"
+                    element={
+                      <ProtectedRoute>
+                        <Analytics />
+                      </ProtectedRoute>
+                    }
+                  />
 
-                <Route
-                  path="/analytics/category-map"
-                  element={
-                    <ProtectedRoute>
-                      <Analytics view="category-map" />
-                    </ProtectedRoute>
-                  }
-                />
+                  <Route
+                    path="/analytics/category-map"
+                    element={
+                      <ProtectedRoute>
+                        <Analytics view="category-map" />
+                      </ProtectedRoute>
+                    }
+                  />
 
-                <Route
-                  path="/workflows"
-                  element={
-                    <ProtectedRoute>
-                      <WorkflowsPage />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/workflows/:tab"
-                  element={
-                    <ProtectedRoute>
-                      <WorkflowsPage />
-                    </ProtectedRoute>
-                  }
-                />
+                  <Route
+                    path="/workflows"
+                    element={
+                      <ProtectedRoute>
+                        <WorkflowsPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/workflows/:tab"
+                    element={
+                      <ProtectedRoute>
+                        <WorkflowsPage />
+                      </ProtectedRoute>
+                    }
+                  />
 
-                <Route
-                  path="/summit-taxonomy"
-                  element={
-                    <ProtectedRoute>
-                      <SummitTaxonomyWorkshop />
-                    </ProtectedRoute>
-                  }
-                />
+                  <Route
+                    path="/summit-taxonomy"
+                    element={
+                      <ProtectedRoute>
+                        <SummitTaxonomyWorkshop />
+                      </ProtectedRoute>
+                    }
+                  />
 
-                <Route
-                  path="/assignments"
-                  element={
-                    <ProtectedRoute>
-                      <AssignmentReview />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/assignments/:tab"
-                  element={
-                    <ProtectedRoute>
-                      <AssignmentReview />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/assignments/run/:runId"
-                  element={
-                    <ProtectedRoute>
-                      <AssignmentReview />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/assignments/history/:historyRunId"
-                  element={
-                    <ProtectedRoute>
-                      <AssignmentReview />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/assignments/live/:ticketId"
-                  element={
-                    <ProtectedRoute>
-                      <AssignmentReview />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/assignments/competency-run/:competencyRunId"
-                  element={
-                    <ProtectedRoute>
-                      <AssignmentReview />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/assignments/competency-live/:analyzeTechId"
-                  element={
-                    <ProtectedRoute>
-                      <AssignmentReview />
-                    </ProtectedRoute>
-                  }
-                />
+                  <Route
+                    path="/assignments"
+                    element={
+                      <ProtectedRoute>
+                        <AssignmentReview />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/assignments/:tab"
+                    element={
+                      <ProtectedRoute>
+                        <AssignmentReview />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/assignments/run/:runId"
+                    element={
+                      <ProtectedRoute>
+                        <AssignmentReview />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/assignments/history/:historyRunId"
+                    element={
+                      <ProtectedRoute>
+                        <AssignmentReview />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/assignments/live/:ticketId"
+                    element={
+                      <ProtectedRoute>
+                        <AssignmentReview />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/assignments/competency-run/:competencyRunId"
+                    element={
+                      <ProtectedRoute>
+                        <AssignmentReview />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/assignments/competency-live/:analyzeTechId"
+                    element={
+                      <ProtectedRoute>
+                        <AssignmentReview />
+                      </ProtectedRoute>
+                    }
+                  />
 
-                {/* Auth callback */}
-                <Route
-                  path="/auth/callback"
-                  element={<AuthCallback />}
-                />
+                  {/* Auth callback */}
+                  <Route
+                    path="/auth/callback"
+                    element={<AuthCallback />}
+                  />
 
-                {/* Default Route */}
-                <Route path="/" element={<HomeRedirect />} />
+                  {/* Default Route */}
+                  <Route path="/" element={<HomeRedirect />} />
 
-                {/* 404 Catch-all */}
-                <Route path="*" element={<HomeRedirect />} />
-              </Routes>
+                  {/* 404 Catch-all */}
+                  <Route path="*" element={<HomeRedirect />} />
+                </Routes>
+              </ErrorBoundary>
               <DemoModeBanner />
               <EmailHealthBanner />
               <CommandPalette />

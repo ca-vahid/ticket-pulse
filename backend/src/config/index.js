@@ -98,8 +98,12 @@ export default {
   // Session
   session: {
     secret: config.SESSION_SECRET,
-    maxAge: 8 * 60 * 60 * 1000, // 8 hours
+    // 7-day sliding window: the cookie is re-issued on every request (rolling:true in app.js),
+    // so active users stay signed in indefinitely; 7 idle days signs them out.
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     rememberMeMaxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+    // Single source of truth for API JWT lifetime (auth.routes.js login/SSO + workspace select).
+    jwtExpiresIn: '7d',
   },
 
   // FreshService API
