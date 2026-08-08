@@ -297,6 +297,81 @@ export const WORKFLOW_TEMPLATES = [
     ]),
   },
   {
+    key: 'location_subcategory_router',
+    name: 'Location → subcategory router',
+    description: 'Route new tickets to a location subcategory from a client_location custom field: contains "Quebec" → subcategory Quebec, contains "Chile" → subcategory Chile, anything else → Other. The category is NOT changed — each subcategory resolves under the ticket\'s current category when the workflow runs. Edit the field key, the match values, and the subcategory names after installing.',
+    triggerType: 'ticket.created',
+    build: () => templateNodes([
+      { id: 'trigger', type: 'trigger', data: { triggerType: 'ticket.created' } },
+      {
+        id: 'route-location',
+        type: 'branch',
+        data: {
+          label: 'Client location?',
+          // Placeholder field key: swap custom:client_location for the
+          // custom-field key your intake populates (fields auto-provision on
+          // first API use; Settings → Ticket Ops → Custom fields lists them).
+          branches: [
+            {
+              key: 'quebec',
+              label: 'Quebec',
+              conditionGroup: {
+                logic: 'all',
+                conditions: [{ field: 'custom:client_location', operator: 'contains', value: 'Quebec' }],
+              },
+            },
+            {
+              key: 'chile',
+              label: 'Chile',
+              conditionGroup: {
+                logic: 'all',
+                conditions: [{ field: 'custom:client_location', operator: 'contains', value: 'Chile' }],
+              },
+            },
+          ],
+        },
+      },
+      // No setCategoryName on purpose: the subcategory resolves against the
+      // ticket's CURRENT category (set by intake or AI triage) at run time.
+      {
+        id: 'set-quebec',
+        type: 'update_ticket',
+        data: {
+          label: 'Subcategory → Quebec',
+          setSubcategoryName: 'Quebec',
+          note: 'Subcategory set from client_location by the location router workflow.',
+        },
+      },
+      {
+        id: 'set-chile',
+        type: 'update_ticket',
+        data: {
+          label: 'Subcategory → Chile',
+          setSubcategoryName: 'Chile',
+          note: 'Subcategory set from client_location by the location router workflow.',
+        },
+      },
+      {
+        id: 'set-other',
+        type: 'update_ticket',
+        data: {
+          label: 'Subcategory → Other',
+          setSubcategoryName: 'Other',
+          note: 'Subcategory set from client_location by the location router workflow.',
+        },
+      },
+      { id: 'end', type: 'stop', data: {} },
+    ], [
+      { id: 'e1', source: 'trigger', target: 'route-location' },
+      { id: 'e2', source: 'route-location', sourceHandle: 'quebec', target: 'set-quebec' },
+      { id: 'e3', source: 'route-location', sourceHandle: 'chile', target: 'set-chile' },
+      { id: 'e4', source: 'route-location', sourceHandle: 'otherwise', target: 'set-other' },
+      { id: 'e5', source: 'set-quebec', target: 'end' },
+      { id: 'e6', source: 'set-chile', target: 'end' },
+      { id: 'e7', source: 'set-other', target: 'end' },
+    ]),
+  },
+  {
     key: 'intake_field_card',
     name: 'Intake field card (pin API fields on the ticket)',
     description: 'When an API-created ticket arrives with a source_system custom field, write a structured field card into the conversation AND pin it above the thread so agents see the intake payload at a glance. Edit the field keys after installing — the builder lists this workspace\'s custom fields.',
@@ -853,11 +928,9 @@ function validateGraph(definition, triggerType) {
       if (badName(node.data?.setSubcategoryName)) {
         errors.push(`Update-ticket node ${node.id}: subcategory name must be a non-empty string (max 120 chars)`);
       }
-      const hasCategoryName = typeof node.data?.setCategoryName === 'string' && node.data.setCategoryName.trim();
-      const hasSubcategoryName = typeof node.data?.setSubcategoryName === 'string' && node.data.setSubcategoryName.trim();
-      if (hasSubcategoryName && !hasCategoryName) {
-        errors.push(`Update-ticket node ${node.id}: a subcategory name needs its parent category name`);
-      }
+      // A subcategory name WITHOUT a category name is valid (FR 08-07 #3):
+      // the engine resolves it against the ticket's current category at run
+      // time (and errors into the step output when the ticket has none).
     }
 
     if (node.type === 'add_note' && reachable.has(node.id)) {

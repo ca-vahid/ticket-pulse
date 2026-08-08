@@ -1664,6 +1664,27 @@ function sanitizePreviewHtmlClient(value = '') {
     .replace(/\son[a-z]+\s*=\s*'[^']*'/gi, '');
 }
 
+// TipTap's StarterKit schema cannot represent tables, divs, spans, images,
+// links, or inline style attributes — round-tripping such HTML through the
+// rich editor silently strips them (QA 08-07 #1: "Apply to workflow" reset a
+// hand-built HTML template). Detect BEFORE loading content into the editor:
+// advanced templates stay code-editor-only and the Rich tab shows a notice.
+const ADVANCED_TEMPLATE_HTML_PATTERN = /<\s*(table|div|span|img|a)\b|\sstyle\s*=/i;
+export function templateHtmlIsAdvanced(html) {
+  return ADVANCED_TEMPLATE_HTML_PATTERN.test(String(html || ''));
+}
+
+// The save/preview snapshot may take editor.getHTML() ONLY when the rich tab
+// is the active surface, the user actually typed there (dirty), and the node's
+// stored HTML is representable by StarterKit. Everything else keeps node data
+// as the single source of truth (QA 08-07 #1).
+export function shouldTakeRichEditorHtml({ nodeType, templateTab, dirty, nodeHtml }) {
+  return nodeType === 'template_render'
+    && templateTab === 'rich'
+    && dirty === true
+    && !templateHtmlIsAdvanced(nodeHtml);
+}
+
 function validateSchemaClient(schema) {
   const errors = [];
   if (!schema || typeof schema !== 'object' || Array.isArray(schema)) {
@@ -2096,7 +2117,14 @@ export function validateWorkflowDefinitionClient(definition, triggerType = null)
     const sourceRegistry = WORKFLOW_NODE_REGISTRY[sourceNode.type];
     const targetRegistry = WORKFLOW_NODE_REGISTRY[targetNode.type];
     if (sourceRegistry.terminal) errors.push(`Terminal node ${sourceNode.id} cannot route to another node`);
-    if (!sourceRegistry.outputHandles.includes(normalizedHandle(edge.sourceHandle))) {
+    // Branch nodes have DYNAMIC output handles — one per configured branch key
+    // plus 'otherwise' (mirrors the server rule; the static registry only
+    // lists 'otherwise', which wrongly flagged installed branch templates).
+    const allowedSourceHandles = sourceNode.type === 'branch'
+      ? [...(Array.isArray(sourceNode.data?.branches) ? sourceNode.data.branches : [])
+        .map((branch) => normalizedHandle(branch?.key)), 'otherwise']
+      : sourceRegistry.outputHandles;
+    if (!allowedSourceHandles.includes(normalizedHandle(edge.sourceHandle))) {
       errors.push(`Edge ${edge.id || '(new edge)'} uses an invalid ${sourceNode.type} output handle`);
     }
     if (!(targetRegistry.inputHandles || ['default']).includes(normalizedHandle(edge.targetHandle))) {
@@ -7244,19 +7272,38 @@ export default function NotificationWorkflowsPanel({
     return `${value.slice(0, start)}${token}${value.slice(end)}`;
   }
 
+  // Advanced-HTML guard (QA 08-07 #1): true when the selected template node's
+  // HTML uses constructs StarterKit would strip. The rich editor never mounts
+  // such content — the Rich tab shows a read-only notice instead.
+  const templateHtmlAdvanced = selectedNode?.type === 'template_render'
+    && templateHtmlIsAdvanced(selectedNode.data?.html);
+  // Rich-editor dirty flag: set on real user edits (onUpdate), cleared on node
+  // switch, programmatic setContent, and save. The save/preview snapshot only
+  // trusts editor.getHTML() when this is true — an idle editor can never
+  // clobber Monaco-authored HTML again.
+  const richEditorDirtyRef = useRef(false);
+
   const editor = useEditor({
     extensions: [StarterKit],
-    content: selectedNode?.type === 'template_render' ? selectedNode.data?.html || '' : '',
+    content: selectedNode?.type === 'template_render' && !templateHtmlIsAdvanced(selectedNode.data?.html)
+      ? selectedNode.data?.html || ''
+      : '',
     editorProps: {
       attributes: {
         class: 'min-h-[260px] max-h-[420px] overflow-y-auto rounded-md border border-gray-200 bg-white px-3 py-2 text-sm leading-6 focus:outline-none focus:ring-2 focus:ring-blue-500',
       },
     },
     onUpdate: ({ editor: activeEditor }) => {
-      if (selectedNode?.type === 'template_render') {
+      if (selectedNode?.type === 'template_render' && !templateHtmlIsAdvanced(selectedNode.data?.html)) {
+        richEditorDirtyRef.current = true;
         updateNodeData({ html: activeEditor.getHTML() });
       }
     },
+  }, [selectedNodeId]);
+
+  useEffect(() => {
+    // Node switch → whatever the editor held belongs to the previous node.
+    richEditorDirtyRef.current = false;
   }, [selectedNodeId]);
 
   useEffect(() => {
@@ -7264,8 +7311,19 @@ export default function NotificationWorkflowsPanel({
 
     const html = selectedNode.data?.html || '';
     try {
+      if (templateHtmlIsAdvanced(html)) {
+        // NEVER setContent advanced HTML into TipTap — StarterKit strips
+        // table/div/span/img/a/style and the stripped version would shadow
+        // the real template. Clear any stale content instead.
+        if (!editor.isEmpty) editor.commands.clearContent(false);
+        richEditorDirtyRef.current = false;
+        return;
+      }
       if (editor.getHTML() !== html) {
         editor.commands.setContent(html, false);
+        // Programmatic replace (node switch, Monaco apply, source-tab edit) —
+        // the editor now mirrors node data; nothing user-typed is pending.
+        richEditorDirtyRef.current = false;
       }
     } catch {
       // TipTap can briefly expose a destroyed editor while React Flow changes selection.
@@ -8124,6 +8182,8 @@ export default function NotificationWorkflowsPanel({
         description: selected.description,
         definition: draft,
       });
+      // Saved — pending rich-editor edits are now committed to node data.
+      richEditorDirtyRef.current = false;
       const shouldStayEnabled = selected.isEnabled === true;
       const response = await notificationWorkflowAPI.publish(selected.id, {
         changeNote: 'Published from Settings workflow editor',
@@ -8585,7 +8645,16 @@ export default function NotificationWorkflowsPanel({
       activeNode.data = { ...(activeNode.data || {}), outputSchema: parsedSchema };
     }
 
-    if (activeNode?.type === 'template_render' && editor && !editor.isDestroyed) {
+    // Take editor.getHTML() ONLY when the Rich tab is active AND the user
+    // actually edited there (QA 08-07 #1). An idle/stale TipTap instance —
+    // e.g. after applying advanced HTML via the Monaco modal — must never
+    // overwrite node data with its stripped round-trip.
+    if (editor && !editor.isDestroyed && shouldTakeRichEditorHtml({
+      nodeType: activeNode?.type,
+      templateTab,
+      dirty: richEditorDirtyRef.current,
+      nodeHtml: activeNode?.data?.html,
+    })) {
       activeNode.data = { ...(activeNode.data || {}), html: editor.getHTML() };
     }
 
@@ -9454,9 +9523,7 @@ export default function NotificationWorkflowsPanel({
                 Category name
                 <input
                   value={selectedNode.data?.setCategoryName || ''}
-                  onChange={(event) => updateNodeData(event.target.value
-                    ? { setCategoryName: event.target.value }
-                    : { setCategoryName: null, setSubcategoryName: null })}
+                  onChange={(event) => updateNodeData({ setCategoryName: event.target.value || null })}
                   placeholder="e.g. Project Setup"
                   className="mt-0.5 w-full rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm normal-case text-gray-900"
                 />
@@ -9467,11 +9534,15 @@ export default function NotificationWorkflowsPanel({
                   value={selectedNode.data?.setSubcategoryName || ''}
                   onChange={(event) => updateNodeData({ setSubcategoryName: event.target.value || null })}
                   placeholder="optional"
-                  disabled={!selectedNode.data?.setCategoryName}
-                  className="mt-0.5 w-full rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm normal-case text-gray-900 disabled:bg-gray-50 disabled:text-gray-400"
+                  className="mt-0.5 w-full rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm normal-case text-gray-900"
                 />
               </label>
             </div>
+            <p className="text-[11px] text-slate-400 normal-case">
+              A subcategory on its own is fine — it resolves under the category named above, or under
+              the ticket&apos;s <span className="font-medium text-slate-500">current</span> category when
+              none is set (uncategorized tickets record an error on the run instead).
+            </p>
           </div>
 
           <label className="block text-xs font-medium uppercase text-gray-500">
@@ -10397,18 +10468,51 @@ export default function NotificationWorkflowsPanel({
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_260px]">
             <div className="min-w-0">
               {templateTab === 'rich' && (
-                <div>
-                  <label className="text-xs font-medium uppercase text-gray-500">HTML Body</label>
-                  <div className="mt-1" onFocus={() => focusInsertTarget('template-html-rich')}>
-                    {editor && !editor.isDestroyed ? (
-                      <EditorContent editor={editor} />
-                    ) : (
-                      <div className="min-h-[220px] rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-500">
-                        Loading editor...
+                templateHtmlAdvanced ? (
+                  <div>
+                    <label className="text-xs font-medium uppercase text-gray-500">HTML Body</label>
+                    <div
+                      data-testid="advanced-html-notice"
+                      className="mt-1 flex min-h-[220px] flex-col items-center justify-center gap-3 rounded-md border border-dashed border-amber-300 bg-amber-50/60 px-6 py-8 text-center"
+                    >
+                      <AlertCircle className="h-6 w-6 text-amber-500" aria-hidden="true" />
+                      <div>
+                        <p className="text-sm font-semibold text-gray-900">This template uses advanced HTML</p>
+                        <p className="mx-auto mt-1 max-w-sm text-xs leading-5 text-gray-600 normal-case">
+                          It contains tables, divs, images, links, or inline styles that the rich editor
+                          can&apos;t represent — opening it here would strip that formatting.
+                          Edit it in the code editor to preserve it exactly.
+                        </p>
                       </div>
-                    )}
+                      <button
+                        type="button"
+                        onClick={() => openContentEditor({
+                          field: 'html',
+                          title: 'Edit HTML email body',
+                          description: 'Monaco editor with searchable Liquid variables. Use this for larger rich HTML templates.',
+                          language: 'html',
+                        })}
+                        className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700"
+                      >
+                        <Code className="h-3.5 w-3.5" aria-hidden="true" />
+                        Open code editor
+                      </button>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div>
+                    <label className="text-xs font-medium uppercase text-gray-500">HTML Body</label>
+                    <div className="mt-1" onFocus={() => focusInsertTarget('template-html-rich')}>
+                      {editor && !editor.isDestroyed ? (
+                        <EditorContent editor={editor} />
+                      ) : (
+                        <div className="min-h-[220px] rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-500">
+                          Loading editor...
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )
               )}
 
               {templateTab === 'source' && (

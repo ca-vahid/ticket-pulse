@@ -96,6 +96,44 @@ Route on the metadata with workflows: condition
 `custom:source_request_type is "Project Setup"` → update-ticket "Category by
 name". The installable **API intake router** workflow template is exactly this.
 
+## Groups — `groupId` vs `internalGroupId`
+
+`GET /groups` lists both kinds of group, distinguished by `origin`:
+
+| `origin` | What it is | How tickets address it |
+|---|---|---|
+| `freshservice` | Synced from FreshService | `groupId` = the row's **`freshserviceId`** (not its `id`) |
+| `local` | Internal (TP-native) group | `internalGroupId` = the row's **`id`** |
+
+Tickets read the placement back as `group` (FS) or `internalGroup`
+(internal). When a create sends neither field, the workspace's default
+internal group — if configured — applies automatically.
+
+**Worked example — assign to the internal "Project Accounting" group:**
+
+```bash
+# 1. Find the group; origin:'local' → use its id as internalGroupId
+curl https://ticketpulse.bgcsaas.com/api/v1/groups \
+  -H "Authorization: Bearer tp_live_xxx"
+# → { "data": [ { "id": 3458, "name": "Project Accounting",
+#                 "origin": "local", "freshserviceId": null }, … ] }
+
+# 2a. Create straight into the group…
+curl -X POST https://ticketpulse.bgcsaas.com/api/v1/tickets \
+  -H "Authorization: Bearer tp_live_xxx" -H "Content-Type: application/json" \
+  -d '{ "subject": "New AP project", "requesterEmail": "jdoe@bgcengineering.ca",
+        "internalGroupId": 3458 }'
+
+# 2b. …or move an existing ticket (clear the other field when switching kinds)
+curl -X PATCH https://ticketpulse.bgcsaas.com/api/v1/tickets/TP-1076 \
+  -H "Authorization: Bearer tp_live_xxx" -H "Content-Type: application/json" \
+  -d '{ "internalGroupId": 3458, "groupId": null }'
+```
+
+The response carries `"internalGroup": { "id": 3458, "name": "Project
+Accounting" }`. For a FreshService group instead, send `groupId` = the row's
+`freshserviceId` (e.g. `1000210021`) — its `id` would be rejected.
+
 ## Power Automate recipe (compact)
 
 Full guide (licensing, escaping, Parse JSON schemas, custom-connector notes):

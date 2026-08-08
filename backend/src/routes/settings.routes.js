@@ -1,6 +1,8 @@
 import express from 'express';
 import { asyncHandler } from '../middleware/errorHandler.js';
-import { requireAuth, requireAdmin, requireWorkspaceAccess } from '../middleware/auth.js';
+import {
+  requireAuth, requireAdmin, requireReviewer, requireWorkspaceAccess,
+} from '../middleware/auth.js';
 import { requireWorkspace } from '../middleware/workspace.js';
 import { ValidationError } from '../utils/errors.js';
 import settingsRepository from '../services/settingsRepository.js';
@@ -1628,12 +1630,14 @@ router.put(
 
 // ------------------------------------------------------ approval categories
 // Per-workspace approval categories + their approval managers. TP-only.
+// Reviewer-tier (FR 08-07 #11): approvals are daily coordination, not
+// admin-only setup — workspace reviewers can manage them too.
 
 router.get(
   '/approval-categories',
   requireWorkspace,
   requireWorkspaceAccess,
-  requireAdmin,
+  requireReviewer,
   asyncHandler(async (req, res) => {
     const categories = await approvalCategoryService.list(req.workspaceId);
     res.json({ success: true, data: categories });
@@ -1644,7 +1648,7 @@ router.post(
   '/approval-categories',
   requireWorkspace,
   requireWorkspaceAccess,
-  requireAdmin,
+  requireReviewer,
   asyncHandler(async (req, res) => {
     const { name, description, managerEmails, sortOrder } = req.body || {};
     const category = await approvalCategoryService.create(req.workspaceId, { name, description, managerEmails, sortOrder });
@@ -1657,7 +1661,7 @@ router.patch(
   '/approval-categories/:id',
   requireWorkspace,
   requireWorkspaceAccess,
-  requireAdmin,
+  requireReviewer,
   asyncHandler(async (req, res) => {
     const id = parseInt(req.params.id, 10);
     const category = await approvalCategoryService.update(id, req.workspaceId, req.body || {});
@@ -1669,7 +1673,7 @@ router.delete(
   '/approval-categories/:id',
   requireWorkspace,
   requireWorkspaceAccess,
-  requireAdmin,
+  requireReviewer,
   asyncHandler(async (req, res) => {
     const id = parseInt(req.params.id, 10);
     const result = await approvalCategoryService.remove(id, req.workspaceId);

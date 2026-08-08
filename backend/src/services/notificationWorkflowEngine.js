@@ -3132,7 +3132,10 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false, sco
   const removeTags = normalizeTagNames(node.data?.removeTags);
 
   if (!Number.isFinite(ticketId) || ticketId <= 0) return { skipped: true, reason: 'No ticket in event context' };
-  if (!setStatus && !setPriority && !setInternalCategoryId && !setCategoryName && !setInternalGroupId
+  // Subcategory-only nodes COUNT as configured (FR 08-07 #3): the parent
+  // resolves against the ticket's current category at run time.
+  if (!setStatus && !setPriority && !setInternalCategoryId && !setCategoryName
+    && !setInternalSubcategoryId && !setSubcategoryName && !setInternalGroupId
     && !assignTo && !setCustomFields && !addTags.length && !removeTags.length) {
     return { skipped: true, reason: 'update_ticket node has no changes configured' };
   }
@@ -3297,27 +3300,82 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false, sco
     patch.priority = setPriority;
     changes.priority = { from: ticket.priority, to: setPriority };
   }
-  if (effectiveCategoryId && effectiveCategoryId !== ticket.internalCategoryId) {
+  // Category/subcategory application (reworked for FR 08-07 #3):
+  //  - the subcategory resolves against the EFFECTIVE parent — the node's
+  //    explicit category when set, else the ticket's CURRENT category;
+  //  - it applies even when the category itself is unchanged;
+  //  - a subcategory-only node on an uncategorized ticket surfaces a
+  //    categoryError on the step output instead of silently skipping;
+  //  - setting a category WITHOUT a subcategory still nulls the sub, but
+  //    ONLY when the category actually changes.
+  const wantsSubcategory = Boolean(effectiveSubcategoryId || setSubcategoryName);
+  let effectiveParentId = null;
+  let categoryChanging = false;
+
+  if (effectiveCategoryId) {
     const category = await prisma.competencyCategory.findFirst({
       where: { id: effectiveCategoryId, workspaceId: ticket.workspaceId, parentId: null, isActive: true },
       select: { id: true },
     });
     if (category) {
-      patch.internalCategoryId = effectiveCategoryId;
-      changes.internalCategoryId = { from: ticket.internalCategoryId, to: effectiveCategoryId };
-      if (effectiveSubcategoryId) {
-        const sub = await prisma.competencyCategory.findFirst({
-          where: { id: effectiveSubcategoryId, workspaceId: ticket.workspaceId, parentId: effectiveCategoryId, isActive: true },
-          select: { id: true },
-        });
-        if (sub) {
-          patch.internalSubcategoryId = effectiveSubcategoryId;
-          changes.internalSubcategoryId = { from: ticket.internalSubcategoryId, to: effectiveSubcategoryId };
-        }
-      } else {
-        patch.internalSubcategoryId = null;
+      effectiveParentId = effectiveCategoryId;
+      if (effectiveCategoryId !== ticket.internalCategoryId) {
+        patch.internalCategoryId = effectiveCategoryId;
+        changes.internalCategoryId = { from: ticket.internalCategoryId, to: effectiveCategoryId };
+        categoryChanging = true;
       }
     }
+  } else if (wantsSubcategory) {
+    effectiveParentId = ticket.internalCategoryId || null;
+    if (!effectiveParentId && !categoryError) {
+      categoryError = 'Cannot set a subcategory: the ticket has no category and the node does not set one';
+    }
+  }
+
+  if (wantsSubcategory && effectiveParentId) {
+    let subId = effectiveSubcategoryId || null;
+    // Subcategory BY NAME without a category name: resolve under the
+    // effective parent here (resolveCategoryNames needs a parent name).
+    if (!subId && setSubcategoryName) {
+      const subByName = await prisma.competencyCategory.findFirst({
+        where: {
+          workspaceId: ticket.workspaceId,
+          parentId: effectiveParentId,
+          isActive: true,
+          name: { equals: setSubcategoryName, mode: 'insensitive' },
+        },
+        select: { id: true, name: true },
+      });
+      if (subByName) {
+        subId = subByName.id;
+        resolvedCategory = {
+          categoryId: effectiveParentId,
+          subcategoryId: subByName.id,
+          categoryName: resolvedCategory?.categoryName || null,
+          subcategoryName: subByName.name,
+        };
+      } else if (!categoryError) {
+        categoryError = `Unknown subcategory "${setSubcategoryName}" under the ticket's effective category`;
+      }
+    }
+    if (subId) {
+      const sub = await prisma.competencyCategory.findFirst({
+        where: { id: subId, workspaceId: ticket.workspaceId, parentId: effectiveParentId, isActive: true },
+        select: { id: true },
+      });
+      if (sub && subId !== ticket.internalSubcategoryId) {
+        patch.internalSubcategoryId = subId;
+        changes.internalSubcategoryId = { from: ticket.internalSubcategoryId, to: subId };
+      } else if (!sub && !categoryError) {
+        categoryError = `Subcategory ${subId} is not an active child of the effective category`;
+      }
+    }
+  }
+  // Category changed and no (valid) subcategory came with it → clear the old
+  // sub, which belonged to the previous parent. An UNCHANGED category never
+  // clears an existing subcategory.
+  if (categoryChanging && patch.internalSubcategoryId === undefined) {
+    patch.internalSubcategoryId = null;
   }
   if (setInternalGroupId && setInternalGroupId !== ticket.internalGroupId) {
     const group = await prisma.group.findFirst({

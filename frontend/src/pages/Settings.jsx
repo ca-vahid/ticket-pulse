@@ -88,6 +88,9 @@ export default function Settings() {
     return ws?.role || 'viewer';
   })();
   const isWsAdmin = wsRole === 'admin';
+  // Reviewer tier (FR 08-07 #11): reviewers manage approval categories —
+  // approvals are daily coordination, not admin-only setup.
+  const isWsReviewer = isWsAdmin || wsRole === 'reviewer';
 
   const validSections = ['freshservice', 'webhooks', 'ticket-mailboxes', 'agents', 'members', 'groups', 'approval-categories', 'ticket-ops', 'api-keys', 'notification-providers', 'public-ticket-status', 'feedback-page', 'urgent-escalation', 'ai-routing', 'ai-providers', 'sync', 'sync-ops', 'backfill', 'backup-restore', 'workspaces', 'admins', 'workspace-access', 'dashboard', 'photos', 'business-hours', 'tech-schedules', 'tech-visibility', 'noise-rules', 'vacation-tracker', 'calendar-leave'];
   const initialSection = (() => {
@@ -166,7 +169,7 @@ export default function Settings() {
     // Tickets & AI
     { id: 'ai-routing', label: 'AI & Routing', Icon: Brain, minRole: 'admin', group: 'Tickets & AI' },
     { id: 'ai-providers', label: 'AI Providers', Icon: Bot, minRole: 'admin', group: 'Tickets & AI' },
-    { id: 'approval-categories', label: 'Approval Categories', Icon: Stamp, minRole: 'admin', group: 'Tickets & AI' },
+    { id: 'approval-categories', label: 'Approval Categories', Icon: Stamp, minRole: 'reviewer', group: 'Tickets & AI' },
     { id: 'noise-rules', label: 'Noise Rules', Icon: VolumeX, minRole: 'admin', group: 'Tickets & AI' },
     { id: 'ticket-ops', label: 'Ticket Ops', Icon: Wand2, minRole: 'admin', group: 'Tickets & AI' },
     { id: 'urgent-escalation', label: 'Urgent Escalation', Icon: Siren, minRole: 'admin', group: 'Tickets & AI' },
@@ -201,6 +204,7 @@ export default function Settings() {
   const navigationItems = allNavigationItems.filter(item => {
     if (item.minRole === 'global') return isGlobalAdmin;
     if (item.minRole === 'admin') return isWsAdmin;
+    if (item.minRole === 'reviewer') return isWsReviewer;
     return true; // viewer
   });
   const activeNavigationItem = navigationItems.find((item) => item.id === activeSection) || navigationItems[0];

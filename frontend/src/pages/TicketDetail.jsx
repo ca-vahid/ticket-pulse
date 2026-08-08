@@ -2879,15 +2879,44 @@ export default function TicketDetail() {
 
                   {(meta?.groups?.length || 0) > 0 && (
                     <SidebarField label="Group" flash={Boolean(liveChanges.groupId)} onAck={() => ackChange('groupId')}>
+                      {/* Composite fs:/int: values (TicketCreate's scheme, FR 08-07 #2):
+                          a ticket sits in EITHER a FreshService group (groupId =
+                          FS id) OR an internal TP-native group (internalGroupId).
+                          The old select read groupId only, so default internal
+                          groups rendered as "No group". FS-born tickets keep FS
+                          groups only — internal groups are TP-born-only. */}
                       <select
-                        value={ticket.groupId ? String(ticket.groupId) : ''}
+                        value={ticket.internalGroupId
+                          ? `int:${ticket.internalGroupId}`
+                          : (ticket.groupId ? `fs:${ticket.groupId}` : '')}
                         disabled={!canWrite || savingField === 'group'}
-                        onChange={(e) => applyChange('group', () => ticketsAPI.update(ticketId, { groupId: e.target.value ? Number(e.target.value) : null }))}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          const payload = v.startsWith('int:')
+                            ? { internalGroupId: Number(v.slice(4)), groupId: null }
+                            : v.startsWith('fs:')
+                              ? { groupId: Number(v.slice(3)), internalGroupId: null }
+                              : { groupId: null, internalGroupId: null };
+                          applyChange('group', () => ticketsAPI.update(ticketId, payload));
+                        }}
                         className={fieldClass}
                         aria-label="Group"
                       >
                         <option value="">No group</option>
-                        {meta.groups.map((g) => <option key={g.id} value={String(g.freshserviceId)}>{g.name}</option>)}
+                        {(canWrite || ticket.internalGroupId) && meta.groups.some((g) => g.origin === 'local') && (
+                          <optgroup label="Internal groups">
+                            {meta.groups.filter((g) => g.origin === 'local').map((g) => (
+                              <option key={`int-${g.id}`} value={`int:${g.id}`}>{g.name}</option>
+                            ))}
+                          </optgroup>
+                        )}
+                        {meta.groups.some((g) => g.origin !== 'local') && (
+                          <optgroup label="FreshService groups">
+                            {meta.groups.filter((g) => g.origin !== 'local').map((g) => (
+                              <option key={`fs-${g.id}`} value={`fs:${g.freshserviceId}`}>{g.name}</option>
+                            ))}
+                          </optgroup>
+                        )}
                       </select>
                     </SidebarField>
                   )}

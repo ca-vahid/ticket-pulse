@@ -30,7 +30,13 @@ const T = {
       type: { type: 'string', nullable: true },
       requester: { type: 'object', nullable: true, properties: { id: { type: 'integer' }, name: { type: 'string' }, email: { type: 'string' } } },
       assignee: { type: 'object', nullable: true, properties: { id: { type: 'integer' }, name: { type: 'string' } } },
-      group: { type: 'object', nullable: true },
+      group: { type: 'object', nullable: true, description: 'FreshService group placement (origin:\'freshservice\' in GET /groups). null when the ticket sits in an internal group instead.' },
+      internalGroup: {
+        type: 'object', nullable: true,
+        properties: { id: { type: 'integer' }, name: { type: 'string' } },
+        description: 'Internal (Ticket Pulse–native) group placement. `id` matches GET /groups `id` for origin:\'local\' rows and the `internalGroupId` write field.',
+        example: { id: 3458, name: 'Project Accounting' },
+      },
       category: { type: 'string', nullable: true }, subcategory: { type: 'string', nullable: true },
       tags: { type: 'array', items: { type: 'string' } },
       rejections: { type: 'integer', description: 'Times the ticket bounced back from an assignee' },
@@ -92,11 +98,11 @@ const T = {
       },
       groupId: {
         type: 'integer',
-        description: 'FreshService group id (see GET /groups). When both groupId and internalGroupId are omitted, the workspace’s default internal group — if configured — is applied automatically.',
+        description: 'FreshService group placement: the `freshserviceId` of an origin:\'freshservice\' group from GET /groups (NOT its `id`). When both groupId and internalGroupId are omitted, the workspace’s default internal group — if configured — is applied automatically.',
       },
       internalGroupId: {
         type: 'integer',
-        description: 'Internal (Ticket Pulse–native) group id (see GET /groups). When both groupId and internalGroupId are omitted, the workspace’s default internal group — if configured — is applied automatically.',
+        description: 'Internal (Ticket Pulse–native) group placement: the `id` of an origin:\'local\' group from GET /groups. When both groupId and internalGroupId are omitted, the workspace’s default internal group — if configured — is applied automatically.',
       },
     },
     example: {
@@ -111,7 +117,9 @@ const T = {
     properties: {
       status: { type: 'string', example: 'Pending' }, priority: { type: 'integer', enum: [1, 2, 3, 4] },
       subject: { type: 'string' }, assignedTechId: { type: 'integer', nullable: true },
-      internalCategoryId: { type: 'integer' }, internalSubcategoryId: { type: 'integer' }, groupId: { type: 'integer' },
+      internalCategoryId: { type: 'integer' }, internalSubcategoryId: { type: 'integer' },
+      groupId: { type: 'integer', nullable: true, description: 'Move to a FreshService group: the `freshserviceId` of an origin:\'freshservice\' group (GET /groups). null clears it.' },
+      internalGroupId: { type: 'integer', nullable: true, description: 'Move to an internal (TP-native) group: the `id` of an origin:\'local\' group (GET /groups). null clears it. Send the other field as null when switching between group kinds.' },
       category: {
         type: 'string', nullable: true,
         description: 'Category BY NAME (same resolution as create). Explicit internalCategoryId wins when both are sent; `category: null` clears the pair.',
@@ -333,7 +341,25 @@ export function buildOpenApiSpec(baseUrl) {
       '/contacts': { get: op('List/search requesters', 'contacts:read', { tag: 'directory', responseRef: ref('Contact') }) },
       '/contacts/{id}': { get: op('Get a requester', 'contacts:read', { tag: 'directory', responseRef: ref('Contact') }) },
       '/agents': { get: op('List agents/technicians', 'agents:read', { tag: 'directory' }) },
-      '/groups': { get: op('List groups', 'groups:read', { tag: 'directory' }) },
+      '/groups': {
+        get: op('List groups — both kinds: origin:\'freshservice\' rows are addressed on tickets via groupId = their freshserviceId; origin:\'local\' rows via internalGroupId = their id', 'groups:read', {
+          tag: 'directory',
+          responseRef: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'integer', description: 'Ticket Pulse row id. For origin:\'local\' groups this is what ticket writes take as `internalGroupId`.' },
+                name: { type: 'string' },
+                description: { type: 'string', nullable: true },
+                origin: { type: 'string', enum: ['freshservice', 'local'], description: '\'freshservice\' = synced from FS; \'local\' = internal (TP-native) group.' },
+                freshserviceId: { type: 'string', nullable: true, description: 'FreshService group id (origin:\'freshservice\' only). This — NOT `id` — is what ticket writes take as `groupId`.' },
+              },
+              example: { id: 3458, name: 'Project Accounting', description: null, origin: 'local', freshserviceId: null },
+            },
+          },
+        }),
+      },
       '/categories': { get: op('List categories & subcategories', 'categories:read', { tag: 'taxonomy' }) },
       '/types': { get: op('List ticket types', 'types:read', { tag: 'taxonomy' }) },
       '/custom-fields': { get: op('List active custom-field definitions (incl. API-provisioned)', 'customfields:read', { tag: 'taxonomy', responseRef: { type: 'array', items: ref('CustomFieldDefinition') } }) },
@@ -498,6 +524,36 @@ Response (<code>201</code>) — note the snake_cased keys and the intake transpa
 Want <code>sourceRequestType</code> to drive the category automatically? Build it as a workflow —
 condition <code>custom:source_request_type is "Project Setup"</code> → update-ticket “Category by name”.
 The installable <b>API intake router</b> template (Settings → Mail Workflows → Templates) is exactly this.
+</div>
+<h2>Groups — two identifier spaces</h2>
+<p><code>GET /groups</code> lists <b>both kinds</b> of group, distinguished by <code>origin</code>:
+<code>origin: "freshservice"</code> rows are synced from FreshService and are addressed on tickets via
+<b><code>groupId</code> = their <code>freshserviceId</code></b> (not their <code>id</code>);
+<code>origin: "local"</code> rows are internal (Ticket Pulse–native) groups addressed via
+<b><code>internalGroupId</code> = their <code>id</code></b>. Tickets read back the placement as
+<code>group</code> (FS) or <code>internalGroup</code> (internal). When a create sends neither field, the
+workspace's default internal group — if configured — applies automatically.</p>
+<div class="card">
+<b>Worked example — assign a ticket to the internal “Project Accounting” group</b><br>
+1. Find the group and note its <code>origin</code> + the right identifier:
+<pre>curl ${baseUrl}/api/v1/groups -H "Authorization: Bearer tp_live_xxx"
+# → { "success": true, "data": [
+#      { "id": 3458, "name": "Project Accounting", "origin": "local",  "freshserviceId": null },
+#      { "id": 12,   "name": "IT Operations",      "origin": "freshservice", "freshserviceId": "1000210021" } ] }</pre>
+2. <code>origin</code> is <code>"local"</code> → use its <code>id</code> as <code>internalGroupId</code> on create…
+<pre>curl -X POST ${baseUrl}/api/v1/tickets \\
+  -H "Authorization: Bearer tp_live_xxx" -H "Content-Type: application/json" \\
+  -d '{ "subject": "New AP project", "requesterEmail": "jdoe@bgcengineering.ca",
+        "internalGroupId": 3458 }'</pre>
+…or move an existing ticket with PATCH (clear the other field when switching kinds):
+<pre>curl -X PATCH ${baseUrl}/api/v1/tickets/TP-1076 \\
+  -H "Authorization: Bearer tp_live_xxx" -H "Content-Type: application/json" \\
+  -d '{ "internalGroupId": 3458, "groupId": null }'</pre>
+3. The response reads it back under <code>internalGroup</code>:
+<pre>{ "data": { "ref": "TP-1076", "group": null,
+  "internalGroup": { "id": 3458, "name": "Project Accounting" }, "…": "…" } }</pre>
+For a FreshService group instead, send <code>"groupId": 1000210021</code> (the row's
+<code>freshserviceId</code>) — sending its <code>id</code> (12) would be rejected as an unknown group.
 </div>
 <h2>Calling from Power Apps / Power Automate</h2>
 <p>The recommended shape: a cloud flow (SharePoint trigger or Power Apps V2 trigger) with the built-in

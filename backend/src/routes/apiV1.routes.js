@@ -71,6 +71,10 @@ function ticketShape(t) {
     requester: t.requester ? { id: t.requester.id, name: t.requester.name, email: t.requester.email } : null,
     assignee: t.assignedTech ? { id: t.assignedTech.id, name: t.assignedTech.name } : null,
     group: t.group ? { id: t.group.id, name: t.group.name } : null,
+    // Internal (TP-native) group placement — distinct from `group` (the
+    // FreshService group). id here matches GET /groups `id` for
+    // origin:'local' rows and PATCH's `internalGroupId` (FR 08-07 #2/#4).
+    internalGroup: t.internalGroup ? { id: t.internalGroup.id, name: t.internalGroup.name } : null,
     category: t.internalCategory?.name || null,
     subcategory: t.internalSubcategory?.name || null,
     tags: Array.isArray(t.tags) ? t.tags.map((tag) => (typeof tag === 'string' ? tag : tag.name)) : [],
@@ -292,7 +296,10 @@ router.patch('/tickets/:id', S('tickets:write'), withIdempotency, asyncHandler(a
   if (body.assignedTechId !== undefined) {
     await ticketService.assignTicket(id, req.workspaceId, body.assignedTechId ? Number(body.assignedTechId) : null, actor);
   }
-  const fieldKeys = ['subject', 'priority', 'internalCategoryId', 'internalSubcategoryId', 'groupId'];
+  // groupId = the freshserviceId of an origin:'freshservice' group;
+  // internalGroupId = the id of an origin:'local' group (GET /groups carries
+  // both identifiers). updateTicketFields clears whichever one is sent null.
+  const fieldKeys = ['subject', 'priority', 'internalCategoryId', 'internalSubcategoryId', 'groupId', 'internalGroupId'];
   const fields = Object.fromEntries(fieldKeys.filter((k) => body[k] !== undefined).map((k) => [k, body[k]]));
   // Category/subcategory BY NAME (FR 08-05 #1) — explicit IDs win when both
   // spellings are sent; `category: null` clears the pair.
@@ -479,8 +486,20 @@ router.get('/agents', S('agents:read'), asyncHandler(async (req, res) => {
 }));
 
 router.get('/groups', S('groups:read'), asyncHandler(async (req, res) => {
+  // Both identifier spaces are exposed (FR 08-07 #4): ticket writes take
+  // `groupId` = `freshserviceId` of an origin:'freshservice' group, or
+  // `internalGroupId` = `id` of an origin:'local' group.
   const groups = await groupRepository.listForWorkspace(req.workspaceId);
-  res.json({ success: true, data: groups.map((g) => ({ id: g.id, name: g.name, description: g.description || null })) });
+  res.json({
+    success: true,
+    data: groups.map((g) => ({
+      id: g.id,
+      name: g.name,
+      description: g.description || null,
+      origin: g.origin,
+      freshserviceId: g.freshserviceId || null,
+    })),
+  });
 }));
 
 router.get('/categories', S('categories:read'), asyncHandler(async (req, res) => {
