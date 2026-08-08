@@ -1,6 +1,17 @@
-export const APP_VERSION = '3.3.01-preview';
+export const APP_VERSION = '3.3.02-preview';
 
 export const changelog = [
+  {
+    version: '3.3.02-preview',
+    date: 'August 8, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>📝 Your HTML templates stay exactly as written</strong> — “Apply to workflow” no longer resets formatting: advanced HTML (tables, colors, styles) is protected from the rich editor’s round-trip and survives byte-identical; the Rich tab shows a clear “edit in code editor” notice for such templates. (QA 08-07)' },
+      { type: 'fixed', html: '<strong>👥 Internal groups show up on tickets</strong> — the ticket panel’s Group dropdown now displays and selects internal groups (your Project Accounting default was applying all along — it just couldn’t be seen); the peek shows it too, and the API returns internalGroup with full docs including a worked “assign to Project Accounting” example. (QA 08-07)' },
+      { type: 'new', html: '<strong>🌎 Location → subcategory automation</strong> — workflows can now set a subcategory on its own (using the ticket’s current category), and a new installable “Location → subcategory router” template maps client_location to Quebec / Chile / Other automatically. The AI triage can also see custom fields as classification evidence now. (QA 08-07)' },
+      { type: 'improved', html: '<strong>✅ Reviewers can manage approval categories</strong> — no longer admin-only. (QA 08-07)' },
+      { type: 'new', html: '<strong>🔋 Analytics → Capacity</strong> — a new team-safe tab: assigned tickets over time (weekly/monthly), distribution with balance score, completion rates, and leave-adjusted capacity (assigned per available day) — alphabetical by design, with coaching detail behind an opt-in toggle. (QA 08-07)' },
+    ],
+  },
   {
     version: '3.3.01-preview',
     date: 'August 8, 2026',

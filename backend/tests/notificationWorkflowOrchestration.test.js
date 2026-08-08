@@ -1071,3 +1071,195 @@ describe('API intake routing (FR 08-05 Phase 1b)', () => {
     expect(recipients.data.to).toEqual(['assigned_agent']);
   });
 });
+
+// FR 08-07 #3: subcategory routing sharp edges. The subcategory resolves
+// against the EFFECTIVE parent (explicit setCategoryName/ID, else the ticket's
+// CURRENT category), applies even when the category is unchanged, and
+// subcategory-only nodes count as configured.
+describe('update_ticket subcategory matrix (FR 08-07 #3)', () => {
+  const TAXONOMY = [
+    { id: 11, workspaceId: 1, name: 'Project Setup', parentId: null, isActive: true },
+    { id: 12, workspaceId: 1, name: 'Accounting', parentId: null, isActive: true },
+    { id: 21, workspaceId: 1, name: 'Quebec', parentId: 11, isActive: true },
+    { id: 22, workspaceId: 1, name: 'Chile', parentId: 11, isActive: true },
+    { id: 23, workspaceId: 1, name: 'Other', parentId: 11, isActive: true },
+  ];
+
+  function updateDefinition(updateData) {
+    return {
+      version: 2,
+      metadata: {},
+      nodes: [
+        { id: 'trigger', type: 'trigger', data: { triggerType: 'ticket.created' } },
+        { id: 'route', type: 'update_ticket', data: updateData },
+        { id: 'end', type: 'stop', data: {} },
+      ],
+      edges: [
+        { id: 'e1', source: 'trigger', target: 'route' },
+        { id: 'e2', source: 'route', target: 'end' },
+      ],
+    };
+  }
+
+  function armTaxonomy() {
+    prismaMock.competencyCategory.findMany.mockResolvedValue(TAXONOMY);
+    prismaMock.competencyCategory.findFirst.mockImplementation(({ where }) => {
+      if (where.id !== undefined) {
+        return Promise.resolve(TAXONOMY.find((c) => c.id === where.id
+          && (where.parentId === null ? c.parentId === null
+            : where.parentId === undefined ? true : c.parentId === where.parentId)) || null);
+      }
+      if (where.name?.equals !== undefined) {
+        const target = String(where.name.equals).trim().toLowerCase();
+        return Promise.resolve(TAXONOMY.find((c) => c.parentId === where.parentId
+          && c.name.trim().toLowerCase() === target) || null);
+      }
+      return Promise.resolve(null);
+    });
+  }
+
+  function armTicket(over = {}) {
+    prismaMock.ticket.findUnique.mockResolvedValue({
+      id: 100,
+      workspaceId: 1,
+      origin: 'ticketpulse',
+      status: 'Open',
+      priority: 2,
+      internalCategoryId: 11,
+      internalSubcategoryId: null,
+      createdAt: new Date('2026-08-01T10:00:00.000Z'),
+      ...over,
+    });
+  }
+
+  async function run(updateData, { workflowId = 80 } = {}) {
+    const result = await executeDefinition({
+      workflow: { id: workflowId, workspaceId: 1, triggerType: 'ticket.created', publishedVersion: 1, versions: [] },
+      definition: updateDefinition(updateData),
+      eventContext: eventContext(),
+      executionMode: 'live',
+    });
+    return { result, step: result.steps.find((s) => s.nodeId === 'route') };
+  }
+
+  beforeEach(() => armTaxonomy());
+
+  test('subcategory-ONLY node counts as configured and applies under the ticket current category', async () => {
+    armTicket(); // category 11, no sub
+    const { result, step } = await run({ setSubcategoryName: 'quebec' });
+
+    expect(result.status).toBe('completed');
+    expect(step.output.skipped).toBeUndefined();
+    expect(step.output.categoryError).toBeUndefined();
+    expect(step.output.updated.internalSubcategoryId).toEqual({ from: null, to: 21 });
+    expect(step.output.updated.internalCategoryId).toBeUndefined();
+
+    const patch = prismaMock.ticket.update.mock.calls.find((c) => c[0].data?.internalSubcategoryId === 21);
+    expect(patch).toBeTruthy();
+    expect(patch[0].data.internalCategoryId).toBeUndefined(); // category untouched
+  });
+
+  test('subcategory-only on an UNCATEGORIZED ticket errors into the step output, never crashes', async () => {
+    armTicket({ internalCategoryId: null });
+    const { result, step } = await run({ setSubcategoryName: 'Quebec' });
+
+    expect(result.status).toBe('completed');
+    expect(step.output.categoryError).toMatch(/has no category/i);
+    expect(prismaMock.ticket.update.mock.calls.some((c) => c[0].data?.internalSubcategoryId)).toBe(false);
+  });
+
+  test('subcategory applies even when the explicit category is UNCHANGED (was the short-circuit bug)', async () => {
+    armTicket(); // already category 11
+    const { step } = await run({ setCategoryName: 'Project Setup', setSubcategoryName: 'Chile' });
+
+    expect(step.output.updated.internalSubcategoryId).toEqual({ from: null, to: 22 });
+    expect(step.output.updated.internalCategoryId).toBeUndefined();
+    const patch = prismaMock.ticket.update.mock.calls.find((c) => c[0].data?.internalSubcategoryId === 22);
+    expect(patch).toBeTruthy();
+    expect(patch[0].data.internalCategoryId).toBeUndefined();
+  });
+
+  test('changing the category WITHOUT a subcategory still nulls the old sub (existing behavior)', async () => {
+    armTicket({ internalCategoryId: 12, internalSubcategoryId: null });
+    const { step } = await run({ setCategoryName: 'Project Setup' });
+
+    expect(step.output.updated.internalCategoryId).toEqual({ from: 12, to: 11 });
+    const patch = prismaMock.ticket.update.mock.calls.find((c) => c[0].data?.internalCategoryId === 11);
+    expect(patch[0].data.internalSubcategoryId).toBeNull();
+  });
+
+  test('an UNCHANGED category without a subcategory does NOT clear an existing sub', async () => {
+    armTicket({ internalCategoryId: 11, internalSubcategoryId: 21 });
+    const { step } = await run({ setCategoryName: 'Project Setup' });
+
+    // No effective changes — and crucially no ticket.update nulling the sub.
+    expect(step.output.skipped).toBe(true);
+    expect(prismaMock.ticket.update.mock.calls.length).toBe(0);
+  });
+
+  test('an unknown subcategory name under the effective parent surfaces categoryError', async () => {
+    armTicket();
+    const { step } = await run({ setSubcategoryName: 'Atlantis' });
+    expect(step.output.categoryError).toMatch(/unknown subcategory/i);
+    expect(prismaMock.ticket.update.mock.calls.length).toBe(0);
+  });
+
+  test('the location_subcategory_router template: 3 branches on custom:client_location, subcategory-only updates, validates', () => {
+    const template = WORKFLOW_TEMPLATES.find((t) => t.key === 'location_subcategory_router');
+    expect(template).toBeDefined();
+    expect(template.triggerType).toBe('ticket.created');
+    const definition = template.build();
+    expect(validateWorkflowDefinition(definition, { triggerType: 'ticket.created' }).errors).toEqual([]);
+
+    const branch = definition.nodes.find((n) => n.type === 'branch');
+    expect(branch.data.branches.map((b) => b.key)).toEqual(['quebec', 'chile']);
+    expect(branch.data.branches[0].conditionGroup.conditions[0]).toEqual({
+      field: 'custom:client_location', operator: 'contains', value: 'Quebec',
+    });
+    const updates = definition.nodes.filter((n) => n.type === 'update_ticket');
+    expect(updates.map((n) => n.data.setSubcategoryName).sort()).toEqual(['Chile', 'Other', 'Quebec']);
+    // No category set anywhere — the ticket's current category is the parent.
+    expect(updates.every((n) => !n.data.setCategoryName && !n.data.setInternalCategoryId)).toBe(true);
+    // Otherwise branch lands on the Other update node.
+    const otherwiseEdge = definition.edges.find((e) => e.sourceHandle === 'otherwise');
+    expect(definition.nodes.find((n) => n.id === otherwiseEdge.target).data.setSubcategoryName).toBe('Other');
+  });
+
+  test('template end-to-end: client_location "Santiago, Chile" → subcategory Chile under the current category', async () => {
+    armTicket(); // category 11 (Project Setup), no sub
+    prismaMock.customFieldDefinition.findMany.mockResolvedValue([{ key: 'client_location', type: 'text' }]);
+    invalidateCustomFieldConditionTypesCache();
+
+    const template = WORKFLOW_TEMPLATES.find((t) => t.key === 'location_subcategory_router');
+    const definition = template.build();
+    const ctx = eventContext({
+      ticket: {
+        id: 100,
+        workspaceId: 1,
+        subject: 'New AP project',
+        status: 'Open',
+        isNoise: false,
+        customFields: { client_location: 'Santiago, Chile' },
+      },
+    });
+
+    const result = await executeDefinition({
+      workflow: { id: 81, workspaceId: 1, triggerType: 'ticket.created', publishedVersion: 1, versions: [] },
+      definition,
+      eventContext: ctx,
+      executionMode: 'live',
+    });
+
+    expect(result.status).toBe('completed');
+    const branchStep = result.steps.find((s) => s.nodeType === 'branch');
+    expect(branchStep.output.matchedBranch).toBe('chile');
+    expect(result.steps.some((s) => s.nodeId === 'set-chile')).toBe(true);
+    expect(result.steps.some((s) => s.nodeId === 'set-quebec')).toBe(false);
+
+    const chileStep = result.steps.find((s) => s.nodeId === 'set-chile');
+    expect(chileStep.output.updated.internalSubcategoryId).toEqual({ from: null, to: 22 });
+    const patch = prismaMock.ticket.update.mock.calls.find((c) => c[0].data?.internalSubcategoryId === 22);
+    expect(patch).toBeTruthy();
+    expect(patch[0].data.internalCategoryId).toBeUndefined();
+  });
+});

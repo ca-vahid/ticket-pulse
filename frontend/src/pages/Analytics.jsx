@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   ArrowLeft,
   BarChart3,
+  BatteryMedium,
   Calendar,
   CheckCircle2,
   Clock,
@@ -60,6 +61,7 @@ const TABS = [
   { id: 'demand', label: 'Demand', Icon: BarChart3 },
   { id: 'categories', label: 'Categories', Icon: Tags },
   { id: 'team', label: 'Team Balance', Icon: Users },
+  { id: 'capacity', label: 'Capacity', Icon: BatteryMedium },
   { id: 'quality', label: 'Quality', Icon: CheckCircle2 },
   { id: 'ops', label: 'Automation Ops', Icon: RefreshCw },
   { id: 'insights', label: 'Insights', Icon: Sparkles },
@@ -784,6 +786,32 @@ function HighchartsBlock({ options, height = '24rem', stabilizeLayout = false })
   );
 }
 
+/**
+ * Per-agent Capacity sheet rows for the workbook export. Exported so the
+ * builder can be unit-tested; keeps the server's alphabetical technician
+ * order (team-safe: no ranked re-sort). CSAT ships with its response count.
+ */
+export function buildCapacityExportRows(team) {
+  const technicians = team?.technicians || [];
+  if (!technicians.length) return [];
+  const totalAssigned = technicians.reduce((sum, row) => sum + (row.assigned || 0), 0);
+  const rangeBusinessDays = team?.summary?.rangeBusinessDays ?? null;
+  return technicians.map((row) => ({
+    technician: row.name,
+    assigned: row.assigned || 0,
+    shareOfTeamPct: totalAssigned ? Number((((row.assigned || 0) / totalAssigned) * 100).toFixed(1)) : 0,
+    closed: row.closed || 0,
+    closeRatePct: row.closeRatePct ?? null,
+    availableDays: row.availableDays ?? null,
+    rangeBusinessDays,
+    assignedPerAvailableDay: row.assignedPerAvailableDay ?? null,
+    leaveDays: row.leaveDays ?? 0,
+    wfhDays: row.wfhDays ?? 0,
+    csatAverage: row.csatAverage ?? null,
+    csatResponses: row.csatCount ?? 0,
+  }));
+}
+
 function exportAnalyticsWorkbook(payload, activeTab) {
   const wb = XLSX.utils.book_new();
   const addSheet = (name, rows) => {
@@ -802,6 +830,7 @@ function exportAnalyticsWorkbook(payload, activeTab) {
   addSheet('Category Pressure', payload.categories?.pressure || []);
   addSheet('Team Balance', payload.team?.technicians || []);
   addSheet('Team Timeline', payload.team?.timeline || []);
+  addSheet('Capacity', buildCapacityExportRows(payload.team));
   addSheet('CSAT Trend', payload.quality?.csat?.trend || []);
   addSheet('CSAT Responses', payload.quality?.csat?.recentResponses || []);
   addSheet('Low CSAT', payload.quality?.csat?.lowScoreTickets || []);
@@ -836,6 +865,10 @@ export default function Analytics({ view = 'standard' }) {
   const [teamTimelineMetric, setTeamTimelineMetric] = useState('assigned');
   const [showTeamPicker, setShowTeamPicker] = useState(false);
   const [showAgentDetails, setShowAgentDetails] = useState(false);
+  // Capacity tab's per-agent coaching context — hidden by default (team-safe),
+  // mirroring Team Balance's "Focused Agent Detail" pattern but independently
+  // toggled so opening one tab's detail never opens the other's.
+  const [showCapacityCoaching, setShowCapacityCoaching] = useState(false);
   const [selectedInsightId, setSelectedInsightId] = useState(null);
   const [selectedCategoryKey, setSelectedCategoryKey] = useState(() => initialParams.get('focus') || null);
   const [hoveredCategory, setHoveredCategory] = useState(null);
@@ -2077,6 +2110,89 @@ export default function Analytics({ view = 'standard' }) {
       series,
     };
   }, [team?.timeline, teamRows, teamTimelineMetric, toggleTeamSelection]);
+
+  // ---- Capacity tab derivations -------------------------------------------
+  // Deliberately based on the RAW server payload: team?.technicians arrives
+  // alphabetically sorted and Capacity keeps that order everywhere (binding
+  // team-safe rule — no ranked default). It also ignores Team Balance's
+  // search/focus/sort state so the tab reads as a stable team surface.
+  const capacityRows = useMemo(() => team?.technicians || [], [team?.technicians]);
+
+  const capacityTotals = useMemo(() => {
+    const assigned = capacityRows.reduce((sum, row) => sum + (row.assigned || 0), 0);
+    const closed = capacityRows.reduce((sum, row) => sum + (row.closed || 0), 0);
+    return {
+      assigned,
+      closed,
+      closeRatePct: assigned ? Number(((closed / assigned) * 100).toFixed(1)) : null,
+      maxAssigned: capacityRows.reduce((max, row) => Math.max(max, row.assigned || 0), 0),
+    };
+  }, [capacityRows]);
+
+  const capacityNotes = useMemo(() => {
+    const notes = team?.notes;
+    if (!notes) return [];
+    return Array.isArray(notes) ? notes.filter(Boolean) : [String(notes)];
+  }, [team?.notes]);
+
+  const capacityTimelineOptions = useMemo(() => {
+    const base = chartBase('column');
+    const timelineRows = team?.timeline || [];
+    const periods = Array.from(new Set(timelineRows.map((row) => row.period))).sort((a, b) => a.localeCompare(b));
+    const byTech = new Map();
+    for (const row of timelineRows) {
+      if (!byTech.has(row.technicianId)) byTech.set(row.technicianId, new Map());
+      byTech.get(row.technicianId).set(row.period, Number(row.assigned) || 0);
+    }
+    // One series per technician in the server's alphabetical roster order —
+    // fixed color assignment (never re-ranked), same palette as the page's
+    // other per-agent charts so an agent keeps one hue across tabs.
+    const series = capacityRows.map((row, index) => ({
+      name: row.name || 'Unknown agent',
+      color: HIGHCHART_COLORS[index % HIGHCHART_COLORS.length],
+      data: periods.map((period) => byTech.get(row.technicianId)?.get(period) || 0),
+    }));
+    return {
+      ...base,
+      xAxis: {
+        categories: periods,
+        labels: { style: { color: '#64748b', fontSize: '11px' } },
+        lineColor: '#cbd5e1',
+      },
+      yAxis: {
+        min: 0,
+        allowDecimals: false,
+        title: { text: 'Assigned tickets', style: { color: '#94a3b8', fontSize: '11px' } },
+        gridLineDashStyle: 'Dash',
+        gridLineColor: '#e2e8f0',
+        labels: { style: { color: '#64748b', fontSize: '11px' } },
+        stackLabels: {
+          enabled: periods.length <= 26,
+          style: { color: '#334155', fontSize: '10px', textOutline: 'none' },
+        },
+      },
+      legend: { itemStyle: { color: '#334155', fontSize: '12px' } },
+      tooltip: {
+        shared: true,
+        useHTML: true,
+        borderColor: '#cbd5e1',
+        headerFormat: '<span style="font-size:12px;font-weight:700;color:#0f172a">{point.key}</span><br/>',
+        pointFormat: '<span style="color:{series.color}">●</span> {series.name}: <b>{point.y}</b><br/>',
+        footerFormat: '<span style="color:#64748b">Team total: <b>{point.total}</b> tickets</span>',
+      },
+      plotOptions: {
+        ...base.plotOptions,
+        series: {
+          ...base.plotOptions.series,
+          stacking: 'normal',
+          borderWidth: 0,
+          borderRadius: 2,
+        },
+      },
+      series,
+    };
+  }, [capacityRows, team?.timeline]);
+  // ---- end Capacity tab derivations ---------------------------------------
 
   const resolutionBucketRows = useMemo(() => (
     Object.entries(quality?.resolution?.buckets || {}).map(([key, count]) => ({
@@ -3492,6 +3608,198 @@ export default function Analytics({ view = 'standard' }) {
     </div>
   );
 
+  const renderCapacity = () => {
+    const summary = team?.summary || {};
+    const rangeBusinessDays = summary.rangeBusinessDays || 0;
+    const groupLabel = groupBy === 'month' ? 'month' : groupBy === 'week' ? 'week' : 'day';
+    const shareOf = (row) => (capacityTotals.assigned
+      ? Number((((row.assigned || 0) / capacityTotals.assigned) * 100).toFixed(1))
+      : 0);
+    const closeRateCell = (row) => (row.assigned
+      ? `${row.closeRatePct ?? 0}% (${row.closed || 0}/${row.assigned})`
+      : '—');
+    const availableCell = (row) => `${row.availableDays ?? '—'} of ${formatNumber(rangeBusinessDays)}`;
+
+    if (!capacityRows.length) {
+      return <EmptyState text="No active technicians in this range." />;
+    }
+
+    return (
+      <div className="space-y-4">
+        {/* Team-level headline: dispersion + completion + leave-adjusted rate.
+            Framed as team headroom — never a ranked individual metric. */}
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <StatCard
+            title="Balance Score"
+            value={formatNumber(summary.balanceScore)}
+            subtitle="Team dispersion, leave-adjusted — 100 is perfectly even"
+            icon={Gauge}
+            tone="green"
+          />
+          <StatCard
+            title="Assignment Spread"
+            value={formatNumber(summary.spread)}
+            subtitle="Tickets between the most and least assigned"
+            icon={Users}
+          />
+          <StatCard
+            title="Team Close Rate"
+            value={capacityTotals.closeRatePct === null ? '—' : `${capacityTotals.closeRatePct}%`}
+            subtitle={`${formatNumber(capacityTotals.closed)} of ${formatNumber(capacityTotals.assigned)} assigned tickets closed`}
+            icon={CheckCircle2}
+            tone="purple"
+          />
+          <StatCard
+            title="Avg / Available Day"
+            value={formatNumber(summary.avgAssignedPerAvailableDay)}
+            subtitle={`${formatNumber(rangeBusinessDays)} weekdays in range`}
+            icon={BarChart3}
+            tone="amber"
+          />
+        </div>
+
+        <Panel
+          title="Assigned Over Time"
+          subtitle={`Assigned tickets per ${groupLabel}, stacked by technician. Change the grouping with the "Trend by" control above.`}
+        >
+          {(team?.timeline || []).length
+            ? <HighchartsBlock options={capacityTimelineOptions} height={isMobile ? '20rem' : '26rem'} />
+            : <EmptyState text="No assignment timeline for this range." />}
+        </Panel>
+
+        <Panel
+          title="Distribution, Completion and Leave-Adjusted Capacity"
+          subtitle="Alphabetical by design — team headroom context, not a ranking."
+        >
+          <div className="max-h-[31rem] space-y-2 overflow-auto sm:hidden">
+            {capacityRows.map((row) => (
+              <div key={row.technicianId} className="rounded-lg border border-slate-200 bg-white p-3">
+                <p className="truncate text-sm font-bold text-slate-900">{row.name}</p>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  {row.assigned || 0} assigned · {formatSharePct(shareOf(row))} of team · close {closeRateCell(row)}
+                </p>
+                <p className="text-xs text-slate-500">
+                  {availableCell(row)} available days · {row.assignedPerAvailableDay ?? '—'} / available day
+                </p>
+                <div className="mt-2 h-1 overflow-hidden rounded-full bg-slate-100" aria-hidden="true">
+                  <div
+                    className="h-full rounded-full bg-blue-500"
+                    style={{ width: `${row.assigned && capacityTotals.maxAssigned ? Math.max(2, (row.assigned / capacityTotals.maxAssigned) * 100) : 0}%` }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="hidden overflow-auto rounded-lg border border-slate-200 sm:block">
+            <table className="min-w-full divide-y divide-slate-200 text-sm">
+              <thead className="sticky top-0 bg-slate-50">
+                <tr>
+                  {[
+                    ['name', 'Technician', 'text-left'],
+                    ['assigned', 'Assigned', 'text-right'],
+                    ['share', 'Share of Team', 'text-right'],
+                    ['shareBar', '', 'text-left'],
+                    ['closeRate', 'Close Rate (N)', 'text-right'],
+                    ['availableDays', 'Available Days', 'text-right'],
+                    ['assignedPerAvailableDay', 'Assigned / Avail. Day', 'text-right'],
+                  ].map(([key, label, align]) => (
+                    <th key={key} className={`whitespace-nowrap px-3 py-2 text-xs font-semibold uppercase tracking-normal text-slate-500 ${align}`}>
+                      {label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 bg-white">
+                {capacityRows.map((row) => (
+                  <tr key={row.technicianId} className="hover:bg-slate-50">
+                    <td className="px-3 py-2 font-semibold text-slate-800">{row.name}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-700">{row.assigned || 0}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-700">{formatSharePct(shareOf(row))}</td>
+                    <td className="w-32 px-3 py-2">
+                      <div className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-100" aria-hidden="true">
+                        <div
+                          className="h-full rounded-full bg-blue-500"
+                          style={{ width: `${row.assigned && capacityTotals.maxAssigned ? Math.max(2, (row.assigned / capacityTotals.maxAssigned) * 100) : 0}%` }}
+                        />
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-700">{closeRateCell(row)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-700">
+                      <span title={row.leaveTypes?.length ? row.leaveTypes.map((leave) => `${leave.name}: ${leave.days}`).join('\n') : undefined}>
+                        {availableCell(row)}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-700">{row.assignedPerAvailableDay ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-3 text-xs text-slate-500">
+            Leave adjustment: available days = the {formatNumber(rangeBusinessDays)} weekdays in this range minus each
+            technician&apos;s approved leave days, so Assigned / Avail. Day compares load fairly for people who were away.
+          </p>
+        </Panel>
+
+        <Panel
+          title="Optional Coaching Context"
+          subtitle="Hidden by default so Capacity stays a team-headroom surface, not a leaderboard."
+          actions={(
+            <button
+              type="button"
+              onClick={() => setShowCapacityCoaching((value) => !value)}
+              className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              {showCapacityCoaching ? 'Hide coaching context' : 'Show coaching context'}
+            </button>
+          )}
+        >
+          {showCapacityCoaching ? (
+            <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
+              {capacityRows.map((row) => (
+                <div key={row.technicianId} className="rounded-lg border border-slate-200 bg-white p-4">
+                  <h3 className="truncate text-sm font-bold text-slate-900">{row.name}</h3>
+                  <p className="text-xs text-slate-500">
+                    {row.assigned || 0} assigned · {row.closed || 0} closed · {row.openNow || 0} open · {row.pendingNow || 0} pending
+                  </p>
+                  <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                    <div className="rounded bg-slate-50 p-2">
+                      <p className="text-xs text-slate-500">Close</p>
+                      <p className="text-sm font-bold text-slate-900">{row.assigned ? `${row.closeRatePct ?? 0}%` : '—'}</p>
+                    </div>
+                    <div className="rounded bg-slate-50 p-2">
+                      <p className="text-xs text-slate-500">Rate</p>
+                      <p className="text-sm font-bold text-slate-900">{row.assignedPerAvailableDay ?? '—'}</p>
+                    </div>
+                    <div className="rounded bg-slate-50 p-2">
+                      <p className="text-xs text-slate-500">CSAT</p>
+                      <p className="text-sm font-bold text-slate-900">
+                        {row.csatAverage === null || row.csatAverage === undefined ? '—' : row.csatAverage}
+                      </p>
+                      <p className="text-[10px] text-slate-500">{formatNumber(row.csatCount || 0)} responses</p>
+                    </div>
+                  </div>
+                  <div className="mt-3 space-y-1 text-xs text-slate-600">
+                    <p><span className="font-semibold text-slate-800">Available:</span> {availableCell(row)} days</p>
+                    <p><span className="font-semibold text-slate-800">Leave:</span> {row.leaveDays || 0} days · <span className="font-semibold text-slate-800">WFH:</span> {row.wfhDays || 0} days</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState text="Open coaching context only when a 1:1 needs it." />
+          )}
+        </Panel>
+
+        {capacityNotes.length > 0 && (
+          <div className="rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-500 shadow-sm">
+            {capacityNotes.map((note) => <p key={note}>• {note}</p>)}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderQuality = () => (
     <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -3860,6 +4168,10 @@ export default function Analytics({ view = 'standard' }) {
     demand: 'demand',
     categories: 'categories',
     team: 'team',
+    // Capacity is a second view over the SAME Team Balance payload — no extra
+    // fetch: fetchAnalytics' requests map is keyed by payload key, so 'team'
+    // is requested once and both tabs read payload.team.
+    capacity: 'team',
     quality: 'quality',
     ops: 'ops',
     insights: 'insights',
@@ -3898,6 +4210,7 @@ export default function Analytics({ view = 'standard' }) {
       case 'demand': return renderDemand();
       case 'categories': return renderCategories();
       case 'team': return renderTeam();
+      case 'capacity': return renderCapacity();
       case 'quality': return renderQuality();
       case 'ops': return renderOps();
       case 'insights': return renderInsights();

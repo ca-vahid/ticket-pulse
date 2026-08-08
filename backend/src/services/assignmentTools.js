@@ -88,7 +88,7 @@ export async function applyWorkspaceTicketTypes(tools, workspaceId) {
 export const TOOL_SCHEMAS = [
   {
     name: 'get_ticket_details',
-    description: 'Get full details of the ticket being analyzed, including subject, description, requester info, priority, FreshService group ID, FreshService ticket type, raw FreshService categories, stored internal category/subcategory classification, taxonomy fit, previous AI category suggestions, and creation timestamps in workspace-local time.',
+    description: 'Get full details of the ticket being analyzed, including subject, description, requester info, priority, FreshService group ID, FreshService ticket type, raw FreshService categories, stored internal category/subcategory classification, taxonomy fit, previous AI category suggestions, structured intake metadata (customFields — e.g. client_location, source_system from API senders; use these as classification evidence), and creation timestamps in workspace-local time.',
     input_schema: {
       type: 'object',
       properties: {
@@ -2315,6 +2315,10 @@ async function getTicketDetails(ticketId) {
       rejectionCount: ticket.rejectionCount || 0,
       hasRejectedEpisode: (ticket.rejectionCount || 0) > 0,
     },
+    // Structured intake metadata (FR 08-07 #3 stretch): API senders attach
+    // fields like client_location — strong classification evidence the model
+    // could not see before. Compact + capped so it never bloats the context.
+    customFields: compactCustomFieldsForPrompt(ticket.customFields),
     createdAt: ticket.createdAt ? convertToTimezone(ticket.createdAt, timezone) : null,
     createdAtUtc: ticket.createdAt?.toISOString?.() || null,
     createdDate: ticket.createdAt ? formatDateInTimezone(ticket.createdAt, timezone) : null,
@@ -2322,6 +2326,30 @@ async function getTicketDetails(ticketId) {
     requester: ticket.requester || null,
     currentlyAssignedTo: ticket.assignedTech?.name || 'Unassigned',
   };
+}
+
+/**
+ * Compact a ticket's customFields JSON for LLM context: skip empty values,
+ * truncate long ones, and cap the whole block at ~500 serialized chars so a
+ * 40-key intake payload can't crowd out the rest of the prompt.
+ */
+export function compactCustomFieldsForPrompt(raw, { budget = 500, perValue = 120 } = {}) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const entries = Object.entries(raw)
+    .filter(([, v]) => v !== null && v !== undefined && String(v).trim() !== '');
+  if (!entries.length) return null;
+  const out = {};
+  let remaining = budget;
+  let omitted = 0;
+  for (const [key, value] of entries) {
+    const text = truncateText(String(value), perValue);
+    const cost = key.length + text.length + 6; // quotes/colon/comma overhead
+    if (cost > remaining) { omitted += 1; continue; }
+    out[key] = text;
+    remaining -= cost;
+  }
+  if (omitted > 0) out._note = `${omitted} more field(s) omitted for length`;
+  return Object.keys(out).length ? out : null;
 }
 
 async function getTechnicians(workspaceId) {

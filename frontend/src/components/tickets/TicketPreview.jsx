@@ -640,12 +640,23 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                     </dd>
                   </div>
                 )}
-                {ticket.groupId && (meta?.groups || []).some((g) => String(g.freshserviceId) === String(ticket.groupId)) && (
-                  <div className="flex items-center gap-2 px-2.5 py-1.5">
-                    <dt className="text-slate-400 w-24 flex-shrink-0 pl-[18px]">Group</dt>
-                    <dd className="text-slate-600 truncate">{(meta.groups.find((g) => String(g.freshserviceId) === String(ticket.groupId)) || {}).name}</dd>
-                  </div>
-                )}
+                {(() => {
+                  // Internal (TP-native) groups too (FR 08-07 #2): a ticket sits
+                  // in EITHER an FS group (groupId) OR an internal group
+                  // (internalGroup relation / internalGroupId via meta lookup).
+                  const groupName = ticket.internalGroup?.name
+                    || (ticket.internalGroupId
+                      && ((meta?.groups || []).find((g) => g.origin === 'local' && String(g.id) === String(ticket.internalGroupId)) || {}).name)
+                    || (ticket.groupId
+                      && ((meta?.groups || []).find((g) => String(g.freshserviceId) === String(ticket.groupId)) || {}).name)
+                    || null;
+                  return groupName ? (
+                    <div className="flex items-center gap-2 px-2.5 py-1.5">
+                      <dt className="text-slate-400 w-24 flex-shrink-0 pl-[18px]">Group</dt>
+                      <dd className="text-slate-600 truncate">{groupName}</dd>
+                    </div>
+                  ) : null;
+                })()}
                 {ticket.source != null && (meta?.sources || []).some((s) => s.value === ticket.source) && (
                   <div className="flex items-center gap-2 px-2.5 py-1.5">
                     <dt className="text-slate-400 w-24 flex-shrink-0 pl-[18px]">Source</dt>

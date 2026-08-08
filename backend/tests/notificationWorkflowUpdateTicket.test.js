@@ -123,10 +123,20 @@ describe('update_ticket category by name (FR 08-05 Phase 1b)', () => {
     ).errors.join(' ')).toMatch(/max 120/i);
   });
 
-  test('a subcategory name without its parent category name is rejected', () => {
+  // FR 08-07 #3: subcategory-only nodes are VALID — the engine resolves the
+  // name against the ticket's CURRENT category at run time (and surfaces an
+  // error on the step output when the ticket has no category).
+  test('a subcategory name without a category name validates (parent = ticket current category)', () => {
     expect(validateWorkflowDefinition(
       categoryDefinition({ setSubcategoryName: 'New Project' }),
       { triggerType: 'ticket.created' },
-    ).errors.join(' ')).toMatch(/needs its parent category name/i);
+    ).errors).toEqual([]);
+  });
+
+  test('a blank subcategory name is still rejected', () => {
+    expect(validateWorkflowDefinition(
+      categoryDefinition({ setSubcategoryName: '   ' }),
+      { triggerType: 'ticket.created' },
+    ).errors.join(' ')).toMatch(/subcategory name/i);
   });
 });

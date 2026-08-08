@@ -268,6 +268,7 @@ export default function ApprovalCategoriesPanel() {
             Define what needs sign-off (e.g. <strong>Laptop purchase</strong>) and which <strong>members</strong> approve it.
             On a ticket, a member requests approval by category and every manager is notified — <strong>any one</strong> can
             approve, reject, or ask for more info. Approvals stay inside Ticket Pulse.
+            Workspace <strong>reviewers</strong> can manage these too — no admin needed.
           </p>
         </div>
       </div>
