@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   DndContext, DragOverlay, KeyboardSensor, PointerSensor,
   useDraggable, useDroppable, useSensor, useSensors,
@@ -6,6 +6,7 @@ import {
 import { Circle, Clock3, CheckCircle2, Lock } from 'lucide-react';
 import { PersonAvatar, SlaChip, StatusPill, TypePill, PRIORITY_STRIP_COLORS, PRIORITY_LABELS } from './ticketUi';
 import { baseStatusOf, statusToneFromDefs } from './statusDefs';
+import ErrorBoundary from '../ErrorBoundary';
 
 /**
  * Board view for the tickets queue (QA 07-27 #3): Open / Pending / Closed
@@ -185,7 +186,7 @@ function BoardColumn({ column, tickets, activeBucket, paginated, emptyState, chi
   );
 }
 
-export default function TicketBoard({
+function TicketBoardInner({
   tickets, ticketingOn, onCardClick, onCardDoubleClick, onStatusDrop,
   closedExcluded = false, onShowClosed = null, paginated = false,
   statusDefs = null, // workspace status registry (queue meta) — base-aware buckets
@@ -209,8 +210,16 @@ export default function TicketBoard({
   }, [tickets, bucketFor]);
 
   const byId = useMemo(() => new Map(tickets.map((t) => [String(t.id), t])), [tickets]);
-  const activeTicket = activeId ? byId.get(activeId) : null;
+  // Crash guard (QA 08-07 #10): a live-refetch can remove the dragged ticket
+  // mid-drag, leaving activeId pointing at nothing. `?? null` keeps the drag
+  // overlay's ternary safe, and the effect below cancels the phantom drag so
+  // dnd-kit isn't left mid-gesture on an unmounted draggable.
+  const activeTicket = activeId ? (byId.get(activeId) ?? null) : null;
   const activeBucket = activeTicket ? bucketFor(activeTicket.status) : null;
+
+  useEffect(() => {
+    if (activeId && !byId.has(activeId)) setActiveId(null);
+  }, [activeId, byId]);
 
   const canDragTicket = (ticket) => {
     const removedLike = ['Deleted', 'Spam'].includes(ticket.status);
@@ -284,5 +293,16 @@ export default function TicketBoard({
         ) : null}
       </DragOverlay>
     </DndContext>
+  );
+}
+
+// Public export wraps the board in its own error boundary (second boundary
+// per the Phase 2 plan): if the dnd tree still finds a way to throw, only the
+// board area falls back — the queue chrome, filters, and header stay alive.
+export default function TicketBoard(props) {
+  return (
+    <ErrorBoundary variant="inline" label="ticket board">
+      <TicketBoardInner {...props} />
+    </ErrorBoundary>
   );
 }

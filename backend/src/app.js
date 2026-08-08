@@ -64,10 +64,14 @@ app.use(
     store: new PgSession({
       pool: pgPool,
       tableName: 'session', // Will be created automatically
+      // connect-pg-simple derives each row's expiry from the cookie maxAge (7d) at write time.
+      // Prune expired rows once an hour instead of the default 15 min — plenty at a 7-day TTL.
+      pruneSessionInterval: 60 * 60, // seconds
     }),
     secret: config.session.secret,
     resave: false,
     saveUninitialized: false,
+    rolling: true, // re-issue the cookie on every response → 7-day *sliding* session
     cookie: {
       secure: config.isProduction,
       httpOnly: true,

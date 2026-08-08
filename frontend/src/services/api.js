@@ -60,6 +60,55 @@ export function getWorkspaceId() {
   return _workspaceId;
 }
 
+// ---------------------------------------------------------------------------
+// Silent auth-token refresh (QA 08-07 #14 — SSE resilience)
+//
+// AuthContext registers its silent-recovery routine (MSAL acquireTokenSilent →
+// /auth/sso exchange) here so non-axios consumers — the SSE EventSource, which
+// can't use the axios interceptors — can mint a fresh JWT before reconnecting
+// instead of 401-looping on a dead token.
+// ---------------------------------------------------------------------------
+let _authTokenRefresher = null;
+let _refreshInFlight = null;
+
+export function registerAuthTokenRefresher(refresher) {
+  _authTokenRefresher = typeof refresher === 'function' ? refresher : null;
+}
+
+/**
+ * Ask the registered refresher for a new session/JWT. Coalesces concurrent
+ * callers into one attempt. Resolves with the fresh token (the refresher is
+ * expected to call setAuthToken on success) or null if refresh isn't possible.
+ */
+export async function refreshAuthToken() {
+  if (!_authTokenRefresher) return null;
+  if (!_refreshInFlight) {
+    _refreshInFlight = Promise.resolve()
+      .then(() => _authTokenRefresher())
+      .then((ok) => (ok ? _authToken : null))
+      .catch(() => null)
+      .finally(() => { _refreshInFlight = null; });
+  }
+  return _refreshInFlight;
+}
+
+/**
+ * True when the stored JWT has an exp claim that has passed (or will pass
+ * within `withinMs`). A missing/undecodable token or a token without exp
+ * returns false — cookie-only auth has nothing to pre-refresh.
+ */
+export function isAuthTokenExpiring(withinMs = 60000) {
+  if (!_authToken) return false;
+  try {
+    const [, payload] = _authToken.split('.');
+    const decoded = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
+    if (!decoded || typeof decoded.exp !== 'number') return false;
+    return decoded.exp * 1000 - Date.now() < withinMs;
+  } catch {
+    return false;
+  }
+}
+
 // Create axios instance
 const api = axios.create({
   baseURL: API_BASE_URL,

@@ -22,6 +22,15 @@ function safeFreshServiceStatus(error) {
     || null;
 }
 
+// The FS client wraps limiter rejections in plain Errors — match the preserved
+// code OR the message (same predicate ticketService uses). A queue timeout
+// means the request never launched: nothing reached FreshService.
+function isFsQueueTimeout(error) {
+  return error?.code === 'FS_QUEUE_TIMEOUT'
+    || error?.originalError?.code === 'FS_QUEUE_TIMEOUT'
+    || /rate-limit queue/.test(error?.message || '');
+}
+
 function getFreshServiceWorkspaceId(fsTicket) {
   return fsTicket?.workspace_id
     ?? fsTicket?.workspaceId
@@ -88,6 +97,11 @@ class FreshServiceWebhookIngestService {
       const client = createFreshServiceClient(fsConfig.domain, fsConfig.apiKey, {
         priority: 'high',
         source: 'freshservice-webhook',
+        // Fail fast when the shared rate-limit queue is congested (FR 08-07
+        // #13): a bounded FS_QUEUE_TIMEOUT surfaces as a 503 below so
+        // FreshService's automator retries the delivery, instead of the
+        // request hanging behind background sync traffic.
+        queueTimeoutMs: 15000,
       });
       fsTicket = await client.fetchTicketSnapshot(freshserviceTicketId);
 
@@ -146,6 +160,18 @@ class FreshServiceWebhookIngestService {
     } catch (error) {
       if (error instanceof WebhookIngestError) {
         throw error;
+      }
+      if (isFsQueueTimeout(error)) {
+        const message = 'FreshService rate-limit queue timed out — retry shortly';
+        await workspaceWebhookService.recordError(workspace.id, message);
+        logger.warn('FreshService webhook ingest queue timeout (503, FS will retry)', {
+          workspaceId: workspace.id,
+          freshserviceTicketId: String(freshserviceTicketId),
+        });
+        throw new WebhookIngestError('freshservice_queue_timeout', message, 503, {
+          workspaceId: workspace.id,
+          freshserviceTicketId: String(freshserviceTicketId),
+        });
       }
       const status = safeFreshServiceStatus(error);
       const code = status ? `freshservice_${status}` : 'webhook_ingest_failed';

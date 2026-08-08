@@ -40,6 +40,8 @@ jest.unstable_mockModule('../src/integrations/freshserviceTransformer.js', () =>
   analyzeTicketActivities: jest.fn(),
   transformTicketThreadEntries: jest.fn(() => []),
   transformTicketConversationEntries: jest.fn(() => []),
+  getStatusString: jest.fn((id) => ({ 2: 'Open', 3: 'Pending', 4: 'Resolved', 5: 'Closed' }[id] || 'Open')),
+  getPriorityNumber: jest.fn((id) => (id >= 1 && id <= 4 ? id : 3)),
 }));
 jest.unstable_mockModule('../src/utils/parallelPool.js', () => ({ runJobsInPool: jest.fn() }));
 jest.unstable_mockModule('../src/services/technicianRepository.js', () => ({

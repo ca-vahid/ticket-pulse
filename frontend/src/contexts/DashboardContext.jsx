@@ -465,8 +465,16 @@ export function DashboardProvider({ children }) {
   // ------------------------------------------------------------------
   // SSE sync-completed handler with targeted invalidation
   // ------------------------------------------------------------------
+  // Latest pathname behind a ref (Tickets.jsx :649-652 pattern): the SSE
+  // callbacks must keep a STABLE identity — useSSE tears down and rebuilds the
+  // EventSource whenever a callback identity changes, so depending on
+  // location.pathname here rebuilt the stream on every route change (QA 08-07
+  // #14 — one cause of the perpetual "Connecting" flicker).
+  const pathnameRef = useRef(location.pathname);
+  useEffect(() => { pathnameRef.current = location.pathname; }, [location.pathname]);
+
   const handleSyncCompleted = useCallback((_data) => {
-    if (!matchesRoute(location.pathname, DASHBOARD_REFRESH_SSE_ROUTES)) return;
+    if (!matchesRoute(pathnameRef.current, DASHBOARD_REFRESH_SSE_ROUTES)) return;
 
     // Invalidate cache and refresh after sync completion
 
@@ -484,7 +492,7 @@ export function DashboardProvider({ children }) {
     } else if (viewMode === 'monthly') {
       fetchMonthlyDashboard(monthStart, TZ);
     }
-  }, [location.pathname, invalidateToday, invalidateCurrentWeek, invalidateCurrentMonth, fetchDashboard, fetchWeeklyDashboard, fetchMonthlyDashboard]);
+  }, [invalidateToday, invalidateCurrentWeek, invalidateCurrentMonth, fetchDashboard, fetchWeeklyDashboard, fetchMonthlyDashboard]);
 
   const handleConnected = useCallback(() => {
     // SSE connection established
@@ -497,7 +505,7 @@ export function DashboardProvider({ children }) {
 
   const dashboardSseEnabled = autoRefresh && matchesRoute(location.pathname, APP_LIVE_SSE_ROUTES);
 
-  const { isConnected: sseConnected, connectionStatus: sseConnectionStatus } = useSSE({
+  const { isConnected: sseConnected, connectionStatus: sseConnectionStatus, retry: sseRetry } = useSSE({
     enabled: dashboardSseEnabled,
     onSyncCompleted: handleSyncCompleted,
     onConnected: handleConnected,
@@ -527,6 +535,8 @@ export function DashboardProvider({ children }) {
     autoRefresh,
     sseConnected,
     sseConnectionStatus,
+    sseRetry,
+    sseEnabled: dashboardSseEnabled,
     setAutoRefresh,
 
     // Fetch methods (cache-aware)

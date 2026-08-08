@@ -134,7 +134,7 @@ function issueAuthToken({ email, name, role, selectedWorkspaceId }) {
     config.session.secret,
     {
       algorithm: 'HS256',
-      expiresIn: '8h',
+      expiresIn: config.session.jwtExpiresIn,
     },
   );
 }
@@ -315,7 +315,7 @@ router.post(
     });
     const authToken = jwt.sign(tokenPayload, config.session.secret, {
       algorithm: 'HS256',
-      expiresIn: '8h',
+      expiresIn: config.session.jwtExpiresIn,
     });
 
     res.json({

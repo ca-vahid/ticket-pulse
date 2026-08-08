@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { sseAPI } from '../services/api';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { sseAPI, isAuthTokenExpiring, refreshAuthToken } from '../services/api';
 import { isDemoMode, maybeScrub } from '../utils/demoMode';
 
 // Scrubs SSE event payloads through the demo-mode anonymizer when active so
@@ -45,6 +45,15 @@ export function useSSE(options = {}) {
   // until a manual refresh.
   const lastEventAtRef = useRef(Date.now());
   const STALE_MS = 90000;
+  // After this many consecutive failed connection attempts, stop the eternal
+  // "connecting" spinner and surface 'disconnected' with a manual retry
+  // affordance (QA 08-07 #14 — Marcus/Adrian pinned at "Connecting").
+  const MAX_RECONNECT_ATTEMPTS = 8;
+  // Refresh the JWT before reconnecting when it expires within this window —
+  // an expired token would just 401-loop the EventSource.
+  const TOKEN_EXPIRY_SLACK_MS = 60000;
+  // Lets retry() reach the connect closure defined inside the effect.
+  const connectRef = useRef(null);
 
   useEffect(() => {
     unmountedRef.current = false;
@@ -67,6 +76,15 @@ export function useSSE(options = {}) {
       if (!enabled || unmountedRef.current) return;
       clearRetryTimer();
 
+      // Give up after the budget is spent: an eternal amber "Connecting" hides
+      // real outages. 'disconnected' + the header's Reconnect affordance is
+      // honest and actionable; retry() resets the budget.
+      if (retryAttemptRef.current >= MAX_RECONNECT_ATTEMPTS) {
+        closeCurrentSource();
+        setConnectionStatus('disconnected');
+        return;
+      }
+
       // Exponential backoff (1s -> 2s -> 4s ... max 15s)
       const delay = Math.min(1000 * (2 ** retryAttemptRef.current), 15000);
       retryAttemptRef.current += 1;
@@ -77,12 +95,24 @@ export function useSSE(options = {}) {
       }, delay);
     };
 
-    const connect = () => {
+    const connect = async () => {
       if (!enabled || unmountedRef.current) return;
 
       clearRetryTimer();
       closeCurrentSource();
       setConnectionStatus('connecting');
+
+      // EventSource can't use the axios auth interceptors, so an expired JWT
+      // would 401 every reconnect forever. Mint a fresh one via the silent
+      // recovery path (AuthContext → MSAL acquireTokenSilent → /auth/sso)
+      // before opening the stream. Failure falls through: the connection
+      // attempt itself will error and consume a retry from the budget.
+      if (isAuthTokenExpiring(TOKEN_EXPIRY_SLACK_MS)) {
+        try {
+          await refreshAuthToken();
+        } catch { /* handled by the connection error path */ }
+        if (!enabled || unmountedRef.current) return;
+      }
 
       try {
         const eventSource = sseAPI.getEventSource();
@@ -150,9 +180,21 @@ export function useSSE(options = {}) {
 
         eventSource.onerror = () => {
           if (eventSource.readyState === EventSource.CLOSED) {
+            // Fatal (e.g. non-200 like an auth 401): the browser won't retry —
+            // our backoff ladder does, against the budget.
             scheduleReconnect();
           } else {
-            setConnectionStatus('connecting');
+            // Network-level failure (backend down/unreachable): the browser
+            // auto-retries internally with readyState CONNECTING and never
+            // closes — count those attempts against the SAME budget, or a
+            // dead backend pins the pill at "Connecting" forever.
+            retryAttemptRef.current += 1;
+            if (retryAttemptRef.current >= MAX_RECONNECT_ATTEMPTS) {
+              closeCurrentSource();
+              setConnectionStatus('disconnected');
+            } else {
+              setConnectionStatus('connecting');
+            }
           }
 
           if (onError) {
@@ -166,6 +208,8 @@ export function useSSE(options = {}) {
         }
       }
     };
+
+    connectRef.current = connect;
 
     if (!enabled) {
       clearRetryTimer();
@@ -194,6 +238,7 @@ export function useSSE(options = {}) {
 
     return () => {
       unmountedRef.current = true;
+      connectRef.current = null;
       clearInterval(staleTimer);
       document.removeEventListener('visibilitychange', onVisible);
       clearRetryTimer();
@@ -210,10 +255,18 @@ export function useSSE(options = {}) {
     }
   };
 
+  // Manual reconnect after the retry budget is exhausted (header "Reconnect").
+  // Resets the budget so the backoff ladder starts over.
+  const retry = useCallback(() => {
+    retryAttemptRef.current = 0;
+    if (connectRef.current) connectRef.current();
+  }, []);
+
   return {
     isConnected: connectionStatus === 'connected',
     connectionStatus,
     lastEvent,
     disconnect,
+    retry,
   };
 }

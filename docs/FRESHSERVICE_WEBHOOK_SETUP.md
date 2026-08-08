@@ -1,6 +1,8 @@
-# FreshService Ticket Webhook Setup
+# FreshService Ticket Webhook Setup — Instant Status Sync
 
-Ticket Pulse supports a per-workspace FreshService ticket webhook that speeds up assignment processing for newly created or updated tickets. Scheduled sync and assignment polling stay enabled and remain the reliability backstop.
+Ticket Pulse supports a per-workspace FreshService ticket webhook that gives **instant status sync**: any FreshService-side change (new ticket, status change, priority change, assignee change) posted to the webhook is fetched, upserted through the shared sync path, and pushed live to open Ticket Pulse queues and ticket views over SSE within seconds — no page refresh needed. Scheduled sync and the 60-second fast lane stay enabled and remain the reliability backstop.
+
+For full coverage the FreshService workflow automator must fire on **both create and update events** — see the two recipes below. An automator that fires only on ticket creation gives instant *arrival* but leaves status changes to the (slower) polling lanes.
 
 ## Endpoint
 
@@ -48,13 +50,15 @@ Send JSON with the FreshService ticket ID. Supported shapes include:
 { "data": { "ticket": { "id": 224183 } } }
 ```
 
-Ticket Pulse does not trust the rest of the webhook payload. It fetches the ticket from FreshService with `include=requester,stats`, validates that the returned ticket belongs to the requested workspace, upserts it through the shared sync path, then runs the existing unassigned-ticket polling logic for that ticket.
+Ticket Pulse does not trust the rest of the webhook payload. It fetches the ticket from FreshService with `include=requester,stats`, validates that the returned ticket belongs to the requested workspace, upserts it through the shared sync path (which broadcasts a `ticket-change` SSE event to that workspace when the status or assignee actually changed), then runs the existing unassigned-ticket polling logic for that ticket.
+
+The same payload works for create and update events — the endpoint is idempotent and always syncs current FreshService truth, so you can point every automator rule at the one URL.
 
 ## FreshService Automation
 
-Create a FreshService workflow automator for ticket create/update events that posts to the workspace URL. Include the ticket ID in the body and the workspace webhook secret in the header above.
+Both recipes post to the same workspace URL with the same body and secret header. Use the numeric ticket ID placeholder from FreshService. If `ticket.id_numeric` is not available in the placeholder picker, choose the ticket ID placeholder that resolves to digits only, such as `224183`, not `SR-224183`.
 
-Recommended body:
+Recommended body (both rules):
 
 ```json
 {
@@ -62,7 +66,34 @@ Recommended body:
 }
 ```
 
-Use the numeric ticket ID placeholder from FreshService. If `ticket.id_numeric` is not available in the placeholder picker, choose the ticket ID placeholder that resolves to digits only, such as `224183`, not `SR-224183`.
+### Recipe 1 — Ticket created (instant arrival + assignment)
+
+Workflow Automator -> New Automator -> **Event based** workflow:
+
+1. **Event**: `Ticket is raised` (all sources).
+2. *(Optional condition)*: restrict by workspace/group if the FS instance hosts multiple workspaces and the automator is not already workspace-scoped.
+3. **Action**: `Trigger Webhook`
+   - Request type: `POST`
+   - URL: the workspace endpoint above
+   - Encoding: `JSON`
+   - Custom header: `X-Ticket-Pulse-Webhook-Secret: <secret>` (or use the `?token=` URL fallback)
+   - Body: the recommended body above.
+
+### Recipe 2 — Ticket updated (instant status sync)
+
+Create a second event-based automator (or add a second event rule to the same automator where the plan allows):
+
+1. **Event**: `Ticket is updated`, with the update-type checkboxes for:
+   - `Status is changed` — any -> any
+   - `Priority is changed` — any -> any
+   - `Agent is changed` — any -> any (assignee set, reassigned, or cleared)
+2. **Action**: identical `Trigger Webhook` action as Recipe 1 (same URL, header, body).
+
+Notes:
+
+- Do **not** fire on "any field updated" — note-adds and tag edits would multiply deliveries without changing anything Ticket Pulse displays live. The three update types above cover everything the queue renders.
+- FreshService retries webhook deliveries on 5xx responses. Ticket Pulse returns `503` when its FreshService API queue is congested (`freshservice_queue_timeout`), so a delivery during heavy background sync is retried by FS rather than lost.
+- Delivery counters (Received / Accepted / Rejected, last delivery time) are visible per workspace in Assignment Review -> Configuration -> Ticket Detection — use them to confirm the update-event rule is actually firing after setup.
 
 ## Local Curl Smoke Test
 
@@ -88,10 +119,12 @@ Expected success response:
 }
 ```
 
-`assignmentTriggered` can be `false` when the ticket is already assigned, filtered as noise, closed, or already has an active/completed assignment run.
+`assignmentTriggered` can be `false` when the ticket is already assigned, filtered as noise, closed, or already has an active/completed assignment run. For a status-change delivery on an assigned ticket that is the normal, correct outcome — the sync (and the live SSE push) still happened.
+
+To watch the live update: keep `/tickets` open in a browser, change the ticket's status in FreshService (or re-run the curl after changing it), and the affected row updates in place without a refresh.
 
 ## Rollback
 
-Disable the workspace webhook in Assignment Review -> Configuration -> Ticket Detection. FreshService deliveries will be rejected for that workspace, while scheduled sync and assignment polling continue to catch missed tickets. To fully roll back, disable or delete the FreshService workflow automator after disabling the Ticket Pulse config.
+Disable the workspace webhook in Assignment Review -> Configuration -> Ticket Detection. FreshService deliveries will be rejected for that workspace, while scheduled sync, the 60-second status-refresh lane, and assignment polling continue to catch missed tickets. To fully roll back, disable or delete the FreshService workflow automator rules (create and update) after disabling the Ticket Pulse config.
 
 Rotate the secret immediately if a webhook URL with `?token=` was exposed in logs, chat, screenshots, or automation history.

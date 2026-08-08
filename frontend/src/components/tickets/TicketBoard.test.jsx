@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import TicketBoard from './TicketBoard';
 
 afterEach(cleanup);
@@ -116,5 +116,49 @@ describe('TicketBoard workspace custom statuses (Phase 8b)', () => {
     expect(screen.queryByText('Ticket 1')).not.toBeInTheDocument();
     expect(screen.queryByText('Ticket 2')).not.toBeInTheDocument();
     expect(screen.getByText('Ticket 3')).toBeInTheDocument();
+  });
+});
+
+describe('TicketBoard crash-proofing (QA 08-07 #10, Phase 2)', () => {
+  test('active ticket vanishing mid-drag (live refetch) does not throw or trip the boundary', () => {
+    const { rerender } = render(
+      <TicketBoard tickets={[t(1, 'Open'), t(2, 'Pending')]} ticketingOn />,
+    );
+
+    // Start a keyboard drag on Ticket 1 (dnd-kit KeyboardSensor: Enter).
+    const card = screen.getByText('Ticket 1').closest('[role="button"]');
+    expect(card).not.toBeNull();
+    fireEvent.keyDown(card, { code: 'Enter' });
+    // Drag started → the DragOverlay renders a second copy of the card.
+    expect(screen.getAllByText('Ticket 1').length).toBe(2);
+
+    // A background refetch removes the dragged ticket from the page.
+    expect(() => {
+      rerender(<TicketBoard tickets={[t(2, 'Pending')]} ticketingOn />);
+    }).not.toThrow();
+
+    // The phantom drag is cancelled: overlay gone, board healthy, no fallback.
+    expect(screen.queryByText('Ticket 1')).not.toBeInTheDocument();
+    expect(screen.getByText('Ticket 2')).toBeInTheDocument();
+    expect(screen.queryByText('Something went wrong')).not.toBeInTheDocument();
+  });
+
+  test('a render throw inside the board falls back to the inline boundary card, not a white screen', () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      // Force a deterministic render throw with a ticket whose property
+      // access explodes mid-render — stands in for any future board crash.
+      const poison = new Proxy(t(1, 'Open'), {
+        get(target, prop) {
+          if (prop === 'subject') throw new Error('poisoned ticket');
+          return target[prop];
+        },
+      });
+      render(<TicketBoard tickets={[poison]} ticketingOn />);
+      expect(screen.getByText('Something went wrong')).toBeInTheDocument();
+      expect(screen.getByText(/The ticket board hit an unexpected error/)).toBeInTheDocument();
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
   });
 });

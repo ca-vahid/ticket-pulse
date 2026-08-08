@@ -207,15 +207,23 @@ class ScheduledSyncService {
 
         this.assignmentFastSyncInProgress.add(wsId);
         try {
+          // FR 08-07 #13: the 60s lane no longer requires assignment polling.
+          // Status refresh runs for every active workspace so FS-side
+          // status/assignee changes land within ~1 min everywhere; assignment
+          // polling and classification stay gated by their own config checks
+          // inside _pollForUnassignedTickets/_classifyAssignedTickets…
+          // (isEnabled + pollForUnassigned), exactly as before.
+          // Env kill-switch: FAST_STATUS_REFRESH=false restores the old gate.
           const cfg = await assignmentRepository.getConfig(wsId);
-          if (!cfg?.isEnabled || !cfg?.pollForUnassigned) {
+          const assignmentPollingEnabled = Boolean(cfg?.isEnabled && cfg?.pollForUnassigned);
+          if (!assignmentPollingEnabled && process.env.FAST_STATUS_REFRESH === 'false') {
             return;
           }
 
           const result = await syncService.syncAssignmentCandidatesNow(wsId, {
             lookbackMinutes: 30,
             maxTickets: 50,
-            maxPipelineRuns: cfg.pollMaxPerCycle || 5,
+            maxPipelineRuns: cfg?.pollMaxPerCycle || 5,
           });
 
           if (result.polling?.triggered || result.ticketsSynced > 0) {

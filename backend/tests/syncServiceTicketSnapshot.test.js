@@ -29,6 +29,17 @@ const prismaMock = {
   },
 };
 const clearReadCacheMock = jest.fn();
+// Live-queue SSE (FR 08-07 #13): syncService lazily imports the sse routes
+// module for its broadcast manager — intercept it so ingest tests can assert
+// (or rule out) the 'ticket-change' broadcast.
+const sseManagerMock = {
+  broadcast: jest.fn(),
+};
+
+jest.unstable_mockModule('../src/routes/sse.routes.js', () => ({
+  sseManager: sseManagerMock,
+  default: {},
+}));
 
 jest.unstable_mockModule('../src/integrations/freshservice.js', () => ({
   createFreshServiceClient: jest.fn(),
@@ -42,6 +53,8 @@ jest.unstable_mockModule('../src/integrations/freshserviceTransformer.js', () =>
   analyzeTicketActivities: jest.fn(),
   transformTicketThreadEntries: jest.fn(() => []),
   transformTicketConversationEntries: jest.fn(() => []),
+  getStatusString: jest.fn((id) => ({ 2: 'Open', 3: 'Pending', 4: 'Resolved', 5: 'Closed' }[id] || 'Open')),
+  getPriorityNumber: jest.fn((id) => (id >= 1 && id <= 4 ? id : 3)),
 }));
 
 jest.unstable_mockModule('../src/utils/parallelPool.js', () => ({
@@ -350,6 +363,119 @@ describe('syncService.syncFreshServiceTicketSnapshot', () => {
         newStatus: 'Pending',
       }),
     }));
+  });
+
+  test('broadcasts a workspace-scoped ticket-change SSE event when the status changed (FR 08-07 #13)', async () => {
+    const result = await syncService.syncFreshServiceTicketSnapshot(2, { id: 224186 }, {
+      client: {},
+      preparedTicket: {
+        freshserviceTicketId: 224186,
+        subject: 'Resolved in FreshService',
+        status: 'Resolved',
+        priority: 3,
+        createdAt: new Date(),
+        assignedTechId: 77,
+        workspaceId: 2,
+      },
+      existingTicket: {
+        id: 501,
+        assignedTechId: 77,
+        status: 'Open',
+        isSelfPicked: false,
+        assignedBy: null,
+        firstAssignedAt: null,
+        rejectionCount: 0,
+      },
+    });
+
+    expect(result.statusChanged).toBe(true);
+    expect(result.assignmentChanged).toBe(false);
+    expect(sseManagerMock.broadcast).toHaveBeenCalledWith(
+      'ticket-change',
+      expect.objectContaining({
+        action: 'sync',
+        workspaceId: 2,
+        ticketId: 501,
+        status: 'Resolved',
+        assignedTechId: 77,
+      }),
+      2,
+    );
+  });
+
+  test('broadcasts on assignment change too, scoped to the ticket workspace', async () => {
+    await syncService.syncFreshServiceTicketSnapshot(2, { id: 224187 }, {
+      client: {},
+      preparedTicket: {
+        freshserviceTicketId: 224187,
+        subject: 'Reassigned',
+        status: 'Open',
+        priority: 3,
+        createdAt: new Date(),
+        assignedTechId: 88,
+        workspaceId: 2,
+      },
+      existingTicket: {
+        id: 501,
+        assignedTechId: 12,
+        status: 'Open',
+        isSelfPicked: false,
+        assignedBy: null,
+        firstAssignedAt: null,
+        rejectionCount: 0,
+      },
+    });
+
+    expect(sseManagerMock.broadcast).toHaveBeenCalledWith(
+      'ticket-change',
+      expect.objectContaining({ action: 'sync', ticketId: 501, assignedTechId: 88 }),
+      2,
+    );
+  });
+
+  test('stays SILENT on a no-op re-sync — same status, same assignee (no refetch storms)', async () => {
+    const result = await syncService.syncFreshServiceTicketSnapshot(2, { id: 224188 }, {
+      client: {},
+      preparedTicket: {
+        freshserviceTicketId: 224188,
+        subject: 'Nothing changed',
+        status: 'Open',
+        priority: 3,
+        createdAt: new Date(),
+        assignedTechId: 77,
+        workspaceId: 2,
+      },
+      existingTicket: {
+        id: 501,
+        assignedTechId: 77,
+        status: 'Open',
+        isSelfPicked: false,
+        assignedBy: null,
+        firstAssignedAt: null,
+        rejectionCount: 0,
+      },
+    });
+
+    expect(result.statusChanged).toBe(false);
+    expect(result.assignmentChanged).toBe(false);
+    expect(sseManagerMock.broadcast).not.toHaveBeenCalled();
+  });
+
+  test('does not broadcast for brand-new tickets (no existing row = nothing "changed")', async () => {
+    await syncService.syncFreshServiceTicketSnapshot(2, { id: 224189 }, {
+      client: {},
+      preparedTicket: {
+        freshserviceTicketId: 224189,
+        subject: 'Brand new',
+        status: 'Open',
+        priority: 3,
+        createdAt: new Date(),
+        workspaceId: 2,
+      },
+      existingTicket: null,
+    });
+
+    expect(sseManagerMock.broadcast).not.toHaveBeenCalled();
   });
 
   test('ignores stale unassigned snapshots when current FreshService ticket still has an assignee', async () => {
