@@ -58,6 +58,57 @@ const getCardBackgroundColor = (openCount, maxOpenCount) => {
   return 'bg-red-50/50'; // Heavy load - extremely subtle red tint
 };
 
+// Text color for the mobile "open now" number — same load semantics as the
+// workload status colors (load-light <5, load-medium 5–9, load-heavy ≥10).
+const getLoadTextClass = (open) => {
+  if (open >= 10) return 'text-red-600';
+  if (open >= 5) return 'text-amber-700';
+  if (open > 0) return 'text-emerald-700';
+  return 'text-slate-400';
+};
+
+/**
+ * Mobile-only stat cell (below `sm`): tiny inline icon + number with a caption
+ * under it — the phone-scale answer to the desktop icon tiles, which read
+ * gigantic on a 390px card (QA 08-08). Interactive cells keep a ≥44px hit box.
+ */
+function MobileStat({ icon: Icon, value, label, iconClass = '', numClass = '', suffix = null, muted = false, title, onClick }) {
+  const body = (
+    <>
+      <span className="flex items-center gap-1 leading-none">
+        <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${muted ? 'text-slate-300' : iconClass}`} aria-hidden="true" />
+        <span className={`text-sm font-bold ${muted ? 'text-slate-300' : numClass}`}>
+          {value}
+          {suffix && !muted && <span className="ml-0.5 text-[9px] font-semibold text-slate-400">{suffix}</span>}
+        </span>
+      </span>
+      <span className={`max-w-full truncate text-[9px] font-semibold uppercase tracking-wide leading-none ${muted ? 'text-slate-300' : 'text-slate-500'}`}>
+        {label}
+      </span>
+    </>
+  );
+  const base = 'flex min-h-[44px] min-w-0 flex-col items-center justify-center gap-1 rounded-lg';
+  if (onClick) {
+    // Only the Rejected cell is tappable — a faint red chip signals it
+    // (tooltips being unreachable on touch).
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        title={title}
+        className={`${base} tp-focus-ring bg-red-50/70 active:bg-red-100 transition-colors`}
+      >
+        {body}
+      </button>
+    );
+  }
+  return (
+    <div className={base} title={title}>
+      {body}
+    </div>
+  );
+}
+
 // Get initials from technician name (e.g., "Vahid Haeri" -> "VH")
 const getInitials = (name) => {
   const parts = name.split(' ').filter(p => p.length > 0);
@@ -254,7 +305,7 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
       <button
         onClick={handleHideToggle}
         aria-label={`Hide ${technician.name}`}
-        className="hide-button tp-focus-ring absolute top-2 right-2 p-1.5 rounded-lg z-10 text-gray-400 bg-white/70 opacity-70 hover:bg-gray-100 hover:opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
+        className="hide-button tp-focus-ring absolute top-2 right-2 p-2 sm:p-1.5 rounded-lg z-10 text-gray-400 bg-white/70 opacity-70 hover:bg-gray-100 hover:opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
         title="Hide technician"
       >
         <EyeOff className="w-4 h-4" />
@@ -263,7 +314,7 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
       {/* Card Content */}
       <div className="p-3 sm:p-4">
         {/* Header: Photo + Name + Badges */}
-        <div className="flex items-start gap-3 mb-3 sm:mb-4">
+        <div className="flex items-center sm:items-start gap-3 mb-2 sm:mb-4">
           {/* Profile Photo or Initials Circle — explicit agent-page affordance */}
           <button
             type="button"
@@ -276,15 +327,15 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
               <img
                 src={technician.photoUrl}
                 alt={technician.name}
-                className="w-14 h-14 rounded-full object-cover shadow-md border-2 border-gray-300"
+                className="w-12 h-12 sm:w-14 sm:h-14 rounded-full object-cover shadow-md border-2 border-gray-300"
                 onError={(e) => {
                   // Hide broken images so alt text doesn't leak the real name.
                   e.currentTarget.style.display = 'none';
                 }}
               />
             ) : (
-              <span className="flex items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-blue-600 w-14 h-14 shadow-md border-2 border-blue-400">
-                <span className="text-base font-bold text-white">
+              <span className="flex items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-blue-600 w-12 h-12 sm:w-14 sm:h-14 shadow-md border-2 border-blue-400">
+                <span className="text-sm sm:text-base font-bold text-white">
                   {getInitials(technician.name)}
                 </span>
               </span>
@@ -292,7 +343,7 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
           </button>
 
           {/* Name and Badges Column */}
-          <div className="flex-1 min-w-0 pt-1">
+          <div className="flex-1 min-w-0 sm:pt-1">
             <div className="flex items-center gap-2 flex-wrap">
               {/* Rank Badge */}
               {isTopPerformer && (
@@ -503,30 +554,43 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
           /* Simple style (QA 07-30 #9): total band + plain-number stat pairs
              with full-word labels — no icon tiles, minimal color. */
           <>
-            <div className="mb-3 flex items-baseline justify-center gap-1.5 rounded-lg bg-violet-50/60 py-2">
+            <div className="mb-3 flex flex-wrap items-baseline justify-center gap-x-1.5 gap-y-0.5 rounded-lg bg-violet-50/60 px-2 py-2">
               <span className="text-2xl font-bold text-indigo-600 leading-none">{totalTickets}</span>
               <span className="text-xs font-medium text-slate-500">
                 {totalTickets === 1 ? 'ticket' : 'tickets'}{' '}
                 {viewMode === 'weekly' ? 'this week' : viewMode === 'monthly' ? 'this month' : 'today'}
               </span>
+              {/* Mobile only (daily): open-now, so phones don't lose the
+                  workload signal the desktop table shows in its Open column */}
+              {viewMode === 'daily' && (
+                <span
+                  className="sm:hidden flex items-baseline gap-1 border-l border-violet-200/70 pl-2.5 ml-1"
+                  title={`${openOnlyCount} open ticket${openOnlyCount === 1 ? '' : 's'} right now${pendingCount > 0 ? ` · ${pendingCount} pending` : ''}`}
+                >
+                  <span className="text-2xl font-bold leading-none text-slate-700">{openOnlyCount}</span>
+                  <span className="text-xs font-medium text-slate-500">
+                    open now{pendingCount > 0 ? ` +${pendingCount} pend` : ''}
+                  </span>
+                </span>
+              )}
             </div>
 
             <div className="mb-2 grid grid-cols-3 gap-x-2 gap-y-3">
               <div className="flex flex-col items-center text-center">
                 <div className={`text-base font-semibold ${selfPicked > 0 ? 'text-slate-800' : 'text-slate-300'}`}>{selfPicked}</div>
-                <div className="text-[10px] text-slate-400 leading-tight">Picked up themselves</div>
+                <div className="text-[10px] text-slate-400 max-sm:text-slate-500 leading-tight">Picked up themselves</div>
               </div>
               <div className="flex flex-col items-center text-center">
                 <div className={`text-base font-semibold ${appAssigned > 0 ? 'text-slate-800' : 'text-slate-300'}`}>{appAssigned}</div>
-                <div className="text-[10px] text-slate-400 leading-tight">Sent by the app</div>
+                <div className="text-[10px] text-slate-400 max-sm:text-slate-500 leading-tight">Sent by the app</div>
               </div>
               <div className="flex flex-col items-center text-center">
                 <div className={`text-base font-semibold ${assigned > 0 ? 'text-slate-800' : 'text-slate-300'}`}>{assigned}</div>
-                <div className="text-[10px] text-slate-400 leading-tight">Sent by a coordinator</div>
+                <div className="text-[10px] text-slate-400 max-sm:text-slate-500 leading-tight">Sent by a coordinator</div>
               </div>
               <div className="flex flex-col items-center text-center">
                 <div className={`text-base font-semibold ${closed > 0 ? 'text-green-700' : 'text-slate-300'}`}>{closed}</div>
-                <div className="text-[10px] text-slate-400 leading-tight">Resolved</div>
+                <div className="text-[10px] text-slate-400 max-sm:text-slate-500 leading-tight">Resolved</div>
               </div>
               <div
                 className="flex flex-col items-center text-center"
@@ -537,20 +601,96 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
                 }
               >
                 <div className={`text-base font-semibold ${rejectedDisplay > 0 ? 'text-red-600' : 'text-slate-300'}`}>{rejectedDisplay}</div>
-                <div className="text-[10px] text-slate-400 leading-tight">Rejected</div>
+                <div className="text-[10px] text-slate-400 max-sm:text-slate-500 leading-tight">Rejected</div>
               </div>
               <div className="flex flex-col items-center text-center" title={csatTooltip}>
                 <div className={`text-base font-semibold ${hasCSAT ? getCSATColor(csatOutOf5) : 'text-slate-300'}`}>
                   {hasCSAT ? csatOutOf5?.toFixed(1) : '—'}
                 </div>
-                <div className="text-[10px] text-slate-400 leading-tight">CSAT score</div>
+                <div className="text-[10px] text-slate-400 max-sm:text-slate-500 leading-tight">
+                  CSAT score
+                  {/* Mobile: tooltips are unreachable on touch, so surface N inline */}
+                  {hasCSAT && <span className="sm:hidden"> ({csatCount})</span>}
+                </div>
               </div>
             </div>
           </>
         ) : (
           <>
-            {/* Ticket Status Display */}
-            <div className="mb-3 py-3 border-b border-gray-200">
+            {/* ── Mobile (<sm) compact presentation ──────────────────────
+                The display-size Open number + icon tiles read gigantic on a
+                phone (QA 08-08). Same data, phone-scale hierarchy: a calm
+                summary band, then an inline six-stat strip. Desktop Cards
+                view (sm+) keeps the original presentation below. */}
+            <div className="sm:hidden mb-1">
+              <div className="mb-1.5 flex flex-wrap items-center justify-center gap-x-4 gap-y-0.5 rounded-lg border border-slate-100 bg-slate-50/80 px-2 py-2">
+                {viewMode === 'daily' && (
+                  <span
+                    className="flex items-baseline gap-1"
+                    title={`Workload: ${openOnlyCount} open ticket${openOnlyCount === 1 ? '' : 's'}${pendingCount > 0 ? ` · ${pendingCount} pending` : ''}`}
+                  >
+                    <span className={`text-lg font-bold leading-none ${getLoadTextClass(openOnlyCount)}`}>{openOnlyCount}</span>
+                    <span className="text-[11px] font-medium text-slate-500">
+                      open now{pendingCount > 0 ? ` +${pendingCount} pend` : ''}
+                    </span>
+                  </span>
+                )}
+                <span className={`flex items-baseline gap-1 ${viewMode === 'daily' ? 'border-l border-slate-200 pl-3' : ''}`}>
+                  <span className="text-lg font-bold leading-none text-indigo-600">{totalTickets}</span>
+                  <span className="text-[11px] font-medium text-slate-500">
+                    {viewMode === 'weekly' ? 'this week' : viewMode === 'monthly' ? 'this month' : 'new today'}
+                  </span>
+                </span>
+              </div>
+              <div className="grid grid-cols-6">
+                <MobileStat icon={Hand} value={selfPicked} label="Self" iconClass="text-purple-600" numClass="text-purple-900" muted={selfPicked === 0} title="Picked up themselves" />
+                <MobileStat
+                  icon={Bot}
+                  value={appAssigned}
+                  label="App"
+                  iconClass="text-sky-600"
+                  numClass="text-sky-800"
+                  muted={appAssigned === 0}
+                  title={appAssigned > 0 ? 'App-assigned tickets (by Ticket Pulse service account)' : 'No app-assigned tickets'}
+                />
+                <MobileStat icon={Send} value={assigned} label="Coord" iconClass="text-orange-600" numClass="text-orange-800" muted={assigned === 0} title={`Coordinator-assigned: ${assigned}`} />
+                <MobileStat icon={CheckSquare} value={closed} label="Done" iconClass="text-green-600" numClass="text-green-800" muted={closed === 0} title={`Closed: ${closed}`} />
+                <MobileStat
+                  icon={RotateCcw}
+                  value={rejectedDisplay}
+                  label="Rej"
+                  iconClass="text-red-500"
+                  numClass="text-red-700"
+                  muted={rejectedDisplay === 0}
+                  title={
+                    rejectedDisplay > 0
+                      ? `Rejected tickets — picked up then put back in queue\nSelected ${periodLabel}: ${rejectedDisplay}\n\nTap to see the list`
+                      : `No bounced tickets ${periodLabel}`
+                  }
+                  onClick={
+                    rejectedDisplay > 0
+                      ? (e) => {
+                        e.stopPropagation();
+                        navigate(buildBouncedUrl(technician.id, viewMode, selectedDate, selectedWeek, selectedMonth));
+                      }
+                      : undefined
+                  }
+                />
+                <MobileStat
+                  icon={Star}
+                  value={hasCSAT ? csatOutOf5?.toFixed(1) : '—'}
+                  suffix={hasCSAT ? '/5' : null}
+                  label={hasCSAT ? `CSAT (${csatCount})` : 'CSAT'}
+                  iconClass={getCSATColor(csatOutOf5)}
+                  numClass={getCSATColor(csatOutOf5)}
+                  muted={!hasCSAT}
+                  title={csatTooltip}
+                />
+              </div>
+            </div>
+
+            {/* Ticket Status Display (sm+ / desktop Cards view) */}
+            <div className="hidden sm:block mb-3 py-3 border-b border-gray-200">
               <div className="flex items-center justify-center gap-4 sm:gap-6">
                 {/* Open Count - Only show in daily view */}
                 {viewMode === 'daily' && (
@@ -584,10 +724,10 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
               </div>
             </div>
 
-            {/* Metrics Grid - Icons + Numbers */}
+            {/* Metrics Grid - Icons + Numbers (sm+ / desktop Cards view) */}
             {/* Fixed 6-column layout so all techs align vertically. Optional metrics
             (App, Rej, CSAT) render as muted placeholders when count is 0. */}
-            <div className="grid grid-cols-3 gap-2 mb-2 sm:grid-cols-6">
+            <div className="hidden gap-2 mb-2 sm:grid sm:grid-cols-6">
 
               {/* Self - always primary */}
               <div className="flex flex-col items-center p-2 bg-purple-100 rounded-lg shadow-sm border border-purple-200">
@@ -693,7 +833,7 @@ export default function TechCard({ technician, onHide, rank, selectedDate, selec
         type="button"
         onClick={(e) => { e.stopPropagation(); setTicketsOpen((v) => !v); }}
         aria-expanded={ticketsOpen}
-        className="tp-focus-ring flex w-full items-center justify-between gap-2 border-t border-gray-200 px-4 py-2.5 text-left active:bg-slate-50"
+        className="tp-focus-ring flex w-full items-center justify-between gap-2 border-t border-gray-200 px-4 py-3 sm:py-2.5 text-left active:bg-slate-50"
       >
         <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600">
           <TicketIcon className="h-3.5 w-3.5 text-slate-400" aria-hidden="true" />
