@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.3.02-preview';
+export const APP_VERSION = '3.3.03-preview';
 
 export const changelog = [
+  {
+    version: '3.3.03-preview',
+    date: 'August 8, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>📱 Mobile dashboard, rebalanced</strong> — agent cards on phones now use the Simple-mode language: the oversized stat tiles are replaced by a calm “N open now · N new today” band and a compact one-row stat strip (small icons, muted zeros, CSAT shows its response count inline), with proper tap targets and the rejection count tappable for drill-down. Four design iterations, verified at real phone sizes in both Simple and Detailed styles; the desktop Cards view is pixel-identical.' },
+    ],
+  },
   {
     version: '3.3.02-preview',
     date: 'August 8, 2026',
