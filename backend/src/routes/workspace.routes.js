@@ -25,8 +25,9 @@ router.use(requireAuth);
 router.get(
   '/',
   asyncHandler(async (req, res) => {
-    const email = req.session?.user?.email;
-    const role = req.session?.user?.role;
+    const user = req.session?.user ?? req.user;
+    const email = user?.email;
+    const role = user?.role;
 
     let workspaces;
     if (role === 'admin') {
@@ -35,12 +36,11 @@ router.get(
         role: 'admin',
       }));
     } else {
-      workspaces = await workspaceRepository.getAccessibleWorkspaces(email);
-      if (workspaces.length === 0) {
-        // Agent-role users have no workspace_access rows — their technician
-        // profile is what grants them a workspace (native ticketing).
-        workspaces = await workspaceRepository.getTechnicianWorkspaces(email);
-      }
+      // Union of access-row workspaces and technician workspaces (Phase A1
+      // picker merge): a partial access grant must never hide the other
+      // workspaces the user's technician profiles cover. Access role wins
+      // the label; technician-only rows carry role 'agent'.
+      workspaces = await workspaceRepository.getMergedWorkspaces(email);
     }
 
     res.json({ success: true, data: workspaces });
@@ -254,13 +254,19 @@ router.post(
 
     const ws = await workspaceRepository.getById(Number(workspaceId));
 
-    // Verify the user has access to this workspace (live DB check)
-    const userRole = req.session?.user?.role;
+    // Verify the user has access to this workspace (live DB check). An
+    // access row OR an active technician profile qualifies — the merged
+    // picker (Phase A1) offers technician workspaces, so select must too.
+    const sessionOrTokenUser = req.session?.user ?? req.user;
+    const userRole = sessionOrTokenUser?.role;
     if (userRole !== 'admin') {
-      const email = req.session?.user?.email;
+      const email = sessionOrTokenUser?.email;
       const wsRole = email ? await workspaceRepository.getAccessRole(email, ws.id) : null;
-      if (!wsRole) {
-        return res.status(403).json({ success: false, message: 'You do not have access to this workspace' });
+      const isTechnician = !wsRole && email
+        ? await workspaceRepository.hasActiveTechnician(email, ws.id)
+        : false;
+      if (!wsRole && !isTechnician) {
+        return res.status(403).json({ success: false, message: 'You do not have access to this workspace', code: 'workspace_access_denied' });
       }
     }
 

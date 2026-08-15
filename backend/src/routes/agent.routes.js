@@ -9,7 +9,7 @@ const router = express.Router();
 
 router.get('/competencies', asyncHandler(async (req, res) => {
   const result = await agentCompetencyService.getMyCompetencyMatrix(
-    req.session?.user?.email,
+    (req.session?.user ?? req.user)?.email,
     req.query.workspaceId,
   );
   res.json({ success: true, data: result });
@@ -17,7 +17,7 @@ router.get('/competencies', asyncHandler(async (req, res) => {
 
 router.post('/competencies/changes', asyncHandler(async (req, res) => {
   const result = await agentCompetencyService.submitMyCompetencyChange(
-    req.session?.user?.email,
+    (req.session?.user ?? req.user)?.email,
     req.body || {},
   );
   res.json({ success: true, ...result });
@@ -25,7 +25,7 @@ router.post('/competencies/changes', asyncHandler(async (req, res) => {
 
 router.post('/competencies/changes/bulk', asyncHandler(async (req, res) => {
   const result = await agentCompetencyService.submitMyCompetencyChanges(
-    req.session?.user?.email,
+    (req.session?.user ?? req.user)?.email,
     req.body || {},
   );
   res.json({ success: true, ...result });
@@ -33,7 +33,7 @@ router.post('/competencies/changes/bulk', asyncHandler(async (req, res) => {
 
 router.delete('/competencies/changes/:id', asyncHandler(async (req, res) => {
   const result = await agentCompetencyService.cancelMyCompetencyChange(
-    req.session?.user?.email,
+    (req.session?.user ?? req.user)?.email,
     req.params.id,
   );
   res.json({ success: true, ...result });
@@ -41,7 +41,7 @@ router.delete('/competencies/changes/:id', asyncHandler(async (req, res) => {
 
 router.get('/notifications/preferences', asyncHandler(async (req, res) => {
   const result = await notificationPreferenceService.getMyPreferences(
-    req.session?.user?.email,
+    (req.session?.user ?? req.user)?.email,
     req.query.workspaceId,
   );
   res.json({ success: true, data: result });
@@ -49,7 +49,7 @@ router.get('/notifications/preferences', asyncHandler(async (req, res) => {
 
 router.put('/notifications/preferences', asyncHandler(async (req, res) => {
   const result = await notificationPreferenceService.saveMyPreferences(
-    req.session?.user?.email,
+    (req.session?.user ?? req.user)?.email,
     req.body || {},
   );
   res.json({ success: true, data: result });
@@ -57,7 +57,7 @@ router.put('/notifications/preferences', asyncHandler(async (req, res) => {
 
 router.post('/notifications/phone-verification', asyncHandler(async (req, res) => {
   const result = await notificationPreferenceService.requestPhoneVerification(
-    req.session?.user?.email,
+    (req.session?.user ?? req.user)?.email,
     req.body || {},
   );
   res.json({ success: true, ...result });
@@ -65,7 +65,7 @@ router.post('/notifications/phone-verification', asyncHandler(async (req, res) =
 
 router.post('/notifications/phone-verification/confirm', asyncHandler(async (req, res) => {
   const result = await notificationPreferenceService.confirmPhoneVerification(
-    req.session?.user?.email,
+    (req.session?.user ?? req.user)?.email,
     req.body || {},
   );
   res.json({ success: true, data: result });
@@ -73,70 +73,70 @@ router.post('/notifications/phone-verification/confirm', asyncHandler(async (req
 
 // Custom agent alerts (per-agent subscriptions). Identity from the SSO session.
 router.get('/alerts', asyncHandler(async (req, res) => {
-  const result = await agentAlertService.list(req.session?.user?.email, req.query.workspaceId);
+  const result = await agentAlertService.list((req.session?.user ?? req.user)?.email, req.query.workspaceId);
   res.json({ success: true, data: result });
 }));
 
 router.get('/alerts-options', asyncHandler(async (req, res) => {
-  const result = await agentAlertService.options(req.session?.user?.email, req.query.workspaceId);
+  const result = await agentAlertService.options((req.session?.user ?? req.user)?.email, req.query.workspaceId);
   res.json({ success: true, data: result });
 }));
 
 router.post('/alerts', asyncHandler(async (req, res) => {
-  const result = await agentAlertService.create(req.session?.user?.email, req.body?.workspaceId || req.query.workspaceId, req.body || {});
+  const result = await agentAlertService.create((req.session?.user ?? req.user)?.email, req.body?.workspaceId || req.query.workspaceId, req.body || {});
   res.status(201).json({ success: true, data: result });
 }));
 
 router.patch('/alerts/:id', asyncHandler(async (req, res) => {
-  const result = await agentAlertService.update(req.session?.user?.email, req.body?.workspaceId || req.query.workspaceId, req.params.id, req.body || {});
+  const result = await agentAlertService.update((req.session?.user ?? req.user)?.email, req.body?.workspaceId || req.query.workspaceId, req.params.id, req.body || {});
   res.json({ success: true, data: result });
 }));
 
 router.delete('/alerts/:id', asyncHandler(async (req, res) => {
-  const result = await agentAlertService.remove(req.session?.user?.email, req.query.workspaceId, req.params.id);
+  const result = await agentAlertService.remove((req.session?.user ?? req.user)?.email, req.query.workspaceId, req.params.id);
   res.json({ success: true, data: result });
 }));
 
 router.put('/alerts-quiet-hours', asyncHandler(async (req, res) => {
-  const result = await agentAlertService.saveQuietHours(req.session?.user?.email, req.body?.workspaceId || req.query.workspaceId, req.body || {});
+  const result = await agentAlertService.saveQuietHours((req.session?.user ?? req.user)?.email, req.body?.workspaceId || req.query.workspaceId, req.body || {});
   res.json({ success: true, data: result });
 }));
 
 router.get('/summit-2026/feedback', asyncHandler(async (req, res) => {
-  const result = await summitWorkshopService.getAuthenticatedFeedback(1, req.session?.user || {});
+  const result = await summitWorkshopService.getAuthenticatedFeedback(1, (req.session?.user ?? req.user) || {});
   res.json({ success: true, ...result });
 }));
 
 router.get('/summit-2026/workshop', asyncHandler(async (req, res) => {
-  const result = await summitWorkshopService.getAuthenticatedWorkshop(1, req.session?.user || {});
+  const result = await summitWorkshopService.getAuthenticatedWorkshop(1, (req.session?.user ?? req.user) || {});
   res.json({ success: true, ...result });
 }));
 
 router.get('/summit-2026/events', asyncHandler(async (req, res) => {
-  await summitWorkshopService.streamAuthenticatedFeedback(1, req.session?.user || {}, res);
+  await summitWorkshopService.streamAuthenticatedFeedback(1, (req.session?.user ?? req.user) || {}, res);
 }));
 
 router.get('/summit-2026/workshop/events', asyncHandler(async (req, res) => {
-  await summitWorkshopService.streamAuthenticatedWorkshop(1, req.session?.user || {}, res);
+  await summitWorkshopService.streamAuthenticatedWorkshop(1, (req.session?.user ?? req.user) || {}, res);
 }));
 
 router.post('/summit-2026/votes', asyncHandler(async (req, res) => {
-  const result = await summitWorkshopService.submitAuthenticatedVote(1, req.session?.user || {}, req.body || {});
+  const result = await summitWorkshopService.submitAuthenticatedVote(1, (req.session?.user ?? req.user) || {}, req.body || {});
   res.json({ success: true, ...result });
 }));
 
 router.post('/summit-2026/feedback/items', asyncHandler(async (req, res) => {
-  const result = await summitWorkshopService.submitAuthenticatedFeedbackItem(1, req.session?.user || {}, req.body || {});
+  const result = await summitWorkshopService.submitAuthenticatedFeedbackItem(1, (req.session?.user ?? req.user) || {}, req.body || {});
   res.json({ success: true, ...result });
 }));
 
 router.post('/summit-2026/feedback/items/:itemId/vote', asyncHandler(async (req, res) => {
-  const result = await summitWorkshopService.voteAuthenticatedFeedbackItem(1, req.session?.user || {}, req.params.itemId, req.body || {});
+  const result = await summitWorkshopService.voteAuthenticatedFeedbackItem(1, (req.session?.user ?? req.user) || {}, req.params.itemId, req.body || {});
   res.json({ success: true, ...result });
 }));
 
 router.post('/summit-2026/feedback/items/:itemId/comments', asyncHandler(async (req, res) => {
-  const result = await summitWorkshopService.commentAuthenticatedFeedbackItem(1, req.session?.user || {}, req.params.itemId, req.body || {});
+  const result = await summitWorkshopService.commentAuthenticatedFeedbackItem(1, (req.session?.user ?? req.user) || {}, req.params.itemId, req.body || {});
   res.json({ success: true, ...result });
 }));
 

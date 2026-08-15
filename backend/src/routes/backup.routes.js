@@ -19,7 +19,7 @@ const router = express.Router();
 router.use(requireAdmin);
 
 function isGlobalAdmin(req) {
-  return req.session?.user?.role === 'admin';
+  return (req.session?.user ?? req.user)?.role === 'admin';
 }
 
 function parseId(raw, label) {
@@ -90,7 +90,7 @@ router.post(
       tier,
       workspaceId: scope === 'workspace' ? req.workspaceId : null,
       trigger: 'manual',
-      actorEmail: req.session?.user?.email || null,
+      actorEmail: (req.session?.user ?? req.user)?.email || null,
     });
     res.status(snapshot.status === 'failed' ? 500 : 201).json({ success: snapshot.status !== 'failed', data: snapshot });
   }),
@@ -119,7 +119,7 @@ router.delete(
   asyncHandler(async (req, res) => {
     const snapshot = await loadAccessibleSnapshot(req);
     await backupService.deleteSnapshot(snapshot.id);
-    logger.info(`[backup] snapshot ${snapshot.id} deleted by ${req.session?.user?.email || 'unknown'}`);
+    logger.info(`[backup] snapshot ${snapshot.id} deleted by ${(req.session?.user ?? req.user)?.email || 'unknown'}`);
     res.json({ success: true, message: 'Snapshot deleted' });
   }),
 );
@@ -149,7 +149,7 @@ router.post(
       modules: req.body?.modules,
       mode: req.body?.mode || 'merge',
       sourceWorkspaceId: req.body?.sourceWorkspaceId,
-      actorEmail: req.session?.user?.email || null,
+      actorEmail: (req.session?.user ?? req.user)?.email || null,
     });
     res.json({ success: true, data: result });
   }),

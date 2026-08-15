@@ -359,7 +359,7 @@ router.post(
         workspaceId: req.workspaceId,
         skipExisting,
         activityConcurrency,
-        triggeredByEmail: req.session?.user?.email || null,
+        triggeredByEmail: (req.session?.user ?? req.user)?.email || null,
         onProgress: (progress) => {
           send('backfill-progress', progress);
         },
@@ -467,11 +467,11 @@ router.post(
       where: { id },
       data: {
         cancelRequested: true,
-        cancelledByEmail: req.session?.user?.email || null,
+        cancelledByEmail: (req.session?.user ?? req.user)?.email || null,
       },
     });
 
-    logger.info(`Backfill run ${id} cancellation requested by ${req.session?.user?.email || 'admin'}`);
+    logger.info(`Backfill run ${id} cancellation requested by ${(req.session?.user ?? req.user)?.email || 'admin'}`);
     res.json({ success: true, message: 'Cancellation requested. The backfill will stop within ~10 seconds.' });
   }),
 );

@@ -2,6 +2,7 @@ import express from 'express';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import {
   requireAuth, requireAdmin, requireReviewer, requireWorkspaceAccess,
+  requireWorkspaceMemberOrAgent,
 } from '../middleware/auth.js';
 import { requireWorkspace } from '../middleware/workspace.js';
 import { ValidationError } from '../utils/errors.js';
@@ -78,7 +79,7 @@ function validateEmail(value, fieldName) {
 }
 
 function attachWorkspaceIdIfPresent(req, _res, next) {
-  const raw = req.headers['x-workspace-id'] || req.session?.user?.selectedWorkspaceId || req.query.workspaceId;
+  const raw = req.headers['x-workspace-id'] || (req.session?.user ?? req.user)?.selectedWorkspaceId || req.query.workspaceId;
   if (raw !== undefined && raw !== null && raw !== '') {
     const workspaceId = Number(raw);
     if (!Number.isNaN(workspaceId)) req.workspaceId = workspaceId;
@@ -87,7 +88,7 @@ function attachWorkspaceIdIfPresent(req, _res, next) {
 }
 
 function requestActor(req) {
-  return req.session?.user || req.user || null;
+  return req.session?.user ?? req.user ?? null;
 }
 
 function parsePositiveId(value, label = 'id') {
@@ -626,7 +627,7 @@ router.put(
   requireAdmin,
   asyncHandler(async (req, res) => {
     const { default: slaPolicyService } = await import('../services/slaPolicyService.js');
-    const policy = await slaPolicyService.upsert(req.workspaceId, req.body || {}, req.session?.user || null);
+    const policy = await slaPolicyService.upsert(req.workspaceId, req.body || {}, (req.session?.user ?? req.user) || null);
     res.json({ success: true, data: policy });
   }),
 );
@@ -644,11 +645,12 @@ router.delete(
 
 // Ticket-type registry: the per-workspace catalogue of ticket types (names,
 // LLM descriptions, FS mapping, pill styling). Read is open to any workspace
-// member (create/detail/filter UIs need it); writes are admin-only.
+// member AND to agent-role technicians (Phase A1 agent-allowed tier — the
+// queue's type pills/filters need it); writes are admin-only.
 router.get(
   '/ticket-types',
   requireWorkspace,
-  requireWorkspaceAccess,
+  requireWorkspaceMemberOrAgent,
   asyncHandler(async (req, res) => {
     const { default: ticketTypeService } = await import('../services/ticketTypeService.js');
     res.json({ success: true, data: await ticketTypeService.listTypes(req.workspaceId) });
@@ -662,7 +664,7 @@ router.post(
   requireAdmin,
   asyncHandler(async (req, res) => {
     const { default: ticketTypeService } = await import('../services/ticketTypeService.js');
-    const created = await ticketTypeService.createType(req.workspaceId, req.body || {}, req.session?.user?.email);
+    const created = await ticketTypeService.createType(req.workspaceId, req.body || {}, (req.session?.user ?? req.user)?.email);
     res.status(201).json({ success: true, data: created });
   }),
 );
@@ -674,7 +676,7 @@ router.patch(
   requireAdmin,
   asyncHandler(async (req, res) => {
     const { default: ticketTypeService } = await import('../services/ticketTypeService.js');
-    const updated = await ticketTypeService.updateType(req.workspaceId, req.params.id, req.body || {}, req.session?.user?.email);
+    const updated = await ticketTypeService.updateType(req.workspaceId, req.params.id, req.body || {}, (req.session?.user ?? req.user)?.email);
     res.json({ success: true, data: updated });
   }),
 );
@@ -687,7 +689,7 @@ router.delete(
   requireAdmin,
   asyncHandler(async (req, res) => {
     const { default: ticketTypeService } = await import('../services/ticketTypeService.js');
-    const retired = await ticketTypeService.retireType(req.workspaceId, req.params.id, req.session?.user?.email);
+    const retired = await ticketTypeService.retireType(req.workspaceId, req.params.id, (req.session?.user ?? req.user)?.email);
     res.json({ success: true, data: retired });
   }),
 );
@@ -735,7 +737,7 @@ router.post(
   requireAdmin,
   asyncHandler(async (req, res) => {
     const { default: ticketMacroService } = await import('../services/ticketMacroService.js');
-    const macro = await ticketMacroService.create(req.workspaceId, req.body || {}, req.session?.user || null);
+    const macro = await ticketMacroService.create(req.workspaceId, req.body || {}, (req.session?.user ?? req.user) || null);
     res.status(201).json({ success: true, data: macro });
   }),
 );
@@ -747,7 +749,7 @@ router.patch(
   requireAdmin,
   asyncHandler(async (req, res) => {
     const { default: ticketMacroService } = await import('../services/ticketMacroService.js');
-    const macro = await ticketMacroService.update(req.workspaceId, req.params.id, req.body || {}, req.session?.user || null);
+    const macro = await ticketMacroService.update(req.workspaceId, req.params.id, req.body || {}, (req.session?.user ?? req.user) || null);
     res.json({ success: true, data: macro });
   }),
 );
@@ -1274,7 +1276,7 @@ router.put(
       return res.status(400).json({ success: false, message: 'emails array is required and must not be empty' });
     }
 
-    const currentUserEmail = req.session?.user?.email?.toLowerCase();
+    const currentUserEmail = (req.session?.user ?? req.user)?.email?.toLowerCase();
     const cleaned = emails.map(e => e.trim().toLowerCase()).filter(Boolean);
 
     if (currentUserEmail && !cleaned.includes(currentUserEmail)) {

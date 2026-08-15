@@ -51,7 +51,7 @@ router.get('/settings', requireReviewer, asyncHandler(async (req, res) => {
 }));
 
 router.put('/settings', requireAdmin, asyncHandler(async (req, res) => {
-  const actorEmail = req.session?.user?.email || 'admin';
+  const actorEmail = (req.session?.user ?? req.user)?.email || 'admin';
   const settings = await providerSettingsService.upsertSettings(
     req.workspaceId,
     req.body?.settings || req.body,

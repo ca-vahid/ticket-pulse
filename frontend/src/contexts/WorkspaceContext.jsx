@@ -5,6 +5,10 @@ import { useAuth } from './AuthContext';
 const WorkspaceContext = createContext(null);
 
 const LS_KEY = 'tp_selectedWorkspace';
+// Sticky flag for "the server never learned about the last workspace switch".
+// sessionStorage because switchWorkspace() is usually followed by a full page
+// reload — a plain state flag would die with the old document.
+const SWITCH_ERR_KEY = 'tp_wsSwitchError';
 
 function loadPersistedWorkspace() {
   try {
@@ -141,6 +145,52 @@ export function WorkspaceProvider({ children }) {
     return null;
   }, []);
 
+  // ------------------------------------------------------------------
+  // Local/server workspace divergence guard (realtime plan Phase 1).
+  // switchWorkspace() updates localStorage + module state synchronously, but
+  // the server-session select used to be fire-and-forget with a swallowed
+  // error — a failed call left the SESSION on the old workspace, which is the
+  // root of the wrong-SSE-channel zombie class. Now: one retry, then a
+  // user-visible error (surfaced by AppHeader) that survives the reload.
+  // ------------------------------------------------------------------
+  const [switchError, setSwitchError] = useState(() => {
+    try { return sessionStorage.getItem(SWITCH_ERR_KEY) || null; } catch { return null; }
+  });
+
+  const clearSwitchError = useCallback(() => {
+    setSwitchError(null);
+    try { sessionStorage.removeItem(SWITCH_ERR_KEY); } catch { /* ignore */ }
+  }, []);
+
+  const selectWorkspaceWithRetry = useCallback(async (targetId) => {
+    const attempt = async () => { await selectWorkspace(targetId); };
+    try {
+      await attempt();
+      clearSwitchError();
+      return true;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      try {
+        await attempt();
+        clearSwitchError();
+        return true;
+      } catch {
+        const message = 'Workspace switch did not reach the server — live updates and data may still show the previous workspace.';
+        setSwitchError(message);
+        try { sessionStorage.setItem(SWITCH_ERR_KEY, message); } catch { /* ignore */ }
+        return false;
+      }
+    }
+  }, [selectWorkspace, clearSwitchError]);
+
+  // Re-attempt the server-side select for the locally selected workspace
+  // (AppHeader's error banner "Retry" affordance).
+  const retryWorkspaceSync = useCallback(async () => {
+    const target = currentWorkspace?.id;
+    if (!target) { clearSwitchError(); return false; }
+    return selectWorkspaceWithRetry(target);
+  }, [currentWorkspace?.id, selectWorkspaceWithRetry, clearSwitchError]);
+
   const switchWorkspace = useCallback((targetId) => {
     const ws = availableWorkspaces.find(w => w.id === targetId);
     const selected = ws
@@ -170,8 +220,11 @@ export function WorkspaceProvider({ children }) {
     }
     appKeys.forEach(k => sessionStorage.removeItem(k));
 
-    selectWorkspace(targetId).catch(() => {});
-  }, [availableWorkspaces, selectWorkspace]);
+    // Fire-and-forget from the caller's perspective (callers may reload the
+    // page immediately), but WITH retry + persistent visible error — see
+    // selectWorkspaceWithRetry above.
+    selectWorkspaceWithRetry(targetId);
+  }, [availableWorkspaces, selectWorkspaceWithRetry]);
 
   const refreshWorkspaces = useCallback(async () => {
     try {
@@ -204,6 +257,9 @@ export function WorkspaceProvider({ children }) {
         switchWorkspace,
         refreshWorkspaces,
         clearWorkspace,
+        switchError,
+        clearSwitchError,
+        retryWorkspaceSync,
       }}
     >
       {children}

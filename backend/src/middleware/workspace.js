@@ -20,7 +20,7 @@ export function requireWorkspace(req, res, next) {
   }
 
   const fromHeader = req.headers['x-workspace-id'];
-  const fromSession = req.session?.user?.selectedWorkspaceId;
+  const fromSession = (req.session?.user ?? req.user)?.selectedWorkspaceId;
   const fromQuery = req.query.workspaceId;
 
   const raw = fromHeader || fromSession || fromQuery;

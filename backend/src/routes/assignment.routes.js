@@ -1038,7 +1038,7 @@ router.post('/runs/:id/decide', requireReviewer, asyncHandler(async (req, res) =
     });
   }
 
-  const decidedByEmail = req.session?.user?.email || 'unknown';
+  const decidedByEmail = (req.session?.user ?? req.user)?.email || 'unknown';
 
   const updated = await assignmentRepository.recordDecisionIfPending(runId, {
     decision,
@@ -1111,7 +1111,7 @@ router.post('/runs/:id/reassign', requireAdmin, asyncHandler(async (req, res) =>
     runId,
     req.workspaceId,
     req.body || {},
-    req.session?.user?.email || 'admin',
+    (req.session?.user ?? req.user)?.email || 'admin',
   );
 
   if (!result.success) {
@@ -1156,7 +1156,7 @@ router.post('/runs/:id/dismiss', requireAdmin, asyncHandler(async (req, res) => 
       message: `Run is not awaiting review (status: ${run.status}, decision: ${run.decision || 'none'})`,
     });
   }
-  const dismissed = await assignmentRepository.dismissRunIfPending(runId, req.session?.user?.email || 'admin');
+  const dismissed = await assignmentRepository.dismissRunIfPending(runId, (req.session?.user ?? req.user)?.email || 'admin');
   if (!dismissed) {
     return res.status(409).json({ success: false, message: 'Run was already decided or is no longer pending review' });
   }
@@ -1347,7 +1347,7 @@ router.post('/ticket/:ticketId/override-reason', requireReviewer, asyncHandler(a
     toTechnicianId,
     reasonCode,
     reason,
-    actorEmail: req.session?.user?.email || 'admin',
+    actorEmail: (req.session?.user ?? req.user)?.email || 'admin',
   });
   res.json({ success: true, recorded: Boolean(correction) });
 }));
@@ -1609,7 +1609,7 @@ router.post('/prompts', requireAdmin, asyncHandler(async (req, res) => {
     systemPrompt,
     toolConfig,
     notes,
-    createdBy: req.session?.user?.email,
+    createdBy: (req.session?.user ?? req.user)?.email,
   });
   res.status(201).json({ success: true, data: version });
 }));
@@ -1620,7 +1620,7 @@ router.post('/prompts/:id/publish', requireAdmin, asyncHandler(async (req, res) 
   if (version.workspaceId !== req.workspaceId) {
     return res.status(403).json({ success: false, message: 'Prompt belongs to a different workspace' });
   }
-  const published = await promptRepository.publish(id, req.session?.user?.email);
+  const published = await promptRepository.publish(id, (req.session?.user ?? req.user)?.email);
   res.json({ success: true, data: published });
 }));
 
@@ -1630,7 +1630,7 @@ router.post('/prompts/:id/restore', requireAdmin, asyncHandler(async (req, res) 
   if (version.workspaceId !== req.workspaceId) {
     return res.status(403).json({ success: false, message: 'Prompt belongs to a different workspace' });
   }
-  const draft = await promptRepository.restore(id, req.session?.user?.email);
+  const draft = await promptRepository.restore(id, (req.session?.user ?? req.user)?.email);
   res.json({ success: true, data: draft });
 }));
 
@@ -1705,7 +1705,7 @@ router.post('/competency-requests/groups/:groupId/decision', requireAdmin, async
     req.workspaceId,
     req.params.groupId,
     req.body?.decision,
-    req.session?.user?.email,
+    (req.session?.user ?? req.user)?.email,
     req.body?.decisionNote,
   );
   const pendingCount = await agentCompetencyService.getPendingRequestCount(req.workspaceId);
@@ -1717,7 +1717,7 @@ router.post('/competency-requests/:id/decision', requireAdmin, asyncHandler(asyn
     req.workspaceId,
     req.params.id,
     req.body?.decision,
-    req.session?.user?.email,
+    (req.session?.user ?? req.user)?.email,
     req.body?.decisionNote,
   );
   const pendingCount = await agentCompetencyService.getPendingRequestCount(req.workspaceId);
@@ -1753,7 +1753,7 @@ function logLegacyDraftEndpointUse(req, endpoint) {
   logger.warn('Legacy draft endpoint used', {
     endpoint,
     workspaceId: req.workspaceId,
-    actorEmail: req.session?.user?.email,
+    actorEmail: (req.session?.user ?? req.user)?.email,
   });
 }
 
@@ -1763,34 +1763,34 @@ router.get('/skills/draft', requireAdmin, asyncHandler(async (req, res) => {
 }));
 
 router.delete('/skills/draft', requireAdmin, asyncHandler(async (req, res) => {
-  const draft = await skillHierarchyService.discardDraft(req.workspaceId, req.session?.user?.email);
+  const draft = await skillHierarchyService.discardDraft(req.workspaceId, (req.session?.user ?? req.user)?.email);
   logger.info('Legacy skill hierarchy draft discarded', {
     workspaceId: req.workspaceId,
     draftId: draft.id,
     source: draft.source,
-    actorEmail: req.session?.user?.email,
+    actorEmail: (req.session?.user ?? req.user)?.email,
   });
   res.json({ success: true, data: draft });
 }));
 
 router.post('/skills/draft', requireAdmin, asyncHandler(async (req, res) => {
   logLegacyDraftEndpointUse(req, 'POST /skills/draft');
-  const draft = await skillHierarchyService.saveDraft(req.workspaceId, req.body || {}, req.session?.user?.email);
+  const draft = await skillHierarchyService.saveDraft(req.workspaceId, req.body || {}, (req.session?.user ?? req.user)?.email);
   res.json({ success: true, data: draft });
 }));
 
 router.post('/skills/import-summit', requireAdmin, asyncHandler(async (req, res) => {
   logLegacyDraftEndpointUse(req, 'POST /skills/import-summit');
-  const draft = await skillHierarchyService.importSummit(req.workspaceId, req.session?.user?.email);
+  const draft = await skillHierarchyService.importSummit(req.workspaceId, (req.session?.user ?? req.user)?.email);
   res.status(201).json({ success: true, data: draft });
 }));
 
 router.post('/skills/publish', requireAdmin, asyncHandler(async (req, res) => {
   logLegacyDraftEndpointUse(req, 'POST /skills/publish');
-  const result = await skillHierarchyService.publish(req.workspaceId, req.session?.user?.email);
+  const result = await skillHierarchyService.publish(req.workspaceId, (req.session?.user ?? req.user)?.email);
   logger.info('Skill hierarchy draft published', {
     workspaceId: req.workspaceId,
-    actorEmail: req.session?.user?.email,
+    actorEmail: (req.session?.user ?? req.user)?.email,
     skillCount: result.skillCount,
     subskillCount: result.subskillCount,
     retiredCount: result.retiredCount,
@@ -1805,7 +1805,7 @@ router.get('/skills/mappings', requireAdmin, asyncHandler(async (req, res) => {
 
 router.put('/skills/mappings', requireAdmin, asyncHandler(async (req, res) => {
   logLegacyDraftEndpointUse(req, 'PUT /skills/mappings');
-  const draft = await skillHierarchyService.updateMappings(req.workspaceId, req.body?.mappings || [], req.session?.user?.email);
+  const draft = await skillHierarchyService.updateMappings(req.workspaceId, req.body?.mappings || [], (req.session?.user ?? req.user)?.email);
   res.json({ success: true, data: draft });
 }));
 
@@ -1827,7 +1827,7 @@ router.post('/skills/freshservice-sync', requireAdmin, asyncHandler(async (req, 
 router.post('/tickets/reclassify', requireAdmin, asyncHandler(async (req, res) => {
   const data = await ticketReclassificationService.run(req.workspaceId, {
     ...(req.body || {}),
-    actorEmail: req.session?.user?.email || 'admin',
+    actorEmail: (req.session?.user ?? req.user)?.email || 'admin',
   });
   logger.info('Internal ticket reclassification completed', {
     workspaceId: req.workspaceId,
@@ -1836,7 +1836,7 @@ router.post('/tickets/reclassify', requireAdmin, asyncHandler(async (req, res) =
     scanned: data.scanned,
     classified: data.classified,
     failed: data.failed,
-    actorEmail: req.session?.user?.email,
+    actorEmail: (req.session?.user ?? req.user)?.email,
   });
   res.json({ success: true, data });
 }));
@@ -1850,7 +1850,7 @@ router.post('/tickets/reclassify/runs/:id/rollback', requireAdmin, asyncHandler(
   const data = await ticketReclassificationService.rollback(
     req.workspaceId,
     req.params.id,
-    req.session?.user?.email || 'admin',
+    (req.session?.user ?? req.user)?.email || 'admin',
   );
   res.json({ success: true, data });
 }));
@@ -1897,7 +1897,7 @@ router.post('/competencies/category-suggestions/:id/review', requireAdmin, async
     workspaceId: req.workspaceId,
     id,
     action,
-    actorEmail: req.session?.user?.email,
+    actorEmail: (req.session?.user ?? req.user)?.email,
     targetCategoryId,
   });
   const categories = await competencyRepository.getSystemSuggestedCategories(req.workspaceId);
@@ -1996,7 +1996,7 @@ router.post('/competency-prompts', requireAdmin, asyncHandler(async (req, res) =
     return res.status(400).json({ success: false, message: 'systemPrompt is required' });
   }
   const version = await competencyPromptRepository.createVersion(req.workspaceId, {
-    systemPrompt, toolConfig, notes, createdBy: req.session?.user?.email,
+    systemPrompt, toolConfig, notes, createdBy: (req.session?.user ?? req.user)?.email,
   });
   res.status(201).json({ success: true, data: version });
 }));
@@ -2007,7 +2007,7 @@ router.post('/competency-prompts/:id/publish', requireAdmin, asyncHandler(async 
   if (version.workspaceId !== req.workspaceId) {
     return res.status(403).json({ success: false, message: 'Prompt belongs to a different workspace' });
   }
-  const published = await competencyPromptRepository.publish(id, req.session?.user?.email);
+  const published = await competencyPromptRepository.publish(id, (req.session?.user ?? req.user)?.email);
   res.json({ success: true, data: published });
 }));
 
@@ -2017,7 +2017,7 @@ router.post('/competency-prompts/:id/restore', requireAdmin, asyncHandler(async 
   if (version.workspaceId !== req.workspaceId) {
     return res.status(403).json({ success: false, message: 'Prompt belongs to a different workspace' });
   }
-  const draft = await competencyPromptRepository.restore(id, req.session?.user?.email);
+  const draft = await competencyPromptRepository.restore(id, (req.session?.user ?? req.user)?.email);
   res.json({ success: true, data: draft });
 }));
 
@@ -2034,7 +2034,7 @@ router.get('/competency-tools', requireAdmin, asyncHandler(async (req, res) => {
 router.post('/competencies/analyze/:techId', requireAdmin, asyncHandler(async (req, res) => {
   const techId = parseInt(req.params.techId);
   const stream = req.query.stream === 'true';
-  const triggeredBy = req.session?.user?.email || 'admin';
+  const triggeredBy = (req.session?.user ?? req.user)?.email || 'admin';
 
   if (!stream) {
     res.status(202).json({ success: true, message: 'Competency analysis triggered' });
@@ -2093,7 +2093,7 @@ router.get('/competencies/runs/:id', requireAdmin, asyncHandler(async (req, res)
 
 router.post('/competencies/runs/:id/rollback', requireAdmin, asyncHandler(async (req, res) => {
   const runId = parseInt(req.params.id);
-  const rolledBackBy = req.session?.user?.email || 'admin';
+  const rolledBackBy = (req.session?.user ?? req.user)?.email || 'admin';
   const result = await competencyAnalysisService.rollback(runId, rolledBackBy);
   res.json({ success: true, data: result });
 }));
@@ -2139,7 +2139,7 @@ router.get('/competencies/technicians', requireReviewer, asyncHandler(async (req
 // browser even though the work itself was healthy).
 router.post('/daily-review', requireAdmin, asyncHandler(async (req, res) => {
   const { reviewDate, startDate, endDate, reviewStartDate, reviewEndDate, force, forceRefreshThreads } = req.body;
-  const triggeredBy = req.session?.user?.email || 'admin';
+  const triggeredBy = (req.session?.user ?? req.user)?.email || 'admin';
 
   const result = await assignmentDailyReviewService.kickOffReview(req.workspaceId, reviewDate, triggeredBy, {
     triggerSource: 'manual',
@@ -2201,7 +2201,7 @@ router.post('/daily-review/recommendations/bulk-status', requireAdmin, asyncHand
     ids,
     status,
     reviewNotes,
-    actorEmail: req.session?.user?.email || 'admin',
+    actorEmail: (req.session?.user ?? req.user)?.email || 'admin',
   });
   res.json({ success: true, data: result });
 }));
@@ -2212,7 +2212,7 @@ router.post('/daily-review/recommendations/:id/status', requireAdmin, asyncHandl
   const result = await assignmentDailyReviewService.updateRecommendation(recommendationId, req.workspaceId, {
     status,
     reviewNotes,
-    actorEmail: req.session?.user?.email || 'admin',
+    actorEmail: (req.session?.user ?? req.user)?.email || 'admin',
   });
   if (!result) {
     return res.status(404).json({ success: false, message: 'Daily review recommendation not found' });
@@ -2223,7 +2223,7 @@ router.post('/daily-review/recommendations/:id/status', requireAdmin, asyncHandl
 router.post('/daily-review/consolidations', requireAdmin, asyncHandler(async (req, res) => {
   const result = await assignmentDailyReviewConsolidationService.kickOff(
     req.workspaceId,
-    req.session?.user?.email || 'admin',
+    (req.session?.user ?? req.user)?.email || 'admin',
   );
   res.status(202).json({ success: true, data: result });
 }));
@@ -2250,7 +2250,7 @@ router.post('/daily-review/consolidations/runs/:id/cancel', requireAdmin, asyncH
   const result = await assignmentDailyReviewConsolidationService.cancel(
     parseInt(req.params.id, 10),
     req.workspaceId,
-    req.session?.user?.email || 'admin',
+    (req.session?.user ?? req.user)?.email || 'admin',
   );
   if (!result) return res.status(404).json({ success: false, message: 'Daily review consolidation run not found' });
   res.json({ success: true, data: result });
@@ -2280,7 +2280,7 @@ router.post('/daily-review/consolidations/runs/:id/apply', requireAdmin, asyncHa
       applyPrompt: req.body?.applyPrompt,
       applySkills: req.body?.applySkills,
       applyTechnicianCompetencies: req.body?.applyTechnicianCompetencies,
-      actorEmail: req.session?.user?.email || 'admin',
+      actorEmail: (req.session?.user ?? req.user)?.email || 'admin',
     },
   );
   res.json({ success: true, data: result });
@@ -2288,7 +2288,7 @@ router.post('/daily-review/consolidations/runs/:id/apply', requireAdmin, asyncHa
 
 router.post('/daily-review/runs/:id/cancel', requireAdmin, asyncHandler(async (req, res) => {
   const runId = parseInt(req.params.id, 10);
-  const result = await assignmentDailyReviewService.cancelRun(runId, req.workspaceId, req.session?.user?.email || 'admin');
+  const result = await assignmentDailyReviewService.cancelRun(runId, req.workspaceId, (req.session?.user ?? req.user)?.email || 'admin');
   res.json({ success: true, data: result });
 }));
 
@@ -2303,7 +2303,7 @@ router.post('/daily-review/runs/:id/meeting-briefing', requireAdmin, asyncHandle
   const runId = parseInt(req.params.id, 10);
   try {
     const result = await assignmentDailyReviewService.generateMeetingBriefing(runId, req.workspaceId, {
-      actorEmail: req.session?.user?.email || 'admin',
+      actorEmail: (req.session?.user ?? req.user)?.email || 'admin',
       tone: req.body?.tone || 'standup',
     });
     res.json({ success: true, data: result });
@@ -2328,7 +2328,7 @@ router.post('/daily-review/runs/:id/rerun', requireAdmin, asyncHandler(async (re
   const result = await assignmentDailyReviewService.runReview(
     req.workspaceId,
     reviewDate,
-    req.session?.user?.email || 'admin',
+    (req.session?.user ?? req.user)?.email || 'admin',
     { triggerSource: 'rerun', force: true, reviewStartDate, reviewEndDate },
   );
 

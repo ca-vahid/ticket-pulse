@@ -603,7 +603,12 @@ export default function TicketDetail() {
   // This ticket belongs to the workspace it was opened in. If the user switches
   // workspace while viewing it, the ticket won't exist in the new one — bounce
   // to that workspace's queue instead of showing a "not found" error.
-  const { workspaceId } = useWorkspace();
+  // NOTE: WorkspaceContext exposes currentWorkspace, not workspaceId — the old
+  // `const { workspaceId } = useWorkspace()` destructure was always undefined,
+  // which silently disabled the switch-bounce below AND left the SSE stream
+  // un-keyed on workspace (realtime plan Phase 1).
+  const { currentWorkspace } = useWorkspace();
+  const workspaceId = currentWorkspace?.id;
   const openedWsRef = useRef(null);
   useEffect(() => {
     if (!workspaceId) return;
@@ -882,7 +887,7 @@ export default function TicketDetail() {
   // "Also viewing" (gap plan 2 P4.1): heartbeat while open, live avatar list
   // over the same SSE connection.
   const { viewers: alsoViewing, onPresence } = useTicketPresence(ticketId, Number.isFinite(ticketId));
-  useSSE({ onTicketChange, onPresence, enabled: Number.isFinite(ticketId) });
+  useSSE({ onTicketChange, onPresence, enabled: Number.isFinite(ticketId), reconnectKey: workspaceId });
   useEffect(() => () => { if (liveRefetchTimerRef.current) clearTimeout(liveRefetchTimerRef.current); }, []);
 
   const isNative = ticket?.origin === 'ticketpulse';

@@ -99,6 +99,18 @@ export const NAV_DESTINATIONS = [
   },
 ];
 
+// Single source of truth for whether a user gets Settings affordances at all
+// (Phase A1). Global-'agent' users (technicians without workspace_access
+// rows) have no Settings sections — their configuration home is the agent
+// portal (/my-competencies, My Alerts) — so every Settings entry point must
+// hide behind this: SideRail (applied), AppHeader's account-menu item
+// (TODO for the AppHeader owner — import { canAccessSettings } from
+// './navDestinations' and gate the Settings menu row with it), MobileTabBar
+// if it ever grows a Settings tab.
+export function canAccessSettings(user) {
+  return Boolean(user) && user.role !== 'agent';
+}
+
 export function useWorkspaceRole() {
   const { user } = useAuth();
   const { currentWorkspace, availableWorkspaces } = useWorkspace();

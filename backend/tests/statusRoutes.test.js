@@ -60,9 +60,11 @@ beforeEach(() => {
 });
 
 describe('/api/ticket-statuses admin gating', () => {
-  test('unauthenticated requests are refused', async () => {
+  test('requests with no identity are refused', async () => {
+    // In the real app requireAuth (mounted upstream) 401s first; the router's
+    // own requireAdmin refusal is an authorization failure → 403 (Phase A1).
     const res = await request(makeApp(null)).get('/api/ticket-statuses').set('x-workspace-id', '1');
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(403);
     expect(statusServiceMock.listStatuses).not.toHaveBeenCalled();
   });
 
@@ -77,7 +79,10 @@ describe('/api/ticket-statuses admin gating', () => {
       request(app).post('/api/ticket-statuses/9/reactivate'),
     ]) {
       const res = await call.set('x-workspace-id', '1');
-      expect(res.status).toBe(401);
+      // 403 (not 401): authenticated-but-not-admin must never trigger the
+      // frontend's credential recovery/sign-out (Phase A1).
+      expect(res.status).toBe(403);
+      expect(res.body.code).toBe('admin_required');
     }
     expect(statusServiceMock.listStatuses).not.toHaveBeenCalled();
     expect(statusServiceMock.createStatus).not.toHaveBeenCalled();

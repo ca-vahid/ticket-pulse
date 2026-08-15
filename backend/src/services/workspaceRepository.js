@@ -2,6 +2,20 @@ import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { DatabaseError, NotFoundError } from '../utils/errors.js';
 
+/**
+ * Merge access-row workspaces with technician workspaces, deduped by id.
+ * The ACCESS row wins the role label when both lists grant the same
+ * workspace; technician-only rows keep their 'agent' label. Sorted by name
+ * for a stable picker. Pure function — exported for the auth login/session
+ * paths (Phase A1 picker merge) and unit tests.
+ */
+export function mergeWorkspaceLists(accessible = [], technician = []) {
+  const byId = new Map();
+  for (const ws of technician) byId.set(ws.id, ws);
+  for (const ws of accessible) byId.set(ws.id, ws); // access-role wins
+  return [...byId.values()].sort((a, b) => String(a.name).localeCompare(String(b.name)));
+}
+
 class WorkspaceRepository {
   async getAll() {
     try {
@@ -152,6 +166,43 @@ class WorkspaceRepository {
     } catch (error) {
       logger.error(`Error fetching technician workspaces for ${email}:`, error);
       throw new DatabaseError('Failed to fetch technician workspaces', error);
+    }
+  }
+
+  /**
+   * Union of the user's access-row workspaces and technician workspaces,
+   * deduped by id — the ACCESS role wins the label when both grant the same
+   * workspace (Phase A1 picker merge). A partial grant (one access row) must
+   * never shrink the picker below what the user's technician profiles cover.
+   */
+  async getMergedWorkspaces(email) {
+    const [accessible, technician] = await Promise.all([
+      this.getAccessibleWorkspaces(email),
+      this.getTechnicianWorkspaces(email),
+    ]);
+    return mergeWorkspaceLists(accessible, technician);
+  }
+
+  /**
+   * True when the user is an active technician in the given workspace —
+   * the membership check behind the agent-allowed read tier (Phase A1):
+   * global-'agent' users have no workspace_access rows but their technician
+   * profile grants the ticket queue's read set (/sse, ticket types).
+   */
+  async hasActiveTechnician(email, workspaceId) {
+    try {
+      const tech = await prisma.technician.findFirst({
+        where: {
+          workspaceId,
+          isActive: true,
+          email: { equals: String(email || '').toLowerCase(), mode: 'insensitive' },
+        },
+        select: { id: true },
+      });
+      return Boolean(tech);
+    } catch (error) {
+      logger.error(`Error checking technician membership for ${email}:`, error);
+      return false;
     }
   }
 

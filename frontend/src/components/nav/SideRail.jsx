@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ChevronsLeft, ChevronsRight, Settings } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { NAV_DESTINATIONS, useNavDestinations } from './navDestinations';
+import { NAV_DESTINATIONS, canAccessSettings, useNavDestinations } from './navDestinations';
 import { useApprovalCount } from '../../hooks/useApprovalCount';
+import { useAuth } from '../../contexts/AuthContext';
 
 // Fixed left navigation rail for desktop (hidden below md — phones use
 // MobileTabBar). Collapsed it's a 58px icon strip; on hover/keyboard focus it
@@ -28,6 +29,10 @@ export default function SideRail() {
   const navigate = useNavigate();
   const location = useLocation();
   const approvalCount = useApprovalCount();
+  const { user } = useAuth();
+  // Agents have no Settings sections (Phase A1) — hide the entry entirely
+  // rather than bouncing them into the "No settings available" card.
+  const showSettings = canAccessSettings(user);
 
   const matchPath = (path) => location.pathname === path || location.pathname.startsWith(`${path}/`);
   const activeId = NAV_DESTINATIONS.find((dest) => matchPath(dest.path))?.id
@@ -131,23 +136,25 @@ export default function SideRail() {
           {destinations.map(renderRow)}
         </div>
 
-        <button
-          type="button"
-          onClick={() => { if (!settingsActive) navigate('/settings'); }}
-          aria-current={settingsActive ? 'page' : undefined}
-          title="Settings"
-          className={cn(
-            'mx-[9px] mt-1 flex h-10 flex-none items-center gap-3 overflow-hidden whitespace-nowrap rounded-xl border px-[8px] text-left text-[12.5px] font-semibold transition-colors tp-focus-ring',
-            settingsActive
-              ? 'border-slate-300 bg-slate-100 text-slate-700 cursor-default'
-              : 'border-transparent text-slate-500 hover:bg-slate-100 hover:text-slate-800',
-          )}
-        >
-          <span className="inline-flex h-5 w-5 flex-none items-center justify-center">
-            <Settings className="h-5 w-5" />
-          </span>
-          <span className="tp-rail-label flex-1 truncate">Settings</span>
-        </button>
+        {showSettings && (
+          <button
+            type="button"
+            onClick={() => { if (!settingsActive) navigate('/settings'); }}
+            aria-current={settingsActive ? 'page' : undefined}
+            title="Settings"
+            className={cn(
+              'mx-[9px] mt-1 flex h-10 flex-none items-center gap-3 overflow-hidden whitespace-nowrap rounded-xl border px-[8px] text-left text-[12.5px] font-semibold transition-colors tp-focus-ring',
+              settingsActive
+                ? 'border-slate-300 bg-slate-100 text-slate-700 cursor-default'
+                : 'border-transparent text-slate-500 hover:bg-slate-100 hover:text-slate-800',
+            )}
+          >
+            <span className="inline-flex h-5 w-5 flex-none items-center justify-center">
+              <Settings className="h-5 w-5" />
+            </span>
+            <span className="tp-rail-label flex-1 truncate">Settings</span>
+          </button>
+        )}
 
         {/* Tickets pages only: collapse/expand the rail out of the way of the
             filter rail. The preference sticks (localStorage). */}
