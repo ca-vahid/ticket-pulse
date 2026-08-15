@@ -224,6 +224,17 @@ async function initialize() {
     } else if (isConfigured) {
       logger.info('FreshService is configured, starting scheduled sync for all workspaces');
       await scheduledSyncService.start();
+
+      // Sync liveness self-monitoring (realtime plan Phase 3): alerts admins
+      // once per incident when a workspace hasn't completed a sync in >3× its
+      // interval. Only armed when the scheduler itself runs — a dev box with
+      // sync disabled must not page anyone. Kill switch: SYNC_HEALTH_ALERTS=false.
+      try {
+        const { default: syncHealthService } = await import('./services/syncHealthService.js');
+        syncHealthService.start();
+      } catch (e) {
+        logger.warn('Sync health monitor failed to start (non-fatal):', e.message);
+      }
     } else {
       logger.warn('FreshService not configured. Please configure in settings.');
     }

@@ -31,6 +31,7 @@ import PublicApprovalDecision from './pages/PublicApprovalDecision';
 import DemoModeBanner from './components/DemoModeBanner';
 import ErrorBoundary from './components/ErrorBoundary';
 import EmailHealthBanner from './components/EmailHealthBanner';
+import SyncHealthBanner from './components/SyncHealthBanner';
 import CommandPalette from './components/CommandPalette';
 import { Activity } from 'lucide-react';
 
@@ -469,7 +470,12 @@ function App() {
                 </Routes>
               </ErrorBoundary>
               <DemoModeBanner />
-              <EmailHealthBanner />
+              {/* Admin health banners share one bottom-left stack so email +
+                  stale-sync warnings never overlap each other. */}
+              <div className="fixed bottom-3 left-3 z-[9998] flex flex-col gap-2">
+                <SyncHealthBanner />
+                <EmailHealthBanner />
+              </div>
               <CommandPalette />
             </SettingsProvider>
           </DashboardProvider>

@@ -28,6 +28,11 @@ jest.unstable_mockModule('../src/middleware/auth.js', () => ({
     if (req.session?.user) return next();
     return res.status(401).json({ success: false, message: 'Authentication required' });
   },
+  requireAdmin: (req, res, next) => {
+    if (req.session?.user?.role === 'admin') return next();
+    return res.status(403).json({ success: false, code: 'admin_required' });
+  },
+  createStreamReauthCheck: () => () => Promise.resolve(true),
 }));
 
 const {
@@ -36,7 +41,11 @@ const {
   resolveSseWorkspace,
   RING_MAX_EVENTS,
   RING_MAX_AGE_MS,
+  MAX_CONNECTIONS_PER_USER,
+  IDLE_REAP_MS,
+  REAUTH_INTERVAL_MS,
 } = await import('../src/routes/sse.routes.js');
+const { default: realtimeTelemetry } = await import('../src/services/realtimeTelemetryService.js');
 
 function makeApp(sessionUser, { sessionWorkspaceId = null } = {}) {
   const app = express();
@@ -66,6 +75,8 @@ beforeEach(() => {
   sseManager.channels.clear();
   sseManager.buffers.clear();
   sseManager.waiters.clear();
+  sseManager.meta.clear();
+  realtimeTelemetry._reset();
 });
 
 /** Read the SSE stream until a predicate matches (Express may split writes). */
@@ -470,5 +481,172 @@ describe('resolveSseWorkspace — access tiers', () => {
     getAccessRoleMock.mockRejectedValue(new Error('db down'));
     prismaMock.technician.findFirst.mockRejectedValue(new Error('db down'));
     await expect(resolveSseWorkspace(reqFor(viewer, '6'))).resolves.toBe(6);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 3 — server hardening + observability (realtime plan)
+// ---------------------------------------------------------------------------
+
+function fakeClientWithDestroy(userEmail, extra = {}) {
+  const client = { write: jest.fn() };
+  const destroy = jest.fn();
+  return { client, destroy, opts: { userEmail, destroy, ...extra } };
+}
+
+function makeAppJson(sessionUser) {
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => {
+    if (sessionUser) req.session = { user: sessionUser };
+    next();
+  });
+  app.use('/api/sse', sseRoutes);
+  return app;
+}
+
+describe('connection registry — per-user cap', () => {
+  test('opening a 9th connection closes the OLDEST with a too_many_connections event', () => {
+    const mine = [];
+    for (let i = 0; i < MAX_CONNECTIONS_PER_USER; i++) {
+      const c = fakeClientWithDestroy('capped@bgc.ca');
+      sseManager.addClient(c.client, 1, c.opts);
+      mine.push(c);
+    }
+    expect(sseManager.getClientCount(1)).toBe(MAX_CONNECTIONS_PER_USER);
+
+    const ninth = fakeClientWithDestroy('CAPPED@bgc.ca'); // case-insensitive
+    sseManager.addClient(ninth.client, 1, ninth.opts);
+
+    // Oldest got the farewell event + destroy; the rest survive.
+    const oldest = mine[0];
+    const raw = oldest.client.write.mock.calls.at(-1)[0];
+    expect(raw).toMatch(/^event: too_many_connections\n/);
+    const payload = JSON.parse(raw.match(/data: (.*)\n\n$/)[1]);
+    expect(payload.limit).toBe(MAX_CONNECTIONS_PER_USER);
+    expect(oldest.destroy).toHaveBeenCalledTimes(1);
+    for (const c of mine.slice(1)) expect(c.destroy).not.toHaveBeenCalled();
+    expect(ninth.destroy).not.toHaveBeenCalled();
+    expect(sseManager.getClientCount(1)).toBe(MAX_CONNECTIONS_PER_USER);
+  });
+
+  test('the cap is per user — another user is unaffected', () => {
+    for (let i = 0; i < MAX_CONNECTIONS_PER_USER; i++) {
+      const c = fakeClientWithDestroy('busy@bgc.ca');
+      sseManager.addClient(c.client, 1, c.opts);
+    }
+    const other = fakeClientWithDestroy('calm@bgc.ca');
+    sseManager.addClient(other.client, 1, other.opts);
+    expect(other.destroy).not.toHaveBeenCalled();
+    expect(sseManager.getClientCount(1)).toBe(MAX_CONNECTIONS_PER_USER + 1);
+  });
+});
+
+describe('connection registry — idle reaping', () => {
+  test('reaps sockets with no successful write inside IDLE_REAP_MS; keeps fresh ones', () => {
+    const dead = fakeClientWithDestroy('dead@bgc.ca');
+    const alive = fakeClientWithDestroy('alive@bgc.ca');
+    sseManager.addClient(dead.client, 1, dead.opts);
+    sseManager.addClient(alive.client, 1, alive.opts);
+
+    // Simulate: no flushed write on `dead` past the reap window.
+    sseManager.meta.get(dead.client).lastWriteOkAt = Date.now() - IDLE_REAP_MS - 1000;
+
+    const reaped = sseManager.reapIdleClients();
+    expect(reaped).toBe(1);
+    expect(dead.destroy).toHaveBeenCalledTimes(1);
+    expect(alive.destroy).not.toHaveBeenCalled();
+    expect(sseManager.getClientCount(1)).toBe(1);
+  });
+
+  test('reaps already-ended responses regardless of write age', () => {
+    const ended = fakeClientWithDestroy('ended@bgc.ca');
+    ended.client.writableEnded = true;
+    sseManager.addClient(ended.client, 2, ended.opts);
+    expect(sseManager.reapIdleClients()).toBe(1);
+    expect(sseManager.getClientCount(2)).toBe(0);
+  });
+
+  test('a flushed heartbeat write refreshes the liveness stamp', () => {
+    const c = fakeClientWithDestroy('hb@bgc.ca');
+    c.client.write.mockReturnValue(true);
+    sseManager.addClient(c.client, 1, c.opts);
+    sseManager.meta.get(c.client).lastWriteOkAt = Date.now() - IDLE_REAP_MS + 5000;
+    sseManager.sendHeartbeat();
+    expect(Date.now() - sseManager.meta.get(c.client).lastWriteOkAt).toBeLessThan(1000);
+    expect(sseManager.reapIdleClients()).toBe(0);
+  });
+});
+
+describe('connection registry — periodic re-auth', () => {
+  test('drops streams whose credentials no longer validate, with a reauth event first', async () => {
+    const stale = fakeClientWithDestroy('stale@bgc.ca', { revalidate: jest.fn(async () => false) });
+    const good = fakeClientWithDestroy('good@bgc.ca', { revalidate: jest.fn(async () => true) });
+    sseManager.addClient(stale.client, 1, stale.opts);
+    sseManager.addClient(good.client, 1, good.opts);
+
+    const later = Date.now() + REAUTH_INTERVAL_MS + 1000;
+    const result = await sseManager.revalidateClients(later);
+
+    expect(result.checked).toBe(2);
+    expect(result.dropped).toBe(1);
+    const raw = stale.client.write.mock.calls.at(-1)[0];
+    expect(raw).toMatch(/^event: reauth\n/);
+    expect(stale.destroy).toHaveBeenCalledTimes(1);
+    expect(good.destroy).not.toHaveBeenCalled();
+    expect(sseManager.getClientCount(1)).toBe(1);
+  });
+
+  test('connections checked recently are skipped (per-connection cadence)', async () => {
+    const c = fakeClientWithDestroy('fresh@bgc.ca', { revalidate: jest.fn(async () => false) });
+    sseManager.addClient(c.client, 1, c.opts);
+    // lastAuthCheckAt = now, so nothing is due yet.
+    const result = await sseManager.revalidateClients(Date.now() + 1000);
+    expect(result.checked).toBe(0);
+    expect(c.opts.revalidate).not.toHaveBeenCalled();
+    expect(sseManager.getClientCount(1)).toBe(1);
+  });
+
+  test('a throwing revalidate counts as invalid', async () => {
+    const c = fakeClientWithDestroy('boom@bgc.ca', { revalidate: jest.fn(async () => { throw new Error('store down'); }) });
+    sseManager.addClient(c.client, 1, c.opts);
+    const result = await sseManager.revalidateClients(Date.now() + REAUTH_INTERVAL_MS + 1000);
+    expect(result.dropped).toBe(1);
+    expect(sseManager.getClientCount(1)).toBe(0);
+  });
+});
+
+describe('POST /api/sse/telemetry + GET /api/sse/telemetry/summary', () => {
+  test('records reports into the in-memory aggregate (202, fire-and-forget)', async () => {
+    const res = await request(makeAppJson(viewer))
+      .post('/api/sse/telemetry')
+      .send({ type: 'downgrade', transport: 'longpoll', churn: 4 });
+    expect(res.status).toBe(202);
+
+    const summary = realtimeTelemetry.summary();
+    expect(summary.today.downgrades).toBe(1);
+    expect(summary.today.downgradesByTransport.longpoll).toBe(1);
+    expect(summary.today.churnMax).toBe(4);
+    expect(summary.today.topUsers[0].user).toBe('vie…@bgc.ca');
+  });
+
+  test('unknown event types are dropped, not stored', async () => {
+    const res = await request(makeAppJson(viewer))
+      .post('/api/sse/telemetry')
+      .send({ type: 'leaderboard-hack', transport: 'longpoll' });
+    expect(res.status).toBe(202);
+    expect(realtimeTelemetry.summary().today.reports).toBe(0);
+  });
+
+  test('summary is admin-gated: 403 for viewers, data for admins', async () => {
+    realtimeTelemetry.record({ userEmail: 'x@bgc.ca', type: 'offline-terminal' });
+    const denied = await request(makeAppJson(viewer)).get('/api/sse/telemetry/summary');
+    expect(denied.status).toBe(403);
+
+    const ok = await request(makeAppJson(admin)).get('/api/sse/telemetry/summary');
+    expect(ok.status).toBe(200);
+    expect(ok.body.data.today.offlineTerminal).toBe(1);
+    expect(ok.body.data.sampling).toMatch(/10%/);
+    expect(typeof ok.body.data.activeConnections).toBe('number');
   });
 });

@@ -421,6 +421,13 @@ export default function AppHeader({
               Live stream unavailable on this network — updating automatically instead.
             </p>
           )}
+          {/* Phase 3: the server closes a user's OLDEST stream past the
+              per-user cap — say so instead of looking mysteriously offline. */}
+          {ladderState === 'offline' && rtDiag?.reason === 'too-many-connections' && (
+            <p className="mb-1 rounded-md border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-medium text-red-700">
+              Too many Ticket Pulse tabs are open for your account — this one was disconnected. Close unused tabs, then click Reconnect.
+            </p>
+          )}
           <div className="flex items-center justify-between py-1">
             <span className="text-slate-400">Data refreshed</span>
             <span className="font-medium">{lastUpdated ? new Date(lastUpdated).toLocaleString() : '—'}</span>

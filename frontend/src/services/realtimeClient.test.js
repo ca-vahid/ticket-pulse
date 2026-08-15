@@ -465,3 +465,98 @@ describe('RealtimeClient — wake/sleep + staleness deadlines', () => {
     expect(h.deps.pollOnce.mock.calls.length).toBeGreaterThan(pollCallsBefore);
   });
 });
+
+describe('RealtimeClient — Phase 3: telemetry + hardening events', () => {
+  async function degradeToLongpoll(h) {
+    for (let i = 0; i < 3; i++) {
+      h.lastSse().fail('no-hello');
+      await flush();
+      await vi.advanceTimersByTimeAsync(5000);
+    }
+  }
+
+  test('a sampled session reports transport downgrades (decision is sessionStorage-sticky)', async () => {
+    const h = makeHarness();
+    const spy = vi.fn();
+    h.client.deps.sendTelemetry = spy;
+    h.client.deps.random = () => 0.05; // < TELEMETRY_SAMPLE_RATE → sampled
+    makeSubscriber(h.client);
+
+    await degradeToLongpoll(h);
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    const call = spy.mock.calls[0][0];
+    expect(call.url).toBe('http://api.test/api/sse/telemetry');
+    expect(call.token).toBe('tok');
+    expect(call.body.type).toBe('downgrade');
+    expect(call.body.transport).toBe('longpoll');
+    expect(typeof call.body.churn).toBe('number');
+    expect(h.deps.storage.get('tp_rt_telemetry_sampled')).toBe('1');
+  });
+
+  test('an unsampled session reports nothing on downgrade (sampling guard)', async () => {
+    const h = makeHarness();
+    const spy = vi.fn();
+    h.client.deps.sendTelemetry = spy;
+    h.client.deps.random = () => 0.9; // not sampled
+    makeSubscriber(h.client);
+
+    await degradeToLongpoll(h);
+
+    expect(spy).not.toHaveBeenCalled();
+    expect(h.deps.storage.get('tp_rt_telemetry_sampled')).toBe('0');
+  });
+
+  test('terminal offline is ALWAYS reported, even unsampled', async () => {
+    const h = makeHarness();
+    const spy = vi.fn();
+    h.client.deps.sendTelemetry = spy;
+    h.client.deps.random = () => 0.9;
+    makeSubscriber(h.client);
+
+    h.lastSse().fail('terminal', 403);
+    await flush();
+
+    expect(h.client.state).toBe('offline');
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0][0].body.type).toBe('offline-terminal');
+    expect(h.client.getDiagnostics().reason).toBe('terminal-error');
+  });
+
+  test('too_many_connections is terminal for this connection: no blind reconnect loop, reason in diagnostics, retry() recovers', async () => {
+    const h = makeHarness();
+    makeSubscriber(h.client);
+    h.lastSse().emit('hello', { epoch: 'e1', workspaceId: 1, lastEventId: 'e1:0' });
+    expect(h.client.state).toBe('live-sse');
+    const attemptsBefore = h.deps.openSse.mock.calls.length;
+
+    h.lastSse().emit('too_many_connections', { limit: 8 });
+    expect(h.client.state).toBe('offline');
+    expect(h.client.getDiagnostics().reason).toBe('too-many-connections');
+
+    // No automatic reconnect — the server would just evict another tab.
+    await vi.advanceTimersByTimeAsync(120000);
+    expect(h.deps.openSse.mock.calls.length).toBe(attemptsBefore);
+
+    // Manual retry (the Offline pill) restarts the ladder and clears the reason.
+    h.client.retry();
+    expect(h.deps.openSse.mock.calls.length).toBe(attemptsBefore + 1);
+    expect(h.client.getDiagnostics().reason).toBeNull();
+  });
+
+  test('reauth event refreshes the token so the server-forced reconnect succeeds first try', async () => {
+    const h = makeHarness();
+    makeSubscriber(h.client);
+    h.lastSse().emit('hello', { epoch: 'e1', workspaceId: 1, lastEventId: 'e1:0' });
+    expect(h.deps.refreshToken).not.toHaveBeenCalled();
+
+    h.lastSse().emit('reauth', { message: 'expired' });
+    expect(h.deps.refreshToken).toHaveBeenCalledTimes(1);
+
+    // Server closes right after — the normal soft-failure retry path runs.
+    h.lastSse().fail('closed');
+    await flush();
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(h.deps.openSse.mock.calls.length).toBe(2);
+  });
+});

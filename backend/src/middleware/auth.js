@@ -225,6 +225,53 @@ export function requireWorkspaceMemberOrAgent(req, res, next) {
 }
 
 /**
+ * Build a re-validation check for a LONG-LIVED stream (realtime plan Phase 3).
+ *
+ * requireAuth validates credentials once at connect time, but an SSE stream
+ * can outlive them by hours: the session row may be destroyed (logout) or the
+ * Bearer JWT may expire while the socket stays open. The SSE route captures
+ * this closure at connect and calls it periodically; `false` means the stream
+ * must be dropped (with a `reauth` event so the client reconnects with fresh
+ * credentials).
+ *
+ * Must be called AFTER requireAuth on the same request.
+ */
+export function createStreamReauthCheck(req) {
+  if (req.session?.user) {
+    const session = req.session;
+    // Session transport: re-read the row from the store. A destroyed session
+    // (logout, expiry sweep) errors or comes back user-less.
+    return () => new Promise((resolve) => {
+      if (typeof session.reload !== 'function') {
+        return resolve(Boolean(session.user));
+      }
+      try {
+        session.reload((err) => resolve(!err && Boolean(session.user)));
+      } catch {
+        resolve(false);
+      }
+    });
+  }
+
+  const authHeader = req.headers.authorization;
+  if (authHeader?.startsWith('Bearer ')) {
+    const token = authHeader.substring(7);
+    // Bearer transport: re-verify the SAME token the stream connected with —
+    // once it passes its exp the stream must re-handshake with a fresh one.
+    return () => {
+      try {
+        jwt.verify(token, config.session.secret, { algorithms: ['HS256'] });
+        return Promise.resolve(true);
+      } catch {
+        return Promise.resolve(false);
+      }
+    };
+  }
+
+  return () => Promise.resolve(false);
+}
+
+/**
  * Optional auth middleware - doesn't throw error if not authenticated
  */
 export function optionalAuth(req, res, next) {

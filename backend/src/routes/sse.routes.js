@@ -1,8 +1,9 @@
 import express from 'express';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requireAdmin, createStreamReauthCheck } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import workspaceRepository from '../services/workspaceRepository.js';
 import prisma from '../services/prisma.js';
+import realtimeTelemetry from '../services/realtimeTelemetryService.js';
 import logger from '../utils/logger.js';
 
 const router = express.Router();
@@ -33,6 +34,23 @@ export const RING_MAX_AGE_MS = 10 * 60 * 1000;
 // corporate-proxy request timeouts.
 const POLL_MAX_WAIT_MS = 25000;
 
+// Phase 3 hardening bounds (realtime plan):
+// - Per-user connection cap. A misbehaving client (tab-restore storm, retry
+//   bug) can otherwise pin dozens of sockets per person. Opening one past the
+//   cap closes the user's OLDEST stream, after a `too_many_connections` event
+//   so that tab shows a message instead of blind-reconnect-looping.
+export const MAX_CONNECTIONS_PER_USER = 8;
+// - Idle reap: a socket with no SUCCESSFUL write in this window is half-dead
+//   (writes buffering into a dead pipe, or errors swallowed elsewhere) —
+//   destroy it. Healthy sockets get a heartbeat write every 30s, so this is
+//   ~4 missed heartbeats.
+export const IDLE_REAP_MS = 120000;
+// - Periodic re-auth of long-lived streams: re-validate the session/token the
+//   stream connected with. On failure send `reauth` then close — the client
+//   reconnects with fresh credentials.
+export const REAUTH_INTERVAL_MS = 15 * 60 * 1000;
+const HARDENING_TICK_MS = 60000;
+
 /**
  * SSE connection manager with per-workspace channels.
  * Clients register with a workspaceId; broadcasts target a specific workspace
@@ -54,6 +72,9 @@ class SSEConnectionManager {
     this.buffers = new Map();
     // key -> Set<resolve> — pending long-poll waiters
     this.waiters = new Map();
+    // Connection registry (Phase 3): client(res) -> { key, userEmail,
+    // connectedAt, lastWriteOkAt, lastAuthCheckAt, revalidate, destroy }
+    this.meta = new Map();
   }
 
   _key(workspaceId) {
@@ -186,16 +207,32 @@ class SSEConnectionManager {
     if (set.size === 0) this.waiters.delete(key);
   }
 
-  addClient(client, workspaceId = null) {
+  addClient(client, workspaceId = null, { userEmail = null, revalidate = null, destroy = null } = {}) {
+    const email = userEmail ? String(userEmail).toLowerCase() : null;
+    // Enforce the per-user cap BEFORE adding, so the newest connection always
+    // survives and the user's oldest one(s) get closed.
+    this._enforceUserCap(email);
+
     const key = this._key(workspaceId);
     if (!this.channels.has(key)) {
       this.channels.set(key, new Set());
     }
     this.channels.get(key).add(client);
+    const now = Date.now();
+    this.meta.set(client, {
+      key,
+      userEmail: email,
+      connectedAt: now,
+      lastWriteOkAt: now,
+      lastAuthCheckAt: now,
+      revalidate,
+      destroy,
+    });
     logger.info(`SSE client connected (workspace=${workspaceId || 'global'}). Total clients: ${this._totalClients()}`);
   }
 
   removeClient(client) {
+    this.meta.delete(client);
     for (const [key, clients] of this.channels) {
       if (clients.has(client)) {
         clients.delete(client);
@@ -204,6 +241,114 @@ class SSEConnectionManager {
       }
     }
     logger.info(`SSE client disconnected. Total clients: ${this._totalClients()}`);
+  }
+
+  /**
+   * Write to one client, tracking write success in the registry. A throwing
+   * write means the socket is dead — destroy + deregister it immediately.
+   * @returns {boolean} whether the write succeeded
+   */
+  _write(client, text) {
+    const meta = this.meta.get(client);
+    try {
+      const flushed = client.write(text);
+      // res.write() returning false is backpressure (data queued, not lost) —
+      // a HEALTHY socket drains quickly, so only a flushed write refreshes the
+      // liveness stamp. A half-dead pipe buffers forever and gets reaped.
+      if (flushed && meta) meta.lastWriteOkAt = Date.now();
+      return true;
+    } catch (error) {
+      logger.error('Error writing to SSE client:', error);
+      this._destroyClient(client);
+      return false;
+    }
+  }
+
+  /** Send an optional farewell event, tear the socket down, deregister. */
+  _destroyClient(client, farewell = null) {
+    const meta = this.meta.get(client);
+    if (farewell) {
+      try {
+        client.write(`event: ${farewell.event}\ndata: ${JSON.stringify(farewell.data)}\n\n`);
+      } catch { /* already dead — the farewell was best-effort */ }
+    }
+    try {
+      if (meta?.destroy) meta.destroy();
+      else client.end?.();
+    } catch { /* already closed */ }
+    this.removeClient(client);
+  }
+
+  /** Close the user's oldest connection(s) so a new one stays under the cap. */
+  _enforceUserCap(userEmail) {
+    if (!userEmail) return;
+    const mine = [];
+    for (const [client, meta] of this.meta) {
+      if (meta.userEmail === userEmail) mine.push([client, meta]);
+    }
+    if (mine.length < MAX_CONNECTIONS_PER_USER) return;
+    mine.sort((a, b) => a[1].connectedAt - b[1].connectedAt);
+    const excess = mine.length - MAX_CONNECTIONS_PER_USER + 1;
+    for (let i = 0; i < excess; i++) {
+      logger.warn(`SSE per-user cap: closing oldest connection for ${userEmail} (${mine.length} open, cap ${MAX_CONNECTIONS_PER_USER})`);
+      this._destroyClient(mine[i][0], {
+        event: 'too_many_connections',
+        data: {
+          message: `Too many live connections for your account (limit ${MAX_CONNECTIONS_PER_USER}) — this one was closed in favor of a newer tab. Close unused tabs before reconnecting.`,
+          limit: MAX_CONNECTIONS_PER_USER,
+        },
+      });
+    }
+  }
+
+  /**
+   * Reap half-dead sockets: already-ended responses, and connections with no
+   * flushed write inside IDLE_REAP_MS (a dead pipe swallows writes silently —
+   * see F4 "zombie" in docs/research/REALTIME_RELIABILITY_NOTES.md).
+   * @returns {number} clients destroyed
+   */
+  reapIdleClients(now = Date.now()) {
+    let reaped = 0;
+    for (const [client, meta] of [...this.meta]) {
+      const ended = client.writableEnded || client.destroyed;
+      const idle = now - meta.lastWriteOkAt > IDLE_REAP_MS;
+      if (ended || idle) {
+        logger.warn(`SSE reaping ${ended ? 'ended' : 'idle'} connection (user=${meta.userEmail || 'unknown'}, last ok write ${Math.round((now - meta.lastWriteOkAt) / 1000)}s ago)`);
+        this._destroyClient(client);
+        reaped++;
+      }
+    }
+    return reaped;
+  }
+
+  /**
+   * Re-validate long-lived streams' credentials (every REAUTH_INTERVAL_MS per
+   * connection). Invalid → `reauth` event, then close; the client reconnects
+   * with a freshly-refreshed token.
+   * @returns {Promise<{checked: number, dropped: number}>}
+   */
+  async revalidateClients(now = Date.now()) {
+    const result = { checked: 0, dropped: 0 };
+    for (const [client, meta] of [...this.meta]) {
+      if (!meta.revalidate || now - meta.lastAuthCheckAt < REAUTH_INTERVAL_MS) continue;
+      meta.lastAuthCheckAt = now;
+      result.checked++;
+      let valid = false;
+      try {
+        valid = await meta.revalidate();
+      } catch {
+        valid = false;
+      }
+      if (!valid && this.meta.has(client)) {
+        logger.info(`SSE re-auth failed for ${meta.userEmail || 'unknown'} — dropping stream with reauth event`);
+        this._destroyClient(client, {
+          event: 'reauth',
+          data: { message: 'Credentials expired — reconnect with a fresh session', ts: now },
+        });
+        result.dropped++;
+      }
+    }
+    return result;
   }
 
   /**
@@ -217,15 +362,10 @@ class SSEConnectionManager {
 
     const sendTo = (clients, formatted) => {
       if (!clients) return;
-      clients.forEach(client => {
-        try {
-          client.write(formatted);
-          count++;
-        } catch (error) {
-          logger.error('Error sending SSE to client:', error);
-          this.removeClient(client);
-        }
-      });
+      // Snapshot: _write may destroy dead clients (mutating the live Set).
+      for (const client of [...clients]) {
+        if (this._write(client, formatted)) count++;
+      }
     };
 
     const emitOn = (key) => {
@@ -268,14 +408,9 @@ class SSEConnectionManager {
     for (const [key, clients] of this.channels) {
       const workspaceId = key === '__global__' ? null : key;
       const heartbeat = `event: heartbeat\ndata: ${JSON.stringify({ ts: Date.now(), workspaceId })}\n\n`;
-      clients.forEach(client => {
-        try {
-          client.write(heartbeat);
-        } catch (error) {
-          logger.error('Error sending heartbeat:', error);
-          this.removeClient(client);
-        }
-      });
+      for (const client of [...clients]) {
+        this._write(client, heartbeat);
+      }
     }
   }
 
@@ -304,6 +439,21 @@ const heartbeatInterval = setInterval(() => {
   sseManager.sendHeartbeat();
 }, 30000);
 heartbeatInterval.unref?.();
+
+// Phase 3 hardening tick: reap half-dead sockets + re-auth due streams. The
+// per-connection re-auth cadence lives in revalidateClients (REAUTH_INTERVAL_MS);
+// this timer merely visits the registry once a minute.
+const hardeningInterval = setInterval(() => {
+  try {
+    sseManager.reapIdleClients();
+  } catch (error) {
+    logger.debug(`SSE idle reap failed: ${error.message}`);
+  }
+  sseManager.revalidateClients().catch((error) => {
+    logger.debug(`SSE re-auth sweep failed: ${error.message}`);
+  });
+}, HARDENING_TICK_MS);
+hardeningInterval.unref?.();
 
 /**
  * Resolve and validate the stream's workspace for GET /events and GET /poll.
@@ -428,7 +578,15 @@ router.get('/events', asyncHandler(async (req, res) => {
     }
   }
 
-  sseManager.addClient(res, workspaceId);
+  sseManager.addClient(res, workspaceId, {
+    userEmail: (req.session?.user || req.user)?.email || null,
+    revalidate: createStreamReauthCheck(req),
+    destroy: () => {
+      try { res.end(); } catch { /* already gone */ }
+      // A half-dead pipe never acks end() — hard-destroy the socket too.
+      try { res.socket?.destroy(); } catch { /* already gone */ }
+    },
+  });
 
   // Clean up on client disconnect
   req.on('close', () => {
@@ -517,6 +675,42 @@ router.get('/status', (req, res) => {
   res.json({
     success: true,
     data: {
+      activeConnections: sseManager.getClientCount(),
+      epoch: sseManager.epoch,
+    },
+  });
+});
+
+/**
+ * POST /api/sse/telemetry
+ * Lightweight client-health reports (realtime plan Phase 3): the realtime
+ * client samples ~10% of sessions (always on terminal offline) and reports
+ * transport downgrades / offline transitions / reconnect churn. Stored only
+ * as an in-memory per-day aggregate — fire-and-forget, never fails the
+ * client, no table.
+ */
+router.post('/telemetry', (req, res) => {
+  const user = req.session?.user || req.user;
+  realtimeTelemetry.record({
+    userEmail: user?.email || null,
+    type: req.body?.type,
+    transport: req.body?.transport,
+    churn: req.body?.churn,
+  });
+  res.status(202).json({ success: true });
+});
+
+/**
+ * GET /api/sse/telemetry/summary
+ * Admin: today/yesterday realtime-health aggregate for the Settings
+ * "Realtime health" block (downgrades, offline transitions, top affected
+ * users with truncated emails — a support triage hint, not a leaderboard).
+ */
+router.get('/telemetry/summary', requireAdmin, (req, res) => {
+  res.json({
+    success: true,
+    data: {
+      ...realtimeTelemetry.summary(),
       activeConnections: sseManager.getClientCount(),
       epoch: sseManager.epoch,
     },

@@ -45,7 +45,9 @@ export default function EmailHealthBanner() {
 
   return (
     <div
-      className="fixed bottom-3 left-3 z-[9998] max-w-sm animate-fadeIn"
+      // Positioning comes from App.jsx's shared bottom-left banner stack, so
+      // this can coexist with SyncHealthBanner without overlapping.
+      className="max-w-sm animate-fadeIn"
       role="alert"
       aria-live="assertive"
     >

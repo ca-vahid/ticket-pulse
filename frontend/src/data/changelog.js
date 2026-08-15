@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.4.04-preview';
+export const APP_VERSION = '3.4.05-preview';
 
 export const changelog = [
+  {
+    version: '3.4.05-preview',
+    date: 'August 15, 2026',
+    entries: [
+      { type: 'new', html: '<strong>🩺 Sync health monitoring</strong> — the app now watches its own sync scheduler: a new Settings → Notifications “Sync freshness” card shows per-workspace last-sync age vs its expected cadence, admins get a dismissible banner the moment any workspace goes stale (3× its interval), and one alert email goes out per incident — the “silently frozen dashboard” class can never hide again. (QA 08-11 insurance)' },
+      { type: 'improved', html: '<strong>🛡️ Hardened live connections</strong> — the server now caps streams at 8 per user (a 9th tab is told politely instead of silently degrading everyone), reaps half-dead connections, and re-checks credentials on long-lived streams every 15 minutes (sign out actually disconnects your streams now — the client refreshes its token and reconnects seamlessly).' },
+      { type: 'new', html: '<strong>📈 Realtime health telemetry + support playbook</strong> — sampled client reports of transport downgrades and offline events roll up into a “Realtime health” admin card (who’s affected, framed for support triage), and docs/REALTIME_SUPPORT_PLAYBOOK.md gives IT the full pill/diagnostics triage guide including the corporate-proxy (Zscaler) bypass request template.' },
+    ],
+  },
   {
     version: '3.4.04-preview',
     date: 'August 15, 2026',
