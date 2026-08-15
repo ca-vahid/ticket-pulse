@@ -7,7 +7,7 @@ import {
 import { ArrowUpDown, ArrowUp, ArrowDown, ChevronRight, Inbox, Waves } from 'lucide-react';
 import {
   TicketRefLink, StatusPill, TypePill, PersonAvatar, PriorityDot, StateChip,
-  ticketCategoryLabels, timeAgo, PRIORITY_STRIP_COLORS,
+  ticketCategoryLabels, formatDayTime, timeAgo, PRIORITY_STRIP_COLORS,
 } from '../tickets/ticketUi';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -163,7 +163,7 @@ export default function EvidenceTable({ tickets = [], chipKey = 'handled', title
                   <>
                     <span aria-hidden="true">·</span>
                     <span className="whitespace-nowrap" title={new Date(r.createdAt).toLocaleString()}>
-                      {timeAgo(r.createdAt)}
+                      {formatDayTime(r.createdAt)} · {timeAgo(r.createdAt)}
                     </span>
                   </>
                 )}
@@ -223,7 +223,7 @@ export default function EvidenceTable({ tickets = [], chipKey = 'handled', title
                 className="whitespace-nowrap text-xs text-slate-400"
                 title={`${new Date(r.startTs).toLocaleString()} – ${new Date(r.endTs).toLocaleString()}`}
               >
-                {timeAgo(r.startTs)}
+                {formatDayTime(r.startTs)} · {timeAgo(r.startTs)}
               </span>
             );
           }
@@ -233,7 +233,7 @@ export default function EvidenceTable({ tickets = [], chipKey = 'handled', title
               className="whitespace-nowrap text-xs text-slate-400"
               title={ts ? new Date(ts).toLocaleString() : ''}
             >
-              {ts ? timeAgo(ts) : '—'}
+              {ts ? <>{formatDayTime(ts)} · {timeAgo(ts)}</> : '—'}
             </span>
           );
         },

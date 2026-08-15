@@ -169,10 +169,17 @@ export default function RequestApprovalModal({ categories = [], technicians = []
               <p className="text-[11px] text-slate-500 leading-relaxed px-1">
                 The <span className="font-medium text-slate-600">{selected.managerCount}</span> manager{selected.managerCount === 1 ? '' : 's'} of
                 <span className="font-medium text-slate-600"> {selected.name}</span> are notified in-app{notifyApprover ? ' and by email' : ''}. The first to respond decides;
-                the rest auto-cancel. <span className="inline-flex items-center gap-0.5 text-slate-400"><ShieldCheck className="w-3 h-3" aria-hidden="true" /> Approvals stay inside Ticket Pulse.</span>
+                the rest auto-cancel.
               </p>
             </div>
           )}
+
+          {/* QA 08-11 #4: the TP-only note shows ALWAYS — not only once a
+              category is picked (it used to hide inside the {selected} block). */}
+          <p className="flex items-start gap-1.5 text-[11px] text-slate-500 leading-relaxed px-1">
+            <ShieldCheck className="w-3.5 h-3.5 text-amber-500 flex-shrink-0 mt-px" aria-hidden="true" />
+            <span>Approvals stay inside Ticket Pulse — never synced to FreshService. You&apos;ll get an email when the decision is made.</span>
+          </p>
         </div>
 
         <div className="flex items-center justify-end gap-2 px-5 py-3.5 border-t border-slate-100">

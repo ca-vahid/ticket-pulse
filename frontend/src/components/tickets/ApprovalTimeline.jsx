@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import {
   Ban, CheckCircle2, ChevronRight, Clock, MessageCircleQuestion, RefreshCw, Send, Stamp, Trash2, XCircle,
 } from 'lucide-react';
-import { PersonAvatar, SafeHtml, timeAgo } from './ticketUi';
+import { PersonAvatar, SafeHtml, formatDayTime, timeAgo } from './ticketUi';
 
 // Per-approver / verdict status → color-coded look (dot, chip, text, header tint).
 const STATUS = {
@@ -82,7 +82,8 @@ export default function ApprovalTimeline({
                 <vMeta.Icon className="w-3 h-3" aria-hidden="true" /> {vMeta.label}
               </span>
               <span className="ml-auto text-[11px] text-slate-400 whitespace-nowrap" title={new Date(head.createdAt).toLocaleString()}>
-                {timeAgo(head.createdAt)}
+                {formatDayTime(head.createdAt)}
+                {' · '}{timeAgo(head.createdAt)}
               </span>
             </div>
 
@@ -102,7 +103,7 @@ export default function ApprovalTimeline({
                       <div className="min-w-0">
                         <p className="text-sm text-slate-700">
                           <span className={`font-semibold ${vMeta.text}`}>{vMeta.verb}</span> by <span className="font-semibold text-slate-800">{decider.approverName || decider.approverEmail}</span>
-                          {decider.decidedAt && <span className="text-slate-400"> · {timeAgo(decider.decidedAt)}</span>}
+                          {decider.decidedAt && <span className="text-slate-400" title={new Date(decider.decidedAt).toLocaleString()}> · {formatDayTime(decider.decidedAt)} · {timeAgo(decider.decidedAt)}</span>}
                         </p>
                         <p className="text-[11px] text-slate-400">
                           Requested by {head.requestedBy}
@@ -189,7 +190,7 @@ export default function ApprovalTimeline({
                               {rowLabel(ap)}
                             </span>
                             {ap.decidedAt && (
-                              <span className="text-[11px] text-slate-400" title={new Date(ap.decidedAt).toLocaleString()}>{timeAgo(ap.decidedAt)}</span>
+                              <span className="text-[11px] text-slate-400" title={new Date(ap.decidedAt).toLocaleString()}>{formatDayTime(ap.decidedAt)} · {timeAgo(ap.decidedAt)}</span>
                             )}
                           </div>
                           {ap.status === 'info_requested'

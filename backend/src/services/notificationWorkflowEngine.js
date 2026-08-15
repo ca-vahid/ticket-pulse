@@ -1604,6 +1604,9 @@ function recipientFromToken(token, context, customEmails) {
   if (value === 'requester') return [context.requester?.email];
   if (value === 'assigned_agent') return [context.assignedAgent?.email];
   if (value === 'previous_agent') return [context.previousAgent?.email];
+  // Approval events (approval.requested/decided) carry the requesting agent's
+  // email in event.extra.requestedBy — lets workflows email the requester.
+  if (value === 'approval_requester') return [context.event?.extra?.requestedBy];
   if (value === 'original_ccs') {
     return [
       ...(Array.isArray(context.ticket?.ccEmails) ? context.ticket.ccEmails : []),

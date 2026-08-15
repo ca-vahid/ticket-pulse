@@ -113,7 +113,7 @@ export default function ScheduledTicketsPanel({ ticketingOn = true }) {
                 {row.recurrence && row.recurrence !== 'none' && (
                   <span
                     className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold border whitespace-nowrap bg-cyan-50 text-cyan-700 border-cyan-200"
-                    title={`Repeats ${row.recurrence} at the same local time${row.lastSpawnedAt ? ` — last spawned ${timeAgo(row.lastSpawnedAt)}` : ''}`}
+                    title={`Repeats ${row.recurrence} at the same local time${row.lastSpawnedAt ? ` — last spawned ${formatDayTime(row.lastSpawnedAt)} · ${timeAgo(row.lastSpawnedAt)}` : ''}`}
                   >
                     <Repeat className="w-3 h-3" aria-hidden="true" />
                     {row.recurrence}
@@ -163,7 +163,7 @@ export default function ScheduledTicketsPanel({ ticketingOn = true }) {
             {data.recent.map((row) => (
               <li key={row.id} className="px-4 py-2.5 flex items-center gap-3 text-sm">
                 <span className="min-w-0 flex-1 truncate text-slate-600">{row.payload?.subject || '(no subject)'}</span>
-                <span className="text-xs text-slate-400 whitespace-nowrap">activated {timeAgo(row.activatedAt)}</span>
+                <span className="text-xs text-slate-400 whitespace-nowrap">activated {formatDayTime(row.activatedAt)} · {timeAgo(row.activatedAt)}</span>
                 {row.ticketId && (
                   <Link to={`/tickets/${row.ticketId}`} state={backState} className="tp-focus-ring text-xs font-semibold text-blue-700 hover:underline rounded whitespace-nowrap">
                     Open ticket

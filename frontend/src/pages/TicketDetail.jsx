@@ -480,7 +480,7 @@ export function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, ph
                 className="inline-flex items-center text-[10px] font-medium text-slate-400 bg-slate-100/80 border border-slate-200 rounded-full px-1.5 py-0.5 whitespace-nowrap"
                 title={`Edited ${entry.editedBy ? `by ${entry.editedBy} · ` : ''}${new Date(entry.editedAt).toLocaleString()}`}
               >
-                edited {timeAgo(entry.editedAt)}
+                edited {formatDayTime(entry.editedAt)} · {timeAgo(entry.editedAt)}
               </span>
             )}
             <span className="text-xs text-slate-400 whitespace-nowrap" title={new Date(entry.occurredAt).toLocaleString()}>
@@ -570,8 +570,9 @@ function SidebarField({ label, children, flash = false, onAck }) {
   );
 }
 
-/** One event on the History tab's vertical timeline. */
-function HistoryEvent({ icon: Icon, tone, title, meta, at, isLast }) {
+/** One event on the History tab's vertical timeline. Exported for tests.
+ * Timestamps follow the "absolute · relative" convention (QA 08-14 #3). */
+export function HistoryEvent({ icon: Icon, tone, title, meta, at, isLast }) {
   return (
     <li className="relative flex gap-3 pb-5">
       {!isLast && <span aria-hidden="true" className="absolute left-[15px] top-8 bottom-0 w-px bg-slate-200" />}
@@ -586,7 +587,8 @@ function HistoryEvent({ icon: Icon, tone, title, meta, at, isLast }) {
         className="text-xs text-slate-400 whitespace-nowrap pt-1"
         title={new Date(at).toLocaleString()}
       >
-        {timeAgo(at)}
+        {formatDayTime(at)}
+        {' · '}{timeAgo(at)}
       </span>
     </li>
   );
@@ -1833,8 +1835,8 @@ export default function TicketDetail() {
                   <p className="text-xs text-slate-400 mt-1">
                 Created <span title={new Date(ticket.createdAt).toLocaleString()}>{timeAgo(ticket.createdAt)}</span>
                     {ticket.requester?.name ? <> by <span className="text-slate-600 font-medium">{ticket.requester.name}</span></> : null}
-                    {ticket.resolvedAt ? <> · resolved {timeAgo(ticket.resolvedAt)}</> : null}
-                    {ticket.lastActivityAt ? <> · last activity {timeAgo(ticket.lastActivityAt)}</> : null}
+                    {ticket.resolvedAt ? <> · resolved <span title={new Date(ticket.resolvedAt).toLocaleString()}>{timeAgo(ticket.resolvedAt)}</span></> : null}
+                    {ticket.lastActivityAt ? <> · last activity <span title={new Date(ticket.lastActivityAt).toLocaleString()}>{formatDayTime(ticket.lastActivityAt)} · {timeAgo(ticket.lastActivityAt)}</span></> : null}
                   </p>
 
                   {/* Quick actions */}
@@ -2547,9 +2549,14 @@ export default function TicketDetail() {
 
                 {pageTab === 'approvals' && (
                   <section className="tp-card rounded-xl p-4 sm:p-5" aria-label="Approvals">
-                    <div className="flex items-center gap-2 mb-3">
+                    <div className="flex flex-wrap items-center gap-2 mb-3">
                       <CheckCircle2 className="w-4 h-4 text-emerald-600" aria-hidden="true" />
                       <h2 className="text-sm font-bold text-slate-800">Approvals</h2>
+                      {/* QA 08-11 #4: approvals are TP-only — say so where they live. */}
+                      <span className="inline-flex items-center gap-1 rounded-full border border-amber-200/80 bg-amber-50/70 px-2 py-0.5 text-[10px] font-medium text-amber-700 whitespace-nowrap">
+                        <ShieldCheck className="w-3 h-3 flex-shrink-0" aria-hidden="true" />
+                        Ticket Pulse feature — not synced to FreshService
+                      </span>
                     </div>
 
                     {(ticket.approvals?.length || 0) === 0 && (

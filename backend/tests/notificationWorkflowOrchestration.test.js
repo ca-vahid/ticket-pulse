@@ -1263,3 +1263,59 @@ describe('update_ticket subcategory matrix (FR 08-07 #3)', () => {
     expect(patch[0].data.internalCategoryId).toBeUndefined();
   });
 });
+
+// Phase B (QA 08-11 #5 rider): the approval_requester recipient token resolves
+// from event.extra.requestedBy so approval-event workflows can email the
+// requesting agent. Unknown/absent extra resolves empty (no crash, no send).
+describe('approval_requester recipient token', () => {
+  function approvalRecipientDefinition() {
+    return {
+      version: 2,
+      metadata: {},
+      nodes: [
+        { id: 'trigger', type: 'trigger', data: { triggerType: 'approval.decided' } },
+        { id: 'recipients', type: 'recipient_resolver', data: { to: ['approval_requester'] } },
+        { id: 'template', type: 'template_render', data: { contentSource: 'template_only', subject: 'Decided', html: '<p>Decided</p>', text: 'Decided' } },
+        { id: 'send', type: 'send_email', data: { provider: 'sendgrid', includeFooter: false } },
+      ],
+      edges: [
+        { id: 'e1', source: 'trigger', target: 'recipients' },
+        { id: 'e2', source: 'recipients', target: 'template' },
+        { id: 'e3', source: 'template', target: 'send' },
+      ],
+    };
+  }
+
+  test('resolves the requester email from event.extra.requestedBy', async () => {
+    const ctx = eventContext({
+      event: {
+        type: 'approval.decided', source: 'ticketpulse_native', occurredAt: '2026-08-15T10:00:00.000Z',
+        dedupeStamp: `a-${Math.random()}`,
+        extra: { approvalId: 7, status: 'approved', approverEmail: 'alice@x.io', requestedBy: 'req@x.io' },
+      },
+    });
+    const result = await executeDefinition({
+      workflow: { id: 90, workspaceId: 1, triggerType: 'approval.decided', publishedVersion: 1, versions: [] },
+      definition: approvalRecipientDefinition(),
+      eventContext: ctx,
+      executionMode: 'live',
+    });
+
+    expect(result.status).toBe('completed');
+    const step = result.steps.find((s) => s.nodeType === 'recipient_resolver');
+    expect(step.output.recipients.to).toEqual(['req@x.io']);
+  });
+
+  test('resolves empty when the event carries no requestedBy', async () => {
+    const result = await executeDefinition({
+      workflow: { id: 91, workspaceId: 1, triggerType: 'approval.decided', publishedVersion: 1, versions: [] },
+      definition: approvalRecipientDefinition(),
+      eventContext: eventContext(), // ticket.created shape — no extra
+      executionMode: 'live',
+    });
+
+    expect(result.status).toBe('completed');
+    const step = result.steps.find((s) => s.nodeType === 'recipient_resolver');
+    expect(step.output.recipients.to).toEqual([]);
+  });
+});
