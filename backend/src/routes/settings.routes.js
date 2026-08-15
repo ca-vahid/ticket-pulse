@@ -34,6 +34,7 @@ import {
   deleteFeedbackSubmission,
 } from '../services/publicFeedbackService.js';
 import urgentEscalationService from '../services/afterHoursUrgentEscalationService.js';
+import userSignatureService from '../services/userSignatureService.js';
 import logger from '../utils/logger.js';
 
 const router = express.Router();
@@ -1367,6 +1368,59 @@ router.get(
         routingGuidance: t.routingGuidance || null,
       })),
     });
+  }),
+);
+
+/**
+ * GET /api/settings/signatures
+ * Settings → Signatures (Mega 08-15 Phase D): workspace member list joined
+ * with per-user email signatures. Admin-gated — this is the management view;
+ * self-service lives at /api/agent/signature.
+ */
+router.get(
+  '/signatures',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const result = await userSignatureService.listWorkspaceSignatures(req.workspaceId);
+    res.json({ success: true, data: result });
+  }),
+);
+
+/**
+ * PUT /api/settings/signatures/:email
+ * Admin edit of ANY member's signature in this workspace (enable/disable,
+ * html/text). Owner comes from the path; the audit stamp from the session.
+ */
+router.put(
+  '/signatures/:email',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const ownerEmail = decodeURIComponent(req.params.email || '');
+    const actor = (req.session?.user ?? req.user) || null;
+    const result = await userSignatureService.saveSignature(req.workspaceId, ownerEmail, req.body || {}, actor);
+    res.json({ success: true, data: result });
+  }),
+);
+
+/**
+ * POST /api/settings/signatures/mass-apply
+ * Apply a signature template ({{name}} / {{title}} / {{email}} substituted
+ * from technician + Entra fields) to selected members. body.preview=true
+ * renders the per-member results WITHOUT writing (preview-before-apply).
+ */
+router.post(
+  '/signatures/mass-apply',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const actor = (req.session?.user ?? req.user) || null;
+    const result = await userSignatureService.massApplySignatureTemplate(req.workspaceId, req.body || {}, actor);
+    res.json({ success: true, data: result });
   }),
 );
 

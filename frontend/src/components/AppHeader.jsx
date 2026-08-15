@@ -544,7 +544,7 @@ export default function AppHeader({
       {
         id: 'notifications',
         label: 'Notifications',
-        description: 'Email & alert preferences',
+        description: 'Email, alerts & signature',
         path: '/notifications',
         Icon: Bell,
       },

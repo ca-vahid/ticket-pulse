@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.4.03-preview';
+export const APP_VERSION = '3.4.04-preview';
 
 export const changelog = [
+  {
+    version: '3.4.04-preview',
+    date: 'August 15, 2026',
+    entries: [
+      { type: 'new', html: '<strong>✍️ Per-user email signatures</strong> — set your signature once (paste it straight from Outlook — tables, colors, and logos survive) and every reply email you send gets it appended automatically, on both FreshService-born and Ticket-Pulse-born tickets. The ticket thread itself stays clean — the signature lives only in the outbound email. Find yours under the account menu → Notifications → My signature, with an enable/disable toggle and live preview. (QA 08-14 #1)' },
+      { type: 'new', html: '<strong>👥 Admin signature management</strong> — Settings → Signatures lists every workspace member with their signature status: edit anyone’s inline, toggle per person, or mass-apply a branded template to selected members with {{name}}, {{title}}, and {{email}} filled from their directory profile — with a mandatory preview before anything is written.' },
+      { type: 'improved', html: '<strong>📝 Composer signature strip</strong> — when you have a signature enabled, the reply composer shows a collapsed “signature will be appended” strip with an expandable preview — it never pollutes the editing area or your drafts, so no double-signatures ever.' },
+    ],
+  },
   {
     version: '3.4.03-preview',
     date: 'August 15, 2026',

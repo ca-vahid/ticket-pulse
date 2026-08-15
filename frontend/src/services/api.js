@@ -484,6 +484,10 @@ export const settingsAPI = {
   },
 
   getTechnicians: () => api.get('/settings/technicians'),
+  // Per-user email signatures — admin management (Mega 08-15 Phase D)
+  getSignatures: () => api.get('/settings/signatures'),
+  updateSignature: (email, data) => api.put(`/settings/signatures/${encodeURIComponent(email)}`, data),
+  massApplySignatures: (data) => api.post('/settings/signatures/mass-apply', data),
   setTechnicianActive: (id, isActive) => api.put(`/settings/technicians/${id}/active`, { isActive }),
   searchDirectory: (q) => api.get('/settings/directory/search', { params: { q } }),
   createLocalAgent: (data) => api.post('/settings/technicians', data),
@@ -1474,6 +1478,9 @@ export const agentAPI = {
   cancelCompetencyChange: (id) => api.delete(`/agent/competencies/changes/${id}`),
   getNotificationPreferences: (params = {}) => api.get('/agent/notifications/preferences', { params }),
   saveNotificationPreferences: (data) => api.put('/agent/notifications/preferences', data),
+  // My email signature (works for agents AND coordinators — requireAuth only)
+  getMySignature: (params = {}) => api.get('/agent/signature', { params }),
+  saveMySignature: (data) => api.put('/agent/signature', data),
   requestPhoneVerification: (data) => api.post('/agent/notifications/phone-verification', data),
   confirmPhoneVerification: (data) => api.post('/agent/notifications/phone-verification/confirm', data),
   // Custom agent alerts

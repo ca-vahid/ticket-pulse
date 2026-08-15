@@ -92,6 +92,8 @@ const apiOverrides = {
 vi.mock('../services/api', () => ({
   ticketsAPI: new Proxy({}, { get: (_t, prop) => apiOverrides[prop] || pending }),
   assignmentAPI: new Proxy({}, { get: () => pending }),
+  // Phase D signature strip fetch (reply mode) — keep it forever-pending here.
+  agentAPI: new Proxy({}, { get: () => pending }),
 }));
 vi.mock('../contexts/WorkspaceContext', () => ({
   useWorkspace: () => ({ workspaceId: 1, currentWorkspace: { id: 1, name: 'IT' }, availableWorkspaces: [] }),

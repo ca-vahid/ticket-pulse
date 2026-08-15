@@ -30,6 +30,8 @@ const prismaMock = {
   },
   slaPolicy: { findFirst: jest.fn() },
   assignmentPipelineRun: { findFirst: jest.fn() },
+  // Per-user email signatures (Phase D): default = no signature row.
+  userEmailSignature: { findUnique: jest.fn() },
   $queryRaw: jest.fn(),
 };
 const noiseRuleServiceMock = { evaluate: jest.fn() };
@@ -1443,5 +1445,121 @@ describe('ticketService workspace default group (QA 08-06 #1)', () => {
     expect(prismaMock.group.findFirst).not.toHaveBeenCalled();
     const { data } = prismaMock.ticket.create.mock.calls[0][0];
     expect(data.internalGroupId).toBeNull();
+  });
+});
+
+describe('ticketService per-user signatures on reply sends (Mega 08-15 Phase D)', () => {
+  const nativeTicket = {
+    id: 501,
+    workspaceId: 1,
+    origin: 'ticketpulse',
+    nativeNumber: 1042,
+    freshserviceTicketId: null,
+    subject: 'Laptop will not boot',
+    status: 'Open',
+    priority: 3,
+    createdAt: new Date('2026-07-01T10:00:00Z'),
+    assignedTechId: null,
+    firstAssignedAt: null,
+    firstPublicAgentReplyAt: null,
+    resolutionTimeSeconds: null,
+    resolvedAt: null,
+    internalCategoryId: null,
+    internalSubcategoryId: null,
+    groupId: null,
+    requester: { id: 40, name: 'Rita Requester', email: 'rita@example.com' },
+    assignedTech: null,
+    internalCategory: null,
+    internalSubcategory: null,
+  };
+  const signatureRow = {
+    id: 7,
+    workspaceId: 1,
+    ownerEmail: 'coord@example.com',
+    enabled: true,
+    html: '<p><strong>Cora Coordinator</strong><br>IT Service Desk</p>',
+    text: 'Cora Coordinator\nIT Service Desk',
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...nativeTicket });
+    prismaMock.ticket.update.mockImplementation(({ data }) => Promise.resolve({ ...nativeTicket, ...data }));
+    prismaMock.ticketThreadEntry.create.mockImplementation(({ data }) => Promise.resolve({ id: 9001, ...data }));
+    prismaMock.notificationDelivery.create.mockResolvedValue({});
+    ticketActivityRepositoryMock.create.mockResolvedValue({});
+    lifecycleMock.emitTicketLifecycleNotifications.mockResolvedValue({ status: 'completed' });
+    sendgridMock.sendEmail.mockResolvedValue({ provider: 'sendgrid', providerMessageId: 'sg-1' });
+  });
+
+  test('TP-born reply: signature appends to the OUTBOUND email only — the stored thread entry stays clean', async () => {
+    prismaMock.userEmailSignature.findUnique.mockResolvedValue(signatureRow);
+
+    const { entry } = await ticketService.addReply(501, 1, { bodyHtml: '<p>Fixed it!</p>', bodyText: 'Fixed it!' }, actor);
+
+    // The signature lookup keys on the ACTING agent's email in this workspace.
+    expect(prismaMock.userEmailSignature.findUnique).toHaveBeenCalledWith({
+      where: { workspaceId_ownerEmail: { workspaceId: 1, ownerEmail: 'coord@example.com' } },
+    });
+    // Outbound email carries body + separator + signature…
+    expect(sendgridMock.sendEmail).toHaveBeenCalledWith(expect.objectContaining({
+      html: '<p>Fixed it!</p><br><br><p><strong>Cora Coordinator</strong><br>IT Service Desk</p>',
+      text: expect.stringContaining('Fixed it!\n\n-- \nCora Coordinator'),
+    }));
+    // …while the persisted entry does NOT (decision: thread stays clean).
+    expect(entry.bodyHtml).toBe('<p>Fixed it!</p>');
+    expect(entry.bodyHtml).not.toContain('Cora Coordinator');
+  });
+
+  test('FS-born reply: signature rides the createReply body (FS emails the requester with it)', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...nativeTicket, origin: 'freshservice', freshserviceTicketId: BigInt(9) });
+    prismaMock.userEmailSignature.findUnique.mockResolvedValue(signatureRow);
+    fsClientMock.createReply.mockResolvedValue({ conversation: { id: 42010 } });
+
+    const { entry } = await ticketService.addReply(501, 1, { bodyHtml: '<p>Fixed it!</p>', bodyText: 'Fixed it!' }, actor);
+
+    expect(fsClientMock.createReply).toHaveBeenCalledWith(
+      9,
+      '<p>Fixed it!</p><br><br><p><strong>Cora Coordinator</strong><br>IT Service Desk</p>',
+      { ccEmails: [], attachments: [] },
+    );
+    expect(entry.bodyHtml).toBe('<p>Fixed it!</p>');
+  });
+
+  test('internal notes never append the signature — either origin', async () => {
+    prismaMock.userEmailSignature.findUnique.mockResolvedValue(signatureRow);
+    await ticketService.addPrivateNote(501, 1, { bodyText: 'internal context' }, actor);
+    // Notes skip the lookup entirely (replies-only decision).
+    expect(prismaMock.userEmailSignature.findUnique).not.toHaveBeenCalled();
+
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...nativeTicket, origin: 'freshservice', freshserviceTicketId: BigInt(9) });
+    fsClientMock.addNote.mockResolvedValue({ conversation: { id: 42011 } });
+    await ticketService.addPrivateNote(501, 1, { bodyText: 'fs-born internal' }, actor);
+    // The TP note marker carries the actor NAME — assert on the signature's
+    // distinctive content instead.
+    expect(fsClientMock.addNote).toHaveBeenCalledWith(9, expect.not.stringContaining('IT Service Desk'), expect.anything());
+  });
+
+  test('no append when the signature is disabled or absent', async () => {
+    prismaMock.userEmailSignature.findUnique.mockResolvedValue({ ...signatureRow, enabled: false });
+    await ticketService.addReply(501, 1, { bodyHtml: '<p>Fixed it!</p>', bodyText: 'Fixed it!' }, actor);
+    expect(sendgridMock.sendEmail).toHaveBeenCalledWith(expect.objectContaining({ html: '<p>Fixed it!</p>' }));
+
+    jest.clearAllMocks();
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...nativeTicket });
+    prismaMock.ticket.update.mockImplementation(({ data }) => Promise.resolve({ ...nativeTicket, ...data }));
+    prismaMock.ticketThreadEntry.create.mockImplementation(({ data }) => Promise.resolve({ id: 9002, ...data }));
+    prismaMock.notificationDelivery.create.mockResolvedValue({});
+    sendgridMock.sendEmail.mockResolvedValue({ provider: 'sendgrid', providerMessageId: 'sg-2' });
+    prismaMock.userEmailSignature.findUnique.mockResolvedValue(null);
+    await ticketService.addReply(501, 1, { bodyHtml: '<p>Second try</p>', bodyText: 'Second try' }, actor);
+    expect(sendgridMock.sendEmail).toHaveBeenCalledWith(expect.objectContaining({ html: '<p>Second try</p>' }));
+  });
+
+  test('a signature lookup failure never blocks the reply (sends unsigned)', async () => {
+    prismaMock.userEmailSignature.findUnique.mockRejectedValue(new Error('db hiccup'));
+    const { entry, email } = await ticketService.addReply(501, 1, { bodyText: 'still goes out' }, actor);
+    expect(email.sent).toBe(true);
+    expect(entry.eventType).toBe('reply');
   });
 });

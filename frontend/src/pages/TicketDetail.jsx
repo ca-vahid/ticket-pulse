@@ -25,6 +25,7 @@ import CcChips from '../components/tickets/CcChips';
 import RecipientsLine, { seedReplyCc } from '../components/tickets/RecipientsLine';
 import FsSyncConfirm from '../components/tickets/FsSyncConfirm';
 import RichTextEditor, { isRichContent } from '../components/tickets/RichTextEditor';
+import ComposerSignatureStrip from '../components/tickets/ComposerSignatureStrip';
 import StagedFileChip from '../components/tickets/StagedFileChip';
 import ImageMarkupModal from '../components/tickets/ImageMarkupModal';
 import TicketAiTab from '../components/tickets/TicketAiTab';
@@ -2486,6 +2487,12 @@ export default function TicketDetail() {
                             return name;
                           }}
                         />
+                        {/* Phase D: read-only signature strip — the server
+                            appends it to the outbound email; never seeded
+                            into the editor (draft/double-append safety). */}
+                        {composerMode === 'reply' && (
+                          <ComposerSignatureStrip workspaceId={currentWorkspace?.id} />
+                        )}
                         {composerFiles.length > 0 && (
                           <ul className="mt-2 flex flex-wrap gap-2 items-start" aria-label="Files to attach">
                             {composerFiles.map((file) => (

@@ -4,6 +4,7 @@ import agentCompetencyService from '../services/agentCompetencyService.js';
 import summitWorkshopService from '../services/summitWorkshopService.js';
 import notificationPreferenceService from '../services/notificationPreferenceService.js';
 import agentAlertService from '../services/agentAlertService.js';
+import userSignatureService from '../services/userSignatureService.js';
 
 const router = express.Router();
 
@@ -99,6 +100,30 @@ router.delete('/alerts/:id', asyncHandler(async (req, res) => {
 
 router.put('/alerts-quiet-hours', asyncHandler(async (req, res) => {
   const result = await agentAlertService.saveQuietHours((req.session?.user ?? req.user)?.email, req.body?.workspaceId || req.query.workspaceId, req.body || {});
+  res.json({ success: true, data: result });
+}));
+
+// My email signature (Mega 08-15 Phase D). Session-email keyed and mounted
+// behind requireAuth ONLY (no workspace/agent-role gate), so these self-serve
+// routes work for agents AND coordinators/admins alike — one surface for
+// everyone who replies. Explicit workspaceId wins; agents without one fall
+// back to their technician profile's workspace.
+router.get('/signature', asyncHandler(async (req, res) => {
+  const email = (req.session?.user ?? req.user)?.email;
+  const workspaceId = await userSignatureService.resolveSignatureWorkspaceId(email, req.query.workspaceId);
+  const result = await userSignatureService.getSignature(workspaceId, email);
+  res.json({ success: true, data: result });
+}));
+
+router.put('/signature', asyncHandler(async (req, res) => {
+  const email = (req.session?.user ?? req.user)?.email;
+  const workspaceId = await userSignatureService.resolveSignatureWorkspaceId(
+    email,
+    req.body?.workspaceId || req.query.workspaceId,
+  );
+  // Owner is ALWAYS the session identity — the self route can never edit
+  // someone else's signature (admins use Settings → Signatures for that).
+  const result = await userSignatureService.saveSignature(workspaceId, email, req.body || {}, email);
   res.json({ success: true, data: result });
 }));
 
