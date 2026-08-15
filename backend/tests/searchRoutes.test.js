@@ -61,7 +61,10 @@ describe('GET /api/search', () => {
 
   test('rejects a user with neither workspace access nor a technician profile', async () => {
     const res = await request(makeApp(member)).get('/api/search?q=printer').set('x-workspace-id', '2');
-    expect(res.status).toBe(401);
+    // 403 (not 401): the caller is authenticated — membership refusals must
+    // not trip the frontend's credential recovery (Phase A1).
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('workspace_access_denied');
     expect(searchMock).not.toHaveBeenCalled();
     // membership was checked against the RIGHT workspace, with a lowercased email
     expect(getAccessRoleMock).toHaveBeenCalledWith('coord@bgc.ca', 2);

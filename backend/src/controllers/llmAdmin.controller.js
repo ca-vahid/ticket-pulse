@@ -66,7 +66,7 @@ export const getDefaults = async (req, res) => {
 export const updatePrompts = async (req, res) => {
   try {
     const { classificationPrompt, responsePrompt } = req.body;
-    const updatedBy = req.session?.user?.name || 'admin';
+    const updatedBy = (req.session?.user ?? req.user)?.name || 'admin';
 
     // Validate required fields
     if (!classificationPrompt || !responsePrompt) {
@@ -104,7 +104,7 @@ export const updatePrompts = async (req, res) => {
 export const updateTemplates = async (req, res) => {
   try {
     const { signatureBlock, fallbackMessage, tonePresets } = req.body;
-    const updatedBy = req.session?.user?.name || 'admin';
+    const updatedBy = (req.session?.user ?? req.user)?.name || 'admin';
 
     const updates = {};
     if (signatureBlock !== undefined) updates.signatureBlock = signatureBlock;
@@ -140,7 +140,7 @@ export const updateEtaRules = async (req, res) => {
       afterHoursMessage,
       holidayMessage,
     } = req.body;
-    const updatedBy = req.session?.user?.name || 'admin';
+    const updatedBy = (req.session?.user ?? req.user)?.name || 'admin';
 
     const updates = {};
     if (baseResponseMinutes !== undefined) updates.baseResponseMinutes = parseInt(baseResponseMinutes);
@@ -172,7 +172,7 @@ export const updateEtaRules = async (req, res) => {
 export const updateOverrides = async (req, res) => {
   try {
     const { overrideRules, domainWhitelist, domainBlacklist } = req.body;
-    const updatedBy = req.session?.user?.name || 'admin';
+    const updatedBy = (req.session?.user ?? req.user)?.name || 'admin';
 
     const updates = {};
     if (overrideRules !== undefined) updates.overrideRules = overrideRules;
@@ -203,7 +203,7 @@ export const updateOverrides = async (req, res) => {
 export const updateRuntimeSettings = async (req, res) => {
   try {
     const { model, reasoningEffort, verbosity, maxOutputTokens } = req.body;
-    const updatedBy = req.session?.user?.name || 'admin';
+    const updatedBy = (req.session?.user ?? req.user)?.name || 'admin';
 
     const allowedModels = getModelMetadata({ operation: 'autoresponse_generation' }).map((entry) => entry.model);
     const allowedReasoning = ['none', 'low', 'medium', 'high'];
@@ -283,7 +283,7 @@ export const updateRuntimeSettings = async (req, res) => {
 export const publishConfig = async (req, res) => {
   try {
     const { notes } = req.body;
-    const publishedBy = req.session?.user?.name || 'admin';
+    const publishedBy = (req.session?.user ?? req.user)?.name || 'admin';
 
     const draft = await llmConfigService.getDraftConfig(req.workspaceId);
     const published = await llmConfigService.publishDraft(draft.id, publishedBy, req.workspaceId, notes);
@@ -309,7 +309,7 @@ export const publishConfig = async (req, res) => {
  */
 export const resetToDefaults = async (req, res) => {
   try {
-    const resetBy = req.session?.user?.name || 'admin';
+    const resetBy = (req.session?.user ?? req.user)?.name || 'admin';
 
     const draft = await llmConfigService.resetDraftToDefaults(req.workspaceId, resetBy);
 
@@ -359,7 +359,7 @@ export const getHistory = async (req, res) => {
 export const revertToVersion = async (req, res) => {
   try {
     const { historyId } = req.body;
-    const revertedBy = req.session?.user?.name || 'admin';
+    const revertedBy = (req.session?.user ?? req.user)?.name || 'admin';
 
     if (!historyId) {
       return res.status(400).json({

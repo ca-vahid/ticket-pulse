@@ -59,6 +59,12 @@ describe('SideRail', () => {
     expect(screen.queryByRole('button', { name: /Mail Workflows/ })).not.toBeInTheDocument();
   });
 
+  test('agents get no Settings entry (Phase A1 — no sections exist for them)', () => {
+    authState.user = { email: 'agent@x.com', role: 'agent' };
+    renderRail('/tickets');
+    expect(screen.queryByRole('button', { name: 'Settings' })).not.toBeInTheDocument();
+  });
+
   test('tickets pages show the full rail by default with a collapse control (QA 07-13 #6)', () => {
     localStorage.removeItem('tp_ticketsRailCollapsed');
     renderRail('/tickets/42');

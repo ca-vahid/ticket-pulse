@@ -62,6 +62,13 @@ export function AuthProvider({ children }) {
       const response = await authAPI.checkSession();
 
       if (response.authenticated && response.user) {
+        // Session-cookie bootstrap (Phase A1): /auth/session now returns a
+        // fresh JWT on the cookie branch. A brand-new tab has the httpOnly
+        // cookie but an empty sessionStorage — storing this token here is
+        // what lets SSE/Bearer paths work before MSAL silent SSO completes.
+        if (response.authToken) {
+          setAuthToken(response.authToken);
+        }
         setUser(response.user);
         setIsAuthenticated(true);
         recoveryAttemptsRef.current = 0;

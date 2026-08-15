@@ -1,7 +1,7 @@
 import express from 'express';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { requireWorkspace } from '../middleware/workspace.js';
-import { AuthenticationError } from '../utils/errors.js';
+import { AuthenticationError, AuthorizationError } from '../utils/errors.js';
 import workspaceRepository from '../services/workspaceRepository.js';
 import prisma from '../services/prisma.js';
 import globalSearchService from '../services/globalSearchService.js';
@@ -22,7 +22,7 @@ const router = express.Router();
 router.use(requireWorkspace);
 
 router.use(asyncHandler(async (req, _res, next) => {
-  const user = req.session?.user;
+  const user = (req.session?.user ?? req.user);
   const email = user?.email?.toLowerCase();
   if (!email) throw new AuthenticationError('Authentication required');
   if (user.role === 'admin') return next();
@@ -40,7 +40,9 @@ router.use(asyncHandler(async (req, _res, next) => {
   ]);
   if (!workspaceRole && !technician) {
     logger.warn(`Search access denied for ${email} in workspace ${req.workspaceId}`);
-    throw new AuthenticationError('You do not have access to search in this workspace');
+    // 403, not 401: the caller is authenticated — lacking membership must not
+    // trigger the frontend's credential recovery/sign-out (Phase A1).
+    throw new AuthorizationError('You do not have access to search in this workspace', 'workspace_access_denied');
   }
   return next();
 }));

@@ -2,7 +2,7 @@ import express from 'express';
 import multer from 'multer';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { requireWorkspace } from '../middleware/workspace.js';
-import { AuthenticationError, ValidationError } from '../utils/errors.js';
+import { AuthenticationError, AuthorizationError, ValidationError } from '../utils/errors.js';
 import ticketService from '../services/ticketService.js';
 import scheduledTicketService from '../services/scheduledTicketService.js';
 import attachmentService, { MAX_ATTACHMENT_BYTES } from '../services/attachmentService.js';
@@ -29,7 +29,7 @@ router.use(requireWorkspace);
 
 async function resolveTicketActor(req, _res, next) {
   try {
-    const user = req.session?.user;
+    const user = (req.session?.user ?? req.user);
     const email = user?.email?.toLowerCase();
     if (!email) throw new AuthenticationError('Authentication required');
 
@@ -49,7 +49,9 @@ async function resolveTicketActor(req, _res, next) {
 
     if (!workspaceRole && !technician) {
       logger.warn(`Ticketing access denied for ${email} in workspace ${req.workspaceId}`);
-      throw new AuthenticationError('You do not have access to tickets in this workspace');
+      // 403, not 401: authenticated-but-not-a-member must never trip the
+      // frontend's credential recovery/sign-out loop (Phase A1).
+      throw new AuthorizationError('You do not have access to tickets in this workspace', 'workspace_access_denied');
     }
 
     req.ticketActor = {

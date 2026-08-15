@@ -4,7 +4,7 @@ import jwksRsa from 'jwks-rsa';
 import config from '../config/index.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { ValidationError, AuthenticationError } from '../utils/errors.js';
-import workspaceRepository from '../services/workspaceRepository.js';
+import workspaceRepository, { mergeWorkspaceLists } from '../services/workspaceRepository.js';
 import settingsRepository from '../services/settingsRepository.js';
 import agentCompetencyService from '../services/agentCompetencyService.js';
 import rateLimiter from '../services/apiRateLimitService.js';
@@ -162,29 +162,56 @@ function isLocalDevRequest(req) {
     ));
 }
 
-async function resolveLoginAccess({ email, role, selectedWorkspaceId }) {
-  let availableWorkspaces = [];
-  let agentProfiles = [];
-  let resolvedRole = role;
-
-  if (resolvedRole === 'admin') {
-    availableWorkspaces = (await workspaceRepository.getAll()).map(ws => ({
+/**
+ * Resolve a user's effective global role + workspace picker (Phase A1).
+ * Shared by /sso, /dev-login, and the /session JWT fallback so all three
+ * agree on the merge semantics:
+ * - admin → every active workspace.
+ * - ≥1 access row → role unchanged; picker = access ∪ technician workspaces,
+ *   deduped with the access-row role winning the label — a PARTIAL grant
+ *   never shrinks the picker below the user's technician coverage.
+ * - 0 access rows + ≥1 technician profile → role 'agent'; picker = technician
+ *   workspaces (pure technicians keep the agent-portal UX — decision recorded
+ *   in plans/MEGA_2026-08-15_PLAN.md Phase A1).
+ */
+export async function resolveUserAccess(email, role) {
+  if (role === 'admin') {
+    const availableWorkspaces = (await workspaceRepository.getAll()).map(ws => ({
       id: ws.id,
       name: ws.name,
       slug: ws.slug,
       role: 'admin',
       nativeTicketingEnabled: ws.nativeTicketingEnabled === true,
     }));
-  } else {
-    availableWorkspaces = await workspaceRepository.getAccessibleWorkspaces(email);
+    const agentProfiles = await agentCompetencyService.getAgentProfiles(email);
+    return { role, availableWorkspaces, agentProfiles };
   }
 
-  agentProfiles = await agentCompetencyService.getAgentProfiles(email);
-  if (resolvedRole !== 'admin' && availableWorkspaces.length === 0 && agentProfiles.length > 0) {
-    resolvedRole = 'agent';
-    // Agents get their workspaces from technician profiles (native ticketing).
-    availableWorkspaces = await workspaceRepository.getTechnicianWorkspaces(email);
+  const [accessible, technician, agentProfiles] = await Promise.all([
+    workspaceRepository.getAccessibleWorkspaces(email),
+    workspaceRepository.getTechnicianWorkspaces(email),
+    agentCompetencyService.getAgentProfiles(email),
+  ]);
+
+  if (accessible.length > 0) {
+    // ≥1 access row → full-app UX. A stale 'agent' role (JWT minted before an
+    // ops grant, or dev-login role override) upgrades to 'viewer' so the
+    // grant actually takes effect without a re-login.
+    const effectiveRole = role === 'agent' ? 'viewer' : role;
+    return { role: effectiveRole, availableWorkspaces: mergeWorkspaceLists(accessible, technician), agentProfiles };
   }
+  if (agentProfiles.length > 0) {
+    // Agents get their workspaces from technician profiles (native ticketing).
+    return { role: 'agent', availableWorkspaces: technician, agentProfiles };
+  }
+  return { role, availableWorkspaces: [], agentProfiles };
+}
+
+async function resolveLoginAccess({ email, role, selectedWorkspaceId }) {
+  const resolved = await resolveUserAccess(email, role);
+  const resolvedRole = resolved.role;
+  const availableWorkspaces = resolved.availableWorkspaces;
+  const agentProfiles = resolved.agentProfiles;
 
   const requestedWorkspaceId = selectedWorkspaceId ? Number(selectedWorkspaceId) : null;
   const selectedWorkspace = requestedWorkspaceId
@@ -240,26 +267,14 @@ router.post(
     const adminEmails = await getAdminEmails();
     let role = adminEmails.includes(email) ? 'admin' : 'viewer';
 
-    // Fetch workspaces this user has access to
+    // Fetch workspaces this user has access to (merged picker — Phase A1)
     let availableWorkspaces = [];
     let agentProfiles = [];
     try {
-      if (role === 'admin') {
-        availableWorkspaces = (await workspaceRepository.getAll()).map(ws => ({
-          id: ws.id,
-          name: ws.name,
-          slug: ws.slug,
-          role: 'admin',
-          nativeTicketingEnabled: ws.nativeTicketingEnabled === true,
-        }));
-      } else {
-        availableWorkspaces = await workspaceRepository.getAccessibleWorkspaces(email);
-      }
-      agentProfiles = await agentCompetencyService.getAgentProfiles(email);
-      if (role !== 'admin' && availableWorkspaces.length === 0 && agentProfiles.length > 0) {
-        role = 'agent';
-        availableWorkspaces = await workspaceRepository.getTechnicianWorkspaces(email);
-      }
+      const resolved = await resolveUserAccess(email, role);
+      role = resolved.role;
+      availableWorkspaces = resolved.availableWorkspaces;
+      agentProfiles = resolved.agentProfiles;
     } catch (err) {
       logger.warn('Failed to fetch workspaces during login:', err.message);
     }
@@ -460,6 +475,16 @@ router.get(
   asyncHandler(async (req, res) => {
     if (req.session?.user) {
       const sessionAgentProfiles = sanitizeAgentProfiles(req.session.user.agentProfiles || []);
+      // Mint a fresh JWT alongside the session payload (Phase A1): the JWT
+      // lives in tab-scoped sessionStorage, so a brand-new tab arrives here
+      // with the httpOnly cookie but NO token — without this, that tab could
+      // never authenticate SSE/Bearer paths. Mirrors the /sso response shape.
+      const authToken = issueAuthToken({
+        email: req.session.user.email,
+        name: req.session.user.name,
+        role: req.session.user.role,
+        selectedWorkspaceId: req.session.user.selectedWorkspaceId || null,
+      });
       return res.json({
         success: true,
         authenticated: true,
@@ -472,6 +497,7 @@ router.get(
           agentProfile: sessionAgentProfiles[0] || null,
           agentProfiles: sessionAgentProfiles,
         },
+        authToken,
         availableWorkspaces: req.session.user.availableWorkspaces || [],
         selectedWorkspaceId: req.session.user.selectedWorkspaceId || null,
         selectedWorkspaceName: req.session.user.selectedWorkspaceName || null,
@@ -495,19 +521,13 @@ router.get(
         try {
           const email = decoded.email?.toLowerCase();
           let role = decoded.role;
-          if (role === 'admin') {
-            availableWorkspaces = (await workspaceRepository.getAll()).map(ws => ({
-              id: ws.id, name: ws.name, slug: ws.slug, role: 'admin',
-              nativeTicketingEnabled: ws.nativeTicketingEnabled === true,
-            }));
-          } else if (email) {
-            availableWorkspaces = await workspaceRepository.getAccessibleWorkspaces(email);
-          }
-          agentProfiles = email ? await agentCompetencyService.getAgentProfiles(email) : [];
-          if (role !== 'admin' && availableWorkspaces.length === 0 && agentProfiles.length > 0) {
-            role = 'agent';
+          if (email) {
+            // Same merged-picker resolution as /sso and /dev-login (Phase A1).
+            const resolved = await resolveUserAccess(email, role);
+            role = resolved.role;
             decoded.role = role;
-            availableWorkspaces = email ? await workspaceRepository.getTechnicianWorkspaces(email) : [];
+            availableWorkspaces = resolved.availableWorkspaces;
+            agentProfiles = resolved.agentProfiles;
           }
           if (decoded.selectedWorkspaceId) {
             selectedWorkspaceId = decoded.selectedWorkspaceId;

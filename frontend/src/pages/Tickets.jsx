@@ -826,7 +826,9 @@ export default function Tickets() {
       return next;
     });
   }, []);
-  useSSE({ onTicketChange, onPresence, onConnected: onSseConnected, enabled: Boolean(workspaceId) });
+  // reconnectKey: deterministic stream re-key on workspace switch (realtime
+  // plan Phase 1) — workspaceId here already derives from useWorkspace().
+  useSSE({ onTicketChange, onPresence, onConnected: onSseConnected, enabled: Boolean(workspaceId), reconnectKey: workspaceId });
   useEffect(() => () => {
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     if (rowFxTimerRef.current) clearTimeout(rowFxTimerRef.current);

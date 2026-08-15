@@ -2454,6 +2454,15 @@ class SyncService {
       const heldMs = Date.now() - lockHeldSince;
       if (heldMs < SYNC_LOCK_STALE_MS) {
         logger.warn(`Sync already in progress for workspace ${workspaceId}, skipping`);
+        // Tell open dashboards too (realtime plan Phase 1 — "Sync now" was a
+        // silent no-op here: the 200 {skipped} response was ignored and no
+        // event ever reached other tabs).
+        getSSEManager()
+          .then((manager) => manager.broadcast('sync-skipped', {
+            workspaceId,
+            reason: 'A sync is already running for this workspace',
+          }, workspaceId))
+          .catch(() => { /* SSE feedback is best-effort */ });
         return { status: 'skipped', reason: `Sync already in progress for workspace ${workspaceId}` };
       }
       // Watchdog: the previous run hung (or died without cleanup). Take the

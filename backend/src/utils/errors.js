@@ -20,14 +20,21 @@ export class ValidationError extends AppError {
 }
 
 export class AuthenticationError extends AppError {
-  constructor(message = 'Authentication failed') {
+  // 401 — the caller's CREDENTIALS are missing/invalid. The frontend treats
+  // this as "re-authenticate" (silent MSAL recovery, then login redirect).
+  constructor(message = 'Authentication failed', code = 'auth_required') {
     super(message, 401);
+    this.code = code;
   }
 }
 
 export class AuthorizationError extends AppError {
-  constructor(message = 'You do not have permission to perform this action') {
+  // 403 — the caller is authenticated but lacks PERMISSION. The frontend must
+  // NEVER run auth recovery/sign-out for these; `code` lets it distinguish
+  // which gate refused (workspace_access_denied, admin_required, ...).
+  constructor(message = 'You do not have permission to perform this action', code = 'forbidden') {
     super(message, 403);
+    this.code = code;
   }
 }
 
@@ -76,6 +83,13 @@ export function formatErrorResponse(error) {
   // Add error details for validation errors
   if (error instanceof ValidationError && error.details) {
     response.details = error.details;
+  }
+
+  // Problem code (auth/authorization errors): lets the frontend distinguish
+  // "credentials are bad" (401 auth_required) from "no permission" (403
+  // workspace_access_denied / admin_required / ...) without string matching.
+  if (error instanceof AppError && typeof error.code === 'string' && error.code) {
+    response.code = error.code;
   }
 
   // Add stack trace in development

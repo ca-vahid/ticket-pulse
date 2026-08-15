@@ -29,7 +29,9 @@ export function useApprovalCount() {
     if (data?.action === 'approval') refresh();
   }, [refresh]);
 
-  useSSE({ onTicketChange, enabled: Boolean(isWorkspaceSelected) });
+  // reconnectKey: deterministic stream re-key on workspace switch (realtime
+  // plan Phase 1) — the context-subscribed id, not a render-time module read.
+  useSSE({ onTicketChange, enabled: Boolean(isWorkspaceSelected), reconnectKey: currentWorkspace?.id });
 
   return count;
 }

@@ -71,6 +71,13 @@ export function getWorkspaceId() {
 let _authTokenRefresher = null;
 let _refreshInFlight = null;
 
+// Timebox for one refresh attempt (Phase A1, relocated from R1): MSAL's
+// acquireTokenSilent can hang indefinitely (iframe that never settles). If
+// the attempt doesn't settle inside this window, callers get null and the
+// in-flight slot clears itself so the NEXT refresh isn't poisoned by the
+// stuck one.
+export const AUTH_REFRESH_SETTLE_TIMEOUT_MS = 5000;
+
 export function registerAuthTokenRefresher(refresher) {
   _authTokenRefresher = typeof refresher === 'function' ? refresher : null;
 }
@@ -78,27 +85,42 @@ export function registerAuthTokenRefresher(refresher) {
 /**
  * Ask the registered refresher for a new session/JWT. Coalesces concurrent
  * callers into one attempt. Resolves with the fresh token (the refresher is
- * expected to call setAuthToken on success) or null if refresh isn't possible.
+ * expected to call setAuthToken on success) or null if refresh isn't
+ * possible / didn't settle within AUTH_REFRESH_SETTLE_TIMEOUT_MS. A stuck
+ * attempt never blocks future refreshes: the shared slot self-clears on
+ * timeout, and if the zombie attempt eventually succeeds it still stores the
+ * token via setAuthToken for the next consumer.
  */
 export async function refreshAuthToken() {
   if (!_authTokenRefresher) return null;
   if (!_refreshInFlight) {
-    _refreshInFlight = Promise.resolve()
+    const attempt = Promise.resolve()
       .then(() => _authTokenRefresher())
       .then((ok) => (ok ? _authToken : null))
-      .catch(() => null)
-      .finally(() => { _refreshInFlight = null; });
+      .catch(() => null);
+    let timeoutId = null;
+    const timeout = new Promise((resolve) => {
+      timeoutId = setTimeout(() => resolve(null), AUTH_REFRESH_SETTLE_TIMEOUT_MS);
+    });
+    _refreshInFlight = Promise.race([attempt, timeout]).finally(() => {
+      if (timeoutId) clearTimeout(timeoutId);
+      _refreshInFlight = null;
+    });
   }
   return _refreshInFlight;
 }
 
 /**
  * True when the stored JWT has an exp claim that has passed (or will pass
- * within `withinMs`). A missing/undecodable token or a token without exp
- * returns false — cookie-only auth has nothing to pre-refresh.
+ * within `withinMs`) — or when there is NO token at all (Phase A1): a
+ * brand-new tab holds only the httpOnly session cookie, so "no token" means
+ * useSSE's pre-connect refresh path MUST run to mint one before connecting
+ * (cookie-only EventSource connects are exactly the cross-site-cookie case
+ * that 401-loops). A present-but-undecodable token, or one without exp, still
+ * returns false.
  */
 export function isAuthTokenExpiring(withinMs = 60000) {
-  if (!_authToken) return false;
+  if (!_authToken) return true;
   try {
     const [, payload] = _authToken.split('.');
     const decoded = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
@@ -173,24 +195,59 @@ const analyticsRetryInterceptor = async (error) => {
   return Promise.reject(error);
 };
 
+/**
+ * Interceptor discipline (Phase A1): only a genuine 401 — the CREDENTIALS are
+ * bad — may trigger the AuthContext recovery loop via `auth:unauthorized`.
+ * 403s are permission refusals for an authenticated user (role gates now
+ * return AuthorizationError + a problem `code`): NO recovery, NO sign-out.
+ */
+export function shouldDispatchUnauthorized(status, requestUrl, config = {}) {
+  if (status !== 401) return false;
+  if (requestUrl.startsWith('/summit/public/')) return false;
+  if (requestUrl.startsWith('/ticket-status/public/')) return false;
+  if (['/auth/session', '/auth/logout', '/auth/sso', '/auth/dev-login'].includes(requestUrl)) return false;
+  if (config._speculative) return false;
+  return true;
+}
+
+// 403s surface QUIETLY, once per endpoint per tab session — a page that polls
+// a forbidden endpoint must not spam the console (or any listener) forever.
+const _forbiddenNotified = new Set();
+export function noteForbidden(requestUrl, message, code) {
+  const key = String(requestUrl || '').split('?')[0];
+  if (_forbiddenNotified.has(key)) return false;
+  _forbiddenNotified.add(key);
+  // eslint-disable-next-line no-console
+  console.warn(`You don't have access to ${key}${code ? ` (${code})` : ''}${message ? `: ${message}` : ''}`);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('api:forbidden', {
+      detail: { url: key, message: message || null, code: code || null },
+    }));
+  }
+  return true;
+}
+
 // Response interceptor for error handling
 const errorInterceptor = (error) => {
   if (error.response) {
     const status = error.response.status;
     const requestUrl = error.config?.url || '';
-    const isPublicSummitRequest = requestUrl.startsWith('/summit/public/');
-    const isPublicTicketStatusRequest = requestUrl.startsWith('/ticket-status/public/');
 
-    if (status === 401 && !isPublicSummitRequest && !isPublicTicketStatusRequest && requestUrl !== '/auth/session' && requestUrl !== '/auth/logout' && requestUrl !== '/auth/sso' && requestUrl !== '/auth/dev-login' && !error.config?._speculative) {
+    if (shouldDispatchUnauthorized(status, requestUrl, error.config || {})) {
       window.dispatchEvent(new CustomEvent('auth:unauthorized', {
         detail: { url: requestUrl },
       }));
+    } else if (status === 403) {
+      noteForbidden(requestUrl, error.response.data?.message, error.response.data?.code);
     }
 
     // Server responded with error status
     const errorMessage = error.response.data?.message || error.message;
     const enhancedError = new Error(errorMessage);
     enhancedError.status = status;
+    // Problem code from the backend (e.g. 'workspace_access_denied') so UIs
+    // can branch on the specific refusal without string matching.
+    if (error.response.data?.code) enhancedError.code = error.response.data.code;
     // Validation errors carry a details array (e.g. workflow definition
     // issues) — keep it so UIs can show the specific problems.
     if (error.response.data?.details) enhancedError.details = error.response.data.details;

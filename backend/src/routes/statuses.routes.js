@@ -18,7 +18,7 @@ const router = express.Router();
 router.use(requireAdmin);
 
 function actorEmail(req) {
-  return req.session?.user?.email || null;
+  return (req.session?.user ?? req.user)?.email || null;
 }
 
 /** Full list including inactive — the Settings manager shows retired rows. */

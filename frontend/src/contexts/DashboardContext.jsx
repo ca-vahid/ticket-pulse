@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { dashboardAPI, getWorkspaceId } from '../services/api';
+import { useWorkspaceOptional } from './WorkspaceContext';
 import { useSSE } from '../hooks/useSSE';
 import { dataCache, cacheKeys, policyForDate, TECH_POLICY, CSAT_POLICY, TTL } from '../services/dataCache';
 import { formatDateLocal } from '../utils/dateHelpers';
@@ -46,6 +47,15 @@ function peekCachedDashboard(type) {
 
 export function DashboardProvider({ children }) {
   const location = useLocation();
+  // Deterministic SSE re-key on workspace switch (realtime plan Phase 1):
+  // subscribe to the workspace through React context so a switch ALWAYS
+  // re-renders this provider and rebuilds the stream. Reading the module
+  // getter at render time only re-keyed on incidental re-renders — App.jsx's
+  // children-bailout meant a switch could leave the stream on the old
+  // workspace's channel. Optional so unit tests can mount the provider bare;
+  // the module getter stays as the fallback.
+  const workspaceCtx = useWorkspaceOptional();
+  const sseWorkspaceId = workspaceCtx ? workspaceCtx.currentWorkspace?.id ?? null : getWorkspaceId();
   // --- Shared state for all view modes ---
   // Initialize from sessionStorage cache to prevent loading flash on back-nav / F5
   const [dashboardData, setDashboardData] = useState(() => {
@@ -217,6 +227,9 @@ export function DashboardProvider({ children }) {
       if (mySeq !== weeklySeqRef.current) return;
       const payload = result.data?.data || result.data;
       setWeeklyData(payload);
+      // "Last updated" honesty (realtime plan Phase 1): lastFreshAt used to be
+      // stamped ONLY by the daily fetch, so weekly/monthly viewers saw a lie.
+      setLastFreshAt(payload?.timestamp ? new Date(payload.timestamp) : new Date());
     } catch (err) {
       if (mySeq !== weeklySeqRef.current) return;
       console.warn('Weekly dashboard fetch error:', err.message);
@@ -257,6 +270,7 @@ export function DashboardProvider({ children }) {
       if (mySeq !== monthlySeqRef.current) return;
       const payload = result.data?.data || result.data;
       setMonthlyData(payload);
+      setLastFreshAt(payload?.timestamp ? new Date(payload.timestamp) : new Date());
     } catch (err) {
       if (mySeq !== monthlySeqRef.current) return;
       console.warn('Monthly dashboard fetch error:', err.message);
@@ -452,6 +466,8 @@ export function DashboardProvider({ children }) {
         const statsPayload = statsRes?.data || statsRes;
         setWeeklyStats(statsPayload?.dailyCounts ?? statsPayload);
       }
+      // All three force-refresh branches just hit the network — stamp it.
+      setLastFreshAt(new Date());
     } catch (err) {
       console.error('Force refresh error:', err);
       setError(err.message || 'Failed to refresh dashboard data');
@@ -474,6 +490,10 @@ export function DashboardProvider({ children }) {
   useEffect(() => { pathnameRef.current = location.pathname; }, [location.pathname]);
 
   const handleSyncCompleted = useCallback((_data) => {
+    // A data event arrived — the stream is delivering fresh server state.
+    // Stamp it even when this route doesn't refetch (realtime plan Phase 1:
+    // "Last updated" must reflect data freshness, not "daily view fetched").
+    setLastFreshAt(new Date());
     if (!matchesRoute(pathnameRef.current, DASHBOARD_REFRESH_SSE_ROUTES)) return;
 
     // Invalidate cache and refresh after sync completion
@@ -503,14 +523,34 @@ export function DashboardProvider({ children }) {
     // No additional logging needed here.
   }, []);
 
-  const dashboardSseEnabled = autoRefresh && matchesRoute(location.pathname, APP_LIVE_SSE_ROUTES);
+  // Another admin's "Sync now" hit the already-running guard — surfaced so
+  // AppHeader can tell the user instead of the click being a silent no-op.
+  const [syncSkippedEvent, setSyncSkippedEvent] = useState(null);
+  const handleSyncSkipped = useCallback((data) => {
+    setSyncSkippedEvent({ at: Date.now(), reason: data?.reason || 'A sync is already running' });
+  }, []);
 
-  const { isConnected: sseConnected, connectionStatus: sseConnectionStatus, retry: sseRetry } = useSSE({
+  // Also gated on having a workspace: the SSE route now REQUIRES an explicit
+  // ?workspaceId= (400 otherwise), so connecting before hydration would just
+  // burn retry budget on guaranteed failures.
+  const dashboardSseEnabled = autoRefresh
+    && sseWorkspaceId != null
+    && matchesRoute(location.pathname, APP_LIVE_SSE_ROUTES);
+
+  const {
+    isConnected: sseConnected,
+    connectionStatus: sseConnectionStatus,
+    retry: sseRetry,
+    getReconnectChurn: sseGetReconnectChurn,
+  } = useSSE({
     enabled: dashboardSseEnabled,
     onSyncCompleted: handleSyncCompleted,
+    onSyncSkipped: handleSyncSkipped,
     onConnected: handleConnected,
     onError: handleError,
-    reconnectKey: getWorkspaceId(),
+    // Deterministic re-key: context-subscribed workspace id (see top of
+    // provider) — NOT the module getter read at render time.
+    reconnectKey: sseWorkspaceId,
   });
 
   const primaryDataReady = !!(dashboardData || weeklyData || monthlyData);
@@ -536,7 +576,9 @@ export function DashboardProvider({ children }) {
     sseConnected,
     sseConnectionStatus,
     sseRetry,
+    sseGetReconnectChurn,
     sseEnabled: dashboardSseEnabled,
+    syncSkippedEvent,
     setAutoRefresh,
 
     // Fetch methods (cache-aware)

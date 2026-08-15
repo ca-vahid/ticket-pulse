@@ -17,7 +17,7 @@ import { scrubFreeText as scrubDemoText, useDemoMode } from '../../utils/demoMod
 import { cn } from '../../lib/utils';
 import { APP_VERSION } from '../../data/changelog';
 import ChangelogModal from '../ChangelogModal';
-import { NAV_DESTINATIONS, useNavDestinations } from './navDestinations';
+import { NAV_DESTINATIONS, canAccessSettings, useNavDestinations } from './navDestinations';
 
 // Short labels so the fixed tabs stay legible on narrow phones.
 const SHORT_LABEL = {
@@ -37,7 +37,7 @@ const SHORT_LABEL = {
 export default function MobileTabBar() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
   const { currentWorkspace, availableWorkspaces, switchWorkspace } = useWorkspace();
   const { lastUpdated, sseConnectionStatus } = useDashboard();
   const demoMode = useDemoMode();
@@ -165,17 +165,21 @@ export default function MobileTabBar() {
                 );
               })}
 
-              <button
-                type="button"
-                onClick={() => go('/settings')}
-                className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50"
-              >
-                <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500">
-                  <Settings className="h-[20px] w-[20px]" />
-                </span>
-                <span className="flex-1">Settings</span>
-                <ChevronRight className="h-4 w-4 text-slate-300" />
-              </button>
+              {/* Agents have no Settings sections (Phase A1) — same gate as
+                  the SideRail entry. */}
+              {canAccessSettings(user) && (
+                <button
+                  type="button"
+                  onClick={() => go('/settings')}
+                  className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500">
+                    <Settings className="h-[20px] w-[20px]" />
+                  </span>
+                  <span className="flex-1">Settings</span>
+                  <ChevronRight className="h-4 w-4 text-slate-300" />
+                </button>
+              )}
 
               <button
                 type="button"

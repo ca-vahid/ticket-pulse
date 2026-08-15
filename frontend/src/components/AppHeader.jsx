@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Award,
@@ -24,7 +24,7 @@ import {
 } from '../utils/demoMode';
 import { APP_VERSION } from '../data/changelog';
 import { syncAPI } from '../services/api';
-import { NAV_DESTINATIONS } from './nav/navDestinations';
+import { NAV_DESTINATIONS, canAccessSettings } from './nav/navDestinations';
 import SideRail from './nav/SideRail';
 import ChangelogModal from './ChangelogModal';
 
@@ -47,28 +47,81 @@ export default function AppHeader({
 }) {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
-  const { currentWorkspace, availableWorkspaces, switchWorkspace } = useWorkspace();
-  const { isRefreshing, lastUpdated, sseConnectionStatus, sseRetry, sseEnabled } = useDashboard();
+  const {
+    currentWorkspace, availableWorkspaces, switchWorkspace,
+    switchError, clearSwitchError, retryWorkspaceSync,
+  } = useWorkspace();
+  const { isRefreshing, lastUpdated, sseConnectionStatus, sseRetry, sseEnabled, syncSkippedEvent } = useDashboard();
   // Only offer the manual reconnect where the live feed is supposed to run —
   // on routes with SSE intentionally off (e.g. Settings), "Offline" is normal.
   const canRetrySse = Boolean(sseEnabled && sseRetry);
   const [showChangelog, setShowChangelog] = useState(false);
   const [manualSyncing, setManualSyncing] = useState(false);
+  // Response-driven "Sync now" feedback (realtime plan Phase 1 — the trigger
+  // used to swallow every outcome, so skipped/forbidden syncs were silent).
+  const [syncNotice, setSyncNotice] = useState(null); // { tone: 'ok'|'warn'|'error', text }
+  const syncNoticeTimerRef = useRef(null);
+  const showSyncNotice = (tone, text) => {
+    if (syncNoticeTimerRef.current) clearTimeout(syncNoticeTimerRef.current);
+    setSyncNotice({ tone, text });
+    syncNoticeTimerRef.current = setTimeout(() => setSyncNotice(null), 6000);
+  };
+  useEffect(() => () => { if (syncNoticeTimerRef.current) clearTimeout(syncNoticeTimerRef.current); }, []);
+
+  // Server broadcast: someone's "Sync now" hit the already-running guard.
+  const lastSkipSeenRef = useRef(null);
+  useEffect(() => {
+    if (!syncSkippedEvent || syncSkippedEvent.at === lastSkipSeenRef.current) return;
+    lastSkipSeenRef.current = syncSkippedEvent.at;
+    showSyncNotice('warn', 'A sync is already running');
+  }, [syncSkippedEvent]);
 
   // Pages without their own dashboard refresh handlers still get a "Sync now"
   // in the Live popover (QA 07-08: it only existed on the Dashboard). Fires a
-  // workspace-wide sync; progress shows via the Background sync row (SSE).
+  // workspace-wide sync. Feedback is RESPONSE-driven, never SSE-dependent.
   const triggerManualSync = async () => {
     setManualSyncing(true);
+    showSyncNotice('ok', 'Sync started');
     try {
-      await syncAPI.trigger();
-    } catch { /* the popover's status rows are the feedback surface */ } finally {
+      const res = await syncAPI.trigger();
+      if (res?.data?.status === 'skipped') {
+        showSyncNotice('warn', 'A sync is already running');
+      } else {
+        // The trigger endpoint runs the sync to completion before responding.
+        showSyncNotice('ok', 'Sync finished — data refreshed');
+      }
+    } catch (err) {
+      const status = err?.response?.status;
+      if (status === 401 || status === 403) {
+        showSyncNotice('error', 'Only admins can start a sync');
+      } else {
+        showSyncNotice('error', 'Sync failed to start — try again');
+      }
+    } finally {
       setManualSyncing(false);
     }
   };
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
+  // Background-sync row honesty: off-dashboard routes have no sync polling, so
+  // the row was a hard-coded "Idle". Fetch the real status lazily when the
+  // popover opens (props from Dashboard still win when provided).
+  const [lazySyncStatus, setLazySyncStatus] = useState(null); // { running, step }
+  useEffect(() => {
+    if (!statusOpen) return undefined;
+    let cancelled = false;
+    syncAPI.getStatus()
+      .then((res) => {
+        if (cancelled) return;
+        setLazySyncStatus({
+          running: Boolean(res?.data?.sync?.isRunning),
+          step: res?.data?.sync?.progress?.currentStep || null,
+        });
+      })
+      .catch(() => { if (!cancelled) setLazySyncStatus(null); });
+    return () => { cancelled = true; };
+  }, [statusOpen]);
 
   const demoMode = useDemoMode();
   const displayUserName = useDemoLabel('name', user?.name || user?.username || 'User');
@@ -207,6 +260,10 @@ export default function AppHeader({
 
   // ---- consolidated status pill -------------------------------------------
   const syncing = backgroundSyncRunning || (isRefreshing && !isColdLoading);
+  // Popover "Background sync" row: Dashboard's live props win; other routes
+  // fall back to the lazily-fetched status (see effect above).
+  const syncRowRunning = backgroundSyncRunning || Boolean(lazySyncStatus?.running);
+  const syncRowStep = backgroundSyncRunning ? backgroundSyncStep : (backgroundSyncStep || lazySyncStatus?.step);
   const progressMatch = backgroundSyncStep && backgroundSyncStep.match(/(\d+)\s*\/\s*(\d+)/);
   const syncPct = progressMatch
     ? Math.min(100, Math.max(0, (parseInt(progressMatch[1], 10) / Math.max(1, parseInt(progressMatch[2], 10))) * 100))
@@ -295,34 +352,36 @@ export default function AppHeader({
             </span>
           </div>
           <div className="flex items-center justify-between py-1">
-            <span className="text-slate-400">Last updated</span>
+            <span className="text-slate-400">Data refreshed</span>
             <span className="font-medium">{lastUpdated ? new Date(lastUpdated).toLocaleString() : '—'}</span>
           </div>
           <div className="flex items-center justify-between gap-3 py-1">
             <span className="flex-none text-slate-400">Background sync</span>
-            {backgroundSyncRunning ? (
+            {syncRowRunning ? (
               <span className="flex min-w-0 items-center gap-2">
-                <span className="truncate font-medium text-blue-700">{backgroundSyncStep || 'Running…'}</span>
-                <button
-                  type="button"
-                  onClick={onKillSync}
-                  disabled={killingSync || !onKillSync}
-                  className="flex-none rounded border border-red-200 bg-red-50 px-1.5 py-0.5 font-semibold text-red-600 hover:bg-red-100 disabled:opacity-50"
-                >
-                  Stop
-                </button>
+                <span className="truncate font-medium text-blue-700">{syncRowStep || 'Running…'}</span>
+                {backgroundSyncRunning && (
+                  <button
+                    type="button"
+                    onClick={onKillSync}
+                    disabled={killingSync || !onKillSync}
+                    className="flex-none rounded border border-red-200 bg-red-50 px-1.5 py-0.5 font-semibold text-red-600 hover:bg-red-100 disabled:opacity-50"
+                  >
+                    Stop
+                  </button>
+                )}
               </span>
             ) : (
               <span className="font-medium text-slate-500">Idle</span>
             )}
           </div>
 
-          {dashboardActions ? (
+          {canManageWorkspace && (dashboardActions ? (
             <div className="mt-2 flex gap-2 border-t border-slate-100 pt-2.5">
               <button
                 type="button"
                 onClick={() => { setStatusOpen(false); dashboardActions.onRefresh(); }}
-                disabled={dashboardActions.refreshing || backgroundSyncRunning}
+                disabled={dashboardActions.refreshing || syncRowRunning}
                 className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2 py-1.5 font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <RefreshCw className="h-3.5 w-3.5" /> Sync now
@@ -330,7 +389,7 @@ export default function AppHeader({
               <button
                 type="button"
                 onClick={() => { setStatusOpen(false); dashboardActions.onSyncWeek(); }}
-                disabled={dashboardActions.refreshing || backgroundSyncRunning}
+                disabled={dashboardActions.refreshing || syncRowRunning}
                 title="Full detail sync for the current week"
                 className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2 py-1.5 font-semibold text-slate-700 transition-colors hover:border-blue-300 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -342,13 +401,27 @@ export default function AppHeader({
               <button
                 type="button"
                 onClick={triggerManualSync}
-                disabled={manualSyncing || backgroundSyncRunning}
+                disabled={manualSyncing || syncRowRunning}
                 title="Pull the latest tickets and changes from FreshService"
                 className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2 py-1.5 font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
               >
-                <RefreshCw className={`h-3.5 w-3.5 ${manualSyncing ? 'animate-spin' : ''}`} /> {manualSyncing ? 'Starting sync…' : 'Sync now'}
+                <RefreshCw className={`h-3.5 w-3.5 ${manualSyncing ? 'animate-spin' : ''}`} /> {manualSyncing ? 'Syncing…' : 'Sync now'}
               </button>
             </div>
+          ))}
+          {syncNotice && (
+            <p
+              role="status"
+              className={`mt-2 rounded-md border px-2 py-1.5 text-[11px] font-medium ${
+                syncNotice.tone === 'ok'
+                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                  : syncNotice.tone === 'warn'
+                    ? 'border-amber-200 bg-amber-50 text-amber-700'
+                    : 'border-red-200 bg-red-50 text-red-700'
+              }`}
+            >
+              {syncNotice.text}
+            </p>
           )}
         </div>
       )}
@@ -430,15 +503,17 @@ export default function AppHeader({
               </button>
             ))}
 
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => navigateFromMenu('/settings')}
-              className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
-            >
-              <Settings className="h-4 w-4 text-slate-500" />
-              <span className="font-semibold">Settings</span>
-            </button>
+            {canAccessSettings(user) && (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => navigateFromMenu('/settings')}
+                className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+              >
+                <Settings className="h-4 w-4 text-slate-500" />
+                <span className="font-semibold">Settings</span>
+              </button>
+            )}
 
             <button
               type="button"
@@ -502,6 +577,29 @@ export default function AppHeader({
           {renderUserMenu()}
         </div>
       </header>
+
+      {/* Workspace switch failed to reach the server (WorkspaceContext retry
+          exhausted) — the session may still point at the previous workspace,
+          which is exactly the wrong-SSE-channel zombie setup. Surface it. */}
+      {switchError && (
+        <div role="alert" className="flex items-center gap-3 border-b border-red-200 bg-red-50 px-4 py-1.5 text-xs text-red-700">
+          <span className="min-w-0 flex-1 truncate font-medium">{switchError}</span>
+          <button
+            type="button"
+            onClick={() => { retryWorkspaceSync?.(); }}
+            className="flex-none rounded border border-red-200 bg-white px-2 py-0.5 font-semibold text-red-600 transition-colors hover:bg-red-100 tp-focus-ring"
+          >
+            Retry
+          </button>
+          <button
+            type="button"
+            onClick={() => clearSwitchError?.()}
+            className="flex-none rounded px-1.5 py-0.5 font-semibold text-red-500 transition-colors hover:bg-red-100 tp-focus-ring"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {/* Mobile: page-specific actions only, inline (non-sticky) so content
           keeps the room the old header bar occupied. */}

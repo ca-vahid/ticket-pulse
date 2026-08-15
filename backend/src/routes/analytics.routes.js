@@ -57,7 +57,7 @@ router.post('/reports', asyncHandler(async (req, res) => {
     scope: req.body?.scope,
     rangeDays: req.body?.rangeDays,
     title: req.body?.title,
-  }, req.session?.user || null);
+  }, (req.session?.user ?? req.user) || null);
   res.status(201).json({ success: true, data: row });
 }));
 

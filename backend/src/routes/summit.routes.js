@@ -49,7 +49,7 @@ summitPublicRouter.post('/:token/feedback/items/:itemId/comments', asyncHandler(
 }));
 
 summitProtectedRouter.get('/workshop', asyncHandler(async (req, res) => {
-  const result = await summitWorkshopService.getOrCreateWorkshop(req.workspaceId, req.session?.user?.email);
+  const result = await summitWorkshopService.getOrCreateWorkshop(req.workspaceId, (req.session?.user ?? req.user)?.email);
   res.json({ success: true, ...result });
 }));
 
@@ -63,17 +63,17 @@ summitProtectedRouter.get('/workshop/feedback', asyncHandler(async (req, res) =>
 }));
 
 summitProtectedRouter.post('/workshop/feedback/items', asyncHandler(async (req, res) => {
-  const result = await summitWorkshopService.submitAuthenticatedFeedbackItem(req.workspaceId, req.session?.user || {}, req.body || {});
+  const result = await summitWorkshopService.submitAuthenticatedFeedbackItem(req.workspaceId, (req.session?.user ?? req.user) || {}, req.body || {});
   res.json({ success: true, ...result });
 }));
 
 summitProtectedRouter.post('/workshop/feedback/items/:itemId/vote', asyncHandler(async (req, res) => {
-  const result = await summitWorkshopService.voteAuthenticatedFeedbackItem(req.workspaceId, req.session?.user || {}, req.params.itemId, req.body || {});
+  const result = await summitWorkshopService.voteAuthenticatedFeedbackItem(req.workspaceId, (req.session?.user ?? req.user) || {}, req.params.itemId, req.body || {});
   res.json({ success: true, ...result });
 }));
 
 summitProtectedRouter.post('/workshop/feedback/items/:itemId/comments', asyncHandler(async (req, res) => {
-  const result = await summitWorkshopService.commentAuthenticatedFeedbackItem(req.workspaceId, req.session?.user || {}, req.params.itemId, req.body || {});
+  const result = await summitWorkshopService.commentAuthenticatedFeedbackItem(req.workspaceId, (req.session?.user ?? req.user) || {}, req.params.itemId, req.body || {});
   res.json({ success: true, ...result });
 }));
 
@@ -105,7 +105,7 @@ summitProtectedRouter.put('/workshop/state', asyncHandler(async (req, res) => {
       label: req.body?.label,
       snapshotType: req.body?.snapshotType || 'manual',
     },
-    req.session?.user?.email,
+    (req.session?.user ?? req.user)?.email,
   );
   res.json({ success: true, ...result });
 }));
@@ -114,7 +114,7 @@ summitProtectedRouter.post('/workshop/snapshots/:id/restore', asyncHandler(async
   const result = await summitWorkshopService.restoreSnapshot(
     req.workspaceId,
     req.params.id,
-    req.session?.user?.email,
+    (req.session?.user ?? req.user)?.email,
   );
   res.json({ success: true, ...result });
 }));

@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.3.03-preview';
+export const APP_VERSION = '3.4.00-preview';
 
 export const changelog = [
+  {
+    version: '3.4.00-preview',
+    date: 'August 15, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>🔐 The sign-out epidemic, solved at the root</strong> — the recurring “signed out 3-5×/day”, eternal “Connecting”, and mid-drag “page refreshes” traced to one bug: no-access responses were mislabeled as login failures, driving the app to sign users out with valid credentials. Access denials are now proper 403s that never trigger sign-out, new tabs bootstrap credentials from the session automatically, and agents (like Adrian & Marcus) get the live-feed and lookup access the queue needs. (QA 08-11/08-12)' },
+      { type: 'fixed', html: '<strong>📡 Realtime that tells the truth</strong> — heartbeats are workspace-scoped and self-verifying (the “Live but frozen for hours” zombie is impossible now: a wrong-channel stream detects itself and reconnects), the connection state machine can no longer loop in “Connecting” through flaky proxies (honest “Offline — Reconnect” with a working retry), switching workspaces re-keys the stream deterministically, and “Sync now” gives real feedback (started / already running / admins-only) instead of silence. “Last updated” is now “Data refreshed” and means it. (QA 08-11)' },
+      { type: 'improved', html: '<strong>⚙️ Settings that fit your role</strong> — reviewers land on a section they can actually use (no more blank page), users without settings see a friendly note instead of nothing, and the Settings entry hides for roles the router would bounce anyway. Adrian’s approval-categories access is granted and working. (QA 08-11)' },
+    ],
+  },
   {
     version: '3.3.03-preview',
     date: 'August 8, 2026',

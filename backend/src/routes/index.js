@@ -29,7 +29,7 @@ import searchRoutes from './search.routes.js';
 import apiV1Routes from './apiV1.routes.js';
 import backupRoutes from './backup.routes.js';
 import { requireWorkspace } from '../middleware/workspace.js';
-import { requireAuth, requireWorkspaceAccess } from '../middleware/auth.js';
+import { requireAuth, requireWorkspaceAccess, requireWorkspaceMemberOrAgent } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -75,8 +75,9 @@ router.use((req, _res, next) => {
 });
 
 // All routes below require authentication, a workspace, and access to it.
-// requireAuth MUST run first so req.session.user is populated from JWT
-// before requireWorkspaceAccess checks the user's email against the DB.
+// requireAuth MUST run first so the identity (req.session.user for cookie
+// sessions, req.user for Bearer JWTs) is populated before the access gates
+// check the user's email against the DB.
 router.use(requireAuth);
 router.use('/agent', agentRoutes);
 // Native ticketing: mounted before global workspace-access enforcement because
@@ -94,6 +95,12 @@ router.use('/settings', settingsRoutes);
 // Cross-workspace AI usage/cost report: super-admin gated inside the router,
 // deliberately NOT behind workspace enforcement (it spans all workspaces).
 router.use('/ai-usage', aiUsageRoutes);
+// SSE live events: agent-allowed READ tier (Mega 08-15 Phase A1). Global
+// 'agent' users (no workspace_access rows) work the ticket queue, so their
+// live updates must not 401/403 — active-technician membership grants access,
+// same model as /tickets and /search above. Mounted before the strict
+// requireWorkspaceAccess gate; everything below it stays members-only.
+router.use('/sse', requireWorkspace, requireWorkspaceMemberOrAgent, sseRoutes);
 router.use(requireWorkspace);
 router.use(requireWorkspaceAccess);
 
@@ -102,7 +109,6 @@ router.use('/dashboard', dashboardRoutes);
 // Ticket-status registry (Phase 8a): Settings CRUD, admin-gated in the router.
 router.use('/ticket-statuses', statusesRoutes);
 router.use('/sync', syncRoutes);
-router.use('/sse', sseRoutes);
 router.use('/photos', photosRoutes);
 router.use('/autoresponse', autoresponseRoutes);
 router.use('/admin/llm-settings', llmAdminRoutes);

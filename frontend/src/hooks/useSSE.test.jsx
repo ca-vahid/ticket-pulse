@@ -10,12 +10,14 @@ const mocks = vi.hoisted(() => ({
   getEventSource: vi.fn(),
   isAuthTokenExpiring: vi.fn(() => false),
   refreshAuthToken: vi.fn(() => Promise.resolve('fresh-token')),
+  getWorkspaceId: vi.fn(() => 1),
 }));
 
 vi.mock('../services/api', () => ({
   sseAPI: { getEventSource: mocks.getEventSource },
   isAuthTokenExpiring: mocks.isAuthTokenExpiring,
   refreshAuthToken: mocks.refreshAuthToken,
+  getWorkspaceId: mocks.getWorkspaceId,
 }));
 
 import { useSSE } from './useSSE';
@@ -57,6 +59,10 @@ class FakeEventSource {
     this.readyState = FakeEventSource.CONNECTING;
     this.onerror?.();
   }
+
+  emit(type, data) {
+    (this.listeners[type] || []).forEach((fn) => fn({ data }));
+  }
 }
 FakeEventSource.CONNECTING = 0;
 FakeEventSource.OPEN = 1;
@@ -68,6 +74,7 @@ beforeEach(() => {
   mocks.getEventSource.mockReset().mockImplementation(() => new FakeEventSource());
   mocks.isAuthTokenExpiring.mockReset().mockReturnValue(false);
   mocks.refreshAuthToken.mockReset().mockResolvedValue('fresh-token');
+  mocks.getWorkspaceId.mockReset().mockReturnValue(1);
 });
 
 afterEach(() => {
@@ -167,6 +174,186 @@ describe('useSSE retry budget + manual retry', () => {
     expect(mocks.getEventSource).toHaveBeenCalledTimes(attemptsBeforeRetry + 1);
     expect(result.current.connectionStatus).toBe('connecting');
 
+    await act(async () => { FakeEventSource.instances.at(-1).open(); });
+    expect(result.current.connectionStatus).toBe('connected');
+  });
+});
+
+// Realtime plan Phase 1 — retry-budget honesty: a bare onopen proves nothing
+// (an inspecting proxy can forward headers then stall). Success is credited
+// only by a real server event or 10s of stability.
+describe('useSSE retry budget honesty (no reset on bare onopen)', () => {
+  test("an open→error flap loop still reaches 'disconnected' within the budget", async () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useSSE({ enabled: true }));
+    await act(async () => {});
+
+    // Each cycle: the connection OPENS (which used to reset the budget and
+    // made Offline unreachable) then dies before proving itself.
+    for (let attempt = 0; attempt < 9; attempt++) {
+      const source = FakeEventSource.instances.at(-1);
+      await act(async () => { source.open(); });
+      await act(async () => { source.fail(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(16000); });
+    }
+
+    expect(result.current.connectionStatus).toBe('disconnected');
+  });
+
+  test('a real server event (connected) credits success and restores the full budget', async () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useSSE({ enabled: true }));
+    await act(async () => {});
+
+    // Burn most of the budget…
+    for (let attempt = 0; attempt < 6; attempt++) {
+      await act(async () => { FakeEventSource.instances.at(-1).fail(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(16000); });
+    }
+    expect(result.current.connectionStatus).toBe('connecting');
+
+    // …then a PROVEN connection (server event, not just onopen)…
+    const source = FakeEventSource.instances.at(-1);
+    await act(async () => { source.open(); });
+    await act(async () => {
+      source.emit('connected', JSON.stringify({ message: 'ok', workspaceId: 1 }));
+    });
+    expect(result.current.connectionStatus).toBe('connected');
+
+    // …restores the FULL budget: 8 more failures before disconnected.
+    for (let attempt = 0; attempt < 8; attempt++) {
+      await act(async () => { FakeEventSource.instances.at(-1).fail(); });
+      expect(result.current.connectionStatus).toBe('connecting');
+      await act(async () => { await vi.advanceTimersByTimeAsync(16000); });
+    }
+    await act(async () => { FakeEventSource.instances.at(-1).fail(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(16000); });
+    expect(result.current.connectionStatus).toBe('disconnected');
+  });
+
+  test('10 seconds of stability also credits success', async () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useSSE({ enabled: true }));
+    await act(async () => {});
+
+    for (let attempt = 0; attempt < 6; attempt++) {
+      await act(async () => { FakeEventSource.instances.at(-1).fail(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(16000); });
+    }
+
+    const source = FakeEventSource.instances.at(-1);
+    await act(async () => { source.open(); });
+    // Stays open 10s with zero events — that is stability, credit it.
+    await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+
+    for (let attempt = 0; attempt < 8; attempt++) {
+      await act(async () => { FakeEventSource.instances.at(-1).fail(); });
+      expect(result.current.connectionStatus).toBe('connecting');
+      await act(async () => { await vi.advanceTimersByTimeAsync(16000); });
+    }
+    await act(async () => { FakeEventSource.instances.at(-1).fail(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(16000); });
+    expect(result.current.connectionStatus).toBe('disconnected');
+  });
+
+  test('exposes the reconnect-churn counter for diagnostics', async () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useSSE({ enabled: true }));
+    await act(async () => {});
+    expect(result.current.getReconnectChurn()).toBe(1); // initial attempt
+
+    await act(async () => { FakeEventSource.instances.at(-1).fail(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(16000); });
+    expect(result.current.getReconnectChurn()).toBeGreaterThanOrEqual(2);
+  });
+});
+
+// Realtime plan Phase 1 — channel membership proof: heartbeats carry the
+// server channel's workspaceId; a mismatch means this tab is a wrong-channel
+// zombie ("Live" pill, frozen data) and must reconnect with a corrected URL.
+describe('useSSE wrong-channel detection', () => {
+  test('heartbeat for another workspace closes the stream and reconnects', async () => {
+    vi.useFakeTimers();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    renderHook(() => useSSE({ enabled: true }));
+    await act(async () => {});
+
+    const source = FakeEventSource.instances.at(-1);
+    await act(async () => { source.open(); });
+    expect(mocks.getEventSource).toHaveBeenCalledTimes(1);
+
+    // Server says channel workspace 2; this tab expects 1.
+    await act(async () => {
+      source.emit('heartbeat', JSON.stringify({ ts: Date.now(), workspaceId: 2 }));
+    });
+
+    expect(source.readyState).toBe(FakeEventSource.CLOSED);
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(16000); });
+    // Reconnected — getEventSource re-reads the current workspace, so the
+    // new stream URL is corrected.
+    expect(mocks.getEventSource).toHaveBeenCalledTimes(2);
+    warnSpy.mockRestore();
+  });
+
+  test('matching heartbeats keep the stream (and still feed the watchdog)', async () => {
+    renderHook(() => useSSE({ enabled: true }));
+    await act(async () => {});
+    const source = FakeEventSource.instances.at(-1);
+    await act(async () => { source.open(); });
+    await act(async () => {
+      source.emit('heartbeat', JSON.stringify({ ts: Date.now(), workspaceId: 1 }));
+    });
+    expect(source.readyState).toBe(FakeEventSource.OPEN);
+    expect(mocks.getEventSource).toHaveBeenCalledTimes(1);
+  });
+
+  test('connected event with a mismatched workspace also forces the reconnect', async () => {
+    vi.useFakeTimers();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const onConnected = vi.fn();
+    renderHook(() => useSSE({ enabled: true, onConnected }));
+    await act(async () => {});
+
+    const source = FakeEventSource.instances.at(-1);
+    await act(async () => {
+      source.emit('connected', JSON.stringify({ message: 'ok', workspaceId: 9 }));
+    });
+
+    expect(source.readyState).toBe(FakeEventSource.CLOSED);
+    // Consumers must NOT run their catch-up refetch against the wrong channel.
+    expect(onConnected).not.toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(16000); });
+    expect(mocks.getEventSource).toHaveBeenCalledTimes(2);
+    warnSpy.mockRestore();
+  });
+});
+
+// Realtime plan Phase 1 — the terminal "stuck connect": a connect() parked on
+// a never-settling token refresh left status 'connecting' with no
+// EventSource, no timer, and a watchdog that early-returned on the null
+// source. The watchdog must detect that shape and force the reconnect ladder.
+describe('useSSE watchdog stuck-connect recovery', () => {
+  test('a connect() hung on token refresh is rescued by the watchdog', async () => {
+    vi.useFakeTimers();
+    // First connect: token "expiring", refresh never settles (the MSAL
+    // deadlock class). Subsequent attempts: token healthy.
+    mocks.isAuthTokenExpiring.mockReturnValueOnce(true).mockReturnValue(false);
+    mocks.refreshAuthToken.mockImplementationOnce(() => new Promise(() => {}));
+
+    const { result } = renderHook(() => useSSE({ enabled: true }));
+    await act(async () => {});
+
+    // Parked: no EventSource was ever created.
+    expect(mocks.getEventSource).not.toHaveBeenCalled();
+    expect(result.current.connectionStatus).toBe('connecting');
+
+    // Watchdog ticks every 15s; the connect counts as stuck after 30s.
+    await act(async () => { await vi.advanceTimersByTimeAsync(46000); });
+    // Rescue scheduled with backoff — let it fire.
+    await act(async () => { await vi.advanceTimersByTimeAsync(16000); });
+
+    expect(mocks.getEventSource).toHaveBeenCalledTimes(1);
     await act(async () => { FakeEventSource.instances.at(-1).open(); });
     expect(result.current.connectionStatus).toBe('connected');
   });
