@@ -15,6 +15,9 @@ vi.mock('../components/agent/NotificationSettingsPanel', () => ({
 vi.mock('../components/agent/AgentAlertsPanel', () => ({
   default: () => <div>My alerts panel</div>,
 }));
+vi.mock('../components/agent/SignaturePanel', () => ({
+  default: () => <div>My signature panel</div>,
+}));
 
 describe('Notifications page', () => {
   afterEach(() => cleanup());
@@ -25,8 +28,9 @@ describe('Notifications page', () => {
     // Dedicated "Notifications" heading, not "My Competencies" (QA 07-21 #3).
     expect(screen.getAllByText('Notifications').length).toBeGreaterThan(0);
     expect(screen.queryByText('My Competencies')).not.toBeInTheDocument();
-    // Both sections stacked on one page (QA 07-21 #4, #5).
+    // All three sections stacked on one page (QA 07-21 #4, #5 + Phase D).
     expect(screen.getByText('Delivery preferences panel')).toBeInTheDocument();
     expect(screen.getByText('My alerts panel')).toBeInTheDocument();
+    expect(screen.getByText('My signature panel')).toBeInTheDocument();
   });
 });

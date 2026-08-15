@@ -15,6 +15,7 @@ import BackfillPanel from '../components/settings/BackfillPanel';
 import WorkspaceManagementPanel from '../components/settings/WorkspaceManagementPanel';
 import MailboxConnectionsPanel from '../components/settings/MailboxConnectionsPanel';
 import MembersPanel from '../components/settings/MembersPanel';
+import SignaturesPanel from '../components/settings/SignaturesPanel';
 import GroupsPanel from '../components/settings/GroupsPanel';
 import ApprovalCategoriesPanel from '../components/settings/ApprovalCategoriesPanel';
 import TicketOpsPanel from '../components/settings/TicketOpsPanel';
@@ -1203,6 +1204,13 @@ export default function Settings() {
                 {activeSectionId === 'groups' && (
                   <div className="p-6">
                     <GroupsPanel />
+                  </div>
+                )}
+
+                {/* Per-user email signatures (Phase D) */}
+                {activeSectionId === 'signatures' && (
+                  <div className="p-6">
+                    <SignaturesPanel />
                   </div>
                 )}
 

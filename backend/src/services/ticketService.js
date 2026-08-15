@@ -21,6 +21,7 @@ import customFieldService from './customFieldService.js';
 import { resolveCategoryNames } from './categoryNameResolver.js';
 import { looksLikeRealHtml, plainTextToHtml } from '../utils/htmlContent.js';
 import { EMAIL_SANITIZE_OPTIONS } from './notificationWorkflowSignatureService.js';
+import { appendSignatureToEmail, getEnabledSignatureForSend } from './userSignatureService.js';
 import { sseManager } from '../routes/sse.routes.js';
 
 // The 4 canonical statuses. Since Phase 8a these are the BASE statuses of the
@@ -2968,12 +2969,21 @@ class TicketService {
       contentType: f.mimetype,
     }));
 
+    // Per-user email signature (Mega 08-15 Phase D): resolved ONCE at this
+    // seam — the composed html feeds both the FS createReply branch and the
+    // native requester email below. Appended to the OUTBOUND email only (the
+    // stored thread entry stays clean); replies only, never notes/forwards.
+    const signature = isPrivate ? null : await getEnabledSignatureForSend(workspaceId, actor?.email);
+
     let externalEntryId = null;
     if (!isNative) {
       const client = await mirrorService.getInteractiveClient(workspaceId);
       if (!client) throw new ValidationError('FreshService is not configured for this workspace');
       const fsId = Number(ticket.freshserviceTicketId);
       const html = bodyHtml || `<p>${(bodyText || '').replace(/\n/g, '<br/>')}</p>`;
+      // FS-born replies: FS emails the requester with the body we send it, so
+      // the signature rides the createReply payload (notes stay unsigned).
+      const outboundHtml = signature ? appendSignatureToEmail({ html }, signature).html : html;
       // Internal notes carry the TP marker so FS automation rules can exclude
       // them (FR 08-07 #9); requester-facing replies go unmarked.
       const fsNoteBody = `${tpNoteMarkerHtml(actor?.name || actor?.email)}${html}`;
@@ -2981,7 +2991,7 @@ class TicketService {
       try {
         result = isPrivate
           ? await client.addNote(fsId, fsNoteBody, { isPrivate: true, attachments: fsAttachments })
-          : await client.createReply(fsId, html, { ccEmails: cc, attachments: fsAttachments });
+          : await client.createReply(fsId, outboundHtml, { ccEmails: cc, attachments: fsAttachments });
       } catch (err) {
         // Queue-wait timeout: the send never launched — safe to retry, and the
         // composer keeps the draft, so tell the user plainly.
@@ -3056,7 +3066,7 @@ class TicketService {
     let email = { sent: false };
     if (isNative) {
       if (!isPrivate && ticket.requester?.email) {
-        email = await this._emailRequesterReply(ticket, entry, { cc, attachments: storedAttachments });
+        email = await this._emailRequesterReply(ticket, entry, { cc, attachments: storedAttachments, signature });
       }
       await mirrorService.enqueueThreadEntry(workspaceId, ticket.id, entry.id);
     } else if (!isPrivate) {
@@ -3333,11 +3343,14 @@ class TicketService {
    * SendGrid/SMTP path. The subject carries the TP-<n> reference as a second
    * threading signal. Non-fatal by design.
    */
-  async _emailRequesterReply(ticket, entry, { cc = [], attachments = [] } = {}) {
+  async _emailRequesterReply(ticket, entry, { cc = [], attachments = [], signature = null } = {}) {
     const ref = ticketDisplayRef(ticket);
     const subject = `Re: ${ticket.subject || 'Your ticket'} [${ref}]`;
-    const html = entry.bodyHtml || `<p>${(entry.bodyText || '').replace(/\n/g, '<br/>')}</p>`;
-    const text = entry.bodyText || stripHtml(entry.bodyHtml) || '';
+    // The acting agent's signature (Phase D) joins the OUTBOUND email only —
+    // entry.bodyHtml (the stored thread entry) intentionally stays clean.
+    let html = entry.bodyHtml || `<p>${(entry.bodyText || '').replace(/\n/g, '<br/>')}</p>`;
+    let text = entry.bodyText || stripHtml(entry.bodyHtml) || '';
+    if (signature) ({ html, text } = appendSignatureToEmail({ html, text }, signature));
     const dedupeKey = `native-reply:${entry.id}`;
     // Graph simple attach tops out at ~3 MB per file; bigger ones stay
     // download-only in Ticket Pulse (the thread still lists them).

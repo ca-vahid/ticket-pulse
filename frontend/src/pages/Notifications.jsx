@@ -2,6 +2,7 @@ import { Bell, LayoutDashboard, LogOut } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import NotificationSettingsPanel from '../components/agent/NotificationSettingsPanel';
 import AgentAlertsPanel from '../components/agent/AgentAlertsPanel';
+import SignaturePanel from '../components/agent/SignaturePanel';
 
 /**
  * Dedicated Notifications page (its own destination from the account menu) —
@@ -23,7 +24,7 @@ export default function Notifications() {
             <div className="hidden h-8 w-px bg-slate-200 sm:block" />
             <div className="min-w-0">
               <div className="truncate text-sm font-semibold text-slate-900">Notifications</div>
-              <div className="truncate text-xs text-slate-500">Email &amp; alert preferences.</div>
+              <div className="truncate text-xs text-slate-500">Email, alerts &amp; signature.</div>
             </div>
           </div>
           <div className="flex flex-none items-center gap-2">
@@ -56,7 +57,7 @@ export default function Notifications() {
           <div>
             <h1 className="text-xl font-bold text-slate-900">Notifications</h1>
             <p className="text-sm text-slate-500">
-              Choose how Ticket Pulse reaches you, then set up alerts for the tickets you want to hear about.
+              Choose how Ticket Pulse reaches you, set up alerts for the tickets you want to hear about, and manage your email signature.
             </p>
           </div>
         </div>
@@ -64,6 +65,9 @@ export default function Notifications() {
         <div className="space-y-5">
           <NotificationSettingsPanel />
           <AgentAlertsPanel />
+          {/* My email signature (Phase D) — same self-serve home for agents
+              and coordinators, both reach this page from the account menu. */}
+          <SignaturePanel />
         </div>
       </main>
     </div>

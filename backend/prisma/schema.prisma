@@ -160,6 +160,7 @@ model Workspace {
   ticketTypeDefinitions             TicketTypeDefinition[]
   ticketStatusDefinitions           TicketStatusDefinition[]
   analyticsReports                  AnalyticsReport[]
+  userEmailSignatures               UserEmailSignature[]
 
   @@map("workspaces")
 }
@@ -3252,4 +3253,26 @@ model SavedFilterView {
   @@index([workspaceId, ownerEmail])
   @@index([workspaceId, shared])
   @@map("saved_filter_views")
+}
+
+// Per-user outbound email signatures (QA 08-14 #1 / Mega 08-15 Phase D).
+// Keyed by (workspace, owner email) like SavedFilterView — no User table.
+// Appended to the OUTBOUND reply email only (FS createReply body + native
+// requester email); the stored thread entry stays clean. Replies only —
+// never notes or forwards. Managed self-serve (account menu → Notifications)
+// and by admins (Settings → Signatures, incl. mass-apply templates).
+model UserEmailSignature {
+  id          Int       @id @default(autoincrement())
+  workspaceId Int       @map("workspace_id")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  ownerEmail  String    @map("owner_email") @db.VarChar(255)
+  enabled     Boolean   @default(true)
+  html        String?   @db.Text
+  text        String?   @db.Text
+  updatedBy   String?   @map("updated_by") @db.VarChar(255)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@unique([workspaceId, ownerEmail])
+  @@map("user_email_signatures")
 }
