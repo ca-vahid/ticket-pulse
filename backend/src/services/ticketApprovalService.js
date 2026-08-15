@@ -27,12 +27,23 @@ function publicBaseUrl() {
   return String(configured).trim().replace(/\/+$/, '');
 }
 
-// Conservative allowlist for approval notes (gap plan P2.4) — inline text
-// formatting + lists + links only; matches what the composer can produce.
+// Allowlist for approval notes (gap plan P2.4) — inline text formatting +
+// lists + links, and since Phase C (08-15) the table set too, so a pasted
+// Excel range survives in an approval request description. Mirrors the
+// composer's widened vocabulary (RichTextEditor.jsx / EMAIL_SANITIZE_OPTIONS).
 function sanitizeNoteHtml(html) {
   const clean = sanitizeHtml(String(html || ''), {
-    allowedTags: ['p', 'br', 'b', 'strong', 'i', 'em', 'u', 'ul', 'ol', 'li', 'a', 'span', 'div'],
-    allowedAttributes: { a: ['href', 'target', 'rel'] },
+    allowedTags: [
+      'p', 'br', 'b', 'strong', 'i', 'em', 'u', 'ul', 'ol', 'li', 'a', 'span', 'div',
+      'table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th', 'colgroup', 'col', 'caption',
+    ],
+    allowedAttributes: {
+      a: ['href', 'target', 'rel'],
+      table: ['width', 'height', 'border', 'cellpadding', 'cellspacing', 'style', 'align'],
+      td: ['width', 'height', 'colspan', 'rowspan', 'style', 'align', 'valign'],
+      th: ['width', 'height', 'colspan', 'rowspan', 'style', 'align', 'valign'],
+      col: ['width', 'span'],
+    },
     allowedSchemes: ['http', 'https', 'mailto'],
     transformTags: { a: sanitizeHtml.simpleTransform('a', { target: '_blank', rel: 'noreferrer' }) },
   }).trim();

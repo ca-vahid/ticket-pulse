@@ -3,17 +3,87 @@ import DOMPurify from 'dompurify';
 import { Bold, Italic, Link2, List, ListOrdered, RemoveFormatting, Underline } from 'lucide-react';
 
 const ALLOWED = {
-  ALLOWED_TAGS: ['b', 'strong', 'i', 'em', 'u', 'p', 'br', 'div', 'ul', 'ol', 'li', 'a'],
-  ALLOWED_ATTR: ['href', 'target', 'rel'],
+  ALLOWED_TAGS: [
+    'b', 'strong', 'i', 'em', 'u', 'p', 'br', 'div', 'ul', 'ol', 'li', 'a',
+    // Rich paste (QA 08-14 #1/#2): Excel ranges + Outlook signatures arrive as
+    // tables/spans/imgs — keep the structure. Mirrors backend htmlContent.js's
+    // table vocabulary and the server's EMAIL_SANITIZE_OPTIONS.
+    'table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th', 'colgroup', 'col', 'caption', 'span', 'img',
+  ],
+  ALLOWED_ATTR: ['href', 'target', 'rel', 'colspan', 'rowspan', 'width', 'height', 'align', 'valign', 'style', 'src', 'alt'],
+  // DOMPurify runs EVERY attribute value through this, so the non-URI
+  // alternatives (bare numbers like colspan="2", scheme-less words) must stay.
+  // Schemes: http/https/mailto plus data:image (javascript:, data:text/html
+  // etc fail every branch); img src is further constrained in the hook below.
+  ALLOWED_URI_REGEXP: /^(?:https?:|mailto:|data:image\/|[^a-z]|[a-z+.-]+(?:[^a-z+.:-]|$))/i,
 };
 
+// Inline-style allowlist: presentational table/text props only. Everything
+// else — position/behavior props and any url()/expression() value — is
+// stripped, so a pasted style can't phone home or overlay the app.
+const ALLOWED_STYLE_PROP_RE = /^(?:border(?:-[a-z-]+)?|background(?:-color)?|color|text-align|font-weight|padding(?:-[a-z]+)?|width)$/;
+
+// Dedicated DOMPurify instance: ticketUi.jsx installs a global hook on the
+// shared one (cid-image removal for rendered emails) — the composer's much
+// stricter style/img rules must not leak onto rendered thread bodies.
+const purifier = typeof window !== 'undefined' ? DOMPurify(window) : DOMPurify;
+
+purifier.addHook('afterSanitizeAttributes', (node) => {
+  if (node.hasAttribute && node.hasAttribute('style')) {
+    const kept = String(node.getAttribute('style') || '')
+      .split(';')
+      .map((decl) => {
+        const sep = decl.indexOf(':');
+        if (sep < 1) return null;
+        const prop = decl.slice(0, sep).trim().toLowerCase();
+        const value = decl.slice(sep + 1).trim();
+        if (!prop || !value || !ALLOWED_STYLE_PROP_RE.test(prop)) return null;
+        if (/url\s*\(|expression\s*\(/i.test(value)) return null;
+        return `${prop}: ${value}`;
+      })
+      .filter(Boolean)
+      .join('; ');
+    if (kept) node.setAttribute('style', kept);
+    else node.removeAttribute('style');
+  }
+  if (node.tagName === 'IMG' && !/^(?:https:|data:image\/)/i.test(node.getAttribute('src') || '')) {
+    node.remove();
+  }
+});
+
 export function sanitizeRichHtml(html) {
-  return DOMPurify.sanitize(String(html || ''), ALLOWED);
+  return purifier.sanitize(String(html || ''), ALLOWED);
+}
+
+/**
+ * MSO clean pre-pass for pasted markup (Word/Outlook signatures + Excel
+ * ranges share the shape): conditional comments, Office namespace tags and
+ * truly-empty spans go away; mso-* style declarations die in the style
+ * allowlist above. Run BEFORE sanitizeRichHtml on clipboard HTML.
+ */
+export function cleanPastedHtml(html) {
+  let out = String(html || '');
+  // Downlevel-hidden conditional blocks (<!--[if gte mso 9]>…<![endif]-->).
+  out = out.replace(/<!--\[if[\s\S]*?<!\[endif\]\s*-->/gi, '');
+  // Any remaining comments (Word litters <!--StartFragment--> etc).
+  out = out.replace(/<!--[\s\S]*?-->/g, '');
+  // Downlevel-revealed markers (<![if !vml]>…<![endif]>) — keep the content,
+  // it's the standards-mode fallback; only the markers go.
+  out = out.replace(/<!\[(?:if|endif)[^\]]*\]>/gi, '');
+  // Office namespace tags (<o:p>, <v:shape>, <w:*>…) — unwrap, keep children.
+  out = out.replace(/<\/?[ovwx]:[a-z][^>]*>/gi, '');
+  // Truly-empty spans (Word emits piles of them once the mso styles are gone).
+  let prev;
+  do {
+    prev = out;
+    out = out.replace(/<span[^>]*><\/span>/gi, '');
+  } while (out !== prev);
+  return out;
 }
 
 /** True when the html carries formatting worth sending as bodyHtml. */
 export function isRichContent(html) {
-  return /<(b|strong|i|em|u|ul|ol|li|a)\b/i.test(String(html || ''));
+  return /<(b|strong|i|em|u|ul|ol|li|a|table|img)\b/i.test(String(html || ''));
 }
 
 function textToHtml(text) {
@@ -166,7 +236,7 @@ const RichTextEditor = forwardRef(function RichTextEditor({
             if (images.length && onImagePaste) {
               e.preventDefault();
               // Keep any text the clipboard also carried, first.
-              const insert = htmlData ? sanitizeRichHtml(htmlData) : textToHtml(textData);
+              const insert = htmlData ? sanitizeRichHtml(cleanPastedHtml(htmlData)) : textToHtml(textData);
               if (insert) document.execCommand('insertHTML', false, insert);
               // Stage each image and drop a lightweight reference at the caret so
               // the tech can anchor where the picture belongs in their write-up.
@@ -184,11 +254,11 @@ const RichTextEditor = forwardRef(function RichTextEditor({
             }
             // Otherwise paste as sanitized content, not raw clipboard markup.
             e.preventDefault();
-            const insert = htmlData ? sanitizeRichHtml(htmlData) : textToHtml(textData);
+            const insert = htmlData ? sanitizeRichHtml(cleanPastedHtml(htmlData)) : textToHtml(textData);
             document.execCommand('insertHTML', false, insert);
             emit();
           }}
-          className="tp-focus-ring w-full text-sm text-slate-800 px-3 py-2.5 rounded-b-lg outline-none overflow-y-auto settings-scrollbar [&_a]:text-blue-600 [&_a]:underline [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5"
+          className="tp-rich-editor tp-focus-ring w-full text-sm text-slate-800 px-3 py-2.5 rounded-b-lg outline-none overflow-y-auto settings-scrollbar [&_a]:text-blue-600 [&_a]:underline [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5"
           style={{ minHeight, maxHeight: 460 }}
         />
       </div>
