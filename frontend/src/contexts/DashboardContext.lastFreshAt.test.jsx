@@ -10,7 +10,7 @@ import { useEffect } from 'react';
 import { MemoryRouter } from 'react-router-dom';
 
 const mocks = vi.hoisted(() => ({
-  getEventSource: vi.fn(),
+  client: null,
 }));
 
 vi.mock('../services/api', () => ({
@@ -21,38 +21,41 @@ vi.mock('../services/api', () => ({
     getWeeklyStats: vi.fn(() => Promise.resolve({ success: true, data: { dailyCounts: [] } })),
   },
   getWorkspaceId: vi.fn(() => 1),
-  sseAPI: { getEventSource: mocks.getEventSource },
-  isAuthTokenExpiring: vi.fn(() => false),
-  refreshAuthToken: vi.fn(() => Promise.resolve(null)),
+}));
+
+// Fake shared realtime client: captures the provider's fan-out callbacks so
+// the test can inject data events like the real client would.
+class FakeRealtimeClient {
+  constructor() {
+    this.subs = [];
+  }
+
+  subscribe(sub) {
+    this.subs.push(sub);
+    if (sub.onStatus) sub.onStatus({ state: 'live-sse', transport: 'sse' });
+    return { update: (fields) => Object.assign(sub, fields), unsubscribe: () => {} };
+  }
+
+  emit(name, data) {
+    for (const sub of this.subs) {
+      if (sub.enabled === false) continue;
+      const cb = sub.callbacks || {};
+      if (name === 'sync-completed' && cb.onSyncCompleted) cb.onSyncCompleted(data);
+    }
+  }
+
+  retry() {}
+
+  getDiagnostics() {
+    return { state: 'live-sse', transport: 'sse', lastEventAt: Date.now(), churn: 1, workspaceId: 1 };
+  }
+}
+
+vi.mock('../services/realtimeClient', () => ({
+  getSharedRealtimeClient: () => mocks.client,
 }));
 
 import { DashboardProvider, useDashboard } from './DashboardContext';
-
-class FakeEventSource {
-  static instances = [];
-
-  constructor() {
-    this.listeners = {};
-    this.readyState = 0;
-    this.onopen = null;
-    this.onerror = null;
-    this.onmessage = null;
-    FakeEventSource.instances.push(this);
-  }
-
-  addEventListener(type, fn) {
-    (this.listeners[type] ||= []).push(fn);
-  }
-
-  emit(type, data) {
-    (this.listeners[type] || []).forEach((fn) => fn({ data }));
-  }
-
-  close() { this.readyState = 2; }
-}
-FakeEventSource.CONNECTING = 0;
-FakeEventSource.OPEN = 1;
-FakeEventSource.CLOSED = 2;
 
 let ctx;
 function Probe() {
@@ -72,16 +75,13 @@ function renderProvider() {
 }
 
 beforeEach(() => {
-  vi.stubGlobal('EventSource', FakeEventSource);
-  FakeEventSource.instances = [];
-  mocks.getEventSource.mockReset().mockImplementation(() => new FakeEventSource());
+  mocks.client = new FakeRealtimeClient();
   sessionStorage.clear();
   ctx = null;
 });
 
 afterEach(() => {
   cleanup();
-  vi.unstubAllGlobals();
 });
 
 describe('DashboardContext lastFreshAt honesty', () => {
@@ -113,13 +113,12 @@ describe('DashboardContext lastFreshAt honesty', () => {
     expect(ctx.lastFreshAt).toBeInstanceOf(Date);
   });
 
-  test('a received SSE sync-completed data event stamps lastFreshAt', async () => {
+  test('a received sync-completed data event stamps lastFreshAt', async () => {
     renderProvider();
     await act(async () => {});
     expect(ctx.lastFreshAt).toBeNull();
-    const source = FakeEventSource.instances.at(-1);
     await act(async () => {
-      source.emit('sync-completed', JSON.stringify({ syncType: 'full' }));
+      mocks.client.emit('sync-completed', { syncType: 'full' });
     });
     expect(ctx.lastFreshAt).toBeInstanceOf(Date);
   });

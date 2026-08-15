@@ -2,7 +2,7 @@ import axios from 'axios';
 import { formatDateLocal } from '../utils/dateHelpers';
 import { isDemoMode, maybeScrub } from '../utils/demoMode';
 
-const API_BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:3000') + '/api';
+export const API_BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:3000') + '/api';
 const AUTH_TOKEN_STORAGE_KEY = 'tp_authToken';
 
 function readSessionStorage(key) {

@@ -51,7 +51,10 @@ export default function AppHeader({
     currentWorkspace, availableWorkspaces, switchWorkspace,
     switchError, clearSwitchError, retryWorkspaceSync,
   } = useWorkspace();
-  const { isRefreshing, lastUpdated, sseConnectionStatus, sseRetry, sseEnabled, syncSkippedEvent } = useDashboard();
+  const {
+    isRefreshing, lastUpdated, sseConnectionStatus, sseTransportStatus, sseTransport,
+    sseRetry, sseGetReconnectChurn, sseGetDiagnostics, sseEnabled, syncSkippedEvent,
+  } = useDashboard();
   // Only offer the manual reconnect where the live feed is supposed to run —
   // on routes with SSE intentionally off (e.g. Settings), "Offline" is normal.
   const canRetrySse = Boolean(sseEnabled && sseRetry);
@@ -269,15 +272,68 @@ export default function AppHeader({
     ? Math.min(100, Math.max(0, (parseInt(progressMatch[1], 10) / Math.max(1, parseInt(progressMatch[2], 10))) * 100))
     : null;
 
-  const statusTone = sseConnectionStatus === 'connected'
+  // Transport-ladder state (realtime plan Phase 2). The legacy EventSource
+  // path (VITE_REALTIME_TRANSPORT=eventsource) has no ladder — derive an
+  // equivalent state from the plain connection status.
+  const ladderState = sseTransportStatus && sseTransportStatus !== 'idle'
+    ? sseTransportStatus
+    : sseConnectionStatus === 'connected'
+      ? 'live-sse'
+      : sseConnectionStatus === 'connecting' ? 'connecting' : 'offline';
+
+  // Pill vocabulary: Live (SSE) / Auto-refresh (polling, amber) / Offline.
+  // Never a spinner-forever "connecting" — after the ladder's budgets it is
+  // either degraded (amber, honest) or offline (red, actionable).
+  const statusTone = ladderState === 'live-sse'
     ? (syncing ? 'sync' : 'live')
-    : sseConnectionStatus === 'connecting' ? 'connecting' : 'offline';
+    : ladderState === 'live-poll'
+      ? (syncing ? 'sync' : 'poll')
+      : ladderState === 'connecting' ? 'connecting' : 'offline';
 
   const STATUS_PILL = {
     live: 'border-emerald-200 bg-emerald-50/80 text-emerald-700 hover:bg-emerald-100/80',
     sync: 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100',
+    poll: 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100',
     connecting: 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100',
     offline: 'border-red-200 bg-red-50 text-red-700 hover:bg-red-100',
+  };
+
+  const STATUS_LABEL = {
+    sync: 'Syncing',
+    live: 'Live',
+    poll: 'Auto-refresh',
+    connecting: 'Connecting',
+  };
+
+  // Diagnostics for the popover (transport, last event age, churn, channel
+  // workspace) — read lazily while open so the support screenshot is
+  // self-diagnosing without costing renders the rest of the time.
+  const [rtDiag, setRtDiag] = useState(null);
+  useEffect(() => {
+    if (!statusOpen || !sseGetDiagnostics) {
+      setRtDiag(null);
+      return undefined;
+    }
+    const read = () => setRtDiag(sseGetDiagnostics());
+    read();
+    const timer = setInterval(read, 5000);
+    return () => clearInterval(timer);
+  }, [statusOpen, sseGetDiagnostics]);
+
+  const formatEventAge = (ts) => {
+    if (!ts) return '—';
+    const seconds = Math.max(0, Math.round((Date.now() - ts) / 1000));
+    if (seconds < 5) return 'just now';
+    if (seconds < 90) return `${seconds}s ago`;
+    const minutes = Math.round(seconds / 60);
+    if (minutes < 90) return `${minutes}m ago`;
+    return `${Math.round(minutes / 60)}h ago`;
+  };
+
+  const TRANSPORT_LABEL = {
+    sse: 'Live stream (SSE)',
+    longpoll: 'Long-poll fallback',
+    shortpoll: 'Periodic refresh (30s)',
   };
 
   const timeLabel = lastUpdated
@@ -321,10 +377,16 @@ export default function AppHeader({
         ) : statusTone === 'offline' ? (
           <WifiOff className="h-3.5 w-3.5" />
         ) : (
-          <span className={`h-2 w-2 rounded-full ${statusTone === 'live' ? 'bg-emerald-500 shadow-[0_0_0_3px_rgb(16_185_129/0.18)]' : 'bg-amber-400 animate-pulse'}`} />
+          <span className={`h-2 w-2 rounded-full ${
+            statusTone === 'live'
+              ? 'bg-emerald-500 shadow-[0_0_0_3px_rgb(16_185_129/0.18)]'
+              : statusTone === 'poll'
+                ? 'bg-amber-500 shadow-[0_0_0_3px_rgb(245_158_11/0.18)]'
+                : 'bg-amber-400 animate-pulse'
+          }`} />
         )}
         <span>
-          {statusTone === 'sync' ? 'Syncing' : statusTone === 'live' ? 'Live' : statusTone === 'connecting' ? 'Connecting' : canRetrySse ? 'Offline — Reconnect' : 'Offline'}
+          {STATUS_LABEL[statusTone] || (canRetrySse ? 'Offline — Reconnect' : 'Offline')}
         </span>
         {timeLabel && statusTone !== 'offline' && (
           <span className="hidden font-medium opacity-70 lg:inline">· {timeLabel}</span>
@@ -336,11 +398,14 @@ export default function AppHeader({
           <div className="flex items-center justify-between py-1">
             <span className="text-slate-400">Realtime feed</span>
             <span className={`inline-flex items-center gap-1.5 font-semibold ${
-              sseConnectionStatus === 'connected' ? 'text-emerald-600' : sseConnectionStatus === 'connecting' ? 'text-amber-600' : 'text-red-600'
+              ladderState === 'live-sse' ? 'text-emerald-600'
+                : ladderState === 'live-poll' || ladderState === 'connecting' ? 'text-amber-600' : 'text-red-600'
             }`}>
-              {sseConnectionStatus === 'connected' ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
-              {sseConnectionStatus === 'connected' ? 'Connected' : sseConnectionStatus === 'connecting' ? 'Connecting…' : 'Disconnected'}
-              {sseConnectionStatus === 'disconnected' && canRetrySse && (
+              {ladderState === 'live-sse' || ladderState === 'live-poll' ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
+              {ladderState === 'live-sse' ? 'Live'
+                : ladderState === 'live-poll' ? 'Auto-refresh'
+                  : ladderState === 'connecting' ? 'Connecting…' : 'Disconnected'}
+              {ladderState === 'offline' && canRetrySse && (
                 <button
                   type="button"
                   onClick={sseRetry}
@@ -351,10 +416,41 @@ export default function AppHeader({
               )}
             </span>
           </div>
+          {ladderState === 'live-poll' && (
+            <p className="mb-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-700">
+              Live stream unavailable on this network — updating automatically instead.
+            </p>
+          )}
           <div className="flex items-center justify-between py-1">
             <span className="text-slate-400">Data refreshed</span>
             <span className="font-medium">{lastUpdated ? new Date(lastUpdated).toLocaleString() : '—'}</span>
           </div>
+          {/* Self-diagnosing rows (Phase 2): what support needs from one
+              screenshot — transport, freshness, churn, channel. */}
+          {rtDiag && (
+            <>
+              <div className="flex items-center justify-between py-1">
+                <span className="text-slate-400">Transport</span>
+                <span className="font-medium">{TRANSPORT_LABEL[sseTransport || rtDiag.transport] || '—'}</span>
+              </div>
+              <div className="flex items-center justify-between py-1">
+                <span className="text-slate-400">Last event</span>
+                <span className="font-medium">{formatEventAge(rtDiag.lastEventAt)}</span>
+              </div>
+              <div className="flex items-center justify-between py-1">
+                <span className="text-slate-400">Reconnects</span>
+                <span className="font-medium">{sseGetReconnectChurn ? sseGetReconnectChurn() : rtDiag.churn}</span>
+              </div>
+              <div className="flex items-center justify-between py-1">
+                <span className="text-slate-400">Channel</span>
+                <span className="font-medium">
+                  {rtDiag.workspaceId != null
+                    ? (rtDiag.workspaceId === currentWorkspace?.id ? `${workspaceName} (ws ${rtDiag.workspaceId})` : `ws ${rtDiag.workspaceId}`)
+                    : '—'}
+                </span>
+              </div>
+            </>
+          )}
           <div className="flex items-center justify-between gap-3 py-1">
             <span className="flex-none text-slate-400">Background sync</span>
             {syncRowRunning ? (

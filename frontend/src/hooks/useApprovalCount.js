@@ -31,7 +31,9 @@ export function useApprovalCount() {
 
   // reconnectKey: deterministic stream re-key on workspace switch (realtime
   // plan Phase 1) — the context-subscribed id, not a render-time module read.
-  useSSE({ onTicketChange, enabled: Boolean(isWorkspaceSelected), reconnectKey: currentWorkspace?.id });
+  // onResync (Phase 2): an unbridgeable event gap (server restart / cursor
+  // out of buffer / post-sleep) may have swallowed an approval event.
+  useSSE({ onTicketChange, onResync: refresh, enabled: Boolean(isWorkspaceSelected), reconnectKey: currentWorkspace?.id });
 
   return count;
 }
