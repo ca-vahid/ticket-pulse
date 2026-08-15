@@ -7,7 +7,7 @@ import { ticketsAPI } from '../services/api';
 import { useSSE } from '../hooks/useSSE';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useWorkspaceRole } from '../components/nav/navDestinations';
-import { timeAgo } from '../components/tickets/ticketUi';
+import { formatDayTime, timeAgo } from '../components/tickets/ticketUi';
 
 const STATUS_META = {
   pending: { label: 'Pending', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
@@ -89,7 +89,7 @@ export default function ApprovalsInbox() {
           <span className="h-9 w-9 rounded-xl bg-emerald-50 text-emerald-700 inline-flex items-center justify-center border border-emerald-100"><Stamp className="w-5 h-5" aria-hidden="true" /></span>
           <div>
             <h1 className="text-xl font-bold text-slate-900">Approvals</h1>
-            <p className="text-sm text-slate-500">Requests awaiting your decision, and your requests that need more info.</p>
+            <p className="text-sm text-slate-500">Requests awaiting your decision, and your requests that need more info. A Ticket Pulse feature — not synced to FreshService.</p>
           </div>
         </div>
 
@@ -153,7 +153,7 @@ export default function ApprovalsInbox() {
                       {a.categoryName && <span className="px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-100">{a.categoryName}</span>}
                       <Link to={`/tickets/${a.ticketId}?tab=approvals`} state={backState} className="tp-focus-ring rounded font-mono text-xs font-bold text-blue-700 hover:underline inline-flex items-center gap-1">{a.displayRef} <ExternalLink className="w-3 h-3" aria-hidden="true" /></Link>
                       <span className="text-sm text-slate-800 truncate max-w-full">{a.subject || '(no subject)'}</span>
-                      <span className="ml-auto text-[11px] text-slate-400 whitespace-nowrap">{timeAgo(a.decidedAt || a.createdAt)}</span>
+                      <span className="ml-auto text-[11px] text-slate-400 whitespace-nowrap">{formatDayTime(a.decidedAt || a.createdAt)} · {timeAgo(a.decidedAt || a.createdAt)}</span>
                     </div>
                     <p className="text-xs text-slate-400 mt-1">
                       Approver {a.approverName || a.approverEmail} · requested by {a.requestedBy}
@@ -183,7 +183,7 @@ export default function ApprovalsInbox() {
                           {a.displayRef} <ExternalLink className="w-3 h-3" aria-hidden="true" />
                         </Link>
                         <span className="text-sm text-slate-800 font-medium truncate max-w-full">{a.subject || '(no subject)'}</span>
-                        <span className="ml-auto text-[11px] text-slate-400 whitespace-nowrap">{timeAgo(a.createdAt)}</span>
+                        <span className="ml-auto text-[11px] text-slate-400 whitespace-nowrap">{formatDayTime(a.createdAt)} · {timeAgo(a.createdAt)}</span>
                       </div>
                       <p className="text-xs text-slate-400 mt-1">Requested by {a.requestedBy}{a.requesterName ? ` · for ${a.requesterName}` : ''}</p>
                       {a.requestNote && <p className="text-xs text-slate-500 mt-1">“{a.requestNote}”</p>}
@@ -235,7 +235,7 @@ export default function ApprovalsInbox() {
                           {a.displayRef} <ExternalLink className="w-3 h-3" aria-hidden="true" />
                         </Link>
                         <span className="text-sm text-slate-800 font-medium truncate max-w-full">{a.subject || '(no subject)'}</span>
-                        <span className="ml-auto text-[11px] text-slate-400 whitespace-nowrap">{timeAgo(a.createdAt)}</span>
+                        <span className="ml-auto text-[11px] text-slate-400 whitespace-nowrap">{formatDayTime(a.createdAt)} · {timeAgo(a.createdAt)}</span>
                       </div>
                       {a.decisionNote && <p className="text-xs text-violet-600 mt-1.5">{a.approverEmail} asks: “{a.decisionNote}”</p>}
                       <div className="flex items-center gap-1.5 mt-2.5">

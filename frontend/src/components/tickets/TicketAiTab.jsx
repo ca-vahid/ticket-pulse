@@ -134,7 +134,8 @@ function RunCard({ run, techById, expanded, onToggle, returnTo }) {
           </span>
         </span>
         <span className="flex-none text-[11px] text-slate-400" title={new Date(run.decidedAt || run.createdAt).toLocaleString()}>
-          {timeAgo(run.decidedAt || run.createdAt)}
+          {formatDayTime(run.decidedAt || run.createdAt)}
+          {' · '}{timeAgo(run.decidedAt || run.createdAt)}
         </span>
         <ChevronDown className={`h-4 w-4 flex-none text-slate-400 transition-transform ${expanded ? 'rotate-180' : ''}`} aria-hidden="true" />
       </button>
@@ -146,7 +147,7 @@ function RunCard({ run, techById, expanded, onToggle, returnTo }) {
               <RotateCcw className="mr-1 inline h-3 w-3" aria-hidden="true" />
               Triggered by a bounce — <b>{rebound.previousTechName || 'the previous assignee'}</b> returned this ticket
               {rebound.unassignedByName && rebound.unassignedByName !== rebound.previousTechName ? ` (unassigned by ${rebound.unassignedByName})` : ''}
-              {rebound.unassignedAt ? ` ${timeAgo(rebound.unassignedAt)}` : ''}.
+              {rebound.unassignedAt ? ` on ${formatDayTime(rebound.unassignedAt)} · ${timeAgo(rebound.unassignedAt)}` : ''}.
               {Number(rebound.reboundCount) > 1 ? ` Return #${rebound.reboundCount} for this ticket.` : ''}
             </p>
           )}
@@ -467,6 +468,7 @@ export default function TicketAiTab({ ticket, technicians = [], canReview = fals
                   </div>
                   <p className="mt-0.5 text-[10px] text-slate-400" title={new Date(node.at).toLocaleString()}>
                     {formatDayTime(node.at)}
+                    {' · '}{timeAgo(node.at)}
                   </p>
                 </li>
               );

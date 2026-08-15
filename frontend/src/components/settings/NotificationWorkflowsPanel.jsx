@@ -9939,6 +9939,7 @@ export default function NotificationWorkflowsPanel({
           options: [
             ['requester', 'Requester'],
             ['assigned_agent', 'Assigned agent'],
+            ['approval_requester', 'Approval requester (approval events)'],
             ['custom_emails', 'Custom emails'],
           ],
         },

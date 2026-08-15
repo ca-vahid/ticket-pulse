@@ -688,9 +688,19 @@ class TicketApprovalService {
       }).catch((err) => logger.warn(`Approval note write failed (non-fatal): ${err.message}`));
 
       await emitApprovalEvent('approval.decided', ticket.id, {
+        // requestedBy lets workflows target the requester (approval_requester token).
         approvalId: approval.id, status: normalized, approverEmail: approval.approverEmail,
+        requestedBy: approval.requestedBy,
       });
       this._broadcast(ticket, 'approval');
+
+      // QA 08-11 #5: the requester hears about the verdict by email too.
+      // Non-fatal — the decision is already persisted.
+      try {
+        await this._emailRequesterDecision(ticket, approval, { decision: normalized, note, actorLabel, changedFrom });
+      } catch (err) {
+        logger.warn(`Approval decision email failed (non-fatal): ${err.message}`);
+      }
     }
 
     logger.info(`Approval ${normalized} (${via}) on ticket ${approval.ticketId} by ${actorLabel}`);
@@ -743,6 +753,42 @@ class TicketApprovalService {
 
     const { sendTransactionalEmail } = await import('./transactionalEmailService.js');
     return sendTransactionalEmail({ workspaceId: ticket.workspaceId, to: approval.approverEmail, subject, html, label: 'approval' });
+  }
+
+  /**
+   * Notify the requester that their approval request was decided (QA 08-11 #5).
+   * Mirrors _emailRequesterClarification's guards: kill-switch, email-shape
+   * check, and skip when the requester decided their own request.
+   */
+  async _emailRequesterDecision(ticket, approval, { decision, note = null, actorLabel = null, changedFrom = null } = {}) {
+    if (process.env.TP_SUPPRESS_APPROVAL_EMAIL === '1') {
+      logger.info(`[approval] decision email suppressed (TP_SUPPRESS_APPROVAL_EMAIL) → ${approval.requestedBy}`);
+      return { sent: false, reason: 'suppressed' };
+    }
+    const to = String(approval.requestedBy || '').trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return { sent: false, reason: 'no_requester_email' };
+    // Don't email yourself: the approver decided their own request.
+    if (to.toLowerCase() === String(approval.approverEmail || '').trim().toLowerCase()) {
+      return { sent: false, reason: 'self_decision' };
+    }
+    const approved = decision === 'approved';
+    const verdictLabel = approved ? 'Approved' : 'Rejected';
+    const ref = ticketDisplayRef(ticket);
+    const ticketUrl = `${publicBaseUrl()}/tickets/${ticket.id}`;
+    const subject = `${verdictLabel}: your approval request on ${ticket.subject || 'ticket'} [${ref}]`;
+    const esc = (s) => String(s || '').replace(/</g, '&lt;');
+    const approver = esc(actorLabel || approval.approverName || approval.approverEmail);
+    const verdictHtml = `<span style="color:${approved ? '#059669' : '#dc2626'};font-weight:bold">${verdictLabel.toUpperCase()} ${approved ? '✔' : '✘'}</span>`;
+    const html = [
+      changedFrom
+        ? `<p>${approver} changed the decision on your approval request on ticket <b>${ref}</b>: ${verdictHtml}</p>`
+        : `<p>${approver} decided your approval request on ticket <b>${ref}</b>: ${verdictHtml}</p>`,
+      `<p><b>${esc(ticket.subject || '')}</b></p>`,
+      note?.trim() ? `<p>Their note: “${esc(note.trim())}”</p>` : '',
+      `<p><a href="${ticketUrl}">Open the ticket</a> to see the full approval trail.</p>`,
+    ].join('');
+    const { sendTransactionalEmail } = await import('./transactionalEmailService.js');
+    return sendTransactionalEmail({ workspaceId: ticket.workspaceId, to, subject, html, label: 'approval decision' });
   }
 
   /** Notify the requester that an approver needs more info before deciding. */

@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.4.01-preview';
+export const APP_VERSION = '3.4.02-preview';
 
 export const changelog = [
+  {
+    version: '3.4.02-preview',
+    date: 'August 15, 2026',
+    entries: [
+      { type: 'new', html: '<strong>📧 Approval decision emails</strong> — the agent who requested an approval now gets an email the moment it’s approved or rejected (verdict, approver’s note, and a link back to the ticket). Never emails you about your own decision, and workflows gain a new “Approval requester” recipient option for custom copy on approval events. (QA 08-11 #5)' },
+      { type: 'improved', html: '<strong>🛡️ Approvals clearly marked Ticket-Pulse-only</strong> — the Approvals tab, the Approvals inbox, and the request dialog now all state up front that approvals live inside Ticket Pulse and are never synced to FreshService — no more guessing where that workflow lives. (QA 08-11 #4)' },
+      { type: 'improved', html: '<strong>🕒 Exact timestamps everywhere it matters</strong> — activity history, approval timelines, the approvals inbox, AI triage, scheduled tickets, backups, and evidence tables now show “Aug 15, 1:56 PM · 2h ago” instead of a bare “2 hours ago”. Dense queue rows stay compact with the exact time in the hover tooltip. (QA 08-14 #3)' },
+    ],
+  },
   {
     version: '3.4.01-preview',
     date: 'August 15, 2026',

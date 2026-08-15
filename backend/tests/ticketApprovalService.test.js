@@ -230,6 +230,72 @@ describe('approval note rawPayload kinds (structured discriminator)', () => {
   });
 });
 
+// QA 08-11 #5: the requesting agent hears about the verdict by email, with the
+// same guard rails as the clarification email (kill-switch, email-shape check)
+// plus a don't-email-yourself skip when the requester decided their own request.
+describe('decision email to the requester (QA 08-11 #5)', () => {
+  const approvalRow = (over = {}) => ({
+    id: 2, ticketId: 501, workspaceId: 1, status: 'pending',
+    approverEmail: 'alice@x.io', requestedBy: 'req@x.io', requestGroupId: 'grp-1', ...over,
+  });
+
+  test('approve emails the requester: verdict + note + ticket link', async () => {
+    prismaMock.ticketApproval.findFirst.mockResolvedValue(approvalRow());
+    await ticketApprovalService.decideInApp(501, 1, 2, 'approved', 'go ahead', { email: 'alice@x.io', name: 'Alice' });
+
+    expect(sendgridMock.sendEmail).toHaveBeenCalledTimes(1);
+    const email = sendgridMock.sendEmail.mock.calls[0][0];
+    expect(email.to).toEqual(['req@x.io']);
+    expect(email.subject).toMatch(/^Approved:/);
+    expect(email.html).toContain('APPROVED');
+    expect(email.html).toContain('go ahead');
+    expect(email.html).toContain('/tickets/501');
+  });
+
+  test('reject emails the requester with the rejection', async () => {
+    prismaMock.ticketApproval.findFirst.mockResolvedValue(approvalRow());
+    await ticketApprovalService.decideInApp(501, 1, 2, 'rejected', 'no budget', { email: 'alice@x.io', name: 'Alice' });
+
+    const email = sendgridMock.sendEmail.mock.calls[0][0];
+    expect(email.to).toEqual(['req@x.io']);
+    expect(email.subject).toMatch(/^Rejected:/);
+    expect(email.html).toContain('REJECTED');
+    expect(email.html).toContain('no budget');
+  });
+
+  test('TP_SUPPRESS_APPROVAL_EMAIL kill-switch suppresses the decision email', async () => {
+    process.env.TP_SUPPRESS_APPROVAL_EMAIL = '1';
+    try {
+      prismaMock.ticketApproval.findFirst.mockResolvedValue(approvalRow());
+      await ticketApprovalService.decideInApp(501, 1, 2, 'approved', null, { email: 'alice@x.io', name: 'Alice' });
+      expect(sendgridMock.sendEmail).not.toHaveBeenCalled();
+    } finally {
+      delete process.env.TP_SUPPRESS_APPROVAL_EMAIL;
+    }
+  });
+
+  test('requester === approver skips (no email to yourself)', async () => {
+    prismaMock.ticketApproval.findFirst.mockResolvedValue(approvalRow({ requestedBy: 'alice@x.io' }));
+    await ticketApprovalService.decideInApp(501, 1, 2, 'approved', null, { email: 'alice@x.io', name: 'Alice' });
+    expect(sendgridMock.sendEmail).not.toHaveBeenCalled();
+  });
+
+  test('non-email requestedBy (legacy "unknown") skips the email', async () => {
+    prismaMock.ticketApproval.findFirst.mockResolvedValue(approvalRow({ requestedBy: 'unknown' }));
+    await ticketApprovalService.decideInApp(501, 1, 2, 'approved', null, { email: 'alice@x.io', name: 'Alice' });
+    expect(sendgridMock.sendEmail).not.toHaveBeenCalled();
+  });
+
+  test('approval.decided event extra carries requestedBy (workflow targeting)', async () => {
+    prismaMock.ticketApproval.findFirst.mockResolvedValue(approvalRow());
+    await ticketApprovalService.decideInApp(501, 1, 2, 'approved', null, { email: 'alice@x.io', name: 'Alice' });
+    expect(lifecycleMock.emitTicketEvent).toHaveBeenCalledWith(
+      'approval.decided', 501,
+      expect.objectContaining({ extra: expect.objectContaining({ requestedBy: 'req@x.io', status: 'approved' }) }),
+    );
+  });
+});
+
 describe('ticketApprovalService.request notifyApprover toggle (QA 07-14 #2)', () => {
   test('notifyApprover: false suppresses the approver email but still creates the request', async () => {
     prismaMock.approvalCategory.findFirst.mockResolvedValue({ id: 9, name: 'Laptop purchase', managerEmails: ['alice@x.io'] });

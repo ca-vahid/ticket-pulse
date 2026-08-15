@@ -7,7 +7,7 @@ import {
 import { backupAPI } from '../../services/api';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 import { useAuth } from '../../contexts/AuthContext';
-import { timeAgo, formatBytes } from '../tickets/ticketUi';
+import { formatDayTime, timeAgo, formatBytes } from '../tickets/ticketUi';
 
 /**
  * Backup & Restore (Settings → Sync & Data). Three layers from
@@ -920,7 +920,8 @@ export default function BackupRestorePanel() {
           {lastCompleted ? (
             <div className="flex flex-wrap items-center gap-1.5">
               <span className={`text-sm font-semibold ${lastSnapshotStale ? 'text-amber-700' : 'text-slate-800'}`}>
-                {timeAgo(lastCompleted.completedAt || lastCompleted.createdAt)}
+                {formatDayTime(lastCompleted.completedAt || lastCompleted.createdAt)}
+                <span className="font-normal text-slate-400"> · {timeAgo(lastCompleted.completedAt || lastCompleted.createdAt)}</span>
               </span>
               <ScopeChip snapshot={lastCompleted} workspaceName={workspaceName(lastCompleted.workspaceId)} />
               <TierChip tier={lastCompleted.tier} />
