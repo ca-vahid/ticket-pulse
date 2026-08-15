@@ -334,6 +334,37 @@ describe('ticketService conversation + status + assignment', () => {
     expect(fsClientMock.createReply).not.toHaveBeenCalled();
   });
 
+  test('reply bodyHtml is sanitized server-side: scripts/handlers stripped, pasted table kept (Phase C)', async () => {
+    const dirty = '<table style="border-collapse:collapse"><tbody><tr>'
+      + '<td colspan="2" style="border:1px solid #ccc">Amount</td></tr></tbody></table>'
+      + '<script>alert(1)</script><img src="https://ok.example/a.png" onerror="alert(2)">'
+      + '<a href="javascript:alert(3)">x</a>';
+    const { entry } = await ticketService.addReply(501, 1, { bodyHtml: dirty, bodyText: 'Amount' }, actor);
+    expect(entry.bodyHtml).toContain('<table');
+    expect(entry.bodyHtml).toContain('colspan="2"');
+    expect(entry.bodyHtml).toContain('border:1px solid #ccc');
+    expect(entry.bodyHtml).not.toContain('<script');
+    expect(entry.bodyHtml).not.toContain('onerror');
+    expect(entry.bodyHtml).not.toContain('javascript:');
+    // The requester email body is built from the SANITIZED html.
+    expect(sendgridMock.sendEmail).toHaveBeenCalledWith(expect.objectContaining({
+      html: expect.not.stringContaining('<script'),
+    }));
+  });
+
+  test('note bodyHtml is sanitized on the note path too', async () => {
+    await ticketService.addPrivateNote(501, 1, { bodyHtml: '<p>ok</p><script>boom()</script>', bodyText: 'ok' }, actor);
+    expect(prismaMock.ticketThreadEntry.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ bodyHtml: expect.not.stringContaining('<script') }),
+    }));
+  });
+
+  test('a body that sanitizes to nothing is rejected, not stored blank', async () => {
+    await expect(ticketService.addReply(501, 1, { bodyHtml: '<script>alert(1)</script>' }, actor))
+      .rejects.toThrow(/body is required/i);
+    expect(prismaMock.ticketThreadEntry.create).not.toHaveBeenCalled();
+  });
+
   test('resolving stamps resolvedAt + resolutionTimeSeconds and closes the active episode', async () => {
     prismaMock.ticket.findFirst.mockResolvedValue({ ...nativeTicket, assignedTechId: 7 });
 

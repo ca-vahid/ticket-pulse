@@ -70,6 +70,11 @@ export const EMAIL_SANITIZE_OPTIONS = Object.freeze({
     'tr',
     'td',
     'th',
+    // Phase C (08-15): Excel clipboard fragments carry these — keep column
+    // widths/captions through the server pass (matches RichTextEditor.jsx).
+    'colgroup',
+    'col',
+    'caption',
     'h1',
     'h2',
     'h3',
@@ -81,6 +86,8 @@ export const EMAIL_SANITIZE_OPTIONS = Object.freeze({
     table: ['width', 'height', 'border', 'cellpadding', 'cellspacing', 'style', 'class'],
     td: ['width', 'height', 'colspan', 'rowspan', 'style', 'class', 'align', 'valign'],
     th: ['width', 'height', 'colspan', 'rowspan', 'style', 'class', 'align', 'valign'],
+    col: ['width', 'span', 'style', 'class'],
+    colgroup: ['width', 'span', 'style', 'class'],
   },
   allowedSchemes: ['http', 'https', 'mailto'],
   allowedSchemesByTag: {

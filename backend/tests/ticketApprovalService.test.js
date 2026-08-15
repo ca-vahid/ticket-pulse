@@ -67,6 +67,22 @@ describe('ticketApprovalService.request (category fan-out)', () => {
       .rejects.toThrow(/no approval managers/i);
   });
 
+  test('request description keeps pasted tables but strips scripts (Phase C widened allowlist)', async () => {
+    prismaMock.approvalCategory.findFirst.mockResolvedValue({ id: 9, name: 'Laptop purchase', managerEmails: ['alice@x.io'] });
+    prismaMock.ticketApproval.findFirst.mockResolvedValue(null);
+
+    const noteHtml = '<p>Quotes:</p><table><tbody><tr>'
+      + '<td colspan="2" style="border:1px solid #ccc">Vendor</td><td>Price</td></tr></tbody></table>'
+      + '<script>alert(1)</script>';
+    await ticketApprovalService.request(501, 1, { approvalCategoryId: 9, note: 'Quotes', noteHtml }, { email: 'req@x.io' });
+
+    const stored = prismaMock.ticketApproval.create.mock.calls[0][0].data.requestNoteHtml;
+    expect(stored).toContain('<table');
+    expect(stored).toContain('colspan="2"');
+    expect(stored).toContain('border:1px solid #ccc');
+    expect(stored).not.toContain('<script');
+  });
+
   test('rejects a duplicate open request for the same category', async () => {
     prismaMock.approvalCategory.findFirst.mockResolvedValue({ id: 9, name: 'Laptop purchase', managerEmails: ['alice@x.io'] });
     prismaMock.ticketApproval.findFirst.mockResolvedValue({ id: 1 }); // already open

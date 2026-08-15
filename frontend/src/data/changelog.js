@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.4.02-preview';
+export const APP_VERSION = '3.4.03-preview';
 
 export const changelog = [
+  {
+    version: '3.4.03-preview',
+    date: 'August 15, 2026',
+    entries: [
+      { type: 'new', html: '<strong>📋 Paste Excel tables straight into replies</strong> — copy a range from Excel and paste it into the reply/note composer: it arrives as a real table with borders, header shading, merged cells, and cell colors — and it sends, stores, and renders that way in the conversation thread. Works in replies, notes, forwards, approval descriptions, and new-ticket descriptions. (QA 08-14 #2)' },
+      { type: 'improved', html: '<strong>✍️ Outlook signatures paste clean</strong> — pasting your Outlook/Word signature no longer collapses to mangled plain text: Microsoft Office’s hidden markup is scrubbed automatically while the layout, colors, and logo cell structure survive. (QA 08-14 #1 stop-gap — full per-user signatures land next release)' },
+      { type: 'fixed', html: '<strong>🔒 Server-side reply sanitizing</strong> — reply, note, and note-edit bodies are now sanitized on the server with the same battle-tested email allowlist (scripts and event handlers stripped, tables kept), closing a gap where raw API posts bypassed the composer’s cleaning.' },
+    ],
+  },
   {
     version: '3.4.02-preview',
     date: 'August 15, 2026',

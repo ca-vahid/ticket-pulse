@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
+import sanitizeHtml from 'sanitize-html';
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { ValidationError, NotFoundError, ServiceBusyError } from '../utils/errors.js';
@@ -19,6 +20,7 @@ import watcherNotificationService from './watcherNotificationService.js';
 import customFieldService from './customFieldService.js';
 import { resolveCategoryNames } from './categoryNameResolver.js';
 import { looksLikeRealHtml, plainTextToHtml } from '../utils/htmlContent.js';
+import { EMAIL_SANITIZE_OPTIONS } from './notificationWorkflowSignatureService.js';
 import { sseManager } from '../routes/sse.routes.js';
 
 // The 4 canonical statuses. Since Phase 8a these are the BASE statuses of the
@@ -221,6 +223,19 @@ function stripHtml(html) {
     .replace(/[ \t]+/g, ' ')
     .replace(/\n{3,}/g, '\n\n')
     .trim() || null;
+}
+
+/**
+ * Server-side sanitize for agent-composed thread bodies (Phase C, 08-15).
+ * The composer sanitizes client-side but the API must not trust it — this is
+ * the trust boundary for everything _addThreadEntry persists AND sends (FS
+ * reply/note bodies, requester emails, the cached entry the UI re-renders).
+ * Reuses the shared permissive email allowlist so pasted tables/imgs survive.
+ */
+function sanitizeBodyHtml(html) {
+  const raw = String(html || '').trim();
+  if (!raw) return null;
+  return sanitizeHtml(raw, EMAIL_SANITIZE_OPTIONS).trim() || null;
 }
 
 /**
@@ -2935,8 +2950,11 @@ class TicketService {
       attachmentService.validateUpload({ fileName: file.originalname, sizeBytes: file.size });
     }
 
-    const bodyHtml = parsed.data.bodyHtml?.trim() || null;
+    const bodyHtml = sanitizeBodyHtml(parsed.data.bodyHtml);
     const bodyText = parsed.data.bodyText?.trim() || stripHtml(bodyHtml);
+    // A body that was ALL disallowed markup (e.g. a lone <script>) sanitizes
+    // to nothing — reject it like an empty submit instead of storing a blank.
+    if (!bodyHtml && !bodyText) throw new ValidationError('Reply body is required');
     const now = new Date();
 
     // FS-born tickets: FS owns requester communication — send through the FS
@@ -3159,8 +3177,9 @@ class TicketService {
     // html, plain-text derived via stripHtml when the client sent none.
     const parsed = threadBodySchema.safeParse({ bodyHtml: input?.bodyHtml, bodyText: input?.bodyText });
     if (!parsed.success) throw new ValidationError(zodMessage(parsed.error));
-    const bodyHtml = parsed.data.bodyHtml?.trim() || null;
+    const bodyHtml = sanitizeBodyHtml(parsed.data.bodyHtml);
     const bodyText = parsed.data.bodyText?.trim() || stripHtml(bodyHtml);
+    if (!bodyHtml && !bodyText) throw new ValidationError('Note body is required');
 
     const now = new Date();
     const editorEmail = actor?.email || null;
