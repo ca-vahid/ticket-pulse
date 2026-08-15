@@ -540,8 +540,11 @@ export function DashboardProvider({ children }) {
   const {
     isConnected: sseConnected,
     connectionStatus: sseConnectionStatus,
+    transportStatus: sseTransportStatus,
+    transport: sseTransport,
     retry: sseRetry,
     getReconnectChurn: sseGetReconnectChurn,
+    getDiagnostics: sseGetDiagnostics,
   } = useSSE({
     enabled: dashboardSseEnabled,
     onSyncCompleted: handleSyncCompleted,
@@ -571,12 +574,15 @@ export function DashboardProvider({ children }) {
     lastFreshAt,
     lastUpdated: lastFreshAt, // backward compat
 
-    // SSE
+    // SSE / realtime transport ladder (Phase 2)
     autoRefresh,
     sseConnected,
     sseConnectionStatus,
+    sseTransportStatus,
+    sseTransport,
     sseRetry,
     sseGetReconnectChurn,
+    sseGetDiagnostics,
     sseEnabled: dashboardSseEnabled,
     syncSkippedEvent,
     setAutoRefresh,

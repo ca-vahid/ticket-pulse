@@ -1,4 +1,6 @@
 /** @vitest-environment jsdom */
+// LEGACY native-EventSource hook (the VITE_REALTIME_TRANSPORT=eventsource
+// rollback path — kept green so the escape hatch stays trustworthy).
 // Phase 2 (QA 08-07 #14) — SSE auth resilience: refresh an expired JWT before
 // reconnecting, and stop the eternal "connecting" spinner after the retry
 // budget is spent (surface 'disconnected' + manual retry instead).
@@ -20,7 +22,7 @@ vi.mock('../services/api', () => ({
   getWorkspaceId: mocks.getWorkspaceId,
 }));
 
-import { useSSE } from './useSSE';
+import { useLegacySSE as useSSE } from './useSSE.legacy';
 
 class FakeEventSource {
   static instances = [];

@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.4.00-preview';
+export const APP_VERSION = '3.4.01-preview';
 
 export const changelog = [
+  {
+    version: '3.4.01-preview',
+    date: 'August 15, 2026',
+    entries: [
+      { type: 'new', html: '<strong>🛜 Realtime transport ladder</strong> — the live feed now climbs down gracefully instead of dying: full live stream first, and if a corporate proxy or firewall blocks streaming, the app automatically falls back to long-polling (data keeps flowing, pill turns amber “Auto-refresh”), then short-polling, then an honest red “Offline — Reconnect”. It quietly re-probes and promotes itself back to “Live” when the network allows. One shared connection per tab replaces the old 2–4 parallel streams. (QA 08-11: Zscaler-class networks)' },
+      { type: 'improved', html: '<strong>🔗 Smarter, resumable stream</strong> — the connection now authenticates with a proper header (no more token in the URL), requires a server “hello” within 5 seconds (a silently-buffered stream is detected instantly instead of looking “connected”), and resumes from where it left off after a blip — missed events replay from a server-side buffer instead of forcing a full reload. Laptop wake-from-sleep is detected and triggers a fresh token + resync automatically.' },
+      { type: 'improved', html: '<strong>🩺 Self-diagnosing status pill</strong> — the header pill now speaks three states (Live / Auto-refresh / Offline) and its popover shows transport, last-event age, reconnect count, and the exact workspace channel — a support screenshot now tells the whole story.' },
+    ],
+  },
   {
     version: '3.4.00-preview',
     date: 'August 15, 2026',

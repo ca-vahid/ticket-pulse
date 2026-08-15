@@ -30,7 +30,13 @@ jest.unstable_mockModule('../src/middleware/auth.js', () => ({
   },
 }));
 
-const { default: sseRoutes, sseManager, resolveSseWorkspace } = await import('../src/routes/sse.routes.js');
+const {
+  default: sseRoutes,
+  sseManager,
+  resolveSseWorkspace,
+  RING_MAX_EVENTS,
+  RING_MAX_AGE_MS,
+} = await import('../src/routes/sse.routes.js');
 
 function makeApp(sessionUser, { sessionWorkspaceId = null } = {}) {
   const app = express();
@@ -58,7 +64,21 @@ beforeEach(() => {
   getAccessRoleMock.mockResolvedValue(null);
   prismaMock.technician.findFirst.mockResolvedValue(null);
   sseManager.channels.clear();
+  sseManager.buffers.clear();
+  sseManager.waiters.clear();
 });
+
+/** Read the SSE stream until a predicate matches (Express may split writes). */
+async function readStreamUntil(reader, predicate, maxReads = 10) {
+  let text = '';
+  for (let i = 0; i < maxReads; i++) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    text += Buffer.from(value).toString('utf8');
+    if (predicate(text)) break;
+  }
+  return text;
+}
 
 describe('sendHeartbeat — channel-scoped with membership proof', () => {
   test('each channel receives ONLY its own heartbeat, stamped with its workspaceId', () => {
@@ -151,30 +171,276 @@ describe('GET /api/sse/events — workspace resolution', () => {
     getAccessRoleMock.mockResolvedValue('viewer');
     const app = makeApp(viewer, { sessionWorkspaceId: 1 });
     const server = app.listen(0);
+    const controller = new AbortController();
     try {
       const port = server.address().port;
-      const controller = new AbortController();
       const res = await fetch(`http://127.0.0.1:${port}/api/sse/events?workspaceId=2`, {
         signal: controller.signal,
       });
       expect(res.status).toBe(200);
-      expect(res.headers.get('content-type')).toBe('text/event-stream');
+      expect(res.headers.get('content-type')).toContain('text/event-stream');
 
       const reader = res.body.getReader();
-      const { value } = await reader.read();
-      const chunk = Buffer.from(value).toString('utf8');
+      const chunk = await readStreamUntil(reader, (t) => t.includes('event: connected') && t.match(/event: connected\ndata: .*\n\n/));
       expect(chunk).toContain('event: connected');
-      const payload = JSON.parse(chunk.match(/data: (.*)\n\n/)[1]);
+      const payload = JSON.parse(chunk.match(/event: connected\ndata: (.*)\n\n/)[1]);
       // Session said workspace 1 — the stream MUST be on the query's 2.
       expect(payload.workspaceId).toBe(2);
       expect(sseManager.getClientCount(2)).toBe(1);
       expect(sseManager.getClientCount(1)).toBe(0);
       // Access was validated against the QUERY workspace.
       expect(getAccessRoleMock).toHaveBeenCalledWith('viewer@bgc.ca', 2);
-      controller.abort();
     } finally {
+      // Abort BEFORE close — server.close waits for open connections, so an
+      // un-aborted SSE stream would hang the test to timeout.
+      controller.abort();
       await new Promise((resolve) => server.close(resolve));
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Realtime plan Phase 2 — protocol: hello, monotonic ids, ring buffer,
+// Last-Event-ID replay, resync, and the long-poll endpoint.
+// ---------------------------------------------------------------------------
+
+describe('broadcast — monotonic per-workspace ids + ring buffer', () => {
+  test('data events carry an id: field with the epoch and a monotonic counter', () => {
+    const ws1 = fakeClient();
+    sseManager.addClient(ws1, 1);
+    sseManager.broadcast('ticket-change', { a: 1 }, 1);
+    sseManager.broadcast('sync-completed', { b: 2 }, 1);
+
+    const first = ws1.write.mock.calls[0][0];
+    const second = ws1.write.mock.calls[1][0];
+    expect(first).toMatch(new RegExp(`^id: ${sseManager.epoch}:1\\n`));
+    expect(second).toMatch(new RegExp(`^id: ${sseManager.epoch}:2\\n`));
+    expect(second).toContain('event: sync-completed');
+  });
+
+  test('ids are independent per workspace', () => {
+    sseManager.broadcast('ticket-change', {}, 1);
+    sseManager.broadcast('ticket-change', {}, 1);
+    sseManager.broadcast('ticket-change', {}, 2);
+    expect(sseManager.cursorFor(1)).toBe(`${sseManager.epoch}:2`);
+    expect(sseManager.cursorFor(2)).toBe(`${sseManager.epoch}:1`);
+  });
+
+  test('events are buffered even with no client connected (replay across reconnects)', () => {
+    sseManager.broadcast('ticket-change', { while: 'disconnected' }, 3);
+    const result = sseManager.eventsAfter(3, `${sseManager.epoch}:0`);
+    expect(result.events).toHaveLength(1);
+    expect(result.events[0].data).toEqual({ while: 'disconnected' });
+  });
+
+  test('the ring buffer keeps at most RING_MAX_EVENTS', () => {
+    for (let i = 0; i < RING_MAX_EVENTS + 50; i++) {
+      sseManager.broadcast('ticket-change', { i }, 4);
+    }
+    const buf = sseManager.buffers.get(4);
+    expect(buf.events).toHaveLength(RING_MAX_EVENTS);
+    // Oldest retained id is 51 — a cursor before that can't be replayed.
+    expect(buf.events[0].id).toBe(51);
+  });
+
+  test('events older than the age bound are pruned', () => {
+    sseManager.broadcast('ticket-change', { old: true }, 5);
+    const buf = sseManager.buffers.get(5);
+    buf.events[0].ts = Date.now() - RING_MAX_AGE_MS - 1000;
+    sseManager.broadcast('ticket-change', { fresh: true }, 5);
+    expect(buf.events).toHaveLength(1);
+    expect(buf.events[0].data).toEqual({ fresh: true });
+  });
+
+  test('heartbeats are NOT buffered and carry no id', () => {
+    const ws = fakeClient();
+    sseManager.addClient(ws, 6);
+    sseManager.sendHeartbeat();
+    expect(ws.write.mock.calls[0][0]).toMatch(/^event: heartbeat\n/);
+    expect(sseManager.buffers.get(6)).toBeUndefined();
+  });
+});
+
+describe('eventsAfter — replay/resync decisions', () => {
+  test('replays only events after the cursor', () => {
+    sseManager.broadcast('ticket-change', { n: 1 }, 1);
+    sseManager.broadcast('ticket-change', { n: 2 }, 1);
+    sseManager.broadcast('ticket-change', { n: 3 }, 1);
+    const result = sseManager.eventsAfter(1, `${sseManager.epoch}:1`);
+    expect(result.events.map((e) => e.data.n)).toEqual([2, 3]);
+  });
+
+  test('an up-to-date cursor replays nothing', () => {
+    sseManager.broadcast('ticket-change', {}, 1);
+    expect(sseManager.eventsAfter(1, `${sseManager.epoch}:1`)).toEqual({ events: [] });
+  });
+
+  test('a cursor from another epoch → resync (server restarted)', () => {
+    sseManager.broadcast('ticket-change', {}, 1);
+    expect(sseManager.eventsAfter(1, 'deadepoch:1')).toEqual({ resync: true });
+  });
+
+  test('a cursor older than the buffer retains → resync (gap exceeds buffer)', () => {
+    for (let i = 0; i < RING_MAX_EVENTS + 10; i++) {
+      sseManager.broadcast('ticket-change', { i }, 1);
+    }
+    expect(sseManager.eventsAfter(1, `${sseManager.epoch}:2`)).toEqual({ resync: true });
+  });
+
+  test('malformed and future cursors → resync', () => {
+    sseManager.broadcast('ticket-change', {}, 1);
+    expect(sseManager.eventsAfter(1, 'garbage')).toEqual({ resync: true });
+    expect(sseManager.eventsAfter(1, `${sseManager.epoch}:999`)).toEqual({ resync: true });
+  });
+});
+
+describe('GET /api/sse/events — hello + replay protocol', () => {
+  async function openStream(app, path) {
+    const server = app.listen(0);
+    const port = server.address().port;
+    const controller = new AbortController();
+    const res = await fetch(`http://127.0.0.1:${port}${path}`, { signal: controller.signal });
+    return {
+      res,
+      close: async () => {
+        controller.abort();
+        await new Promise((resolve) => server.close(resolve));
+      },
+    };
+  }
+
+  test('sends retry hint + hello (epoch, workspaceId, lastEventId) before connected', async () => {
+    sseManager.broadcast('ticket-change', {}, 2);
+    const { res, close } = await openStream(makeApp(admin), '/api/sse/events?workspaceId=2');
+    try {
+      expect(res.status).toBe(200);
+      expect(res.headers.get('cache-control')).toContain('no-transform');
+      const reader = res.body.getReader();
+      const text = await readStreamUntil(reader, (t) => t.includes('event: connected'));
+      expect(text).toMatch(/^retry: 5000\n\n/);
+      const hello = JSON.parse(text.match(/event: hello\ndata: (.*)\n/)[1]);
+      expect(hello.epoch).toBe(sseManager.epoch);
+      expect(hello.workspaceId).toBe(2);
+      expect(hello.lastEventId).toBe(`${sseManager.epoch}:1`);
+      expect(text.indexOf('event: hello')).toBeLessThan(text.indexOf('event: connected'));
+    } finally {
+      await close();
+    }
+  });
+
+  test('Last-Event-ID header replays the buffered gap with ids', async () => {
+    sseManager.broadcast('ticket-change', { n: 1 }, 2);
+    sseManager.broadcast('ticket-change', { n: 2 }, 2);
+    sseManager.broadcast('sync-completed', { n: 3 }, 2);
+
+    const app = makeApp(admin);
+    const server = app.listen(0);
+    const controller = new AbortController();
+    try {
+      const port = server.address().port;
+      const res = await fetch(`http://127.0.0.1:${port}/api/sse/events?workspaceId=2`, {
+        headers: { 'Last-Event-ID': `${sseManager.epoch}:1` },
+        signal: controller.signal,
+      });
+      const reader = res.body.getReader();
+      const text = await readStreamUntil(reader, (t) => t.includes('event: sync-completed'));
+      expect(text).toContain(`id: ${sseManager.epoch}:2\nevent: ticket-change`);
+      expect(text).toContain(`id: ${sseManager.epoch}:3\nevent: sync-completed`);
+      expect(text).not.toContain('"n":1'); // before the cursor — not replayed
+      expect(text).not.toContain('event: resync');
+    } finally {
+      controller.abort();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  test('an epoch-mismatched Last-Event-ID gets a resync event instead of replay', async () => {
+    sseManager.broadcast('ticket-change', { n: 1 }, 2);
+    const { res, close } = await openStream(makeApp(admin), '/api/sse/events?workspaceId=2&lastEventId=oldepoch:99');
+    try {
+      const reader = res.body.getReader();
+      const text = await readStreamUntil(reader, (t) => t.includes('event: resync'));
+      expect(text).toContain('event: resync');
+      const resync = JSON.parse(text.match(/event: resync\ndata: (.*)\n/)[1]);
+      expect(resync.cursor).toBe(`${sseManager.epoch}:1`);
+      expect(resync.epoch).toBe(sseManager.epoch);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('GET /api/sse/poll — long-poll fallback', () => {
+  test('same auth tiers as /events: 401 / 400 / 403', async () => {
+    expect((await request(makeApp(null)).get('/api/sse/poll?workspaceId=1')).status).toBe(401);
+    const missing = await request(makeApp(admin)).get('/api/sse/poll');
+    expect(missing.status).toBe(400);
+    expect(missing.body.code).toBe('workspace_required');
+    const forbidden = await request(makeApp(viewer)).get('/api/sse/poll?workspaceId=2');
+    expect(forbidden.status).toBe(403);
+    expect(forbidden.body.code).toBe('workspace_forbidden');
+  });
+
+  test('no cursor → immediate baseline (current cursor + epoch, no events)', async () => {
+    sseManager.broadcast('ticket-change', {}, 1);
+    const res = await request(makeApp(admin)).get('/api/sse/poll?workspaceId=1');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ events: [], cursor: `${sseManager.epoch}:1`, epoch: sseManager.epoch });
+  });
+
+  test('buffered events after the cursor return immediately', async () => {
+    sseManager.broadcast('ticket-change', { n: 1 }, 1);
+    sseManager.broadcast('sync-completed', { n: 2 }, 1);
+    const res = await request(makeApp(admin))
+      .get(`/api/sse/poll?workspaceId=1&cursor=${encodeURIComponent(`${sseManager.epoch}:1`)}`);
+    expect(res.status).toBe(200);
+    expect(res.body.events).toEqual([
+      expect.objectContaining({ id: `${sseManager.epoch}:2`, event: 'sync-completed', data: { n: 2 } }),
+    ]);
+    expect(res.body.cursor).toBe(`${sseManager.epoch}:2`);
+  });
+
+  test('holds until a broadcast lands, then returns it (long-poll wake)', async () => {
+    sseManager.broadcast('ticket-change', { n: 1 }, 1);
+    const pending = request(makeApp(admin))
+      .get(`/api/sse/poll?workspaceId=1&cursor=${encodeURIComponent(`${sseManager.epoch}:1`)}&wait=5000`);
+    // Give the request a beat to register its waiter, then broadcast.
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    sseManager.broadcast('ticket-change', { n: 2 }, 1);
+    const res = await pending;
+    expect(res.status).toBe(200);
+    expect(res.body.events.map((e) => e.data.n)).toEqual([2]);
+  });
+
+  test('wait=0 acts as a short-poll: immediate empty response on no news', async () => {
+    sseManager.broadcast('ticket-change', {}, 1);
+    const started = Date.now();
+    const res = await request(makeApp(admin))
+      .get(`/api/sse/poll?workspaceId=1&cursor=${encodeURIComponent(`${sseManager.epoch}:1`)}&wait=0`);
+    expect(res.status).toBe(200);
+    expect(res.body.events).toEqual([]);
+    expect(res.body.cursor).toBe(`${sseManager.epoch}:1`);
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
+  test('a stale/foreign cursor returns resync: true with the current cursor', async () => {
+    sseManager.broadcast('ticket-change', {}, 1);
+    const res = await request(makeApp(admin))
+      .get('/api/sse/poll?workspaceId=1&cursor=deadepoch:9&wait=0');
+    expect(res.status).toBe(200);
+    expect(res.body.resync).toBe(true);
+    expect(res.body.events).toEqual([]);
+    expect(res.body.cursor).toBe(`${sseManager.epoch}:1`);
+  });
+
+  test('short hold times out and returns empty with the unchanged cursor', async () => {
+    sseManager.broadcast('ticket-change', {}, 1);
+    const res = await request(makeApp(admin))
+      .get(`/api/sse/poll?workspaceId=1&cursor=${encodeURIComponent(`${sseManager.epoch}:1`)}&wait=300`);
+    expect(res.status).toBe(200);
+    expect(res.body.events).toEqual([]);
+    expect(res.body.cursor).toBe(`${sseManager.epoch}:1`);
+    expect(res.body.resync).toBeUndefined();
   });
 });
 
