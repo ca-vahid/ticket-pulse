@@ -47,6 +47,27 @@ const WATCHDOG_TICK_MS = 15000;
 // unmount one page's hook before the next page's mounts.
 const STOP_GRACE_MS = 1000;
 const TRANSPORT_MEMORY_KEY = 'tp_rt_transport';
+// Client telemetry (realtime plan Phase 3): sampled ~10% of sessions report
+// transport downgrades / offline transitions + reconnect churn to the server's
+// in-memory aggregate. Terminal offline is ALWAYS reported (it is the signal
+// support most needs). Fire-and-forget — telemetry can never affect the ladder.
+export const TELEMETRY_SAMPLE_RATE = 0.1;
+const TELEMETRY_MEMORY_KEY = 'tp_rt_telemetry_sampled';
+
+function defaultSendTelemetry({ url, token, body }) {
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    fetch(url, {
+      method: 'POST',
+      headers,
+      credentials: 'include',
+      cache: 'no-store',
+      keepalive: true,
+      body: JSON.stringify(body),
+    }).catch(() => { /* fire-and-forget */ });
+  } catch { /* fetch unavailable (tests/SSR) */ }
+}
 
 function safeStorage() {
   return {
@@ -85,6 +106,7 @@ export class RealtimeClient {
       scrub: (data) => maybeScrub(data, isDemoMode()),
       storage: safeStorage(),
       random: Math.random,
+      sendTelemetry: defaultSendTelemetry,
       ...deps,
     };
 
@@ -112,6 +134,9 @@ export class RealtimeClient {
     this._reprobeIndex = 0;
     this._wrongChannelWarned = false;
     this._offlineTerminal = false; // 4xx — don't auto-recover
+    this.offlineReason = null; // e.g. 'too-many-connections' — diagnostics only
+    this._telemetryDecided = false;
+    this._telemetrySampled = false;
 
     this._timers = { sseRetry: null, reprobe: null, stopGrace: null, watchdog: null };
     this._lastTickWall = Date.now();
@@ -233,6 +258,7 @@ export class RealtimeClient {
   _start(ws) {
     this._running = true;
     this._offlineTerminal = false;
+    this.offlineReason = null;
     this.targetWorkspaceId = ws;
     this.connectedWorkspaceId = null;
     this._wrongChannelWarned = false;
@@ -281,6 +307,7 @@ export class RealtimeClient {
     this._reprobeIndex = 0;
     this._wrongChannelWarned = false;
     this._offlineTerminal = false;
+    this.offlineReason = null;
     this._setState('connecting');
 
     const remembered = this.deps.storage.get(TRANSPORT_MEMORY_KEY);
@@ -305,6 +332,7 @@ export class RealtimeClient {
     this._sseAttempt = 0;
     this._reprobeIndex = 0;
     this._offlineTerminal = false;
+    this.offlineReason = null;
     this.deps.storage.set(TRANSPORT_MEMORY_KEY, 'sse');
     this._running = true;
     this.targetWorkspaceId = this.deps.getWorkspaceId();
@@ -323,7 +351,45 @@ export class RealtimeClient {
       workspaceId: this.connectedWorkspaceId ?? this.targetWorkspaceId,
       cursor: this.cursor,
       epoch: this.epoch,
+      reason: this.offlineReason,
     };
+  }
+
+  // ------------------------------------------------------------- telemetry
+
+  /** Sampled once per session (sessionStorage-sticky, ~10%). */
+  _telemetryEnabled() {
+    if (!this._telemetryDecided) {
+      this._telemetryDecided = true;
+      const remembered = this.deps.storage.get(TELEMETRY_MEMORY_KEY);
+      if (remembered === '1' || remembered === '0') {
+        this._telemetrySampled = remembered === '1';
+      } else {
+        this._telemetrySampled = this.deps.random() < TELEMETRY_SAMPLE_RATE;
+        this.deps.storage.set(TELEMETRY_MEMORY_KEY, this._telemetrySampled ? '1' : '0');
+      }
+    }
+    return this._telemetrySampled;
+  }
+
+  /**
+   * Report one health event to POST /api/sse/telemetry. `always` bypasses the
+   * sample (terminal offline is always reported). Never throws, never awaited.
+   */
+  _reportTelemetry(type, { always = false, transport = null } = {}) {
+    if (!always && !this._telemetryEnabled()) return;
+    try {
+      this.deps.sendTelemetry({
+        url: `${this.deps.baseUrl}/sse/telemetry`,
+        token: this.deps.getToken(),
+        body: {
+          type,
+          transport: transport || this.transport,
+          churn: this.churn,
+          ts: Date.now(),
+        },
+      });
+    } catch { /* fire-and-forget */ }
   }
 
   // ------------------------------------------------------------------- SSE
@@ -430,6 +496,23 @@ export class RealtimeClient {
       this._emitResync('server-resync');
       break;
     }
+    case 'too_many_connections': {
+      // The server closed THIS stream to stay under the per-user cap (the
+      // user's newer tabs keep theirs). Terminal for this connection —
+      // auto-reconnecting would just evict another tab in a loop. The pill
+      // shows Offline with a manual Reconnect; diagnostics carry the reason.
+      this._goOffline({ terminal: true, reason: 'too-many-connections' });
+      break;
+    }
+    case 'reauth': {
+      // The server is about to drop the stream because the credentials it
+      // connected with went stale. Refresh the token NOW so the automatic
+      // reconnect (triggered when the stream closes) succeeds first try.
+      try {
+        Promise.resolve(this.deps.refreshToken()).catch(() => { /* reconnect may still work on the cookie */ });
+      } catch { /* ignore */ }
+      break;
+    }
     default: {
       this.lastEventAt = Date.now();
       if (!isProbe) this._markSseLive();
@@ -445,6 +528,7 @@ export class RealtimeClient {
   _markSseLive() {
     if (this.state === 'live-sse' && this.transport === 'sse') return;
     this.transport = 'sse';
+    this.offlineReason = null;
     this.connectedWorkspaceId = this.targetWorkspaceId;
     this._sseFailures = [];
     this._sseAttempt = 0;
@@ -542,6 +626,7 @@ export class RealtimeClient {
     // Sticky degrade: remember it so the next page load starts here.
     this.deps.storage.set(TRANSPORT_MEMORY_KEY, 'longpoll');
     this._reprobeIndex = 0;
+    this._reportTelemetry('downgrade', { transport: 'longpoll' });
     this._enterPolling('longpoll');
   }
 
@@ -605,6 +690,7 @@ export class RealtimeClient {
 
         this.lastEventAt = Date.now();
         this._pollFailures = [];
+        this.offlineReason = null;
         this.connectedWorkspaceId = this.targetWorkspaceId;
         this._setState('live-poll');
 
@@ -644,6 +730,7 @@ export class RealtimeClient {
             this.transport = 'shortpoll';
             this.deps.storage.set(TRANSPORT_MEMORY_KEY, 'shortpoll');
             this._pollFailures = [];
+            this._reportTelemetry('downgrade', { transport: 'shortpoll' });
             this._notifyStatus();
           } else {
             this._goOffline();
@@ -673,8 +760,9 @@ export class RealtimeClient {
 
   // ---------------------------------------------------------------- offline
 
-  _goOffline({ terminal = false } = {}) {
+  _goOffline({ terminal = false, reason = null } = {}) {
     this._offlineTerminal = terminal;
+    this.offlineReason = reason || (terminal ? 'terminal-error' : 'network');
     this._session += 1;
     this._closeSse();
     this._closeProbe();
@@ -682,6 +770,9 @@ export class RealtimeClient {
     this._clearTimer('sseRetry');
     this._clearTimer('reprobe');
     this._setState('offline');
+    // Terminal offline is ALWAYS reported (bypasses the sample) — it is the
+    // "user is dead in the water" signal the Realtime-health block exists for.
+    this._reportTelemetry(terminal ? 'offline-terminal' : 'offline', { always: terminal });
     this._fanoutError(new Error('Realtime connection lost'));
   }
 

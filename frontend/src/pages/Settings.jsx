@@ -30,6 +30,8 @@ import WorkspaceAccessPanel from '../components/settings/WorkspaceAccessPanel';
 import FreshServiceWebhookCard from '../components/settings/FreshServiceWebhookCard';
 import AiProviderSettingsPanel from '../components/settings/AiProviderSettingsPanel';
 import EmailHealthCard from '../components/settings/EmailHealthCard';
+import SyncHealthCard from '../components/settings/SyncHealthCard';
+import RealtimeHealthCard from '../components/settings/RealtimeHealthCard';
 import PublicTicketStatusPanel from '../components/settings/PublicTicketStatusPanel';
 import FeedbackPagePanel from '../components/settings/FeedbackPagePanel';
 import UrgentEscalationPanel from '../components/settings/UrgentEscalationPanel';
@@ -800,6 +802,10 @@ export default function Settings() {
                 {activeSectionId === 'notification-providers' && (
                   <form onSubmit={handleSave} className="p-6 space-y-5">
                     <EmailHealthCard />
+                    {/* Realtime plan Phase 3: sync liveness + sampled client
+                        realtime telemetry live in the same health surface. */}
+                    <SyncHealthCard />
+                    <RealtimeHealthCard />
                     {!isGlobalAdmin && (
                       <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
                       Notification <span className="font-semibold text-slate-800">provider setup</span> (SendGrid / Twilio

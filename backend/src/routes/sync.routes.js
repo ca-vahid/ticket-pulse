@@ -67,6 +67,23 @@ router.get(
 );
 
 /**
+ * GET /api/sync/health
+ * Sync liveness self-monitoring (realtime plan Phase 3): per-workspace last
+ * completed sync vs the scheduler cadence, classified ok/late/stale
+ * (stale = >3× interval). Powers the admin stale-sync banner and the Settings
+ * "Sync freshness" health rows.
+ */
+router.get(
+  '/health',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { default: syncHealthService } = await import('../services/syncHealthService.js');
+    const health = await syncHealthService.getHealth();
+    res.json({ success: true, data: health });
+  }),
+);
+
+/**
  * GET /api/sync/logs
  * Get sync logs with pagination, filtering, and total count
  * Query params:

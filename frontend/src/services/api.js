@@ -578,6 +578,16 @@ export const aiUsageAPI = {
   },
 };
 
+/**
+ * Realtime health API (realtime plan Phase 3) — admin summary of the sampled
+ * client telemetry (transport downgrades, offline transitions).
+ */
+export const realtimeAPI = {
+  getTelemetrySummary: async () => {
+    return await api.get('/sse/telemetry/summary');
+  },
+};
+
 export const syncAPI = {
   trigger: async () => {
     return await apiLongTimeout.post('/sync/trigger');
@@ -602,6 +612,12 @@ export const syncAPI = {
 
   getStats: async () => {
     return await api.get('/sync/stats');
+  },
+
+  // Sync liveness (realtime plan Phase 3): per-workspace last completed sync
+  // vs scheduler cadence, ok/late/stale. Admin-only endpoint.
+  getHealth: async () => {
+    return await api.get('/sync/health');
   },
 
   startSchedule: async () => {
