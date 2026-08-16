@@ -71,11 +71,14 @@ Template for the user's IT/network team:
 > Please add an SSL-inspection bypass / streaming exemption (Zscaler: SSL Inspection policy → "Do Not Inspect"; equivalent for Netskope/Palo Alto) for these hosts:
 >
 > - `ticketpulse.bgcsaas.com`
+> - `api.ticketpulse.bgcsaas.com`
 > - `ticket-pulse-app.azurewebsites.net`
 >
 > No other change is needed — standard HTTPS on 443. This is the vendor-documented resolution for SSE behind inspecting proxies.
 
-(If the API later moves to `api.ticketpulse.bgcsaas.com` — Phase A2 — add that host to the list.)
+(The API's primary host is `api.ticketpulse.bgcsaas.com` since Phase A2 — the
+`azurewebsites.net` host remains valid indefinitely for webhooks and existing
+API callers.)
 
 ## 6. What to collect in a support ticket
 

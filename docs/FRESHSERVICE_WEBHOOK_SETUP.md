@@ -12,6 +12,10 @@ Use the workspace-specific URL shown in Assignment Review -> Configuration -> Ti
 https://<ticket-pulse-host>/api/freshservice-webhooks/<workspace-slug>/tickets
 ```
 
+`<ticket-pulse-host>` for production is `api.ticketpulse.bgcsaas.com` (preferred
+since the Phase A2 domain flip) or `ticket-pulse-app.azurewebsites.net` — both
+remain valid indefinitely; existing automator rules do NOT need re-pointing.
+
 Example:
 
 ```text
