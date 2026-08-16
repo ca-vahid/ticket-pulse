@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.4.05-preview';
+export const APP_VERSION = '3.4.06-preview';
 
 export const changelog = [
+  {
+    version: '3.4.06-preview',
+    date: 'August 15, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>🌐 First-party API domain</strong> — the app now talks to <code>api.ticketpulse.bgcsaas.com</code> instead of a cross-site Azure host. Because the API and the app share the same parent domain, session cookies are first-party: browsers with third-party-cookie blocking (strict Edge/Chrome policies, some privacy extensions) can no longer break sign-in or new-tab sessions. The old host stays valid indefinitely — FreshService webhooks and Power Automate flows need no changes.' },
+      { type: 'improved', html: '<strong>🍪 Tighter cookie policy</strong> — with cookies now first-party, the session cookie is being moved from SameSite=None to Lax (ops-flippable, no redeploy), reducing CSRF surface and playing nicer with corporate browser policies.' },
+    ],
+  },
   {
     version: '3.4.05-preview',
     date: 'August 15, 2026',

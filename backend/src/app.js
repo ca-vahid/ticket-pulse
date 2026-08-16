@@ -76,7 +76,9 @@ app.use(
       secure: config.isProduction,
       httpOnly: true,
       maxAge: config.session.maxAge,
-      sameSite: config.isProduction ? 'none' : 'lax',
+      // COOKIE_SAMESITE lets ops flip to 'lax' once the API serves from a
+      // first-party subdomain (Phase A2) without a redeploy; rollback = 'none'.
+      sameSite: process.env.COOKIE_SAMESITE || (config.isProduction ? 'none' : 'lax'),
     },
   }),
 );
