@@ -2,7 +2,11 @@ import prisma from './prisma.js';
 import settingsRepository from './settingsRepository.js';
 import { createFreshServiceClient } from '../integrations/freshservice.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
-import { isSkillHierarchyWorkspace } from '../utils/workspaceFeatureFlags.js';
+// Flag-split assignment (Phase PA): FS-SYNC set — this service is the
+// FS-coupled hierarchy machinery (legacy draft/publish editor, Summit import,
+// FS custom-object drift/sync). Canonical-only workspaces manage their tree
+// through the plain category CRUD (competencyRepository) instead.
+import { isFsTaxonomySyncWorkspace } from '../utils/workspaceFeatureFlags.js';
 
 const DEFAULT_TP_SKILL_FIELD = 'lf_ticket_pulse_category';
 const DEFAULT_TP_SUBSKILL_FIELD = 'lf_ticket_pulse_subcategory';
@@ -11,7 +15,7 @@ const TP_SUBSKILL_OBJECT_TITLE = 'Ticket Pulse Subskills';
 const TP_SUBSKILL_PARENT_FIELD = 'parent_skill';
 const LEVEL_RANK = { basic: 1, intermediate: 2, advanced: 3, expert: 4 };
 function assertSkillHierarchyWorkspace(workspaceId) {
-  if (!isSkillHierarchyWorkspace(workspaceId)) {
+  if (!isFsTaxonomySyncWorkspace(workspaceId)) {
     throw new ValidationError('The category/subcategory hierarchy editor is not enabled for this workspace');
   }
 }

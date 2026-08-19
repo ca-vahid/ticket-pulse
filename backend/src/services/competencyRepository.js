@@ -1,7 +1,10 @@
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { DatabaseError, NotFoundError, ValidationError } from '../utils/errors.js';
-import { isSkillHierarchyWorkspace } from '../utils/workspaceFeatureFlags.js';
+// Flag-split assignment (Phase PA): CANONICAL set — gates 2-level hierarchy
+// SEMANTICS (subcategory-only AI suggestions, parent-competency inference).
+// Pure DB behavior; applies to every canonical-taxonomy workspace.
+import { isCanonicalCategoryWorkspace } from '../utils/workspaceFeatureFlags.js';
 
 function categoryOrder() {
   return [{ parentId: 'asc' }, { sortOrder: 'asc' }, { name: 'asc' }];
@@ -128,7 +131,7 @@ class CompetencyRepository {
           workspaceId,
           isActive: false,
           isSystemSuggested: true,
-          ...(isSkillHierarchyWorkspace(workspaceId) ? { parentId: { not: null } } : {}),
+          ...(isCanonicalCategoryWorkspace(workspaceId) ? { parentId: { not: null } } : {}),
         },
         include: {
           parent: { select: { id: true, name: true, isActive: true } },
@@ -392,7 +395,7 @@ class CompetencyRepository {
 
       if (action === 'approve') {
         const requestedParentId = data.parentId !== undefined ? data.parentId : current.parentId;
-        if (isSkillHierarchyWorkspace(workspaceId) && !requestedParentId) {
+        if (isCanonicalCategoryWorkspace(workspaceId) && !requestedParentId) {
           throw new ValidationError('IT category review can approve new subcategories only; choose an existing parent category');
         }
         return await this.updateCategory(categoryId, {
@@ -510,7 +513,7 @@ class CompetencyRepository {
           },
         });
 
-        if (isSkillHierarchyWorkspace(workspaceId)) {
+        if (isCanonicalCategoryWorkspace(workspaceId)) {
           const categories = await tx.competencyCategory.findMany({
             where: { workspaceId, isActive: true },
             select: { id: true, parentId: true },
@@ -557,7 +560,7 @@ class CompetencyRepository {
         const activeCategories = allActiveCategories.filter((category) => requestedCategoryIds.includes(category.id));
         const activeIds = new Set(activeCategories.map((category) => category.id));
         const activeCompetencies = (competencies || []).filter((c) => activeIds.has(Number(c.competencyCategoryId)));
-        const competenciesToSave = isSkillHierarchyWorkspace(workspaceId)
+        const competenciesToSave = isCanonicalCategoryWorkspace(workspaceId)
           ? inferParentCompetenciesForSkillHierarchy(activeCompetencies, allActiveCategories)
           : activeCompetencies.map(normalizeCompetencyMapping).filter(Boolean);
         if (activeCompetencies.length !== (competencies || []).length) {

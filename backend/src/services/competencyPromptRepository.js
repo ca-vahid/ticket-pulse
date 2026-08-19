@@ -1,7 +1,9 @@
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { DatabaseError, NotFoundError } from '../utils/errors.js';
-import { isSkillHierarchyWorkspace } from '../utils/workspaceFeatureFlags.js';
+// Flag-split assignment (Phase PA): CANONICAL set — picks the hierarchy-aware
+// vs legacy default competency prompt. Prompt selection only.
+import { isCanonicalCategoryWorkspace } from '../utils/workspaceFeatureFlags.js';
 
 const DEFAULT_COMPETENCY_PROMPT = `You are an IT technician category competency analyst. Your job is to analyze a technician's ticket history and determine their Ticket Pulse category/subcategory competency levels.
 
@@ -201,7 +203,7 @@ class CompetencyPromptRepository {
 
   async getPublished(workspaceId) {
     try {
-      const useSkillHierarchyPrompt = isSkillHierarchyWorkspace(workspaceId);
+      const useSkillHierarchyPrompt = isCanonicalCategoryWorkspace(workspaceId);
       let published = await prisma.competencyPromptVersion.findFirst({
         where: { workspaceId, status: 'published' },
         orderBy: { version: 'desc' },

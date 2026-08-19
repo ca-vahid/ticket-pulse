@@ -1,5 +1,11 @@
 import { jest } from '@jest/globals';
 
+// Pin the FS-taxonomy-sync set for this suite: only ws1 mirrors categories to
+// FreshService, so ws2 exercises the "no write-back" path. Without this the
+// suite inherits whatever backend/.env sets (e.g. 1,2) once src/config's
+// dotenv runs — flag resolution is lazy since the Phase PA flag split.
+process.env.FS_TAXONOMY_SYNC_WORKSPACE_IDS = '1';
+
 const prismaMock = {
   assignmentConfig: {
     findUnique: jest.fn(),

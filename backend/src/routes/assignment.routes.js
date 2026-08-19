@@ -30,7 +30,12 @@ import { normalizeAiModel, providerForModel } from '../utils/aiProviders.js';
 import { attachSseDisconnectAbort } from '../utils/sseDisconnect.js';
 import { requireReviewer, requireAdmin } from '../middleware/auth.js';
 import appConfig from '../config/index.js';
-import { isSkillHierarchyWorkspace } from '../utils/workspaceFeatureFlags.js';
+// Flag-split assignment (Phase PA): the GET /config payload exposes BOTH sets.
+// `skillHierarchyEnabled` (legacy name the frontend already reads) follows the
+// FS-SYNC set — it gates the FS drift/sync migration toolbar. The canonical
+// set ships alongside as `canonicalCategoriesEnabled` for canonical-only
+// surfaces (e.g. the Reclassify batch UI).
+import { isCanonicalCategoryWorkspace, isFsTaxonomySyncWorkspace } from '../utils/workspaceFeatureFlags.js';
 import prisma from '../services/prisma.js';
 import logger from '../utils/logger.js';
 
@@ -122,10 +127,15 @@ router.get('/config', requireAdmin, asyncHandler(async (req, res) => {
     anthropicConfigured: providerGateway.isConfigured('anthropic'),
     openAiConfigured: providerGateway.isConfigured('openai'),
     graphConfigured: graphMailClient.isConfigured(),
-    // Whether this workspace uses the hierarchical category editor
-    // (draft/publish/drift/reclassify) — env-driven, mirrors the backend
-    // service gates so the UI can't drift from what the API allows.
-    skillHierarchyEnabled: isSkillHierarchyWorkspace(req.workspaceId),
+    // Env-driven category-system flags, mirroring the backend service gates so
+    // the UI can't drift from what the API allows (split in Phase PA):
+    // - skillHierarchyEnabled (legacy name): FS taxonomy sync — gates the FS
+    //   drift/sync migration toolbar and FS category write-back surfaces.
+    // - canonicalCategoriesEnabled: internal canonical taxonomy — gates
+    //   canonical-only tools like batch reclassification.
+    skillHierarchyEnabled: isFsTaxonomySyncWorkspace(req.workspaceId),
+    fsTaxonomySyncEnabled: isFsTaxonomySyncWorkspace(req.workspaceId),
+    canonicalCategoriesEnabled: isCanonicalCategoryWorkspace(req.workspaceId),
   });
 }));
 

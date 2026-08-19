@@ -1,7 +1,10 @@
-import { isSkillHierarchyWorkspace } from './workspaceFeatureFlags.js';
+// Flag-split assignment (Phase PA): analytics/category mode is the defining
+// consumer of the CANONICAL set — it decides whether internalCategoryId or the
+// legacy ticketCategory string is the workspace's source of truth.
+import { isCanonicalCategoryWorkspace } from './workspaceFeatureFlags.js';
 
 export function getCategoryMode(workspaceId) {
-  return isSkillHierarchyWorkspace(workspaceId) ? 'canonical' : 'legacy';
+  return isCanonicalCategoryWorkspace(workspaceId) ? 'canonical' : 'legacy';
 }
 
 export function normalizeTicketCategory(ticket, workspaceId) {

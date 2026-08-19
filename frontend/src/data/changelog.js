@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.5.02-preview';
+export const APP_VERSION = '3.5.03-preview';
 
 export const changelog = [
+  {
+    version: '3.5.03-preview',
+    date: 'August 19, 2026',
+    entries: [
+      { type: 'new', html: '<strong>🏗️ Project Accounting joins the modern category system</strong> — the workspace’s existing Project Setup / Proposal Setup taxonomy (with Quebec/Chile region subcategories) is now fully visible in Analytics: the “legacy category values” banner is gone, the category map is populated, and it turns out all 69 tickets were already categorized — the old mode was simply hiding it. A “General / Other” catch-all was added. (QA 08-17 #6)' },
+      { type: 'new', html: '<strong>🤖 AI auto-categorization for Project Accounting</strong> — new tickets are now categorized automatically by AI using a purpose-written Project Accounting prompt (Project Setup vs Proposal Setup selection guidance, conservative when unsure). Full self-serve setup guide for the QA team at docs/PA_AUTO_CATEGORIZE_SETUP.md — including where the toggle lives and how to review AI picks. FreshService write-back stays off for this workspace by design. (QA 08-18 #2)' },
+      { type: 'improved', html: '<strong>🔧 Category system feature flags untangled</strong> — “canonical analytics categories” and “FreshService taxonomy sync” are now separate per-workspace switches, so a workspace can get modern categories without inheriting FreshService write-back machinery. Project Accounting keeps the Reclassify tools without the FS sync toolbar.' },
+    ],
+  },
   {
     version: '3.5.02-preview',
     date: 'August 19, 2026',
