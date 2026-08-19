@@ -248,6 +248,28 @@ code {
     white-space: pre-wrap;
   }
 
+  /* Data tables born from a clipboard paste (Excel/Word ranges): the composer
+     stamps them `tp-data-table` at paste time (QA 08-17 #1), so the RENDERED
+     note/description shows real cell borders even though Excel keeps its
+     border info in a <style> block the sanitizers strip. Class-scoped on
+     purpose — email LAYOUT tables in .tp-rich-body must stay chrome-free
+     (the v3.4.03 constraint). Surviving inline cell styles still win. */
+  .tp-rich-body .tp-data-table {
+    border-collapse: collapse;
+    max-width: 100%;
+    margin: 0.375rem 0;
+  }
+  .tp-rich-body .tp-data-table td,
+  .tp-rich-body .tp-data-table th {
+    border: 1px solid hsl(215 25% 84%);
+    padding: 0.25rem 0.5rem;
+  }
+  .tp-rich-body .tp-data-table th {
+    background: hsl(210 40% 97%);
+    font-weight: 600;
+    text-align: left;
+  }
+
   /* Composer (RichTextEditor) — same containment as .tp-rich-body, plus
      default table chrome so a pasted Excel range / Outlook signature table is
      visibly editable even when its borders lived in a stripped <style> block.

@@ -1,6 +1,16 @@
-export const APP_VERSION = '3.5.00-preview';
+export const APP_VERSION = '3.5.01-preview';
 
 export const changelog = [
+  {
+    version: '3.5.01-preview',
+    date: 'August 19, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>📧 Decision emails now ALWAYS arrive</strong> — the requester gets an email on every approval decision, including when you decide your own request (the body says “you approved your own request” — that self-decision case was why QA’s test saw nothing). Admin-decided-on-your-behalf cases email correctly too, and “Change to rejected” sends the update. (QA 08-17 #2)' },
+      { type: 'fixed', html: '<strong>📋 Pasted Excel tables keep their borders — everywhere</strong> — real Excel pastes carry their borders in hidden style classes that were being stripped; the composer now folds those styles in, tags pasted tables, and the sent/rendered note shows proper cell borders (the previous fix only looked right inside the editor). Word/Outlook table pastes benefit too. (QA 08-17 #1)' },
+      { type: 'improved', html: '<strong>🔐 Approval Categories fully works for reviewers</strong> — the member picker and directory search now run at reviewer tier (no more red “Admin access required” wall with an empty “No one matches” list); if access is genuinely limited you get a clear amber note with a lock icon instead of a dead end, and you can always add an approval manager by typing their email directly. (QA 08-17 #7)' },
+      { type: 'improved', html: '<strong>🏷️ Custom emails accept lists now</strong> — the workflow “Custom emails” recipient field is a chips input: type commas or semicolons, paste a whole list, remove with backspace or × — up to 25 addresses. (QA 08-18 #1)' },
+    ],
+  },
   {
     version: '3.5.00-preview',
     date: 'August 19, 2026',

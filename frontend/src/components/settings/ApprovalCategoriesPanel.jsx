@@ -1,10 +1,17 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { settingsAPI } from '../../services/api';
+import { settingsAPI, ticketsAPI } from '../../services/api';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 import {
   Stamp, Loader, Plus, Pencil, Trash2, Check, X, AlertCircle, CheckCircle2,
-  Search, UserPlus, Users, Power, PowerOff, Ban,
+  Search, UserPlus, Users, Power, PowerOff, Ban, Lock, AtSign,
 } from 'lucide-react';
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// The shared axios error interceptor rethrows an enhanced Error carrying
+// `.status` (the raw axios `.response.status` never reaches callers) — accept
+// both shapes so a mocked axios error in tests behaves like the real one.
+const isForbidden = (err) => err?.status === 403 || err?.response?.status === 403;
 
 function initials(name) {
   return (name || '?').split(/[\s@.]+/).map((p) => p[0]).join('').slice(0, 2).toUpperCase();
@@ -24,17 +31,20 @@ function Avatar({ name, photoUrl, size = 'h-6 w-6' }) {
  * Approval-manager picker — workspace members first, then the Entra directory
  * for anyone else (admins/coordinators who aren't technicians — QA 07-06 #7).
  * Approvals key on EMAIL: any picked person can decide via the emailed magic
- * link, and in-app if they can sign in.
+ * link, and in-app if they can sign in. When directory access is locked
+ * (genuine 403 — QA 08-17 #7) the picker stays usable: members still match
+ * and a fully-typed email can always be added via the free-text row.
  */
-function MemberPicker({ members, exclude = [], onPick }) {
+function MemberPicker({ members, exclude = [], onPick, directoryLocked = false, onDirectoryLocked }) {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
   const [directoryResults, setDirectoryResults] = useState([]);
   const [searching, setSearching] = useState(false);
+  const [lockInfoOpen, setLockInfoOpen] = useState(false);
   const rootRef = useRef(null);
 
   useEffect(() => {
-    const onDoc = (e) => { if (!rootRef.current?.contains(e.target)) setOpen(false); };
+    const onDoc = (e) => { if (!rootRef.current?.contains(e.target)) { setOpen(false); setLockInfoOpen(false); } };
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
   }, []);
@@ -48,9 +58,10 @@ function MemberPicker({ members, exclude = [], onPick }) {
   }, [members, query, exclude]);
 
   // Directory search (debounced) surfaces people who aren't workspace members.
+  // Skipped entirely while locked — no point firing requests that will 403.
   useEffect(() => {
     const q = query.trim();
-    if (q.length < 2) { setDirectoryResults([]); return undefined; }
+    if (q.length < 2 || directoryLocked) { setDirectoryResults([]); return undefined; }
     setSearching(true);
     const timer = setTimeout(async () => {
       try {
@@ -59,13 +70,25 @@ function MemberPicker({ members, exclude = [], onPick }) {
         setDirectoryResults((res.data || [])
           .filter((p) => p.mail && !memberEmails.has(p.mail.toLowerCase()) && !exclude.includes(p.mail.toLowerCase()))
           .slice(0, 5));
-      } catch { setDirectoryResults([]); }
+      } catch (err) {
+        setDirectoryResults([]);
+        // A genuine 403 flips the whole panel into the locked-directory UX.
+        if (isForbidden(err)) onDirectoryLocked?.();
+      }
       setSearching(false);
     }, 300);
     return () => clearTimeout(timer);
-  }, [query, members, exclude]);
+  }, [query, members, exclude, directoryLocked, onDirectoryLocked]);
 
   const pick = (email) => { onPick(String(email).toLowerCase()); setQuery(''); setDirectoryResults([]); setOpen(false); };
+
+  // Free-text escape hatch: approvals key on email, so a fully-typed address
+  // is always addable — with or without directory access.
+  const typedEmail = query.trim().toLowerCase();
+  const typedEmailAddable = EMAIL_RE.test(typedEmail)
+    && !exclude.includes(typedEmail)
+    && !memberResults.some((m) => m.email.toLowerCase() === typedEmail)
+    && !directoryResults.some((p) => (p.mail || '').toLowerCase() === typedEmail);
 
   const row = (key, name, email, badge, photoUrl) => (
     <button
@@ -87,14 +110,39 @@ function MemberPicker({ members, exclude = [], onPick }) {
   return (
     <div ref={rootRef} className="relative">
       <div className="relative">
-        <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
+        <Search className={`w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 ${directoryLocked ? 'text-slate-300' : 'text-slate-400'}`} aria-hidden="true" />
         <input
           value={query}
           onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
           onFocus={() => setOpen(true)}
-          placeholder="Add an approval manager — search members or the directory…"
-          className="w-full pl-10 pr-3 py-2.5 border border-input rounded-lg text-sm tp-focus-ring"
+          placeholder={directoryLocked
+            ? 'Add an approval manager — search members or type an email address…'
+            : 'Add an approval manager — search members or the directory…'}
+          className={`w-full pl-10 py-2.5 border border-input rounded-lg text-sm tp-focus-ring ${
+            directoryLocked ? 'pr-10 bg-slate-50 text-slate-600 placeholder:text-slate-400' : 'pr-3'
+          }`}
         />
+        {directoryLocked && (
+          <button
+            type="button"
+            aria-label="Directory search unavailable — details"
+            aria-expanded={lockInfoOpen}
+            onClick={() => setLockInfoOpen((v) => !v)}
+            onMouseEnter={() => setLockInfoOpen(true)}
+            onMouseLeave={() => setLockInfoOpen(false)}
+            className="tp-focus-ring absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md text-amber-500 hover:text-amber-600 hover:bg-amber-50"
+          >
+            <Lock className="w-4 h-4" aria-hidden="true" />
+          </button>
+        )}
+        {directoryLocked && lockInfoOpen && (
+          <div role="tooltip" className="absolute right-0 top-full mt-1.5 z-40 w-72 tp-card rounded-lg shadow-soft p-3 text-xs text-slate-600 animate-scaleIn">
+            <p className="flex items-start gap-1.5">
+              <Lock className="w-3.5 h-3.5 mt-0.5 text-amber-500 shrink-0" aria-hidden="true" />
+              <span><strong className="text-slate-800">Directory search needs admin access</strong> — you can still search workspace members, or type an email address to add anyone.</span>
+            </p>
+          </div>
+        )}
       </div>
       {open && (
         <div className="absolute z-30 mt-1 w-full tp-card rounded-xl shadow-soft p-1.5 max-h-72 overflow-y-auto settings-scrollbar animate-scaleIn">
@@ -103,10 +151,30 @@ function MemberPicker({ members, exclude = [], onPick }) {
             <p className="px-2.5 pt-1.5 pb-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">Directory</p>
           )}
           {directoryResults.map((p) => row(`d-${p.mail}`, p.displayName, p.mail, 'directory', p.photoUrl))}
+          {typedEmailAddable && (
+            <button
+              type="button"
+              onClick={() => pick(typedEmail)}
+              className="w-full flex items-center gap-3 px-2.5 py-2 rounded-lg text-left hover:bg-blue-50 tp-focus-ring"
+            >
+              <span className="h-9 w-9 rounded-full bg-blue-50 border border-blue-100 inline-flex items-center justify-center shrink-0">
+                <AtSign className="w-4 h-4 text-blue-500" aria-hidden="true" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-medium text-gray-900 truncate">Use this email address</span>
+                <span className="block text-xs text-gray-500 truncate">{typedEmail}</span>
+              </span>
+              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 shrink-0"><UserPlus className="w-3.5 h-3.5" /> Add</span>
+            </button>
+          )}
           {searching && <p className="px-3 py-2 text-xs text-slate-400">Searching directory…</p>}
-          {!searching && memberResults.length === 0 && directoryResults.length === 0 && (
+          {!searching && memberResults.length === 0 && directoryResults.length === 0 && !typedEmailAddable && (
             <div className="px-3 py-4 text-sm text-slate-400">
-              {query.trim().length >= 2 ? `No one matches “${query}”.` : 'Type at least 2 characters to search the directory.'}
+              {query.trim().length >= 2
+                ? `No one matches “${query}”.`
+                : directoryLocked
+                  ? 'Search workspace members, or type a full email address to add anyone.'
+                  : 'Type at least 2 characters to search the directory.'}
               <span className="block text-[11px] mt-0.5">Anyone with an email can approve via the emailed link; members and admins can also decide in-app.</span>
             </div>
           )}
@@ -133,7 +201,7 @@ function ManagerChip({ email, member, onRemove }) {
 
 const emptyForm = { name: '', description: '', managerEmails: [] };
 
-function CategoryForm({ initial, members, memberByEmail, onCancel, onSave, saving }) {
+function CategoryForm({ initial, members, memberByEmail, onCancel, onSave, saving, directoryLocked, onDirectoryLocked }) {
   const [form, setForm] = useState(initial || emptyForm);
   const addEmail = (email) => setForm((f) => (f.managerEmails.includes(email) ? f : { ...f, managerEmails: [...f.managerEmails, email] }));
   const removeEmail = (email) => setForm((f) => ({ ...f, managerEmails: f.managerEmails.filter((x) => x !== email) }));
@@ -161,7 +229,7 @@ function CategoryForm({ initial, members, memberByEmail, onCancel, onSave, savin
             ))}
           </div>
         )}
-        <MemberPicker members={members} exclude={form.managerEmails} onPick={addEmail} />
+        <MemberPicker members={members} exclude={form.managerEmails} onPick={addEmail} directoryLocked={directoryLocked} onDirectoryLocked={onDirectoryLocked} />
       </div>
       <div className="flex items-center gap-2">
         <button
@@ -192,6 +260,11 @@ export default function ApprovalCategoriesPanel() {
   const [editingId, setEditingId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  // QA 08-17 #7 — reviewer-safe lookups: a 403 on directory search greys the
+  // picker with an amber note instead of the red error banner (red = real
+  // failures only). Member lookup failing is likewise informational.
+  const [directoryLocked, setDirectoryLocked] = useState(false);
+  const [membersUnavailable, setMembersUnavailable] = useState(false);
 
   const memberByEmail = useMemo(() => {
     const map = {};
@@ -201,19 +274,41 @@ export default function ApprovalCategoriesPanel() {
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
+    // The category list is the panel's core — only ITS failure is a real error.
     try {
-      const [cats, techs] = await Promise.all([
-        settingsAPI.getApprovalCategories(),
-        settingsAPI.getTechnicians(),
-      ]);
+      const cats = await settingsAPI.getApprovalCategories();
       setCategories(cats.data || []);
-      setMembers((techs.data || []).filter((t) => t.isActive !== false));
     } catch (err) {
       setError(err.response?.data?.message || err.message || 'Failed to load approval categories');
-    } finally { setLoading(false); }
+      setLoading(false);
+      return;
+    }
+    // Member names/avatars are best-effort enrichment via the reviewer-reachable
+    // tickets meta (chips fall back to raw emails). Never blanks the categories.
+    try {
+      const meta = await ticketsAPI.meta();
+      setMembers(meta.data?.technicians || []);
+      setMembersUnavailable(false);
+    } catch {
+      setMembers([]);
+      setMembersUnavailable(true);
+    }
+    setLoading(false);
   }, []);
 
   useEffect(() => { load(); }, [load, currentWorkspace?.id]);
+
+  // Probe directory access once per workspace: q < 2 chars returns an empty
+  // 200 AFTER the role gate, so a 403 here means "locked" without ever
+  // hitting Entra. Lets the picker render pre-greyed instead of failing later.
+  useEffect(() => {
+    let cancelled = false;
+    setDirectoryLocked(false);
+    settingsAPI.searchDirectory('').catch((err) => {
+      if (!cancelled && isForbidden(err)) setDirectoryLocked(true);
+    });
+    return () => { cancelled = true; };
+  }, [currentWorkspace?.id]);
 
   const flash = (msg) => { setSuccessMsg(msg); setTimeout(() => setSuccessMsg(null), 4000); };
 
@@ -283,9 +378,19 @@ export default function ApprovalCategoriesPanel() {
           <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" /><span>{successMsg}</span>
         </div>
       )}
+      {(directoryLocked || membersUnavailable) && (
+        <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+          <Lock className="w-4 h-4 mt-0.5 shrink-0 text-amber-500" aria-hidden="true" />
+          <span>
+            {directoryLocked
+              ? 'Directory search needs admin access — you can still add approval managers by typing their full email address.'
+              : 'Member names could not be loaded right now — manager chips show email addresses, and you can still add managers by email.'}
+          </span>
+        </div>
+      )}
 
       {creating ? (
-        <CategoryForm members={members} memberByEmail={memberByEmail} onCancel={() => setCreating(false)} onSave={create} saving={saving} />
+        <CategoryForm members={members} memberByEmail={memberByEmail} onCancel={() => setCreating(false)} onSave={create} saving={saving} directoryLocked={directoryLocked} onDirectoryLocked={() => setDirectoryLocked(true)} />
       ) : (
         <button
           type="button"
@@ -312,6 +417,8 @@ export default function ApprovalCategoriesPanel() {
                 onCancel={() => setEditingId(null)}
                 onSave={(form) => saveEdit(c.id, form)}
                 saving={saving}
+                directoryLocked={directoryLocked}
+                onDirectoryLocked={() => setDirectoryLocked(true)}
               />
             ) : (
               <div key={c.id} className={`relative rounded-lg border px-3.5 py-3 ${c.isActive ? 'border-slate-200 bg-white' : 'border-dashed border-slate-300 bg-slate-100/70'}`}>
