@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -725,7 +725,9 @@ function HotspotRankedBars({ data, totalLabel = 'tickets', compact = false }) {
   );
 }
 
-function HighchartsBlock({ options, height = '24rem', stabilizeLayout = false }) {
+// Exported for tests: Analytics.teamBalance.test.jsx pins the chart-type-key
+// remount defence against cross-surface chart.update() reuse.
+export function HighchartsBlock({ options, height = '24rem', stabilizeLayout = false }) {
   const chartRef = useRef(null);
   const containerProps = useMemo(() => ({ style: { height: '100%', width: '100%' } }), []);
 
@@ -776,7 +778,15 @@ function HighchartsBlock({ options, height = '24rem', stabilizeLayout = false })
 
   return (
     <div className="min-w-0" style={{ height }}>
+      {/* Keyed by chart type: if React ever reuses this block across surfaces,
+          a type change (e.g. treemap → bar) destroys and recreates the chart
+          instead of morphing the old instance via chart.update() — Chart.update
+          cannot remove collections (colorAxis!) the new options simply omit.
+          Deliberately NOT `immutable`: that recreates on EVERY options change,
+          which would kill the treemap drill/lens morph animation and void the
+          stabilizeLayout settle timers above. */}
       <HighchartsReact
+        key={options?.chart?.type || 'chart'}
         ref={chartRef}
         highcharts={Highcharts}
         options={options}
@@ -860,7 +870,10 @@ export default function Analytics({ view = 'standard' }) {
   const [customEnd, setCustomEnd] = useState(() => initialParams.get('end') || '');
   const [teamSearch, setTeamSearch] = useState('');
   const [teamFilter, setTeamFilter] = useState('all');
-  const [teamSort, setTeamSort] = useState({ key: 'assigned', direction: 'desc' });
+  // Team-safe default: alphabetical, never a ranked most-to-least leaderboard
+  // (see buildCapacityExportRows note — the alphabetical rule is binding).
+  // The table headers still let a coordinator re-sort deliberately.
+  const [teamSort, setTeamSort] = useState({ key: 'name', direction: 'asc' });
   const [selectedTeamIds, setSelectedTeamIds] = useState([]);
   const [teamTimelineMetric, setTeamTimelineMetric] = useState('assigned');
   const [showTeamPicker, setShowTeamPicker] = useState(false);
@@ -1938,6 +1951,12 @@ export default function Analytics({ view = 'standard' }) {
     title: { text: null },
     credits: { enabled: false },
     accessibility: { enabled: true },
+    // Explicit empty colorAxis: if this config ever reaches an existing chart
+    // via chart.update() (instance reuse), an empty ARRAY actively removes any
+    // stale colorAxis left by a treemap/heatmap. `undefined` would NOT — the
+    // `if (options[coll])` guard in Chart.update skips falsy collections, so a
+    // config that merely omits the key can never clear one (QA 08-17 #4).
+    colorAxis: [],
     colors: ['#2563eb', '#f59e0b', '#8b5cf6', '#059669'],
     xAxis: {
       // Explicit category axis with every agent label shown. `type: 'category'`
@@ -1994,6 +2013,9 @@ export default function Analytics({ view = 'standard' }) {
     title: { text: null },
     credits: { enabled: false },
     accessibility: { enabled: true },
+    // See workloadChartOptions: empty array (not undefined) so chart.update()
+    // actively clears any stale colorAxis from a reused chart instance.
+    colorAxis: [],
     colors: ['#f59e0b', '#059669', '#2563eb', '#64748b'],
     xAxis: {
       type: 'category',
@@ -3403,13 +3425,18 @@ export default function Analytics({ view = 'standard' }) {
         {teamRows.length ? <HighchartsBlock options={timelineChartOptions} height={isMobile ? '20rem' : '26rem'} /> : <EmptyState text="No agents match the current filters." />}
       </Panel>
 
-      <div className="grid gap-4 xl:grid-cols-2">
-        <Panel title="Workload by Agent" subtitle="Assigned tickets, current open queue, and closed count by agent.">
-          {teamRows.length ? <HighchartsBlock options={workloadChartOptions} height={teamBarChartHeight} /> : <EmptyState text="No agents match the current filters." />}
-        </Panel>
-        <Panel title="Assignment Source by Agent" subtitle="Shows self-picked, coordinator-assigned, and Ticket Pulse-assigned volume.">
-          {teamRows.length ? <HighchartsBlock options={sourceChartOptions} height={teamBarChartHeight} /> : <EmptyState text="No agents match the current filters." />}
-        </Panel>
+      {/* Large rosters (40+ agents) grow teamBarChartHeight up to 1400px; the
+          scroll container keeps the page calm while every agent row stays at a
+          readable bar height instead of compressing (QA 08-17 #4). */}
+      <div className="max-h-[40rem] overflow-y-auto settings-scrollbar">
+        <div className="grid gap-4 xl:grid-cols-2">
+          <Panel title="Workload by Agent" subtitle="Assigned tickets, current open queue, and closed count by agent.">
+            {teamRows.length ? <HighchartsBlock options={workloadChartOptions} height={teamBarChartHeight} /> : <EmptyState text="No agents match the current filters." />}
+          </Panel>
+          <Panel title="Assignment Source by Agent" subtitle="Shows self-picked, coordinator-assigned, and Ticket Pulse-assigned volume.">
+            {teamRows.length ? <HighchartsBlock options={sourceChartOptions} height={teamBarChartHeight} /> : <EmptyState text="No agents match the current filters." />}
+          </Panel>
+        </div>
       </div>
 
       <Panel title="Team-Safe Distribution" subtitle="Sortable agent table with context metrics, not public winner/loser framing.">
@@ -4362,7 +4389,13 @@ export default function Analytics({ view = 'standard' }) {
         )}
       </div>
 
-      {renderActiveTab()}
+      {/* Keyed per tab so switching tabs REMOUNTS the tree instead of letting
+          React positionally reuse subtrees across same-shaped tab roots. Without
+          this, Highcharts instances survive a tab switch and receive the next
+          tab's options via chart.update() — and Chart.update's `if (options[coll])`
+          guard means a Categories colorAxis can never be removed by a Team bar
+          config that simply omits the key (QA 08-17 #4: garbled Team Balance). */}
+      <Fragment key={activeTab}>{renderActiveTab()}</Fragment>
 
       {meta?.caveats?.length > 0 && (
         <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4 text-xs text-slate-500 shadow-sm">

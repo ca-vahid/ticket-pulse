@@ -123,11 +123,18 @@ const getSSEManager = async () => {
 
 // If a sync run holds the per-workspace lock longer than this, presume it hung
 // (a hung 00:00Z run on 2026-07-07 silently blocked ALL ticket ingest for 64
-// minutes) and let the next scheduled run take the lock over. Normal cycles
-// finish in ~1 min; multi-day catch-up syncs stay well under this too.
-// FR 08-07 #13: 30min → 10min — a hung run stalling ingest for half an hour
-// was a major contributor to the "status takes 1h+ to sync" reports.
-const SYNC_LOCK_STALE_MS = 10 * 60 * 1000;
+// minutes) and let the next scheduled run take the lock over.
+// FR 08-07 #13 cut this 30min → 10min, but prod (2026-08-18) showed HEALTHY
+// Accounting full cycles run ~13 min median on the 5-min cadence: the 10-min
+// watchdog stole the lock mid-run, flipped the sync_log row to failed, started
+// a concurrent duplicate, then the original completed anyway — out-of-order
+// completions + doubled FS load, and the flapping fed the sync-health alert
+// storm. 20 min sits above the observed p95 cycle while still catching
+// genuinely hung runs well before the old 30-min ceiling. The 60s fast lane
+// keeps ticket data fresh throughout, so a slow full cycle costs nothing.
+// Exported: syncHealthService uses the same threshold to void the in-flight
+// "a sync is running" credit for hung runs.
+export const SYNC_LOCK_STALE_MS = 20 * 60 * 1000;
 
 /**
  * Service for syncing data from FreshService

@@ -17,6 +17,7 @@ const prismaMock = {
     updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     create: jest.fn(),
     update: jest.fn(),
+    groupBy: jest.fn(),
   },
 };
 
@@ -30,16 +31,47 @@ const { default: syncLogRepository } = await import('../src/services/syncLogRepo
 beforeEach(() => {
   prismaMock.syncLog.findFirst.mockReset();
   prismaMock.syncLog.updateMany.mockClear();
+  prismaMock.syncLog.groupBy.mockReset();
 });
 
 describe('getLatestSuccessful watermark source', () => {
-  test('only considers completed TICKET syncs (syncType full)', async () => {
+  test('only considers completed TICKET syncs (syncType full), newest COMPLETION first', async () => {
+    // Phase SH: order by completedAt, not startedAt — overlapping runs
+    // (watchdog takeover, manual "Sync now") complete out of order, and the
+    // startedAt ordering could return an older completion, making sync health
+    // report a stale age right after a successful sync.
     prismaMock.syncLog.findFirst.mockResolvedValue({ id: 1 });
     await syncLogRepository.getLatestSuccessful(1);
     expect(prismaMock.syncLog.findFirst).toHaveBeenCalledWith({
       where: { status: 'completed', syncType: 'full', workspaceId: 1 },
-      orderBy: { startedAt: 'desc' },
+      orderBy: { completedAt: 'desc' },
     });
+  });
+});
+
+describe('getRunningSince — in-flight run detection (sync health)', () => {
+  test('one grouped query over started full-sync rows, mapped per workspace', async () => {
+    const startedAt = new Date('2026-08-15T18:00:00Z');
+    prismaMock.syncLog.groupBy.mockResolvedValue([
+      { workspaceId: 2, _max: { startedAt } },
+      { workspaceId: 3, _max: { startedAt: null } },
+    ]);
+    const result = await syncLogRepository.getRunningSince([1, 2, 3]);
+    expect(prismaMock.syncLog.groupBy).toHaveBeenCalledWith({
+      by: ['workspaceId'],
+      where: { status: 'started', syncType: 'full', workspaceId: { in: [1, 2, 3] } },
+      _max: { startedAt: true },
+    });
+    expect(result.get(2)).toBe(startedAt);
+    expect(result.has(3)).toBe(false); // null max rows are dropped
+    expect(result.has(1)).toBe(false); // nothing running
+  });
+
+  test('empty input and DB errors both degrade to an empty map (never throws)', async () => {
+    expect((await syncLogRepository.getRunningSince([])).size).toBe(0);
+    expect(prismaMock.syncLog.groupBy).not.toHaveBeenCalled();
+    prismaMock.syncLog.groupBy.mockRejectedValueOnce(new Error('boom'));
+    expect((await syncLogRepository.getRunningSince([1])).size).toBe(0);
   });
 });
 

@@ -59,6 +59,7 @@ import {
 } from 'lucide-react';
 import { AssignmentConfigPanel } from './AssignmentReview';
 import { filterSettingsNavItems, resolveActiveSettingsItem } from './settingsNav';
+import useSettingsSectionHash from '../hooks/useSettingsSectionHash';
 
 export default function Settings() {
   const navigate = useNavigate();
@@ -80,7 +81,9 @@ export default function Settings() {
   // The user's REQUEST (deep-link hash or nav click). What actually renders
   // is resolved against the role-filtered list below — a hash pointing at a
   // section this role can't see falls back to the first visible section.
-  const [activeSection, setActiveSectionRaw] = useState(() => window.location.hash.replace('#', '') || null);
+  // Reactive to location.hash so banner deep links work from INSIDE Settings
+  // (QA 08-17 #3 — the old initializer-only read made them silent no-ops).
+  const [activeSection, setActiveSection] = useSettingsSectionHash();
 
   // Mail Workflows moved out of Settings (QA 07-06 #1) — its single home is the
   // main-nav /workflows page. Old deep links land there instead of a dead tab.
@@ -97,11 +100,6 @@ export default function Settings() {
       return false;
     }
   });
-
-  const setActiveSection = (id) => {
-    setActiveSectionRaw(id);
-    window.history.replaceState(null, '', `#${id}`);
-  };
 
   const [formData, setFormData] = useState({
     freshservice_domain: '',
