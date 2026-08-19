@@ -2,7 +2,10 @@ import prisma from './prisma.js';
 import promptRepository from './promptRepository.js';
 import competencyRepository from './competencyRepository.js';
 import logger from '../utils/logger.js';
-import { isSkillHierarchyWorkspace } from '../utils/workspaceFeatureFlags.js';
+// Flag-split assignment (Phase PA): CANONICAL set — enforces the locked-tree
+// rules when applying daily-review items (subcategory-only adds, no implicit
+// category creation). DB-only; no FreshService coupling.
+import { isCanonicalCategoryWorkspace } from '../utils/workspaceFeatureFlags.js';
 import { DEFAULT_OPUS_MODEL, normalizeAiModel, providerForModel } from '../utils/aiProviders.js';
 import providerGateway from './aiProviders/providerGateway.js';
 import { TOOL_SCHEMAS as ASSIGNMENT_TOOL_SCHEMAS } from './assignmentTools.js';
@@ -961,7 +964,7 @@ ${JSON.stringify(context.snapshot, null, 2)}`,
         });
         return { action: 'updated_existing_skill', categoryId: updated.id };
       }
-      if (isSkillHierarchyWorkspace(workspaceId) && !parentId) {
+      if (isCanonicalCategoryWorkspace(workspaceId) && !parentId) {
         throw new Error('IT category consolidation can add subcategories only; choose an existing parent category');
       }
       const created = await competencyRepository.createCategory(workspaceId, {
@@ -976,7 +979,7 @@ ${JSON.stringify(context.snapshot, null, 2)}`,
 
     if (!existing) {
       const parentId = resolveParentId();
-      if (isSkillHierarchyWorkspace(workspaceId) && !parentId) {
+      if (isCanonicalCategoryWorkspace(workspaceId) && !parentId) {
         throw new Error('IT category consolidation cannot create a new top-level category; choose an existing parent category');
       }
       const created = await competencyRepository.createCategory(workspaceId, {
@@ -1033,7 +1036,7 @@ ${JSON.stringify(context.snapshot, null, 2)}`,
         where: { workspaceId, name: { equals: payload.categoryName, mode: 'insensitive' } },
       });
       if (!category) {
-        if (isSkillHierarchyWorkspace(workspaceId)) {
+        if (isCanonicalCategoryWorkspace(workspaceId)) {
           throw new Error('IT technician competency changes must use an existing category/subcategory; approve or create the subcategory first');
         }
         category = await competencyRepository.createCategory(workspaceId, {

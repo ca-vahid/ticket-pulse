@@ -18,7 +18,10 @@ import {
 } from '../integrations/freshserviceTransformer.js';
 import { runJobsInPool } from '../utils/parallelPool.js';
 import { normalizeAiModel, providerForModel } from '../utils/aiProviders.js';
-import { isSkillHierarchyWorkspace } from '../utils/workspaceFeatureFlags.js';
+// Flag-split assignment (Phase PA): CANONICAL set — selects the locked-tree
+// taxonomy governance rules in the daily-review prompt (no new top-levels,
+// subcategory adds only). Prompt-only; no FreshService coupling.
+import { isCanonicalCategoryWorkspace } from '../utils/workspaceFeatureFlags.js';
 import providerGateway from './aiProviders/providerGateway.js';
 import { TOOL_SCHEMAS as ASSIGNMENT_TOOL_SCHEMAS } from './assignmentTools.js';
 
@@ -2422,7 +2425,7 @@ class AssignmentDailyReviewService {
         },
       };
 
-      const canonicalCategoryReviewRules = isSkillHierarchyWorkspace(dataset.workspaceId)
+      const canonicalCategoryReviewRules = isCanonicalCategoryWorkspace(dataset.workspaceId)
         ? `- The top-level category list is fixed for this go-live. Do not recommend adding a new top-level category.
 - taxonomyRecommendations may include adding a new subcategory under an existing parent category, or moving, renaming, merging, deprecating, remapping, or updating descriptions for existing categories/subcategories when the evidence supports it.
 - For taxonomyRecommendations with taxonomyAction="add", the proposal must be a subcategory and must include parentCategoryId or parentCategoryName for the existing top-level parent. Put the proposed subcategory name in newName.

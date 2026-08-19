@@ -4,7 +4,10 @@ import { COMPETENCY_TOOL_SCHEMAS, executeCompetencyTool } from './competencyTool
 import prisma from './prisma.js';
 import { findBestCategoryMatch } from '../utils/categoryMatcher.js';
 import { normalizeAiModel, providerForModel } from '../utils/aiProviders.js';
-import { isSkillHierarchyWorkspace } from '../utils/workspaceFeatureFlags.js';
+// Flag-split assignment (Phase PA): CANONICAL set — routes assessments through
+// the canonical-evidence path (id-based mappings, clean-evidence caps,
+// subcategory-only taxonomy-gap suggestions). DB-only.
+import { isCanonicalCategoryWorkspace } from '../utils/workspaceFeatureFlags.js';
 import providerGateway from './aiProviders/providerGateway.js';
 import logger from '../utils/logger.js';
 
@@ -320,7 +323,7 @@ class CompetencyAnalysisService {
   }
 
   async _applyAssessment(technicianId, workspaceId, assessment) {
-    if (!isSkillHierarchyWorkspace(workspaceId)) {
+    if (!isCanonicalCategoryWorkspace(workspaceId)) {
       return this._applyLegacyAssessment(technicianId, workspaceId, assessment);
     }
 
@@ -381,7 +384,7 @@ class CompetencyAnalysisService {
         }
 
         const parentId = resolveSuggestedParentId(comp, activeExisting);
-        if (isSkillHierarchyWorkspace(workspaceId) && !parentId) {
+        if (isCanonicalCategoryWorkspace(workspaceId) && !parentId) {
           skippedInvalidSuggestionParent++;
           logger.warn('Skipped top-level taxonomy-gap suggestion in canonical category workspace', {
             workspaceId,

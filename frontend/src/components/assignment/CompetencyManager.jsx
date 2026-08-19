@@ -2031,19 +2031,32 @@ export default function CompetencyManager({ deepRunId, deepAnalyzeTechId, worksp
 
   const isLiveAnalysis = !!deepAnalyzeTechId;
   const forceNew = searchParams.get('force') === 'true';
-  // Which category editor this workspace gets is decided by the BACKEND
-  // (SKILL_HIERARCHY_WORKSPACE_IDS drives the draft/publish/reclassify
-  // services) — asking it keeps the UI from drifting from what the API
-  // allows. Fallback to the historical IT-only check while loading / if the
-  // config call fails.
-  const [skillHierarchyEnabled, setSkillHierarchyEnabled] = useState(null);
+  // Which category tools this workspace gets is decided by the BACKEND
+  // (the FS_TAXONOMY_SYNC / CANONICAL_CATEGORY workspace sets drive the
+  // drift/sync and reclassify services) — asking it keeps the UI from
+  // drifting from what the API allows. Two separate gates since Phase PA:
+  // - skillHierarchyEnabled (FS-sync set) → FS drift/sync migration toolbar
+  // - canonicalCategoriesEnabled → batch Reclassify (canonical-only
+  //   workspaces like Project Accounting get Reclassify without FS tools)
+  // Fallback to the historical IT-only check while loading / if the config
+  // call fails.
+  const [categoryFlags, setCategoryFlags] = useState(null);
   useEffect(() => {
-    setSkillHierarchyEnabled(null);
+    setCategoryFlags(null);
     assignmentAPI.getConfig()
-      .then((res) => setSkillHierarchyEnabled(res?.skillHierarchyEnabled === true))
-      .catch(() => setSkillHierarchyEnabled(null));
+      .then((res) => setCategoryFlags({
+        fsSync: res?.skillHierarchyEnabled === true,
+        // Older backends don't send canonicalCategoriesEnabled — fall back to
+        // the pre-split behavior (both tool groups ride the same flag).
+        canonical: res?.canonicalCategoriesEnabled === undefined
+          ? res?.skillHierarchyEnabled === true
+          : res?.canonicalCategoriesEnabled === true,
+      }))
+      .catch(() => setCategoryFlags(null));
   }, [currentWorkspace?.id]);
-  const useHierarchyEditor = skillHierarchyEnabled ?? (Number(currentWorkspace?.id) === 1 || currentWorkspace?.slug === 'it');
+  const legacyItFallback = Number(currentWorkspace?.id) === 1 || currentWorkspace?.slug === 'it';
+  const useHierarchyEditor = categoryFlags?.fsSync ?? legacyItFallback;
+  const useReclassifyTools = categoryFlags?.canonical ?? legacyItFallback;
 
   useEffect(() => {
     assignmentAPI.getCategorySuggestions()
@@ -2091,7 +2104,7 @@ export default function CompetencyManager({ deepRunId, deepAnalyzeTechId, worksp
       </div>
 
       {effectiveTab === 'matrix' && <MatrixTab onAnalyze={(id) => handleAnalyze(id)} />}
-      {effectiveTab === 'categories' && <CategoriesManagementTab showMigrationControls={useHierarchyEditor} />}
+      {effectiveTab === 'categories' && <CategoriesManagementTab showMigrationControls={useHierarchyEditor} showReclassifyControls={useReclassifyTools} />}
       {effectiveTab === 'suggestions' && <CategorySuggestionsTab onCountChange={setSuggestionCount} />}
       {effectiveTab === 'history' && <RunHistoryTab deepRunId={deepRunId} workspaceTimezone={workspaceTimezone} />}
       {effectiveTab === 'prompt' && <CompetencyPromptTab />}

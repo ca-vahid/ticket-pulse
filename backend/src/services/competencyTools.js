@@ -1,6 +1,9 @@
 import prisma from './prisma.js';
 import graphMailClient from '../integrations/graphMailClient.js';
-import { isSkillHierarchyWorkspace } from '../utils/workspaceFeatureFlags.js';
+// Flag-split assignment (Phase PA): CANONICAL set — canonicalMode here only
+// changes evidence SEMANTICS (canonical taxonomy = skill evidence, raw FS
+// category fields = context-only); it never talks to FreshService.
+import { isCanonicalCategoryWorkspace } from '../utils/workspaceFeatureFlags.js';
 
 function buildCategoryTree(categories = []) {
   const byId = new Map(categories.map((category) => [category.id, { ...category, subcategories: [] }]));
@@ -547,7 +550,7 @@ async function getTechnicianCanonicalCategoryEvidence(workspaceId, technicianId,
 async function getTechnicianTicketHistory(workspaceId, technicianId, params = {}) {
   const days = clampInteger(params.days, 90, 180);
   const limit = clampInteger(params.limit, 50, 100);
-  const canonicalMode = isSkillHierarchyWorkspace(workspaceId);
+  const canonicalMode = isCanonicalCategoryWorkspace(workspaceId);
   const since = new Date();
   since.setDate(since.getDate() - days);
 
@@ -626,7 +629,7 @@ async function getTechnicianTicketHistory(workspaceId, technicianId, params = {}
 
 async function getTechnicianCategoryDistribution(workspaceId, technicianId, params = {}) {
   const days = clampInteger(params.days, 90, 180);
-  const canonicalMode = isSkillHierarchyWorkspace(workspaceId);
+  const canonicalMode = isCanonicalCategoryWorkspace(workspaceId);
   const since = new Date();
   since.setDate(since.getDate() - days);
 
@@ -768,7 +771,7 @@ async function getTechnicianCategoryDistribution(workspaceId, technicianId, para
 async function getTechnicianAssignmentSignals(workspaceId, technicianId, params = {}) {
   const days = clampInteger(params.days, 180, 365);
   const limit = clampInteger(params.limit, 40, 80);
-  const canonicalMode = isSkillHierarchyWorkspace(workspaceId);
+  const canonicalMode = isCanonicalCategoryWorkspace(workspaceId);
   const includeThreadSnippets = params.includeThreadSnippets !== false;
   const since = new Date();
   since.setDate(since.getDate() - days);
@@ -1034,7 +1037,7 @@ async function getTechnicianAssignmentSignals(workspaceId, technicianId, params 
 
 async function searchWorkspaceTickets(workspaceId, params = {}) {
   const limit = clampInteger(params.limit, 15, 25);
-  const canonicalMode = isSkillHierarchyWorkspace(workspaceId);
+  const canonicalMode = isCanonicalCategoryWorkspace(workspaceId);
   const where = { workspaceId };
 
   if (params.internalCategoryId) where.internalCategoryId = Number(params.internalCategoryId);

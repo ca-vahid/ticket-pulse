@@ -1,6 +1,10 @@
 import prisma from './prisma.js';
 import assignmentPipelineService from './assignmentPipelineService.js';
-import { isSkillHierarchyWorkspace } from '../utils/workspaceFeatureFlags.js';
+// Flag-split assignment (Phase PA): FS-SYNC set — not category-related at all;
+// the old flag was used as a rollout scope for the priority backfill probe.
+// Kept on the narrow FS set DELIBERATELY so new canonical-only workspaces do
+// not silently opt into priority backfills; widen on purpose when wanted.
+import { isFsTaxonomySyncWorkspace } from '../utils/workspaceFeatureFlags.js';
 import logger from '../utils/logger.js';
 
 const ACTIVE_STATUS_VALUES = Object.freeze(['Open', 'open', '2', 'Pending', 'pending', '3']);
@@ -15,7 +19,7 @@ export function normalizePriorityBackfillOptions(options = {}) {
 class PriorityBackfillService {
   async findCandidates(workspaceId, options = {}) {
     const { days, limit } = normalizePriorityBackfillOptions(options);
-    if (!isSkillHierarchyWorkspace(workspaceId)) {
+    if (!isFsTaxonomySyncWorkspace(workspaceId)) {
       return {
         skipped: true,
         reason: 'workspace_not_in_scope',

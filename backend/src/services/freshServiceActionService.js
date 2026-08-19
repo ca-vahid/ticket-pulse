@@ -6,7 +6,10 @@ import {
   freshServiceGroupHasAgent,
   resolveBroadAssignmentGroup,
 } from './freshServiceGroupGuard.js';
-import { isSkillHierarchyWorkspace } from '../utils/workspaceFeatureFlags.js';
+// Flag-split assignment (Phase PA): FS-SYNC set — every use here gates writing
+// lf_ticket_pulse_* category custom fields back to FreshService. Canonical
+// workspaces WITHOUT FS taxonomy sync (e.g. Project Accounting) must skip it.
+import { isFsTaxonomySyncWorkspace } from '../utils/workspaceFeatureFlags.js';
 import logger from '../utils/logger.js';
 import { PRIORITY_ID_TO_LABEL } from './priorityAssessment.js';
 import { normalizeTicketType } from './ticketTypeAssessment.js';
@@ -194,7 +197,7 @@ class FreshServiceActionService {
     const decision = run.decision;
     const actions = [];
     const addTicketPulseCategoryAction = async () => {
-      if (!isSkillHierarchyWorkspace(run.workspaceId)) {
+      if (!isFsTaxonomySyncWorkspace(run.workspaceId)) {
         return;
       }
 
@@ -289,7 +292,7 @@ class FreshServiceActionService {
       noteBody += `${messageHtml}<br>`;
       noteBody += `<b>Run ID:</b> ${run.id}`;
 
-      if (isSkillHierarchyWorkspace(run.workspaceId)) {
+      if (isFsTaxonomySyncWorkspace(run.workspaceId)) {
         const workspace = await prisma.workspace.findUnique({
           where: { id: run.workspaceId },
           select: { tpSkillCustomField: true, tpSubskillCustomField: true },
@@ -754,7 +757,7 @@ class FreshServiceActionService {
       return { success: true, skipped: true, error: reason, preview, actions: [] };
     };
 
-    if (!isSkillHierarchyWorkspace(workspaceId)) {
+    if (!isFsTaxonomySyncWorkspace(workspaceId)) {
       return skip('category_writeback_not_enabled_for_workspace', 'Category write-back requires the hierarchical category system for this workspace');
     }
     const ticket = run.ticket;

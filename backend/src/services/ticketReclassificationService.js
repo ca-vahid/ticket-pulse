@@ -3,7 +3,10 @@ import prisma from './prisma.js';
 import { DEFAULT_RECLASSIFICATION_MODEL } from '../utils/anthropicModels.js';
 import { normalizeAiModel, providerForModel } from '../utils/aiProviders.js';
 import providerGateway from './aiProviders/providerGateway.js';
-import { isSkillHierarchyWorkspace } from '../utils/workspaceFeatureFlags.js';
+// Flag-split assignment (Phase PA): CANONICAL set — batch reclassification
+// writes internal category ids only (no FreshService coupling), so any
+// canonical-taxonomy workspace may use it, FS-synced or not.
+import { isCanonicalCategoryWorkspace } from '../utils/workspaceFeatureFlags.js';
 import { ValidationError } from '../utils/errors.js';
 import logger from '../utils/logger.js';
 
@@ -106,8 +109,8 @@ function snapshotTicketClassification(ticket) {
 
 class TicketReclassificationService {
   async run(workspaceId, options = {}) {
-    if (!isSkillHierarchyWorkspace(workspaceId)) {
-      throw new ValidationError('Ticket reclassification is enabled only for the IT category/subcategory migration workspace');
+    if (!isCanonicalCategoryWorkspace(workspaceId)) {
+      throw new ValidationError('Ticket reclassification is enabled only for canonical-category workspaces');
     }
     const apply = options.apply === true;
     const applyFromPreview = apply && Array.isArray(options.previewResults) && options.previewResults.length > 0;

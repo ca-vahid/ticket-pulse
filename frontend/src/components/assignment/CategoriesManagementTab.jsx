@@ -64,9 +64,12 @@ function usePopoverDismiss(open, ref, onClose) {
 // ─── Migration-era tools, relocated (Phase 3 surface unification) ────────
 // The old "Categories / Subcategories Draft" editor (SkillsMigrationPanel) is
 // retired: the tree below is the single editor. The tools that survive all
-// operate on the LIVE tree — FS drift check, FS additive sync, and batch
-// ticket reclassification — and are flag-gated to skill-hierarchy workspaces
-// exactly as before (showMigrationControls prop, SKILL_HIERARCHY_WORKSPACE_IDS).
+// operate on the LIVE tree and are flag-gated per workspace (Phase PA split):
+// - showMigrationControls (FS_TAXONOMY_SYNC set): FS drift check + FS
+//   additive sync + legacy-draft cleanup — FreshService-coupled tools.
+// - showReclassifyControls (CANONICAL_CATEGORY set): batch ticket
+//   reclassification — canonical-taxonomy-only, works with no FS coupling
+//   (Project Accounting gets Reclassify without the FS toolbar).
 
 const RECLASSIFICATION_MODELS = [
   { value: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5', detail: 'Default for bulk cleanup. Lower cost and fast enough for category matching.' },
@@ -1239,7 +1242,7 @@ function CategoryRow({
 
 // ─── Main tab ────────────────────────────────────────────────────────────
 
-export default function CategoriesManagementTab({ showMigrationControls = false }) {
+export default function CategoriesManagementTab({ showMigrationControls = false, showReclassifyControls = showMigrationControls }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -1580,7 +1583,7 @@ export default function CategoriesManagementTab({ showMigrationControls = false 
         </div>
       )}
 
-      {showMigrationControls && helpOpen && <HierarchyToolsHelpModal onClose={() => setHelpOpen(false)} />}
+      {(showMigrationControls || showReclassifyControls) && helpOpen && <HierarchyToolsHelpModal onClose={() => setHelpOpen(false)} />}
       <ConfirmDialog
         open={syncConfirmOpen}
         title="Sync to FreshService?"
@@ -1636,32 +1639,34 @@ export default function CategoriesManagementTab({ showMigrationControls = false 
             </button>
             <DuplicateDetector onMerged={() => { fetchData(); markTreeChanged(); }} />
             {showMigrationControls && (
-              <>
-                <FreshserviceToolsMenu
-                  busy={driftBusy || syncBusy}
-                  onCheckDrift={loadDrift}
-                  onSyncRequest={() => setSyncConfirmOpen(true)}
-                />
-                <button
-                  type="button"
-                  onClick={() => setReclassifyOpen((prev) => !prev)}
-                  aria-expanded={reclassifyOpen}
-                  className={`tp-focus-ring flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
-                    reclassifyOpen ? 'border-purple-300 bg-purple-50 text-purple-700' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                  }`}
-                >
-                  <Brain className="h-3 w-3" /> Reclassify
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setHelpOpen(true)}
-                  aria-label="Category tools help"
-                  title="Category tools help"
-                  className="tp-focus-ring rounded-full border border-blue-200 bg-blue-50 p-1.5 text-blue-700 hover:bg-blue-100"
-                >
-                  <HelpCircle className="h-3.5 w-3.5" />
-                </button>
-              </>
+              <FreshserviceToolsMenu
+                busy={driftBusy || syncBusy}
+                onCheckDrift={loadDrift}
+                onSyncRequest={() => setSyncConfirmOpen(true)}
+              />
+            )}
+            {showReclassifyControls && (
+              <button
+                type="button"
+                onClick={() => setReclassifyOpen((prev) => !prev)}
+                aria-expanded={reclassifyOpen}
+                className={`tp-focus-ring flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+                  reclassifyOpen ? 'border-purple-300 bg-purple-50 text-purple-700' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <Brain className="h-3 w-3" /> Reclassify
+              </button>
+            )}
+            {(showMigrationControls || showReclassifyControls) && (
+              <button
+                type="button"
+                onClick={() => setHelpOpen(true)}
+                aria-label="Category tools help"
+                title="Category tools help"
+                className="tp-focus-ring rounded-full border border-blue-200 bg-blue-50 p-1.5 text-blue-700 hover:bg-blue-100"
+              >
+                <HelpCircle className="h-3.5 w-3.5" />
+              </button>
             )}
           </div>
         </div>
@@ -1708,7 +1713,7 @@ export default function CategoriesManagementTab({ showMigrationControls = false 
         {showMigrationControls && driftOpen && drift && (
           <DriftReportSection drift={drift} busy={driftBusy} onRefresh={loadDrift} onClose={() => setDriftOpen(false)} />
         )}
-        {showMigrationControls && reclassifyOpen && (
+        {showReclassifyControls && reclassifyOpen && (
           <ReclassifyTicketsSection onClose={() => setReclassifyOpen(false)} />
         )}
 

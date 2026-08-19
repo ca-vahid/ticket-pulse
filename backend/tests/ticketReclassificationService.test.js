@@ -1,5 +1,11 @@
 import { jest } from '@jest/globals';
 
+// Pin the canonical-category set for this suite: ws1 is canonical, ws2 is not
+// (its test asserts the non-canonical rejection). Without this the suite
+// inherits whatever backend/.env sets once src/config's dotenv runs — flag
+// resolution is lazy since the Phase PA flag split.
+process.env.CANONICAL_CATEGORY_WORKSPACE_IDS = '1';
+
 const mockMessagesCreate = jest.fn();
 const mockProviderSendJson = jest.fn();
 
@@ -69,9 +75,9 @@ describe('ticketReclassificationService', () => {
     mockProviderSendJson.mockReset();
   });
 
-  test('blocks non-IT workspaces during phased migration', async () => {
+  test('blocks non-canonical workspaces', async () => {
     await expect(ticketReclassificationService.run(2, { apply: true })).rejects.toThrow(
-      'enabled only for the IT category/subcategory migration workspace',
+      'enabled only for canonical-category workspaces',
     );
 
     expect(prismaMock.competencyCategory.findMany).not.toHaveBeenCalled();

@@ -72,7 +72,11 @@ jest.unstable_mockModule('../src/middleware/auth.js', () => ({
   requireReviewer: (req, res, next) => next(),
 }));
 jest.unstable_mockModule('../src/config/index.js', () => ({ default: { freshservice: { domain: 'test' } } }));
-jest.unstable_mockModule('../src/utils/workspaceFeatureFlags.js', () => ({ isSkillHierarchyWorkspace: () => true }));
+jest.unstable_mockModule('../src/utils/workspaceFeatureFlags.js', () => ({
+  isSkillHierarchyWorkspace: () => true,
+  isCanonicalCategoryWorkspace: () => true,
+  isFsTaxonomySyncWorkspace: () => true,
+}));
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: {} }));
 jest.unstable_mockModule('../src/utils/logger.js', () => ({ default: loggerMock }));
 
