@@ -82,7 +82,7 @@ const makeBucketFor = (statusDefs) => (status) => {
 // so the root card's onClick doesn't double-fire alongside a native open.
 const isModifiedClick = (e) => e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button === 1;
 
-function BoardCard({ ticket, statusDefs, canDrag, dragging, linkState, onClick, onDoubleClick }) {
+function BoardCard({ ticket, statusDefs, canDrag, dragging, linkState, onClick, onDoubleClick, slaCalendarAware = false }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: String(ticket.id),
     disabled: !canDrag,
@@ -180,7 +180,7 @@ function BoardCard({ ticket, statusDefs, canDrag, dragging, linkState, onClick, 
           )}
           <span className="ml-auto flex flex-none items-center gap-1.5">
             {baseStatusOf(statusDefs, ticket.status) === 'Open' && ticket.dueBy && (
-              <SlaChip value={ticket.dueBy} className="!px-1.5 !text-[10px]" />
+              <SlaChip value={ticket.dueBy} calendarAware={slaCalendarAware} className="!px-1.5 !text-[10px]" />
             )}
             <span className="text-[10px] font-semibold uppercase text-slate-400" title={`Priority: ${PRIORITY_LABELS[ticket.priority] || ticket.priority}`}>
               {PRIORITY_LABELS[ticket.priority]?.slice(0, 3) || `P${ticket.priority}`}
@@ -237,6 +237,7 @@ function TicketBoardInner({
   tickets, ticketingOn, onCardClick, onCardDoubleClick, onStatusDrop,
   closedExcluded = false, onShowClosed = null, paginated = false,
   statusDefs = null, // workspace status registry (queue meta) — base-aware buckets
+  slaCalendarAware = false, // Phase SLA: business-hours tooltip on due chips
 }) {
   const [activeId, setActiveId] = useState(null);
   // Return address for the card anchors (QA 08-07 #7) — the same state the
@@ -332,6 +333,7 @@ function TicketBoardInner({
                 linkState={linkState}
                 onClick={onCardClick}
                 onDoubleClick={onCardDoubleClick}
+                slaCalendarAware={slaCalendarAware}
               />
             ))}
           </BoardColumn>
@@ -340,7 +342,7 @@ function TicketBoardInner({
       <DragOverlay dropAnimation={null}>
         {activeTicket ? (
           <div className="w-[260px] rotate-2 opacity-95">
-            <BoardCard ticket={activeTicket} statusDefs={statusDefs} canDrag dragging linkState={linkState} />
+            <BoardCard ticket={activeTicket} statusDefs={statusDefs} canDrag dragging linkState={linkState} slaCalendarAware={slaCalendarAware} />
           </div>
         ) : null}
       </DragOverlay>

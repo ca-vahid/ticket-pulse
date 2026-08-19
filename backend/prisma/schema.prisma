@@ -68,6 +68,12 @@ model Workspace {
   tpSkillCustomField      String   @default("lf_ticket_pulse_category") @map("tp_skill_custom_field") @db.VarChar(100)
   tpSubskillCustomField   String   @default("lf_ticket_pulse_subcategory") @map("tp_subskill_custom_field") @db.VarChar(100)
   nativeTicketingEnabled  Boolean  @default(false) @map("native_ticketing_enabled")
+  // Calendar-aware SLAs (QA 08-17 #9): when true, SLA due-date clocks for
+  // TP-born tickets count BUSINESS MINUTES only (Settings → Business Hours +
+  // Holidays) instead of wall-clock time. Per-policy calendarMode can
+  // override in either direction. Baked into the stored dueBy at write time —
+  // downstream `dueBy < now` comparisons never change.
+  slaCalendarAware        Boolean  @default(false) @map("sla_calendar_aware")
   // Internal/trusted email domains (lowercase, no @). A ticket whose requester
   // email is OUTSIDE this list is flagged External in the UI (QA 07-27 #4).
   // Empty list = flagging off for this workspace.
@@ -719,6 +725,10 @@ model SlaPolicy {
   ticketType           TicketTypeDefinition? @relation(fields: [ticketTypeId], references: [id], onDelete: Cascade)
   firstResponseMinutes Int?                  @map("first_response_minutes")
   resolveMinutes       Int?                  @map("resolve_minutes")
+  // 'inherit' → follow Workspace.slaCalendarAware; 'calendar' → always count
+  // business minutes; 'always_on' → always wall-clock (the 24/7 escape hatch
+  // for Urgent / Major Incident clocks that must not pause over a weekend).
+  calendarMode         String                @default("inherit") @map("calendar_mode") @db.VarChar(20)
   isActive             Boolean               @default(true) @map("is_active")
   updatedBy            String?               @map("updated_by") @db.VarChar(255)
   updatedAt            DateTime              @updatedAt @map("updated_at")

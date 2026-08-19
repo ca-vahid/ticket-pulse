@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, Archive, Check, FileText, Globe as GlobeGlyph, Layers, Loader2, Plus, RefreshCw, Sparkles, Star, StickyNote, Tag as TagGlyph, Timer, Trash2, Wand2 } from 'lucide-react';
+import { AlertTriangle, Archive, CalendarClock, Check, FileText, Globe as GlobeGlyph, Layers, Loader2, Plus, RefreshCw, Sparkles, Star, StickyNote, Tag as TagGlyph, Timer, Trash2, Wand2 } from 'lucide-react';
 import { settingsAPI, ticketsAPI, workspaceAPI } from '../../services/api';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 import { TAG_CHIP_TONES, TYPE_COLOR_TONES } from '../tickets/ticketUi';
@@ -30,15 +30,34 @@ function SectionCard({ icon: Icon, title, hint, children }) {
   );
 }
 
-function SlaSection() {
+export function SlaSection() {
   const { activeTypes } = useTicketTypes();
   const [policies, setPolicies] = useState([]);
   const [busyKey, setBusyKey] = useState(null); // `${priority}:${typeId}`
   const [typeTab, setTypeTab] = useState(null); // type id (string); no generic scope
+  // Calendar-aware SLAs (QA 08-17 #9): per-workspace flag — when on, the
+  // clocks count business minutes only (Settings → Business Hours & Holidays).
+  const [calendarAware, setCalendarAware] = useState(null); // null = loading
+  const [calendarBusy, setCalendarBusy] = useState(false);
   const load = useCallback(() => {
     settingsAPI.getSlaPolicies().then((res) => setPolicies(res.data?.data || res.data || [])).catch(() => {});
   }, []);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    settingsAPI.getSlaCalendar()
+      .then((res) => setCalendarAware((res.data?.data ?? res.data)?.slaCalendarAware === true))
+      .catch(() => setCalendarAware(false));
+  }, []);
+
+  const toggleCalendar = async () => {
+    if (calendarAware === null || calendarBusy) return;
+    setCalendarBusy(true);
+    try {
+      const res = await settingsAPI.updateSlaCalendar(!calendarAware);
+      setCalendarAware((res.data?.data ?? res.data)?.slaCalendarAware === true);
+    } catch { /* flag unchanged on failure */ }
+    setCalendarBusy(false);
+  };
   // SLAs are defined PER TYPE (no generic fallback) — land on the first type.
   useEffect(() => {
     if (typeTab === null && activeTypes.length) setTypeTab(String(activeTypes[0].id));
@@ -56,8 +75,57 @@ function SlaSection() {
     setBusyKey(null);
   };
 
+  // 24/7 escape hatch: flips a policy row between 'inherit' (follow the
+  // workspace calendar) and 'always_on' (wall-clock around the clock — for
+  // Urgent / Major Incident clocks that must not pause over a weekend).
+  const toggleAlwaysOn = async (policy) => {
+    if (!policy) return;
+    setBusyKey(`mode:${policy.priority}:${currentTypeId}`);
+    try {
+      await settingsAPI.upsertSlaPolicy({
+        priority: policy.priority,
+        ticketTypeId: currentTypeId,
+        firstResponseMinutes: policy.firstResponseMinutes || null,
+        resolveMinutes: policy.resolveMinutes || null,
+        calendarMode: policy.calendarMode === 'always_on' ? 'inherit' : 'always_on',
+      });
+      load();
+    } catch { /* keep simple */ }
+    setBusyKey(null);
+  };
+
   return (
     <SectionCard icon={Timer} title="SLA policies (Ticket Pulse tickets)" hint="Per-type, per-priority clocks applied when a TP-born ticket is created (e.g. a tighter Major Incident response than a Service Request). The clock pauses while a ticket is Pending. Build escalation ladders as workflows on the SLA-breach triggers.">
+      <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2.5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-start gap-2">
+            <CalendarClock className="w-4 h-4 text-blue-500 mt-0.5 shrink-0" aria-hidden="true" />
+            <div>
+              <p className="text-xs font-bold text-slate-700">Calendar-aware SLAs</p>
+              <p className="text-[11px] text-slate-500 mt-0.5 max-w-lg">
+                Due dates count business hours only — uses <span className="font-semibold text-slate-600">Settings → Business Hours &amp; Holidays</span>.
+                The clock already pauses while a ticket is Pending; this also stops it over weekends and holidays.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={calendarAware === true}
+            aria-label={`Calendar-aware SLAs ${calendarAware ? 'on' : 'off'}`}
+            onClick={toggleCalendar}
+            disabled={calendarAware === null || calendarBusy}
+            className={`tp-focus-ring relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-60 ${calendarAware ? 'bg-blue-600' : 'bg-slate-300'}`}
+          >
+            <span className="absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform" style={{ transform: calendarAware ? 'translateX(16px)' : 'translateX(0)' }} aria-hidden="true" />
+          </button>
+        </div>
+        {calendarAware === true && (
+          <p className="text-[11px] text-blue-600/90 mt-1.5 ml-6">
+            New tickets get business-hours due dates. Mark a row <span className="font-semibold">24/7</span> to keep that clock running around the clock.
+          </p>
+        )}
+      </div>
       {activeTypes.length === 0 && (
         <p className="text-xs text-slate-400 italic">Configure ticket types above first — SLAs are defined per type.</p>
       )}
@@ -89,6 +157,9 @@ function SlaSection() {
               busy={busyKey === `${priority}:${currentTypeId}`}
               onSave={save}
               onDelete={async () => { await settingsAPI.deleteSlaPolicy(priority, currentTypeId).catch(() => {}); load(); }}
+              calendarAware={calendarAware === true}
+              modeBusy={busyKey === `mode:${priority}:${currentTypeId}`}
+              onToggleAlwaysOn={() => toggleAlwaysOn(forTab.get(priority))}
             />
           ))}
         </div>
@@ -97,7 +168,7 @@ function SlaSection() {
   );
 }
 
-function SlaRow({ priority, policy, busy, onSave, onDelete }) {
+function SlaRow({ priority, policy, busy, onSave, onDelete, calendarAware = false, modeBusy = false, onToggleAlwaysOn }) {
   const [fr, setFr] = useState(policy?.firstResponseMinutes ?? '');
   const [resolve, setResolve] = useState(policy?.resolveMinutes ?? '');
   useEffect(() => { setFr(policy?.firstResponseMinutes ?? ''); setResolve(policy?.resolveMinutes ?? ''); }, [policy]);
@@ -119,6 +190,23 @@ function SlaRow({ priority, policy, busy, onSave, onDelete }) {
       {dirty && (
         <button onClick={() => onSave(priority, Number(fr) || null, Number(resolve) || null)} disabled={busy} className="tp-focus-ring inline-flex items-center gap-1 px-2 py-1 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-60">
           {busy ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" /> : <Check className="w-3 h-3" aria-hidden="true" />} Save
+        </button>
+      )}
+      {calendarAware && policy && (
+        <button
+          type="button"
+          onClick={onToggleAlwaysOn}
+          disabled={modeBusy}
+          aria-pressed={policy.calendarMode === 'always_on'}
+          aria-label={`${PRIORITY_LABELS[priority]} SLA ${policy.calendarMode === 'always_on' ? 'runs 24/7 — switch to the business-hours calendar' : 'follows business hours — switch to 24/7'}`}
+          title={policy.calendarMode === 'always_on'
+            ? 'Runs 24/7 — this clock never pauses for weekends or holidays. Click to follow the business-hours calendar.'
+            : 'Follows the business-hours calendar. Click to run this clock 24/7 (e.g. Urgent / Major Incident).'}
+          className={`tp-focus-ring px-1.5 py-0.5 rounded-full text-[10px] font-bold border disabled:opacity-60 ${policy.calendarMode === 'always_on'
+            ? 'bg-indigo-600 text-white border-indigo-600'
+            : 'bg-white text-slate-400 border-slate-200 hover:border-indigo-300 hover:text-indigo-500'}`}
+        >
+          24/7
         </button>
       )}
       {policy && (

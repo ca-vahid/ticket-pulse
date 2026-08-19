@@ -1457,6 +1457,7 @@ export default function Tickets() {
                         tickets={tickets}
                         ticketingOn={ticketingOn}
                         statusDefs={statusDefs}
+                        slaCalendarAware={meta?.slaCalendarAware === true}
                         onCardClick={onRowClick}
                         onCardDoubleClick={onRowDoubleClick}
                         onStatusDrop={onBoardStatusDrop}
@@ -1866,7 +1867,7 @@ export default function Tickets() {
                                 : resolvedLike
                                   ? <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold border bg-emerald-50 text-emerald-700 border-emerald-200">Done</span>
                                   : ticket.dueBy
-                                    ? <SlaChip value={ticket.dueBy} paused={baseStatusOf(statusDefs, ticket.status) === 'Pending'} className="!px-1.5 !text-[10px]" />
+                                    ? <SlaChip value={ticket.dueBy} paused={baseStatusOf(statusDefs, ticket.status) === 'Pending'} calendarAware={meta?.slaCalendarAware === true} className="!px-1.5 !text-[10px]" />
                                     : <span className="text-xs text-slate-300">—</span>}
                             </span>
                           );

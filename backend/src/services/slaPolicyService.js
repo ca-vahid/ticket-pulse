@@ -1,6 +1,7 @@
 import prisma from './prisma.js';
 import { ValidationError } from '../utils/errors.js';
 import ticketTypeService from './ticketTypeService.js';
+import businessCalendarService from './businessCalendarService.js';
 
 /**
  * Ticket Pulse's own SLA targets for TP-born tickets: per-priority first-
@@ -13,8 +14,43 @@ import ticketTypeService from './ticketTypeService.js';
  * ticketTypeId is the "all types" fallback row. Matching walks: exact
  * type-specific policy -> fallback policy -> no clocks. Type-less tickets
  * (FS allows them) always use the fallback.
+ *
+ * Calendar-aware clocks (Phase SLA, QA 08-17 #9): when the workspace opts in
+ * (Workspace.slaCalendarAware) the clocks count BUSINESS minutes — weekends,
+ * disabled days and holidays don't burn SLA time. Per-policy calendarMode
+ * overrides in either direction ('calendar' forces it on, 'always_on' is the
+ * 24/7 escape hatch). The calendar is baked into the STORED dueBy here at
+ * write time, so every downstream `dueBy < now` comparison stays unchanged.
  */
+const CALENDAR_MODES = ['inherit', 'calendar', 'always_on'];
+const FLAG_CACHE_TTL_MS = 60 * 1000;
+
 class SlaPolicyService {
+  constructor() {
+    // Tiny TTL cache for the per-workspace calendar flag — dueDatesFor runs
+    // on every TP-born create and the flag changes only via the Settings
+    // toggle (which clears this cache).
+    this._calendarFlagCache = new Map(); // workspaceId -> { value, expiresAt }
+  }
+
+  clearCalendarFlagCache() {
+    this._calendarFlagCache.clear();
+  }
+
+  async _workspaceCalendarAware(workspaceId) {
+    const cached = this._calendarFlagCache.get(workspaceId);
+    if (cached && cached.expiresAt > Date.now()) return cached.value;
+    let value = false;
+    try {
+      const ws = await prisma.workspace.findUnique({
+        where: { id: workspaceId },
+        select: { slaCalendarAware: true },
+      });
+      value = ws?.slaCalendarAware === true;
+    } catch { /* missing column / transient DB hiccup → wall-clock behavior */ }
+    this._calendarFlagCache.set(workspaceId, { value, expiresAt: Date.now() + FLAG_CACHE_TTL_MS });
+    return value;
+  }
   async list(workspaceId) {
     return prisma.slaPolicy.findMany({
       where: { workspaceId },
@@ -23,12 +59,15 @@ class SlaPolicyService {
     });
   }
 
-  async upsert(workspaceId, { priority, ticketTypeId = null, firstResponseMinutes, resolveMinutes, isActive = true }, actor) {
+  async upsert(workspaceId, { priority, ticketTypeId = null, firstResponseMinutes, resolveMinutes, isActive = true, calendarMode = undefined }, actor) {
     const prio = Number(priority);
     if (!Number.isInteger(prio) || prio < 1 || prio > 4) throw new ValidationError('Priority must be 1–4');
     const fr = normalizedMinutes(firstResponseMinutes, 'First-response');
     const resolve = normalizedMinutes(resolveMinutes, 'Resolution');
     if (fr === null && resolve === null) throw new ValidationError('Set at least one SLA window');
+    if (calendarMode !== undefined && !CALENDAR_MODES.includes(calendarMode)) {
+      throw new ValidationError(`calendarMode must be one of ${CALENDAR_MODES.join(', ')}`);
+    }
 
     // Product rule: SLAs are defined PER TYPE — no generic rows anymore
     // (existing generic rows were replicated per-type and removed).
@@ -49,6 +88,7 @@ class SlaPolicyService {
       resolveMinutes: resolve,
       isActive: isActive !== false,
       updatedBy: actor?.email || null,
+      ...(calendarMode !== undefined ? { calendarMode } : {}),
     };
     if (existing) {
       return prisma.slaPolicy.update({ where: { id: existing.id }, data: fields });
@@ -91,8 +131,32 @@ class SlaPolicyService {
       });
     }
     if (!policy) return { frDueBy: null, dueBy: null };
-    const at = (minutes) => (minutes ? new Date(from.getTime() + minutes * 60 * 1000) : null);
-    return { frDueBy: at(policy.firstResponseMinutes), dueBy: at(policy.resolveMinutes) };
+
+    // Wall-clock helper stays THE fallback path — 'always_on' policies,
+    // opted-out workspaces and calendar failures all land here.
+    const wallClockAt = (minutes) => (minutes ? new Date(from.getTime() + minutes * 60 * 1000) : null);
+
+    // Effective mode: per-policy override wins; 'inherit' follows the
+    // workspace flag (cached lookup — this runs on every TP-born create).
+    const mode = policy.calendarMode && policy.calendarMode !== 'inherit'
+      ? policy.calendarMode
+      : (await this._workspaceCalendarAware(workspaceId) ? 'calendar' : 'always_on');
+    if (mode !== 'calendar') {
+      return { frDueBy: wallClockAt(policy.firstResponseMinutes), dueBy: wallClockAt(policy.resolveMinutes) };
+    }
+
+    try {
+      // One calendar load covers both targets. loadCalendar returns null for
+      // workspaces with zero enabled days → addBusinessMinutes wall-clocks.
+      const calendar = await businessCalendarService.loadCalendar(workspaceId);
+      const at = async (minutes) => (minutes
+        ? businessCalendarService.addBusinessMinutes(from, minutes, { workspaceId, calendar })
+        : null);
+      return { frDueBy: await at(policy.firstResponseMinutes), dueBy: await at(policy.resolveMinutes) };
+    } catch {
+      // Calendar math must never block ticket creation.
+      return { frDueBy: wallClockAt(policy.firstResponseMinutes), dueBy: wallClockAt(policy.resolveMinutes) };
+    }
   }
 }
 

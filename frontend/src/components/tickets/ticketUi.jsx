@@ -243,7 +243,7 @@ export function dueIn(value) {
   return { label: `${span} left`, state: 'ok' };
 }
 
-export function SlaChip({ value, paused = false, className = '' }) {
+export function SlaChip({ value, paused = false, calendarAware = false, className = '' }) {
   // Pending tickets pause the SLA clock: neutral "Paused" chip, no countdown,
   // no overdue red — the requester (or a third party) holds the ball.
   if (paused) {
@@ -256,6 +256,11 @@ export function SlaChip({ value, paused = false, className = '' }) {
   }
   const info = dueIn(value);
   if (!info) return null;
+  // Calendar-aware workspaces (Phase SLA): the stored due date already skips
+  // weekends/holidays, so the tooltip just explains WHICH clock stamped it.
+  const clockTitle = calendarAware
+    ? 'Business-hours clock — this due date only counts business hours (weekends and holidays don’t)'
+    : undefined;
   // Softer, borderless urgency pills with a leading colored dot (mockup style):
   // red overdue, amber due-soon, green plenty-of-time.
   const tone = info.state === 'over'
@@ -265,7 +270,7 @@ export function SlaChip({ value, paused = false, className = '' }) {
       : 'bg-emerald-50 text-emerald-700';
   const dot = info.state === 'over' ? 'bg-red-500' : info.state === 'warn' ? 'bg-amber-500' : 'bg-emerald-500';
   return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap ${tone} ${className}`}>
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap ${tone} ${className}`} title={clockTitle}>
       <span className={`w-1.5 h-1.5 rounded-full ${dot}`} aria-hidden="true" />
       {info.label}
     </span>
@@ -313,15 +318,16 @@ const SLA_TARGET_DATETIME = { month: 'short', day: 'numeric', year: 'numeric', h
  *
  * kind: 'response' (first response) | 'resolution'.
  */
-export function SlaTargetChip({ target, metAt = null, status, kind = 'response', className = '', terminal = null, paused = null }) {
+export function SlaTargetChip({ target, metAt = null, status, kind = 'response', className = '', terminal = null, paused = null, calendarAware = false }) {
   // `terminal` / `paused` (optional, Phase 8b): base-aware overrides from the
   // workspace status registry so a custom Resolved-base status freezes the
-  // chip and a custom Pending-base status pauses it.
+  // chip and a custom Pending-base status pauses it. `calendarAware` (Phase
+  // SLA) only decorates the LIVE countdown with the business-hours tooltip.
   const isTerminal = terminal ?? ['Resolved', 'Closed'].includes(status);
   const info = slaTargetState({ target, metAt, isTerminal });
   if (!info) return null;
   if (info.state === 'live') {
-    return <SlaChip value={target} paused={paused ?? status === 'Pending'} className={className} />;
+    return <SlaChip value={target} paused={paused ?? status === 'Pending'} calendarAware={calendarAware} className={className} />;
   }
   const base = `inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap border ${className}`;
   const targetLabel = new Date(target).toLocaleString(undefined, SLA_TARGET_DATETIME);
