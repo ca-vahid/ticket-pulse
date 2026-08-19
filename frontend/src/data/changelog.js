@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.5.05-preview';
+export const APP_VERSION = '3.5.06-preview';
 
 export const changelog = [
+  {
+    version: '3.5.06-preview',
+    date: 'August 19, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>⚡ Applying an AI suggestion updates the queue instantly</strong> — approving or picking a technician in the AI recommendation popup now shows your choice on the ticket row the moment you hit Apply, instead of the row sitting on “Assign” for a minute or two until the next sync. Behind the scenes the FreshService write-back also announces itself live to every open page, so the ticket detail and peek panel converge within seconds — and if FreshService rejects the assignment, the row snaps back to the truth. (QA 08-19, #238146)' },
+    ],
+  },
   {
     version: '3.5.05-preview',
     date: 'August 19, 2026',

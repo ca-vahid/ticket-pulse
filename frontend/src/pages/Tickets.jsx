@@ -853,6 +853,32 @@ export default function Tickets() {
     setPulse((p) => p + 1); // keeps an open preview in sync
   }, [fetchTickets, fetchStats]);
 
+  // Applying an AI suggestion (modal Approve / pick-another) can't use
+  // refreshAfterEdit alone: the decide endpoint returns BEFORE the
+  // FreshService write-back lands, so an immediate refetch still shows the
+  // old assignee and the row sat on "Assign" for minutes until the next sync
+  // (QA 08-19, #238146). Show the chosen tech now; the write-back's
+  // ticket-change SSE then reconciles the row to the truth — including the
+  // rare preflight abort where FS rejects the assignment.
+  const onAiApplied = useCallback((ticketId, info) => {
+    const applied = info?.decision === 'approved' || info?.decision === 'modified';
+    const techId = applied ? Number(info?.assignedTechId) || null : null;
+    if (!ticketId || !techId) { refreshAfterEdit(); return; }
+    const tech = (meta?.technicians || []).find((t) => t.id === techId);
+    setTickets((rows) => rows.map((r) => (r.id === ticketId
+      ? {
+        ...r,
+        assignedTechId: techId,
+        assignedTech: tech ? { id: tech.id, name: tech.name, photoUrl: tech.photoUrl } : r.assignedTech,
+      }
+      : r)));
+    fetchStats();
+    setPulse((p) => p + 1);
+    setRowFx((current) => new Map([...current, [ticketId, 'aiDone']]));
+    if (rowFxTimerRef.current) clearTimeout(rowFxTimerRef.current);
+    rowFxTimerRef.current = setTimeout(() => setRowFx(new Map()), 3200);
+  }, [meta?.technicians, refreshAfterEdit, fetchStats]);
+
   // Manual assignment from the queue (row picker or mobile sheet). If the AI
   // was mid-analysis on this row, the human wins the UI immediately: halo,
   // capsule and progress vanish now, and once the refetch shows the chosen
@@ -2168,7 +2194,7 @@ export default function Tickets() {
         <AiAssignModal
           ticket={aiTicket}
           onClose={() => setAiTicket(null)}
-          onDone={refreshAfterEdit}
+          onDone={(info) => onAiApplied(aiTicket?.id, info)}
         />
       )}
 
