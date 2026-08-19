@@ -63,6 +63,7 @@ import {
 import { AnimatePresence, motion } from 'motion/react';
 import { notificationWorkflowAPI, ticketsAPI } from '../../services/api';
 import ConditionGroupBuilder from './ConditionGroupBuilder';
+import SenderIdentityCard from './SenderIdentityCard';
 import EmailChipsInput from '../common/EmailChipsInput';
 import FieldCardNote, { FIELD_CARD_ACCENTS } from '../tickets/FieldCardNote';
 import WorkflowIndex from './WorkflowIndex';
@@ -4061,6 +4062,8 @@ function EmailBrandingPanel({
           </button>
         </div>
       </div>
+
+      <SenderIdentityCard />
 
       <div className="grid min-h-0 gap-4 xl:grid-cols-[280px_minmax(420px,0.95fr)_minmax(420px,1.05fr)]">
         <aside className="min-h-0 rounded-md border border-slate-200 bg-slate-50 p-3">

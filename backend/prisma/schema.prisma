@@ -161,6 +161,7 @@ model Workspace {
   ticketStatusDefinitions           TicketStatusDefinition[]
   analyticsReports                  AnalyticsReport[]
   userEmailSignatures               UserEmailSignature[]
+  emailIdentity                     WorkspaceEmailIdentity?
 
   @@map("workspaces")
 }
@@ -2311,6 +2312,24 @@ model NotificationEmailSignature {
 
   @@index([workspaceId])
   @@map("notification_email_signatures")
+}
+
+// Per-workspace outbound sender identity (Phase EB): the From display name
+// used for SendGrid sends from this workspace (`"Ticket Pulse IT" <addr>`).
+// Null fromName = inherit the global default (app_settings
+// sendgrid_from_name, falling back to 'Ticket Pulse'). Guaranteed on
+// SendGrid only — Graph sends as the connected mailbox and Exchange
+// rewrites arbitrary from-names to the directory displayName.
+model WorkspaceEmailIdentity {
+  id          Int       @id @default(autoincrement())
+  workspaceId Int       @unique @map("workspace_id")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  fromName    String?   @map("from_name") @db.VarChar(80)
+  updatedBy   String?   @map("updated_by") @db.VarChar(255)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@map("workspace_email_identities")
 }
 
 model NotificationEmailBlock {

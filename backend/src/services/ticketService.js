@@ -13,6 +13,7 @@ import ticketThreadRepository from './ticketThreadRepository.js';
 import ticketLifecycleNotificationService from './ticketLifecycleNotificationService.js';
 import requesterRepository from './requesterRepository.js';
 import sendgridNotificationService from './sendgridNotificationService.js';
+import { resolveFromName } from './workspaceEmailIdentityService.js';
 import mirrorService from './mirrorService.js';
 import { getFreshServiceDetail } from '../integrations/freshservice.js';
 import attachmentService from './attachmentService.js';
@@ -3305,6 +3306,7 @@ class TicketService {
       to: recipients,
       subject: `FW: ${ticket.subject || 'Ticket'} [${ref}]`,
       html,
+      fromName: await resolveFromName(workspaceId),
     });
 
     const now = new Date();
@@ -3352,6 +3354,9 @@ class TicketService {
     let text = entry.bodyText || stripHtml(entry.bodyHtml) || '';
     if (signature) ({ html, text } = appendSignatureToEmail({ html, text }, signature));
     const dedupeKey = `native-reply:${entry.id}`;
+    // Workspace sender identity (Phase EB): guaranteed on the SendGrid
+    // fallback, best-effort on Graph (Exchange rewrites to the mailbox name).
+    const fromName = await resolveFromName(ticket.workspaceId);
     // Graph simple attach tops out at ~3 MB per file; bigger ones stay
     // download-only in Ticket Pulse (the thread still lists them).
     const mailableAttachments = attachments
@@ -3377,6 +3382,7 @@ class TicketService {
             subject,
             html,
             attachments: mailableAttachments,
+            fromName,
           });
           if (sent?.internetMessageId) {
             await prisma.ticketThreadEntry.update({
@@ -3418,6 +3424,7 @@ class TicketService {
         subject,
         html,
         text: `${text}\n\n— ${entry.actorName || 'Ticket Pulse'} · ${ref}`,
+        fromName,
       });
       await prisma.notificationDelivery.create({
         data: {

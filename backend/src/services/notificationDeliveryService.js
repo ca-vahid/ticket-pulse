@@ -2,6 +2,7 @@ import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { sendAssignmentEmail, sendEmail } from './sendgridNotificationService.js';
 import { placeVoiceCall, sendSms, sendWhatsApp } from './twilioNotificationService.js';
+import { resolveFromName } from './workspaceEmailIdentityService.js';
 
 function payloadValue(payload, key) {
   return payload && typeof payload === 'object' ? payload[key] : null;
@@ -37,12 +38,16 @@ async function sendDelivery(delivery) {
   if (delivery.channel === 'email') {
     const toRecipients = listFromDelivery(delivery, 'toRecipients', delivery.recipient ? [delivery.recipient] : []);
     const hasWorkflowBody = delivery.htmlBody || delivery.textBody || payloadValue(delivery.payload, 'htmlBody');
+    // Per-workspace From display name (Phase EB); falls back to the global
+    // default inside resolveFromName when the workspace has no override.
+    const fromName = await resolveFromName(delivery.workspaceId ?? null);
     if (hasWorkflowBody || toRecipients.length > 1 || delivery.ccRecipients?.length || delivery.bccRecipients?.length) {
       return sendEmail({
         to: toRecipients,
         cc: listFromDelivery(delivery, 'ccRecipients'),
         bcc: listFromDelivery(delivery, 'bccRecipients'),
         from: delivery.fromAddress || payloadValue(delivery.payload, 'fromAddress'),
+        fromName,
         subject: buildEmailSubject(delivery),
         html: delivery.htmlBody || payloadValue(delivery.payload, 'htmlBody') || payloadValue(delivery.payload, 'html'),
         text: message,
@@ -57,6 +62,7 @@ async function sendDelivery(delivery) {
       to: delivery.recipient,
       subject: buildEmailSubject(delivery),
       body: message,
+      fromName,
     });
   }
 

@@ -165,18 +165,29 @@ class GraphMailClient {
    * lets us capture the internetMessageId for reply threading.
    * Requires Mail.Send application permission.
    */
-  async sendMailAsMailbox(mailbox, { to, cc = [], subject, html, attachments = [] }) {
+  async sendMailAsMailbox(mailbox, { to, cc = [], subject, html, attachments = [], fromName = null }) {
     const client = this._getClient();
     const recipients = (Array.isArray(to) ? to : [to]).filter(Boolean)
       .map((address) => ({ emailAddress: { address } }));
     if (recipients.length === 0) throw new Error('Email recipient is required');
 
-    const draft = await client.api(`/users/${mailbox}/messages`).post({
+    const draftPayload = {
       subject,
       body: { contentType: 'HTML', content: html },
       toRecipients: recipients,
       ccRecipients: cc.filter(Boolean).map((address) => ({ emailAddress: { address } })),
-    });
+    };
+    // Best-effort sender display name (Phase EB). Graph sends AS the
+    // mailbox, and Exchange typically rewrites arbitrary from-names to the
+    // directory displayName on delivery — so this is cosmetic-at-best and
+    // harmless when rewritten. Per-workspace names are only guaranteed on
+    // the SendGrid path; the durable Graph-side fix is renaming the mailbox
+    // (e.g. ticketpulse@ -> "Ticket Pulse") in Entra/Exchange.
+    const name = String(fromName || '').trim();
+    if (name) {
+      draftPayload.from = { emailAddress: { address: mailbox, name } };
+    }
+    const draft = await client.api(`/users/${mailbox}/messages`).post(draftPayload);
 
     // Simple file attach caps at ~3 MB per request; larger files need upload
     // sessions, so callers pre-filter (oversized ones stay stored in Ticket Pulse).

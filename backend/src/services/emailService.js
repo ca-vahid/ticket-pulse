@@ -1,6 +1,7 @@
 import nodemailer from 'nodemailer';
 import config from '../config/index.js';
 import logger from '../utils/logger.js';
+import { formatSender } from '../utils/emailSender.js';
 
 /**
  * Email Service
@@ -47,7 +48,13 @@ class EmailService {
 
     try {
       const info = await this.transporter.sendMail({
-        from: config.smtp.fromEmail,
+        // Legacy path (Phase EB): formats the default sender name from env
+        // only — deliberately no app_settings/workspace lookup here. The
+        // modern sends all go through sendgridNotificationService.
+        from: formatSender({
+          name: process.env.SENDGRID_FROM_NAME || 'Ticket Pulse',
+          email: config.smtp.fromEmail,
+        }),
         to,
         subject,
         text: body,

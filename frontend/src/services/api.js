@@ -471,6 +471,14 @@ export const settingsAPI = {
     return await api.get('/settings/email-health');
   },
 
+  getSenderIdentity: async () => {
+    return await api.get('/settings/sender-identity');
+  },
+
+  updateSenderIdentity: async (data) => {
+    return await api.put('/settings/sender-identity', data);
+  },
+
   initialize: async () => {
     return await api.post('/settings/initialize');
   },

@@ -25,6 +25,12 @@ jest.unstable_mockModule('../src/services/twilioNotificationService.js', () => (
   sendWhatsApp: jest.fn(),
 }));
 
+const resolveFromNameMock = jest.fn();
+jest.unstable_mockModule('../src/services/workspaceEmailIdentityService.js', () => ({
+  resolveFromName: resolveFromNameMock,
+  default: { resolveFromName: resolveFromNameMock },
+}));
+
 jest.unstable_mockModule('../src/utils/logger.js', () => ({
   default: {
     warn: jest.fn(),
@@ -41,6 +47,7 @@ describe('notificationDeliveryService', () => {
     jest.clearAllMocks();
     prismaMock.notificationDelivery.update.mockResolvedValue({});
     prismaMock.notificationDelivery.findMany.mockResolvedValue([]);
+    resolveFromNameMock.mockResolvedValue('Ticket Pulse');
   });
 
   test('sends generic workflow email deliveries through SendGrid and marks sent', async () => {
@@ -67,11 +74,13 @@ describe('notificationDeliveryService', () => {
     });
 
     expect(result.success).toBe(true);
+    expect(resolveFromNameMock).toHaveBeenCalledWith(2);
     expect(sendEmailMock).toHaveBeenCalledWith(expect.objectContaining({
       to: ['requester@example.com'],
       subject: 'Ticket received',
       html: '<p>Hello</p>',
       text: 'Hello',
+      fromName: 'Ticket Pulse',
     }));
     expect(prismaMock.notificationDelivery.update).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 1 },
@@ -79,6 +88,31 @@ describe('notificationDeliveryService', () => {
         status: 'sent',
         providerMessageId: 'msg-1',
       }),
+    }));
+  });
+
+  test('passes the workspace sender name to simple assignment emails too', async () => {
+    resolveFromNameMock.mockResolvedValue('Ticket Pulse IT');
+    sendAssignmentEmailMock.mockResolvedValue({ provider: 'sendgrid' });
+
+    const result = await processDelivery({
+      id: 5,
+      workspaceId: 1,
+      channel: 'email',
+      recipient: 'tech@example.com',
+      toRecipients: [],
+      ccRecipients: [],
+      bccRecipients: [],
+      assessedPriority: 'Urgent',
+      provider: 'sendgrid',
+      payload: { message: 'You have a new urgent ticket' },
+    });
+
+    expect(result.success).toBe(true);
+    expect(resolveFromNameMock).toHaveBeenCalledWith(1);
+    expect(sendAssignmentEmailMock).toHaveBeenCalledWith(expect.objectContaining({
+      to: 'tech@example.com',
+      fromName: 'Ticket Pulse IT',
     }));
   });
 
