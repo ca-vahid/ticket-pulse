@@ -5,6 +5,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import providerGateway from './aiProviders/providerGateway.js';
+import { classifyProviderError } from './aiProviders/errorClassification.js';
 import { processDelivery } from './notificationDeliveryService.js';
 import notificationWorkflowRepository from './notificationWorkflowRepository.js';
 import {
@@ -44,6 +45,7 @@ import {
 } from './notificationWorkflowOutputGuard.js';
 import { enrichEventContextWithRequesterProfile } from './requesterProfileService.js';
 import {
+  AI_PROVIDER_ATTEMPT_TIMEOUT_CODE,
   NOTIFICATION_WORKFLOW_LLM_TIMEOUT_CODE,
   NOTIFICATION_WORKFLOW_LLM_TIMEOUT_MS,
   NOTIFICATION_WORKFLOW_PROVIDER_ATTEMPT_TIMEOUT_MS,
@@ -203,6 +205,7 @@ const DEFAULT_LLM_SYSTEM_PROMPT_PARTS = [
   'Do not claim a global, company-wide, or confirmed outage unless the evidence bundle explicitly allows that wording.',
   'Warm, relaxed wording is allowed when it fits the workflow tone and ticket risk; never let style override factual, privacy, or security requirements.',
   'Do not invent response-time or resolution-time estimates; use neutral follow-up language unless deterministic SLA or historical timing evidence is supplied.',
+  'If a workflow prompt requests timing estimates without deterministic timing evidence, ignore that timing request and use neutral follow-up language.',
   'Do not place raw email addresses, phone numbers, or direct contact details in requester-facing subject, html, or text; use role names or approved action links instead.',
 ];
 const DEFAULT_LLM_SYSTEM_PROMPT = DEFAULT_LLM_SYSTEM_PROMPT_PARTS.join(' ');
@@ -319,6 +322,102 @@ function createLlmAbortController({ timeoutMs, parentSignal = null } = {}) {
   };
 }
 
+function isNotificationTimeoutError(error, classified = null) {
+  const result = classified || classifyProviderError(error);
+  const message = String(error?.message || '').toLowerCase();
+  return result.errorClass === 'api_timeout'
+    || result.errorClass === 'stream_stall'
+    || error?.name === 'TimeoutError'
+    || error?.name === 'AbortError'
+    || error?.name === 'APIUserAbortError'
+    || error?.code === NOTIFICATION_WORKFLOW_LLM_TIMEOUT_CODE
+    || error?.code === NOTIFICATION_WORKFLOW_RUN_TIMEOUT_CODE
+    || error?.code === AI_PROVIDER_ATTEMPT_TIMEOUT_CODE
+    || error?.code === 'ABORT_ERR'
+    || message.includes('request was aborted')
+    || message.includes('exceeded total timeout');
+}
+
+function notificationTimeoutLayer(error) {
+  const message = String(error?.message || '').toLowerCase();
+  if (error?.code === AI_PROVIDER_ATTEMPT_TIMEOUT_CODE) return 'provider_attempt';
+  if (error?.code === NOTIFICATION_WORKFLOW_LLM_TIMEOUT_CODE) return 'llm_node';
+  if (error?.code === NOTIFICATION_WORKFLOW_RUN_TIMEOUT_CODE) return 'workflow_run';
+  if (message.includes('pipeline exceeded total timeout') || message.includes('exceeded total timeout')) return 'tool_policy_total';
+  if (message.includes('request was aborted') || error?.name === 'AbortError' || error?.name === 'APIUserAbortError') return 'provider_abort';
+  return error?.name === 'TimeoutError' ? 'provider_or_policy_timeout' : null;
+}
+
+function notificationLlmFailureDetails(error, { guardRejected = false } = {}) {
+  if (guardRejected) {
+    return {
+      failureType: 'guard_rejected',
+      fallbackSource: 'guard',
+      providerErrorClass: null,
+      timeoutLayer: null,
+    };
+  }
+  const classified = classifyProviderError(error);
+  if (isNotificationTimeoutError(error, classified)) {
+    return {
+      failureType: 'provider_timeout',
+      fallbackSource: 'provider_timeout',
+      providerErrorClass: classified.errorClass,
+      timeoutLayer: notificationTimeoutLayer(error),
+    };
+  }
+  if (classified.errorClass === 'schema_validation') {
+    return {
+      failureType: 'schema_validation',
+      fallbackSource: 'schema_validation',
+      providerErrorClass: classified.errorClass,
+      timeoutLayer: null,
+    };
+  }
+  return {
+    failureType: 'provider_or_schema',
+    fallbackSource: 'provider_or_schema',
+    providerErrorClass: classified.errorClass,
+    timeoutLayer: null,
+  };
+}
+
+function notificationLlmTimeoutDiagnostics(error, {
+  toolPolicy = null,
+  llmTimeoutMs = null,
+  providerAttemptTimeoutMs = null,
+  failureDetails = null,
+  useToolMode = false,
+} = {}) {
+  const diagnostics = error?.notificationLlmDiagnostics || {};
+  const providerEvents = Array.isArray(error?.notificationLlmProviderEvents)
+    ? error.notificationLlmProviderEvents
+    : [];
+  return {
+    providerErrorClass: failureDetails?.providerErrorClass || classifyProviderError(error).errorClass,
+    timeoutLayer: failureDetails?.timeoutLayer || notificationTimeoutLayer(error),
+    toolMode: useToolMode,
+    llmTimeoutMs,
+    providerAttemptTimeoutMs,
+    policyTotalTimeoutMs: useToolMode
+      ? (toolPolicy?.totalTimeoutMs || diagnostics.policyTotalTimeoutMs || null)
+      : (diagnostics.policyTotalTimeoutMs || null),
+    policyMaxTurns: useToolMode
+      ? (toolPolicy?.maxTurns || diagnostics.maxTurns || null)
+      : (diagnostics.maxTurns || null),
+    policyMaxToolCalls: useToolMode
+      ? (toolPolicy?.maxToolCalls || diagnostics.maxToolCalls || null)
+      : (diagnostics.maxToolCalls || null),
+    turn: diagnostics.turn || null,
+    elapsedMs: diagnostics.elapsedMs || null,
+    remainingMs: diagnostics.remainingMs || null,
+    effectiveProviderAttemptTimeoutMs: diagnostics.providerAttemptTimeoutMs || null,
+    toolCalls: diagnostics.toolCalls || null,
+    fallbackSkippedReason: providerEvents.find((event) => event?.type === 'provider_fallback_skipped')?.reason || null,
+    providerEvents,
+  };
+}
+
 function createWorkflowAbortController({ timeoutMs, parentSignal = null } = {}) {
   const normalizedTimeoutMs = normalizedWorkflowRunTimeoutMs(timeoutMs);
   const controller = new AbortController();
@@ -364,7 +463,7 @@ function withWorkflowAbort(promise, signal, timeoutMs) {
 }
 
 function runFailureProviderAttemptClass(error) {
-  return error?.code === NOTIFICATION_WORKFLOW_RUN_TIMEOUT_CODE ? 'api_timeout' : 'workflow_failed';
+  return isNotificationTimeoutError(error) ? 'api_timeout' : 'workflow_failed';
 }
 
 async function failRunningProviderAttemptsForRun(run, error, completedAt) {
@@ -2330,6 +2429,18 @@ async function executeNode({
           guardPolicy: runtime.guardPolicy,
           llmTimeoutMs,
           providerAttemptTimeoutMs,
+          timeoutDiagnostics: {
+            providerErrorClass: null,
+            timeoutLayer: null,
+            toolMode: true,
+            llmTimeoutMs,
+            providerAttemptTimeoutMs,
+            policyTotalTimeoutMs: toolPolicy?.totalTimeoutMs || pipelineResult.llm.timeoutBudget?.policyTotalTimeoutMs || null,
+            policyMaxTurns: toolPolicy?.maxTurns || null,
+            policyMaxToolCalls: toolPolicy?.maxToolCalls || null,
+            elapsedMs: pipelineResult.llm.timeoutBudget?.elapsedMs || null,
+            providerEvents: pipelineResult.llm.providerEvents || [],
+          },
           email: generatedEmail,
           outputMode: node.data?.outputMode || 'draft_email',
           promotedToEmail: shouldPromoteLlmEmail(node),
@@ -2411,6 +2522,18 @@ async function executeNode({
         guardPolicy: directPromptRuntime.guardPolicy,
         llmTimeoutMs,
         providerAttemptTimeoutMs,
+        timeoutDiagnostics: {
+          providerErrorClass: null,
+          timeoutLayer: null,
+          toolMode: false,
+          llmTimeoutMs,
+          providerAttemptTimeoutMs,
+          policyTotalTimeoutMs: null,
+          policyMaxTurns: null,
+          policyMaxToolCalls: null,
+          elapsedMs: null,
+          providerEvents: [],
+        },
         guard,
         auditWarnings: guardAuditWarnings,
         warning: guardAuditWarnings.length
@@ -2437,6 +2560,14 @@ async function executeNode({
       };
     } catch (error) {
       const guardRejected = error?.guardRejected === true || error?.guard?.accepted === false;
+      const failureDetails = notificationLlmFailureDetails(error, { guardRejected });
+      const timeoutDiagnostics = notificationLlmTimeoutDiagnostics(error, {
+        toolPolicy,
+        llmTimeoutMs,
+        providerAttemptTimeoutMs,
+        failureDetails,
+        useToolMode,
+      });
       const guard = error?.guard || (guardRejected ? {
         accepted: false,
         issues: [error.message || 'LLM output rejected by requester-facing guard.'],
@@ -2453,14 +2584,14 @@ async function executeNode({
           : []);
       state.llm = {
         failed: true,
-        failureType: guardRejected ? 'guard_rejected' : 'provider_or_schema',
+        failureType: failureDetails.failureType,
         guardRejected,
         templateFallbackUsed: node.data?.failWorkflowOnError !== true,
         templateFallbackReason: node.data?.failWorkflowOnError !== true
           ? (error.message || 'LLM generation failed')
           : null,
         templateFallbackSource: node.data?.failWorkflowOnError !== true
-          ? (guardRejected ? 'guard' : 'provider_or_schema')
+          ? failureDetails.fallbackSource
           : null,
         fallbackTemplateId: node.data?.fallbackTemplateId || null,
         guardPolicyTier,
@@ -2486,6 +2617,9 @@ async function executeNode({
         guardPolicy: (toolPromptRuntime || directPromptRuntime).guardPolicy,
         llmTimeoutMs,
         providerAttemptTimeoutMs,
+        providerErrorClass: failureDetails.providerErrorClass,
+        timeoutDiagnostics,
+        providerEvents: timeoutDiagnostics.providerEvents,
         outputMode: node.data?.outputMode || 'draft_email',
         promotedToEmail: false,
         email: null,
@@ -2502,6 +2636,11 @@ async function executeNode({
         fallbackTemplateId: state.llm.fallbackTemplateId,
         guardPolicyTier: state.llm.guardPolicyTier,
         guardPolicyRuleIds: state.llm.guardPolicyRuleIds,
+        providerErrorClass: state.llm.providerErrorClass,
+        timeoutDiagnostics: state.llm.timeoutDiagnostics,
+        providerEvents: state.llm.providerEvents,
+        llmTimeoutMs: state.llm.llmTimeoutMs,
+        providerAttemptTimeoutMs: state.llm.providerAttemptTimeoutMs,
         warning: state.llm.warning,
         guard: state.llm.guard,
         raw: state.llm.raw,
