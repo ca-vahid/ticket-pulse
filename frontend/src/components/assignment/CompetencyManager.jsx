@@ -735,9 +735,18 @@ function MatrixTab({ onAnalyze }) {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const mappingMap = {};
+  // Competencies minted by the assignment-feedback learner (notes stamped
+  // "Auto-created…") get a visible marker: admins should know which matrix
+  // entries no human ever chose. A manual edit re-saves without the note,
+  // which correctly clears the marker — the human has confirmed it.
+  const autoLearnedMap = {};
   for (const m of mappings) {
     if (!mappingMap[m.technicianId]) mappingMap[m.technicianId] = {};
     mappingMap[m.technicianId][m.competencyCategoryId] = m.proficiencyLevel;
+    if (typeof m.notes === 'string' && m.notes.startsWith('Auto-created')) {
+      if (!autoLearnedMap[m.technicianId]) autoLearnedMap[m.technicianId] = {};
+      autoLearnedMap[m.technicianId][m.competencyCategoryId] = true;
+    }
   }
 
   const selectedTech = technicians.find((t) => t.id === selectedTechId);
@@ -1114,6 +1123,7 @@ function MatrixTab({ onAnalyze }) {
                       {visibleTechnicians.map((tech) => {
                         const level = mappingMap[tech.id]?.[cat.id] || '';
                         const levelInfo = PROFICIENCY_LEVELS.find((l) => l.value === level);
+                        const autoLearned = !!autoLearnedMap[tech.id]?.[cat.id] && !!levelInfo;
                         const isFocused = focusedTechId === tech.id;
                         const isHovered = hoveredTechId === tech.id && !focusedTechId;
                         const isActiveColumn = activeColumnTechId === tech.id;
@@ -1164,9 +1174,15 @@ function MatrixTab({ onAnalyze }) {
                                     ? 'bg-white/75 text-slate-300 ring-1 ring-purple-200'
                                     : `${matrixEditMode ? 'text-slate-200 hover:bg-slate-100' : 'text-slate-200'}`
                               }`}
-                              title={`${cat.depth === 1 ? `${cat.parentName} > ` : ''}${cat.name} × ${tech.name}: ${level || 'not set'} (${matrixEditMode ? 'click to cycle and auto-save' : 'enable edits to change'})`}
+                              title={`${cat.depth === 1 ? `${cat.parentName} > ` : ''}${cat.name} × ${tech.name}: ${level || 'not set'}${autoLearned ? ' — AUTO-LEARNED from assignment feedback, no human set this' : ''} (${matrixEditMode ? 'click to cycle and auto-save' : 'enable edits to change'})`}
                             >
                               {levelInfo ? levelInfo.num : '·'}
+                              {autoLearned && (
+                                <span
+                                  className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-amber-400 ring-2 ring-white"
+                                  aria-label="Auto-learned competency"
+                                />
+                              )}
                             </button>
                           </td>
                         );

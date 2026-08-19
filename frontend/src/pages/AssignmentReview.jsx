@@ -4611,7 +4611,7 @@ export function AssignmentConfigPanel({ workspaceTimezone = 'America/Los_Angeles
         llmModel: 'claude-sonnet-5', maxRecommendations: 3, scoringWeights: null,
         pollForUnassigned: true, pollMaxPerCycle: 5,
         monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60,
-        excludedGroupIds: [], observeOnlyGroupIds: [], autoCategorizeEnabled: false, observeCategoryWritebackEnabled: false,
+        excludedGroupIds: [], observeOnlyGroupIds: [], autoCategorizeEnabled: false, observeCategoryWritebackEnabled: false, competencyFeedbackEnabled: true,
         dailyReviewEnabled: false, dailyReviewRunHour: 18, dailyReviewRunMinute: 5, dailyReviewLookbackDays: 14,
         dailyReviewPreheatEnabled: false,
         priorityAssessmentEnabled: true, priorityWritebackEnabled: true, typeWritebackEnabled: false,
@@ -4672,6 +4672,13 @@ export function AssignmentConfigPanel({ workspaceTimezone = 'America/Los_Angeles
           </div>
         )}
         <ConfigToggle label="Auto-Close Noise Tickets" description="Automatically close/resolve noise and spam tickets in FreshService without admin review" checked={config.autoCloseNoise} onChange={() => setConfig({ ...config, autoCloseNoise: !config.autoCloseNoise })} />
+        <ConfigToggle
+          label="Learn Competencies From Assignments"
+          description="Approved and reassigned tickets strengthen — or auto-create — the assigned technician's competency in the ticket's category (marked with an amber dot in the matrix). Turn off if people outside the team temporarily handle tickets here, so one reassignment can't add them to the skills matrix."
+          checked={config.competencyFeedbackEnabled !== false}
+          onChange={() => setConfig({ ...config, competencyFeedbackEnabled: config.competencyFeedbackEnabled === false })}
+          color="text-amber-600"
+        />
         <div className="py-3">
           <h4 className="font-medium text-sm text-slate-800 mb-1.5">Max Recommendations</h4>
           <p className="text-xs text-slate-500 mb-2">Number of technician recommendations the LLM should provide</p>
