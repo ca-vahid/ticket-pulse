@@ -1295,13 +1295,15 @@ router.put(
  * GET /api/settings/directory/search?q=<term>
  * Entra (GAL) typeahead for adding members. Returns matching directory users
  * with photos + a workspace-aware `alreadyMember` flag so the UI can skip
- * people already on this workspace's roster. Scoped to workspace admins.
+ * people already on this workspace's roster. Reviewer-tier (QA 08-17 #7):
+ * a read-only top-7 typeahead — reviewers manage approval categories and
+ * need it to pick approval managers; admins keep it for member management.
  */
 router.get(
   '/directory/search',
   requireWorkspace,
   requireWorkspaceAccess,
-  requireAdmin,
+  requireReviewer,
   asyncHandler(async (req, res) => {
     const q = (req.query.q || '').trim();
     if (q.length < 2) return res.json({ success: true, data: [] });

@@ -10,7 +10,10 @@ const ALLOWED = {
     // table vocabulary and the server's EMAIL_SANITIZE_OPTIONS.
     'table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th', 'colgroup', 'col', 'caption', 'span', 'img',
   ],
-  ALLOWED_ATTR: ['href', 'target', 'rel', 'colspan', 'rowspan', 'width', 'height', 'align', 'valign', 'style', 'src', 'alt'],
+  // `class` is allowed but filtered to the tp-* namespace in the hook below —
+  // our own markers (tp-data-table on pasted tables, QA 08-17 #1) survive
+  // re-sanitize/re-edit while Office classes (xl65, MsoNormal) are dropped.
+  ALLOWED_ATTR: ['href', 'target', 'rel', 'colspan', 'rowspan', 'width', 'height', 'align', 'valign', 'style', 'src', 'alt', 'class'],
   // DOMPurify runs EVERY attribute value through this, so the non-URI
   // alternatives (bare numbers like colspan="2", scheme-less words) must stay.
   // Schemes: http/https/mailto plus data:image (javascript:, data:text/html
@@ -36,15 +39,30 @@ purifier.addHook('afterSanitizeAttributes', (node) => {
         const sep = decl.indexOf(':');
         if (sep < 1) return null;
         const prop = decl.slice(0, sep).trim().toLowerCase();
-        const value = decl.slice(sep + 1).trim();
+        let value = decl.slice(sep + 1).trim();
         if (!prop || !value || !ALLOWED_STYLE_PROP_RE.test(prop)) return null;
         if (/url\s*\(|expression\s*\(/i.test(value)) return null;
+        // Normalize Office-isms so pasted borders actually render (QA 08-17
+        // #1): `windowtext` is an IE system color browsers/email clients don't
+        // paint, and Excel's hairline `.5pt` widths round down to nothing.
+        value = value
+          .replace(/\bwindowtext\b/gi, '#000')
+          .replace(/(\d*\.?\d+)pt\b/g, (m, n) => (parseFloat(n) < 1 ? '1px' : m));
         return `${prop}: ${value}`;
       })
       .filter(Boolean)
       .join('; ');
     if (kept) node.setAttribute('style', kept);
     else node.removeAttribute('style');
+  }
+  // Class allowlist: only our own tp-* markers survive — pasted Office class
+  // soup (xl65, MsoNormal, WordSection1…) is dropped with its dead styling.
+  if (node.hasAttribute && node.hasAttribute('class')) {
+    const kept = String(node.getAttribute('class') || '')
+      .split(/\s+/)
+      .filter((cls) => /^tp-[\w-]+$/.test(cls));
+    if (kept.length) node.setAttribute('class', kept.join(' '));
+    else node.removeAttribute('class');
   }
   if (node.tagName === 'IMG' && !/^(?:https:|data:image\/)/i.test(node.getAttribute('src') || '')) {
     node.remove();
@@ -60,9 +78,24 @@ export function sanitizeRichHtml(html) {
  * ranges share the shape): conditional comments, Office namespace tags and
  * truly-empty spans go away; mso-* style declarations die in the style
  * allowlist above. Run BEFORE sanitizeRichHtml on clipboard HTML.
+ *
+ * QA 08-17 #1 (rendered table borders): real Excel clipboard HTML carries its
+ * cell borders in a <style> block (`.xl65{border:.5pt solid windowtext}`) and
+ * `class=xl65` hooks — never inline — so the border info used to die right
+ * here at paste. Two DOM passes fix it:
+ *  - class rules from <style> blocks are folded into the matching elements'
+ *    inline styles (existing inline declarations still win), preserving
+ *    Excel's per-cell/partial borders through sanitization;
+ *  - every clipboard-born <table> is stamped `tp-data-table`, the tp-*
+ *    class the sanitizer keeps and `.tp-rich-body` styles at render time.
  */
 export function cleanPastedHtml(html) {
   let out = String(html || '');
+  // Excel guards its <style> content in legacy comment markers
+  // (<style><!-- .xl65{…} --></style>) — unwrap them FIRST or the comment
+  // strip below would eat the border rules before the fold-in pass runs.
+  out = out.replace(/(<style[^>]*>)([\s\S]*?)(<\/style>)/gi,
+    (_m, open, css, close) => open + css.replace(/<!--|-->/g, '') + close);
   // Downlevel-hidden conditional blocks (<!--[if gte mso 9]>…<![endif]-->).
   out = out.replace(/<!--\[if[\s\S]*?<!\[endif\]\s*-->/gi, '');
   // Any remaining comments (Word litters <!--StartFragment--> etc).
@@ -78,6 +111,44 @@ export function cleanPastedHtml(html) {
     prev = out;
     out = out.replace(/<span[^>]*><\/span>/gi, '');
   } while (out !== prev);
+
+  // DOM passes only when the clipboard actually carries tables or CSS —
+  // plain-ish pastes keep the cheap string-only path.
+  if (typeof DOMParser !== 'undefined' && /<(?:table|style)\b/i.test(out)) {
+    const doc = new DOMParser().parseFromString(out, 'text/html');
+
+    // Fold simple `.class { … }` / `td.class { … }` rules into inline styles.
+    // Naive on purpose: Excel/Word emit flat single-class selectors; anything
+    // fancier is skipped and simply dies with the <style> block as before.
+    const classRules = new Map();
+    for (const styleEl of doc.querySelectorAll('style')) {
+      const css = String(styleEl.textContent || '').replace(/\/\*[\s\S]*?\*\//g, '');
+      for (const rule of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+        const decls = rule[2].trim().replace(/;\s*$/, '');
+        if (!decls) continue;
+        for (const rawSelector of rule[1].split(',')) {
+          const match = /^[a-z]{0,10}\.([A-Za-z_][\w-]*)$/i.exec(rawSelector.trim());
+          if (!match) continue;
+          classRules.set(match[1], `${classRules.get(match[1]) || ''}${decls};`);
+        }
+      }
+      styleEl.remove();
+    }
+    if (classRules.size > 0) {
+      for (const el of doc.body.querySelectorAll('[class]')) {
+        let fromClasses = '';
+        for (const cls of el.classList) fromClasses += classRules.get(cls) || '';
+        if (fromClasses) {
+          // Class declarations go FIRST so the element's own inline style,
+          // parsed later, keeps winning — same precedence as real CSS.
+          el.setAttribute('style', fromClasses + (el.getAttribute('style') || ''));
+        }
+      }
+    }
+
+    for (const table of doc.body.querySelectorAll('table')) table.classList.add('tp-data-table');
+    out = doc.body.innerHTML;
+  }
   return out;
 }
 

@@ -133,6 +133,20 @@ describe('approval-category routes are reviewer-tier (FR 08-07 #11)', () => {
     expect(approvalCategoryServiceMock.remove).not.toHaveBeenCalled();
   });
 
+  test('directory search is reviewer-tier too (QA 08-17 #7 — approval-manager picker)', async () => {
+    // q < 2 chars short-circuits to an empty list AFTER the role gate, so this
+    // exercises requireReviewer without needing a live Entra client.
+    const asReviewer = await request(app).get('/settings/directory/search?q=a').set('x-test-role', 'reviewer');
+    expect(asReviewer.status).toBe(200);
+    expect(asReviewer.body).toEqual({ success: true, data: [] });
+
+    const asAdmin = await request(app).get('/settings/directory/search?q=a').set('x-test-role', 'admin');
+    expect(asAdmin.status).toBe(200);
+
+    const asViewer = await request(app).get('/settings/directory/search?q=a');
+    expect(asViewer.status).toBe(403);
+  });
+
   test('sibling settings routes stay ADMIN-gated (reviewers rejected)', async () => {
     // Group membership editing is admin-only — a reviewer must still 403.
     const res = await request(app)

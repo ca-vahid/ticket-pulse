@@ -63,6 +63,7 @@ import {
 import { AnimatePresence, motion } from 'motion/react';
 import { notificationWorkflowAPI, ticketsAPI } from '../../services/api';
 import ConditionGroupBuilder from './ConditionGroupBuilder';
+import EmailChipsInput from '../common/EmailChipsInput';
 import FieldCardNote, { FIELD_CARD_ACCENTS } from '../tickets/FieldCardNote';
 import WorkflowIndex from './WorkflowIndex';
 
@@ -9929,7 +9930,7 @@ export default function NotificationWorkflowsPanel({
     if (selectedNode.type === 'recipient_resolver') {
       const to = selectedNode.data?.to || [];
       const cc = selectedNode.data?.cc || [];
-      const customEmails = (selectedNode.data?.customEmails || []).join(', ');
+      const customEmails = selectedNode.data?.customEmails || [];
       const showCustomEmailInput = to.includes('custom_emails') || customEmails.length > 0;
       const recipientGroups = [
         {
@@ -9975,14 +9976,17 @@ export default function NotificationWorkflowsPanel({
           {showCustomEmailInput && (
             <div>
               <label className="text-xs font-medium uppercase text-gray-500">Custom Emails</label>
-              <input
+              {/* QA 08-18 #1: chips input — the old controlled join/split
+                  round-trip ate the comma on every keystroke. Persistence
+                  contract unchanged: customEmails stays a string array. */}
+              <EmailChipsInput
                 value={customEmails}
-                onChange={(event) => updateNodeData({
-                  customEmails: event.target.value.split(',').map((item) => item.trim()).filter(Boolean),
-                })}
+                onChange={(list) => updateNodeData({ customEmails: list })}
                 placeholder="ops@example.com, lead@example.com"
-                className="mt-1 w-full rounded-md border border-gray-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                label="Custom email recipients"
+                className="mt-1"
               />
+              <p className="mt-1 text-[11px] text-gray-400">Type or paste addresses — commas, semicolons and spaces all separate.</p>
             </div>
           )}
         </div>

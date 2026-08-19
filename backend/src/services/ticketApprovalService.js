@@ -205,6 +205,7 @@ class TicketApprovalService {
     return this._decide(approval, decision, note, {
       via: 'link',
       actorLabel: approval.approverName || approval.approverEmail,
+      actorEmail: approval.approverEmail,
       noteHtml,
     });
   }
@@ -222,6 +223,7 @@ class TicketApprovalService {
     return this._decide(approval, decision, note, {
       via: 'app',
       actorLabel: actor?.name || actor?.email || 'Ticket Pulse user',
+      actorEmail: actor?.email || null,
       noteHtml,
     });
   }
@@ -594,6 +596,7 @@ class TicketApprovalService {
     return this._decide(approval, decision, note, {
       via: 'app',
       actorLabel: actor?.name || actor?.email || approval.approverName || approval.approverEmail,
+      actorEmail: actor?.email || approval.approverEmail,
       changedFrom: approval.status,
     });
   }
@@ -612,7 +615,7 @@ class TicketApprovalService {
     return approval;
   }
 
-  async _decide(approval, decision, note, { via, actorLabel, changedFrom = null, noteHtml = null }) {
+  async _decide(approval, decision, note, { via, actorLabel, actorEmail = null, changedFrom = null, noteHtml = null }) {
     const normalized = String(decision || '').toLowerCase();
     if (!['approved', 'rejected'].includes(normalized)) {
       throw new ValidationError('Decision must be "approved" or "rejected"');
@@ -708,7 +711,7 @@ class TicketApprovalService {
       // QA 08-11 #5: the requester hears about the verdict by email too.
       // Non-fatal — the decision is already persisted.
       try {
-        await this._emailRequesterDecision(ticket, approval, { decision: normalized, note, actorLabel, changedFrom });
+        await this._emailRequesterDecision(ticket, approval, { decision: normalized, note, actorLabel, actorEmail, changedFrom });
       } catch (err) {
         logger.warn(`Approval decision email failed (non-fatal): ${err.message}`);
       }
@@ -768,34 +771,42 @@ class TicketApprovalService {
 
   /**
    * Notify the requester that their approval request was decided (QA 08-11 #5).
-   * Mirrors _emailRequesterClarification's guards: kill-switch, email-shape
-   * check, and skip when the requester decided their own request.
+   * Mirrors _emailRequesterClarification's guards: kill-switch + email-shape
+   * check. QA 08-17 #2: the requester ALWAYS gets the verdict email — even
+   * when they decided their own request (the body says so instead of skipping;
+   * Susan's self-approval test read as "decision emails never arrive").
+   * `actorEmail` is the DECIDING actor, not approval.approverEmail — an admin
+   * deciding on the approver's behalf must not read as a self-decision.
    */
-  async _emailRequesterDecision(ticket, approval, { decision, note = null, actorLabel = null, changedFrom = null } = {}) {
+  async _emailRequesterDecision(ticket, approval, { decision, note = null, actorLabel = null, actorEmail = null, changedFrom = null } = {}) {
     if (process.env.TP_SUPPRESS_APPROVAL_EMAIL === '1') {
       logger.info(`[approval] decision email suppressed (TP_SUPPRESS_APPROVAL_EMAIL) → ${approval.requestedBy}`);
       return { sent: false, reason: 'suppressed' };
     }
     const to = String(approval.requestedBy || '').trim();
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return { sent: false, reason: 'no_requester_email' };
-    // Don't email yourself: the approver decided their own request.
-    if (to.toLowerCase() === String(approval.approverEmail || '').trim().toLowerCase()) {
-      return { sent: false, reason: 'self_decision' };
-    }
+    const isSelf = to.toLowerCase() === String(actorEmail || '').trim().toLowerCase();
     const approved = decision === 'approved';
     const verdictLabel = approved ? 'Approved' : 'Rejected';
     const ref = ticketDisplayRef(ticket);
     const ticketUrl = `${publicBaseUrl()}/tickets/${ticket.id}`;
+    // Subject prefix stays identical for the self variant — inbox filters and
+    // threading keep working; only the body wording changes.
     const subject = `${verdictLabel}: your approval request on ${ticket.subject || 'ticket'} [${ref}]`;
     const esc = (s) => String(s || '').replace(/</g, '&lt;');
     const approver = esc(actorLabel || approval.approverName || approval.approverEmail);
     const verdictHtml = `<span style="color:${approved ? '#059669' : '#dc2626'};font-weight:bold">${verdictLabel.toUpperCase()} ${approved ? '✔' : '✘'}</span>`;
-    const html = [
-      changedFrom
+    const decidedLine = isSelf
+      ? (changedFrom
+        ? `<p>You changed the decision on your own approval request on ticket <b>${ref}</b>: ${verdictHtml}</p>`
+        : `<p>You ${approved ? 'approved' : 'rejected'} your own approval request on ticket <b>${ref}</b>: ${verdictHtml}</p>`)
+      : (changedFrom
         ? `<p>${approver} changed the decision on your approval request on ticket <b>${ref}</b>: ${verdictHtml}</p>`
-        : `<p>${approver} decided your approval request on ticket <b>${ref}</b>: ${verdictHtml}</p>`,
+        : `<p>${approver} decided your approval request on ticket <b>${ref}</b>: ${verdictHtml}</p>`);
+    const html = [
+      decidedLine,
       `<p><b>${esc(ticket.subject || '')}</b></p>`,
-      note?.trim() ? `<p>Their note: “${esc(note.trim())}”</p>` : '',
+      note?.trim() ? `<p>${isSelf ? 'Your note' : 'Their note'}: “${esc(note.trim())}”</p>` : '',
       `<p><a href="${ticketUrl}">Open the ticket</a> to see the full approval trail.</p>`,
     ].join('');
     const { sendTransactionalEmail } = await import('./transactionalEmailService.js');
