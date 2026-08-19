@@ -47,7 +47,10 @@ export default function AiAssignModal({ ticket, onClose, onDone }) {
     setError(null);
     try {
       await assignmentAPI.decide(run.id, decisionData);
-      onDone?.();
+      // Hand the decision to the host page: decide returns BEFORE the FS
+      // write-back lands, so a plain refetch would still show the old
+      // assignee — the host needs the chosen tech to update its row now.
+      onDone?.(decisionData);
       onClose();
     } catch (e) {
       setError(e.response?.data?.message || e.message || 'Decision failed');

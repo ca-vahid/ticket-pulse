@@ -3370,7 +3370,10 @@ export default function TicketDetail() {
           ticket={ticket}
           onClose={() => setAiModalOpen(false)}
           onDone={() => {
-            lastLocalMutationRef.current = Date.now();
+            // No SSE-echo swallow here: the decide endpoint returns before the
+            // FS write-back lands, so this refetch is pre-assignment — the
+            // write-back's ticket-change SSE is what brings the new assignee,
+            // and swallowing it left the page stale until the next sync.
             fetchTicket({ silent: true });
           }}
         />

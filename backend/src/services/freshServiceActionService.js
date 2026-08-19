@@ -18,6 +18,7 @@ import statusService from './statusService.js';
 import notificationPreferenceService from './notificationPreferenceService.js';
 import ticketLifecycleNotificationService from './ticketLifecycleNotificationService.js';
 import { TICKET_ORIGIN, ticketDisplayRef } from '../utils/ticketOrigin.js';
+import { sseManager } from '../routes/sse.routes.js';
 
 const TP_SKILL_OBJECT_TITLE = 'Ticket Pulse Skills';
 const TP_SUBSKILL_OBJECT_TITLE = 'Ticket Pulse Subskills';
@@ -1215,7 +1216,7 @@ class FreshServiceActionService {
             freshserviceTicketId: action.ticketId,
             runId,
           });
-          await this._mirrorLocalAssignment(run, action);
+          await this._mirrorLocalAssignment(run, action, workspaceId);
           const upsertedTicket = await findTicketForNotificationMirror(run.ticketId, {
             freshserviceTicketId: action.ticketId,
             runId,
@@ -1572,6 +1573,7 @@ class FreshServiceActionService {
             });
           });
           logger.info('Native ticket assigned by pipeline (local-only)', { ticketRef: ref, techId: action.techId, runId: run.id });
+          this._broadcastAssignment(workspaceId, updated);
         }
       }
 
@@ -1594,7 +1596,7 @@ class FreshServiceActionService {
     }
   }
 
-  async _mirrorLocalAssignment(run, action) {
+  async _mirrorLocalAssignment(run, action, workspaceId) {
     const assignedTechId = Number(action.techId || run.assignedTechId);
     if (!Number.isFinite(assignedTechId) || assignedTechId <= 0) return;
 
@@ -1608,7 +1610,7 @@ class FreshServiceActionService {
     });
     const assignedBy = serviceAccountNames[0] || 'Ticket Pulse';
 
-    await prisma.ticket.update({
+    const mirrored = await prisma.ticket.update({
       where: { id: run.ticketId },
       data: {
         assignedTechId,
@@ -1626,7 +1628,32 @@ class FreshServiceActionService {
         runId: run.id,
         error: updateError.message,
       });
+      return null;
     });
+
+    if (mirrored) this._broadcastAssignment(workspaceId, mirrored);
+  }
+
+  /**
+   * Live-notify open pages that a pipeline decision landed on the ticket row.
+   * Without this the queue only learns about its OWN apply from the next sync
+   * cycle — the row sat on "Assign" for minutes after the user hit Apply in
+   * the AI modal (QA 08-19, #238146).
+   */
+  _broadcastAssignment(workspaceId, ticket) {
+    try {
+      sseManager.broadcast('ticket-change', {
+        action: 'assigned',
+        workspaceId,
+        ticketId: ticket.id,
+        origin: ticket.origin,
+        displayRef: ticketDisplayRef(ticket),
+        status: ticket.status,
+        assignedTechId: ticket.assignedTechId ?? null,
+      }, workspaceId);
+    } catch (err) {
+      logger.warn(`SSE broadcast failed for ticket ${ticket.id} (non-fatal): ${err.message}`);
+    }
   }
 
   async _resolveTicketPulseLookupFields(client, action, fsConfig) {
