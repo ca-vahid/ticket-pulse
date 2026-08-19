@@ -227,7 +227,7 @@ const DEFAULT_PROMPT_HARDENING_CONTROLS = [
   'no_raw_contact_details_in_generated_copy',
 ];
 const WORKFLOW_GUARDRAIL_GROUPS = {
-  internalReferences: [...HARD_BLOCK_GUARD_CHECKS],
+  internalReferences: [...HARD_BLOCK_GUARD_CHECKS, 'generated_public_links'],
   outageClaims: ['unsupported_outage_claims', 'similar_report_claim_without_evidence'],
   timingClaims: ['unsupported_timing_claims'],
   tone: ['emoji', 'playful_tone'],
