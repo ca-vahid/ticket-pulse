@@ -348,7 +348,7 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
               <TypePill type={ticket.ticketType} full />
               <StatusPill status={ticket.status} tone={statusToneFromDefs(statusDefs, ticket.status)} />
               <PriorityDot priority={ticket.priority} withLabel />
-              {(ticket.frDueBy && !ticket.firstPublicAgentReplyAt && !ticketTerminal && !['Deleted', 'Spam'].includes(ticket.status)) && <SlaChip value={ticket.frDueBy} paused={ticketSlaPaused} />}
+              {(ticket.frDueBy && !ticket.firstPublicAgentReplyAt && !ticketTerminal && !['Deleted', 'Spam'].includes(ticket.status)) && <SlaChip value={ticket.frDueBy} paused={ticketSlaPaused} calendarAware={meta?.slaCalendarAware === true} />}
               {(ticket.tags || []).map((tag) => <TagChip key={tag.id} tag={tag} size="xs" />)}
               {(ticket.impact || ticket.urgency) && (
                 <span className="text-[10px] text-slate-400">
@@ -581,7 +581,7 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                     <dt className="text-slate-400 w-24 flex-shrink-0 pl-[18px]">First response</dt>
                     <dd className="flex items-center gap-1.5 min-w-0">
                       <span className="text-slate-600" title={`${new Date(ticket.frDueBy).toLocaleString()}${isNative ? '' : ' — FreshService owns this date'}`}>{formatDayTime(ticket.frDueBy)}</span>
-                      <SlaTargetChip target={ticket.frDueBy} metAt={ticket.firstPublicAgentReplyAt} status={ticket.status} terminal={ticketTerminal} paused={ticketSlaPaused} kind="response" className="!px-1.5 !text-[10px]" />
+                      <SlaTargetChip target={ticket.frDueBy} metAt={ticket.firstPublicAgentReplyAt} status={ticket.status} terminal={ticketTerminal} paused={ticketSlaPaused} calendarAware={meta?.slaCalendarAware === true} kind="response" className="!px-1.5 !text-[10px]" />
                       {canWrite && (
                         <button
                           onClick={openFullTicket}
@@ -606,7 +606,7 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                       {ticket.dueBy ? (
                         <>
                           <span className="text-slate-600" title={`${new Date(ticket.dueBy).toLocaleString()}${isNative ? '' : ' — FreshService owns this date'}`}>{formatDayTime(ticket.dueBy)}</span>
-                          <SlaTargetChip target={ticket.dueBy} metAt={ticket.resolvedAt || ticket.closedAt} status={ticket.status} terminal={ticketTerminal} paused={ticketSlaPaused} kind="resolution" className="!px-1.5 !text-[10px]" />
+                          <SlaTargetChip target={ticket.dueBy} metAt={ticket.resolvedAt || ticket.closedAt} status={ticket.status} terminal={ticketTerminal} paused={ticketSlaPaused} calendarAware={meta?.slaCalendarAware === true} kind="resolution" className="!px-1.5 !text-[10px]" />
                         </>
                       ) : (
                         <span className="text-slate-300">Not set</span>

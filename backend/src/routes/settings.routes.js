@@ -707,6 +707,46 @@ router.delete(
   }),
 );
 
+// Calendar-aware SLA flag (Phase SLA, QA 08-17 #9): per-workspace opt-in that
+// makes SLA clocks count business minutes only (weekends + holidays pause).
+// Kept as a dedicated settings route rather than widening the global
+// workspace-update whitelist — it is workspace-admin config, not platform
+// admin config.
+router.get(
+  '/sla-calendar',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { default: prisma } = await import('../services/prisma.js');
+    const ws = await prisma.workspace.findUnique({
+      where: { id: req.workspaceId },
+      select: { slaCalendarAware: true },
+    });
+    res.json({ success: true, data: { slaCalendarAware: ws?.slaCalendarAware === true } });
+  }),
+);
+
+router.put(
+  '/sla-calendar',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const enabled = req.body?.slaCalendarAware === true;
+    const { default: prisma } = await import('../services/prisma.js');
+    const ws = await prisma.workspace.update({
+      where: { id: req.workspaceId },
+      data: { slaCalendarAware: enabled },
+      select: { slaCalendarAware: true },
+    });
+    // dueDatesFor caches the flag (60s) — new tickets must see the change now.
+    const { default: slaPolicyService } = await import('../services/slaPolicyService.js');
+    slaPolicyService.clearCalendarFlagCache();
+    res.json({ success: true, data: { slaCalendarAware: ws.slaCalendarAware === true } });
+  }),
+);
+
 // Ticket-type registry: the per-workspace catalogue of ticket types (names,
 // LLM descriptions, FS mapping, pill styling). Read is open to any workspace
 // member AND to agent-role technicians (Phase A1 agent-allowed tier — the

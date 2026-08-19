@@ -2713,7 +2713,7 @@ export default function TicketDetail() {
                           ) : (
                             <span className="ml-auto text-slate-300">Not set</span>
                           )}
-                          {ticket.frDueBy && <SlaTargetChip target={ticket.frDueBy} metAt={ticket.firstPublicAgentReplyAt} status={ticket.status} terminal={ticketTerminal} paused={ticketSlaPaused} kind="response" />}
+                          {ticket.frDueBy && <SlaTargetChip target={ticket.frDueBy} metAt={ticket.firstPublicAgentReplyAt} status={ticket.status} terminal={ticketTerminal} paused={ticketSlaPaused} calendarAware={meta?.slaCalendarAware === true} kind="response" />}
                           {canWrite && (
                             <DueDateEditor
                               label="First response"
@@ -2738,7 +2738,7 @@ export default function TicketDetail() {
                           ) : (
                             <span className="ml-auto text-slate-300">Not set</span>
                           )}
-                          {ticket.dueBy && <SlaTargetChip target={ticket.dueBy} metAt={ticket.resolvedAt || ticket.closedAt} status={ticket.status} terminal={ticketTerminal} paused={ticketSlaPaused} kind="resolution" />}
+                          {ticket.dueBy && <SlaTargetChip target={ticket.dueBy} metAt={ticket.resolvedAt || ticket.closedAt} status={ticket.status} terminal={ticketTerminal} paused={ticketSlaPaused} calendarAware={meta?.slaCalendarAware === true} kind="resolution" />}
                           {canWrite && (
                             <DueDateEditor
                               label="Resolution"

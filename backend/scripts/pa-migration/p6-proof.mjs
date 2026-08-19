@@ -23,7 +23,8 @@ if (isFsTaxonomySyncWorkspace(ws.id)) {
 }
 
 const newCats = await prisma.$queryRawUnsafe(
-  'SELECT id, name FROM competency_categories WHERE workspace_id=$1 AND source=$2 AND is_active=true', ws.id, SOURCE,
+  // ws5's taxonomy predates this migration (discovered live in prod) — any active category counts, not just SOURCE-stamped ones
+  'SELECT id, name FROM competency_categories WHERE workspace_id=$1 AND is_active=true', ws.id,
 );
 if (newCats.length === 0) throw new Error('no active PA categories — run Phase 1 first');
 const newIds = new Set(newCats.map((c) => Number(c.id)));

@@ -529,6 +529,9 @@ export const settingsAPI = {
   deleteSlaPolicy: (priority, ticketTypeId = null) => api.delete(`/settings/sla-policies/${priority}`, {
     params: ticketTypeId ? { ticketTypeId } : {},
   }),
+  // Calendar-aware SLA flag (weekends + holidays pause the clocks)
+  getSlaCalendar: () => api.get('/settings/sla-calendar'),
+  updateSlaCalendar: (slaCalendarAware) => api.put('/settings/sla-calendar', { slaCalendarAware }),
   // Ticket-type registry (per-workspace type catalogue)
   getTicketTypes: () => api.get('/settings/ticket-types'),
   createTicketType: (data) => api.post('/settings/ticket-types', data),

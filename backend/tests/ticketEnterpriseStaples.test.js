@@ -4,6 +4,10 @@ import { jest } from '@jest/globals';
 
 const prismaMock = {
   slaPolicy: { findMany: jest.fn(), findFirst: jest.fn(), upsert: jest.fn(), deleteMany: jest.fn() },
+  // Calendar-aware SLAs (Phase SLA): workspace flag + business calendar rows.
+  workspace: { findUnique: jest.fn() },
+  businessHour: { findMany: jest.fn() },
+  holiday: { findMany: jest.fn() },
   ticketMacro: { findMany: jest.fn(), findFirst: jest.fn(), create: jest.fn(), update: jest.fn(), delete: jest.fn() },
   customFieldDefinition: { findMany: jest.fn(), findFirst: jest.fn(), create: jest.fn(), update: jest.fn(), delete: jest.fn() },
   ticket: { findFirst: jest.fn(), update: jest.fn(), findUnique: jest.fn().mockResolvedValue(null) },
@@ -38,7 +42,20 @@ const { default: slaPolicyService } = await import('../src/services/slaPolicySer
 const { default: ticketMacroService } = await import('../src/services/ticketMacroService.js');
 const { default: customFieldService } = await import('../src/services/customFieldService.js');
 
-beforeEach(() => jest.clearAllMocks());
+beforeEach(() => {
+  jest.clearAllMocks();
+  // The workspace calendar flag is TTL-cached inside the service — reset it so
+  // each test's workspace.findUnique mock is authoritative.
+  slaPolicyService.clearCalendarFlagCache();
+  prismaMock.workspace.findUnique.mockResolvedValue({ slaCalendarAware: false });
+  prismaMock.businessHour.findMany.mockResolvedValue([]);
+  prismaMock.holiday.findMany.mockResolvedValue([]);
+});
+
+// Mon–Fri 09:00–17:00 Pacific (the seeded default calendar).
+const WEEKDAYS_9_5 = [1, 2, 3, 4, 5].map((dayOfWeek) => ({
+  dayOfWeek, startTime: '09:00', endTime: '17:00', isEnabled: true, timezone: 'America/Los_Angeles',
+}));
 
 describe('SLA policies', () => {
   test('dueDatesFor computes clocks from the active policy', async () => {
@@ -58,6 +75,67 @@ describe('SLA policies', () => {
     await expect(slaPolicyService.upsert(1, { priority: 9, resolveMinutes: 60 })).rejects.toThrow(/1–4/);
     await expect(slaPolicyService.upsert(1, { priority: 2 })).rejects.toThrow(/at least one/i);
     await expect(slaPolicyService.upsert(1, { priority: 2, resolveMinutes: 2 })).rejects.toThrow(/between/i);
+  });
+
+  test('upsert rejects unknown calendarMode values', async () => {
+    await expect(slaPolicyService.upsert(1, { priority: 2, resolveMinutes: 60, calendarMode: '24-7' }))
+      .rejects.toThrow(/calendarMode/);
+  });
+});
+
+// Phase SLA (QA 08-17 #9): effective-mode matrix — per-policy calendarMode
+// override × workspace slaCalendarAware flag. Friday 2026-08-21 16:00 PDT
+// (23:00Z) + 120m resolve: wall-clock → Fri 18:00 PDT (Sat 01:00Z); calendar
+// → 60m Fri + 60m Mon = Mon 2026-08-24 10:00 PDT (17:00Z).
+describe('SLA policies — calendar-aware mode matrix', () => {
+  const FROM = new Date('2026-08-21T23:00:00.000Z');
+  const WALL = '2026-08-22T01:00:00.000Z';
+  const CAL = '2026-08-24T17:00:00.000Z';
+  const policy = (calendarMode) => ({ firstResponseMinutes: null, resolveMinutes: 120, calendarMode });
+  const withCalendarRows = () => prismaMock.businessHour.findMany.mockResolvedValue(WEEKDAYS_9_5);
+
+  test('inherit + workspace OFF → wall-clock', async () => {
+    prismaMock.slaPolicy.findFirst.mockResolvedValue(policy('inherit'));
+    withCalendarRows();
+    expect((await slaPolicyService.dueDatesFor(1, 3, FROM)).dueBy.toISOString()).toBe(WALL);
+  });
+
+  test('inherit + workspace ON → business calendar (weekend skipped)', async () => {
+    prismaMock.workspace.findUnique.mockResolvedValue({ slaCalendarAware: true });
+    prismaMock.slaPolicy.findFirst.mockResolvedValue(policy('inherit'));
+    withCalendarRows();
+    expect((await slaPolicyService.dueDatesFor(1, 3, FROM)).dueBy.toISOString()).toBe(CAL);
+  });
+
+  test('always_on + workspace ON → wall-clock (the 24/7 escape hatch)', async () => {
+    prismaMock.workspace.findUnique.mockResolvedValue({ slaCalendarAware: true });
+    prismaMock.slaPolicy.findFirst.mockResolvedValue(policy('always_on'));
+    withCalendarRows();
+    expect((await slaPolicyService.dueDatesFor(1, 4, FROM)).dueBy.toISOString()).toBe(WALL);
+  });
+
+  test('calendar + workspace OFF → business calendar (per-policy force-on)', async () => {
+    prismaMock.slaPolicy.findFirst.mockResolvedValue(policy('calendar'));
+    withCalendarRows();
+    expect((await slaPolicyService.dueDatesFor(1, 3, FROM)).dueBy.toISOString()).toBe(CAL);
+  });
+
+  test('workspace ON but zero enabled business-hour days → wall-clock fallback', async () => {
+    prismaMock.workspace.findUnique.mockResolvedValue({ slaCalendarAware: true });
+    prismaMock.slaPolicy.findFirst.mockResolvedValue(policy('inherit'));
+    // businessHour.findMany stays [] from beforeEach.
+    expect((await slaPolicyService.dueDatesFor(1, 3, FROM)).dueBy.toISOString()).toBe(WALL);
+  });
+
+  test('both clocks share one calendar and both skip the weekend', async () => {
+    prismaMock.workspace.findUnique.mockResolvedValue({ slaCalendarAware: true });
+    prismaMock.slaPolicy.findFirst.mockResolvedValue({ firstResponseMinutes: 30, resolveMinutes: 120, calendarMode: 'inherit' });
+    withCalendarRows();
+    const dates = await slaPolicyService.dueDatesFor(1, 3, FROM);
+    expect(dates.frDueBy.toISOString()).toBe('2026-08-21T23:30:00.000Z'); // fits inside Friday
+    expect(dates.dueBy.toISOString()).toBe(CAL);
+    // One calendar load for the pair of targets.
+    expect(prismaMock.businessHour.findMany).toHaveBeenCalledTimes(1);
   });
 });
 

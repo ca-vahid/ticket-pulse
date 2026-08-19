@@ -1803,6 +1803,9 @@ class TicketService {
 
     return {
       nativeTicketingEnabled: workspace.nativeTicketingEnabled === true,
+      // Calendar-aware SLAs (Phase SLA): lets SlaChip/SlaTargetChip explain
+      // that live countdowns run on the business-hours clock.
+      slaCalendarAware: workspace.slaCalendarAware === true,
       // Phase 8a: per-workspace status registry (active only). Shape changed
       // from string[] to rich objects — audited 2026-08-05: NOTHING consumed
       // meta.statuses (frontend constant sets are still hardcoded until 8b),

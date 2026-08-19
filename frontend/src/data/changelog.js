@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.5.03-preview';
+export const APP_VERSION = '3.5.04-preview';
 
 export const changelog = [
+  {
+    version: '3.5.04-preview',
+    date: 'August 19, 2026',
+    entries: [
+      { type: 'new', html: '<strong>📅 SLA clocks that respect weekends & holidays</strong> — turn on “Calendar-aware SLAs” in Settings → Ticket Ops and due dates count business hours only: a ticket created Friday afternoon is due Monday, not Sunday. It uses your Settings → Business Hours & Holidays calendar per workspace, each priority can be pinned to 24/7 (keep Urgent always-on), and SLA chips show a “business-hours clock” hint. The clock already paused on Pending — now weekends and holidays pause it too. Off by default; flip it per workspace when ready. (QA 08-17 #9)' },
+      { type: 'improved', html: '<strong>🧰 Safe rollout for existing tickets</strong> — an admin backfill recomputes open SLA-stamped due dates under the new calendar (manual due dates and closed tickets untouched) and pre-arms breach-notification bookkeeping so the switch never triggers an alert burst.' },
+    ],
+  },
   {
     version: '3.5.03-preview',
     date: 'August 19, 2026',

@@ -77,7 +77,8 @@ if (!cfg) {
 
 // ---- 2. sanity: the taxonomy must exist before enabling ----
 const cats = await prisma.$queryRawUnsafe(
-  'SELECT count(*)::int n FROM competency_categories WHERE workspace_id=$1 AND source=$2 AND is_active=true', ws.id, SOURCE,
+  // ws5's taxonomy predates this migration — any active category satisfies the guard
+  'SELECT count(*)::int n FROM competency_categories WHERE workspace_id=$1 AND is_active=true', ws.id,
 );
 if (cats[0].n === 0) throw new Error('HARD BLOCK: no active PA categories — auto-categorize writes canonical ids only; run Phase 1 first');
 console.log(`\ntaxonomy present: ${cats[0].n} active PA categories`);
@@ -92,7 +93,7 @@ const PA_SECTION = `
 This workspace serves the Project Accounting team, not general IT. Tickets are business/finance requests about project and proposal administration: opening and configuring projects, setting up proposals and bids, cost codes and budgets, project numbers, timesheet/project-admin corrections, and related correspondence. Apply everything above (availability, competency, priority, briefing rules) unchanged, plus the guidance below.
 
 ### Category selection guidance
-The taxonomy here is FLAT: top-level categories only, no subcategories. Select exactly ONE existing top-level category from get_ticket_categories. Leave the subcategory unset — do not populate internalSubcategoryId and OMIT subcategoryFit entirely (do not send "none" for a taxonomy that has no subcategories).
+The taxonomy is two-level: top-level categories (Project Setup, Proposal Setup, General / Other) with REGION subcategories (Quebec, Chile, Other) under the two main ones. Select exactly ONE existing top-level category from get_ticket_categories; when the ticket clearly concerns a region (Quebec or Chile offices/projects), also select that region subcategory — otherwise pick the "Other" subcategory of the chosen top-level. General / Other has no subcategories; leave the subcategory unset there.
 
 - **Project Setup** — the request is about creating or changing a PROJECT that already won/exists: new project numbers or codes, opening a project in the ERP, phases/tasks/WBS, project budgets after award, cost-code or charge-code setup and corrections, changes to an existing project's configuration, and timesheet/charging issues tied to a specific project.
 - **Proposal Setup** — the request is about PRE-AWARD work: setting up a proposal, bid, RFP response, or pursuit; proposal/opportunity numbers; pre-award budgets or estimates; and converting a won proposal into a project (the conversion request itself belongs here).

@@ -3,7 +3,7 @@ import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, test } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import {
-  AgentFirstName, ExternalChip, FeaturedFieldChip, MirrorChip, OriginChip, PersonAvatar, PriorityDot, SlaTargetChip, StatusPill, formatDay, formatDayTime, initials, slaTargetState, timeAgo,
+  AgentFirstName, ExternalChip, FeaturedFieldChip, MirrorChip, OriginChip, PersonAvatar, PriorityDot, SlaChip, SlaTargetChip, StatusPill, formatDay, formatDayTime, initials, slaTargetState, timeAgo,
 } from './ticketUi';
 
 afterEach(cleanup);
@@ -140,6 +140,30 @@ describe('ticketUi components', () => {
     render(<SlaTargetChip target={target} metAt="2026-07-29T21:00:00Z" status="Closed" kind="resolution" />);
     expect(screen.getByText('Resolved late')).toBeInTheDocument();
     expect(screen.queryByText(/Overdue/)).not.toBeInTheDocument();
+  });
+
+  // Phase SLA (QA 08-17 #9) — calendar-aware workspaces explain the clock.
+  test('SlaChip live countdown carries the business-hours tooltip only when calendarAware', () => {
+    const futureTarget = new Date(Date.now() + 3 * 24 * 3600 * 1000).toISOString();
+    render(<SlaChip value={futureTarget} calendarAware />);
+    expect(screen.getByText(/left/)).toHaveAttribute('title', expect.stringContaining('Business-hours clock'));
+    cleanup();
+    render(<SlaChip value={futureTarget} />);
+    expect(screen.getByText(/left/)).not.toHaveAttribute('title');
+    cleanup();
+    // Paused keeps its own explanation regardless of the calendar flag.
+    render(<SlaChip value={futureTarget} paused calendarAware />);
+    expect(screen.getByText('Paused')).toHaveAttribute('title', expect.stringContaining('paused while the ticket is pending'));
+  });
+
+  test('SlaTargetChip threads calendarAware to the live chip but not to frozen outcomes', () => {
+    const futureTarget = new Date(Date.now() + 3 * 24 * 3600 * 1000).toISOString();
+    render(<SlaTargetChip target={futureTarget} metAt={null} status="Open" kind="resolution" calendarAware />);
+    expect(screen.getByText(/left/)).toHaveAttribute('title', expect.stringContaining('Business-hours clock'));
+    cleanup();
+    render(<SlaTargetChip target="2026-07-28T13:00:00Z" metAt="2026-07-28T09:00:00Z" status="Open" kind="response" calendarAware />);
+    // Frozen outcome keeps its met/late tooltip — no clock-mode noise.
+    expect(screen.getByText('Met')).toHaveAttribute('title', expect.stringContaining('before the'));
   });
 
   test('SlaTargetChip keeps the live countdown for open tickets past due', () => {
