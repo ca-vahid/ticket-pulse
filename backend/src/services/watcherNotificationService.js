@@ -62,12 +62,20 @@ class WatcherNotificationService {
         where: { workspaceId: ticket.workspaceId, isEnabled: true, mode: { in: ['send', 'both'] } },
         orderBy: { id: 'asc' },
       });
+      // Workspace sender identity (Phase EB): guaranteed on SendGrid,
+      // best-effort on Graph (Exchange rewrites to the mailbox name).
+      const { resolveFromName } = await import('./workspaceEmailIdentityService.js');
+      const fromName = await resolveFromName(ticket.workspaceId);
       const { default: graphMailClient } = await import('../integrations/graphMailClient.js');
       if (connection && graphMailClient.isConfigured()) {
-        await graphMailClient.sendMailAsMailbox(connection.address, { to: recipients, subject, html });
+        await graphMailClient.sendMailAsMailbox(connection.address, {
+          to: recipients, subject, html, fromName,
+        });
       } else {
         const { default: sendgrid } = await import('./sendgridNotificationService.js');
-        await sendgrid.sendEmail({ to: recipients, subject, html });
+        await sendgrid.sendEmail({
+          to: recipients, subject, html, fromName,
+        });
       }
       logger.info(`Watcher notification (${eventKind}) sent for ticket ${ticket.id} to ${recipients.length} watcher(s)`);
       return { sent: recipients.length };

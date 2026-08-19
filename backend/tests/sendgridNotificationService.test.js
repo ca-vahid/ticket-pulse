@@ -132,6 +132,84 @@ describe('sendgridNotificationService', () => {
     expect(axiosPostMock).not.toHaveBeenCalled();
   });
 
+  test('passes the sender display name natively as from.name on the API path', async () => {
+    settingsRepositoryMock.getSendGridConfig.mockResolvedValue({
+      apiKey: 'SG.test',
+      fromEmail: 'ticketpulse@example.com',
+      configured: true,
+      mode: 'api',
+    });
+    axiosPostMock.mockResolvedValue({ headers: {} });
+
+    await sendEmail({
+      to: 'requester@example.com',
+      subject: 'Ticket arrived',
+      text: 'Hello',
+      fromName: 'Ticket Pulse IT',
+    });
+
+    expect(axiosPostMock).toHaveBeenCalledWith(
+      'https://api.sendgrid.com/v3/mail/send',
+      expect.objectContaining({
+        // Name rides in from.name — never stuffed into from.email.
+        from: { email: 'ticketpulse@example.com', name: 'Ticket Pulse IT' },
+      }),
+      expect.anything(),
+    );
+  });
+
+  test('formats the sender as an RFC 5322 mailbox string on the SMTP path', async () => {
+    settingsRepositoryMock.getSendGridConfig.mockResolvedValue({
+      apiKey: null,
+      fromEmail: null,
+      smtpConfigured: true,
+      smtpHost: 'smtp.sendgrid.net',
+      smtpPort: 587,
+      smtpUser: 'apikey',
+      smtpPassword: 'smtp-secret',
+      smtpFromEmail: 'ticketpulse@example.com',
+      configured: true,
+      mode: 'smtp',
+    });
+    sendMailMock.mockResolvedValue({ messageId: 'smtp-message-2' });
+
+    await sendEmail({
+      to: 'requester@example.com',
+      subject: 'Ticket arrived',
+      text: 'Hello',
+      fromName: 'Ticket Pulse Accounting',
+    });
+
+    expect(sendMailMock).toHaveBeenCalledWith(expect.objectContaining({
+      from: '"Ticket Pulse Accounting" <ticketpulse@example.com>',
+    }));
+  });
+
+  test('falls back to the global default name when the caller passes none', async () => {
+    settingsRepositoryMock.getSendGridConfig.mockResolvedValue({
+      apiKey: 'SG.test',
+      fromEmail: 'ticketpulse@example.com',
+      fromName: 'Ticket Pulse',
+      configured: true,
+      mode: 'api',
+    });
+    axiosPostMock.mockResolvedValue({ headers: {} });
+
+    await sendEmail({
+      to: 'requester@example.com',
+      subject: 'Ticket arrived',
+      text: 'Hello',
+    });
+
+    expect(axiosPostMock).toHaveBeenCalledWith(
+      'https://api.sendgrid.com/v3/mail/send',
+      expect.objectContaining({
+        from: { email: 'ticketpulse@example.com', name: 'Ticket Pulse' },
+      }),
+      expect.anything(),
+    );
+  });
+
   test('rejects send attempts when no email provider configuration is available', async () => {
     settingsRepositoryMock.getSendGridConfig.mockResolvedValue({
       apiKey: null,

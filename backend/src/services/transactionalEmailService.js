@@ -1,6 +1,7 @@
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import emailHealthService from './emailHealthService.js';
+import { resolveFromName } from './workspaceEmailIdentityService.js';
 
 /**
  * Shared one-off ("transactional") email transport. Prefers sending as a
@@ -15,6 +16,11 @@ export async function sendTransactionalEmail({ workspaceId, to, subject, html, l
   const recipients = Array.isArray(to) ? to.filter(Boolean) : [to].filter(Boolean);
   if (recipients.length === 0) return { sent: false, reason: 'no_recipient' };
   try {
+    // Per-workspace From display name (Phase EB) — guaranteed on the
+    // SendGrid fallback; best-effort on Graph (Exchange usually rewrites it
+    // to the mailbox displayName). Sends without a workspaceId (sync-health
+    // and other global notices) resolve to the global default.
+    const fromName = await resolveFromName(workspaceId ?? null);
     const connection = await prisma.mailboxConnection.findFirst({
       where: { workspaceId, isEnabled: true, mode: { in: ['send', 'both'] } },
       orderBy: { id: 'asc' },
@@ -25,7 +31,9 @@ export async function sendTransactionalEmail({ workspaceId, to, subject, html, l
         // Graph bypasses sendgridNotificationService, so record its health here.
         const startedAt = Date.now();
         try {
-          await graphMailClient.sendMailAsMailbox(connection.address, { to: recipients, subject, html });
+          await graphMailClient.sendMailAsMailbox(connection.address, {
+            to: recipients, subject, html, fromName,
+          });
           await emailHealthService.recordSuccess({
             workspaceId, channel: 'email', context: label, provider: 'msgraph',
             durationMs: Date.now() - startedAt, recipients,
@@ -42,7 +50,9 @@ export async function sendTransactionalEmail({ workspaceId, to, subject, html, l
     }
     // sendgridNotificationService.sendEmail records its own health event.
     const { default: sendgrid } = await import('./sendgridNotificationService.js');
-    await sendgrid.sendEmail({ to: recipients, subject, html, context: label, workspaceId });
+    await sendgrid.sendEmail({
+      to: recipients, subject, html, fromName, context: label, workspaceId,
+    });
     return { sent: true, via: 'sendgrid' };
   } catch (err) {
     logger.warn(`Transactional ${label} send failed (non-fatal): ${err.message}`);

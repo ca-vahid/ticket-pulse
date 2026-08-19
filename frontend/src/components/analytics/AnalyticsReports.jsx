@@ -4,6 +4,7 @@ import {
 } from 'lucide-react';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { analyticsAPI, ticketsAPI } from '../../services/api';
+import MetricHint from './MetricHint';
 
 /**
  * Analytics → Reports (feedback 07-14): saved report snapshots for weekly
@@ -331,24 +332,33 @@ function ReportView({ report, onDelete, onRename = null }) {
         </div>
       </div>
 
-      {/* KPI row */}
+      {/* KPI row — each tile carries a glossary hint (QA 08-17 #5); the ⓘ is
+          print-hidden so exported PDFs stay clean. */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <div className="rounded-lg border border-slate-200 bg-white p-3">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Created</p>
+          <p className="flex items-center justify-between gap-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            Created <MetricHint metric="reportCreated" />
+          </p>
           <p className="text-2xl font-bold tabular-nums text-slate-900">{d.totals?.created ?? '—'}</p>
           <Delta pct={d.totals?.deltaPct} />
         </div>
         <div className="rounded-lg border border-slate-200 bg-white p-3">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Prior period</p>
+          <p className="flex items-center justify-between gap-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            Prior period <MetricHint metric="reportPriorPeriod" />
+          </p>
           <p className="text-2xl font-bold tabular-nums text-slate-900">{d.totals?.previousPeriod ?? '—'}</p>
           <span className="text-xs text-slate-400">same length, immediately before</span>
         </div>
         <div className="rounded-lg border border-slate-200 bg-white p-3">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Resolved in window</p>
+          <p className="flex items-center justify-between gap-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            Resolved in window <MetricHint metric="reportResolvedInWindow" />
+          </p>
           <p className="text-2xl font-bold tabular-nums text-slate-900">{d.totals?.resolvedInWindow ?? '—'}</p>
         </div>
         <div className="rounded-lg border border-slate-200 bg-white p-3">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Avg resolution</p>
+          <p className="flex items-center justify-between gap-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            Avg resolution <MetricHint metric="reportAvgResolution" />
+          </p>
           <p className="text-2xl font-bold tabular-nums text-slate-900">{d.totals?.avgResolutionHours != null ? `${d.totals.avgResolutionHours}h` : '—'}</p>
           <span className="text-xs text-slate-400">of tickets created + resolved in window</span>
         </div>

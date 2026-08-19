@@ -3,6 +3,7 @@ import nodemailer from 'nodemailer';
 import settingsRepository from './settingsRepository.js';
 import emailHealthService from './emailHealthService.js';
 import { ExternalAPIError, ValidationError } from '../utils/errors.js';
+import { formatSender, sanitizeFromName } from '../utils/emailSender.js';
 
 function trim(value) {
   const text = String(value || '').trim();
@@ -84,6 +85,7 @@ async function sendViaSendgridApi({
   ccRecipients,
   bccRecipients,
   from,
+  fromName,
   replyTo,
   emailSubject,
   htmlBody,
@@ -101,9 +103,15 @@ async function sendViaSendgridApi({
   if (textBody) content.push({ type: 'text/plain', value: textBody });
   if (htmlBody) content.push({ type: 'text/html', value: htmlBody });
 
+  // SendGrid v3 supports from.name natively — never stuff the display name
+  // into from.email (that breaks sender verification matching). Callers
+  // without a workspace-resolved name fall back to the global default that
+  // getSendGridConfig already carries.
+  const fromAddress = trim(from) || sendgridConfig.fromEmail;
+  const senderName = sanitizeFromName(fromName) || sanitizeFromName(sendgridConfig.fromName);
   const payload = {
     personalizations: [personalization],
-    from: { email: trim(from) || sendgridConfig.fromEmail },
+    from: senderName ? { email: fromAddress, name: senderName } : { email: fromAddress },
     subject: emailSubject,
     content,
   };
@@ -136,6 +144,7 @@ async function sendViaSmtp({
   ccRecipients,
   bccRecipients,
   from,
+  fromName,
   replyTo,
   emailSubject,
   htmlBody,
@@ -153,7 +162,12 @@ async function sendViaSmtp({
   });
 
   const info = await transporter.sendMail({
-    from: trim(from) || sendgridConfig.smtpFromEmail,
+    // RFC 5322 `"Name" <addr>` (nodemailer passes the header through);
+    // falls back to the global default name from getSendGridConfig.
+    from: formatSender({
+      name: sanitizeFromName(fromName) || sanitizeFromName(sendgridConfig.fromName),
+      email: trim(from) || sendgridConfig.smtpFromEmail,
+    }),
     to: toRecipients,
     cc: ccRecipients.length > 0 ? ccRecipients : undefined,
     bcc: bccRecipients.length > 0 ? bccRecipients : undefined,
@@ -177,6 +191,7 @@ export async function sendEmail({
   cc = [],
   bcc = [],
   from = null,
+  fromName = null,
   replyTo = null,
   subject,
   html = null,
@@ -209,6 +224,7 @@ export async function sendEmail({
       ccRecipients,
       bccRecipients,
       from,
+      fromName,
       replyTo,
       emailSubject,
       htmlBody,
@@ -237,11 +253,12 @@ export async function sendEmail({
   }
 }
 
-export async function sendAssignmentEmail({ to, subject, body, context = 'assignment' }) {
+export async function sendAssignmentEmail({ to, subject, body, fromName = null, context = 'assignment' }) {
   return sendEmail({
     to,
     subject: subject || 'Ticket Pulse priority assignment',
     text: body,
+    fromName,
     context,
   });
 }

@@ -57,6 +57,7 @@ const DEFAULT_SETTINGS = {
   service_account_names: '',
   sendgrid_api_key: '',
   sendgrid_from_email: '',
+  sendgrid_from_name: '',
   twilio_account_sid: '',
   twilio_auth_token: '',
   twilio_from_number: '',
@@ -372,9 +373,10 @@ class SettingsRepository {
     );
 
     try {
-      const [apiKey, fromEmail] = await Promise.all([
+      const [apiKey, fromEmail, fromName] = await Promise.all([
         this.get('sendgrid_api_key'),
         this.get('sendgrid_from_email'),
+        this.get('sendgrid_from_name'),
       ]);
 
       const effectiveApiKey = trimOrNull(apiKey) || trimOrNull(process.env.SENDGRID_API_KEY);
@@ -384,6 +386,9 @@ class SettingsRepository {
       return {
         apiKey: effectiveApiKey,
         fromEmail: effectiveFromEmail,
+        // Global default sender display name (Phase EB); per-workspace
+        // overrides layer on top via workspaceEmailIdentityService.
+        fromName: trimOrNull(fromName) || trimOrNull(process.env.SENDGRID_FROM_NAME) || 'Ticket Pulse',
         ...smtpConfig,
         smtpConfigured,
         configured: apiConfigured || smtpConfigured,
@@ -397,6 +402,7 @@ class SettingsRepository {
       return {
         apiKey: fallbackApiKey,
         fromEmail: fallbackFromEmail,
+        fromName: trimOrNull(process.env.SENDGRID_FROM_NAME) || 'Ticket Pulse',
         ...smtpConfig,
         smtpConfigured,
         configured: apiConfigured || smtpConfigured,

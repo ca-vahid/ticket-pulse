@@ -35,6 +35,12 @@ import {
 } from '../services/publicFeedbackService.js';
 import urgentEscalationService from '../services/afterHoursUrgentEscalationService.js';
 import userSignatureService from '../services/userSignatureService.js';
+import {
+  clearSenderIdentityCache,
+  getSenderIdentity,
+  upsertSenderIdentity,
+} from '../services/workspaceEmailIdentityService.js';
+import { MAX_FROM_NAME_LENGTH } from '../utils/emailSender.js';
 import logger from '../utils/logger.js';
 
 const router = express.Router();
@@ -76,6 +82,17 @@ function validateEmail(value, fieldName) {
   if (value === undefined || value === null || String(value).trim() === '') return;
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value).trim())) {
     throw new ValidationError(`${fieldName} must be a valid email address`);
+  }
+}
+
+function validateFromDisplayName(value, fieldName) {
+  if (value === undefined || value === null || String(value).trim() === '') return;
+  const text = String(value).trim();
+  if (/[<>\r\n]/.test(text)) {
+    throw new ValidationError(`${fieldName} cannot contain angle brackets or line breaks`);
+  }
+  if (text.length > MAX_FROM_NAME_LENGTH) {
+    throw new ValidationError(`${fieldName} must be ${MAX_FROM_NAME_LENGTH} characters or fewer`);
   }
 }
 
@@ -207,6 +224,10 @@ router.put(
     validateE164(normalizedSettings.twilio_from_number, 'Twilio phone number');
     validateWhatsAppSender(normalizedSettings.twilio_whatsapp_sender, 'WhatsApp sender');
     validateEmail(normalizedSettings.sendgrid_from_email, 'SendGrid from email');
+    if (normalizedSettings.sendgrid_from_name !== undefined) {
+      normalizedSettings.sendgrid_from_name = String(normalizedSettings.sendgrid_from_name ?? '').trim();
+      validateFromDisplayName(normalizedSettings.sendgrid_from_name, 'From display name');
+    }
     if (normalizedSettings.twilio_account_sid !== undefined
       && normalizedSettings.twilio_account_sid
       && !String(normalizedSettings.twilio_account_sid).trim().startsWith('AC')) {
@@ -246,10 +267,52 @@ router.put(
       await scheduledSyncService.restart();
     }
 
+    // The global From display name feeds the cached per-workspace sender
+    // identity resolution — drop the cache so sends pick it up immediately.
+    if (normalizedSettings.sendgrid_from_name !== undefined) {
+      clearSenderIdentityCache();
+    }
+
     res.json({
       success: true,
       message: `${count} settings updated successfully`,
     });
+  }),
+);
+
+/**
+ * GET /api/settings/sender-identity
+ * Workspace-scoped outbound sender identity (Phase EB): the From display
+ * name override, the inherited global default, and the addresses it rides on.
+ */
+router.get(
+  '/sender-identity',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const identity = await getSenderIdentity(req.workspaceId);
+    res.json({ success: true, data: identity });
+  }),
+);
+
+/**
+ * PUT /api/settings/sender-identity
+ * Update the workspace From display name. Blank clears back to inherit.
+ */
+router.put(
+  '/sender-identity',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    validateFromDisplayName(req.body?.fromName, 'From display name');
+    const identity = await upsertSenderIdentity(
+      req.workspaceId,
+      { fromName: req.body?.fromName },
+      requestActor(req),
+    );
+    res.json({ success: true, data: identity });
   }),
 );
 

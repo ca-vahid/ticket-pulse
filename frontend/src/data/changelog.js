@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.5.01-preview';
+export const APP_VERSION = '3.5.02-preview';
 
 export const changelog = [
+  {
+    version: '3.5.02-preview',
+    date: 'August 19, 2026',
+    entries: [
+      { type: 'new', html: '<strong>✉️ Emails that say who they’re from</strong> — outbound Ticket Pulse emails now carry a proper display name: “Ticket Pulse” by default, with per-workspace overrides like “Ticket Pulse IT” or “Ticket Pulse Accounting”. Set the global name in Settings → Notifications and the per-workspace one in Mail Workflows → Email Branding → Sender identity — with a live inbox-style preview of exactly how it lands.' },
+      { type: 'new', html: '<strong>💡 Every analytics number explains itself</strong> — hover (or keyboard-focus) any stat across all Analytics tabs and a tooltip tells you exactly what the number means, how it’s computed, and its caveats — 61 metric definitions written from the actual calculations. Survey-based metrics always disclose their sample size; team metrics stay framed as balance signals. Works in every workspace. (QA 08-17 #5)' },
+    ],
+  },
   {
     version: '3.5.01-preview',
     date: 'August 19, 2026',

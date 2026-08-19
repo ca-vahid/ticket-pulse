@@ -107,6 +107,7 @@ export default function Settings() {
     service_account_names: '',
     sendgrid_api_key: '',
     sendgrid_from_email: '',
+    sendgrid_from_name: '',
     twilio_account_sid: '',
     twilio_auth_token: '',
     twilio_from_number: '',
@@ -172,6 +173,7 @@ export default function Settings() {
         service_account_names: settings.service_account_names || '',
         sendgrid_api_key: settings.sendgrid_api_key === '***MASKED***' ? '' : settings.sendgrid_api_key || '',
         sendgrid_from_email: settings.sendgrid_from_email || '',
+        sendgrid_from_name: settings.sendgrid_from_name || '',
         twilio_account_sid: settings.twilio_account_sid || '',
         twilio_auth_token: settings.twilio_auth_token === '***MASKED***' ? '' : settings.twilio_auth_token || '',
         twilio_from_number: settings.twilio_from_number || '',
@@ -264,6 +266,7 @@ export default function Settings() {
       return pruneNotificationSecrets({
         sendgrid_api_key: formData.sendgrid_api_key,
         sendgrid_from_email: formData.sendgrid_from_email,
+        sendgrid_from_name: formData.sendgrid_from_name,
       });
     }
 
@@ -282,6 +285,7 @@ export default function Settings() {
     return pruneNotificationSecrets({
       sendgrid_api_key: formData.sendgrid_api_key,
       sendgrid_from_email: formData.sendgrid_from_email,
+      sendgrid_from_name: formData.sendgrid_from_name,
       twilio_account_sid: formData.twilio_account_sid,
       twilio_auth_token: formData.twilio_auth_token,
       twilio_from_number: formData.twilio_from_number,
@@ -359,6 +363,7 @@ export default function Settings() {
         'notification-providers': [
           'sendgrid_api_key',
           'sendgrid_from_email',
+          'sendgrid_from_name',
           'twilio_account_sid',
           'twilio_auth_token',
           'twilio_from_number',
@@ -876,6 +881,22 @@ export default function Settings() {
                                   className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                                 />
                                 <span className="mt-1 block text-xs text-slate-500">Must be a verified sender or domain in SendGrid.</span>
+                              </label>
+
+                              <label className="block">
+                                <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">From display name</span>
+                                <input
+                                  type="text"
+                                  name="sendgrid_from_name"
+                                  value={formData.sendgrid_from_name}
+                                  onChange={handleChange}
+                                  placeholder="Ticket Pulse"
+                                  maxLength={80}
+                                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                                />
+                                <span className="mt-1 block text-xs text-slate-500">
+                                  Default sender name recipients see (&quot;Ticket Pulse&quot; when blank). Workspaces can override it under Mail Workflows &rarr; Email Branding.
+                                </span>
                               </label>
 
                               <div className="mt-2 rounded-lg border border-slate-200 bg-white p-3">

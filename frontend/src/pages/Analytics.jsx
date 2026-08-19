@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -27,6 +27,8 @@ import {
   FileText,
 } from 'lucide-react';
 import AnalyticsReports from '../components/analytics/AnalyticsReports';
+import MetricHint from '../components/analytics/MetricHint';
+import { metricHintText } from '../utils/metricsGlossary';
 import { Link, useLocation } from 'react-router-dom';
 import Highcharts from 'highcharts';
 import 'highcharts/highcharts-more';
@@ -112,6 +114,27 @@ const TEAM_TIMELINE_METRICS = [
 ];
 
 const HIGHCHART_COLORS = ['#2563eb', '#059669', '#f59e0b', '#7c3aed', '#dc2626', '#0891b2', '#64748b', '#0f766e', '#c2410c'];
+
+// Team-Safe Distribution columns: [sortKey, header label, metricsGlossary key].
+// The glossary key drives the header's ⓘ hint (QA 08-17 #5).
+const TEAM_TABLE_COLUMNS = [
+  ['name', 'Technician', null],
+  ['assigned', 'Assigned', 'agentAssigned'],
+  ['openNow', 'Open Now', 'agentOpenNow'],
+  ['pendingNow', 'Pending Now', 'agentPendingNow'],
+  ['selfPicked', 'Self', 'agentSelfPicked'],
+  ['coordinatorAssigned', 'Coordinator', 'agentCoordinatorAssigned'],
+  ['appAssigned', 'App', 'agentAppAssigned'],
+  ['closed', 'Closed', 'agentClosed'],
+  ['closeRatePct', 'Close %', 'agentCloseRate'],
+  ['avgResolutionHours', 'Avg Res.', 'agentAvgResolution'],
+  ['csatAverage', 'CSAT', 'agentCsat'],
+  ['rejected', 'Rejected', 'agentRejected'],
+  ['availableDays', 'Available Days', 'agentAvailableDays'],
+  ['assignedPerAvailableDay', 'Assigned / Avail. Day', 'agentAssignedPerAvailableDay'],
+  ['leaveDays', 'Leave Days', 'agentLeaveDays'],
+  ['wfhDays', 'WFH Days', 'agentWfhDays'],
+];
 
 const RESOLUTION_BUCKET_LABELS = {
   under4h: '< 4h',
@@ -349,66 +372,7 @@ function chartBase(type = 'column') {
   };
 }
 
-/**
- * Small ⓘ affordance for StatCard metric definitions. Internal implementation
- * (no tooltip lib): shows a positioned popover on hover AND keyboard focus,
- * closes on Escape/blur, clamps to the viewport edges, and only animates when
- * the user hasn't asked for reduced motion (motion-safe).
- */
-function StatCardInfo({ title, info }) {
-  const [open, setOpen] = useState(false);
-  const [shiftX, setShiftX] = useState(0);
-  const popoverRef = useRef(null);
-  const popoverId = useId();
-
-  // Edge clamp: once open, nudge the popover back inside the viewport.
-  useLayoutEffect(() => {
-    if (!open) {
-      setShiftX(0);
-      return;
-    }
-    const el = popoverRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const margin = 8;
-    let dx = 0;
-    if (rect.left < margin) dx = margin - rect.left;
-    else if (rect.right > window.innerWidth - margin) dx = window.innerWidth - margin - rect.right;
-    if (dx !== 0) setShiftX(dx);
-  }, [open]);
-
-  return (
-    <span className="relative inline-flex">
-      <button
-        type="button"
-        aria-label={`What "${title}" means`}
-        aria-describedby={open ? popoverId : undefined}
-        onMouseEnter={() => setOpen(true)}
-        onMouseLeave={() => setOpen(false)}
-        onFocus={() => setOpen(true)}
-        onBlur={() => setOpen(false)}
-        onKeyDown={(e) => { if (e.key === 'Escape') setOpen(false); }}
-        className="tp-focus-ring -m-1 rounded-full p-1 text-slate-400 transition-colors hover:text-slate-600"
-      >
-        <Info className="h-3.5 w-3.5" aria-hidden="true" />
-      </button>
-      {open && (
-        <div
-          ref={popoverRef}
-          id={popoverId}
-          role="tooltip"
-          style={shiftX ? { transform: `translateX(${shiftX}px)` } : undefined}
-          className="animate-fadeIn absolute right-0 top-full z-30 mt-1.5 w-60 rounded-lg border border-slate-200 bg-white p-2.5 text-left shadow-lg"
-        >
-          <p className="text-[10px] font-semibold uppercase tracking-normal text-slate-400">{title}</p>
-          <p className="mt-1 text-xs font-normal normal-case leading-relaxed tracking-normal text-slate-600">{info}</p>
-        </div>
-      )}
-    </span>
-  );
-}
-
-export function StatCard({ title, value, subtitle, icon: Icon = Info, tone = 'blue', delta, info }) {
+export function StatCard({ title, value, subtitle, icon: Icon = Info, tone = 'blue', delta, info, metric }) {
   const toneClass = {
     blue: 'border-blue-100 bg-blue-50 text-blue-700',
     green: 'border-emerald-100 bg-emerald-50 text-emerald-700',
@@ -429,7 +393,7 @@ export function StatCard({ title, value, subtitle, icon: Icon = Info, tone = 'bl
           {subtitle && <p className="mt-1 text-xs text-slate-500">{subtitle}</p>}
         </div>
         <div className="flex shrink-0 items-start gap-1.5">
-          {info && <StatCardInfo title={title} info={info} />}
+          {(info || metric) && <MetricHint metric={metric} title={title} info={info} />}
           <div className={`rounded-lg border p-2 ${toneClass}`}>
             <Icon className="h-4 w-4 sm:h-5 sm:w-5" />
           </div>
@@ -680,8 +644,14 @@ function HotspotRankedBars({ data, totalLabel = 'tickets', compact = false }) {
         const count = row.count || 0;
         const pct = total ? Number(((count / total) * 100).toFixed(1)) : 0;
         const width = Math.max(5, (count / max) * 100);
+        const rowHint = `${row.name}: ${formatNumber(count)} ${totalLabel} — ${pct}% of the ${formatNumber(total)} listed`;
         return (
-          <div key={`${row.name}-${index}`} className="rounded-md border border-slate-200 bg-white px-2 py-1.5">
+          <div
+            key={`${row.name}-${index}`}
+            className="rounded-md border border-slate-200 bg-white px-2 py-1.5"
+            title={rowHint}
+            aria-label={rowHint}
+          >
             <div className="mb-1 flex items-center justify-between gap-2">
               <div className="flex min-w-0 items-center gap-1.5">
                 <span className="inline-flex h-3.5 min-w-3.5 items-center justify-center rounded bg-slate-100 px-1 text-[9px] font-bold leading-none text-slate-600">
@@ -711,11 +681,10 @@ function HotspotRankedBars({ data, totalLabel = 'tickets', compact = false }) {
                 <span className="text-[9px] font-semibold leading-none text-slate-500">{pct}%</span>
               </div>
             </div>
-            <div className="h-1 overflow-hidden rounded-full bg-slate-100">
+            <div className="h-1 overflow-hidden rounded-full bg-slate-100" aria-hidden="true">
               <div
                 className="h-full rounded-full bg-gradient-to-r from-blue-600 to-emerald-500"
                 style={{ width: `${width}%` }}
-                title={`${row.name}: ${count} ${totalLabel}`}
               />
             </div>
           </div>
@@ -2529,14 +2498,14 @@ export default function Analytics({ view = 'standard' }) {
   const renderOverview = () => (
     <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard title="Created" value={formatNumber(overview?.cards?.created?.current)} subtitle="Tickets created" icon={Calendar} delta={overview?.cards?.created?.pct} />
-        <StatCard title="Closed / Resolved" value={formatNumber(overview?.cards?.resolved?.current)} subtitle="Assigned in selected range" icon={CheckCircle2} tone="green" delta={overview?.cards?.resolved?.pct} />
-        <StatCard title="Open Backlog" value={formatNumber(overview?.cards?.openBacklog?.current)} subtitle="Current open and pending" icon={Clock} tone="amber" />
-        <StatCard title="Overdue Risk" value={formatNumber(overview?.cards?.overdue?.current)} subtitle="Open tickets past dueBy" icon={ShieldAlert} tone={overview?.cards?.overdue?.current > 0 ? 'red' : 'green'} />
-        <StatCard title="Net Change" value={formatNumber(overview?.cards?.netChange?.current)} subtitle="Created minus closed/resolved" icon={RefreshCw} tone="slate" delta={overview?.cards?.netChange?.pct} />
-        <StatCard title="Avg Resolution" value={formatHours(overview?.cards?.avgResolutionHours?.current)} subtitle={`${formatNumber(overview?.cards?.avgResolutionHours?.sampleSize)} sampled tickets`} icon={Gauge} tone="purple" />
-        <StatCard title="CSAT" value={overview?.cards?.csat?.average ?? '—'} subtitle={`${formatNumber(overview?.cards?.csat?.responses)} responses`} icon={CheckCircle2} tone="green" />
-        <StatCard title="First Response Risk" value={formatNumber(overview?.cards?.firstResponseRisk?.current)} subtitle="Open tickets past frDueBy" icon={AlertTriangle} tone="amber" />
+        <StatCard title="Created" value={formatNumber(overview?.cards?.created?.current)} subtitle="Tickets created" icon={Calendar} delta={overview?.cards?.created?.pct} metric="created" />
+        <StatCard title="Closed / Resolved" value={formatNumber(overview?.cards?.resolved?.current)} subtitle="Assigned in selected range" icon={CheckCircle2} tone="green" delta={overview?.cards?.resolved?.pct} metric="resolvedClosed" />
+        <StatCard title="Open Backlog" value={formatNumber(overview?.cards?.openBacklog?.current)} subtitle="Current open and pending" icon={Clock} tone="amber" metric="openBacklog" />
+        <StatCard title="Overdue Risk" value={formatNumber(overview?.cards?.overdue?.current)} subtitle="Open tickets past dueBy" icon={ShieldAlert} tone={overview?.cards?.overdue?.current > 0 ? 'red' : 'green'} metric="overdueRisk" />
+        <StatCard title="Net Change" value={formatNumber(overview?.cards?.netChange?.current)} subtitle="Created minus closed/resolved" icon={RefreshCw} tone="slate" delta={overview?.cards?.netChange?.pct} metric="netChange" />
+        <StatCard title="Avg Resolution" value={formatHours(overview?.cards?.avgResolutionHours?.current)} subtitle={`${formatNumber(overview?.cards?.avgResolutionHours?.sampleSize)} sampled tickets`} icon={Gauge} tone="purple" metric="avgResolution" />
+        <StatCard title="CSAT" value={overview?.cards?.csat?.average ?? '—'} subtitle={`${formatNumber(overview?.cards?.csat?.responses)} responses`} icon={CheckCircle2} tone="green" metric="csat" />
+        <StatCard title="First Response Risk" value={formatNumber(overview?.cards?.firstResponseRisk?.current)} subtitle="Open tickets past frDueBy" icon={AlertTriangle} tone="amber" metric="firstResponseRisk" />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -2595,13 +2564,13 @@ export default function Analytics({ view = 'standard' }) {
         )}
         <Panel title="Data Quality" subtitle="Coverage labels prevent sparse fields from looking more precise than they are.">
           <div className="grid gap-3 sm:grid-cols-2">
-            <StatCard title="Range Tickets" value={formatNumber(overview?.dataQuality?.rangeTicketCount)} icon={Info} tone="slate" />
-            <StatCard title="Resolution Coverage" value={`${overview?.dataQuality?.resolutionTimeCoverage ?? 0}%`} icon={Gauge} tone="green" />
-            <StatCard title="CSAT Samples" value={formatNumber(overview?.dataQuality?.csatSampleCount)} icon={CheckCircle2} tone="purple" />
-            <StatCard title="Classified" value={formatNumber(overview?.dataQuality?.canonicalClassifiedCount || 0)} subtitle="Canonical category/subcategory" icon={CheckCircle2} tone="green" />
-            <StatCard title="Legacy Fallback" value={formatNumber(overview?.dataQuality?.legacyFallbackCount || 0)} subtitle="Using mirrored or legacy fields" icon={Info} tone="amber" />
-            <StatCard title="Review Needed" value={formatNumber(overview?.dataQuality?.categoryReviewNeededCount || 0)} subtitle="Weak or flagged category fit" icon={AlertTriangle} tone="amber" />
-            <StatCard title="Unclassified" value={formatNumber(overview?.dataQuality?.unclassifiedCount || 0)} subtitle="No usable category value" icon={XCircle} tone="red" />
+            <StatCard title="Range Tickets" value={formatNumber(overview?.dataQuality?.rangeTicketCount)} icon={Info} tone="slate" metric="rangeTickets" />
+            <StatCard title="Resolution Coverage" value={`${overview?.dataQuality?.resolutionTimeCoverage ?? 0}%`} icon={Gauge} tone="green" metric="resolutionCoverage" />
+            <StatCard title="CSAT Samples" value={formatNumber(overview?.dataQuality?.csatSampleCount)} icon={CheckCircle2} tone="purple" metric="csatSamples" />
+            <StatCard title="Classified" value={formatNumber(overview?.dataQuality?.canonicalClassifiedCount || 0)} subtitle="Canonical category/subcategory" icon={CheckCircle2} tone="green" metric="classifiedCanonical" />
+            <StatCard title="Legacy Fallback" value={formatNumber(overview?.dataQuality?.legacyFallbackCount || 0)} subtitle="Using mirrored or legacy fields" icon={Info} tone="amber" metric="legacyFallback" />
+            <StatCard title="Review Needed" value={formatNumber(overview?.dataQuality?.categoryReviewNeededCount || 0)} subtitle="Weak or flagged category fit" icon={AlertTriangle} tone="amber" metric="categoryReviewNeeded" />
+            <StatCard title="Unclassified" value={formatNumber(overview?.dataQuality?.unclassifiedCount || 0)} subtitle="No usable category value" icon={XCircle} tone="red" metric="unclassified" />
           </div>
           {(overview?.firstResponse?.coveragePct ?? 0) >= 30 ? (
             <div className="mt-3 grid gap-3 sm:grid-cols-3">
@@ -2611,6 +2580,7 @@ export default function Analytics({ view = 'standard' }) {
                 subtitle={`n=${overview.firstResponse.sampleSize} (${overview.firstResponse.coveragePct}% coverage)`}
                 icon={Gauge}
                 tone="green"
+                metric="medianFirstResponse"
               />
               <StatCard
                 title="P90 First Response"
@@ -2618,6 +2588,7 @@ export default function Analytics({ view = 'standard' }) {
                 subtitle="90% of first replies were faster"
                 icon={Gauge}
                 tone="amber"
+                metric="p90FirstResponse"
               />
               <StatCard
                 title="Origin Split"
@@ -2625,6 +2596,7 @@ export default function Analytics({ view = 'standard' }) {
                 subtitle="TP-born / FreshService-born (created in range)"
                 icon={Info}
                 tone="slate"
+                metric="originSplit"
               />
             </div>
           ) : (
@@ -2647,7 +2619,7 @@ export default function Analytics({ view = 'standard' }) {
         </div>
       </Panel>
       <div className="grid gap-4 lg:grid-cols-2">
-        <Panel title="Requester Hotspots">
+        <Panel title={<span className="inline-flex items-center gap-1.5">Requester Hotspots <MetricHint metric="requesterHotspots" /></span>}>
           <HotspotRankedBars data={demand?.breakdowns?.requester || []} compact />
         </Panel>
         <Panel title="Source Mix">
@@ -2837,10 +2809,10 @@ export default function Analytics({ view = 'standard' }) {
           </div>
         )}
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <StatCard title="Created Demand" value={formatNumber(categories?.summary?.totalCreated)} subtitle="Tickets created in range" icon={Tags} />
-          <StatCard title="Open in Categories" value={formatNumber(categories?.summary?.open)} subtitle={`${formatNumber(categories?.summary?.overdue || 0)} overdue`} icon={Clock} tone={(categories?.summary?.overdue || 0) > 0 ? 'amber' : 'green'} />
-          <StatCard title="Review Needed" value={formatNumber(categories?.summary?.reviewNeeded)} subtitle="Taxonomy fit or migration review" icon={AlertTriangle} tone={(categories?.summary?.reviewNeeded || 0) > 0 ? 'amber' : 'green'} />
-          <StatCard title="Automation Failures" value={formatNumber(categories?.summary?.automationFailures)} subtitle={`${formatNumber(categories?.summary?.automationRuns || 0)} category-linked runs`} icon={RefreshCw} tone={(categories?.summary?.automationFailures || 0) > 0 ? 'red' : 'green'} />
+          <StatCard title="Created Demand" value={formatNumber(categories?.summary?.totalCreated)} subtitle="Tickets created in range" icon={Tags} metric="categoriesCreatedDemand" />
+          <StatCard title="Open in Categories" value={formatNumber(categories?.summary?.open)} subtitle={`${formatNumber(categories?.summary?.overdue || 0)} overdue`} icon={Clock} tone={(categories?.summary?.overdue || 0) > 0 ? 'amber' : 'green'} metric="categoriesOpen" />
+          <StatCard title="Review Needed" value={formatNumber(categories?.summary?.reviewNeeded)} subtitle="Taxonomy fit or migration review" icon={AlertTriangle} tone={(categories?.summary?.reviewNeeded || 0) > 0 ? 'amber' : 'green'} metric="categoriesReviewNeeded" />
+          <StatCard title="Automation Failures" value={formatNumber(categories?.summary?.automationFailures)} subtitle={`${formatNumber(categories?.summary?.automationRuns || 0)} category-linked runs`} icon={RefreshCw} tone={(categories?.summary?.automationFailures || 0) > 0 ? 'red' : 'green'} metric="categoriesAutomationFailures" />
         </div>
 
         {renderCategoryMapControls()}
@@ -3254,10 +3226,10 @@ export default function Analytics({ view = 'standard' }) {
   const renderTeam = () => (
     <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard title="Balance Score" value={formatNumber(team?.summary?.balanceScore)} subtitle="Adjusted for leave days" icon={Gauge} tone="green" />
-        <StatCard title="Avg Assigned" value={formatNumber(team?.summary?.avgAssignedPerTech)} subtitle="Per active technician" icon={Users} />
-        <StatCard title="Avg / Available Day" value={formatNumber(team?.summary?.avgAssignedPerAvailableDay)} subtitle={`${formatNumber(team?.summary?.rangeBusinessDays || 0)} weekdays in range`} icon={BarChart3} tone="amber" />
-        <StatCard title="Open > 24h" value={formatNumber((team?.summary?.openAgeBuckets?.over24h || 0))} subtitle="Current open queue" icon={Clock} tone="red" />
+        <StatCard title="Balance Score" value={formatNumber(team?.summary?.balanceScore)} subtitle="Adjusted for leave days" icon={Gauge} tone="green" metric="balanceScore" />
+        <StatCard title="Avg Assigned" value={formatNumber(team?.summary?.avgAssignedPerTech)} subtitle="Per active technician" icon={Users} metric="avgAssignedPerTech" />
+        <StatCard title="Avg / Available Day" value={formatNumber(team?.summary?.avgAssignedPerAvailableDay)} subtitle={`${formatNumber(team?.summary?.rangeBusinessDays || 0)} weekdays in range`} icon={BarChart3} tone="amber" metric="avgPerAvailableDay" />
+        <StatCard title="Open > 24h" value={formatNumber((team?.summary?.openAgeBuckets?.over24h || 0))} subtitle="Current open queue" icon={Clock} tone="red" metric="openOver24h" />
       </div>
       {(team?.summary?.excludedFromDistribution || 0) > 0 && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
@@ -3382,29 +3354,33 @@ export default function Analytics({ view = 'standard' }) {
                         {(() => {
                           const active = (row.openNow || 0) + (row.pendingNow || 0);
                           return (
-                            <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                              active >= 30 ? 'bg-red-50 text-red-700'
-                                : active >= 15 ? 'bg-amber-50 text-amber-700'
-                                  : 'bg-emerald-50 text-emerald-700'
-                            }`}>
+                            <span
+                              title={metricHintText('agentLoadStatus')}
+                              className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                                active >= 30 ? 'bg-red-50 text-red-700'
+                                  : active >= 15 ? 'bg-amber-50 text-amber-700'
+                                    : 'bg-emerald-50 text-emerald-700'
+                              }`}
+                            >
                               {active >= 30 ? 'High' : active >= 15 ? 'Watch' : 'OK'}
                             </span>
                           );
                         })()}
                       </div>
+                      {/* Picker chips sit inside a <button>, so the metric
+                          hints ride as title/aria text rather than nested
+                          popover buttons (QA 08-17 #5). */}
                       <div className="mt-3 grid grid-cols-3 gap-1 text-center text-[11px]">
-                        <div className="rounded bg-slate-100 px-1.5 py-1">
-                          <p className="font-bold text-slate-900">{row.assignedPerAvailableDay ?? '—'}</p>
-                          <p className="text-slate-500">rate</p>
-                        </div>
-                        <div className="rounded bg-slate-100 px-1.5 py-1">
-                          <p className="font-bold text-slate-900">{row.rejected}</p>
-                          <p className="text-slate-500">reject</p>
-                        </div>
-                        <div className="rounded bg-slate-100 px-1.5 py-1">
-                          <p className="font-bold text-slate-900">{row.leaveDays}</p>
-                          <p className="text-slate-500">leave</p>
-                        </div>
+                        {[
+                          [row.assignedPerAvailableDay ?? '—', 'rate', 'agentAssignedPerAvailableDay'],
+                          [row.rejected, 'reject', 'agentRejected'],
+                          [row.leaveDays, 'leave', 'agentLeaveDays'],
+                        ].map(([value, label, metricKey]) => (
+                          <div key={label} className="rounded bg-slate-100 px-1.5 py-1" title={metricHintText(metricKey)}>
+                            <p className="font-bold text-slate-900">{value}</p>
+                            <p className="text-slate-500" aria-label={`${label}: ${metricHintText(metricKey)}`}>{label}</p>
+                          </div>
+                        ))}
                       </div>
                     </button>
                   );
@@ -3461,39 +3437,25 @@ export default function Analytics({ view = 'standard' }) {
                   {selectedTeamIds.includes(row.technicianId) ? 'Selected' : 'Focus'}
                 </button>
               </div>
+              {/* Mobile mini-stats: a full popover per cell would be per-row
+                  noise, so each label carries the glossary text as a plain
+                  title/aria hint instead (QA 08-17 #5). */}
               <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
-                <div className="rounded bg-slate-50 p-2">
-                  <p className="text-slate-500">Self</p>
-                  <p className="font-bold text-slate-900">{row.selfPicked}</p>
-                </div>
-                <div className="rounded bg-slate-50 p-2">
-                  <p className="text-slate-500">Coord.</p>
-                  <p className="font-bold text-slate-900">{row.coordinatorAssigned}</p>
-                </div>
-                <div className="rounded bg-slate-50 p-2">
-                  <p className="text-slate-500">App</p>
-                  <p className="font-bold text-slate-900">{row.appAssigned}</p>
-                </div>
-                <div className="rounded bg-slate-50 p-2">
-                  <p className="text-slate-500">CSAT</p>
-                  <p className="font-bold text-slate-900">{row.csatAverage === null ? '—' : row.csatAverage}</p>
-                </div>
-                <div className="rounded bg-slate-50 p-2">
-                  <p className="text-slate-500">Leave</p>
-                  <p className="font-bold text-slate-900">{row.leaveDays}</p>
-                </div>
-                <div className="rounded bg-slate-50 p-2">
-                  <p className="text-slate-500">WFH</p>
-                  <p className="font-bold text-slate-900">{row.wfhDays || 0}</p>
-                </div>
-                <div className="rounded bg-slate-50 p-2">
-                  <p className="text-slate-500">Avail.</p>
-                  <p className="font-bold text-slate-900">{row.availableDays}</p>
-                </div>
-                <div className="rounded bg-slate-50 p-2">
-                  <p className="text-slate-500">Rate</p>
-                  <p className="font-bold text-slate-900">{row.assignedPerAvailableDay ?? '—'}</p>
-                </div>
+                {[
+                  ['Self', row.selfPicked, 'agentSelfPicked'],
+                  ['Coord.', row.coordinatorAssigned, 'agentCoordinatorAssigned'],
+                  ['App', row.appAssigned, 'agentAppAssigned'],
+                  ['CSAT', row.csatAverage === null ? '—' : row.csatAverage, 'agentCsat'],
+                  ['Leave', row.leaveDays, 'agentLeaveDays'],
+                  ['WFH', row.wfhDays || 0, 'agentWfhDays'],
+                  ['Avail.', row.availableDays, 'agentAvailableDays'],
+                  ['Rate', row.assignedPerAvailableDay ?? '—', 'agentAssignedPerAvailableDay'],
+                ].map(([label, value, metricKey]) => (
+                  <div key={label} className="rounded bg-slate-50 p-2" title={metricHintText(metricKey)}>
+                    <p className="text-slate-500" aria-label={`${label}: ${metricHintText(metricKey)}`}>{label}</p>
+                    <p className="font-bold text-slate-900">{value}</p>
+                  </div>
+                ))}
               </div>
             </div>
           ))}
@@ -3502,36 +3464,22 @@ export default function Analytics({ view = 'standard' }) {
           <table className="min-w-full divide-y divide-slate-200 text-sm">
             <thead className="sticky top-0 bg-slate-50">
               <tr>
-                {[
-                  ['name', 'Technician'],
-                  ['assigned', 'Assigned'],
-                  ['openNow', 'Open Now'],
-                  ['pendingNow', 'Pending Now'],
-                  ['selfPicked', 'Self'],
-                  ['coordinatorAssigned', 'Coordinator'],
-                  ['appAssigned', 'App'],
-                  ['closed', 'Closed'],
-                  ['closeRatePct', 'Close %'],
-                  ['avgResolutionHours', 'Avg Res.'],
-                  ['csatAverage', 'CSAT'],
-                  ['rejected', 'Rejected'],
-                  ['availableDays', 'Available Days'],
-                  ['assignedPerAvailableDay', 'Assigned / Avail. Day'],
-                  ['leaveDays', 'Leave Days'],
-                  ['wfhDays', 'WFH Days'],
-                ].map(([key, label]) => (
+                {TEAM_TABLE_COLUMNS.map(([key, label, metricKey]) => (
                   /* Numbers sit flush under their titles: name stays left,
                      every metric column right-aligns header + cells and the
                      long trailing labels stop wrapping (QA 07-30 #3). */
                   <th key={key} className={`px-3 py-2 text-xs font-semibold uppercase tracking-normal text-slate-500 whitespace-nowrap ${key === 'name' ? 'text-left' : 'text-right'}`}>
-                    <button
-                      type="button"
-                      onClick={() => setTeamSortKey(key)}
-                      className={`inline-flex items-center gap-1 hover:text-slate-900 ${key === 'name' ? '' : 'flex-row-reverse'}`}
-                    >
-                      {label}
-                      {teamSort.key === key && <span>{teamSort.direction === 'desc' ? '↓' : '↑'}</span>}
-                    </button>
+                    <span className={`inline-flex items-center gap-1 ${key === 'name' ? '' : 'flex-row-reverse'}`}>
+                      <button
+                        type="button"
+                        onClick={() => setTeamSortKey(key)}
+                        className={`inline-flex items-center gap-1 hover:text-slate-900 ${key === 'name' ? '' : 'flex-row-reverse'}`}
+                      >
+                        {label}
+                        {teamSort.key === key && <span>{teamSort.direction === 'desc' ? '↓' : '↑'}</span>}
+                      </button>
+                      {metricKey && <MetricHint metric={metricKey} title={label} />}
+                    </span>
                   </th>
                 ))}
               </tr>
@@ -3662,12 +3610,14 @@ export default function Analytics({ view = 'standard' }) {
             subtitle="Team dispersion, leave-adjusted — 100 is perfectly even"
             icon={Gauge}
             tone="green"
+            metric="balanceScore"
           />
           <StatCard
             title="Assignment Spread"
             value={formatNumber(summary.spread)}
             subtitle="Tickets between the most and least assigned"
             icon={Users}
+            metric="assignmentSpread"
           />
           <StatCard
             title="Team Close Rate"
@@ -3675,6 +3625,7 @@ export default function Analytics({ view = 'standard' }) {
             subtitle={`${formatNumber(capacityTotals.closed)} of ${formatNumber(capacityTotals.assigned)} assigned tickets closed`}
             icon={CheckCircle2}
             tone="purple"
+            metric="teamCloseRate"
           />
           <StatCard
             title="Avg / Available Day"
@@ -3682,6 +3633,7 @@ export default function Analytics({ view = 'standard' }) {
             subtitle={`${formatNumber(rangeBusinessDays)} weekdays in range`}
             icon={BarChart3}
             tone="amber"
+            metric="avgPerAvailableDay"
           />
         </div>
 
@@ -3722,16 +3674,19 @@ export default function Analytics({ view = 'standard' }) {
               <thead className="sticky top-0 bg-slate-50">
                 <tr>
                   {[
-                    ['name', 'Technician', 'text-left'],
-                    ['assigned', 'Assigned', 'text-right'],
-                    ['share', 'Share of Team', 'text-right'],
-                    ['shareBar', '', 'text-left'],
-                    ['closeRate', 'Close Rate (N)', 'text-right'],
-                    ['availableDays', 'Available Days', 'text-right'],
-                    ['assignedPerAvailableDay', 'Assigned / Avail. Day', 'text-right'],
-                  ].map(([key, label, align]) => (
+                    ['name', 'Technician', 'text-left', null],
+                    ['assigned', 'Assigned', 'text-right', 'agentAssigned'],
+                    ['share', 'Share of Team', 'text-right', 'shareOfTeam'],
+                    ['shareBar', '', 'text-left', null],
+                    ['closeRate', 'Close Rate (N)', 'text-right', 'agentCloseRate'],
+                    ['availableDays', 'Available Days', 'text-right', 'agentAvailableDays'],
+                    ['assignedPerAvailableDay', 'Assigned / Avail. Day', 'text-right', 'agentAssignedPerAvailableDay'],
+                  ].map(([key, label, align, metricKey]) => (
                     <th key={key} className={`whitespace-nowrap px-3 py-2 text-xs font-semibold uppercase tracking-normal text-slate-500 ${align}`}>
-                      {label}
+                      <span className={`inline-flex items-center gap-1 ${align === 'text-right' ? 'flex-row-reverse' : ''}`}>
+                        {label}
+                        {metricKey && <MetricHint metric={metricKey} title={label} />}
+                      </span>
                     </th>
                   ))}
                 </tr>
@@ -3830,10 +3785,10 @@ export default function Analytics({ view = 'standard' }) {
   const renderQuality = () => (
     <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard title="Avg Resolution" value={formatHours(quality?.resolution?.hours?.avg)} subtitle={`${formatNumber(quality?.resolution?.seconds?.count)} sampled tickets`} icon={Gauge} />
-        <StatCard title="Median Resolution" value={formatHours(quality?.resolution?.hours?.median)} icon={Clock} tone="green" />
-        <StatCard title="P90 Resolution" value={formatHours(quality?.resolution?.hours?.p90)} icon={AlertTriangle} tone="amber" />
-        <StatCard title="CSAT Average" value={quality?.csat?.average ?? '—'} subtitle={`${formatNumber(quality?.csat?.responses)} responses`} icon={CheckCircle2} tone="purple" />
+        <StatCard title="Avg Resolution" value={formatHours(quality?.resolution?.hours?.avg)} subtitle={`${formatNumber(quality?.resolution?.seconds?.count)} sampled tickets`} icon={Gauge} metric="qualityAvgResolution" />
+        <StatCard title="Median Resolution" value={formatHours(quality?.resolution?.hours?.median)} icon={Clock} tone="green" metric="qualityMedianResolution" />
+        <StatCard title="P90 Resolution" value={formatHours(quality?.resolution?.hours?.p90)} icon={AlertTriangle} tone="amber" metric="qualityP90Resolution" />
+        <StatCard title="CSAT Average" value={quality?.csat?.average ?? '—'} subtitle={`${formatNumber(quality?.csat?.responses)} responses`} icon={CheckCircle2} tone="purple" metric="csat" />
       </div>
 
       <Panel
@@ -3841,9 +3796,9 @@ export default function Analytics({ view = 'standard' }) {
         subtitle="Two views, both 0–100%. Satisfied (top-2-box) is the share of ratings that are Good/Great (CSAT 3–4) — the satisfaction rate. Average score is the mean normalized score, which only reaches 100% when every rating is the maximum. First-party feedback wins when a ticket has both. Counts (N) always shown."
       >
         <div className="grid gap-3 sm:grid-cols-3">
-          <StatCard title="Satisfied (top-2-box)" value={quality?.satisfaction?.topTwoBoxPct != null ? `${quality.satisfaction.topTwoBoxPct}%` : '—'} subtitle={`${formatNumber(quality?.satisfaction?.responses)} rated tickets`} icon={CheckCircle2} tone="green" />
-          <StatCard title="First-party feedback" value={quality?.feedback?.averageScore != null ? `${quality.feedback.averageScore} / 5` : '—'} subtitle={`${formatNumber(quality?.feedback?.responses)} responses`} icon={Sparkles} tone="blue" />
-          <StatCard title="Average score" value={quality?.satisfaction?.average != null ? `${quality.satisfaction.average}%` : '—'} subtitle={`mean · ${formatNumber(quality?.satisfaction?.bySource?.feedback)} first-party · ${formatNumber(quality?.satisfaction?.bySource?.csat)} CSAT`} icon={Gauge} tone="purple" />
+          <StatCard title="Satisfied (top-2-box)" value={quality?.satisfaction?.topTwoBoxPct != null ? `${quality.satisfaction.topTwoBoxPct}%` : '—'} subtitle={`${formatNumber(quality?.satisfaction?.responses)} rated tickets`} icon={CheckCircle2} tone="green" metric="satisfiedTopTwoBox" />
+          <StatCard title="First-party feedback" value={quality?.feedback?.averageScore != null ? `${quality.feedback.averageScore} / 5` : '—'} subtitle={`${formatNumber(quality?.feedback?.responses)} responses`} icon={Sparkles} tone="blue" metric="firstPartyFeedback" />
+          <StatCard title="Average score" value={quality?.satisfaction?.average != null ? `${quality.satisfaction.average}%` : '—'} subtitle={`mean · ${formatNumber(quality?.satisfaction?.bySource?.feedback)} first-party · ${formatNumber(quality?.satisfaction?.bySource?.csat)} CSAT`} icon={Gauge} tone="purple" metric="satisfactionAverage" />
         </div>
       </Panel>
 
@@ -3972,7 +3927,7 @@ export default function Analytics({ view = 'standard' }) {
           value={formatNumber(ops?.pipeline?.totalRuns)}
           icon={Sparkles}
           tone="purple"
-          info="AI assignment pipeline executions in the selected range — every run counts, including reruns and rebound-triggered runs."
+          metric="pipelineRuns"
         />
         <StatCard
           title="Routing accuracy"
@@ -3980,7 +3935,7 @@ export default function Analytics({ view = 'standard' }) {
           subtitle="auto-assignments that stuck ≥7 days"
           icon={Gauge}
           tone={ops?.routingAccuracy?.heldPct != null && ops.routingAccuracy.heldPct < 80 ? 'amber' : 'green'}
-          info="Percentage of auto-assigned tickets still with the AI's pick after 7 days. A ticket counts against accuracy when a human reassigned it away within 7 days of the AI's decision."
+          metric="routingAccuracy"
         />
         <StatCard
           title="Rebounds"
@@ -3988,7 +3943,7 @@ export default function Analytics({ view = 'standard' }) {
           subtitle="unique tickets"
           icon={RefreshCw}
           tone="amber"
-          info="Unique tickets that bounced back and re-entered the assignment pipeline at least once in this range. Multiple rebounds on the same ticket count once — the same definition Assignment Review uses."
+          metric="rebounds"
         />
         <StatCard
           title="Sync Failure Rate"
@@ -3996,14 +3951,14 @@ export default function Analytics({ view = 'standard' }) {
           subtitle={`${formatNumber(ops?.sync?.failed)} failed logs`}
           icon={AlertTriangle}
           tone={ops?.sync?.failureRatePct > 5 ? 'red' : 'green'}
-          info="Percentage of FreshService sync jobs in this range that logged a failure (failed sync logs divided by all sync logs, most recent 500)."
+          metric="syncFailureRate"
         />
         <StatCard
           title="Stale Started Syncs"
           value={formatNumber(ops?.sync?.staleStarted)}
           icon={Clock}
           tone={ops?.sync?.staleStarted > 0 ? 'red' : 'green'}
-          info="Sync jobs still marked 'started' more than 30 minutes after they began — likely stuck or crashed mid-run and worth investigating."
+          metric="staleStartedSyncs"
         />
       </div>
 
