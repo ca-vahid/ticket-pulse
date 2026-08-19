@@ -1863,6 +1863,10 @@ model AssignmentConfig {
   // Auto-apply AI categories to FreshService even while assignment is
   // human-gated (pending_review) or the run was priority-only (after-hours).
   autoCategorizeEnabled               Boolean   @default(false) @map("auto_categorize_enabled")
+  // Competency feedback learner: approved/modified/auto_assigned decisions
+  // strengthen (or auto-create) the assigned tech's competency. Off = the
+  // matrix only changes by explicit human edits (Coreshack lesson, Aug 2026).
+  competencyFeedbackEnabled           Boolean   @default(true) @map("competency_feedback_enabled")
   // Observation carve-out: when true, observe-only groups still get the AI's
   // CATEGORY applied (persisted on the ticket; FS write-back rides
   // autoCategorizeEnabled) while assignment/noise/priority/type stay mocked.

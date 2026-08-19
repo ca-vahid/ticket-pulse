@@ -16,6 +16,18 @@ class CompetencyFeedbackService {
     if (decision !== 'approved' && decision !== 'modified' && decision !== 'auto_assigned') return;
 
     try {
+      // Per-workspace kill switch. Off = the skills matrix changes only by
+      // explicit human edits; assignment decisions never create or promote
+      // competencies. Added after a single in-app reassignment silently minted
+      // a competency for a non-team member (Coreshack/Reid, Aug 14 2026).
+      const config = await prisma.assignmentConfig.findUnique({
+        where: { workspaceId },
+        select: { competencyFeedbackEnabled: true },
+      });
+      if (config && config.competencyFeedbackEnabled === false) {
+        logger.debug('Competency feedback: learning disabled for workspace', { runId, workspaceId });
+        return;
+      }
       const run = await prisma.assignmentPipelineRun.findUnique({
         where: { id: runId },
         select: {

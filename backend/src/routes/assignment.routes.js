@@ -146,6 +146,7 @@ router.put('/config', requireAdmin, asyncHandler(async (req, res) => {
     recommendationPrompt, pollForUnassigned, pollMaxPerCycle,
     monitoredMailbox, emailPollingEnabled, emailPollingIntervalSec,
     autoCloseNoise, dryRunMode, excludedGroupIds, observeOnlyGroupIds, autoCategorizeEnabled,
+    competencyFeedbackEnabled,
     observeCategoryWritebackEnabled,
     dailyReviewEnabled, dailyReviewRunHour, dailyReviewRunMinute, dailyReviewLookbackDays,
     dailyReviewPreheatEnabled, priorityAssessmentEnabled, priorityWritebackEnabled,
@@ -171,6 +172,7 @@ router.put('/config', requireAdmin, asyncHandler(async (req, res) => {
   if (emailPollingIntervalSec !== undefined) data.emailPollingIntervalSec = emailPollingIntervalSec;
   if (autoCloseNoise !== undefined) data.autoCloseNoise = autoCloseNoise;
   if (autoCategorizeEnabled !== undefined) data.autoCategorizeEnabled = !!autoCategorizeEnabled;
+  if (competencyFeedbackEnabled !== undefined) data.competencyFeedbackEnabled = !!competencyFeedbackEnabled;
   if (observeCategoryWritebackEnabled !== undefined) data.observeCategoryWritebackEnabled = !!observeCategoryWritebackEnabled;
   if (dryRunMode !== undefined) data.dryRunMode = dryRunMode;
   if (dailyReviewEnabled !== undefined) data.dailyReviewEnabled = dailyReviewEnabled;

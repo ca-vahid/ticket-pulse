@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.5.04-preview';
+export const APP_VERSION = '3.5.05-preview';
 
 export const changelog = [
+  {
+    version: '3.5.05-preview',
+    date: 'August 19, 2026',
+    entries: [
+      { type: 'added', html: '<strong>🧠 Competency learning is now visible and controllable</strong> — competencies the system auto-creates from assignment feedback are marked with an <b>amber dot</b> in the competency matrix (tooltip explains no human set them), and a new toggle under Assignment → Settings → Assignment Behavior (“Learn Competencies From Assignments”) lets a workspace turn the learner off entirely — built for setups where non-team members temporarily handle tickets, so a single reassignment can’t quietly add them to the auto-assign pool.' },
+    ],
+  },
   {
     version: '3.5.04-preview',
     date: 'August 19, 2026',
