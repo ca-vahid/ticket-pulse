@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle, CheckCircle2, Clock3, Database, HelpCircle, RefreshCw,
 } from 'lucide-react';
@@ -10,6 +10,11 @@ const STATUS_META = {
   stale: { label: 'Stale', Icon: AlertTriangle, badge: 'bg-red-100 text-red-700', dot: 'bg-red-500' },
   unknown: { label: 'No syncs yet', Icon: HelpCircle, badge: 'bg-slate-200 text-slate-600', dot: 'bg-slate-400' },
 };
+
+// Manual refresh feedback: the request often returns in <100ms, which read as
+// "the button did nothing" (QA 08-17 #3). Hold the spinner at least this long.
+const MIN_REFRESH_SPINNER_MS = 400;
+const AUTO_REFRESH_MS = 60 * 1000;
 
 function relativeAge(ageMs) {
   if (ageMs === null || ageMs === undefined) return 'never';
@@ -28,32 +33,63 @@ function fmtTime(iso) {
   return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
+function startedAgo(ms) {
+  if (ms === null || ms === undefined) return 'started just now';
+  const mins = Math.round(ms / 60000);
+  return mins < 1 ? 'started just now' : `started ${mins}m ago`;
+}
+
+function fmtClock(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleTimeString();
+}
+
 /**
  * SyncHealthCard — per-workspace FreshService sync freshness vs the scheduler
  * cadence (realtime plan Phase 3). Stale (>3× interval) means dashboards keep
  * serving old data while looking alive — exactly the "silently dead
  * scheduler" class this card exists to make visible.
+ * Phase SH: an in-flight run shows as "Syncing now" instead of aging into a
+ * false Stale, and each row carries the honest data-freshness signal
+ * (newest ticket ingest, which the 60s fast lane keeps bumping).
  * Powered by GET /api/sync/health (admin).
  */
 export default function SyncHealthCard() {
   const [health, setHealth] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const mountedRef = useRef(true);
 
-  const load = useCallback(async () => {
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
+  const load = useCallback(async ({ minSpinnerMs = 0 } = {}) => {
     setLoading(true);
     setError(null);
+    const startedAt = Date.now();
     try {
       const resp = await syncAPI.getHealth();
-      setHealth(resp?.data || null);
+      if (mountedRef.current) setHealth(resp?.data || null);
     } catch (err) {
-      setError(err?.message || 'Could not load sync health');
+      if (mountedRef.current) setError(err?.message || 'Could not load sync health');
     } finally {
-      setLoading(false);
+      const wait = minSpinnerMs - (Date.now() - startedAt);
+      if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+      if (mountedRef.current) setLoading(false);
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+    // Keep the card honest while the Settings tab sits open — a stale badge
+    // from minutes ago is exactly the confusion this card exists to prevent.
+    const timer = setInterval(() => load(), AUTO_REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [load]);
 
   const overall = health?.overall || 'unknown';
   const checking = loading && !health;
@@ -77,13 +113,16 @@ export default function SyncHealthCard() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {health?.checkedAt && (
+            <span className="text-[11px] text-slate-400">Checked {fmtClock(health.checkedAt)}</span>
+          )}
           <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${meta.badge}`}>
             <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />
             {meta.label}
           </span>
           <button
             type="button"
-            onClick={load}
+            onClick={() => load({ minSpinnerMs: MIN_REFRESH_SPINNER_MS })}
             disabled={loading}
             className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-50"
             title="Refresh"
@@ -104,6 +143,7 @@ export default function SyncHealthCard() {
                 <th className="px-3 py-2 font-medium">Workspace</th>
                 <th className="px-3 py-2 font-medium">Schedule</th>
                 <th className="px-3 py-2 font-medium">Last completed sync</th>
+                <th className="px-3 py-2 font-medium">Data freshness</th>
                 <th className="px-3 py-2 font-medium">Status</th>
               </tr>
             </thead>
@@ -117,18 +157,30 @@ export default function SyncHealthCard() {
                     <td className="whitespace-nowrap px-3 py-2" title={fmtTime(row.lastSyncAt)}>
                       {row.lastSyncAt ? `${relativeAge(row.ageMs)} · ${fmtTime(row.lastSyncAt)}` : 'never'}
                     </td>
+                    <td className="whitespace-nowrap px-3 py-2 text-slate-500" title={fmtTime(row.dataFreshAt)}>
+                      {row.dataFreshAt ? `Data fresh ${relativeAge(row.dataAgeMs)}` : '—'}
+                    </td>
                     <td className="whitespace-nowrap px-3 py-2">
-                      <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-semibold ${rowMeta.badge}`}>
-                        <span className={`h-1.5 w-1.5 rounded-full ${rowMeta.dot}`} />
-                        {rowMeta.label}
-                      </span>
+                      {row.syncRunning ? (
+                        // An in-flight run is liveness, not lateness — show it
+                        // instead of a misleading Stale/Late chip.
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-100 px-2 py-0.5 font-semibold text-blue-700">
+                          <RefreshCw className="h-3 w-3 animate-spin" />
+                          Syncing now · {startedAgo(row.runningForMs)}
+                        </span>
+                      ) : (
+                        <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-semibold ${rowMeta.badge}`}>
+                          <span className={`h-1.5 w-1.5 rounded-full ${rowMeta.dot}`} />
+                          {rowMeta.label}
+                        </span>
+                      )}
                     </td>
                   </tr>
                 );
               })}
               {!loading && rows.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="px-3 py-3 text-slate-500">No active workspaces.</td>
+                  <td colSpan={5} className="px-3 py-3 text-slate-500">No active workspaces.</td>
                 </tr>
               )}
             </tbody>
@@ -136,7 +188,8 @@ export default function SyncHealthCard() {
         </div>
       )}
       <p className="mt-3 text-[11px] text-slate-400">
-        Stale = no completed sync in over 3× the interval (15-minute floor). Admins get one email per stale incident.
+        Stale = no completed sync in over 3× the interval (20-minute floor) with no fresh ticket data and no
+        healthy run in flight. Admins get one email per confirmed stale incident.
       </p>
     </section>
   );

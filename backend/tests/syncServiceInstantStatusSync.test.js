@@ -445,8 +445,8 @@ describe('performFullSync — stale sync lock (10min) break', () => {
     syncService._preheatTicketThreads = jest.fn().mockResolvedValue();
   });
 
-  test('a lock held >10min is broken with a warn log and the sync proceeds', async () => {
-    syncService.runningWorkspaces.set(7, Date.now() - 11 * 60 * 1000);
+  test('a lock held >20min is broken with a warn log and the sync proceeds', async () => {
+    syncService.runningWorkspaces.set(7, Date.now() - 21 * 60 * 1000);
 
     const result = await syncService.performFullSync({ workspaceId: 7 });
 
@@ -455,11 +455,14 @@ describe('performFullSync — stale sync lock (10min) break', () => {
       expect.stringContaining('Breaking stale sync lock for workspace 7'),
       expect.objectContaining({ workspaceId: 7 }),
     );
-    expect(syncLogRepositoryMock.failStaleStarted).toHaveBeenCalledWith(7, 10 * 60 * 1000);
+    expect(syncLogRepositoryMock.failStaleStarted).toHaveBeenCalledWith(7, 20 * 60 * 1000);
   });
 
-  test('a lock held <10min still skips the run (no premature takeover)', async () => {
-    syncService.runningWorkspaces.set(7, Date.now() - 9 * 60 * 1000);
+  test('a lock held <20min still skips the run (no premature takeover)', async () => {
+    // Phase SH raised the threshold 10m → 20m: Accounting's HEALTHY full
+    // cycles run ~13 min, and the 10-min watchdog was stealing the lock
+    // mid-run (concurrent duplicates + out-of-order completions).
+    syncService.runningWorkspaces.set(7, Date.now() - 13 * 60 * 1000);
 
     const result = await syncService.performFullSync({ workspaceId: 7 });
 

@@ -722,6 +722,36 @@ class TicketRepository {
       throw new DatabaseError('Failed to clean old tickets', error);
     }
   }
+
+  /**
+   * Per-workspace MAX(last_ingested_at) — the honest "when did ticket data
+   * last arrive" signal for sync health (the 60s fast lane refreshes tickets
+   * without writing sync_log rows, so completions alone under-report
+   * freshness). One query; the LATERAL keeps each per-workspace MAX on the
+   * (workspace_id, last_ingested_at DESC) index instead of a table scan.
+   * @param {number[]} workspaceIds
+   * @returns {Promise<Map<number, Date>>} workspaceId -> latest lastIngestedAt
+   */
+  async getMaxLastIngestedAt(workspaceIds = []) {
+    try {
+      if (!Array.isArray(workspaceIds) || workspaceIds.length === 0) return new Map();
+      const rows = await prisma.$queryRaw`
+        SELECT ws.id AS workspace_id, agg.max_ingested_at
+        FROM unnest(${workspaceIds}::int[]) AS ws(id)
+        LEFT JOIN LATERAL (
+          SELECT MAX(t.last_ingested_at) AS max_ingested_at
+          FROM tickets t
+          WHERE t.workspace_id = ws.id
+        ) agg ON TRUE
+      `;
+      return new Map(rows
+        .filter((r) => r.max_ingested_at)
+        .map((r) => [Number(r.workspace_id), r.max_ingested_at]));
+    } catch (error) {
+      logger.error('Error fetching per-workspace ingest freshness:', error);
+      return new Map();
+    }
+  }
 }
 
 export default new TicketRepository();

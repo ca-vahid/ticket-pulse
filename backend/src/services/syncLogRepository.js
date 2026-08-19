@@ -125,9 +125,13 @@ class SyncLogRepository {
       const where = { status: 'completed', syncType: 'full' };
       if (workspaceId) where.workspaceId = workspaceId;
 
+      // Order by COMPLETION, not start: overlapping runs (watchdog takeover,
+      // manual "Sync now" during a scheduled run) can finish out of order, and
+      // the startedAt ordering returned an older completion — sync health then
+      // reported a stale age for a workspace that had just completed a sync.
       return await prisma.syncLog.findFirst({
         where,
-        orderBy: { startedAt: 'desc' },
+        orderBy: { completedAt: 'desc' },
       });
     } catch (error) {
       logger.error('Error fetching latest successful sync log:', error);
@@ -334,23 +338,26 @@ class SyncLogRepository {
   }
 
   /**
-   * Check if a sync is currently running
-   * @returns {Promise<boolean>} True if a sync is running
+   * When did the currently-running TICKET sync start, per workspace? One
+   * grouped query over 'started' full-sync rows (sync health calls this on
+   * every poll). A workspace with no in-flight run simply has no entry.
+   * @param {number[]} workspaceIds
+   * @returns {Promise<Map<number, Date>>} workspaceId -> latest running startedAt
    */
-  async isSyncRunning(workspaceId = null) {
+  async getRunningSince(workspaceIds = []) {
     try {
-      const where = { status: 'started' };
-      if (workspaceId) where.workspaceId = workspaceId;
-
-      const runningSync = await prisma.syncLog.findFirst({
-        where,
-        orderBy: { startedAt: 'desc' },
+      if (!Array.isArray(workspaceIds) || workspaceIds.length === 0) return new Map();
+      const groups = await prisma.syncLog.groupBy({
+        by: ['workspaceId'],
+        where: { status: 'started', syncType: 'full', workspaceId: { in: workspaceIds } },
+        _max: { startedAt: true },
       });
-
-      return Boolean(runningSync);
+      return new Map(groups
+        .filter((g) => g._max.startedAt)
+        .map((g) => [g.workspaceId, g._max.startedAt]));
     } catch (error) {
-      logger.error('Error checking if sync is running:', error);
-      return false;
+      logger.error('Error fetching running sync starts:', error);
+      return new Map();
     }
   }
 }

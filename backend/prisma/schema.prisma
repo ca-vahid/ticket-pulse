@@ -1180,6 +1180,10 @@ model Ticket {
 
   @@index([workspaceId])
   @@index([workspaceId, lastRealActivityAt(sort: Desc)])
+  // Sync health's data-freshness signal (Phase SH): per-workspace
+  // MAX(last_ingested_at) is polled every health check — this keeps it an
+  // index probe instead of a per-workspace scan.
+  @@index([workspaceId, lastIngestedAt(sort: Desc)])
   // Queue cf_* filters (Custom Fields Activation Phase 2): GIN over the JSONB
   // values so containment probes stay cheap as the table grows.
   @@index([customFields(ops: JsonbPathOps)], map: "idx_tickets_custom_fields_gin", type: Gin)

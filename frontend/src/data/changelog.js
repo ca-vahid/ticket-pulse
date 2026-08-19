@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.4.06-preview';
+export const APP_VERSION = '3.5.00-preview';
 
 export const changelog = [
+  {
+    version: '3.5.00-preview',
+    date: 'August 19, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>🚨 The “sync is stale” email storm, ended</strong> — those all-day alert emails were false alarms: your FreshService data was syncing fine the whole time. The health monitor was clocking “time since the last COMPLETED sync” while long (healthy) sync cycles were still running. It now counts an in-flight sync as alive, tracks true data freshness from ticket ingest timestamps, requires 15 minutes of confirmed staleness before emailing (once per incident), and the sync watchdog no longer interrupts long-but-healthy cycles. Alerts re-enabled with the new logic.' },
+      { type: 'fixed', html: '<strong>📊 Accounting’s Team Balance charts, un-garbled</strong> — the washed-out bars, phantom 0–400 color legend, and name-pile-up were a chart-engine instance-reuse bug (the Categories treemap was being morphed into the Team bar charts on tab switch). Tabs now remount cleanly, big rosters scroll instead of squishing, and the charts default to alphabetical order — team-safe, no leaderboard framing. (QA 08-17 #4)' },
+      { type: 'improved', html: '<strong>🩺 Sync freshness that answers back</strong> — the Settings card now shows a live “Syncing now · started Xm ago” chip, a “Data fresh Xm ago” column, a “Checked at” stamp that visibly updates on refresh, and auto-refreshes every minute. The stale banner knows when a sync is already running (and stops advising a “Sync now” that’s disabled), and banner links into Settings now navigate correctly even when you’re already on the Settings page. (QA 08-17 #3)' },
+    ],
+  },
   {
     version: '3.4.06-preview',
     date: 'August 15, 2026',
