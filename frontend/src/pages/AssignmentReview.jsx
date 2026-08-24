@@ -4607,7 +4607,7 @@ export function AssignmentConfigPanel({ workspaceTimezone = 'America/Los_Angeles
       const res = await assignmentAPI.getConfig();
       const cfg = res?.data || {};
       setConfig({
-        isEnabled: false, autoAssign: false, autoCloseNoise: false, dryRunMode: true,
+        isEnabled: false, autoAssign: false, autoCloseNoise: false, duplicateBurstEnabled: true, dryRunMode: true,
         llmModel: 'claude-sonnet-5', maxRecommendations: 3, scoringWeights: null,
         pollForUnassigned: true, pollMaxPerCycle: 5,
         monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60,
@@ -4620,7 +4620,7 @@ export function AssignmentConfigPanel({ workspaceTimezone = 'America/Los_Angeles
       });
       try { const statusRes = await assignmentAPI.emailStatus(); setEmailStatus(statusRes?.data || null); } catch { /* ignore */ }
     } catch {
-      setConfig({ isEnabled: false, autoAssign: false, autoCloseNoise: false, dryRunMode: true, llmModel: 'claude-sonnet-5', maxRecommendations: 3, scoringWeights: null, pollForUnassigned: true, pollMaxPerCycle: 5, monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60, excludedGroupIds: [], observeOnlyGroupIds: [], dailyReviewEnabled: false, dailyReviewRunHour: 18, dailyReviewRunMinute: 5, dailyReviewLookbackDays: 14, dailyReviewPreheatEnabled: false, priorityAssessmentEnabled: true, priorityWritebackEnabled: true, typeWritebackEnabled: false, priorityAssessmentAfterHoursEnabled: false });
+      setConfig({ isEnabled: false, autoAssign: false, autoCloseNoise: false, duplicateBurstEnabled: true, dryRunMode: true, llmModel: 'claude-sonnet-5', maxRecommendations: 3, scoringWeights: null, pollForUnassigned: true, pollMaxPerCycle: 5, monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60, excludedGroupIds: [], observeOnlyGroupIds: [], dailyReviewEnabled: false, dailyReviewRunHour: 18, dailyReviewRunMinute: 5, dailyReviewLookbackDays: 14, dailyReviewPreheatEnabled: false, priorityAssessmentEnabled: true, priorityWritebackEnabled: true, typeWritebackEnabled: false, priorityAssessmentAfterHoursEnabled: false });
     } finally { setLoading(false); }
   }, []);
 
@@ -4672,6 +4672,13 @@ export function AssignmentConfigPanel({ workspaceTimezone = 'America/Los_Angeles
           </div>
         )}
         <ConfigToggle label="Auto-Close Noise Tickets" description="Automatically close/resolve noise and spam tickets in FreshService without admin review" checked={config.autoCloseNoise} onChange={() => setConfig({ ...config, autoCloseNoise: !config.autoCloseNoise })} />
+        <ConfigToggle
+          label="Collapse duplicate bursts"
+          description="Same requester + identical subject within 15 minutes: later copies get linked as duplicates, Ticket-Pulse-born copies auto-resolve, and the AI run is skipped. Turn off for teams whose legitimate requests share subjects (e.g. Power App submissions that differ only in the body)."
+          checked={config.duplicateBurstEnabled !== false}
+          onChange={() => setConfig({ ...config, duplicateBurstEnabled: config.duplicateBurstEnabled === false })}
+          color="text-sky-600"
+        />
         <ConfigToggle
           label="Learn Competencies From Assignments"
           description="Approved and reassigned tickets strengthen — or auto-create — the assigned technician's competency in the ticket's category (marked with an amber dot in the matrix). Turn off if people outside the team temporarily handle tickets here, so one reassignment can't add them to the skills matrix."

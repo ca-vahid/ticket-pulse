@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronDown, ChevronRight, Columns3, CornerUpRight, GripVertical, RotateCcw, Sparkles } from 'lucide-react';
+import { ChevronDown, ChevronRight, Columns3, CornerUpRight, GripVertical, MoveHorizontal, RotateCcw, Sparkles } from 'lucide-react';
 import AssigneePicker from './AssigneePicker';
 import StatusPicker from './StatusPicker';
 import {
@@ -529,16 +529,253 @@ export function normalizeColumnKeys(value) {
  * subject (compact) / the roomy 60px type slot, then the chosen non-subject
  * columns in user order. Applied at xl+ via the `--tp-q-grid` variable; the
  * below-xl templates stay hardcoded in Tickets.jsx (fixed essentials).
+ *
+ * Phase QR: `widths` ({key: px}, the CURRENT layout's user-resized columns)
+ * pins those tracks to fixed px. With no widths the output is byte-identical
+ * to the pre-QR template (zero-change default). Once ANY column is pinned the
+ * unpinned subject swaps minmax(0,…) → minmax(minPx,…) so the overflow
+ * wrapper's floor holds — subject keeps its flexible slack until the user
+ * pins it directly.
  */
-export function buildQueueGridTemplate(columnKeys, { roomy = false } = {}) {
+export function buildQueueGridTemplate(columnKeys, { roomy = false, widths = {} } = {}) {
+  const hasPinned = Object.keys(widths).length > 0;
+  const subjectCol = QUEUE_COLUMN_MAP.get('subject');
+  const subjectTrack = widths.subject != null
+    ? `${widths.subject}px`
+    : hasPinned
+      ? subjectCol.track.replace('minmax(0,', `minmax(${subjectCol.minPx}px,`)
+      : subjectCol.track;
   const tracks = columnKeys
     .filter((k) => k !== 'subject' && QUEUE_COLUMN_MAP.has(k))
-    .map((k) => QUEUE_COLUMN_MAP.get(k).track);
+    .map((k) => (widths[k] != null ? `${widths[k]}px` : QUEUE_COLUMN_MAP.get(k).track));
   return [
     '6px',
-    roomy ? '60px' : QUEUE_COLUMN_MAP.get('subject').track,
+    roomy ? '60px' : subjectTrack,
     ...tracks,
   ].join(' ');
+}
+
+// ------------------------------------------------- resizable widths (Phase QR)
+
+export const MAX_COLUMN_PX = 800;
+const WIDTHS_STORAGE_KEY = 'tp_queue_columnWidths';
+const WIDTHS_PREF_KEY = 'queue.columnWidths';
+const EMPTY_WIDTHS = () => ({ compact: {}, roomy: {} });
+
+/** Clamp a candidate px width to [registry minPx, 800]. */
+export function clampColumnWidth(key, px) {
+  const min = QUEUE_COLUMN_MAP.get(key)?.minPx ?? 60;
+  return Math.min(MAX_COLUMN_PX, Math.max(min, Math.round(px)));
+}
+
+/**
+ * Default px a column starts a keyboard/fallback resize from when it has no
+ * pinned width and no measurable DOM rect: the first px figure in its track
+ * ('150px' → 150, 'minmax(150px,1fr)' → 150), else the registry minPx
+ * (subject's 'minmax(0,2.4fr)' has none).
+ */
+export function columnFallbackPx(key) {
+  const col = QUEUE_COLUMN_MAP.get(key);
+  if (!col) return 120;
+  const m = col.track.match(/([\d.]+)px/);
+  const parsed = m ? parseFloat(m[1]) : 0;
+  return parsed > 0 ? parsed : col.minPx;
+}
+
+/**
+ * Normalize a stored/foreign widths value into {compact:{key:px}, roomy:{…}}:
+ * unknown layouts/keys dropped, non-numeric junk dropped, survivors clamped.
+ * Only user-resized keys are ever stored — unset keys keep registry tracks.
+ */
+export function normalizeColumnWidths(value) {
+  const out = EMPTY_WIDTHS();
+  if (!value || typeof value !== 'object') return out;
+  for (const layout of ['compact', 'roomy']) {
+    const src = value[layout];
+    if (!src || typeof src !== 'object' || Array.isArray(src)) continue;
+    for (const [k, v] of Object.entries(src)) {
+      const n = Number(v);
+      if (!QUEUE_COLUMN_MAP.has(k) || !Number.isFinite(n) || n <= 0) continue;
+      out[layout][k] = clampColumnWidth(k, n);
+    }
+  }
+  return out;
+}
+
+/**
+ * Natural min width (px) of the xl grid once widths are pinned — pinned px
+ * for resized columns, each remaining track's own px floor otherwise (subject
+ * uses its minPx, matching the minmax swap in buildQueueGridTemplate). The
+ * overflow wrapper (QR3) sets this as min-width so cells never collapse below
+ * their floor; returns 0 with no pinned widths (no wrapper → today's layout).
+ */
+export function buildQueueGridMinWidth(columnKeys, { roomy = false, widths = {} } = {}) {
+  if (Object.keys(widths).length === 0) return 0;
+  const minOf = (key) => {
+    if (widths[key] != null) return widths[key];
+    const col = QUEUE_COLUMN_MAP.get(key);
+    const m = col.track.match(/([\d.]+)px/);
+    const parsed = m ? parseFloat(m[1]) : 0;
+    return key === 'subject' ? Math.max(parsed, col.minPx) : parsed;
+  };
+  let sum = 6 + (roomy ? 60 : minOf('subject'));
+  for (const k of columnKeys) {
+    if (k !== 'subject' && QUEUE_COLUMN_MAP.has(k)) sum += minOf(k);
+  }
+  return Math.round(sum);
+}
+
+/**
+ * Per-user column widths (QR1) — {compact:{key:px}, roomy:{key:px}} under the
+ * 'queue.columnWidths' preference. Same storage choreography as columnKeys in
+ * Tickets.jsx: localStorage mirror ('tp_queue_columnWidths') paints instantly,
+ * the server value WINS on load, writes are optimistic with a debounced
+ * fire-and-forget PUT. Widths apply at xl+ only — below xl the hardcoded
+ * essentials templates never read them (enforced by the GRID_* classes).
+ */
+export function useColumnWidths(layout, workspaceId) {
+  const [allWidths, setAllWidths] = useState(() => {
+    try {
+      return normalizeColumnWidths(JSON.parse(localStorage.getItem(WIDTHS_STORAGE_KEY) || 'null'));
+    } catch { return EMPTY_WIDTHS(); }
+  });
+  const saveTimerRef = useRef(null);
+  const persist = useCallback((next) => {
+    try { localStorage.setItem(WIDTHS_STORAGE_KEY, JSON.stringify(next)); } catch { /* no-op */ }
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      ticketsAPI.setQueuePreference(WIDTHS_PREF_KEY, next).catch(() => { /* local mirror still applies */ });
+    }, 600);
+  }, []);
+  useEffect(() => () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); }, []);
+  useEffect(() => {
+    let cancelled = false;
+    ticketsAPI.getQueuePreference(WIDTHS_PREF_KEY)
+      .then((res) => {
+        if (cancelled) return;
+        const value = res?.data?.value;
+        if (!value || typeof value !== 'object') return; // never resized — keep defaults/mirror
+        const next = normalizeColumnWidths(value);
+        setAllWidths(next);
+        try { localStorage.setItem(WIDTHS_STORAGE_KEY, JSON.stringify(next)); } catch { /* no-op */ }
+      })
+      .catch(() => { /* offline/legacy backend — the mirror already painted */ });
+    return () => { cancelled = true; };
+  }, [workspaceId]);
+
+  // Board has no list columns; its (hidden) customizer state rides compact.
+  const layoutKey = layout === 'roomy' ? 'roomy' : 'compact';
+  const setWidth = useCallback((key, px) => {
+    if (!QUEUE_COLUMN_MAP.has(key)) return;
+    setAllWidths((prev) => {
+      const next = { ...prev, [layoutKey]: { ...prev[layoutKey], [key]: clampColumnWidth(key, px) } };
+      persist(next);
+      return next;
+    });
+  }, [layoutKey, persist]);
+  const resetWidth = useCallback((key) => {
+    setAllWidths((prev) => {
+      if (prev[layoutKey]?.[key] == null) return prev;
+      const layer = { ...prev[layoutKey] };
+      delete layer[key];
+      const next = { ...prev, [layoutKey]: layer };
+      persist(next);
+      return next;
+    });
+  }, [layoutKey, persist]);
+  const resetAllWidths = useCallback(() => {
+    setAllWidths((prev) => {
+      if (Object.keys(prev.compact).length === 0 && Object.keys(prev.roomy).length === 0) return prev;
+      const next = EMPTY_WIDTHS();
+      persist(next);
+      return next;
+    });
+  }, [persist]);
+
+  return {
+    widths: allWidths[layoutKey],
+    setWidth,
+    resetWidth,
+    resetAllWidths,
+    hasCustomWidths: Object.keys(allWidths.compact).length > 0 || Object.keys(allWidths.roomy).length > 0,
+  };
+}
+
+/**
+ * 6px drag handle on the right edge of an xl header cell (QR2). Pointer
+ * capture; every move calls onPreview(key, px) — the page writes the
+ * recomputed template STRAIGHT to the list card's `--tp-q-grid` var (no React
+ * render per move) — and pointerup commits once (debounced PUT behind it).
+ * Keyboard: ←/→ nudge ±16px. Double-click resets the column. All its events
+ * stopPropagation so the neighbouring sort button never sees them, and it
+ * overlays only its own 6px sliver — sort clicks elsewhere pass untouched.
+ * hidden below xl: stored widths are an xl+ concern only.
+ */
+export function ColumnResizeHandle({ colKey, label, minPx, value, onPreview, onCommit, onReset }) {
+  const dragRef = useRef(null);
+  const clamp = (px) => clampColumnWidth(colKey, px);
+  // Live rendered width from the header cell itself (flexible tracks differ
+  // from their registry defaults); pinned value / registry fallback when the
+  // rect is unmeasurable (jsdom).
+  const startWidth = (el) => {
+    const w = el.parentElement?.getBoundingClientRect?.().width || 0;
+    return w > 0 ? w : (value ?? columnFallbackPx(colKey));
+  };
+
+  const onPointerDown = (e) => {
+    if (e.button !== 0 && e.pointerType !== 'touch') return;
+    e.preventDefault();
+    e.stopPropagation();
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* jsdom */ }
+    // Suppress text selection page-wide for the drag's duration — the pointer
+    // sweeps across header labels and would smear a selection behind it.
+    document.body.style.userSelect = 'none';
+    dragRef.current = { startX: e.clientX, startW: startWidth(e.currentTarget), next: null };
+  };
+  const onPointerMove = (e) => {
+    const d = dragRef.current;
+    if (!d) return;
+    e.stopPropagation();
+    d.next = clamp(d.startW + (e.clientX - d.startX));
+    onPreview(colKey, d.next);
+  };
+  const endDrag = (e) => {
+    const d = dragRef.current;
+    dragRef.current = null;
+    if (!d) return;
+    e.stopPropagation();
+    document.body.style.userSelect = '';
+    try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* jsdom */ }
+    if (d.next != null) onCommit(colKey, d.next);
+  };
+  const onKeyDown = (e) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault();
+    e.stopPropagation();
+    const base = value ?? startWidth(e.currentTarget);
+    onCommit(colKey, clamp(base + (e.key === 'ArrowRight' ? 16 : -16)));
+  };
+
+  return (
+    <span
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={`Resize ${label} column`}
+      aria-valuemin={minPx}
+      aria-valuemax={MAX_COLUMN_PX}
+      aria-valuenow={value != null ? value : undefined}
+      tabIndex={0}
+      title="Drag to resize · double-click to reset"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={endDrag}
+      onPointerCancel={() => { dragRef.current = null; document.body.style.userSelect = ''; }}
+      onClick={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => { e.stopPropagation(); onReset(colKey); }}
+      onKeyDown={onKeyDown}
+      className="tp-focus-ring hidden xl:block absolute right-0 inset-y-0 w-[6px] z-10 cursor-col-resize touch-none select-none rounded-full transition-colors hover:bg-blue-300/70 active:bg-blue-400/80 focus-visible:bg-blue-300/70"
+    />
+  );
 }
 
 // ------------------------------------------------------------ columns menu
@@ -549,7 +786,7 @@ export function buildQueueGridTemplate(columnKeys, { roomy = false } = {}) {
  * "Always shown", Reset-to-default footer. Same shell as FilterFlyout.
  * Hidden in board mode (the board has status columns, not these).
  */
-export function QueueColumnsMenu({ value, onChange }) {
+export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onResetWidths }) {
   const [open, setOpen] = useState(false);
   const [dragKey, setDragKey] = useState(null);
   // Display order while the menu is open: current visible order, then the
@@ -661,14 +898,28 @@ export function QueueColumnsMenu({ value, onChange }) {
               );
             })}
           </ul>
-          <button
-            onClick={reset}
-            disabled={!customized}
-            className="tp-focus-ring mt-1.5 w-full inline-flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs font-semibold text-slate-500 hover:text-blue-700 hover:bg-blue-50 rounded-md border-t border-slate-100 disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-slate-500"
-          >
-            <RotateCcw className="w-3 h-3" aria-hidden="true" />
-            Reset to default
-          </button>
+          {/* Footer: column-set reset (QC4) beside the width reset (QR3) —
+              two different customizations, two explicit ways back. */}
+          <div className="mt-1.5 flex items-stretch gap-1 border-t border-slate-100 pt-1">
+            <button
+              onClick={reset}
+              disabled={!customized}
+              title="Restore the default column set and order"
+              className="tp-focus-ring flex-1 inline-flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs font-semibold text-slate-500 hover:text-blue-700 hover:bg-blue-50 rounded-md disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-slate-500"
+            >
+              <RotateCcw className="w-3 h-3" aria-hidden="true" />
+              Reset columns
+            </button>
+            <button
+              onClick={onResetWidths}
+              disabled={!hasCustomWidths}
+              title="Clear every column width you've dragged (both list layouts)"
+              className="tp-focus-ring flex-1 inline-flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs font-semibold text-slate-500 hover:text-blue-700 hover:bg-blue-50 rounded-md disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-slate-500"
+            >
+              <MoveHorizontal className="w-3 h-3" aria-hidden="true" />
+              Reset widths
+            </button>
+          </div>
         </div>
       )}
     </div>

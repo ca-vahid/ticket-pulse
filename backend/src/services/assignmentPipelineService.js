@@ -174,7 +174,16 @@ class AssignmentPipelineService {
     // triage per burst, not one per click — see the 2026-07-13 MS Teams app
     // storm: 12 identical tickets in 84s, 12 full AI runs). Manual triggers
     // bypass the guard so an admin can always force a real run.
-    if (!isManual && !reboundFrom) {
+    // Per-workspace opt-out (Phase DB): `duplicateBurstEnabled === false`
+    // disables the guard entirely — some teams' legitimate requests share
+    // subjects and differ only in the body, which the guard never reads.
+    // Null/missing keeps today's behavior (default ON), matching the
+    // competencyFeedbackEnabled !== false convention.
+    if (!isManual && !reboundFrom && assignmentConfig?.duplicateBurstEnabled === false) {
+      logger.debug('Duplicate-burst guard skipped: disabled for this workspace', {
+        ticketId, workspaceId, triggerSource,
+      });
+    } else if (!isManual && !reboundFrom) {
       try {
         const { default: duplicateBurstService } = await import('./duplicateBurstService.js');
         const original = await duplicateBurstService.detectBurstDuplicate(ticketId, workspaceId);

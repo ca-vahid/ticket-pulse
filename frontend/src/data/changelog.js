@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.6.01-preview';
+export const APP_VERSION = '3.6.02-preview';
 
 export const changelog = [
+  {
+    version: '3.6.02-preview',
+    date: 'August 23, 2026',
+    entries: [
+      { type: 'new', html: '<strong>↔️ Resizable queue columns</strong> — drag the divider on any column header to give Subject (or anything else) more room, just like a spreadsheet. Widths are per layout, per user, and sync across browsers; arrow keys nudge for accessibility, double-click resets one column, and “Reset widths” in the Columns menu clears them all. If your pinned widths outgrow the card, the list scrolls horizontally instead of crushing columns. (QA 08-21: resizable columns)' },
+      { type: 'new', html: '<strong>🔀 “Collapse duplicate bursts” is now a per-workspace switch</strong> — Settings → AI & Routing → Assignment Behavior. When off, same-subject tickets from the same requester are no longer auto-linked and auto-resolved as duplicates — built for Project Accounting, whose legitimate Power App requests share subjects and differ only in the body. Default stays on everywhere else. (QA 08-21 #6)' },
+    ],
+  },
   {
     version: '3.6.01-preview',
     date: 'August 23, 2026',
