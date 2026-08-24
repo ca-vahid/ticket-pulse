@@ -10,10 +10,15 @@ import { MemoryRouter } from 'react-router-dom';
 //  - subject / ref / chevron are REAL anchors with modifier-aware clicks,
 //  - board mode fetches a 50-row page and the pagination math follows,
 //  - URL churn with unchanged query values never blanks selection or refetches.
-const { listSpy, metaSpy, statsSpy } = vi.hoisted(() => ({
+const { listSpy, metaSpy, statsSpy, decideSpy, roleRef } = vi.hoisted(() => ({
   listSpy: vi.fn(),
   metaSpy: vi.fn(),
   statsSpy: vi.fn(),
+  decideSpy: vi.fn(),
+  // Mutable workspace role: the historical default is this OBJECT (which the
+  // page's `wsRole === 'admin'` string compare treats as non-reviewer); the
+  // AI-visibility tests below set real role STRINGS ('viewer' / 'admin').
+  roleRef: { value: { role: 'admin', canManage: true, canReview: true } },
 }));
 
 vi.mock('../services/api', () => ({
@@ -21,6 +26,7 @@ vi.mock('../services/api', () => ({
     { list: listSpy, meta: metaSpy, stats: statsSpy },
     { get: (target, key) => target[key] || (() => new Promise(() => {})) },
   ),
+  assignmentAPI: { decide: decideSpy, latestRun: vi.fn(() => new Promise(() => {})) },
   getGlobalExcludeNoise: vi.fn(() => false),
   setGlobalExcludeNoise: vi.fn(),
 }));
@@ -31,7 +37,7 @@ vi.mock('../contexts/WorkspaceContext', () => ({
   useWorkspace: () => ({ currentWorkspace: { id: 1, name: 'IT', slug: 'it' }, availableWorkspaces: [] }),
 }));
 vi.mock('../components/nav/navDestinations', () => ({
-  useWorkspaceRole: () => ({ role: 'admin', canManage: true, canReview: true }),
+  useWorkspaceRole: () => roleRef.value,
   NAV_DESTINATIONS: [],
 }));
 vi.mock('../hooks/useSSE', () => ({ useSSE: vi.fn() }));
@@ -46,7 +52,9 @@ vi.mock('../components/tickets/TicketFilterRail', () => ({
   default: () => null,
   ActiveFilterBar: () => null,
 }));
-vi.mock('../components/tickets/AiAssignModal', () => ({ default: () => null }));
+// Marker render so the AI-visibility tests can assert whether the reviewer
+// modal opened (it only mounts when the page sets aiTicket).
+vi.mock('../components/tickets/AiAssignModal', () => ({ default: () => <div>AI MODAL</div> }));
 vi.mock('../components/tickets/MobileAssignSheet', () => ({ default: () => null }));
 vi.mock('../assets/tickets-hero.png', () => ({ default: 'hero.png' }));
 
@@ -84,6 +92,7 @@ function mount(initialEntry = '/tickets') {
 beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
+  roleRef.value = { role: 'admin', canManage: true, canReview: true };
   // onRowClick branches on viewport width — jsdom has no matchMedia. Desktop
   // (matches: true) → plain click peeks instead of navigating.
   window.matchMedia = vi.fn().mockImplementation((query) => ({
@@ -229,6 +238,80 @@ describe('Board density — 50-card page (QA 08-07 #12)', () => {
     listSpy.mockResolvedValue({ data: { items: [row(1, 'Open')], total: 51 } });
     mount();
     await waitFor(() => expect(screen.getAllByText('on page').length).toBeGreaterThan(0));
+  });
+});
+
+describe('AI suggestion read/act split (QA 08-19 #2)', () => {
+  const aiBlock = {
+    runId: 7,
+    state: 'suggested',
+    techId: 49,
+    techName: 'Zoe Dio',
+    score: 0.89,
+    count: 3,
+    candidates: [
+      { techId: 49, techName: 'Zoe Dio', score: 0.89 },
+      { techId: 50, techName: 'Benjamin Rabel', score: 0.87 },
+      { techId: 51, techName: 'Dominic Bautista', score: 0.86 },
+    ],
+  };
+  // Row 1: FS-born WITH an fs id → the editable assignee-cell path (picker slot).
+  // Row 2: no fs id → the read-only assignee-cell path (:1795-style chip).
+  const aiRows = () => [
+    { ...row(1, 'Open'), freshserviceTicketId: 901, ai: { ...aiBlock } },
+    { ...row(2, 'Open'), ai: { ...aiBlock } },
+  ];
+
+  test('viewer sees the read-only Suggested chip: spans not buttons, no approve, no reviewer API calls', async () => {
+    roleRef.value = 'viewer';
+    listSpy.mockResolvedValue({ data: { items: aiRows(), total: 2 } });
+    mount();
+    await waitFor(() => expect(screen.getAllByText('Row 1').length).toBeGreaterThan(0));
+
+    // Both cell variants render the suggestion, read-only.
+    const chips = screen.getAllByTitle(/waiting on a reviewer/i);
+    expect(chips.length).toBeGreaterThanOrEqual(2);
+    for (const chip of chips) {
+      expect(chip.tagName).not.toBe('BUTTON');
+      expect(chip.closest('button')).toBeNull();
+    }
+    expect(screen.getAllByText('Suggested · 89%').length).toBe(2);
+
+    // Nothing actionable: no review/approve affordances, and clicking the chip
+    // neither opens the reviewer modal nor fires the decide endpoint.
+    expect(screen.queryByRole('button', { name: /review ai suggestion/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /ask ai to assign/i })).not.toBeInTheDocument();
+    fireEvent.click(chips[0]);
+    expect(screen.queryByText('AI MODAL')).not.toBeInTheDocument();
+    expect(decideSpy).not.toHaveBeenCalled();
+  });
+
+  test('reviewer keeps the actionable chip: a real button that opens the AI modal', async () => {
+    roleRef.value = 'admin';
+    listSpy.mockResolvedValue({ data: { items: aiRows(), total: 2 } });
+    mount();
+    await waitFor(() => expect(screen.getAllByText('Row 2').length).toBeGreaterThan(0));
+
+    // Row 2 (read-only cell path) renders the chip as a BUTTON for reviewers
+    // (row 1's editable path shows the same state inside the AssigneePicker
+    // trigger, whose title lives on an inner span — filter to the button).
+    const chip = screen.getAllByTitle(/awaiting your approval/i).find((el) => el.tagName === 'BUTTON');
+    expect(chip).toBeTruthy();
+    // …and clicking it opens the live-pipeline review modal.
+    fireEvent.click(chip);
+    expect(screen.getByText('AI MODAL')).toBeInTheDocument();
+    // No read-only viewer chips anywhere for reviewers.
+    expect(screen.queryByTitle(/waiting on a reviewer/i)).not.toBeInTheDocument();
+  });
+
+  test('viewer keeps the manual assignee picker on rows without a pending suggestion', async () => {
+    roleRef.value = 'viewer';
+    listSpy.mockResolvedValue({
+      data: { items: [{ ...row(1, 'Open'), freshserviceTicketId: 901, ai: null }], total: 1 },
+    });
+    mount();
+    await waitFor(() => expect(screen.getAllByText('Row 1').length).toBeGreaterThan(0));
+    expect(screen.getByRole('button', { name: /unassigned — assign a member/i })).toBeInTheDocument();
   });
 });
 

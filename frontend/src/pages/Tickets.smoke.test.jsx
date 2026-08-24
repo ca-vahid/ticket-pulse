@@ -24,8 +24,9 @@ vi.mock('../contexts/AuthContext', () => ({
 vi.mock('../contexts/WorkspaceContext', () => ({
   useWorkspace: () => ({ currentWorkspace: { id: 1, name: 'IT', slug: 'it' }, availableWorkspaces: [] }),
 }));
+const { roleRef } = vi.hoisted(() => ({ roleRef: { value: { role: 'admin', canManage: true, canReview: true } } }));
 vi.mock('../components/nav/navDestinations', () => ({
-  useWorkspaceRole: () => ({ role: 'admin', canManage: true, canReview: true }),
+  useWorkspaceRole: () => roleRef.value,
   NAV_DESTINATIONS: [],
 }));
 vi.mock('../hooks/useSSE', () => ({ useSSE: vi.fn() }));
@@ -50,5 +51,12 @@ describe('Tickets page smoke', () => {
     render(<Tickets />, { wrapper: MemoryRouter });
     // Loading spinner state is fine — the assertion is that render didn't throw.
     expect(screen.getByText('AppHeader')).toBeInTheDocument();
+  });
+
+  test('mounts for a viewer-role member too (read/act split path, QA 08-19 #2)', () => {
+    roleRef.value = 'viewer';
+    render(<Tickets />, { wrapper: MemoryRouter });
+    expect(screen.getByText('AppHeader')).toBeInTheDocument();
+    roleRef.value = { role: 'admin', canManage: true, canReview: true };
   });
 });

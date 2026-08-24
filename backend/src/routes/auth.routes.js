@@ -474,6 +474,26 @@ router.get(
   '/session',
   asyncHandler(async (req, res) => {
     if (req.session?.user) {
+      // Live role refresh (Mega 08-23 AC2): re-run resolveUserAccess so a
+      // grant/revoke made since login takes effect on the NEXT session check,
+      // not at the next re-login. The Bearer branch below always re-resolved;
+      // this cookie branch used to re-mint the JWT from the stale session
+      // role verbatim — the "stale-role trap". A DB hiccup keeps the session
+      // values (refresh is best-effort, never a lockout).
+      try {
+        const resolved = await resolveUserAccess(
+          String(req.session.user.email || '').toLowerCase(),
+          req.session.user.role,
+        );
+        const refreshedProfiles = sanitizeAgentProfiles(resolved.agentProfiles);
+        req.session.user.role = resolved.role;
+        req.session.user.availableWorkspaces = resolved.availableWorkspaces;
+        req.session.user.agentProfiles = refreshedProfiles;
+        req.session.user.agentProfile = refreshedProfiles[0] || null;
+      } catch (err) {
+        logger.warn('Live access refresh failed on /session (keeping session values):', err.message);
+      }
+
       const sessionAgentProfiles = sanitizeAgentProfiles(req.session.user.agentProfiles || []);
       // Mint a fresh JWT alongside the session payload (Phase A1): the JWT
       // lives in tab-scoped sessionStorage, so a brand-new tab arrives here

@@ -10,7 +10,13 @@ const DashboardContext = createContext(null);
 
 const TZ = 'America/Los_Angeles';
 const DASHBOARD_REFRESH_SSE_ROUTES = ['/dashboard', '/technician', '/timeline', '/analytics', '/visuals'];
-const APP_LIVE_SSE_ROUTES = [...DASHBOARD_REFRESH_SSE_ROUTES, '/assignments', '/summit-taxonomy', '/workflows', '/tickets'];
+// Routes where THIS provider listens on the shared realtime client (it stamps
+// lastFreshAt / refetches dashboards on sync-completed). This list no longer
+// drives the header pill — AppHeader reads the shared client's own status via
+// useRealtimeStatus (QA 08-19 #3), so a route missing here shows a stale
+// "Data refreshed" at worst, never a false Offline. '/approvals' added so the
+// approvals page gets the freshness stamp like every other header page.
+const APP_LIVE_SSE_ROUTES = [...DASHBOARD_REFRESH_SSE_ROUTES, '/assignments', '/summit-taxonomy', '/workflows', '/tickets', '/approvals'];
 
 function matchesRoute(pathname, routes) {
   return routes.some((path) => pathname === path || pathname.startsWith(`${path}/`));

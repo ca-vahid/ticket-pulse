@@ -264,6 +264,64 @@ class WorkspaceRepository {
     }
   }
 
+  /**
+   * App-access ∪ active-technician union for a workspace (Mega 08-23 AC3):
+   * one row per person, keyed by email. Technicians carry name/photo and
+   * technicianId; accessRole is the workspace_access role or null for
+   * technician-only people (no app access — the Marcus case). Access-only
+   * rows (non-technician users) come back with name/photoUrl null.
+   */
+  async getWorkspaceMembers(workspaceId) {
+    try {
+      const [accessRows, technicians] = await Promise.all([
+        prisma.workspaceAccess.findMany({
+          where: { workspaceId },
+          orderBy: { email: 'asc' },
+        }),
+        prisma.technician.findMany({
+          where: { workspaceId, isActive: true },
+          select: { id: true, name: true, email: true, photoUrl: true },
+          orderBy: { name: 'asc' },
+        }),
+      ]);
+
+      const byEmail = new Map();
+      for (const t of technicians) {
+        const email = String(t.email || '').trim().toLowerCase();
+        if (!email) continue; // access is keyed by email — nothing to join on
+        byEmail.set(email, {
+          email,
+          name: t.name,
+          photoUrl: t.photoUrl || null,
+          technicianId: t.id,
+          accessRole: null,
+        });
+      }
+      for (const row of accessRows) {
+        const email = String(row.email || '').trim().toLowerCase();
+        if (!email) continue;
+        const existing = byEmail.get(email);
+        if (existing) {
+          existing.accessRole = row.role;
+        } else {
+          byEmail.set(email, {
+            email,
+            name: null,
+            photoUrl: null,
+            technicianId: null,
+            accessRole: row.role,
+          });
+        }
+      }
+
+      return [...byEmail.values()].sort((a, b) =>
+        String(a.name || a.email).localeCompare(String(b.name || b.email)));
+    } catch (error) {
+      logger.error(`Error fetching workspace members for workspace ${workspaceId}:`, error);
+      throw new DatabaseError('Failed to fetch workspace members', error);
+    }
+  }
+
   async getAllActive() {
     try {
       return await prisma.workspace.findMany({

@@ -1,8 +1,9 @@
 import express from 'express';
 import jwt from 'jsonwebtoken';
 import config from '../config/index.js';
-import { requireAuth, requireAdmin } from '../middleware/auth.js';
+import { requireAuth, requireAdmin, sessionUser } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
+import { resolveUserAccess } from './auth.routes.js';
 import workspaceRepository from '../services/workspaceRepository.js';
 import settingsRepository from '../services/settingsRepository.js';
 import availabilityService from '../services/availabilityService.js';
@@ -277,12 +278,28 @@ router.post(
     }
 
     const user = req.session?.user || req.user || {};
+
+    // Live role refresh (Mega 08-23 AC2): re-resolve the role from the DB
+    // before re-signing, so the fresh JWT carries the CURRENT role — a grant
+    // or revoke made since login takes effect here, not at the next re-login.
+    let effectiveRole = user.role;
+    try {
+      const resolved = await resolveUserAccess(String(user.email || '').toLowerCase(), user.role);
+      effectiveRole = resolved.role;
+      if (req.session?.user) {
+        req.session.user.role = resolved.role;
+        req.session.user.availableWorkspaces = resolved.availableWorkspaces;
+      }
+    } catch (err) {
+      logger.warn('Live access refresh failed on /workspaces/select (keeping session role):', err.message);
+    }
+
     const authToken = jwt.sign(
       {
         email: user.email,
         name: user.name,
         username: user.username || user.name,
-        role: user.role,
+        role: effectiveRole,
         selectedWorkspaceId: ws.id,
       },
       config.session.secret,
@@ -295,60 +312,175 @@ router.post(
 );
 
 /**
+ * The only roles a workspace_access row may hold. Everything else is a 400 —
+ * the old handler upserted `role || 'viewer'` raw, so any string became a
+ * "role" (Mega 08-23 AC1 hardening).
+ */
+const ALLOWED_ACCESS_ROLES = ['viewer', 'reviewer', 'admin'];
+
+/**
+ * Bind the admin gate for the /:id/access + /:id/members routes to the
+ * TARGET workspace (Mega 08-23 AC1 security fix).
+ *
+ * These routes are mounted BEFORE requireWorkspace (routes/index.js), so
+ * req.workspaceId was never set here: requireAdmin refused every
+ * workspace-scoped admin outright, and — had the middleware run — it would
+ * have checked the client-controllable x-workspace-id header while the
+ * handler mutated req.params.id (cross-workspace privilege escalation).
+ *
+ * Fix: derive req.workspaceId from the route param itself, so requireAdmin
+ * verifies the caller's admin role against the exact workspace being read or
+ * mutated. If a non-global-admin request carries a DIFFERENT ambient
+ * workspace scope (header or session selection), refuse it explicitly with
+ * 403 workspace_mismatch. Global admins may operate on any workspace.
+ */
+function scopeToTargetWorkspace(req, res, next) {
+  const targetId = Number(req.params.id);
+  if (!Number.isInteger(targetId) || targetId <= 0) {
+    return res.status(400).json({ success: false, message: 'Invalid workspace id' });
+  }
+
+  const user = sessionUser(req);
+  if (user?.role !== 'admin') {
+    const scopedRaw = req.headers['x-workspace-id'] ?? user?.selectedWorkspaceId ?? null;
+    const scopedId = scopedRaw === null || scopedRaw === undefined || scopedRaw === ''
+      ? null
+      : Number(scopedRaw);
+    if (scopedId !== null && !Number.isNaN(scopedId) && scopedId !== targetId) {
+      logger.warn(`Workspace access route refused: ${user?.email || 'unknown'} scoped to workspace ${scopedId} targeted workspace ${targetId}`);
+      return res.status(403).json({
+        success: false,
+        message: 'You can only manage access for your current workspace',
+        code: 'workspace_mismatch',
+      });
+    }
+  }
+
+  req.workspaceId = targetId; // requireAdmin checks the role against the TARGET
+  return next();
+}
+
+/**
  * GET /api/workspaces/:id/access
- * List access grants for a workspace (admin only).
+ * List access grants for a workspace (workspace admin of THAT workspace, or
+ * global admin).
  */
 router.get(
   '/:id/access',
+  scopeToTargetWorkspace,
   requireAdmin,
   asyncHandler(async (req, res) => {
-    const list = await workspaceRepository.getAccessList(Number(req.params.id));
+    const list = await workspaceRepository.getAccessList(req.workspaceId);
     res.json({ success: true, data: list });
   }),
 );
 
 /**
+ * GET /api/workspaces/:id/members
+ * App-access ∪ active-technician union for the Members panel (Mega 08-23 AC3):
+ * [{ email, name, photoUrl, technicianId?, accessRole }] where accessRole is
+ * 'viewer'|'reviewer'|'admin' or null for technician-only people (no app
+ * access yet — the Marcus case). Same admin gate as the grant routes.
+ */
+router.get(
+  '/:id/members',
+  scopeToTargetWorkspace,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const members = await workspaceRepository.getWorkspaceMembers(req.workspaceId);
+    res.json({ success: true, data: members });
+  }),
+);
+
+/**
  * POST /api/workspaces/:id/access
- * Grant a user access to a workspace (admin only).
+ * Grant or change a user's access (workspace admin of THAT workspace, or
+ * global admin). Ceiling: only GLOBAL admins may grant the admin role or
+ * change an existing admin's role — a workspace admin manages up to reviewer.
  */
 router.post(
   '/:id/access',
+  scopeToTargetWorkspace,
   requireAdmin,
   asyncHandler(async (req, res) => {
     const { email, role } = req.body;
-    if (!email) {
+    if (!email || !String(email).trim()) {
       return res.status(400).json({ success: false, message: 'email is required' });
     }
 
-    const access = await workspaceRepository.grantAccess(
-      email,
-      Number(req.params.id),
-      role || 'viewer',
-    );
+    const targetEmail = String(email).trim().toLowerCase();
+    const requestedRole = role || 'viewer';
+    if (!ALLOWED_ACCESS_ROLES.includes(requestedRole)) {
+      return res.status(400).json({
+        success: false,
+        message: `role must be one of: ${ALLOWED_ACCESS_ROLES.join(', ')}`,
+      });
+    }
 
-    logger.info(`Granted ${role || 'viewer'} access to ${email} for workspace ${req.params.id}`);
+    const actor = sessionUser(req);
+    const isGlobalAdmin = actor?.role === 'admin';
+    const existingRole = await workspaceRepository.getAccessRole(targetEmail, req.workspaceId);
+    if (!isGlobalAdmin && (requestedRole === 'admin' || existingRole === 'admin')) {
+      return res.status(403).json({
+        success: false,
+        message: 'Only a global admin can grant the admin role or change an existing admin',
+        code: 'super_admin_required',
+      });
+    }
+
+    const access = await workspaceRepository.grantAccess(targetEmail, req.workspaceId, requestedRole);
+
+    logger.info('Workspace access granted', {
+      actor: actor?.email || null,
+      target: targetEmail,
+      workspaceId: req.workspaceId,
+      oldRole: existingRole || null,
+      newRole: requestedRole,
+    });
     res.json({ success: true, data: access });
   }),
 );
 
 /**
  * DELETE /api/workspaces/:id/access/:email
- * Revoke access (admin only).
+ * Revoke access (workspace admin of THAT workspace, or global admin).
+ * Revoking an existing ADMIN grant requires a global admin — a workspace
+ * admin must not be able to remove their peers or themselves from the tier
+ * above their ceiling.
  */
 router.delete(
   '/:id/access/:email',
+  scopeToTargetWorkspace,
   requireAdmin,
   asyncHandler(async (req, res) => {
-    const removed = await workspaceRepository.revokeAccess(
-      req.params.email,
-      Number(req.params.id),
-    );
+    const targetEmail = String(req.params.email || '').trim().toLowerCase();
+    const actor = sessionUser(req);
+    const isGlobalAdmin = actor?.role === 'admin';
 
+    const existingRole = await workspaceRepository.getAccessRole(targetEmail, req.workspaceId);
+    if (!existingRole) {
+      return res.status(404).json({ success: false, message: 'Access record not found' });
+    }
+    if (existingRole === 'admin' && !isGlobalAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: 'Only a global admin can revoke an admin grant',
+        code: 'super_admin_required',
+      });
+    }
+
+    const removed = await workspaceRepository.revokeAccess(targetEmail, req.workspaceId);
     if (!removed) {
       return res.status(404).json({ success: false, message: 'Access record not found' });
     }
 
-    logger.info(`Revoked access for ${req.params.email} from workspace ${req.params.id}`);
+    logger.info('Workspace access revoked', {
+      actor: actor?.email || null,
+      target: targetEmail,
+      workspaceId: req.workspaceId,
+      oldRole: existingRole,
+      newRole: null,
+    });
     res.json({ success: true, message: 'Access revoked' });
   }),
 );

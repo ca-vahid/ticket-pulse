@@ -21,6 +21,7 @@ export default function MobileAssignSheet({
   assignFn = null, // FS write-back with confirmation (FS-born tickets)
   onAssigned,
   canReview = false,
+  canSeeAi = false, // read/act split (QA 08-19 #2): non-reviewers SEE the suggestion, read-only
   onAiAssign = null, // open the full "Review…" AI modal
 }) {
   const [query, setQuery] = useState('');
@@ -95,8 +96,13 @@ export default function MobileAssignSheet({
     setBusy(false);
   };
 
+  // Read/act split (QA 08-19 #2): reviewers get the actionable candidate card
+  // (radio + Approve → reviewer-gated decide endpoint); other members get a
+  // read-only info card — same facts, nothing clickable that could 403.
+  const seeAi = canReview || canSeeAi;
   const showAiCard = canReview && ai?.state === 'suggested' && !value && aiCandidates.length > 0;
-  const showAiPending = canReview && (ai?.state === 'analyzing' || ai?.state === 'queued');
+  const showAiInfoCard = !canReview && seeAi && ai?.state === 'suggested' && !value && aiCandidates.length > 0;
+  const showAiPending = seeAi && (ai?.state === 'analyzing' || ai?.state === 'queued');
 
   return (
     <>
@@ -212,9 +218,39 @@ export default function MobileAssignSheet({
                 </div>
               )}
 
-              {showAiPending && (
+              {/* Read-only AI card for non-reviewers: same suggestion facts, no
+                  radios, no Approve — the decision belongs to a reviewer. */}
+              {showAiInfoCard && (
+                <div
+                  className="mb-2 rounded-xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-violet-50/60 p-2.5"
+                  title="AI suggestion — waiting on a reviewer's approval"
+                >
+                  <p className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-indigo-500 mb-1.5">
+                    <Sparkles className="w-3 h-3" aria-hidden="true" /> AI suggests
+                  </p>
+                  <div className="space-y-1">
+                    {aiCandidates.map((c, i) => {
+                      const pct = typeof c.score === 'number' ? Math.round(c.score * 100) : null;
+                      const photoUrl = technicians.find((t) => t.id === c.techId)?.photoUrl;
+                      return (
+                        <div key={c.techId ?? i} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5">
+                          <PersonAvatar name={c.techName || '?'} photoUrl={photoUrl} size="h-8 w-8" textSize="text-[10px]" />
+                          <span className="text-sm font-medium text-slate-800 truncate flex-1">{c.techName || 'Unknown'}</span>
+                          {pct !== null && <span className="text-xs tabular-nums text-slate-500 flex-shrink-0">{pct}%</span>}
+                          {i === 0 && <span className="text-[8px] font-bold uppercase tracking-wider bg-amber-100 text-amber-700 px-1 rounded flex-shrink-0">AI</span>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-1.5 text-[11px] font-medium text-indigo-500">
+                    Waiting on a reviewer&rsquo;s approval — you can still assign someone below.
+                  </p>
+                </div>
+              )}
+
+              {showAiPending && (canReview && onAiAssign ? (
                 <button
-                  onClick={onAiAssign ? () => { onClose?.(); onAiAssign(); } : undefined}
+                  onClick={() => { onClose?.(); onAiAssign(); }}
                   className="mb-2 w-full flex items-center gap-2 rounded-xl border border-indigo-100 bg-indigo-50/60 px-3 py-2.5 text-left"
                 >
                   {ai.state === 'analyzing'
@@ -224,7 +260,16 @@ export default function MobileAssignSheet({
                     {ai.state === 'analyzing' ? 'AI is analyzing this ticket…' : 'AI run queued for business hours'}
                   </span>
                 </button>
-              )}
+              ) : (
+                <div className="mb-2 w-full flex items-center gap-2 rounded-xl border border-indigo-100 bg-indigo-50/60 px-3 py-2.5 text-left">
+                  {ai.state === 'analyzing'
+                    ? <Loader2 className="w-4 h-4 text-indigo-500 animate-spin flex-shrink-0" aria-hidden="true" />
+                    : <Sparkles className="w-4 h-4 text-indigo-400 flex-shrink-0" aria-hidden="true" />}
+                  <span className="text-sm font-medium text-indigo-700">
+                    {ai.state === 'analyzing' ? 'AI is analyzing this ticket…' : 'AI run queued for business hours'}
+                  </span>
+                </div>
+              ))}
 
               {/* Search — no autoFocus, so the keyboard only appears when tapped */}
               <div className="relative mb-1.5">

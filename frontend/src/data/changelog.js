@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.5.06-preview';
+export const APP_VERSION = '3.6.00-preview';
 
 export const changelog = [
+  {
+    version: '3.6.00-preview',
+    date: 'August 23, 2026',
+    entries: [
+      { type: 'new', html: '<strong>🔑 Grant app access right from Members</strong> — the Members panel now shows an “App access” column: pick No access / Viewer / Reviewer / Admin per person and it applies on their next page load — no re-login needed. Workspace admins can grant up to Reviewer (Admin stays global-admin-only), so Marcus can get the same access as Adrian in two clicks. Under the hood the access routes were security-hardened: target-workspace binding, role validation, admin ceiling, and audit logging. (QA 08-19 #1)' },
+      { type: 'improved', html: '<strong>🤖 AI suggestions visible to everyone</strong> — the “Suggested · NN%” chip now shows for all workspace members (queue rows, peek drawer, mobile) — read-only with a “waiting on a reviewer’s approval” hint. Approving or dismissing stays with reviewers and admins, exactly as before. Alvina sees what Susan sees now. (QA 08-19 #2)' },
+      { type: 'fixed', html: '<strong>🟢 The pill stopped lying on Approvals</strong> — the Live/Auto-refresh/Offline pill now reports the tab’s real shared connection on every page. The Approvals page showed “Offline” while its live feed was working fine — it was reading a deliberately-idle per-page subscription. Reconnect now works from any page too. (QA 08-19 #3)' },
+    ],
+  },
   {
     version: '3.5.06-preview',
     date: 'August 19, 2026',

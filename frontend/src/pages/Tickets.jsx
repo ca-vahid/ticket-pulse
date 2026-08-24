@@ -313,11 +313,17 @@ export default function Tickets() {
   const linkState = { from: `${location.pathname}${location.search}` };
   const { user } = useAuth();
   const { currentWorkspace } = useWorkspace();
-  // AI assignment/review is a reviewer/admin capability — its endpoints are
-  // reviewer-gated server-side. Agents/viewers must not see those affordances
-  // (otherwise the sparkle button just 401s on click).
+  // AI assignment/review ACTIONS are a reviewer/admin capability — decide/
+  // latest-run endpoints are reviewer-gated server-side, so agents/viewers
+  // must not get clickable affordances (they'd just 403).
   const wsRole = useWorkspaceRole();
   const canReview = wsRole === 'admin' || wsRole === 'reviewer';
+  // Read/act split (QA 08-19 #2): every signed-in member may SEE the pending
+  // AI suggestion (the backend already sends the `ai` block to everyone; it's
+  // a routing hint, not a people metric) — but for non-reviewers the chip
+  // renders read-only: a span, never a button, nothing that can fire a
+  // reviewer-gated API.
+  const canSeeAi = Boolean(user);
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [meta, setMeta] = useState(null);
@@ -1610,6 +1616,37 @@ export default function Tickets() {
                           // Assignee not in the active team list = deactivated / FS-only (read-only here).
                           const assigneeReadOnly = ticket.assignedTech
                             && !(meta?.technicians || []).some((t) => t.id === ticket.assignedTechId);
+                          // Shared body of the dashed "Suggested · NN%" capsule — rendered as a
+                          // BUTTON for reviewers (opens the AI modal) and as a read-only SPAN for
+                          // everyone else (QA 08-19 #2 read/act split).
+                          const suggestedPct = typeof ticket.ai?.score === 'number' ? Math.round(ticket.ai.score * 100) : null;
+                          const suggestedChipBody = ticket.ai?.state === 'suggested' ? (
+                            <>
+                              <span className="relative flex-shrink-0">
+                                <PersonAvatar name={ticket.ai.techName} photoUrl={(meta?.technicians || []).find((t) => t.id === ticket.ai.techId)?.photoUrl} size="h-6 w-6" textSize="text-[9px]" />
+                                <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-violet-600 ring-2 ring-white inline-flex items-center justify-center" aria-hidden="true">
+                                  <Sparkles className="w-[7px] h-[7px] text-white" />
+                                </span>
+                              </span>
+                              <span className="flex flex-col min-w-0 flex-1 leading-tight">
+                                <span className="text-[9px] font-bold uppercase tracking-wider text-violet-600">
+                                  Suggested{suggestedPct !== null ? ` · ${suggestedPct}%` : ''}
+                                </span>
+                                {ticket.ai.techName
+                                  ? <AgentFirstName name={ticket.ai.techName} className="text-xs font-semibold text-slate-800" />
+                                  : <span className="truncate text-xs font-semibold text-slate-800">AI pick</span>}
+                              </span>
+                              {ticket.ai.count > 1 && (
+                                <span className="text-[9px] font-medium text-violet-400 flex-shrink-0">+{ticket.ai.count - 1}</span>
+                              )}
+                            </>
+                          ) : null;
+                          const viewerSuggestedTitle = `AI suggests ${ticket.ai?.techName || 'a technician'}${suggestedPct !== null ? ` — ${suggestedPct}% match` : ''} — waiting on a reviewer's approval`;
+                          // Viewer/agent + unassigned + pending suggestion: show the same capsule
+                          // reviewers get, read-only. (The decision belongs to a reviewer; manual
+                          // assignment stays available in the peek drawer / detail / mobile sheet.)
+                          const viewerSuggested = canSeeAi && !canReview
+                            && !ticket.assignedTechId && ticket.ai?.state === 'suggested';
 
                           // ---- Row cell pieces, arranged per layout below (compact:
                           //      one tight line, type folded into the title; roomy:
@@ -1739,20 +1776,33 @@ export default function Tickets() {
                           );
                           const assigneeCell = (isEditable || fsRowEditable) ? (
                             <span className={`${CELL} py-1 gap-1 relative ${fx === 'aiDone' ? 'tp-assign-pop' : ''}`}>
-                              <AssigneePicker
-                                ticketId={ticket.id}
-                                value={ticket.assignedTechId}
-                                currentTech={ticket.assignedTech}
-                                technicians={meta?.technicians || []}
-                                ticketOrigin={ticket.origin}
-                                assignFn={fsRowEditable ? ((techId) => fsAssign(ticket, techId)) : undefined}
-                                onAssigned={(techId) => onManualAssigned(ticket.id, techId)}
-                                size="sm"
-                                align="right"
-                                showAi={canReview}
-                                aiSuggestion={canReview ? (ticket.ai || (aiLive ? { state: 'analyzing' } : null)) : null}
-                                onAiAssign={canReview ? () => setAiTicket(ticket) : null}
-                              />
+                              {viewerSuggested ? (
+                                /* Read-only Suggested capsule (span, not button): non-reviewers see
+                                   the pick but can't approve/dismiss — those endpoints would 403. */
+                                <span
+                                  onClick={(e) => e.stopPropagation()}
+                                  onDoubleClick={(e) => e.stopPropagation()}
+                                  title={viewerSuggestedTitle}
+                                  className="flex items-center gap-2 min-w-0 w-full pl-1 pr-2 py-1 rounded-full border border-dashed border-violet-300 bg-violet-50/60"
+                                >
+                                  {suggestedChipBody}
+                                </span>
+                              ) : (
+                                <AssigneePicker
+                                  ticketId={ticket.id}
+                                  value={ticket.assignedTechId}
+                                  currentTech={ticket.assignedTech}
+                                  technicians={meta?.technicians || []}
+                                  ticketOrigin={ticket.origin}
+                                  assignFn={fsRowEditable ? ((techId) => fsAssign(ticket, techId)) : undefined}
+                                  onAssigned={(techId) => onManualAssigned(ticket.id, techId)}
+                                  size="sm"
+                                  align="right"
+                                  showAi={canReview}
+                                  aiSuggestion={canReview ? (ticket.ai || (aiLive ? { state: 'analyzing' } : null)) : null}
+                                  onAiAssign={canReview ? () => setAiTicket(ticket) : null}
+                                />
+                              )}
                               {/* Provenance badge AFTER the picker so avatars/names
                                   align vertically across rows (QA 08-03). */}
                               {ticket.aiBypass && <BypassBadge bypass={ticket.aiBypass} />}
@@ -1792,30 +1842,23 @@ export default function Tickets() {
                                     </span>
                                   </span>
                                 )
-                              ) : canReview && ticket.ai?.state === 'suggested' && !ticket.assignedTech ? (
-                                <button
-                                  onClick={() => setAiTicket(ticket)}
-                                  title={`AI suggests ${ticket.ai.techName || 'a technician'}${typeof ticket.ai.score === 'number' ? ` — ${Math.round(ticket.ai.score * 100)}% match` : ''}${ticket.ai.count > 1 ? ` (+${ticket.ai.count - 1} more candidate${ticket.ai.count - 1 === 1 ? '' : 's'})` : ''} · awaiting your approval`}
-                                  className="tp-focus-ring group flex items-center gap-2 min-w-0 w-full pl-1 pr-2 py-1 rounded-full border border-dashed border-violet-300 bg-violet-50/60 hover:bg-violet-50 transition-colors text-left"
-                                >
-                                  <span className="relative flex-shrink-0">
-                                    <PersonAvatar name={ticket.ai.techName} photoUrl={(meta?.technicians || []).find((t) => t.id === ticket.ai.techId)?.photoUrl} size="h-6 w-6" textSize="text-[9px]" />
-                                    <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-violet-600 ring-2 ring-white inline-flex items-center justify-center" aria-hidden="true">
-                                      <Sparkles className="w-[7px] h-[7px] text-white" />
-                                    </span>
+                              ) : canSeeAi && ticket.ai?.state === 'suggested' && !ticket.assignedTech ? (
+                                canReview ? (
+                                  <button
+                                    onClick={() => setAiTicket(ticket)}
+                                    title={`AI suggests ${ticket.ai.techName || 'a technician'}${suggestedPct !== null ? ` — ${suggestedPct}% match` : ''}${ticket.ai.count > 1 ? ` (+${ticket.ai.count - 1} more candidate${ticket.ai.count - 1 === 1 ? '' : 's'})` : ''} · awaiting your approval`}
+                                    className="tp-focus-ring group flex items-center gap-2 min-w-0 w-full pl-1 pr-2 py-1 rounded-full border border-dashed border-violet-300 bg-violet-50/60 hover:bg-violet-50 transition-colors text-left"
+                                  >
+                                    {suggestedChipBody}
+                                  </button>
+                                ) : (
+                                  <span
+                                    title={viewerSuggestedTitle}
+                                    className="flex items-center gap-2 min-w-0 w-full pl-1 pr-2 py-1 rounded-full border border-dashed border-violet-300 bg-violet-50/60"
+                                  >
+                                    {suggestedChipBody}
                                   </span>
-                                  <span className="flex flex-col min-w-0 flex-1 leading-tight">
-                                    <span className="text-[9px] font-bold uppercase tracking-wider text-violet-600">
-                                      Suggested{typeof ticket.ai.score === 'number' ? ` · ${Math.round(ticket.ai.score * 100)}%` : ''}
-                                    </span>
-                                    {ticket.ai.techName
-                                      ? <AgentFirstName name={ticket.ai.techName} className="text-xs font-semibold text-slate-800" />
-                                      : <span className="truncate text-xs font-semibold text-slate-800">AI pick</span>}
-                                  </span>
-                                  {ticket.ai.count > 1 && (
-                                    <span className="text-[9px] font-medium text-violet-400 flex-shrink-0">+{ticket.ai.count - 1}</span>
-                                  )}
-                                </button>
+                                )
                               ) : (
                                 <>
                                   <span className="flex items-center gap-2 min-w-0 flex-1" title="Synced from FreshService — read-only here">
@@ -1828,31 +1871,54 @@ export default function Tickets() {
                                       <UnassignedBadge variant="muted" />
                                     )}
                                   </span>
-                                  {!canReview ? null : ticket.ai?.state === 'suggested' ? (
-                                    <button
-                                      onClick={() => setAiTicket(ticket)}
-                                      title={ticket.assignedTech
-                                        ? `Already assigned to ${ticket.assignedTech.name} — AI suggested ${ticket.ai.techName || 'someone'} (informational)`
-                                        : `AI suggests ${ticket.ai.techName || 'a technician'} — review`}
-                                      aria-label={ticket.assignedTech ? 'AI suggestion (already assigned)' : 'Review AI suggestion'}
-                                      className={`tp-focus-ring p-1 rounded-md flex-shrink-0 ${
-                                        ticket.assignedTech
-                                          ? 'text-slate-300 hover:text-slate-500 hover:bg-slate-50'
-                                          : 'text-indigo-500 hover:bg-indigo-50'
-                                      }`}
-                                    >
-                                      <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
-                                    </button>
+                                  {!canSeeAi ? null : ticket.ai?.state === 'suggested' ? (
+                                    canReview ? (
+                                      <button
+                                        onClick={() => setAiTicket(ticket)}
+                                        title={ticket.assignedTech
+                                          ? `Already assigned to ${ticket.assignedTech.name} — AI suggested ${ticket.ai.techName || 'someone'} (informational)`
+                                          : `AI suggests ${ticket.ai.techName || 'a technician'} — review`}
+                                        aria-label={ticket.assignedTech ? 'AI suggestion (already assigned)' : 'Review AI suggestion'}
+                                        className={`tp-focus-ring p-1 rounded-md flex-shrink-0 ${
+                                          ticket.assignedTech
+                                            ? 'text-slate-300 hover:text-slate-500 hover:bg-slate-50'
+                                            : 'text-indigo-500 hover:bg-indigo-50'
+                                        }`}
+                                      >
+                                        <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
+                                      </button>
+                                    ) : (
+                                      /* Non-reviewers: informational sparkle only — no modal, no API. */
+                                      <span
+                                        title={ticket.assignedTech
+                                          ? `Already assigned to ${ticket.assignedTech.name} — AI suggested ${ticket.ai.techName || 'someone'} (informational)`
+                                          : viewerSuggestedTitle}
+                                        aria-label="AI suggestion — waiting on a reviewer's approval"
+                                        className={`p-1 rounded-md flex-shrink-0 ${ticket.assignedTech ? 'text-slate-300' : 'text-indigo-400'}`}
+                                      >
+                                        <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
+                                      </span>
+                                    )
                                   ) : ticket.ai?.state === 'queued' ? (
-                                    <button
-                                      onClick={() => setAiTicket(ticket)}
-                                      title="AI run queued for business hours"
-                                      aria-label="AI run queued"
-                                      className="tp-focus-ring p-1 rounded-md text-indigo-400 hover:bg-indigo-50 flex-shrink-0"
-                                    >
-                                      <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
-                                    </button>
-                                  ) : ticket.ai?.state === 'analyzing' ? null : !ticket.assignedTech && !resolvedLike ? (
+                                    canReview ? (
+                                      <button
+                                        onClick={() => setAiTicket(ticket)}
+                                        title="AI run queued for business hours"
+                                        aria-label="AI run queued"
+                                        className="tp-focus-ring p-1 rounded-md text-indigo-400 hover:bg-indigo-50 flex-shrink-0"
+                                      >
+                                        <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
+                                      </button>
+                                    ) : (
+                                      <span
+                                        title="AI run queued for business hours"
+                                        aria-label="AI run queued"
+                                        className="p-1 rounded-md text-indigo-300 flex-shrink-0"
+                                      >
+                                        <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
+                                      </span>
+                                    )
+                                  ) : ticket.ai?.state === 'analyzing' ? null : canReview && !ticket.assignedTech && !resolvedLike ? (
                                     <button
                                       onClick={() => setAiTicket(ticket)}
                                       title="Ask AI to assign"
@@ -2018,16 +2084,26 @@ export default function Tickets() {
                                         New
                                       </span>
                                     )}
-                                    {aiLive && (
+                                    {aiLive && (canReview ? (
                                       <button
-                                        onClick={(e) => { e.stopPropagation(); if (canReview) setAiTicket(ticket); }}
+                                        onClick={(e) => { e.stopPropagation(); setAiTicket(ticket); }}
                                         title="AI is picking the best technician right now"
                                         className="tp-focus-ring tp-ai-chip shrink-0 inline-flex items-center gap-1 pl-1.5 pr-2 py-0.5 rounded-full text-[10px] font-bold text-white"
                                       >
                                         <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
                                         AI
                                       </button>
-                                    )}
+                                    ) : (
+                                      /* Read-only for non-reviewers — no modal behind it (QA 08-19 #2). */
+                                      <span
+                                        onClick={(e) => e.stopPropagation()}
+                                        title="AI is picking the best technician right now"
+                                        className="tp-ai-chip shrink-0 inline-flex items-center gap-1 pl-1.5 pr-2 py-0.5 rounded-full text-[10px] font-bold text-white"
+                                      >
+                                        <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
+                                        AI
+                                      </span>
+                                    ))}
                                     <StatusPill status={ticket.status} className="ml-auto" tone={statusToneFromDefs(statusDefs, ticket.status)} />
                                   </div>
                                   {/* Anchor for long-press / new-tab on touch +
@@ -2076,7 +2152,9 @@ export default function Tickets() {
                                               <span className="flex-shrink-0 text-[8px] font-semibold uppercase tracking-wide px-1 py-0.5 rounded bg-amber-100 text-amber-700">read-only</span>
                                             )}
                                           </>
-                                        ) : canReview && ticket.ai?.state === 'suggested' ? (
+                                        ) : canSeeAi && ticket.ai?.state === 'suggested' ? (
+                                          /* Visible to every member; the sheet it opens keeps
+                                             approve reviewer-only (read/act split, QA 08-19 #2). */
                                           <>
                                             <span className="h-6 w-6 rounded-full border-[1.5px] border-dashed border-indigo-300 bg-indigo-50 text-indigo-500 inline-flex items-center justify-center flex-shrink-0">
                                               <Sparkles className="w-3 h-3" aria-hidden="true" />
@@ -2186,6 +2264,7 @@ export default function Tickets() {
           : null}
         onAssigned={(techId) => assignSheetTicket && onManualAssigned(assignSheetTicket.id, techId)}
         canReview={canReview}
+        canSeeAi={canSeeAi}
         onAiAssign={canReview && assignSheetTicket ? () => setAiTicket(assignSheetTicket) : null}
       />
 

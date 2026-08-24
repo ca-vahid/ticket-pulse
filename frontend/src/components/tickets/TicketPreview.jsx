@@ -144,10 +144,14 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
     ? `https://${FRESHSERVICE_DOMAIN}/a/tickets/${ticket.freshserviceTicketId}`
     : null;
   const canWrite = isNative && ticketingOn;
-  // AI assignment/review is reviewer/admin only — its endpoints are reviewer-gated
-  // server-side, so agents/viewers must not see the review affordances.
+  // AI assignment/review ACTIONS are reviewer/admin only — those endpoints are
+  // reviewer-gated server-side, so agents/viewers must not get clickable
+  // affordances. SEEING the pending suggestion is member-wide (read/act split,
+  // QA 08-19 #2): any signed-in role reaches this drawer, so canSeeAi keys off
+  // having a workspace role at all.
   const wsRole = useWorkspaceRole();
   const canReview = wsRole === 'admin' || wsRole === 'reviewer';
+  const canSeeAi = Boolean(wsRole);
   const canPickUp = canWrite && meta?.actor?.technicianId && ticket?.assignedTechId !== meta.actor.technicianId;
 
   const act = useCallback(async (field, fn) => {
@@ -509,8 +513,11 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                   <span className="text-sm text-slate-600 truncate">{ticket.assignedTech?.name || 'Unassigned'}</span>
                 </div>
               )}
-              {canReview && aiPending && aiTop && !ticket.assignedTechId && (
-                <div className="mt-1.5 rounded-lg border border-indigo-200 bg-gradient-to-r from-indigo-50 to-violet-50/60 p-2">
+              {canSeeAi && aiPending && aiTop && !ticket.assignedTechId && (
+                <div
+                  className="mt-1.5 rounded-lg border border-indigo-200 bg-gradient-to-r from-indigo-50 to-violet-50/60 p-2"
+                  title={canReview ? undefined : 'AI suggestion — waiting on a reviewer’s approval'}
+                >
                   <p className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-indigo-500 mb-1">
                     <Sparkles className="w-3 h-3" aria-hidden="true" /> AI suggests
                   </p>
@@ -525,21 +532,29 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                       <span className="text-[10px] text-indigo-500 font-medium whitespace-nowrap">{Math.round(aiTop.score * 100)}%</span>
                     )}
                   </div>
-                  <div className="mt-1.5 flex items-center gap-1.5">
-                    <button
-                      onClick={approveAi}
-                      disabled={aiDeciding}
-                      className="tp-focus-ring flex-1 px-2 py-1 rounded-md bg-indigo-600 text-white text-[11px] font-semibold hover:bg-indigo-700 disabled:opacity-60"
-                    >
-                      {aiDeciding ? 'Approving…' : 'Approve'}
-                    </button>
-                    <button
-                      onClick={() => setAiOpen(true)}
-                      className="tp-focus-ring px-2 py-1 rounded-md border border-indigo-200 text-indigo-700 text-[11px] font-medium hover:bg-indigo-100/60"
-                    >
-                      Review…
-                    </button>
-                  </div>
+                  {canReview ? (
+                    <div className="mt-1.5 flex items-center gap-1.5">
+                      <button
+                        onClick={approveAi}
+                        disabled={aiDeciding}
+                        className="tp-focus-ring flex-1 px-2 py-1 rounded-md bg-indigo-600 text-white text-[11px] font-semibold hover:bg-indigo-700 disabled:opacity-60"
+                      >
+                        {aiDeciding ? 'Approving…' : 'Approve'}
+                      </button>
+                      <button
+                        onClick={() => setAiOpen(true)}
+                        className="tp-focus-ring px-2 py-1 rounded-md border border-indigo-200 text-indigo-700 text-[11px] font-medium hover:bg-indigo-100/60"
+                      >
+                        Review…
+                      </button>
+                    </div>
+                  ) : (
+                    /* Read/act split (QA 08-19 #2): members see the pick; only
+                       reviewers get Approve/Review (the decide endpoint 403s). */
+                    <p className="mt-1.5 text-[10px] font-medium text-indigo-500">
+                      Waiting on a reviewer&rsquo;s approval.
+                    </p>
+                  )}
                 </div>
               )}
             </div>

@@ -1,6 +1,6 @@
 {
   "name": "ticket-pulse-backend",
-  "version": "3.5.06-preview",
+  "version": "3.6.00-preview",
   "type": "module",
   "description": "FreshService Real-Time IT Dashboard - Backend API",
   "main": "src/app.js",
