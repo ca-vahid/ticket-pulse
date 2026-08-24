@@ -553,6 +553,9 @@ export const settingsAPI = {
   createTicketTemplate: (data) => api.post('/settings/ticket-templates', data),
   updateTicketTemplate: (id, data) => api.patch(`/settings/ticket-templates/${id}`, data),
   deleteTicketTemplate: (id) => api.delete(`/settings/ticket-templates/${id}`),
+  // New-ticket form config (Phase TF) — TP composer only; FS forms untouched.
+  getTicketForm: () => api.get('/settings/ticket-form'),
+  updateTicketForm: (data) => api.put('/settings/ticket-form', data),
   getCustomFields: () => api.get('/settings/custom-fields'),
   createCustomField: (data) => api.post('/settings/custom-fields', data),
   updateCustomField: (id, data) => api.patch(`/settings/custom-fields/${id}`, data),
@@ -738,6 +741,9 @@ export const ticketsAPI = {
   // GET returns { key, value } with value:null when never customized.
   getQueuePreference: (key) => api.get(`/tickets/preferences/${encodeURIComponent(key)}`),
   setQueuePreference: (key, value) => api.put(`/tickets/preferences/${encodeURIComponent(key)}`, { value }),
+
+  // Admin-chosen quick filter cards (Phase FC) — reads ride meta.queueCards.
+  updateQueueCards: (cards) => api.put('/tickets/queue-cards', { cards }),
 
   // Saved filter views (per-user, workspace-scoped)
   listSavedViews: () => api.get('/tickets/saved-views'),

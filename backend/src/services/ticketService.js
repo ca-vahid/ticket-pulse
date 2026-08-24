@@ -19,6 +19,9 @@ import { getFreshServiceDetail } from '../integrations/freshservice.js';
 import attachmentService from './attachmentService.js';
 import watcherNotificationService from './watcherNotificationService.js';
 import customFieldService from './customFieldService.js';
+import queueCardConfigService from './queueCardConfigService.js';
+import ticketFormConfigService from './ticketFormConfigService.js';
+import { zonedStartOfMonth, zonedStartOfWeek, zonedStartOfYear } from '../utils/zonedBoundaries.js';
 import { resolveCategoryNames } from './categoryNameResolver.js';
 import { looksLikeRealHtml, plainTextToHtml } from '../utils/htmlContent.js';
 import { EMAIL_SANITIZE_OPTIONS } from './notificationWorkflowSignatureService.js';
@@ -62,6 +65,24 @@ async function workspaceInternalDomains(workspaceId) {
   const list = ws?.internalDomains || [];
   internalDomainsCache.set(workspaceId, { list, fetchedAt: Date.now() });
   return list;
+}
+
+// Workspace timezone per workspace, 60s cache — read by the created_* quick
+// segments + counts on every queue page (Mega 08-23 Phase FC). Same pattern
+// as internalDomainsCache above.
+const workspaceTimezoneCache = new Map(); // workspaceId → { timezone, fetchedAt }
+async function workspaceTimezone(workspaceId) {
+  const cached = workspaceTimezoneCache.get(workspaceId);
+  if (cached && Date.now() - cached.fetchedAt < 60_000) return cached.timezone;
+  let timezone = 'America/Los_Angeles';
+  try {
+    const ws = await prisma.workspace.findUnique({
+      where: { id: workspaceId }, select: { defaultTimezone: true },
+    });
+    timezone = ws?.defaultTimezone || timezone;
+  } catch { /* fall back to the schema default */ }
+  workspaceTimezoneCache.set(workspaceId, { timezone, fetchedAt: Date.now() });
+  return timezone;
 }
 
 // FreshService 400s carry a structured errors[] the generic message hides —
@@ -708,11 +729,29 @@ class TicketService {
       where.id = { in: awaitingIds.length ? awaitingIds : [-1] };
     } else if (query.segment === 'deleted') {
       where.status = { in: ['Deleted', 'Spam'] };
+    } else if (query.segment === 'noise') {
+      // Opt-in "Noise" card (Phase FC): everything the noise rules flagged,
+      // any status — matching the stats `noise` count exactly. Overrides the
+      // default isNoise:false exclusion set above.
+      where.isNoise = true;
+    } else if (query.segment === 'created_week' || query.segment === 'created_month' || query.segment === 'created_year') {
+      // "Tickets this week/month/year" (Phase FC): createdAt >= the calendar
+      // boundary on the WORKSPACE's wall clock (see utils/zonedBoundaries.js
+      // for the deliberate divergence from due_today's server-local endOfDay).
+      // AND-composed so an explicit createdFrom/createdTo facet still applies;
+      // status keeps the default any-non-Deleted/Spam scope so the card counts
+      // creations, not open work.
+      const timezone = await workspaceTimezone(workspaceId);
+      const start = query.segment === 'created_week' ? zonedStartOfWeek(now, timezone)
+        : query.segment === 'created_month' ? zonedStartOfMonth(now, timezone)
+          : zonedStartOfYear(now, timezone);
+      where.AND = [...(where.AND || []), { createdAt: { gte: start } }];
     }
 
     // Deleted/Spam tickets are hidden everywhere except the explicit 'deleted'
-    // view — they must not pad the main list or its counts.
-    if (query.segment !== 'deleted' && where.status === undefined) {
+    // view — they must not pad the main list or its counts. The 'noise' card
+    // keeps its any-status scope (its count includes noise in any status).
+    if (query.segment !== 'deleted' && query.segment !== 'noise' && where.status === undefined) {
       where.status = { notIn: ['Deleted', 'Spam'] };
     }
 
@@ -1205,14 +1244,20 @@ class TicketService {
     const endOfDay = new Date(now); endOfDay.setHours(23, 59, 59, 999);
     // Registry-resolved scopes (Phase 8b) so custom statuses count where their
     // base counts — one lookup for the whole stat batch, not one per count.
-    const [openNames, openBaseNames, resolvedNames] = await Promise.all([
+    const [openNames, openBaseNames, resolvedNames, timezone] = await Promise.all([
       statusService.statusNamesForBase(workspaceId, ['Open', 'Pending']),
       statusService.statusNamesForBase(workspaceId, 'Open'),
       statusService.statusNamesForBase(workspaceId, ['Resolved', 'Closed']),
+      workspaceTimezone(workspaceId),
     ]);
     const open = { workspaceId, isNoise: false, status: { in: openNames } };
+    // "Tickets this week/month/year" (Phase FC): same visible-queue base as
+    // `all` plus a zoned createdAt floor — mirrors the created_* segment
+    // where-clauses exactly so a card's count always equals its click.
+    const visible = { workspaceId, isNoise: false, status: { notIn: ['Deleted', 'Spam'] } };
 
-    const [all, openCount, unassigned, dueToday, overdue, resolved, deleted, noise, awaitingIds, awaitingApproval, technicianOpen] = await Promise.all([
+    const [all, openCount, unassigned, dueToday, overdue, resolved, deleted, noise, awaitingIds, awaitingApproval, technicianOpen,
+      createdThisWeek, createdThisMonth, createdThisYear] = await Promise.all([
       prisma.ticket.count({ where: { workspaceId, isNoise: false, status: { notIn: ['Deleted', 'Spam'] } } }),
       prisma.ticket.count({ where: open }),
       prisma.ticket.count({ where: { ...open, assignedTechId: null } }),
@@ -1255,6 +1300,9 @@ class TicketService {
         where: { ...open, assignedTechId: { not: null } },
         _count: { _all: true },
       }),
+      prisma.ticket.count({ where: { ...visible, createdAt: { gte: zonedStartOfWeek(now, timezone) } } }),
+      prisma.ticket.count({ where: { ...visible, createdAt: { gte: zonedStartOfMonth(now, timezone) } } }),
+      prisma.ticket.count({ where: { ...visible, createdAt: { gte: zonedStartOfYear(now, timezone) } } }),
     ]);
 
     const byTechnician = {};
@@ -1273,6 +1321,9 @@ class TicketService {
       resolved,
       deleted,
       noise,
+      createdThisWeek,
+      createdThisMonth,
+      createdThisYear,
       byTechnician,
     };
   }
@@ -1753,7 +1804,7 @@ class TicketService {
 
   /** Reference data for the ticket composer / filters. */
   async getMeta(workspaceId) {
-    const [workspace, groups, technicians, categories, sourceRows, approvalCategories, tags, categoryGroupLinks, impactUsage, statusDefs] = await Promise.all([
+    const [workspace, groups, technicians, categories, sourceRows, approvalCategories, tags, categoryGroupLinks, impactUsage, statusDefs, queueCards, ticketFormConfig] = await Promise.all([
       this._getWorkspace(workspaceId),
       prisma.group.findMany({
         where: { workspaceId, isActive: true },
@@ -1791,6 +1842,13 @@ class TicketService {
       }),
       prisma.ticket.count({ where: { workspaceId, OR: [{ impact: { not: null } }, { urgency: { not: null } }] } }),
       statusService.listStatuses(workspaceId),
+      // Quick filter cards (Phase FC) — resolved server-side (absent row =
+      // today's default 6) so the queue renders the right cards on first
+      // paint with no extra request and no flicker.
+      queueCardConfigService.getCards(workspaceId),
+      // New-ticket form config (Phase TF) — raw row; resolved below with the
+      // already-fetched workspace (surfaces defaultInternalGroupId).
+      ticketFormConfigService.getConfig(workspaceId),
     ]);
 
     const tops = categories.filter((c) => c.parentId === null);
@@ -1851,6 +1909,13 @@ class TicketService {
       categoryGroupLinks: categoryGroupLinks.map((l) => ({ categoryId: l.categoryId, groupId: String(l.groupId) })),
       // Impact/urgency facet only shows once anyone uses the fields (P1.5).
       hasImpactUrgency: impactUsage > 0,
+      // Admin-chosen quick filter cards (Phase FC): ordered array of exactly
+      // 6 registry keys. The frontend registry owns labels/icons.
+      queueCards,
+      // Resolved new-ticket form (Phase TF): built-in field visibility/
+      // required/defaults + workspace default source/group for the composer.
+      // TP composer only — FreshService-owned forms are untouched.
+      form: ticketFormConfigService.resolve(ticketFormConfig, workspace),
     };
   }
 
@@ -2061,7 +2126,7 @@ class TicketService {
 
   // ------------------------------------------------------------------ create
 
-  async createTicket(workspaceId, input, actor, { sourceChannel = TICKET_SOURCE.AGENT } = {}) {
+  async createTicket(workspaceId, input, actor, { sourceChannel = TICKET_SOURCE.AGENT, enforceRequired = false } = {}) {
     const workspace = await this._getWorkspace(workspaceId);
     if (!workspace.nativeTicketingEnabled) {
       throw new ValidationError('Native ticketing is not enabled for this workspace');
@@ -2070,6 +2135,28 @@ class TicketService {
     const parsed = createTicketSchema.safeParse(input);
     if (!parsed.success) throw new ValidationError(zodMessage(parsed.error));
     const data = parsed.data;
+
+    // Admin-editable form config (Mega 08-23 Phase TF). Two consumers:
+    //  • defaultSource fills in when the caller omits source — but ONLY for
+    //    the Agent channel (staff-logged tickets): email/API/webhook intakes
+    //    keep their true arrival channel, and the resolver's own fallback is
+    //    Agent(103), today's exact behavior when no config row exists.
+    //  • required built-ins/custom fields bind only callers that pass
+    //    enforceRequired (interactive composer + public API create) —
+    //    automated intakes can't answer a validation error (contract
+    //    documented in ticketFormConfigService).
+    const wantsFormConfig = enforceRequired
+      || (sourceChannel === TICKET_SOURCE.AGENT && (data.source === null || data.source === undefined));
+    let resolvedForm = null;
+    if (wantsFormConfig) {
+      try {
+        resolvedForm = ticketFormConfigService.resolve(await ticketFormConfigService.getConfig(workspaceId), workspace);
+      } catch { /* config unavailable — behave as unconfigured */ }
+    }
+    if (resolvedForm && sourceChannel === TICKET_SOURCE.AGENT
+      && (data.source === null || data.source === undefined)) {
+      data.source = resolvedForm.defaultSource;
+    }
 
     // Status against the workspace registry (Phase 8a): active, Open/Pending
     // base only — a ticket can't be born Resolved (same rule as the old enum).
@@ -2114,6 +2201,24 @@ class TicketService {
       customFieldIntake = await customFieldService.setValuesAtCreate(
         workspaceId, data.customFields, { autoProvision: true, actor },
       );
+    }
+
+    // Required-field enforcement (Phase TF, interactive composer + public API
+    // only). Built-ins check the RESOLVED group (a required Group satisfied by
+    // the workspace default internal group passes — it is visibly preselected
+    // in the composer); custom fields check the cleaned intake values, so a
+    // rejected/absent value on a required field blocks the create.
+    if (enforceRequired && resolvedForm) {
+      ticketFormConfigService.assertRequiredBuiltIns(resolvedForm, { ...data, groupId, internalGroupId });
+      const requiredDefs = (await customFieldService.listDefinitions(workspaceId))
+        .filter((d) => d.isRequiredOnCreate === true);
+      const missingCustom = requiredDefs.filter((d) => {
+        const v = customFieldIntake.values[d.key];
+        return v === null || v === undefined || v === '';
+      });
+      if (missingCustom.length) {
+        throw new ValidationError(`Required custom field${missingCustom.length === 1 ? '' : 's'} missing: ${missingCustom.map((d) => d.label).join(', ')}`);
+      }
     }
 
     const requester = await this.resolveRequester(workspaceId, data);

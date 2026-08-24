@@ -946,6 +946,33 @@ router.delete(
   }),
 );
 
+// New-ticket form config (Mega 08-23 Phase TF): built-in field visibility/
+// required/defaults + workspace default source / default FS-group preselect.
+// TP composer only — FreshService-owned forms are untouched. Reads for the
+// composer itself ride meta.form; these admin routes serve the editor.
+router.get(
+  '/ticket-form',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { default: ticketFormConfigService } = await import('../services/ticketFormConfigService.js');
+    res.json({ success: true, data: await ticketFormConfigService.getResolvedForm(req.workspaceId) });
+  }),
+);
+
+router.put(
+  '/ticket-form',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { default: ticketFormConfigService } = await import('../services/ticketFormConfigService.js');
+    const form = await ticketFormConfigService.update(req.workspaceId, req.body || {}, requestActor(req)?.email || null);
+    res.json({ success: true, data: form });
+  }),
+);
+
 router.get(
   '/custom-fields',
   requireWorkspace,

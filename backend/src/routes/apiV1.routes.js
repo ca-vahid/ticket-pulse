@@ -260,7 +260,10 @@ router.post('/tickets', S('tickets:write'), withIdempotency, asyncHandler(async 
     // default internal group applies automatically.
     ...(body.groupId !== undefined ? { groupId: body.groupId } : {}),
     ...(body.internalGroupId !== undefined ? { internalGroupId: body.internalGroupId } : {}),
-  }, apiActor(req), { sourceChannel: TICKET_SOURCE.API });
+    // enforceRequired (Mega 08-23 Phase TF): the workspace's required-on-create
+    // custom fields and required built-ins bind the public API too — a create
+    // that omits them 400s with the missing labels listed.
+  }, apiActor(req), { sourceChannel: TICKET_SOURCE.API, enforceRequired: true });
   logger.info(`API v1: ticket ${ticket.displayRef} created via key "${req.apiKey.name}"`);
   res.status(201).json({
     success: true,

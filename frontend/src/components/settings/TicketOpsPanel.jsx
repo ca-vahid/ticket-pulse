@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, Archive, CalendarClock, Check, FileText, Globe as GlobeGlyph, Layers, Loader2, Plus, RefreshCw, Sparkles, Star, StickyNote, Tag as TagGlyph, Timer, Trash2, Wand2 } from 'lucide-react';
+import { AlertTriangle, Archive, ArrowDown, ArrowUp, CalendarClock, Check, Eye, EyeOff, FileText, FormInput, Globe as GlobeGlyph, LayoutGrid, Layers, Loader2, Plus, RefreshCw, RotateCcw, Sparkles, Star, StickyNote, Tag as TagGlyph, Timer, Trash2, Wand2 } from 'lucide-react';
 import { settingsAPI, ticketsAPI, workspaceAPI } from '../../services/api';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
-import { TAG_CHIP_TONES, TYPE_COLOR_TONES } from '../tickets/ticketUi';
+import { SOURCE_OPTIONS, TAG_CHIP_TONES, TYPE_COLOR_TONES } from '../tickets/ticketUi';
+import { DEFAULT_QUEUE_CARDS, QUEUE_CARD_KEYS, QUEUE_CARD_REGISTRY, normalizeQueueCards } from '../tickets/queueCards';
 import { useTicketTypes, invalidateTicketTypesCache } from '../../hooks/useTicketTypes';
 import TicketStatusesSection from './TicketStatusesSection';
 
@@ -491,6 +492,10 @@ export function CustomFieldsSection() {
         label: draft.label,
         type: draft.type,
         options: draft.type === 'select' ? String(draft.options || '').split(',').map((v) => v.trim()).filter(Boolean) : [],
+        // New-ticket form (Phase TF): required binds the composer AND the
+        // public API create; the default prefills the composer only.
+        isRequiredOnCreate: draft.isRequiredOnCreate === true,
+        defaultValue: String(draft.defaultValue ?? '').trim() || null,
       };
       if (editingId) {
         await settingsAPI.updateCustomField(editingId, payload);
@@ -511,6 +516,8 @@ export function CustomFieldsSection() {
       label: field.label,
       type: field.type,
       options: (field.options || []).join(', '),
+      isRequiredOnCreate: field.isRequiredOnCreate === true,
+      defaultValue: field.defaultValue ?? '',
     });
   };
 
@@ -540,6 +547,16 @@ export function CustomFieldsSection() {
             <span className={`font-semibold ${field.isActive ? 'text-slate-700' : 'text-slate-300 line-through'}`}>{field.label}</span>
             <code className="text-[10px] bg-slate-100 rounded px-1 text-slate-500">{field.key}</code>
             <span className="text-slate-400">{field.type}{field.type === 'select' ? ` (${(field.options || []).length})` : ''}</span>
+            {field.isRequiredOnCreate && (
+              <span className="text-[10px] font-semibold text-red-500 border border-red-200 bg-red-50 rounded-full px-1.5 py-px" title="Required when creating a ticket — binds the composer and the public API">
+                Required
+              </span>
+            )}
+            {field.defaultValue !== null && field.defaultValue !== undefined && field.defaultValue !== '' && (
+              <span className="text-[10px] text-slate-400 border border-slate-200 rounded-full px-1.5 py-px" title="Prefilled in the new-ticket composer">
+                default: {String(field.defaultValue)}
+              </span>
+            )}
             {isApiBorn(field) ? (
               <span
                 className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-indigo-600 bg-indigo-50 border border-indigo-100 rounded-full px-1.5 py-px"
@@ -612,6 +629,43 @@ export function CustomFieldsSection() {
               <input value={draft.options} onChange={(e) => setDraft({ ...draft, options: e.target.value })} placeholder="Options, comma-separated" aria-label="Options" className="tp-focus-ring flex-1 border border-slate-200 rounded-md px-2 py-1" />
             )}
           </div>
+          {/* New-ticket form knobs (Phase TF) */}
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-1.5 text-slate-500 cursor-pointer" title="A create without this field is rejected — in the composer AND on the public API">
+              <input
+                type="checkbox"
+                checked={draft.isRequiredOnCreate === true}
+                onChange={(e) => setDraft({ ...draft, isRequiredOnCreate: e.target.checked })}
+                className="tp-focus-ring rounded border-slate-300 text-blue-600"
+              />
+              Required on create
+            </label>
+            <label className="flex items-center gap-1.5 text-slate-500">
+              Default
+              {draft.type === 'select' ? (
+                <select value={draft.defaultValue ?? ''} onChange={(e) => setDraft({ ...draft, defaultValue: e.target.value })} aria-label="Default value" className="tp-focus-ring border border-slate-200 rounded-md px-1.5 py-1">
+                  <option value="">none</option>
+                  {String(draft.options || '').split(',').map((v) => v.trim()).filter(Boolean).map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+                </select>
+              ) : draft.type === 'boolean' ? (
+                <select value={draft.defaultValue ?? ''} onChange={(e) => setDraft({ ...draft, defaultValue: e.target.value })} aria-label="Default value" className="tp-focus-ring border border-slate-200 rounded-md px-1.5 py-1">
+                  <option value="">none</option>
+                  <option value="true">Yes</option>
+                  <option value="false">No</option>
+                </select>
+              ) : (
+                <input
+                  type={draft.type === 'number' ? 'number' : draft.type === 'date' ? 'date' : 'text'}
+                  value={draft.defaultValue ?? ''}
+                  onChange={(e) => setDraft({ ...draft, defaultValue: e.target.value })}
+                  placeholder="none"
+                  aria-label="Default value"
+                  className="tp-focus-ring w-36 border border-slate-200 rounded-md px-2 py-1"
+                />
+              )}
+            </label>
+            <span className="text-[10px] text-slate-400">Prefills the composer; API senders still set their own values.</span>
+          </div>
           {editingId && (
             <p className="text-[10px] text-slate-400">Existing ticket values keep their stored shape — the new type applies from the next edit or API write.</p>
           )}
@@ -624,7 +678,7 @@ export function CustomFieldsSection() {
           </div>
         </div>
       ) : (
-        <button onClick={() => setDraft({ key: '', label: '', type: 'text', options: '' })} className="tp-focus-ring inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700">
+        <button onClick={() => setDraft({ key: '', label: '', type: 'text', options: '', isRequiredOnCreate: false, defaultValue: '' })} className="tp-focus-ring inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700">
           <Plus className="w-3.5 h-3.5" aria-hidden="true" /> New field
         </button>
       )}
@@ -1074,17 +1128,447 @@ function TrustedDomainsSection() {
   );
 }
 
+// ------------------------------------------------ quick filter cards (FC4)
+
+/**
+ * Admin picker for the six /tickets stat cards (Mega 08-23 Phase FC): six
+ * slot dropdowns over the queueCards registry (no duplicates), a live mini
+ * preview, and Restore defaults. Stored per workspace; the queue reads it
+ * from meta.queueCards.
+ */
+export function QueueCardsSection() {
+  const [cards, setCards] = useState(null); // null = loading
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    ticketsAPI.meta()
+      .then((res) => setCards(normalizeQueueCards(res.data?.queueCards)))
+      .catch(() => setCards([...DEFAULT_QUEUE_CARDS]));
+  }, []);
+
+  const persist = async (next) => {
+    setBusy(true); setError(null); setSaved(false);
+    try {
+      const res = await ticketsAPI.updateQueueCards(next);
+      setCards(normalizeQueueCards(res.data?.cards ?? next));
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e) { setError(e.response?.data?.message || e.message); }
+    setBusy(false);
+  };
+
+  const setSlot = (index, key) => {
+    const next = cards.slice();
+    next[index] = key;
+    setCards(next);
+    persist(next);
+  };
+
+  const isDefault = Array.isArray(cards) && cards.join(',') === DEFAULT_QUEUE_CARDS.join(',');
+
+  return (
+    <SectionCard
+      icon={LayoutGrid}
+      title="Quick filter cards"
+      hint="The six stat cards at the top of the Tickets page. Pick which six show for this workspace — e.g. swap a slot for “Tickets this month” to see the month's intake at a glance. Each card is a one-click filter and its count always matches what clicking it shows."
+    >
+      {cards === null ? (
+        <p className="text-xs text-slate-400 italic">Loading…</p>
+      ) : (
+        <>
+          {/* Live mini preview */}
+          <div className="grid grid-cols-3 lg:grid-cols-6 gap-1.5 mb-3" aria-label="Card row preview">
+            {cards.map((key, i) => {
+              const seg = QUEUE_CARD_REGISTRY[key];
+              const Icon = seg.Icon;
+              return (
+                <div key={`${key}-${i}`} className="flex items-center gap-1.5 rounded-lg border border-slate-100 bg-white px-2 py-1.5 shadow-subtle min-w-0">
+                  <span className={`h-6 w-6 rounded-md inline-flex items-center justify-center flex-shrink-0 ${seg.tile}`}>
+                    <Icon className="w-3.5 h-3.5" aria-hidden="true" />
+                  </span>
+                  <span className="text-[10px] font-medium text-slate-500 truncate">{seg.label}</span>
+                </div>
+              );
+            })}
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+            {cards.map((key, i) => (
+              <label key={i} className="flex items-center gap-1.5 text-xs text-slate-500">
+                <span className="w-4 text-[10px] font-bold text-slate-300 tabular-nums">{i + 1}</span>
+                <select
+                  value={key}
+                  disabled={busy}
+                  onChange={(e) => setSlot(i, e.target.value)}
+                  aria-label={`Card slot ${i + 1}`}
+                  className="tp-focus-ring flex-1 border border-slate-200 rounded-md px-1.5 py-1 text-slate-700 disabled:opacity-60"
+                >
+                  {QUEUE_CARD_KEYS
+                    .filter((k) => k === key || !cards.includes(k))
+                    .map((k) => <option key={k} value={k}>{QUEUE_CARD_REGISTRY[k].label}</option>)}
+                </select>
+              </label>
+            ))}
+          </div>
+          <div className="mt-2.5 flex items-center gap-3">
+            <button
+              onClick={() => persist([...DEFAULT_QUEUE_CARDS])}
+              disabled={busy || isDefault}
+              className="tp-focus-ring inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-slate-700 disabled:opacity-50"
+            >
+              <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" /> Restore defaults
+            </button>
+            {busy && <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400" aria-hidden="true" />}
+            {saved && <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600"><Check className="w-3.5 h-3.5" aria-hidden="true" /> Saved</span>}
+            {error && <span className="text-xs text-red-500">{error}</span>}
+          </div>
+        </>
+      )}
+    </SectionCard>
+  );
+}
+
+// -------------------------------------------------- new-ticket form (TF3)
+
+// Built-in vocabulary mirror (validation authority: ticketFormConfigService).
+// `requirable` = the required toggle makes sense (priority/type/source always
+// resolve a value server-side; requester/subject are locked-required).
+const FORM_FIELD_META = {
+  requester: { requirable: false },
+  subject: { requirable: false },
+  description: { requirable: true },
+  type: { requirable: false, defaultKind: 'type' },
+  priority: { requirable: false, defaultKind: 'priority' },
+  category: { requirable: true },
+  subcategory: { requirable: true },
+  source: { requirable: false, defaultKind: 'source' },
+  group: { requirable: true },
+  tags: { requirable: true },
+  cc: { requirable: true },
+  attachments: { requirable: true, composerOnlyRequired: true },
+};
+
+/**
+ * FreshService-style editor for the TP composer's built-in fields (Mega 08-23
+ * Phase TF): visibility (Hide, never Delete), required, per-type defaults,
+ * reorder, plus the two prominent workspace defaults (source + group — the
+ * internal-group default SURFACES Workspace.defaultInternalGroupId, which
+ * create already applies when the composer leaves group empty).
+ */
+export function TicketFormSection() {
+  const { activeTypes } = useTicketTypes();
+  const [form, setForm] = useState(null); // resolved {fields, defaultSource, defaultGroup, defaults}
+  const [groups, setGroups] = useState([]);
+  const [dirty, setDirty] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState(null);
+  const [initialGroupValue, setInitialGroupValue] = useState('');
+
+  const groupValue = form?.defaultGroup
+    ? (form.defaultGroup.kind === 'fs' ? `fs:${form.defaultGroup.id}` : `int:${form.defaultGroup.id}`)
+    : '';
+
+  const load = useCallback(() => {
+    settingsAPI.getTicketForm()
+      .then((res) => {
+        const data = res.data?.data || res.data;
+        setForm(data);
+        setInitialGroupValue(data?.defaultGroup
+          ? (data.defaultGroup.kind === 'fs' ? `fs:${data.defaultGroup.id}` : `int:${data.defaultGroup.id}`)
+          : '');
+        setDirty(false);
+      })
+      .catch((e) => setError(e.response?.data?.message || e.message));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    ticketsAPI.meta().then((res) => setGroups(res.data?.groups || [])).catch(() => {});
+  }, []);
+
+  const patch = (updater) => {
+    setForm((prev) => (prev ? updater(prev) : prev));
+    setDirty(true); setSaved(false);
+  };
+  const patchField = (key, changes) => patch((prev) => ({
+    ...prev,
+    fields: prev.fields.map((f) => (f.key === key ? { ...f, ...changes } : f)),
+  }));
+  const moveField = (key, delta) => patch((prev) => {
+    const fields = prev.fields.slice();
+    const i = fields.findIndex((f) => f.key === key);
+    const j = i + delta;
+    if (i < 0 || j < 0 || j >= fields.length) return prev;
+    [fields[i], fields[j]] = [fields[j], fields[i]];
+    return { ...prev, fields: fields.map((f, idx) => ({ ...f, sortOrder: idx })) };
+  });
+  const setGroupChoice = (value) => patch((prev) => ({
+    ...prev,
+    defaultGroup: value === '' ? null
+      : value.startsWith('fs:') ? { kind: 'fs', id: value.slice(3) }
+        : { kind: 'internal', id: value.slice(4) },
+  }));
+
+  const save = async () => {
+    setBusy(true); setError(null); setSaved(false);
+    try {
+      // The internal-group default lives on the WORKSPACE (shared with the
+      // silent create fallback) — write it through the existing route; the
+      // ticket-form row only stores an FS-group preselect.
+      if (groupValue !== initialGroupValue) {
+        if (groupValue.startsWith('int:')) await settingsAPI.setDefaultGroup(Number(groupValue.slice(4)));
+        else if (initialGroupValue.startsWith('int:')) await settingsAPI.setDefaultGroup(null);
+      }
+      const res = await settingsAPI.updateTicketForm({
+        fields: form.fields.map(({ key, visible, required, defaultValue, sortOrder }) => ({ key, visible, required, defaultValue, sortOrder })),
+        defaultSource: form.defaultSource ?? null,
+        defaultGroupId: groupValue.startsWith('fs:') ? groupValue.slice(3) : null,
+        defaults: form.defaults,
+      });
+      const data = res.data?.data || res.data;
+      setForm(data);
+      setInitialGroupValue(data?.defaultGroup
+        ? (data.defaultGroup.kind === 'fs' ? `fs:${data.defaultGroup.id}` : `int:${data.defaultGroup.id}`)
+        : '');
+      setDirty(false);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e) { setError(e.response?.data?.message || e.message); }
+    setBusy(false);
+  };
+
+  const restoreDefaults = async () => {
+    setBusy(true); setError(null);
+    try {
+      // Resets fields/defaults/default source/FS-group preselect. The
+      // workspace's default INTERNAL group is deliberately left alone — it
+      // predates this editor and also routes silent (API/email) creates.
+      await settingsAPI.updateTicketForm({ reset: true });
+      load();
+    } catch (e) { setError(e.response?.data?.message || e.message); }
+    setBusy(false);
+  };
+
+  const defaultEditor = (field) => {
+    const kind = FORM_FIELD_META[field.key]?.defaultKind;
+    if (kind === 'priority') {
+      return (
+        <select
+          value={field.defaultValue ?? '2'}
+          onChange={(e) => patchField(field.key, { defaultValue: e.target.value })}
+          aria-label="Default priority"
+          className="tp-focus-ring border border-slate-200 rounded-md px-1.5 py-0.5 text-[11px] text-slate-600"
+        >
+          {[1, 2, 3, 4].map((p) => <option key={p} value={String(p)}>Default: {PRIORITY_LABELS[p]}</option>)}
+        </select>
+      );
+    }
+    if (kind === 'type') {
+      return (
+        <select
+          value={field.defaultValue ?? ''}
+          onChange={(e) => patchField(field.key, { defaultValue: e.target.value || null })}
+          aria-label="Default type"
+          className="tp-focus-ring border border-slate-200 rounded-md px-1.5 py-0.5 text-[11px] text-slate-600"
+        >
+          <option value="">Default: workspace default type</option>
+          {activeTypes.map((t) => <option key={t.id} value={t.name}>Default: {t.name}</option>)}
+        </select>
+      );
+    }
+    if (kind === 'source') {
+      return <span className="text-[10px] text-slate-400 italic">default set above</span>;
+    }
+    return null;
+  };
+
+  return (
+    <SectionCard
+      icon={FormInput}
+      title="New-ticket form"
+      hint="What the Ticket Pulse composer (/tickets/new) shows and requires, per workspace. Applies to Ticket Pulse's own composer only — FreshService's forms and fields are untouched. Requester and Subject are always shown and required; hidden fields are hidden, never deleted."
+    >
+      {!form ? (
+        <p className="text-xs text-slate-400 italic">{error || 'Loading…'}</p>
+      ) : (
+        <>
+          {/* Workspace defaults — prominent, above the field list */}
+          <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2.5 grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label className="block text-xs">
+              <span className="font-bold text-slate-600">Default source</span>
+              <select
+                value={form.defaultSource ?? 103}
+                onChange={(e) => patch((prev) => ({ ...prev, defaultSource: Number(e.target.value) }))}
+                aria-label="Default source"
+                className="tp-focus-ring mt-1 w-full border border-slate-200 rounded-md px-2 py-1.5 text-slate-700 bg-white"
+              >
+                {SOURCE_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+              </select>
+              <span className="block mt-1 text-[10px] text-slate-400">Preselected in the composer; also applied when a staff-logged create omits a source.</span>
+            </label>
+            <label className="block text-xs">
+              <span className="font-bold text-slate-600">Default group</span>
+              <select
+                value={groupValue}
+                onChange={(e) => setGroupChoice(e.target.value)}
+                aria-label="Default group"
+                className="tp-focus-ring mt-1 w-full border border-slate-200 rounded-md px-2 py-1.5 text-slate-700 bg-white"
+              >
+                <option value="">No default group</option>
+                {groups.some((g) => g.origin === 'local') && (
+                  <optgroup label="Internal groups">
+                    {groups.filter((g) => g.origin === 'local').map((g) => (
+                      <option key={`int-${g.id}`} value={`int:${g.id}`}>{g.name}</option>
+                    ))}
+                  </optgroup>
+                )}
+                {groups.some((g) => g.origin !== 'local') && (
+                  <optgroup label="FreshService groups">
+                    {groups.filter((g) => g.origin !== 'local').map((g) => (
+                      <option key={`fs-${g.id}`} value={`fs:${g.freshserviceId}`}>{g.name}</option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+              <span className="block mt-1 text-[10px] text-slate-400">
+                Preselected in the composer and applied when the composer leaves group empty. An internal group here is the workspace default group (shared with email/API intake).
+              </span>
+            </label>
+          </div>
+
+          {/* Composer behavior defaults */}
+          <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-slate-600">
+            <label className="flex items-center gap-1.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={form.defaults?.notifyRequester !== false}
+                onChange={(e) => patch((prev) => ({ ...prev, defaults: { ...prev.defaults, notifyRequester: e.target.checked } }))}
+                className="tp-focus-ring rounded border-slate-300 text-blue-600"
+              />
+              Email the requester by default
+            </label>
+            <label className="flex items-center gap-1.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={form.defaults?.aiClassify !== false}
+                onChange={(e) => patch((prev) => ({ ...prev, defaults: { ...prev.defaults, aiClassify: e.target.checked } }))}
+                className="tp-focus-ring rounded border-slate-300 text-indigo-600"
+              />
+              Classify &amp; assess with AI by default
+            </label>
+            <label className="flex items-center gap-1.5">
+              Assignment default
+              <select
+                value={form.defaults?.assignMode || 'none'}
+                onChange={(e) => patch((prev) => ({ ...prev, defaults: { ...prev.defaults, assignMode: e.target.value } }))}
+                aria-label="Default assignment mode"
+                className="tp-focus-ring border border-slate-200 rounded-md px-1.5 py-0.5 text-slate-600"
+              >
+                <option value="none">Leave unassigned</option>
+                <option value="ai">AI recommends an assignee</option>
+              </select>
+            </label>
+          </div>
+
+          {/* Built-in field rows */}
+          <div className="space-y-1 mb-2">
+            {form.fields.map((field, i) => {
+              const meta = FORM_FIELD_META[field.key] || {};
+              const locked = field.locked === true;
+              return (
+                <div key={field.key} className={`flex items-center gap-2 text-xs rounded-md px-1.5 py-1 -mx-1.5 ${field.visible ? '' : 'opacity-60'}`}>
+                  <span className="flex flex-col -my-0.5">
+                    <button
+                      onClick={() => moveField(field.key, -1)}
+                      disabled={i === 0}
+                      aria-label={`Move ${field.label} up`}
+                      className="tp-focus-ring p-0.5 rounded text-slate-300 hover:text-slate-500 disabled:opacity-30"
+                    >
+                      <ArrowUp className="w-3 h-3" aria-hidden="true" />
+                    </button>
+                    <button
+                      onClick={() => moveField(field.key, 1)}
+                      disabled={i === form.fields.length - 1}
+                      aria-label={`Move ${field.label} down`}
+                      className="tp-focus-ring p-0.5 rounded text-slate-300 hover:text-slate-500 disabled:opacity-30"
+                    >
+                      <ArrowDown className="w-3 h-3" aria-hidden="true" />
+                    </button>
+                  </span>
+                  <span className={`w-28 font-semibold ${field.visible ? 'text-slate-700' : 'text-slate-400'}`}>{field.label}</span>
+                  {locked ? (
+                    <span className="text-[10px] text-slate-400 border border-slate-200 rounded-full px-1.5 py-px">Always shown · required</span>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => patchField(field.key, { visible: !field.visible })}
+                        aria-pressed={!field.visible}
+                        aria-label={field.visible ? `Hide ${field.label}` : `Show ${field.label}`}
+                        title={field.visible ? 'Hide from the composer (the API can still set it)' : 'Show in the composer'}
+                        className="tp-focus-ring inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 hover:bg-slate-50"
+                      >
+                        {field.visible
+                          ? <><Eye className="w-3 h-3" aria-hidden="true" /> Shown</>
+                          : <><EyeOff className="w-3 h-3" aria-hidden="true" /> Hidden</>}
+                      </button>
+                      {meta.requirable && (
+                        <label className="flex items-center gap-1 text-[11px] text-slate-500 cursor-pointer" title={meta.composerOnlyRequired ? 'Composer-only: files upload after create, so the API cannot enforce this' : 'Required in the composer and on the public API create'}>
+                          <input
+                            type="checkbox"
+                            checked={field.required}
+                            disabled={!field.visible}
+                            onChange={(e) => patchField(field.key, { required: e.target.checked })}
+                            className="tp-focus-ring rounded border-slate-300 text-blue-600"
+                          />
+                          Required
+                        </label>
+                      )}
+                      {defaultEditor(field)}
+                    </>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {error && <p className="text-xs text-red-500 mb-1.5">{error}</p>}
+          <div className="flex items-center gap-3">
+            {dirty && (
+              <button onClick={save} disabled={busy} className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 disabled:opacity-60">
+                {busy ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" /> : <Check className="w-3 h-3" aria-hidden="true" />} Save form
+              </button>
+            )}
+            <button
+              onClick={restoreDefaults}
+              disabled={busy}
+              className="tp-focus-ring inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-slate-700 disabled:opacity-50"
+            >
+              <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" /> Restore defaults
+            </button>
+            {saved && <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600"><Check className="w-3.5 h-3.5" aria-hidden="true" /> Saved</span>}
+          </div>
+        </>
+      )}
+    </SectionCard>
+  );
+}
+
 export default function TicketOpsPanel() {
   return (
     <div className="space-y-4 animate-fadeIn">
       <TicketTypesSection />
       <TicketStatusesSection />
+      <QueueCardsSection />
       <SlaSection />
       <TrustedDomainsSection />
       <TagsSection />
       <CategoryGroupSection />
       <MacrosSection />
       <QuickNotesSection />
+      {/* New-ticket form ABOVE Custom fields: the two lists read as one
+          FreshService-style Ticket Fields editor (built-ins, then customs). */}
+      <TicketFormSection />
       <CustomFieldsSection />
       <CreateTemplatesSection />
     </div>
