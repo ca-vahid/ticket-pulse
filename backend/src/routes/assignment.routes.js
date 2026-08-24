@@ -109,6 +109,7 @@ router.get('/config', requireAdmin, asyncHandler(async (req, res) => {
       emailPollingIntervalSec: 60,
       lastEmailCheckAt: null,
       autoCloseNoise: false,
+      duplicateBurstEnabled: true,
       dryRunMode: true,
       dailyReviewEnabled: false,
       dailyReviewRunHour: 18,
@@ -145,7 +146,7 @@ router.put('/config', requireAdmin, asyncHandler(async (req, res) => {
     scoringWeights, classificationPrompt, categorizationPrompt,
     recommendationPrompt, pollForUnassigned, pollMaxPerCycle,
     monitoredMailbox, emailPollingEnabled, emailPollingIntervalSec,
-    autoCloseNoise, dryRunMode, excludedGroupIds, observeOnlyGroupIds, autoCategorizeEnabled,
+    autoCloseNoise, duplicateBurstEnabled, dryRunMode, excludedGroupIds, observeOnlyGroupIds, autoCategorizeEnabled,
     competencyFeedbackEnabled,
     observeCategoryWritebackEnabled,
     dailyReviewEnabled, dailyReviewRunHour, dailyReviewRunMinute, dailyReviewLookbackDays,
@@ -171,6 +172,7 @@ router.put('/config', requireAdmin, asyncHandler(async (req, res) => {
   if (emailPollingEnabled !== undefined) data.emailPollingEnabled = emailPollingEnabled;
   if (emailPollingIntervalSec !== undefined) data.emailPollingIntervalSec = emailPollingIntervalSec;
   if (autoCloseNoise !== undefined) data.autoCloseNoise = autoCloseNoise;
+  if (duplicateBurstEnabled !== undefined) data.duplicateBurstEnabled = !!duplicateBurstEnabled;
   if (autoCategorizeEnabled !== undefined) data.autoCategorizeEnabled = !!autoCategorizeEnabled;
   if (competencyFeedbackEnabled !== undefined) data.competencyFeedbackEnabled = !!competencyFeedbackEnabled;
   if (observeCategoryWritebackEnabled !== undefined) data.observeCategoryWritebackEnabled = !!observeCategoryWritebackEnabled;

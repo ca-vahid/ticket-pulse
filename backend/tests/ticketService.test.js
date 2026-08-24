@@ -840,6 +840,26 @@ describe('ticketService.listTickets sorting', () => {
     }));
   });
 
+  // Phase QC (Mega 08-23): the optional Source/Department queue columns sort
+  // server-side — nullable columns, so blanks trail in BOTH directions like
+  // dueBy. department orders by the ticket's own column (requester-profile
+  // fallback rows deliberately sort with the nulls).
+  test('sort=source joins the whitelist with nulls last', async () => {
+    await ticketService.listTickets(1, { sort: 'source', dir: 'asc' });
+
+    expect(prismaMock.ticket.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      orderBy: [{ source: { sort: 'asc', nulls: 'last' } }, { id: 'desc' }],
+    }));
+  });
+
+  test('sort=department joins the whitelist with nulls last (desc too)', async () => {
+    await ticketService.listTickets(1, { sort: 'department', dir: 'desc' });
+
+    expect(prismaMock.ticket.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      orderBy: [{ department: { sort: 'desc', nulls: 'last' } }, { id: 'desc' }],
+    }));
+  });
+
   test('sort=status asc assembles the page Open-first (lifecycle rank, not alphabetical)', async () => {
     // Alphabetically Closed < Open < Pending — the ranked page must still
     // start with Open even though groupBy returns Closed first.

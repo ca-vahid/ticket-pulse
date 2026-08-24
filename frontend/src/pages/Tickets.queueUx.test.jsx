@@ -284,14 +284,14 @@ describe('Columns flyout (Phase QC — QC4)', () => {
     ), { timeout: 2500 });
   });
 
-  test('Reset to default restores the stock template and persists the default set', async () => {
+  test('Reset columns restores the stock template and persists the default set', async () => {
     localStorage.setItem('tp_queue_columns', JSON.stringify(['subject', 'requester', 'status', 'assignee']));
     mount();
     await waitFor(() => expect(screen.getAllByText('Row 1').length).toBeGreaterThan(0));
     expect(currentTemplate()).not.toBe(DEFAULT_COMPACT_TEMPLATE);
 
     await openColumnsMenu();
-    fireEvent.click(screen.getByRole('button', { name: /reset to default/i }));
+    fireEvent.click(screen.getByRole('button', { name: /reset columns/i }));
     await waitFor(() => expect(currentTemplate()).toBe(DEFAULT_COMPACT_TEMPLATE));
     await waitFor(() => expect(setPrefSpy).toHaveBeenCalledWith('queue.columns', DEFAULT_COLUMN_KEYS), { timeout: 2500 });
   });
