@@ -167,6 +167,7 @@ model Workspace {
   ticketStatusDefinitions           TicketStatusDefinition[]
   analyticsReports                  AnalyticsReport[]
   userEmailSignatures               UserEmailSignature[]
+  userPreferences                   UserPreference[]
   emailIdentity                     WorkspaceEmailIdentity?
 
   @@map("workspaces")
@@ -1876,6 +1877,12 @@ model AssignmentConfig {
   // true to preserve behavior). Only types with an fsTypeValue mapping in
   // ticket_type_definitions are ever sent.
   typeWritebackEnabled                Boolean   @default(false) @map("type_writeback_enabled")
+  // Duplicate-burst guard: same requester + identical normalized subject within
+  // 15 minutes ⇒ later copies are linked as duplicates (TP-born copies
+  // auto-Resolve) and the AI run is skipped. Body is never compared, so turn
+  // OFF for teams whose legitimate requests share subjects (e.g. Project
+  // Accounting's Power App submissions that differ only in the body link).
+  duplicateBurstEnabled               Boolean   @default(true) @map("duplicate_burst_enabled")
   createdAt                           DateTime  @default(now()) @map("created_at")
   updatedAt                           DateTime  @updatedAt @map("updated_at")
 
@@ -3298,6 +3305,26 @@ model SavedFilterView {
 // requester email); the stored thread entry stays clean. Replies only —
 // never notes or forwards. Managed self-serve (account menu → Notifications)
 // and by admins (Settings → Signatures, incl. mass-apply templates).
+// Per-user UI preferences (Mega 08-23 Phase QC): small JSON values keyed by
+// (workspace, owner email, key) — the SavedFilterView / UserEmailSignature
+// pattern (no User table exists). Keys are ALLOWLISTED at the route (first
+// consumers: 'queue.columns' + 'queue.columnWidths' for the tickets queue),
+// and values are capped at ~8KB — this is a preference store, not a document
+// store.
+model UserPreference {
+  id          Int       @id @default(autoincrement())
+  workspaceId Int       @map("workspace_id")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  ownerEmail  String    @map("owner_email") @db.VarChar(255)
+  key         String    @db.VarChar(80)
+  value       Json
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@unique([workspaceId, ownerEmail, key])
+  @@map("user_preferences")
+}
+
 model UserEmailSignature {
   id          Int       @id @default(autoincrement())
   workspaceId Int       @map("workspace_id")

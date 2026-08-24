@@ -797,7 +797,7 @@ class TicketService {
       };
     }
 
-    const sortField = ['createdAt', 'updatedAt', 'priority', 'status', 'subject', 'requester', 'dueBy'].includes(query.sort) ? query.sort : 'createdAt';
+    const sortField = ['createdAt', 'updatedAt', 'priority', 'status', 'subject', 'requester', 'dueBy', 'source', 'department'].includes(query.sort) ? query.sort : 'createdAt';
     const sortDir = query.dir === 'asc' ? 'asc' : 'desc';
 
     let total;
@@ -820,6 +820,14 @@ class TicketService {
         orderBy = [{ dueBy: { sort: sortDir, nulls: 'last' } }, { id: 'desc' }];
       } else if (sortField === 'requester') {
         orderBy = [{ requester: { name: sortDir } }, { id: 'desc' }];
+      } else if (sortField === 'source' || sortField === 'department') {
+        // Optional-column sorts (Phase QC): both are nullable, so blanks trail
+        // in either direction like dueBy. Note: department sorts on the
+        // TICKET's department column only — rows whose queue cell shows the
+        // requester-profile fallback (entraDepartment/department) still sort
+        // under nulls, deliberately: mixing the two sources would make the
+        // order disagree with itself as Entra data drifts.
+        orderBy = [{ [sortField]: { sort: sortDir, nulls: 'last' } }, { id: 'desc' }];
       } else {
         orderBy = [{ [sortField]: sortDir }, { id: 'desc' }];
       }

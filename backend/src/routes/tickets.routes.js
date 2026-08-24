@@ -171,6 +171,55 @@ router.delete('/saved-views/:id', asyncHandler(async (req, res) => {
   res.json({ success: true });
 }));
 
+// -------------------------------------------- per-user UI preferences (QC1)
+// Tiny JSON values keyed by (workspace, actor email, key) — queue column
+// layout and friends. Keys are a hard allowlist (unknown key → 404, same
+// posture as an unknown route) and values are size-capped: this is a
+// preference store, not a document store.
+
+const PREFERENCE_KEYS = new Set(['queue.columns', 'queue.columnWidths']);
+const PREFERENCE_VALUE_MAX_BYTES = 8 * 1024;
+
+function parsePreferenceKey(req) {
+  const key = String(req.params.key || '');
+  return PREFERENCE_KEYS.has(key) ? key : null;
+}
+
+router.get('/preferences/:key', asyncHandler(async (req, res) => {
+  const key = parsePreferenceKey(req);
+  if (!key) return res.status(404).json({ success: false, message: 'Unknown preference key' });
+  const row = await prisma.userPreference.findUnique({
+    where: { workspaceId_ownerEmail_key: { workspaceId: req.workspaceId, ownerEmail: req.ticketActor.email, key } },
+  });
+  // No row = "never customized" — the client falls back to its defaults.
+  res.json({ success: true, data: { key, value: row ? row.value : null } });
+}));
+
+router.put('/preferences/:key', asyncHandler(async (req, res) => {
+  const key = parsePreferenceKey(req);
+  if (!key) return res.status(404).json({ success: false, message: 'Unknown preference key' });
+  const value = req.body?.value;
+  // null is rejected too: the column is a required Json (a "cleared" pref is
+  // simply the row never written — GET then returns value:null for defaults).
+  if (value === undefined || value === null) return res.status(400).json({ success: false, message: 'value is required' });
+  let bytes;
+  try {
+    bytes = Buffer.byteLength(JSON.stringify(value), 'utf8');
+  } catch {
+    return res.status(400).json({ success: false, message: 'value must be JSON-serializable' });
+  }
+  if (!Number.isFinite(bytes) || bytes > PREFERENCE_VALUE_MAX_BYTES) {
+    return res.status(400).json({ success: false, message: `value too large (max ${PREFERENCE_VALUE_MAX_BYTES} bytes)` });
+  }
+  const where = { workspaceId_ownerEmail_key: { workspaceId: req.workspaceId, ownerEmail: req.ticketActor.email, key } };
+  const row = await prisma.userPreference.upsert({
+    where,
+    update: { value },
+    create: { workspaceId: req.workspaceId, ownerEmail: req.ticketActor.email, key, value },
+  });
+  res.json({ success: true, data: { key, value: row.value } });
+}));
+
 // Requester typeahead for the create flow: known requesters + Entra directory.
 router.get('/requester-search', asyncHandler(async (req, res) => {
   const results = await ticketService.searchRequesters(String(req.query.q || ''));
