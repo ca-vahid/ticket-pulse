@@ -734,6 +734,11 @@ export const ticketsAPI = {
     return await api.delete(`/tickets/${id}`);
   },
 
+  // Per-user UI preferences (workspace-scoped, allowlisted keys — Phase QC).
+  // GET returns { key, value } with value:null when never customized.
+  getQueuePreference: (key) => api.get(`/tickets/preferences/${encodeURIComponent(key)}`),
+  setQueuePreference: (key, value) => api.put(`/tickets/preferences/${encodeURIComponent(key)}`, { value }),
+
   // Saved filter views (per-user, workspace-scoped)
   listSavedViews: () => api.get('/tickets/saved-views'),
   createSavedView: (data) => api.post('/tickets/saved-views', data),

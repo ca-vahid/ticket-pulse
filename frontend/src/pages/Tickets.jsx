@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'motion/react';
 import {
   Activity, AlertCircle, ArrowDownWideNarrow, ArrowUpNarrowWide, CalendarDays, Check,
-  CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, CornerUpRight, Download, Inbox,
+  CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Download, Inbox,
   Columns3, ListFilter, Loader2, MessageSquare, Plus, RefreshCw, Rows2, Rows4, Search, ShieldCheck, Sparkles, Ticket, UserRound, X,
 } from 'lucide-react';
 import AppHeader from '../components/AppHeader';
@@ -11,8 +11,6 @@ import MobileTabBar from '../components/nav/MobileTabBar';
 import TicketPreview from '../components/tickets/TicketPreview';
 import ScheduledTicketsPanel from '../components/tickets/ScheduledTicketsPanel';
 import TicketFilterRail, { ActiveFilterBar } from '../components/tickets/TicketFilterRail';
-import AssigneePicker from '../components/tickets/AssigneePicker';
-import StatusPicker from '../components/tickets/StatusPicker';
 import TicketBoard from '../components/tickets/TicketBoard';
 import MobileAssignSheet from '../components/tickets/MobileAssignSheet';
 import { OverridePromptToast, useOverridePrompt } from '../components/tickets/OverridePrompt';
@@ -20,10 +18,14 @@ import AiAssignModal from '../components/tickets/AiAssignModal';
 import LiveUpdatePill from '../components/tickets/LiveUpdatePill';
 import FsSyncConfirm from '../components/tickets/FsSyncConfirm';
 import {
-  AgentFirstName, ExternalChip, FeaturedFieldChip, PersonAvatar, PriorityDot, SlaChip, StateChip, StatusPill, TagChip, TypePill, UnassignedBadge,
+  ExternalChip, FeaturedFieldChip, PersonAvatar, PriorityDot, StateChip, StatusPill, TagChip, TypePill,
   PRIORITY_LABELS, PRIORITY_STRIP_COLORS, ticketCategoryLabels, timeAgo,
 } from '../components/tickets/ticketUi';
-import { baseStatusOf, isTerminalStatus, statusDefsFromMeta, statusNamesForBase, statusToneFromDefs } from '../components/tickets/statusDefs';
+import { isTerminalStatus, statusDefsFromMeta, statusNamesForBase, statusToneFromDefs } from '../components/tickets/statusDefs';
+import {
+  BypassBadge, CELL, DEFAULT_COLUMN_KEYS, QUEUE_COLUMNS, QueueColumnsMenu,
+  buildQueueGridTemplate, isModifiedClick, normalizeColumnKeys,
+} from '../components/tickets/queueColumns';
 import { ticketsAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
@@ -35,41 +37,6 @@ import ticketsHeroArt from '../assets/tickets-hero.png';
 // (Phase 8b, statusDefs.js) — canonical 4 until meta loads.
 const PAGE_SIZE = 25;
 
-/**
- * "Handled in FreshService" marker: the assignment was made in FS, not by our
- * AI. Either the AI auto-assigned someone and a human reassigned it in FS
- * (kind='reassigned'), or the ticket was already taken in FS before the AI run
- * could act (kind='handled_in_fs'). The row shows the real current assignee;
- * this amber chip flags the FS handoff and links to the assignment-history
- * detail.
- */
-function BypassBadge({ bypass }) {
-  let title;
-  if (bypass.kind === 'reassigned') {
-    const bits = [];
-    if (bypass.aiTechName) bits.push(`AI assigned ${bypass.aiTechName}`);
-    if (bypass.byActorName) bits.push(`reassigned by ${bypass.byActorName}`);
-    title = `Handled in FreshService — ${bits.join('; ') || 'reassigned in FreshService'}. Click for assignment history.`;
-  } else {
-    const who = bypass.byActorName
-      ? (bypass.selfPicked ? `self-assigned by ${bypass.byActorName}` : `assigned by ${bypass.byActorName}`)
-      : 'assigned in FreshService';
-    const aiNote = bypass.aiTechName ? ` (AI would have picked ${bypass.aiTechName})` : '';
-    title = `Handled in FreshService — ${who} before AI could act${aiNote}. Click for assignment history.`;
-  }
-  return (
-    <Link
-      to={`/assignments/history/${bypass.runId}`}
-      onClick={(e) => e.stopPropagation()}
-      title={title}
-      aria-label={title}
-      className="tp-focus-ring flex-shrink-0 inline-flex items-center h-5 w-5 rounded-md bg-amber-50 border border-amber-200 text-amber-600 hover:bg-amber-100 transition-colors"
-    >
-      <CornerUpRight className="w-3 h-3 m-auto" aria-hidden="true" />
-    </Link>
-  );
-}
-
 const SORT_OPTIONS = [
   { value: 'updatedAt', label: 'Last activity' },
   { value: 'createdAt', label: 'Created date' },
@@ -78,11 +45,15 @@ const SORT_OPTIONS = [
   { value: 'dueBy', label: 'Due date' },
   { value: 'subject', label: 'Subject' },
   { value: 'requester', label: 'Requester' },
+  // Optional-column sorts (Phase QC) — nulls-last on the backend, like dueBy.
+  { value: 'source', label: 'Source' },
+  { value: 'department', label: 'Department' },
 ];
 // Fields whose FIRST click sorts ascending — status asc walks the lifecycle
 // Open-first (QA 08-04 #14a) and due asc puts the soonest deadline on top;
-// desc-first only makes sense for recency/priority fields.
-const ASC_FIRST_SORTS = new Set(['status', 'dueBy']);
+// categorical columns (source/department) read A→Z. Desc-first only makes
+// sense for recency/priority fields.
+const ASC_FIRST_SORTS = new Set(['status', 'dueBy', 'source', 'department']);
 
 // KPI stat cards (mockup: colored icon tile + large number + label). Clicking a
 // card applies that segment. Unassigned lives in the sidebar Views, not here.
@@ -100,9 +71,9 @@ const SEGMENT_COUNT_KEY = { all: 'all', open: 'open', unassigned: 'unassigned', 
 // number lives small under the subject.
 //   COMPACT: the Type (INC/REQ) tag folds into the title line, so its column
 //     is gone and that width flows into the subject — kills the truncation
-//     that a narrow subject track caused. 7 tracks.
-//   ROOMY: the subject spans row 1 full-width; these are the row-2 meta tracks
-//     (a slim type slot, then category/assignee/status/due/updated). 7 tracks.
+//     that a narrow subject track caused.
+//   ROOMY: the subject spans row 1 full-width; row 2 holds a slim type slot,
+//     then the chosen columns.
 //
 // Tablet band (QA 08-04 #5/#6): below xl the fixed tracks used to claim 644px
 // before the subject saw a single pixel — on an iPad (768 portrait, or 1024
@@ -112,47 +83,17 @@ const SEGMENT_COUNT_KEY = { all: 'all', open: 'open', unassigned: 'unassigned', 
 // 150→120, and the Updated column is dropped (its time folds into the meta
 // line). The cutoff is xl, not lg, because iPad landscape (1024) IS lg and
 // shows the rail — the wide template only fits once the viewport clears it.
-// Headers and rows share these classes, so the templates always stay aligned.
 //
-// Requester column (QA 08-07 #6): xl-only 150px track between Subject and
-// Category — compact track 3, roomy row-2 track 3 (after the type slot). The
-// md templates stay untouched: the tablet band has no width budget for
-// another column (08-04 sweep), so below xl the requester keeps living in the
-// subject meta line instead.
-const GRID_COMPACT = 'grid md:grid-cols-[6px_minmax(0,2.4fr)_minmax(100px,0.8fr)_118px_96px_84px] xl:grid-cols-[6px_minmax(0,2.4fr)_150px_minmax(150px,1fr)_210px_116px_88px_74px] items-center';
-const GRID_ROOMY = 'grid md:grid-cols-[6px_60px_minmax(100px,1fr)_118px_96px_84px] xl:grid-cols-[6px_60px_150px_minmax(150px,1fr)_210px_116px_88px_74px] items-stretch';
-// The Updated column only exists at xl+ (see GRID templates above) — this
-// hides its header + cell together so track counts always match.
-const UPDATED_COL = 'hidden xl:flex';
-// The Requester column is xl-only too — same paired header/cell hiding as
-// UPDATED_COL so the md track counts never drift (QA 08-07 #6).
-const REQUESTER_COL = 'hidden xl:flex';
-// Row anchors (QA 08-07 #7): plain left-click keeps the in-app peek/navigate
-// behavior, but any modified click (Ctrl/Cmd new tab, Shift new window, Alt
-// download, middle-click) must fall through to NATIVE anchor semantics — do
-// not preventDefault those. Right-click needs no handler at all: real <a href>
-// gives the context menu its "Open in new tab" for free.
-const isModifiedClick = (e) => e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button === 1;
-// No vertical grid lines (modern list feel) — horizontal row dividers only.
-// px-2 below xl: the tablet band's narrower tracks need the padding back as
-// content width (px-3 alone truncated "Open" → "Op…" in the status column).
-const CELL = 'px-2 xl:px-3 self-stretch flex items-center min-w-0';
-
-// Live pipeline progress → human stage label for the "AI choosing…" chip.
-// Tool names arrive over SSE per analysis turn; buckets are coarse on purpose
-// (the run is agentic, so exact step totals don't exist ahead of time).
-const AI_STAGE_LABELS = [
-  [/submit_recommendation/, 'making the call'],
-  [/find_matching_agents|competenc/, 'matching skills'],
-  [/availability|workload|history|risk_signals|routing|site_context|ad_profile/, 'weighing the team'],
-  [/similar|search/, 'checking similar tickets'],
-  [/ticket_details|categories|requester|thread|conversation/, 'reading the ticket'],
-];
-function aiProgressLabel(progress) {
-  if (!progress?.step) return null;
-  const stage = AI_STAGE_LABELS.find(([re]) => re.test(progress.tool || ''))?.[1] || 'analyzing';
-  return `${stage} · step ${progress.step}`;
-}
+// Per-user columns (Mega 08-23 Phase QC): the xl+ template is COMPUTED from
+// the user's chosen columns (queueColumns.jsx registry) and rides the
+// `--tp-q-grid` CSS variable set once on the list card. Headers and rows read
+// the SAME variable and place their cells with the same computed
+// `--tp-q-col` indexes, so the old header/row alignment invariant now holds
+// by construction. Below xl the hardcoded 6-track "essentials" templates
+// stay exactly as they were — custom columns are an xl+ feature (the tablet
+// band has no width budget, 08-04 sweep) and mobile cards are untouched.
+const GRID_COMPACT = 'grid md:grid-cols-[6px_minmax(0,2.4fr)_minmax(100px,0.8fr)_118px_96px_84px] xl:[grid-template-columns:var(--tp-q-grid)] items-center';
+const GRID_ROOMY = 'grid md:grid-cols-[6px_60px_minmax(100px,1fr)_118px_96px_84px] xl:[grid-template-columns:var(--tp-q-grid)] items-stretch';
 
 /** Inline priority dropdown for TP-born rows (FS-born rows stay read-only). */
 function InlinePriorityPicker({ ticket, onChanged }) {
@@ -473,6 +414,42 @@ export default function Tickets() {
     } catch { return 'compact'; }
   });
   useEffect(() => { try { localStorage.setItem('tp_ticket_layout', layout); } catch { /* no-op */ } }, [layout]);
+  // ---- Per-user queue columns (Mega 08-23 Phase QC) ----
+  // Ordered visible column keys (subject pinned first). localStorage mirror
+  // paints the last known layout instantly; the server preference
+  // ('queue.columns', keyed workspace+user) then WINS on load so the layout
+  // follows the person across browsers. Writes are optimistic: local state +
+  // mirror now, debounced PUT behind them (fire-and-forget).
+  const [columnKeys, setColumnKeys] = useState(() => {
+    try {
+      return normalizeColumnKeys(JSON.parse(localStorage.getItem('tp_queue_columns') || 'null'));
+    } catch { return [...DEFAULT_COLUMN_KEYS]; }
+  });
+  const columnsSaveTimerRef = useRef(null);
+  const updateColumns = useCallback((nextKeys) => {
+    const next = normalizeColumnKeys(nextKeys);
+    setColumnKeys(next);
+    try { localStorage.setItem('tp_queue_columns', JSON.stringify(next)); } catch { /* no-op */ }
+    if (columnsSaveTimerRef.current) clearTimeout(columnsSaveTimerRef.current);
+    columnsSaveTimerRef.current = setTimeout(() => {
+      ticketsAPI.setQueuePreference('queue.columns', next).catch(() => { /* local mirror still applies */ });
+    }, 600);
+  }, []);
+  useEffect(() => () => { if (columnsSaveTimerRef.current) clearTimeout(columnsSaveTimerRef.current); }, []);
+  useEffect(() => {
+    let cancelled = false;
+    ticketsAPI.getQueuePreference('queue.columns')
+      .then((res) => {
+        if (cancelled) return;
+        const value = res?.data?.value;
+        if (!Array.isArray(value)) return; // never customized — keep defaults/mirror
+        const next = normalizeColumnKeys(value);
+        setColumnKeys(next);
+        try { localStorage.setItem('tp_queue_columns', JSON.stringify(next)); } catch { /* no-op */ }
+      })
+      .catch(() => { /* offline/legacy backend — the mirror already painted */ });
+    return () => { cancelled = true; };
+  }, [workspaceId]);
   // Board view (QA 07-27 #3): Open / Pending / Closed columns with drag-drop.
   const boardMode = layout === 'board';
   // Board density (QA 08-07 #12): cards are far shorter than list rows, so the
@@ -1199,6 +1176,55 @@ export default function Tickets() {
     return map;
   }, [meta?.groups]);
 
+  // ---- Computed column placement (Phase QC) ----
+  // Cells render in the registry's canonical DOM order (so the hardcoded md
+  // templates keep today's exact projection) and are PLACED at xl+ by
+  // explicit grid coordinates: `--tp-q-col` carries each visible column's
+  // track index in the user's order, `--tp-q-grid` (set on the list card)
+  // carries the matching template. Essentials (category/assignee/status/due)
+  // always render for the md band — deselecting one only hides it at xl.
+  const colMeta = useMemo(() => {
+    const nonSubject = columnKeys.filter((k) => k !== 'subject');
+    const start = new Map(nonSubject.map((k, i) => [k, i + 3])); // track 1 = accent, 2 = subject/type slot
+    const rowStart = roomy ? 'xl:row-start-2' : 'xl:row-start-1';
+    const out = {};
+    for (const col of QUEUE_COLUMNS) {
+      if (col.key === 'subject') continue;
+      const visible = start.has(col.key);
+      const pos = visible ? `xl:[grid-column:var(--tp-q-col)] ${rowStart}` : '';
+      const headerPos = visible ? 'xl:[grid-column:var(--tp-q-col)] xl:row-start-1' : '';
+      const mdVisible = Boolean(col.mdEssential);
+      // In roomy the md "Ticket" header span covers the category track, so the
+      // category header only exists at xl (matches the pre-QC layout).
+      const mdHeaderVisible = mdVisible && !(roomy && col.key === 'category');
+      out[col.key] = {
+        render: visible || mdVisible,
+        cls: mdVisible ? (visible ? pos : 'xl:hidden') : `hidden xl:flex ${pos}`,
+        headerRender: visible || mdHeaderVisible,
+        headerCls: mdHeaderVisible ? (visible ? headerPos : 'xl:hidden') : `hidden xl:flex ${headerPos}`,
+        style: visible ? { '--tp-q-col': start.get(col.key) } : undefined,
+      };
+    }
+    return out;
+  }, [columnKeys, roomy]);
+  const gridTemplate = useMemo(() => buildQueueGridTemplate(columnKeys, { roomy }), [columnKeys, roomy]);
+  const rowColumns = useMemo(() => QUEUE_COLUMNS.filter((c) => c.render && colMeta[c.key]?.render), [colMeta]);
+  const headerColumns = useMemo(() => QUEUE_COLUMNS.filter((c) => c.key !== 'subject' && colMeta[c.key]?.headerRender), [colMeta]);
+  const headerPad = roomy ? 'py-2' : cellPad;
+  const headerCell = (col) => (
+    <span key={col.key} className={`${CELL} ${colMeta[col.key].headerCls} ${headerPad} ${col.headerClass || ''}`} style={colMeta[col.key].style}>
+      {col.sortField ? (
+        <button
+          onClick={() => headerSort(col.sortField)}
+          title={col.headerTitle}
+          className={`tp-focus-ring uppercase tracking-wide hover:text-blue-600 rounded ${col.headerClass === 'justify-end' ? 'text-right' : ''}`}
+        >
+          {col.label}{sortIndicator(col.sortField)}
+        </button>
+      ) : col.label}
+    </span>
+  );
+
   const activeFilterCount = [
     segment !== 'all', searchParams.has('status'), assignee, priority, type, origin,
     category, subcategory, group, source, createdFrom || createdTo, due, noise, view, urlSearch,
@@ -1424,6 +1450,14 @@ export default function Tickets() {
                       </button>
                     ))}
                   </div>
+                  {/* Columns customizer (Phase QC) — list layouts only; the
+                      board's columns are statuses, not these. Desktop-only:
+                      custom columns apply at xl+ and mobile keeps its cards. */}
+                  {!boardMode && (
+                    <div className="hidden md:block">
+                      <QueueColumnsMenu value={columnKeys} onChange={updateColumns} />
+                    </div>
+                  )}
                 </div>
 
                 {/* Top pagination + AI-approval worklist connector — controls at both ends */}
@@ -1505,7 +1539,10 @@ export default function Tickets() {
                       </div>
                     </>
                   ) : (
-                    <div className="tp-card rounded-xl overflow-hidden">
+                    /* --tp-q-grid: the ONE computed xl template header + rows
+                       share (Phase QC) — set once here, read via the GRID_*
+                       classes, so the two can never drift. */
+                    <div className="tp-card rounded-xl overflow-hidden" style={{ '--tp-q-grid': gridTemplate }}>
                       {/* Header */}
                       <div className="hidden md:flex items-stretch border-b border-slate-200 bg-slate-50/80">
                         <span className="flex items-center justify-center w-9 flex-shrink-0">
@@ -1522,68 +1559,28 @@ export default function Tickets() {
                           /* Roomy header rides the SAME grid as the rows so every
                              label sits over its column — the old flat flex shoved
                              one "Status · Due · Updated" clump into the corner
-                             (QA 07-30 #1). "Ticket" spans the type+category
-                             tracks the title block sits over. */
+                             (QA 07-30 #1). At md "Ticket" spans the type+category
+                             tracks; at xl it sits on the slim type slot and every
+                             chosen column gets its own label (the columns are
+                             user-ordered now, so no fixed span can cover them). */
                           <div className={`flex-1 ${GRID_ROOMY} text-[11px] font-semibold uppercase tracking-wide text-slate-400`}>
                             <span aria-hidden="true" />
-                            {/* Span widens 2/4 → 2/5 at xl to absorb the new
-                                requester track (QA 08-07 #6), so Assignee and
-                                everything after keep sitting over their own
-                                columns. Responsive class, not inline style —
-                                gridColumn can't switch per breakpoint inline. */}
-                            <span className={`${CELL} py-2 [grid-column:2/4] xl:[grid-column:2/5]`}>
-                              <button onClick={() => headerSort('subject')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 rounded">
+                            <span className={`${CELL} py-2 [grid-column:2/4] xl:[grid-column:2/3] xl:row-start-1 xl:!px-1.5`}>
+                              <button onClick={() => headerSort('subject')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 rounded whitespace-nowrap">
                                 Ticket{sortIndicator('subject')}
                               </button>
                             </span>
-                            <span className={`${CELL} py-2`}>Assignee</span>
-                            <span className={`${CELL} py-2`}>
-                              <button onClick={() => headerSort('status')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 rounded" title="Sort by status (Open first)">
-                                Status{sortIndicator('status')}
-                              </button>
-                            </span>
-                            <span className={`${CELL} py-2`}>
-                              <button onClick={() => headerSort('dueBy')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 rounded" title="Sort by due date (soonest first)">
-                                Due{sortIndicator('dueBy')}
-                              </button>
-                            </span>
-                            <span className={`${CELL} ${UPDATED_COL} py-2 justify-end`}>
-                              <button onClick={() => headerSort('updatedAt')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 rounded text-right">
-                                Updated{sortIndicator('updatedAt')}
-                              </button>
-                            </span>
+                            {headerColumns.map(headerCell)}
                           </div>
                         ) : (
                           <div className={`flex-1 ${GRID_COMPACT} text-[11px] font-semibold uppercase tracking-wide text-slate-400`}>
                             <span aria-hidden="true" />
-                            <span className={`${CELL} ${cellPad}`}>
+                            <span className={`${CELL} ${cellPad} xl:col-start-2 xl:row-start-1`}>
                               <button onClick={() => headerSort('subject')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 rounded">
                                 Subject{sortIndicator('subject')}
                               </button>
                             </span>
-                            {/* xl-only, paired with the row's requesterCell (QA 08-07 #6) */}
-                            <span className={`${CELL} ${REQUESTER_COL} ${cellPad}`}>
-                              <button onClick={() => headerSort('requester')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 rounded" title="Sort by requester name">
-                                Requester{sortIndicator('requester')}
-                              </button>
-                            </span>
-                            <span className={`${CELL} ${cellPad}`}>Category</span>
-                            <span className={`${CELL} ${cellPad}`}>Assignee</span>
-                            <span className={`${CELL} ${cellPad}`}>
-                              <button onClick={() => headerSort('status')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 rounded" title="Sort by status (Open first)">
-                                Status{sortIndicator('status')}
-                              </button>
-                            </span>
-                            <span className={`${CELL} ${cellPad}`}>
-                              <button onClick={() => headerSort('dueBy')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 rounded" title="Sort by due date (soonest first)">
-                                Due{sortIndicator('dueBy')}
-                              </button>
-                            </span>
-                            <span className={`${CELL} ${UPDATED_COL} ${cellPad} justify-end`}>
-                              <button onClick={() => headerSort('updatedAt')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 rounded text-right">
-                                Updated{sortIndicator('updatedAt')}
-                              </button>
-                            </span>
+                            {headerColumns.map(headerCell)}
                           </div>
                         )}
                       </div>
@@ -1616,37 +1613,6 @@ export default function Tickets() {
                           // Assignee not in the active team list = deactivated / FS-only (read-only here).
                           const assigneeReadOnly = ticket.assignedTech
                             && !(meta?.technicians || []).some((t) => t.id === ticket.assignedTechId);
-                          // Shared body of the dashed "Suggested · NN%" capsule — rendered as a
-                          // BUTTON for reviewers (opens the AI modal) and as a read-only SPAN for
-                          // everyone else (QA 08-19 #2 read/act split).
-                          const suggestedPct = typeof ticket.ai?.score === 'number' ? Math.round(ticket.ai.score * 100) : null;
-                          const suggestedChipBody = ticket.ai?.state === 'suggested' ? (
-                            <>
-                              <span className="relative flex-shrink-0">
-                                <PersonAvatar name={ticket.ai.techName} photoUrl={(meta?.technicians || []).find((t) => t.id === ticket.ai.techId)?.photoUrl} size="h-6 w-6" textSize="text-[9px]" />
-                                <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-violet-600 ring-2 ring-white inline-flex items-center justify-center" aria-hidden="true">
-                                  <Sparkles className="w-[7px] h-[7px] text-white" />
-                                </span>
-                              </span>
-                              <span className="flex flex-col min-w-0 flex-1 leading-tight">
-                                <span className="text-[9px] font-bold uppercase tracking-wider text-violet-600">
-                                  Suggested{suggestedPct !== null ? ` · ${suggestedPct}%` : ''}
-                                </span>
-                                {ticket.ai.techName
-                                  ? <AgentFirstName name={ticket.ai.techName} className="text-xs font-semibold text-slate-800" />
-                                  : <span className="truncate text-xs font-semibold text-slate-800">AI pick</span>}
-                              </span>
-                              {ticket.ai.count > 1 && (
-                                <span className="text-[9px] font-medium text-violet-400 flex-shrink-0">+{ticket.ai.count - 1}</span>
-                              )}
-                            </>
-                          ) : null;
-                          const viewerSuggestedTitle = `AI suggests ${ticket.ai?.techName || 'a technician'}${suggestedPct !== null ? ` — ${suggestedPct}% match` : ''} — waiting on a reviewer's approval`;
-                          // Viewer/agent + unassigned + pending suggestion: show the same capsule
-                          // reviewers get, read-only. (The decision belongs to a reviewer; manual
-                          // assignment stays available in the peek drawer / detail / mobile sheet.)
-                          const viewerSuggested = canSeeAi && !canReview
-                            && !ticket.assignedTechId && ticket.ai?.state === 'suggested';
 
                           // ---- Row cell pieces, arranged per layout below (compact:
                           //      one tight line, type folded into the title; roomy:
@@ -1739,250 +1705,40 @@ export default function Tickets() {
                               <span className="xl:hidden">{` · updated ${timeAgo(ticket.lastActivityAt || ticket.updatedAt)}`}</span>
                             </span>
                           );
-                          // Requester column (QA 08-07 #6), xl-only: name on
-                          // the primary line, Entra office/city as the quiet
-                          // second line when present — mirrors catCell's shape.
-                          const requesterOffice = ticket.requester?.entraOfficeLocation || ticket.requester?.entraCity || null;
-                          const requesterCell = (
-                            <span
-                              className={`${CELL} ${REQUESTER_COL} ${cellPad} flex-col !items-start justify-center gap-0.5`}
-                              title={[ticket.requester?.name, requesterOffice].filter(Boolean).join(' · ') || undefined}
-                            >
-                              <span className="block w-full text-xs font-medium text-slate-700 truncate">
-                                {ticket.requester?.name || 'Unknown requester'}
-                              </span>
-                              {requesterOffice && (
-                                <span className="block w-full text-[10px] text-slate-400 truncate">{requesterOffice}</span>
-                              )}
-                            </span>
-                          );
-                          // Category, leaf-first: the SUBCATEGORY is the most specific (= most
-                          // useful) piece, so it gets the primary line; parent under it.
-                          const { category: catLabel, subcategory: subLabel } = ticketCategoryLabels(ticket);
-                          const catCell = (
-                            <span
-                              className={`${CELL} ${cellPad} flex-col !items-start justify-center gap-0.5`}
-                              title={[catLabel, subLabel].filter(Boolean).join(' / ') || undefined}
-                            >
-                              {subLabel ? (
-                                <>
-                                  <span className="block w-full text-xs font-medium text-slate-700 truncate">{subLabel}</span>
-                                  {catLabel && <span className="block w-full text-[10px] text-slate-400 truncate">in {catLabel}</span>}
-                                </>
-                              ) : (
-                                <span className="block w-full text-xs text-slate-600 truncate">{catLabel || '—'}</span>
-                              )}
-                            </span>
-                          );
-                          const assigneeCell = (isEditable || fsRowEditable) ? (
-                            <span className={`${CELL} py-1 gap-1 relative ${fx === 'aiDone' ? 'tp-assign-pop' : ''}`}>
-                              {viewerSuggested ? (
-                                /* Read-only Suggested capsule (span, not button): non-reviewers see
-                                   the pick but can't approve/dismiss — those endpoints would 403. */
-                                <span
-                                  onClick={(e) => e.stopPropagation()}
-                                  onDoubleClick={(e) => e.stopPropagation()}
-                                  title={viewerSuggestedTitle}
-                                  className="flex items-center gap-2 min-w-0 w-full pl-1 pr-2 py-1 rounded-full border border-dashed border-violet-300 bg-violet-50/60"
-                                >
-                                  {suggestedChipBody}
-                                </span>
-                              ) : (
-                                <AssigneePicker
-                                  ticketId={ticket.id}
-                                  value={ticket.assignedTechId}
-                                  currentTech={ticket.assignedTech}
-                                  technicians={meta?.technicians || []}
-                                  ticketOrigin={ticket.origin}
-                                  assignFn={fsRowEditable ? ((techId) => fsAssign(ticket, techId)) : undefined}
-                                  onAssigned={(techId) => onManualAssigned(ticket.id, techId)}
-                                  size="sm"
-                                  align="right"
-                                  showAi={canReview}
-                                  aiSuggestion={canReview ? (ticket.ai || (aiLive ? { state: 'analyzing' } : null)) : null}
-                                  onAiAssign={canReview ? () => setAiTicket(ticket) : null}
-                                />
-                              )}
-                              {/* Provenance badge AFTER the picker so avatars/names
-                                  align vertically across rows (QA 08-03). */}
-                              {ticket.aiBypass && <BypassBadge bypass={ticket.aiBypass} />}
-                            </span>
-                          ) : (
-                            <span
-                              className={`${CELL} py-1 gap-1.5 relative ${fx === 'aiDone' ? 'tp-assign-pop' : ''}`}
-                              onClick={(e) => e.stopPropagation()}
-                              onDoubleClick={(e) => e.stopPropagation()}
-                            >
-                              {aiLive && !ticket.assignedTech ? (
-                                canReview ? (
-                                  <button
-                                    onClick={() => setAiTicket(ticket)}
-                                    title="AI is choosing the best person for this ticket — click to watch live. A manual assignment overrides the pick; category & priority detection still finish."
-                                    className="tp-focus-ring tp-ai-think flex items-center gap-2 min-w-0 w-full pl-1 pr-2 py-1 rounded-full text-left"
-                                  >
-                                    <span className="h-6 w-6 rounded-full bg-violet-100 inline-flex items-center justify-center flex-shrink-0">
-                                      <Sparkles className="w-3 h-3 text-violet-600 tp-ai-twinkle" aria-hidden="true" />
-                                    </span>
-                                    <span className="flex flex-col min-w-0 leading-tight">
-                                      <span className="text-[9px] font-bold uppercase tracking-wider text-violet-600">AI choosing…</span>
-                                      <span className="text-xs italic text-slate-400 truncate">{aiProgressLabel(aiProgress.get(ticket.id)) || 'best person for this'}</span>
-                                    </span>
-                                  </button>
-                                ) : (
-                                  <span
-                                    title="AI is choosing the best person for this ticket"
-                                    className="tp-ai-think flex items-center gap-2 min-w-0 w-full pl-1 pr-2 py-1 rounded-full"
-                                  >
-                                    <span className="h-6 w-6 rounded-full bg-violet-100 inline-flex items-center justify-center flex-shrink-0">
-                                      <Sparkles className="w-3 h-3 text-violet-600 tp-ai-twinkle" aria-hidden="true" />
-                                    </span>
-                                    <span className="flex flex-col min-w-0 leading-tight">
-                                      <span className="text-[9px] font-bold uppercase tracking-wider text-violet-600">AI choosing…</span>
-                                      <span className="text-xs italic text-slate-400 truncate">{aiProgressLabel(aiProgress.get(ticket.id)) || 'best person for this'}</span>
-                                    </span>
-                                  </span>
-                                )
-                              ) : canSeeAi && ticket.ai?.state === 'suggested' && !ticket.assignedTech ? (
-                                canReview ? (
-                                  <button
-                                    onClick={() => setAiTicket(ticket)}
-                                    title={`AI suggests ${ticket.ai.techName || 'a technician'}${suggestedPct !== null ? ` — ${suggestedPct}% match` : ''}${ticket.ai.count > 1 ? ` (+${ticket.ai.count - 1} more candidate${ticket.ai.count - 1 === 1 ? '' : 's'})` : ''} · awaiting your approval`}
-                                    className="tp-focus-ring group flex items-center gap-2 min-w-0 w-full pl-1 pr-2 py-1 rounded-full border border-dashed border-violet-300 bg-violet-50/60 hover:bg-violet-50 transition-colors text-left"
-                                  >
-                                    {suggestedChipBody}
-                                  </button>
-                                ) : (
-                                  <span
-                                    title={viewerSuggestedTitle}
-                                    className="flex items-center gap-2 min-w-0 w-full pl-1 pr-2 py-1 rounded-full border border-dashed border-violet-300 bg-violet-50/60"
-                                  >
-                                    {suggestedChipBody}
-                                  </span>
-                                )
-                              ) : (
-                                <>
-                                  <span className="flex items-center gap-2 min-w-0 flex-1" title="Synced from FreshService — read-only here">
-                                    {ticket.assignedTech ? (
-                                      <>
-                                        <PersonAvatar name={ticket.assignedTech.name} photoUrl={ticket.assignedTech.photoUrl} />
-                                        <AgentFirstName name={ticket.assignedTech.name} className="text-xs text-slate-600" />
-                                      </>
-                                    ) : (
-                                      <UnassignedBadge variant="muted" />
-                                    )}
-                                  </span>
-                                  {!canSeeAi ? null : ticket.ai?.state === 'suggested' ? (
-                                    canReview ? (
-                                      <button
-                                        onClick={() => setAiTicket(ticket)}
-                                        title={ticket.assignedTech
-                                          ? `Already assigned to ${ticket.assignedTech.name} — AI suggested ${ticket.ai.techName || 'someone'} (informational)`
-                                          : `AI suggests ${ticket.ai.techName || 'a technician'} — review`}
-                                        aria-label={ticket.assignedTech ? 'AI suggestion (already assigned)' : 'Review AI suggestion'}
-                                        className={`tp-focus-ring p-1 rounded-md flex-shrink-0 ${
-                                          ticket.assignedTech
-                                            ? 'text-slate-300 hover:text-slate-500 hover:bg-slate-50'
-                                            : 'text-indigo-500 hover:bg-indigo-50'
-                                        }`}
-                                      >
-                                        <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
-                                      </button>
-                                    ) : (
-                                      /* Non-reviewers: informational sparkle only — no modal, no API. */
-                                      <span
-                                        title={ticket.assignedTech
-                                          ? `Already assigned to ${ticket.assignedTech.name} — AI suggested ${ticket.ai.techName || 'someone'} (informational)`
-                                          : viewerSuggestedTitle}
-                                        aria-label="AI suggestion — waiting on a reviewer's approval"
-                                        className={`p-1 rounded-md flex-shrink-0 ${ticket.assignedTech ? 'text-slate-300' : 'text-indigo-400'}`}
-                                      >
-                                        <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
-                                      </span>
-                                    )
-                                  ) : ticket.ai?.state === 'queued' ? (
-                                    canReview ? (
-                                      <button
-                                        onClick={() => setAiTicket(ticket)}
-                                        title="AI run queued for business hours"
-                                        aria-label="AI run queued"
-                                        className="tp-focus-ring p-1 rounded-md text-indigo-400 hover:bg-indigo-50 flex-shrink-0"
-                                      >
-                                        <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
-                                      </button>
-                                    ) : (
-                                      <span
-                                        title="AI run queued for business hours"
-                                        aria-label="AI run queued"
-                                        className="p-1 rounded-md text-indigo-300 flex-shrink-0"
-                                      >
-                                        <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
-                                      </span>
-                                    )
-                                  ) : ticket.ai?.state === 'analyzing' ? null : canReview && !ticket.assignedTech && !resolvedLike ? (
-                                    <button
-                                      onClick={() => setAiTicket(ticket)}
-                                      title="Ask AI to assign"
-                                      aria-label="Ask AI to assign"
-                                      className="tp-focus-ring p-1 rounded-md text-slate-300 hover:text-indigo-500 hover:bg-indigo-50 flex-shrink-0"
-                                    >
-                                      <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
-                                    </button>
-                                  ) : null}
-                                </>
-                              )}
-                            </span>
-                          );
-                          const statusCell = (
-                            <span className={`${CELL} py-1`}>
-                              {(isEditable || fsRowEditable) && !removedLike ? (
-                                <StatusPicker
-                                  ticketId={ticket.id}
-                                  value={ticket.status}
-                                  statusDefs={statusDefs}
-                                  fsChange={fsRowEditable ? ((next) => fsStatusChange(ticket, next)) : null}
-                                  onChanged={(next, prev) => {
-                                    refreshAfterEdit();
-                                    showToast(`${ticket.displayRef} → ${next}`, isEditable ? (async () => {
-                                      try { await ticketsAPI.setStatus(ticket.id, prev); refreshAfterEdit(); } catch { /* refresh shows truth */ }
-                                    }) : null);
-                                  }}
-                                />
-                              ) : (
-                                <StatusPill status={ticket.status} size="sm" tone={statusToneFromDefs(statusDefs, ticket.status)} />
-                              )}
-                            </span>
-                          );
-                          const dueCell = (
-                            <span className={`${CELL} ${cellPad}`}>
-                              {removedLike
-                                ? <span className="text-xs text-slate-300">—</span>
-                                : resolvedLike
-                                  ? <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold border bg-emerald-50 text-emerald-700 border-emerald-200">Done</span>
-                                  : ticket.dueBy
-                                    ? <SlaChip value={ticket.dueBy} paused={baseStatusOf(statusDefs, ticket.status) === 'Pending'} calendarAware={meta?.slaCalendarAware === true} className="!px-1.5 !text-[10px]" />
-                                    : <span className="text-xs text-slate-300">—</span>}
-                            </span>
-                          );
-                          const updatedCell = (
-                            <span
-                              className={`${CELL} ${UPDATED_COL} ${cellPad} justify-end relative`}
-                              title={ticket.lastActivityAt ? new Date(ticket.lastActivityAt).toLocaleString() : ''}
-                            >
-                              <span className="text-xs text-slate-400 whitespace-nowrap transition-opacity group-hover:opacity-0">
-                                {timeAgo(ticket.lastActivityAt || ticket.updatedAt)}
-                              </span>
-                              <Link
-                                to={ticketHref}
-                                state={linkState}
-                                onClick={(e) => { e.stopPropagation(); if (isModifiedClick(e)) return; e.preventDefault(); onRowDoubleClick(ticket.id); }}
-                                title="Open full ticket"
-                                aria-label={`Open ${ticket.displayRef}`}
-                                className="tp-focus-ring absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-md text-slate-400 hover:text-blue-600 hover:bg-blue-50"
-                              >
-                                <ChevronRight className="w-4 h-4" aria-hidden="true" />
-                              </Link>
-                            </span>
-                          );
+                          // Everything the registry cell renderers need
+                          // (queueColumns.jsx) — built per row, per the ctx
+                          // contract documented there.
+                          const rowCtx = {
+                            cell: (key) => `${CELL} ${colMeta[key]?.cls || ''}`,
+                            cellStyle: (key) => colMeta[key]?.style,
+                            cellPad,
+                            roomy,
+                            technicians: meta?.technicians || [],
+                            statusDefs,
+                            groupNames,
+                            slaCalendarAware: meta?.slaCalendarAware === true,
+                            canReview,
+                            canSeeAi,
+                            fx,
+                            aiLive,
+                            aiProgress: aiProgress.get(ticket.id),
+                            isEditable,
+                            fsRowEditable,
+                            removedLike,
+                            resolvedLike,
+                            ticketHref,
+                            linkState,
+                            refreshAfterEdit,
+                            showToast,
+                            setAiTicket,
+                            fsAssign,
+                            fsStatusChange,
+                            onManualAssigned,
+                            onOpenFull: onRowDoubleClick,
+                          };
+                          const columnCells = rowColumns.map((c) => (
+                            <Fragment key={c.key}>{c.render(ticket, rowCtx)}</Fragment>
+                          ));
                           return (
                             <motion.li
                               key={ticket.id}
@@ -2034,20 +1790,17 @@ export default function Tickets() {
                                         </span>
                                         {subjectMeta}
                                       </span>
-                                      {/* Row 2: type, requester (xl-only), then the usual columns */}
-                                      <span className={`${CELL} ${cellPad}`}>{typePill}</span>
-                                      {requesterCell}
-                                      {catCell}
-                                      {assigneeCell}
-                                      {statusCell}
-                                      {dueCell}
-                                      {updatedCell}
+                                      {/* Row 2: the slim type slot, then the chosen
+                                          columns (canonical DOM order; xl placement
+                                          via --tp-q-col — see colMeta). */}
+                                      <span className={`${CELL} ${cellPad} xl:col-start-2 xl:row-start-2`}>{typePill}</span>
+                                      {columnCells}
                                     </div>
                                   ) : (
                                     <div className={`flex-1 ${GRID_COMPACT}`}>
                                       <span aria-hidden="true" className={`self-stretch ${accent}`} />
                                       {/* Compact: type folds into the title line so the subject gets the width */}
-                                      <span className={`${CELL} ${cellPad} flex-col !items-start justify-center gap-0.5`}>
+                                      <span className={`${CELL} ${cellPad} xl:col-start-2 xl:row-start-1 flex-col !items-start justify-center gap-0.5`}>
                                         {/* Wrap below xl — same rationale as the roomy row: pills
                                             wrap under the subject rather than colliding into the
                                             category column on iPad widths (QA 08-04 #6). The
@@ -2063,12 +1816,7 @@ export default function Tickets() {
                                         </span>
                                         {subjectMeta}
                                       </span>
-                                      {requesterCell}
-                                      {catCell}
-                                      {assigneeCell}
-                                      {statusCell}
-                                      {dueCell}
-                                      {updatedCell}
+                                      {columnCells}
                                     </div>
                                   )}
                                 </div>

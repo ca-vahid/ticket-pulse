@@ -4,17 +4,22 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
-// Queue UX batch contract tests (FR 08-07 Phase 3 — items #6/#7/#12 + the
-// deferred Phase-2 non-destructive-refresh item):
-//  - the xl-only Requester column keeps header/row track parity,
-//  - subject / ref / chevron are REAL anchors with modifier-aware clicks,
-//  - board mode fetches a 50-row page and the pagination math follows,
-//  - URL churn with unchanged query values never blanks selection or refetches.
-const { listSpy, metaSpy, statsSpy, decideSpy, roleRef } = vi.hoisted(() => ({
+// Queue UX contract tests:
+//  - FR 08-07 Phase 3 (#6/#7/#12 + the deferred non-destructive-refresh item):
+//    row anchors, board density, URL-churn stability;
+//  - QA 08-19 #2: the AI suggestion read/act split;
+//  - Mega 08-23 Phase QC: per-user columns — header + rows ride ONE computed
+//    gridTemplateColumns (--tp-q-grid) built from the user's chosen columns,
+//    defaults reproduce today's exact set + order (zero change untouched),
+//    the flyout toggles/reorders/resets, and the choice round-trips through
+//    the per-user preference endpoints (server wins over the local mirror).
+const { listSpy, metaSpy, statsSpy, decideSpy, getPrefSpy, setPrefSpy, roleRef } = vi.hoisted(() => ({
   listSpy: vi.fn(),
   metaSpy: vi.fn(),
   statsSpy: vi.fn(),
   decideSpy: vi.fn(),
+  getPrefSpy: vi.fn(),
+  setPrefSpy: vi.fn(),
   // Mutable workspace role: the historical default is this OBJECT (which the
   // page's `wsRole === 'admin'` string compare treats as non-reviewer); the
   // AI-visibility tests below set real role STRINGS ('viewer' / 'admin').
@@ -23,7 +28,7 @@ const { listSpy, metaSpy, statsSpy, decideSpy, roleRef } = vi.hoisted(() => ({
 
 vi.mock('../services/api', () => ({
   ticketsAPI: new Proxy(
-    { list: listSpy, meta: metaSpy, stats: statsSpy },
+    { list: listSpy, meta: metaSpy, stats: statsSpy, getQueuePreference: getPrefSpy, setQueuePreference: setPrefSpy },
     { get: (target, key) => target[key] || (() => new Promise(() => {})) },
   ),
   assignmentAPI: { decide: decideSpy, latestRun: vi.fn(() => new Promise(() => {})) },
@@ -59,9 +64,14 @@ vi.mock('../components/tickets/MobileAssignSheet', () => ({ default: () => null 
 vi.mock('../assets/tickets-hero.png', () => ({ default: 'hero.png' }));
 
 import Tickets from './Tickets';
+import { DEFAULT_COLUMN_KEYS } from '../components/tickets/queueColumns';
 
-const XL_COMPACT_TEMPLATE = 'xl:grid-cols-[6px_minmax(0,2.4fr)_150px_minmax(150px,1fr)_210px_116px_88px_74px]';
-const XL_ROOMY_TEMPLATE = 'xl:grid-cols-[6px_60px_150px_minmax(150px,1fr)_210px_116px_88px_74px]';
+// The ONE computed template (QC3): --tp-q-grid on the list card, consumed by
+// header + rows through the same xl arbitrary-property class.
+const GRID_VAR_CLASS = 'xl:[grid-template-columns:var(--tp-q-grid)]';
+// Defaults must reproduce the pre-QC hardcoded xl templates exactly.
+const DEFAULT_COMPACT_TEMPLATE = '6px minmax(0,2.4fr) 150px minmax(150px,1fr) 210px 116px 88px 74px';
+const DEFAULT_ROOMY_TEMPLATE = '6px 60px 150px minmax(150px,1fr) 210px 116px 88px 74px';
 
 const row = (id, status) => ({
   id,
@@ -73,7 +83,9 @@ const row = (id, status) => ({
   freshserviceTicketId: null,
   assignedTech: null,
   assignedTechId: null,
-  requester: { name: 'Rita Requester', entraOfficeLocation: 'Vancouver HQ' },
+  requester: { name: 'Rita Requester', entraOfficeLocation: 'Vancouver HQ', entraDepartment: 'Geo Ops' },
+  source: 2,
+  department: null,
   tags: [],
   ai: null,
   createdAt: '2026-08-01T10:00:00Z',
@@ -87,6 +99,17 @@ function mount(initialEntry = '/tickets') {
   return render(<Tickets />, {
     wrapper: ({ children }) => <MemoryRouter initialEntries={[initialEntry]}>{children}</MemoryRouter>,
   });
+}
+
+// The list card carries --tp-q-grid; any requester cell reaches it via closest.
+function currentTemplate() {
+  const card = screen.getAllByTitle('Rita Requester · Vancouver HQ')[0].closest('.tp-card');
+  return card.style.getPropertyValue('--tp-q-grid');
+}
+
+async function openColumnsMenu() {
+  fireEvent.click(screen.getByRole('button', { name: 'Columns' }));
+  return await screen.findByRole('dialog', { name: 'Customize columns' });
 }
 
 beforeEach(() => {
@@ -120,28 +143,36 @@ beforeEach(() => {
   statsSpy.mockResolvedValue({
     data: { all: 40, open: 12, unassigned: 3, awaiting: 2, awaitingApproval: 0, dueToday: 1, overdue: 1, resolved: 20, deleted: 0, noise: 0, byTechnician: {} },
   });
+  // Preference endpoints: never customized by default; PUT acks.
+  getPrefSpy.mockResolvedValue({ data: { key: 'queue.columns', value: null } });
+  setPrefSpy.mockResolvedValue({ data: { key: 'queue.columns', value: [] } });
 });
 
 afterEach(cleanup);
 
-describe('Requester column — xl-only with header/row track parity (QA 08-07 #6)', () => {
-  test('compact: header + cell share the 8-track xl template; both are hidden below xl', async () => {
+describe('Computed column templates (Phase QC — QC3)', () => {
+  test('compact default: header + rows share the computed var template and it equals the pre-QC layout exactly', async () => {
     mount();
     await waitFor(() => expect(screen.getAllByText('Row 1').length).toBeGreaterThan(0));
 
-    // Header label exists, sortable, and only shows at xl.
+    // Zero-change default: the computed template reproduces the old literal.
+    expect(currentTemplate()).toBe(DEFAULT_COMPACT_TEMPLATE);
+
+    // Header label exists, sortable, and only shows at xl (requester is a
+    // non-essential column below xl — QA 08-07 #6 projection preserved).
     const reqHeaderBtn = screen.getByRole('button', { name: /^Requester$/ });
     const reqHeaderCell = reqHeaderBtn.closest('span');
     expect(reqHeaderCell).toHaveClass('hidden', 'xl:flex');
 
-    // Header and row ride the SAME grid template (the :115 pairing rule).
+    // Header and row ride the SAME computed grid (the old :115 pairing rule,
+    // now enforced by construction through --tp-q-grid).
     const headerGrid = reqHeaderCell.closest('div');
-    expect(headerGrid.className).toContain(XL_COMPACT_TEMPLATE);
+    expect(headerGrid.className).toContain(GRID_VAR_CLASS);
     const cells = screen.getAllByTitle('Rita Requester · Vancouver HQ');
     expect(cells.length).toBe(2); // one requester cell per row
     expect(cells[0]).toHaveClass('hidden', 'xl:flex');
     const rowGrid = cells[0].closest('div');
-    expect(rowGrid.className).toContain(XL_COMPACT_TEMPLATE);
+    expect(rowGrid.className).toContain(GRID_VAR_CLASS);
     // Track parity: header and row place the same number of grid children.
     expect(headerGrid.children.length).toBe(rowGrid.children.length);
     // Office/city subtext fits under the name.
@@ -157,21 +188,160 @@ describe('Requester column — xl-only with header/row track parity (QA 08-07 #6
     await waitFor(() => expect(lastListParams().sort).toBe('requester'));
   });
 
-  test('roomy: requester track present at xl and the Ticket header span widens 2/4 → 2/5', async () => {
+  test('default column ORDER matches the pre-QC queue via the computed --tp-q-col indexes', async () => {
+    mount();
+    await waitFor(() => expect(screen.getAllByText('Row 1').length).toBeGreaterThan(0));
+
+    // requester=3, category=4, assignee=5, status=6, due=7, lastActivity=8 —
+    // exactly the old fixed track order.
+    const colOf = (el) => el.closest('span[style]')?.style.getPropertyValue('--tp-q-col')
+      || el.style.getPropertyValue('--tp-q-col');
+    const reqCell = screen.getAllByTitle('Rita Requester · Vancouver HQ')[0];
+    expect(colOf(reqCell)).toBe('3');
+    const dueHeader = screen.getByRole('button', { name: /^Due$/ }).closest('span');
+    expect(colOf(dueHeader)).toBe('7');
+    const updatedHeader = screen.getByRole('button', { name: /^Updated$/ }).closest('span');
+    expect(colOf(updatedHeader)).toBe('8');
+    const statusHeader = screen.getByTitle('Sort by status (Open first)').closest('span');
+    expect(colOf(statusHeader)).toBe('6');
+  });
+
+  test('roomy: computed template has the 60px type slot; the Ticket header sits on it at xl (md span unchanged)', async () => {
     localStorage.setItem('tp_ticket_layout', 'roomy');
     mount();
     await waitFor(() => expect(screen.getAllByText('Row 1').length).toBeGreaterThan(0));
 
+    expect(currentTemplate()).toBe(DEFAULT_ROOMY_TEMPLATE);
     const cells = screen.getAllByTitle('Rita Requester · Vancouver HQ');
     expect(cells[0]).toHaveClass('hidden', 'xl:flex');
-    expect(cells[0].closest('div').className).toContain(XL_ROOMY_TEMPLATE);
+    expect(cells[0].closest('div').className).toContain(GRID_VAR_CLASS);
 
-    // The roomy header's "Ticket" span absorbs the new track at xl so every
-    // later label (Assignee/Status/Due/Updated) stays over its own column.
+    // md keeps the old type+category span; at xl the columns are user-ordered
+    // so every column labels itself and "Ticket" collapses onto the type slot.
     const ticketHeaderBtn = screen.getByRole('button', { name: /^Ticket$/ });
     const span = ticketHeaderBtn.closest('span');
-    expect(span).toHaveClass('[grid-column:2/4]', 'xl:[grid-column:2/5]');
-    expect(span.closest('div').className).toContain(XL_ROOMY_TEMPLATE);
+    expect(span).toHaveClass('[grid-column:2/4]', 'xl:[grid-column:2/3]');
+    expect(span.closest('div').className).toContain(GRID_VAR_CLASS);
+  });
+});
+
+describe('Columns flyout (Phase QC — QC4)', () => {
+  test('toggling a column on changes the computed template, appends its track, and persists (debounced PUT + mirror)', async () => {
+    mount();
+    await waitFor(() => expect(screen.getAllByText('Row 1').length).toBeGreaterThan(0));
+
+    await openColumnsMenu();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Created column' }));
+
+    // Template gains the createdAt track at the end of the chosen order.
+    await waitFor(() => expect(currentTemplate()).toBe(`${DEFAULT_COMPACT_TEMPLATE} 96px`));
+    // The new column renders: header + a dated cell per row. (createdAt is the
+    // default sort, so the header carries the ↓ indicator — query by title.)
+    expect(screen.getByTitle('Sort by created date')).toBeInTheDocument();
+    // Optimistic localStorage mirror, then the debounced server PUT.
+    expect(JSON.parse(localStorage.getItem('tp_queue_columns'))).toEqual([...DEFAULT_COLUMN_KEYS, 'createdAt']);
+    await waitFor(() => expect(setPrefSpy).toHaveBeenCalledWith('queue.columns', [...DEFAULT_COLUMN_KEYS, 'createdAt']), { timeout: 2500 });
+  });
+
+  test('toggling a column off removes its track; mandatory columns are locked "Always shown"', async () => {
+    mount();
+    await waitFor(() => expect(screen.getAllByText('Row 1').length).toBeGreaterThan(0));
+
+    const dialog = await openColumnsMenu();
+    // Mandatory rows: checked + disabled, labeled always-shown.
+    const subjectBox = screen.getByRole('checkbox', { name: 'Subject column' });
+    const requesterBox = screen.getByRole('checkbox', { name: 'Requester column' });
+    expect(subjectBox).toBeChecked();
+    expect(subjectBox).toBeDisabled();
+    expect(requesterBox).toBeChecked();
+    expect(requesterBox).toBeDisabled();
+    expect(within(dialog).getAllByText('Always shown').length).toBe(2);
+
+    // Drop the Updated column → its 74px track disappears from the template.
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Updated column' }));
+    await waitFor(() => expect(currentTemplate()).toBe('6px minmax(0,2.4fr) 150px minmax(150px,1fr) 210px 116px 88px'));
+    expect(screen.queryByRole('button', { name: /^Updated$/ })).not.toBeInTheDocument();
+  });
+
+  test('drag-to-reorder: dropping Status onto Assignee puts its track first and re-places both columns', async () => {
+    mount();
+    await waitFor(() => expect(screen.getAllByText('Row 1').length).toBeGreaterThan(0));
+
+    await openColumnsMenu();
+    const grip = screen.getByLabelText('Reorder Status column');
+    const targetRow = screen.getByRole('checkbox', { name: 'Assignee column' }).closest('li');
+    fireEvent.dragStart(grip, { dataTransfer: { effectAllowed: 'none' } });
+    fireEvent.drop(targetRow);
+
+    // Status (116px) now precedes Assignee (210px) in the computed template…
+    await waitFor(() => expect(currentTemplate()).toBe('6px minmax(0,2.4fr) 150px minmax(150px,1fr) 116px 210px 88px 74px'));
+    // …and the placement indexes follow (status=5, assignee=6).
+    const statusHeader = screen.getByTitle('Sort by status (Open first)').closest('span');
+    expect(statusHeader.style.getPropertyValue('--tp-q-col')).toBe('5');
+    await waitFor(() => expect(setPrefSpy).toHaveBeenCalledWith(
+      'queue.columns',
+      ['subject', 'requester', 'category', 'status', 'assignee', 'due', 'lastActivity'],
+    ), { timeout: 2500 });
+  });
+
+  test('Reset to default restores the stock template and persists the default set', async () => {
+    localStorage.setItem('tp_queue_columns', JSON.stringify(['subject', 'requester', 'status', 'assignee']));
+    mount();
+    await waitFor(() => expect(screen.getAllByText('Row 1').length).toBeGreaterThan(0));
+    expect(currentTemplate()).not.toBe(DEFAULT_COMPACT_TEMPLATE);
+
+    await openColumnsMenu();
+    fireEvent.click(screen.getByRole('button', { name: /reset to default/i }));
+    await waitFor(() => expect(currentTemplate()).toBe(DEFAULT_COMPACT_TEMPLATE));
+    await waitFor(() => expect(setPrefSpy).toHaveBeenCalledWith('queue.columns', DEFAULT_COLUMN_KEYS), { timeout: 2500 });
+  });
+
+  test('board mode hides the customizer (board columns are statuses, not these)', async () => {
+    localStorage.setItem('tp_ticket_layout', 'board');
+    mount();
+    await waitFor(() => expect(listSpy).toHaveBeenCalled());
+    expect(screen.queryByRole('button', { name: 'Columns' })).not.toBeInTheDocument();
+  });
+});
+
+describe('Column preference round-trip (Phase QC — QC1/QC4)', () => {
+  test('the stored server value wins over the localStorage mirror on load', async () => {
+    // Mirror says default; the SERVER says the user runs with Created+Source.
+    localStorage.setItem('tp_queue_columns', JSON.stringify(DEFAULT_COLUMN_KEYS));
+    getPrefSpy.mockResolvedValue({
+      data: { key: 'queue.columns', value: [...DEFAULT_COLUMN_KEYS, 'createdAt', 'source'] },
+    });
+    mount();
+    await waitFor(() => expect(screen.getAllByText('Row 1').length).toBeGreaterThan(0));
+
+    await waitFor(() => expect(currentTemplate()).toBe(`${DEFAULT_COMPACT_TEMPLATE} 96px 96px`));
+    expect(screen.getByRole('button', { name: /^Source$/ })).toBeInTheDocument();
+    // The mirror is refreshed to the server truth for the next first paint.
+    expect(JSON.parse(localStorage.getItem('tp_queue_columns'))).toEqual([...DEFAULT_COLUMN_KEYS, 'createdAt', 'source']);
+    expect(getPrefSpy).toHaveBeenCalledWith('queue.columns');
+  });
+
+  test('garbage in the stored value is normalized: unknown keys dropped, mandatory restored, junk → defaults', async () => {
+    getPrefSpy.mockResolvedValue({
+      data: { key: 'queue.columns', value: ['bogus', 'status', 'status', 'due'] },
+    });
+    mount();
+    await waitFor(() => expect(screen.getAllByText('Row 1').length).toBeGreaterThan(0));
+    // subject pinned first + requester re-inserted + dedupe + unknowns gone:
+    // subject, requester, status, due → 6px subject 150px 116px 88px.
+    await waitFor(() => expect(currentTemplate()).toBe('6px minmax(0,2.4fr) 150px 116px 88px'));
+  });
+
+  test('new-column sorts wire through the headers (source header → sort=source asc-first)', async () => {
+    getPrefSpy.mockResolvedValue({
+      data: { key: 'queue.columns', value: [...DEFAULT_COLUMN_KEYS, 'source'] },
+    });
+    mount();
+    await waitFor(() => expect(screen.getAllByText('Row 1').length).toBeGreaterThan(0));
+    const sourceHeader = await screen.findByRole('button', { name: /^Source$/ });
+    fireEvent.click(sourceHeader);
+    await waitFor(() => expect(lastListParams().sort).toBe('source'));
+    expect(lastListParams().dir).toBe('asc'); // categorical → A→Z first
   });
 });
 
@@ -256,7 +426,7 @@ describe('AI suggestion read/act split (QA 08-19 #2)', () => {
     ],
   };
   // Row 1: FS-born WITH an fs id → the editable assignee-cell path (picker slot).
-  // Row 2: no fs id → the read-only assignee-cell path (:1795-style chip).
+  // Row 2: no fs id → the read-only assignee-cell path (read-only chip).
   const aiRows = () => [
     { ...row(1, 'Open'), freshserviceTicketId: 901, ai: { ...aiBlock } },
     { ...row(2, 'Open'), ai: { ...aiBlock } },

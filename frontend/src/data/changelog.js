@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.6.00-preview';
+export const APP_VERSION = '3.6.01-preview';
 
 export const changelog = [
+  {
+    version: '3.6.01-preview',
+    date: 'August 23, 2026',
+    entries: [
+      { type: 'new', html: '<strong>🗂️ Choose your own queue columns</strong> — a new “Columns” button on the tickets list lets you show, hide, and drag-reorder columns — including new <em>Created date</em>, <em>Source</em>, <em>Department</em>, and <em>Group</em> columns (Source and Department sort too). Subject and Requester always stay. Your layout is saved per user per workspace, so it follows you across browsers and devices. Tablet/mobile keep their tuned compact layouts; Board view is unaffected. (QA 08-21: pick columns like FreshService)' },
+    ],
+  },
   {
     version: '3.6.00-preview',
     date: 'August 23, 2026',
