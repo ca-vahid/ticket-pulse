@@ -2,9 +2,9 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'motion/react';
 import {
-  Activity, AlertCircle, ArrowDownWideNarrow, ArrowUpNarrowWide, CalendarDays, Check,
-  CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Download, Inbox,
-  Columns3, ListFilter, Loader2, MessageSquare, Plus, RefreshCw, Rows2, Rows4, Search, ShieldCheck, Sparkles, Ticket, UserRound, X,
+  Activity, AlertCircle, ArrowDownWideNarrow, ArrowUpNarrowWide, Check,
+  ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Download, Inbox,
+  Columns3, ListFilter, Loader2, Plus, RefreshCw, Rows2, Rows4, Search, Settings2, ShieldCheck, Sparkles, UserRound, X,
 } from 'lucide-react';
 import AppHeader from '../components/AppHeader';
 import MobileTabBar from '../components/nav/MobileTabBar';
@@ -26,6 +26,7 @@ import {
   BypassBadge, CELL, ColumnResizeHandle, DEFAULT_COLUMN_KEYS, QUEUE_COLUMNS, QueueColumnsMenu,
   buildQueueGridMinWidth, buildQueueGridTemplate, isModifiedClick, normalizeColumnKeys, useColumnWidths,
 } from '../components/tickets/queueColumns';
+import { QUEUE_CARD_REGISTRY, normalizeQueueCards } from '../components/tickets/queueCards';
 import { ticketsAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
@@ -56,16 +57,10 @@ const SORT_OPTIONS = [
 const ASC_FIRST_SORTS = new Set(['status', 'dueBy', 'source', 'department']);
 
 // KPI stat cards (mockup: colored icon tile + large number + label). Clicking a
-// card applies that segment. Unassigned lives in the sidebar Views, not here.
-const SEGMENTS = [
-  { key: 'all', label: 'All tickets', Icon: Ticket, tile: 'bg-blue-50 text-blue-600', num: 'text-blue-600' },
-  { key: 'open', label: 'Open', Icon: Inbox, tile: 'bg-emerald-50 text-emerald-600', num: 'text-emerald-600' },
-  { key: 'awaiting', label: 'Awaiting reply', Icon: MessageSquare, tile: 'bg-sky-50 text-sky-600', num: 'text-slate-800' },
-  { key: 'due_today', label: 'Due today', Icon: CalendarDays, tile: 'bg-amber-50 text-amber-600', num: 'text-slate-800' },
-  { key: 'overdue', label: 'Overdue', Icon: AlertCircle, tile: 'bg-red-50 text-red-600', num: 'text-red-600' },
-  { key: 'resolved', label: 'Resolved', Icon: CheckCircle2, tile: 'bg-violet-50 text-violet-600', num: 'text-slate-800' },
-];
-const SEGMENT_COUNT_KEY = { all: 'all', open: 'open', unassigned: 'unassigned', awaiting: 'awaiting', due_today: 'dueToday', overdue: 'overdue', resolved: 'resolved' };
+// card applies that segment. WHICH six cards render is an admin choice per
+// workspace (Mega 08-23 Phase FC): meta.queueCards → the queueCards.js
+// registry (labels/icons/tile tokens/count keys), defaulting to the classic
+// six until configured.
 
 // Two row layouts (user picks via the toolbar toggle). No REF column — the
 // number lives small under the subject.
@@ -1144,6 +1139,10 @@ export default function Tickets() {
   const totalPages = Math.max(1, Math.ceil(total / effectivePageSize));
   const ticketingOn = meta ? meta.nativeTicketingEnabled : true;
   const isAgent = user?.role === 'agent';
+  // Admin-chosen quick filter cards (Phase FC): meta.queueCards resolved
+  // against the registry; hardcoded classic six until meta lands (and as the
+  // fallback for legacy backends that don't send the key).
+  const queueCards = useMemo(() => normalizeQueueCards(meta?.queueCards), [meta?.queueCards]);
 
   // Board drag-drop → the same origin-aware status flow the StatusPicker uses:
   // TP-born saves directly (undo toast); FS-born goes through the confirmed
@@ -1338,20 +1337,23 @@ export default function Tickets() {
 
         {!metaError && (
           <>
-            {/* KPI stat cards — colored icon tile + large number + label */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-4" role="group" aria-label="Quick segments">
-              {SEGMENTS.map((seg) => {
-                const active = segment === seg.key || (seg.key === 'all' && segment === 'all');
-                const count = stats?.[SEGMENT_COUNT_KEY[seg.key]];
+            {/* KPI stat cards — colored icon tile + large number + label.
+                The set comes from meta.queueCards (admin-configurable, Phase
+                FC); the hover gear deep-links admins to the configurator. */}
+            <div className="relative group/cards grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-4" role="group" aria-label="Quick segments">
+              {queueCards.map((key) => {
+                const seg = QUEUE_CARD_REGISTRY[key];
+                const active = segment === key || (key === 'all' && segment === 'all');
+                const count = stats?.[seg.countKey];
                 const Icon = seg.Icon;
                 return (
                   <button
-                    key={seg.key}
+                    key={key}
                     // "All tickets" widens the status scope to match its count
                     // (every non-Deleted/Spam status, like the rail's view) —
                     // clearing to the Open+Pending default made the card lie
                     // (QA 08-04 #1). Other cards carry their own segment scope.
-                    onClick={() => setParams({ segment: seg.key === 'all' ? null : seg.key, status: seg.key === 'all' ? 'any' : null })}
+                    onClick={() => setParams({ segment: key === 'all' ? null : key, status: key === 'all' ? 'any' : null })}
                     aria-pressed={active}
                     className={`tp-focus-ring flex items-center gap-3 text-left px-3.5 py-3 rounded-xl bg-white border transition-all ${
                       active ? 'border-blue-300 ring-2 ring-blue-400/40 shadow-soft' : 'border-slate-100 shadow-subtle hover:border-slate-200 hover:shadow-soft'
@@ -1369,6 +1371,16 @@ export default function Tickets() {
                   </button>
                 );
               })}
+              {wsRole === 'admin' && (
+                <Link
+                  to="/settings#ticket-ops"
+                  aria-label="Customize quick filter cards"
+                  title="Customize which six cards show here (Settings → Ticket Ops)"
+                  className="tp-focus-ring absolute -top-2 -right-2 z-10 p-1.5 rounded-full bg-white border border-slate-200 shadow-subtle text-slate-400 hover:text-blue-600 hover:border-blue-200 opacity-0 group-hover/cards:opacity-100 focus:opacity-100 transition-opacity"
+                >
+                  <Settings2 className="w-3.5 h-3.5" aria-hidden="true" />
+                </Link>
+              )}
             </div>
 
             {/* Docked filter rail | main column (rail width animates; the grid

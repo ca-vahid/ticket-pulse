@@ -115,3 +115,53 @@ describe('TicketCreate — custom fields section (Phase 1c)', () => {
     expect('customFields' in ticketsAPI.create.mock.calls[0][0]).toBe(false);
   });
 });
+
+// Mega 08-23 Phase TF — required-on-create + defaults on custom fields:
+// a required definition auto-opens the section, gets a * marker, and blocks
+// submit with an inline error; a defaultValue prefills its input and travels
+// in the payload untouched.
+describe('TicketCreate — custom fields required + defaults (Phase TF)', () => {
+  const REQUIRED_DEFS = [
+    { id: 1, key: 'cost_centre', label: 'Cost centre', type: 'text', options: [], isRequiredOnCreate: true, defaultValue: null },
+    { id: 2, key: 'region', label: 'Region', type: 'select', options: ['Quebec', 'Ontario'], isRequiredOnCreate: false, defaultValue: 'Quebec' },
+  ];
+
+  test('a required definition auto-opens the section and blocks submit with an inline error', async () => {
+    ticketsAPI.customFieldDefinitions.mockResolvedValueOnce({ data: REQUIRED_DEFS });
+    await renderPage();
+
+    // Auto-opened (required fields must not hide in a collapsed section).
+    const toggle = screen.getByRole('button', { name: /Custom fields/ });
+    await waitFor(() => expect(toggle).toHaveAttribute('aria-expanded', 'true'));
+    // Region's default already counts as set; the header reflects it.
+    expect(screen.getByText('1 set')).toBeInTheDocument();
+    // Required marker on the label.
+    expect(screen.getByText('Cost centre').closest('label')).toHaveTextContent('*');
+
+    fireEvent.change(screen.getByPlaceholderText('Search people by name or email…'), { target: { value: 'jane@acme.com' } });
+    fireEvent.change(screen.getByLabelText(/Subject/), { target: { value: 'Needs the money field' } });
+    fireEvent.click(screen.getAllByRole('button', { name: /Create ticket/ })[0]);
+
+    expect(await screen.findByText('Cost centre is required')).toBeInTheDocument();
+    expect(ticketsAPI.create).not.toHaveBeenCalled();
+
+    // Filling it clears the block on the next submit.
+    fireEvent.change(screen.getByLabelText(/Cost centre/), { target: { value: 'CC-42' } });
+    fireEvent.click(screen.getAllByRole('button', { name: /Create ticket/ })[0]);
+    await waitFor(() => expect(ticketsAPI.create).toHaveBeenCalled());
+    expect(ticketsAPI.create.mock.calls[0][0].customFields).toEqual(expect.objectContaining({ cost_centre: 'CC-42' }));
+  });
+
+  test('defaultValue prefills the input and travels in the payload', async () => {
+    ticketsAPI.customFieldDefinitions.mockResolvedValueOnce({ data: [REQUIRED_DEFS[1]] });
+    await renderPage();
+    fireEvent.click(screen.getByRole('button', { name: /Custom fields/ }));
+    expect(screen.getByLabelText('Region')).toHaveValue('Quebec');
+
+    fireEvent.change(screen.getByPlaceholderText('Search people by name or email…'), { target: { value: 'jane@acme.com' } });
+    fireEvent.change(screen.getByLabelText(/Subject/), { target: { value: 'Default rides along' } });
+    fireEvent.click(screen.getAllByRole('button', { name: /Create ticket/ })[0]);
+    await waitFor(() => expect(ticketsAPI.create).toHaveBeenCalled());
+    expect(ticketsAPI.create.mock.calls[0][0].customFields).toEqual({ region: 'Quebec' });
+  });
+});

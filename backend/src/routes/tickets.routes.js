@@ -105,6 +105,17 @@ router.get('/stats', asyncHandler(async (req, res) => {
   res.json({ success: true, data: stats });
 }));
 
+// Admin-chosen quick filter cards (Mega 08-23 Phase FC). Reads ride
+// meta.queueCards; this PUT is the only write. Validation (exactly 6 known
+// unique keys) lives in queueCardConfigService; the admin gate is the same
+// requireTicketingAdmin the sibling ticket-ops routes use (declared below —
+// function declarations hoist).
+router.put('/queue-cards', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const { default: queueCardConfigService } = await import('../services/queueCardConfigService.js');
+  const cards = await queueCardConfigService.setCards(req.workspaceId, req.body?.cards, req.ticketActor.email);
+  res.json({ success: true, data: { cards } });
+}));
+
 // ----------------------------------------------- saved filter views (per-user)
 
 function actorIsAdmin(actor) {
@@ -957,7 +968,10 @@ router.get('/:id', asyncHandler(async (req, res) => {
 // --------------------------------------------------------------- mutations
 
 router.post('/', requireNativeTicketing, asyncHandler(async (req, res) => {
-  const ticket = await ticketService.createTicket(req.workspaceId, req.body || {}, req.ticketActor);
+  // enforceRequired: the interactive composer binds the workspace's ticket-form
+  // required fields (built-ins + custom) — automated intakes stay exempt
+  // (contract in ticketFormConfigService).
+  const ticket = await ticketService.createTicket(req.workspaceId, req.body || {}, req.ticketActor, { enforceRequired: true });
   res.status(201).json({ success: true, data: ticket });
 }));
 

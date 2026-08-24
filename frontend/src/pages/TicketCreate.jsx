@@ -70,11 +70,16 @@ export default function TicketCreate() {
   const [customFieldDefs, setCustomFieldDefs] = useState([]);
   const [customFieldsOpen, setCustomFieldsOpen] = useState(false);
   const [customFieldValues, setCustomFieldValues] = useState({});
+  // assignMode / aiClassify / notifyRequester / source / group start from the
+  // WORKSPACE's form config (meta.form, Mega 08-23 Phase TF) once meta lands —
+  // these useState values are only the pre-meta fallback and match the config
+  // service's own defaults ('none' is both; the old resetForm 'ai' was a bug).
   const [assignMode, setAssignMode] = useState('none'); // ai | me | pick | none
   const [assignTechId, setAssignTechId] = useState('');
   const [aiClassify, setAiClassify] = useState(true); // AI classifies + assesses priority/type (independent of assignment)
   const [cc, setCc] = useState([]);
   const [notifyRequester, setNotifyRequester] = useState(true);
+  const [fieldErrors, setFieldErrors] = useState({}); // key → message (required validation)
   const [createTemplates, setCreateTemplates] = useState([]);
   const [files, setFiles] = useState([]);
   const [dragOver, setDragOver] = useState(false);
@@ -215,28 +220,132 @@ export default function TicketCreate() {
 
   const canTakeMyself = Boolean(meta?.actor?.technicianId);
 
+  // ---- Workspace form config (Mega 08-23 Phase TF) ----
+  // meta.form drives visibility, required-ness, and initial values for the
+  // built-in blocks. TP composer only — FS-owned forms are untouched.
+  const form = meta?.form || null;
+  const formFields = useMemo(() => new Map((form?.fields || []).map((f) => [f.key, f])), [form]);
+  const fieldVisible = (key) => !formFields.size || formFields.get(key)?.visible !== false;
+  const fieldRequired = (key) => formFields.get(key)?.required === true;
+
+  /** The config's initial values (used at first meta load AND by resetForm). */
+  const formDefaults = () => {
+    const groupDefault = form?.defaultGroup || null;
+    // Only preselect a default group that actually exists in this workspace's
+    // pickable groups — a stale id must not render a blank select.
+    let groupValue = '';
+    if (groupDefault?.kind === 'fs' && (meta?.groups || []).some((g) => g.origin !== 'local' && String(g.freshserviceId) === String(groupDefault.id))) {
+      groupValue = `fs:${groupDefault.id}`;
+    } else if (groupDefault?.kind === 'internal' && (meta?.groups || []).some((g) => g.origin === 'local' && String(g.id) === String(groupDefault.id))) {
+      groupValue = `int:${groupDefault.id}`;
+    }
+    return {
+      priority: Number(formFields.get('priority')?.defaultValue) || 2,
+      ticketType: formFields.get('type')?.defaultValue || defaultType?.name || null,
+      source: form?.defaultSource ?? 103,
+      groupId: groupValue,
+      notifyRequester: form?.defaults?.notifyRequester !== false,
+      aiClassify: form?.defaults?.aiClassify !== false,
+      assignMode: form?.defaults?.assignMode === 'ai' ? 'ai' : 'none',
+    };
+  };
+
+  /** Custom-field defaults (Phase TF): defaultValue prefills, coerced per type. */
+  const customFieldDefaultValues = () => {
+    const values = {};
+    for (const def of customFieldDefs) {
+      if (def.defaultValue === null || def.defaultValue === undefined || def.defaultValue === '') continue;
+      values[def.key] = def.type === 'boolean' ? String(def.defaultValue) === 'true'
+        : def.type === 'number' ? Number(def.defaultValue)
+          : String(def.defaultValue);
+    }
+    return values;
+  };
+  const hasRequiredCustomFields = customFieldDefs.some((d) => d.isRequiredOnCreate === true);
+
+  // One-time init once meta (and defs) have landed: seed the form from the
+  // workspace config instead of the hardcoded fallbacks above.
+  const formInitRef = useRef(false);
+  useEffect(() => {
+    if (!meta || formInitRef.current) return;
+    formInitRef.current = true;
+    const d = formDefaults();
+    setPriority(d.priority);
+    if (d.ticketType) setTicketType(d.ticketType);
+    setSource(d.source);
+    setGroupId(d.groupId);
+    setNotifyRequester(d.notifyRequester);
+    setAiClassify(d.aiClassify);
+    setAssignMode(d.assignMode);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meta]);
+  const cfInitRef = useRef(false);
+  useEffect(() => {
+    if (!customFieldDefs.length || cfInitRef.current) return;
+    cfInitRef.current = true;
+    const defaults = customFieldDefaultValues();
+    if (Object.keys(defaults).length) setCustomFieldValues((prev) => ({ ...defaults, ...prev }));
+    // Required custom fields must be visible, not buried in a collapsed section.
+    if (customFieldDefs.some((d) => d.isRequiredOnCreate === true)) setCustomFieldsOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customFieldDefs]);
+
   const goBack = () => navigate('/tickets');
 
   const resetForm = () => {
+    // Back to the WORKSPACE's configured defaults (Phase TF) — the same
+    // values the form opened with, killing the old 'none'-on-mount vs
+    // 'ai'-on-reset inconsistency.
+    const d = formDefaults();
     setSubject('');
     setDescription('');
     setDescriptionText('');
-    setPriority(2);
-    setTicketType(defaultType?.name ?? null);
+    setPriority(d.priority);
+    setTicketType(d.ticketType);
     setCategoryId('');
     setSubcategoryId('');
-    setGroupId('');
+    setGroupId(d.groupId);
+    setSource(d.source);
     setTagIds([]);
-    setAssignMode('ai');
+    setAssignMode(d.assignMode);
     setAssignTechId('');
     setCc([]);
-    setNotifyRequester(true);
-    setCustomFieldValues({});
-    setCustomFieldsOpen(false);
+    setNotifyRequester(d.notifyRequester);
+    setCustomFieldValues(customFieldDefaultValues());
+    setCustomFieldsOpen(hasRequiredCustomFields);
+    setFieldErrors({});
     setFiles([]);
     setRequester(null);
     setRqQuery('');
     setTimeout(() => rqInputRef.current?.focus(), 0);
+  };
+
+  /**
+   * Required-field validation (Phase TF): visible required built-ins +
+   * required custom fields. Returns {key → message}; empty object = OK.
+   * Category/subcategory are skipped when the AI will classify (they're the
+   * model's to fill — mirrors the server's enforcement rule).
+   */
+  const validateRequired = () => {
+    const errors = {};
+    const need = (key, ok, message) => {
+      if (fieldVisible(key) && fieldRequired(key) && !ok) errors[key] = message;
+    };
+    need('description', Boolean(descriptionText.trim()), 'A description is required');
+    if (!aiDecides) {
+      need('category', Boolean(categoryId), 'Pick a category');
+      if (subcategories.length > 0) need('subcategory', Boolean(subcategoryId), 'Pick a subcategory');
+    }
+    need('group', Boolean(groupId), 'Pick a group');
+    need('tags', tagIds.length > 0, 'Pick at least one tag');
+    need('cc', cc.length > 0, 'Add at least one Cc address');
+    need('attachments', files.length > 0, 'Attach at least one file');
+    for (const def of customFieldDefs) {
+      if (def.isRequiredOnCreate !== true) continue;
+      const v = customFieldValues[def.key];
+      if (v === '' || v === null || v === undefined) errors[`cf:${def.key}`] = `${def.label} is required`;
+    }
+    return errors;
   };
 
   /** afterAction: 'open' navigates to the new ticket, 'new' resets, 'resolve' resolves then navigates, 'schedule' queues. */
@@ -245,6 +354,14 @@ export default function TicketCreate() {
     setSubmitMenuOpen(false);
     setError(null);
     setSuccessNote(null);
+    // Required gate (Phase TF) — inline errors under each block + a summary.
+    const requiredErrors = validateRequired();
+    setFieldErrors(requiredErrors);
+    if (Object.keys(requiredErrors).length > 0) {
+      if (Object.keys(requiredErrors).some((k) => k.startsWith('cf:'))) setCustomFieldsOpen(true);
+      setError('This workspace requires a few more fields — see the highlighted ones below.');
+      return;
+    }
     setIsSaving(true);
     try {
       const payload = {
@@ -527,9 +644,12 @@ export default function TicketCreate() {
                       )}
                     </>
                   )}
-                  <div className="mt-2">
-                    <CcChips value={cc} onChange={setCc} placeholder="Cc colleagues on this ticket…" />
-                  </div>
+                  {fieldVisible('cc') && (
+                    <div className="mt-2">
+                      <CcChips value={cc} onChange={setCc} placeholder={`Cc colleagues on this ticket…${fieldRequired('cc') ? ' (required)' : ''}`} />
+                      {fieldErrors.cc && <p className="mt-1 text-xs text-red-600" role="alert">{fieldErrors.cc}</p>}
+                    </div>
+                  )}
                   <label className="mt-2 flex items-center gap-2 text-xs text-slate-600 cursor-pointer w-fit">
                     <input
                       type="checkbox"
@@ -571,228 +691,259 @@ export default function TicketCreate() {
                   />
                 </div>
 
-                <div>
-                  <span className={labelClass}>Description</span>
-                  <RichTextEditor
-                    value={description}
-                    onChange={({ html, text }) => { setDescription(html); setDescriptionText(text); }}
-                    placeholder="What happened, where, since when, error messages…"
-                    ariaLabel="Description"
-                    minHeight={240}
-                    onImagePaste={(file) => {
-                      const ext = ((file.type || 'image/png').split('/')[1] || 'png').replace('jpeg', 'jpg');
-                      const name = `pasted-image-${++pasteCountRef.current}.${ext}`;
-                      addFiles([new File([file], name, { type: file.type || 'image/png' })]);
-                      return name;
-                    }}
-                  />
-                </div>
+                {fieldVisible('description') && (
+                  <div>
+                    <span className={labelClass}>Description{fieldRequired('description') && <span className="text-red-500"> *</span>}</span>
+                    <RichTextEditor
+                      value={description}
+                      onChange={({ html, text }) => { setDescription(html); setDescriptionText(text); }}
+                      placeholder="What happened, where, since when, error messages…"
+                      ariaLabel="Description"
+                      minHeight={240}
+                      onImagePaste={(file) => {
+                        const ext = ((file.type || 'image/png').split('/')[1] || 'png').replace('jpeg', 'jpg');
+                        const name = `pasted-image-${++pasteCountRef.current}.${ext}`;
+                        addFiles([new File([file], name, { type: file.type || 'image/png' })]);
+                        return name;
+                      }}
+                    />
+                    {fieldErrors.description && <p className="mt-1 text-xs text-red-600" role="alert">{fieldErrors.description}</p>}
+                  </div>
+                )}
 
                 {/* Attachments — staged files sit up top (prominent), add-zone below */}
-                <div>
-                  <span className={labelClass}>Attachments{files.length > 0 ? ` (${files.length})` : ''}</span>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    multiple
-                    onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }}
-                    className="sr-only"
-                    aria-label="Choose files to attach"
-                  />
-                  {files.length > 0 && (
-                    <ul className="mb-2 flex flex-wrap gap-2.5 items-start">
-                      {files.map((file) => (
-                        <StagedFileChip
-                          key={`${file.name}-${file.size}`}
-                          file={file}
-                          onRemove={() => setFiles((prev) => prev.filter((f) => f !== file))}
-                          onEdit={() => setEditFile(file)}
-                        />
-                      ))}
-                    </ul>
-                  )}
-                  <div
-                    onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-                    onDragLeave={() => setDragOver(false)}
-                    onDrop={(e) => { e.preventDefault(); setDragOver(false); addFiles(e.dataTransfer.files); }}
-                    className={`rounded-xl border-2 border-dashed text-center transition-colors ${files.length > 0 ? 'px-3 py-3' : 'px-3 py-5'} ${
-                      dragOver ? 'border-blue-400 bg-blue-50/60' : 'border-slate-200 bg-slate-50/40'
-                    }`}
-                  >
-                    <p className="text-xs text-slate-500 inline-flex items-center gap-1.5">
-                      <Paperclip className={`w-4 h-4 ${dragOver ? 'text-blue-500' : 'text-slate-300'}`} aria-hidden="true" />
-                      Drag files here, paste a screenshot into the description, or{' '}
-                      <button
-                        type="button"
-                        onClick={() => fileInputRef.current?.click()}
-                        disabled={files.length >= MAX_FILES}
-                        className="tp-focus-ring rounded font-semibold text-blue-600 hover:underline disabled:opacity-50"
-                      >
-                        browse
-                      </button>
-                    </p>
-                    <p className="text-[10px] text-slate-400 mt-0.5">{files.length}/{MAX_FILES} · up to {MAX_FILE_MB} MB each</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Classification card — category/subcategory/priority/type are AI-owned when triage is on */}
-              <div className="tp-card rounded-2xl p-5 space-y-5">
-                {aiDecides && (
-                  <div className="flex items-start gap-2 -mt-1 px-3 py-2 rounded-lg bg-indigo-50/70 border border-indigo-100 text-[11px] text-indigo-700">
-                    <Sparkles className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" aria-hidden="true" />
-                    AI will set category, subcategory, priority and type on create. Turn off “Classify &amp; assess with AI” to set them yourself.
-                  </div>
-                )}
-                <div className={`grid grid-cols-1 sm:grid-cols-2 gap-4 transition-opacity ${aiDecides ? 'opacity-50' : ''}`}>
+                {fieldVisible('attachments') && (
                   <div>
-                    <span className={labelClass}>Type</span>
-                    {activeTypes.length > 4 ? (
-                      <select
-                        value={ticketType ?? ''}
-                        disabled={aiDecides}
-                        onChange={(e) => setTicketType(e.target.value)}
-                        aria-label="Ticket type"
-                        className="tp-focus-ring w-full rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs font-semibold text-slate-600 disabled:cursor-not-allowed"
-                      >
-                        {activeTypes.map((t) => <option key={t.id} value={t.name}>{t.name}</option>)}
-                      </select>
-                    ) : (
-                      <div
-                        role="group"
-                        aria-label="Ticket type"
-                        className={`grid gap-1.5 ${['grid-cols-1', 'grid-cols-1', 'grid-cols-2', 'grid-cols-3', 'grid-cols-2'][activeTypes.length] || 'grid-cols-2'}`}
-                      >
-                        {activeTypes.map((t) => (
-                          <button
-                            key={t.id}
-                            type="button"
-                            disabled={aiDecides}
-                            onClick={() => setTicketType(t.name)}
-                            aria-pressed={ticketType === t.name}
-                            title={t.description || undefined}
-                            className={`tp-focus-ring px-2 py-2 rounded-lg text-xs font-semibold border transition-colors disabled:cursor-not-allowed ${
-                              ticketType === t.name
-                                ? (TYPE_SELECTED_CLASSES[t.color] || TYPE_SELECTED_CLASSES.slate)
-                                : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'
-                            }`}
-                          >
-                            {t.name}
-                          </button>
+                    <span className={labelClass}>Attachments{fieldRequired('attachments') && <span className="text-red-500"> *</span>}{files.length > 0 ? ` (${files.length})` : ''}</span>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      multiple
+                      onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }}
+                      className="sr-only"
+                      aria-label="Choose files to attach"
+                    />
+                    {files.length > 0 && (
+                      <ul className="mb-2 flex flex-wrap gap-2.5 items-start">
+                        {files.map((file) => (
+                          <StagedFileChip
+                            key={`${file.name}-${file.size}`}
+                            file={file}
+                            onRemove={() => setFiles((prev) => prev.filter((f) => f !== file))}
+                            onEdit={() => setEditFile(file)}
+                          />
                         ))}
-                      </div>
+                      </ul>
                     )}
-                  </div>
-                  <div>
-                    <span className={labelClass}>Priority</span>
-                    <div role="group" aria-label="Priority" className="grid grid-cols-4 gap-1.5">
-                      {[1, 2, 3, 4].map((p) => (
+                    <div
+                      onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                      onDragLeave={() => setDragOver(false)}
+                      onDrop={(e) => { e.preventDefault(); setDragOver(false); addFiles(e.dataTransfer.files); }}
+                      className={`rounded-xl border-2 border-dashed text-center transition-colors ${files.length > 0 ? 'px-3 py-3' : 'px-3 py-5'} ${
+                        dragOver ? 'border-blue-400 bg-blue-50/60' : 'border-slate-200 bg-slate-50/40'
+                      }`}
+                    >
+                      <p className="text-xs text-slate-500 inline-flex items-center gap-1.5">
+                        <Paperclip className={`w-4 h-4 ${dragOver ? 'text-blue-500' : 'text-slate-300'}`} aria-hidden="true" />
+                      Drag files here, paste a screenshot into the description, or{' '}
                         <button
-                          key={p}
                           type="button"
-                          disabled={aiDecides}
-                          onClick={() => setPriority(p)}
-                          aria-pressed={priority === p}
-                          className={`tp-focus-ring px-2 py-2 rounded-lg text-xs font-semibold border transition-colors disabled:cursor-not-allowed ${
-                            priority === p
-                              ? p === 4 ? 'bg-red-600 text-white border-red-600'
-                                : p === 3 ? 'bg-amber-500 text-white border-amber-500'
-                                  : p === 2 ? 'bg-emerald-600 text-white border-emerald-600'
-                                    : 'bg-blue-500 text-white border-blue-500'
-                              : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'
-                          }`}
+                          onClick={() => fileInputRef.current?.click()}
+                          disabled={files.length >= MAX_FILES}
+                          className="tp-focus-ring rounded font-semibold text-blue-600 hover:underline disabled:opacity-50"
                         >
-                          {PRIORITY_LABELS[p]}
+                        browse
                         </button>
-                      ))}
+                      </p>
+                      <p className="text-[10px] text-slate-400 mt-0.5">{files.length}/{MAX_FILES} · up to {MAX_FILE_MB} MB each</p>
                     </div>
-                  </div>
-                </div>
-
-                <div className={`grid grid-cols-1 sm:grid-cols-2 gap-4 transition-opacity ${aiDecides ? 'opacity-50' : ''}`}>
-                  <div>
-                    <label htmlFor="tc-category" className={labelClass}>Category</label>
-                    <select
-                      id="tc-category"
-                      value={categoryId}
-                      disabled={aiDecides}
-                      onChange={(e) => { setCategoryId(e.target.value); setSubcategoryId(''); }}
-                      className={`${fieldClass} disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed`}
-                    >
-                      <option value="">{aiDecides ? 'AI will choose' : 'Choose a category'}</option>
-                      {(() => {
-                        // Scope by the chosen FS group (gap plan P2.3); unmapped
-                        // categories stay visible everywhere.
-                        const tree = meta?.categoryTree || [];
-                        const links = meta?.categoryGroupLinks || [];
-                        const gid = groupId.startsWith('fs:') ? groupId.slice(3) : null;
-                        if (!links.length || !gid) return tree.map((c) => <option key={c.id} value={c.id}>{c.name}</option>);
-                        const mapped = new Set(links.map((l) => l.categoryId));
-                        const allowed = new Set(links.filter((l) => l.groupId === gid).map((l) => l.categoryId));
-                        return tree
-                          .filter((c) => !mapped.has(c.id) || allowed.has(c.id) || String(c.id) === categoryId)
-                          .map((c) => <option key={c.id} value={c.id}>{c.name}</option>);
-                      })()}
-                    </select>
-                  </div>
-                  <div>
-                    <label htmlFor="tc-subcategory" className={labelClass}>Subcategory</label>
-                    <select
-                      id="tc-subcategory"
-                      value={subcategoryId}
-                      onChange={(e) => setSubcategoryId(e.target.value)}
-                      disabled={aiDecides || !categoryId || subcategories.length === 0}
-                      className={`${fieldClass} disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed`}
-                    >
-                      <option value="">{aiDecides ? 'AI will choose' : '—'}</option>
-                      {subcategories.map((s) => (
-                        <option key={s.id} value={s.id}>{s.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label htmlFor="tc-source" className={labelClass}>Source</label>
-                  <select id="tc-source" value={source} onChange={(e) => setSource(Number(e.target.value))} className={fieldClass}>
-                    {SOURCE_OPTIONS.map((opt) => (
-                      <option key={opt.value} value={opt.value}>{opt.label}</option>
-                    ))}
-                  </select>
-                  <p className="mt-1 text-[11px] text-slate-400">How the request reached you — phone call, walk-up, Teams message…</p>
-                </div>
-
-                {(meta?.groups?.length || 0) > 0 && (
-                  <div>
-                    <label htmlFor="tc-group" className={labelClass}>Group</label>
-                    <select id="tc-group" value={groupId} onChange={(e) => setGroupId(e.target.value)} className={fieldClass}>
-                      <option value="">No group</option>
-                      {meta.groups.some((g) => g.origin === 'local') && (
-                        <optgroup label="Internal groups">
-                          {meta.groups.filter((g) => g.origin === 'local').map((g) => (
-                            <option key={`int-${g.id}`} value={`int:${g.id}`}>{g.name}</option>
-                          ))}
-                        </optgroup>
-                      )}
-                      {meta.groups.some((g) => g.origin !== 'local') && (
-                        <optgroup label="FreshService groups">
-                          {meta.groups.filter((g) => g.origin !== 'local').map((g) => (
-                            <option key={`fs-${g.id}`} value={`fs:${g.freshserviceId}`}>{g.name}</option>
-                          ))}
-                        </optgroup>
-                      )}
-                    </select>
+                    {fieldErrors.attachments && <p className="mt-1 text-xs text-red-600" role="alert">{fieldErrors.attachments}</p>}
                   </div>
                 )}
               </div>
+
+              {/* Classification card — category/subcategory/priority/type are
+                  AI-owned when triage is on. Field blocks render per the
+                  workspace form config (Phase TF); the card disappears when
+                  every one of its fields is hidden. */}
+              {['type', 'priority', 'category', 'subcategory', 'source', 'group'].some(fieldVisible) && (
+                <div className="tp-card rounded-2xl p-5 space-y-5">
+                  {aiDecides && (
+                    <div className="flex items-start gap-2 -mt-1 px-3 py-2 rounded-lg bg-indigo-50/70 border border-indigo-100 text-[11px] text-indigo-700">
+                      <Sparkles className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" aria-hidden="true" />
+                    AI will set category, subcategory, priority and type on create. Turn off “Classify &amp; assess with AI” to set them yourself.
+                    </div>
+                  )}
+                  {(fieldVisible('type') || fieldVisible('priority')) && (
+                    <div className={`grid grid-cols-1 sm:grid-cols-2 gap-4 transition-opacity ${aiDecides ? 'opacity-50' : ''}`}>
+                      {fieldVisible('type') && (
+                        <div>
+                          <span className={labelClass}>Type</span>
+                          {activeTypes.length > 4 ? (
+                            <select
+                              value={ticketType ?? ''}
+                              disabled={aiDecides}
+                              onChange={(e) => setTicketType(e.target.value)}
+                              aria-label="Ticket type"
+                              className="tp-focus-ring w-full rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs font-semibold text-slate-600 disabled:cursor-not-allowed"
+                            >
+                              {activeTypes.map((t) => <option key={t.id} value={t.name}>{t.name}</option>)}
+                            </select>
+                          ) : (
+                            <div
+                              role="group"
+                              aria-label="Ticket type"
+                              className={`grid gap-1.5 ${['grid-cols-1', 'grid-cols-1', 'grid-cols-2', 'grid-cols-3', 'grid-cols-2'][activeTypes.length] || 'grid-cols-2'}`}
+                            >
+                              {activeTypes.map((t) => (
+                                <button
+                                  key={t.id}
+                                  type="button"
+                                  disabled={aiDecides}
+                                  onClick={() => setTicketType(t.name)}
+                                  aria-pressed={ticketType === t.name}
+                                  title={t.description || undefined}
+                                  className={`tp-focus-ring px-2 py-2 rounded-lg text-xs font-semibold border transition-colors disabled:cursor-not-allowed ${
+                                    ticketType === t.name
+                                      ? (TYPE_SELECTED_CLASSES[t.color] || TYPE_SELECTED_CLASSES.slate)
+                                      : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'
+                                  }`}
+                                >
+                                  {t.name}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {fieldVisible('priority') && (
+                        <div>
+                          <span className={labelClass}>Priority</span>
+                          <div role="group" aria-label="Priority" className="grid grid-cols-4 gap-1.5">
+                            {[1, 2, 3, 4].map((p) => (
+                              <button
+                                key={p}
+                                type="button"
+                                disabled={aiDecides}
+                                onClick={() => setPriority(p)}
+                                aria-pressed={priority === p}
+                                className={`tp-focus-ring px-2 py-2 rounded-lg text-xs font-semibold border transition-colors disabled:cursor-not-allowed ${
+                                  priority === p
+                                    ? p === 4 ? 'bg-red-600 text-white border-red-600'
+                                      : p === 3 ? 'bg-amber-500 text-white border-amber-500'
+                                        : p === 2 ? 'bg-emerald-600 text-white border-emerald-600'
+                                          : 'bg-blue-500 text-white border-blue-500'
+                                    : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'
+                                }`}
+                              >
+                                {PRIORITY_LABELS[p]}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {(fieldVisible('category') || fieldVisible('subcategory')) && (
+                    <div className={`grid grid-cols-1 sm:grid-cols-2 gap-4 transition-opacity ${aiDecides ? 'opacity-50' : ''}`}>
+                      {fieldVisible('category') && (
+                        <div>
+                          <label htmlFor="tc-category" className={labelClass}>Category{fieldRequired('category') && <span className="text-red-500"> *</span>}</label>
+                          <select
+                            id="tc-category"
+                            value={categoryId}
+                            disabled={aiDecides}
+                            onChange={(e) => { setCategoryId(e.target.value); setSubcategoryId(''); }}
+                            className={`${fieldClass} disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed`}
+                          >
+                            <option value="">{aiDecides ? 'AI will choose' : 'Choose a category'}</option>
+                            {(() => {
+                              // Scope by the chosen FS group (gap plan P2.3); unmapped
+                              // categories stay visible everywhere.
+                              const tree = meta?.categoryTree || [];
+                              const links = meta?.categoryGroupLinks || [];
+                              const gid = groupId.startsWith('fs:') ? groupId.slice(3) : null;
+                              if (!links.length || !gid) return tree.map((c) => <option key={c.id} value={c.id}>{c.name}</option>);
+                              const mapped = new Set(links.map((l) => l.categoryId));
+                              const allowed = new Set(links.filter((l) => l.groupId === gid).map((l) => l.categoryId));
+                              return tree
+                                .filter((c) => !mapped.has(c.id) || allowed.has(c.id) || String(c.id) === categoryId)
+                                .map((c) => <option key={c.id} value={c.id}>{c.name}</option>);
+                            })()}
+                          </select>
+                          {fieldErrors.category && <p className="mt-1 text-xs text-red-600" role="alert">{fieldErrors.category}</p>}
+                        </div>
+                      )}
+                      {fieldVisible('subcategory') && (
+                        <div>
+                          <label htmlFor="tc-subcategory" className={labelClass}>Subcategory{fieldRequired('subcategory') && <span className="text-red-500"> *</span>}</label>
+                          <select
+                            id="tc-subcategory"
+                            value={subcategoryId}
+                            onChange={(e) => setSubcategoryId(e.target.value)}
+                            disabled={aiDecides || !categoryId || subcategories.length === 0}
+                            className={`${fieldClass} disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed`}
+                          >
+                            <option value="">{aiDecides ? 'AI will choose' : '—'}</option>
+                            {subcategories.map((s) => (
+                              <option key={s.id} value={s.id}>{s.name}</option>
+                            ))}
+                          </select>
+                          {fieldErrors.subcategory && <p className="mt-1 text-xs text-red-600" role="alert">{fieldErrors.subcategory}</p>}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {fieldVisible('source') && (
+                    <div>
+                      <label htmlFor="tc-source" className={labelClass}>Source</label>
+                      <select id="tc-source" value={source} onChange={(e) => setSource(Number(e.target.value))} className={fieldClass}>
+                        {SOURCE_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>{opt.label}</option>
+                        ))}
+                      </select>
+                      <p className="mt-1 text-[11px] text-slate-400">How the request reached you — phone call, walk-up, Teams message…</p>
+                    </div>
+                  )}
+
+                  {fieldVisible('group') && (meta?.groups?.length || 0) > 0 && (
+                    <div>
+                      <label htmlFor="tc-group" className={labelClass}>Group{fieldRequired('group') && <span className="text-red-500"> *</span>}</label>
+                      <select id="tc-group" value={groupId} onChange={(e) => setGroupId(e.target.value)} className={fieldClass}>
+                        <option value="">No group</option>
+                        {meta.groups.some((g) => g.origin === 'local') && (
+                          <optgroup label="Internal groups">
+                            {meta.groups.filter((g) => g.origin === 'local').map((g) => (
+                              <option key={`int-${g.id}`} value={`int:${g.id}`}>{g.name}</option>
+                            ))}
+                          </optgroup>
+                        )}
+                        {meta.groups.some((g) => g.origin !== 'local') && (
+                          <optgroup label="FreshService groups">
+                            {meta.groups.filter((g) => g.origin !== 'local').map((g) => (
+                              <option key={`fs-${g.id}`} value={`fs:${g.freshserviceId}`}>{g.name}</option>
+                            ))}
+                          </optgroup>
+                        )}
+                      </select>
+                      {form?.defaultGroup && groupId === (form.defaultGroup.kind === 'fs' ? `fs:${form.defaultGroup.id}` : `int:${form.defaultGroup.id}`) && (
+                        <p className="mt-1 text-[11px] text-slate-400">Preselected — this workspace&apos;s default group for new tickets.</p>
+                      )}
+                      {fieldErrors.group && <p className="mt-1 text-xs text-red-600" role="alert">{fieldErrors.group}</p>}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Tags at creation (gap plan 2 P1.3). Impact/Urgency removed
                   from the form per QA 07-13 #5 — still editable on the detail
                   sidebar for the rare ticket that needs them. */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {(meta?.tags?.length || 0) > 0 && (
+                {fieldVisible('tags') && (meta?.tags?.length || 0) > 0 && (
                   <div>
-                    <span className={labelClass}>Tags</span>
+                    <span className={labelClass}>Tags{fieldRequired('tags') && <span className="text-red-500"> *</span>}</span>
                     <div className="flex flex-wrap gap-1 mt-1">
                       {meta.tags.map((tag) => (
                         <button
@@ -810,6 +961,7 @@ export default function TicketCreate() {
                         </button>
                       ))}
                     </div>
+                    {fieldErrors.tags && <p className="mt-1 text-xs text-red-600" role="alert">{fieldErrors.tags}</p>}
                   </div>
                 )}
               </div>
@@ -829,7 +981,7 @@ export default function TicketCreate() {
                     <span className="text-[11px] text-slate-400">
                       {Object.values(customFieldValues).filter((v) => v !== '' && v !== null && v !== undefined).length > 0
                         ? `${Object.values(customFieldValues).filter((v) => v !== '' && v !== null && v !== undefined).length} set`
-                        : 'optional'}
+                        : (hasRequiredCustomFields ? 'some required' : 'optional')}
                     </span>
                     <ChevronDown className={`w-4 h-4 text-slate-400 ml-auto transition-transform ${customFieldsOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
                   </button>
@@ -840,7 +992,10 @@ export default function TicketCreate() {
                         const set = (v) => setCustomFieldValues((prev) => ({ ...prev, [def.key]: v }));
                         return (
                           <div key={def.key}>
-                            <label htmlFor={`tc-cf-${def.key}`} className={labelClass}>{def.label}</label>
+                            <label htmlFor={`tc-cf-${def.key}`} className={labelClass}>
+                              {def.label}
+                              {def.isRequiredOnCreate === true && <span className="text-red-500"> *</span>}
+                            </label>
                             {def.type === 'select' ? (
                               <select id={`tc-cf-${def.key}`} value={value} onChange={(e) => set(e.target.value)} className={fieldClass}>
                                 <option value="">—</option>
@@ -861,6 +1016,7 @@ export default function TicketCreate() {
                                 className={fieldClass}
                               />
                             )}
+                            {fieldErrors[`cf:${def.key}`] && <p className="mt-1 text-xs text-red-600" role="alert">{fieldErrors[`cf:${def.key}`]}</p>}
                           </div>
                         );
                       })}

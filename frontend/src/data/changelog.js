@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.6.02-preview';
+export const APP_VERSION = '3.6.03-preview';
 
 export const changelog = [
+  {
+    version: '3.6.03-preview',
+    date: 'August 24, 2026',
+    entries: [
+      { type: 'new', html: '<strong>🎯 Pick your six quick-filter cards</strong> — admins choose which six cards top the Tickets page per workspace, from a pool including new <em>Tickets this week / this month / this year</em> (cut on your workspace’s clock) plus Unassigned, Deleted, and Noise. Configure in Settings → Ticket Ops (or hover the card row for a shortcut gear); the filter rail gains a matching “This year” preset. (QA 08-21 #4)' },
+      { type: 'new', html: '<strong>📝 Admin-editable new-ticket form</strong> — shape the Ticket Pulse composer per workspace like FreshService’s field editor: hide, require, and reorder built-in fields; set default priority, type, <em>email source</em>, and <em>group</em> (visibly preselected); make custom fields required-on-create (binds the API too) with prefilled defaults. Settings → Ticket Ops → New-ticket form, right above Custom fields. FreshService’s own forms are untouched. (QA 08-21 #3)' },
+    ],
+  },
   {
     version: '3.6.02-preview',
     date: 'August 23, 2026',

@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { Drawer } from 'vaul';
 import { DayPicker } from 'react-day-picker';
 import {
-  endOfMonth, endOfWeek, format, startOfMonth, startOfWeek, subDays, subMonths, subWeeks,
+  endOfMonth, endOfWeek, format, startOfMonth, startOfWeek, startOfYear, subDays, subMonths, subWeeks,
 } from 'date-fns';
 import {
   CalendarClock, CalendarDays, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight,
@@ -24,6 +24,9 @@ const CREATED_PRESETS = [
   { key: 'last-week', label: 'Last week', range: (now) => [startOfWeek(subWeeks(now, 1), { weekStartsOn: 1 }), endOfWeek(subWeeks(now, 1), { weekStartsOn: 1 })] },
   { key: 'month', label: 'This month', range: (now) => [startOfMonth(now), now] },
   { key: 'last-month', label: 'Last month', range: (now) => [startOfMonth(subMonths(now, 1)), endOfMonth(subMonths(now, 1))] },
+  // "This year" (Mega 08-23 Phase FC): keeps the rail's presets in step with
+  // the created_week/month/year quick cards.
+  { key: 'year', label: 'This year', range: (now) => [startOfYear(now), now] },
   { key: '7d', label: 'Last 7 days', range: (now) => [subDays(now, 7), now] },
   { key: '30d', label: 'Last 30 days', range: (now) => [subDays(now, 30), now] },
 ];

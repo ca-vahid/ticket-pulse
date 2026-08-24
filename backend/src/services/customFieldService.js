@@ -64,7 +64,7 @@ class CustomFieldService {
     });
   }
 
-  async createDefinition(workspaceId, { key, label, type = 'text', options = [] }) {
+  async createDefinition(workspaceId, { key, label, type = 'text', options = [], isRequiredOnCreate, defaultValue }) {
     const cleanKey = String(key || '').trim().toLowerCase();
     if (!KEY_PATTERN.test(cleanKey)) {
       throw new ValidationError('Field key must be lowercase letters/numbers/underscores, starting with a letter');
@@ -72,7 +72,8 @@ class CustomFieldService {
     if (!FIELD_TYPES.includes(type)) throw new ValidationError(`Field type must be one of: ${FIELD_TYPES.join(', ')}`);
     const cleanLabel = String(label || '').trim();
     if (!cleanLabel) throw new ValidationError('Field needs a label');
-    if (type === 'select' && (!Array.isArray(options) || options.filter(Boolean).length === 0)) {
+    const cleanOptions = type === 'select' ? (options || []).map(String).filter(Boolean) : [];
+    if (type === 'select' && cleanOptions.length === 0) {
       throw new ValidationError('Select fields need at least one option');
     }
     return prisma.customFieldDefinition.create({
@@ -81,12 +82,14 @@ class CustomFieldService {
         key: cleanKey,
         label: cleanLabel.slice(0, 120),
         type,
-        options: type === 'select' ? options.map(String).filter(Boolean) : [],
+        options: cleanOptions,
+        isRequiredOnCreate: isRequiredOnCreate === true,
+        defaultValue: normalizeDefaultValue({ type, options: cleanOptions, label: cleanLabel }, defaultValue),
       },
     });
   }
 
-  async updateDefinition(workspaceId, id, { label, type, options, isActive, sortOrder, isFeatured }) {
+  async updateDefinition(workspaceId, id, { label, type, options, isActive, sortOrder, isFeatured, isRequiredOnCreate, defaultValue }) {
     const definition = await prisma.customFieldDefinition.findFirst({ where: { id: Number(id), workspaceId } });
     if (!definition) throw new NotFoundError('Custom field not found');
     // Type is editable so admins can curate API-provisioned definitions (the
@@ -108,6 +111,16 @@ class CustomFieldService {
       ...(isActive !== undefined ? { isActive: isActive !== false } : {}),
       ...(sortOrder !== undefined ? { sortOrder: Number(sortOrder) || 0 } : {}),
       ...(isFeatured !== undefined ? { isFeatured: isFeatured === true } : {}),
+      // New-ticket form (Phase TF): required binds composer + public API
+      // create; defaultValue prefills the composer only (stored as a string,
+      // validated against the — possibly updated — type/options).
+      ...(isRequiredOnCreate !== undefined ? { isRequiredOnCreate: isRequiredOnCreate === true } : {}),
+      ...(defaultValue !== undefined ? {
+        defaultValue: normalizeDefaultValue(
+          { type: nextType, options: nextOptions, label: label !== undefined ? String(label) : definition.label },
+          defaultValue,
+        ),
+      } : {}),
     };
     // At most ONE featured definition per workspace (it drives the queue-row
     // chip): featuring this one unfeatures the rest, atomically.
@@ -331,6 +344,17 @@ class CustomFieldService {
       });
     }).catch(() => { /* integrations never break the edit */ });
   }
+}
+
+/**
+ * Validate an admin-entered default value against the field's type and store
+ * it as a string (the DB shape). null/'' clears the default. Reuses
+ * coerceValue so a default can never be a value the field itself would reject.
+ */
+function normalizeDefaultValue(definition, raw) {
+  if (raw === null || raw === undefined || raw === '') return null;
+  const value = coerceValue(definition, raw); // throws ValidationError on mismatch
+  return value === null ? null : String(value).slice(0, 2000);
 }
 
 function coerceValue(definition, raw) {

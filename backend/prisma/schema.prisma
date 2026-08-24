@@ -169,6 +169,8 @@ model Workspace {
   userEmailSignatures               UserEmailSignature[]
   userPreferences                   UserPreference[]
   emailIdentity                     WorkspaceEmailIdentity?
+  queueCardConfig                   QueueCardConfig?
+  ticketFormConfig                  TicketFormConfig?
 
   @@map("workspaces")
 }
@@ -856,6 +858,11 @@ model CustomFieldDefinition {
   // The ONE definition per workspace surfaced as a chip on queue rows and in
   // the peek Details (single-featured enforced in updateDefinition).
   isFeatured  Boolean  @default(false) @map("is_featured")
+  // New-ticket form config (Mega 08-23 Phase TF): required-ness binds the
+  // interactive composer AND the public API create; defaultValue (stored as a
+  // string, coerced per `type`) prefills the composer only.
+  isRequiredOnCreate Boolean @default(false) @map("is_required_on_create")
+  defaultValue       String? @map("default_value") @db.VarChar(2000)
   sortOrder   Int      @default(0) @map("sort_order")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
@@ -3323,6 +3330,46 @@ model UserPreference {
 
   @@unique([workspaceId, ownerEmail, key])
   @@map("user_preferences")
+}
+
+// Admin-configurable quick filter cards on /tickets (Mega 08-23 Phase FC):
+// `cards` is an ORDERED array of exactly 6 registry keys (server-validated;
+// dupes rejected). Absent row = today's default 6 — zero behavior change.
+model QueueCardConfig {
+  id          Int       @id @default(autoincrement())
+  workspaceId Int       @unique @map("workspace_id")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  cards       Json
+  updatedBy   String?   @map("updated_by") @db.VarChar(255)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@map("queue_card_configs")
+}
+
+// Admin-editable new-ticket form per workspace (Mega 08-23 Phase TF):
+// `fields` = [{key, visible, required, defaultValue, sortOrder}] over the
+// FIXED built-in vocabulary (requester/subject/description/type/priority/
+// category/subcategory/source/group/tags/cc/attachments — validated in
+// ticketFormConfigService; requester+subject forced visible+required).
+// `defaultSource` (AGENT_SELECTABLE_SOURCES) fills in when a create omits
+// source; `defaultGroupId` is a default FRESHSERVICE group preselect for the
+// composer — the INTERNAL default group stays on
+// Workspace.defaultInternalGroupId (already applied at create; surfaced, not
+// duplicated). `defaults` = {notifyRequester, aiClassify, assignMode}.
+model TicketFormConfig {
+  id             Int       @id @default(autoincrement())
+  workspaceId    Int       @unique @map("workspace_id")
+  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  fields         Json?
+  defaultSource  Int?      @map("default_source")
+  defaultGroupId BigInt?   @map("default_group_id")
+  defaults       Json?
+  updatedBy      String?   @map("updated_by") @db.VarChar(255)
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  @@map("ticket_form_configs")
 }
 
 model UserEmailSignature {

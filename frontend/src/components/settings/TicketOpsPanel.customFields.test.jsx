@@ -71,7 +71,7 @@ describe('CustomFieldsSection (Phase 1c manager)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(settingsAPI.updateCustomField).toHaveBeenCalledWith(3, {
-      label: 'PowerApp record', type: 'text', options: [],
+      label: 'PowerApp record', type: 'text', options: [], isRequiredOnCreate: false, defaultValue: null,
     }));
   });
 
@@ -83,7 +83,7 @@ describe('CustomFieldsSection (Phase 1c manager)', () => {
     fireEvent.change(screen.getByLabelText('Options'), { target: { value: 'A100, B200' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(settingsAPI.updateCustomField).toHaveBeenCalledWith(1, {
-      label: 'Cost centre', type: 'select', options: ['A100', 'B200'],
+      label: 'Cost centre', type: 'select', options: ['A100', 'B200'], isRequiredOnCreate: false, defaultValue: null,
     }));
   });
 
@@ -106,7 +106,54 @@ describe('CustomFieldsSection (Phase 1c manager)', () => {
     fireEvent.change(screen.getByLabelText('Field key'), { target: { value: 'region' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create' }));
     await waitFor(() => expect(settingsAPI.createCustomField).toHaveBeenCalledWith({
-      key: 'region', label: 'Region', type: 'text', options: [],
+      key: 'region', label: 'Region', type: 'text', options: [], isRequiredOnCreate: false, defaultValue: null,
+    }));
+  });
+});
+
+// Mega 08-23 Phase TF — Required-on-create + Default value on definitions:
+// required binds the composer AND the public API create; the default only
+// prefills the composer.
+describe('CustomFieldsSection — required + default (Phase TF)', () => {
+  test('a required definition shows the Required badge; defaults show their value', async () => {
+    settingsAPI.getCustomFields.mockResolvedValueOnce({
+      data: {
+        data: [
+          { ...FIELDS[0], isRequiredOnCreate: true, defaultValue: null },
+          { ...FIELDS[1], isRequiredOnCreate: false, defaultValue: 'ACME Inc' },
+        ],
+      },
+    });
+    render(<CustomFieldsSection />);
+    await waitFor(() => expect(screen.getByText('Client Name')).toBeInTheDocument());
+    expect(within(screen.getByText('Cost centre').closest('li')).getByText('Required')).toBeInTheDocument();
+    expect(within(screen.getByText('Client Name').closest('li')).getByText('default: ACME Inc')).toBeInTheDocument();
+  });
+
+  test('Edit round-trips Required-on-create and a typed default value', async () => {
+    await renderLoaded();
+    const row = screen.getByText('Cost centre').closest('li');
+    fireEvent.click(within(row).getByRole('button', { name: 'Edit' }));
+
+    fireEvent.click(screen.getByLabelText('Required on create'));
+    fireEvent.change(screen.getByLabelText('Default value'), { target: { value: 'CC-100' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(settingsAPI.updateCustomField).toHaveBeenCalledWith(1, {
+      label: 'Cost centre', type: 'text', options: [], isRequiredOnCreate: true, defaultValue: 'CC-100',
+    }));
+  });
+
+  test('boolean fields offer a Yes/No default select', async () => {
+    await renderLoaded();
+    fireEvent.click(screen.getByRole('button', { name: /New field/ }));
+    fireEvent.change(screen.getByLabelText('Field label'), { target: { value: 'VIP' } });
+    fireEvent.change(screen.getByLabelText('Field key'), { target: { value: 'vip' } });
+    fireEvent.change(screen.getByLabelText('Field type'), { target: { value: 'boolean' } });
+    fireEvent.change(screen.getByLabelText('Default value'), { target: { value: 'true' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+    await waitFor(() => expect(settingsAPI.createCustomField).toHaveBeenCalledWith({
+      key: 'vip', label: 'VIP', type: 'boolean', options: [], isRequiredOnCreate: false, defaultValue: 'true',
     }));
   });
 });

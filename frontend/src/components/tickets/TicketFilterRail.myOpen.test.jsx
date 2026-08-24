@@ -51,3 +51,25 @@ describe('TicketFilterRail canned views (QA 08-04 #15)', () => {
     expect(search.get('status')).toBe('any');
   });
 });
+
+// Mega 08-23 Phase FC (FC4): the Created presets gain "This year" so the rail
+// agrees with the created_week/month/year quick cards.
+describe('TicketFilterRail created presets', () => {
+  test('"This year" applies Jan 1 → today', () => {
+    render(
+      <MemoryRouter initialEntries={['/tickets']}>
+        <TicketFilterRail meta={{ workspaceId: 1, technicians: [], groups: [], categoryTree: [], actor: {} }} />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Created/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'This year' }));
+
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const search = new URLSearchParams(screen.getByTestId('search').textContent);
+    expect(search.get('createdFrom')).toBe(`${now.getFullYear()}-01-01`);
+    expect(search.get('createdTo')).toBe(`${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`);
+  });
+});
