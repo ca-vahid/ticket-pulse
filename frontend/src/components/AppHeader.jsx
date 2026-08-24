@@ -17,6 +17,7 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { useDashboard } from '../contexts/DashboardContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
+import { useRealtimeStatus } from '../hooks/useRealtimeStatus';
 import {
   scrubFreeText as scrubDemoText,
   useDemoLabel,
@@ -55,9 +56,24 @@ export default function AppHeader({
     isRefreshing, lastUpdated, sseConnectionStatus, sseTransportStatus, sseTransport,
     sseRetry, sseGetReconnectChurn, sseGetDiagnostics, sseEnabled, syncSkippedEvent,
   } = useDashboard();
-  // Only offer the manual reconnect where the live feed is supposed to run —
-  // on routes with SSE intentionally off (e.g. Settings), "Offline" is normal.
-  const canRetrySse = Boolean(sseEnabled && sseRetry);
+  // Honest pill (QA 08-19 #3): the pill reports the SHARED realtime client —
+  // one connection per tab, kept alive on every header page (useApprovalCount
+  // + this status-only subscription) — NOT DashboardContext's route-gated
+  // consumer. That consumer's `sseEnabled` only means "this route refetches
+  // dashboards on sync-completed"; reading it for the pill made /approvals
+  // (and any route outside APP_LIVE_SSE_ROUTES) show a red Offline while the
+  // tab was genuinely live. The legacy EventSource transport has no shared
+  // client — rt.active is false there and everything below falls back to the
+  // DashboardContext-derived state (the pre-shared behavior).
+  const rt = useRealtimeStatus(currentWorkspace?.id);
+  // Manual reconnect: with the shared client Retry is actionable on EVERY
+  // page (the client runs wherever the header renders). On the legacy path it
+  // keeps the old rule — only where the route-gated feed is supposed to run.
+  const canRetrySse = rt.active ? Boolean(rt.retry) : Boolean(sseEnabled && sseRetry);
+  const pillRetry = rt.active ? rt.retry : sseRetry;
+  const pillTransport = rt.active ? rt.transport : sseTransport;
+  const pillGetDiagnostics = rt.active ? rt.getDiagnostics : sseGetDiagnostics;
+  const pillGetReconnectChurn = rt.active ? rt.getReconnectChurn : sseGetReconnectChurn;
   const [showChangelog, setShowChangelog] = useState(false);
   const [manualSyncing, setManualSyncing] = useState(false);
   // Response-driven "Sync now" feedback (realtime plan Phase 1 — the trigger
@@ -272,14 +288,19 @@ export default function AppHeader({
     ? Math.min(100, Math.max(0, (parseInt(progressMatch[1], 10) / Math.max(1, parseInt(progressMatch[2], 10))) * 100))
     : null;
 
-  // Transport-ladder state (realtime plan Phase 2). The legacy EventSource
-  // path (VITE_REALTIME_TRANSPORT=eventsource) has no ladder — derive an
-  // equivalent state from the plain connection status.
-  const ladderState = sseTransportStatus && sseTransportStatus !== 'idle'
-    ? sseTransportStatus
-    : sseConnectionStatus === 'connected'
-      ? 'live-sse'
-      : sseConnectionStatus === 'connecting' ? 'connecting' : 'offline';
+  // Transport-ladder state (realtime plan Phase 2), read from the SHARED
+  // client (see rt above). 'idle' = the client hasn't started for this
+  // workspace yet — show it as connecting, never offline. The legacy
+  // EventSource path (VITE_REALTIME_TRANSPORT=eventsource) has no ladder —
+  // derive an equivalent state from DashboardContext's plain connection
+  // status, exactly as before.
+  const ladderState = rt.active
+    ? (rt.state === 'idle' ? 'connecting' : rt.state)
+    : sseTransportStatus && sseTransportStatus !== 'idle'
+      ? sseTransportStatus
+      : sseConnectionStatus === 'connected'
+        ? 'live-sse'
+        : sseConnectionStatus === 'connecting' ? 'connecting' : 'offline';
 
   // Pill vocabulary: Live (SSE) / Auto-refresh (polling, amber) / Offline.
   // Never a spinner-forever "connecting" — after the ladder's budgets it is
@@ -310,15 +331,15 @@ export default function AppHeader({
   // self-diagnosing without costing renders the rest of the time.
   const [rtDiag, setRtDiag] = useState(null);
   useEffect(() => {
-    if (!statusOpen || !sseGetDiagnostics) {
+    if (!statusOpen || !pillGetDiagnostics) {
       setRtDiag(null);
       return undefined;
     }
-    const read = () => setRtDiag(sseGetDiagnostics());
+    const read = () => setRtDiag(pillGetDiagnostics());
     read();
     const timer = setInterval(read, 5000);
     return () => clearInterval(timer);
-  }, [statusOpen, sseGetDiagnostics]);
+  }, [statusOpen, pillGetDiagnostics]);
 
   const formatEventAge = (ts) => {
     if (!ts) return '—';
@@ -349,7 +370,7 @@ export default function AppHeader({
           // it kicks a reconnect (budget reset) instead of opening the popup —
           // the pill flipping to "Connecting" is the feedback.
           if (statusTone === 'offline' && canRetrySse) {
-            sseRetry();
+            pillRetry();
             return;
           }
           setStatusOpen((o) => !o); setUserMenuOpen(false); setWorkspaceMenuOpen(false);
@@ -408,7 +429,7 @@ export default function AppHeader({
               {ladderState === 'offline' && canRetrySse && (
                 <button
                   type="button"
-                  onClick={sseRetry}
+                  onClick={pillRetry}
                   className="tp-focus-ring rounded border border-red-200 bg-red-50 px-1.5 py-0.5 font-semibold text-red-600 hover:bg-red-100"
                 >
                   Reconnect
@@ -438,7 +459,7 @@ export default function AppHeader({
             <>
               <div className="flex items-center justify-between py-1">
                 <span className="text-slate-400">Transport</span>
-                <span className="font-medium">{TRANSPORT_LABEL[sseTransport || rtDiag.transport] || '—'}</span>
+                <span className="font-medium">{TRANSPORT_LABEL[pillTransport || rtDiag.transport] || '—'}</span>
               </div>
               <div className="flex items-center justify-between py-1">
                 <span className="text-slate-400">Last event</span>
@@ -446,7 +467,7 @@ export default function AppHeader({
               </div>
               <div className="flex items-center justify-between py-1">
                 <span className="text-slate-400">Reconnects</span>
-                <span className="font-medium">{sseGetReconnectChurn ? sseGetReconnectChurn() : rtDiag.churn}</span>
+                <span className="font-medium">{pillGetReconnectChurn ? pillGetReconnectChurn() : rtDiag.churn}</span>
               </div>
               <div className="flex items-center justify-between py-1">
                 <span className="text-slate-400">Channel</span>

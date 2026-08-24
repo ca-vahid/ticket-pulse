@@ -24,6 +24,12 @@ vi.mock('../services/api', () => ({
 vi.mock('../contexts/AuthContext', () => ({ useAuth: mocks.useAuth }));
 vi.mock('../contexts/DashboardContext', () => ({ useDashboard: mocks.useDashboard }));
 vi.mock('../contexts/WorkspaceContext', () => ({ useWorkspace: mocks.useWorkspace }));
+// Legacy-shaped stub (active:false) so this suite keeps exercising the
+// DashboardContext-driven pill state it always asserted against; the shared
+// client path has its own suite (AppHeader.pill.test.jsx).
+vi.mock('../hooks/useRealtimeStatus', () => ({
+  useRealtimeStatus: () => ({ active: false, state: null, transport: null, retry: null, getDiagnostics: null, getReconnectChurn: null }),
+}));
 vi.mock('./nav/SideRail', () => ({ default: () => null }));
 vi.mock('./ChangelogModal', () => ({ default: () => null }));
 

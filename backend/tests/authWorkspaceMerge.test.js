@@ -42,7 +42,7 @@ jest.unstable_mockModule('../src/utils/logger.js', () => ({
   default: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() },
 }));
 
-const { mergeWorkspaceLists } = await import('../src/services/workspaceRepository.js');
+const { default: workspaceRepository, mergeWorkspaceLists } = await import('../src/services/workspaceRepository.js');
 const { default: authRoutes, resolveUserAccess } = await import('../src/routes/auth.routes.js');
 const { errorHandler } = await import('../src/middleware/errorHandler.js');
 const { default: config } = await import('../src/config/index.js');
@@ -213,5 +213,115 @@ describe('GET /auth/session', () => {
     expect(res.status).toBe(200);
     expect(res.body.authenticated).toBe(false);
     expect(res.body.authToken).toBeUndefined();
+  });
+});
+
+describe('live role refresh on the session-cookie branch (Mega 08-23 AC2)', () => {
+  const it = wsRow(1, 'IT');
+
+  function makeApp(sessionUserValue = null) {
+    const app = express();
+    app.use(express.json());
+    app.use((req, _res, next) => {
+      req.session = sessionUserValue ? { user: sessionUserValue } : {};
+      next();
+    });
+    app.use('/api/auth', authRoutes);
+    app.use(errorHandler);
+    return app;
+  }
+
+  test('a fresh grant upgrades a stale agent session on the NEXT session check — no re-login', async () => {
+    // Marcus logged in as a pure technician (role 'agent'); an admin has
+    // since granted him reviewer on IT. The cookie branch used to re-mint
+    // the JWT from the stale session role verbatim.
+    workspaceAccessFindMany.mockResolvedValue([accessRecord(it, 'reviewer')]);
+    technicianFindMany.mockResolvedValue([technicianRecord(it)]);
+    getAgentProfilesMock.mockResolvedValue([{ id: 9, email: 'user@bgc.ca' }]);
+
+    const res = await request(makeApp({
+      email: 'user@bgc.ca',
+      name: 'Marcus',
+      role: 'agent',
+      selectedWorkspaceId: 1,
+      availableWorkspaces: [{ id: 1, name: 'IT', slug: 'it', role: 'agent' }],
+      agentProfiles: [],
+    })).get('/api/auth/session');
+
+    expect(res.status).toBe(200);
+    expect(res.body.user.role).toBe('viewer');
+    expect(res.body.availableWorkspaces.find(w => w.id === 1).role).toBe('reviewer');
+    const decoded = jwt.verify(res.body.authToken, config.session.secret, { algorithms: ['HS256'] });
+    expect(decoded.role).toBe('viewer');
+  });
+
+  test('a revoke downgrades on the next session check too (back to the agent portal)', async () => {
+    technicianFindMany.mockResolvedValue([technicianRecord(it)]);
+    getAgentProfilesMock.mockResolvedValue([{ id: 9, email: 'user@bgc.ca' }]);
+
+    const res = await request(makeApp({
+      email: 'user@bgc.ca',
+      name: 'Marcus',
+      role: 'viewer', // upgraded earlier; the grant has since been revoked
+      selectedWorkspaceId: 1,
+      availableWorkspaces: [{ id: 1, name: 'IT', slug: 'it', role: 'viewer' }],
+      agentProfiles: [],
+    })).get('/api/auth/session');
+
+    expect(res.status).toBe(200);
+    expect(res.body.user.role).toBe('agent');
+    const decoded = jwt.verify(res.body.authToken, config.session.secret, { algorithms: ['HS256'] });
+    expect(decoded.role).toBe('agent');
+  });
+
+  test('a resolver failure keeps the session values (best-effort refresh, never a lockout)', async () => {
+    workspaceAccessFindMany.mockRejectedValue(new Error('db down'));
+    technicianFindMany.mockRejectedValue(new Error('db down'));
+
+    const res = await request(makeApp({
+      email: 'user@bgc.ca',
+      name: 'User',
+      role: 'viewer',
+      selectedWorkspaceId: 1,
+      availableWorkspaces: [{ id: 1, name: 'IT', slug: 'it', role: 'viewer' }],
+      agentProfiles: [],
+    })).get('/api/auth/session');
+
+    expect(res.status).toBe(200);
+    expect(res.body.user.role).toBe('viewer');
+    expect(res.body.availableWorkspaces.map(w => w.id)).toEqual([1]);
+  });
+});
+
+describe('getWorkspaceMembers join shape (Mega 08-23 AC3)', () => {
+  test('access ∪ active technicians, keyed by email, accessRole null for technician-only rows', async () => {
+    technicianFindMany.mockResolvedValue([
+      { id: 7, name: 'Marcus Blackstock', email: 'MBlackstock@bgc.ca', photoUrl: 'data:image/x' },
+      { id: 8, name: 'Adrian Lo', email: 'alo@bgc.ca', photoUrl: null },
+      { id: 9, name: 'No Email Tech', email: null, photoUrl: null },
+    ]);
+    workspaceAccessFindMany.mockResolvedValue([
+      { email: 'alo@bgc.ca', role: 'viewer' },
+      { email: 'ops-only@bgc.ca', role: 'reviewer' },
+    ]);
+
+    const members = await workspaceRepository.getWorkspaceMembers(1);
+
+    // Technician-only (the Marcus case): joined but no access yet.
+    const marcus = members.find(m => m.email === 'mblackstock@bgc.ca');
+    expect(marcus).toMatchObject({ technicianId: 7, name: 'Marcus Blackstock', accessRole: null });
+
+    // Technician + access row: role attached to the SAME row (no duplicate).
+    const adrian = members.filter(m => m.email === 'alo@bgc.ca');
+    expect(adrian).toHaveLength(1);
+    expect(adrian[0]).toMatchObject({ technicianId: 8, accessRole: 'viewer' });
+
+    // Access-only user (non-technician): present with null name/technicianId.
+    const opsOnly = members.find(m => m.email === 'ops-only@bgc.ca');
+    expect(opsOnly).toMatchObject({ technicianId: null, name: null, accessRole: 'reviewer' });
+
+    // Technicians without an email can't be joined on and are omitted.
+    expect(members.some(m => m.name === 'No Email Tech')).toBe(false);
+    expect(members).toHaveLength(3);
   });
 });

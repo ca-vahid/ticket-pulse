@@ -116,4 +116,54 @@ describe('MobileAssignSheet', () => {
     await waitFor(() => expect(assign).toHaveBeenCalledWith(1, 11));
     expect(screen.queryByText('Why the override?')).not.toBeInTheDocument();
   });
+
+  // Read/act split (QA 08-19 #2): non-reviewer members SEE the suggestion,
+  // read-only — no Approve, no radios, no Let-AI footer, nothing that could
+  // fire the reviewer-gated decide/triage endpoints.
+  describe('viewer (canSeeAi without canReview)', () => {
+    test('shows the read-only AI card: candidates visible, no Approve, no radios, decide never fires', () => {
+      render(<MobileAssignSheet open ticket={suggestedTicket} technicians={team} canSeeAi onClose={() => {}} onAssigned={() => {}} />);
+      // Suggestion facts are visible…
+      expect(screen.getByText('AI suggests')).toBeInTheDocument();
+      expect(screen.getByText('Zoe Dio')).toBeInTheDocument();
+      expect(screen.getByText('Benjamin Rabel')).toBeInTheDocument();
+      expect(screen.getByText('89%')).toBeInTheDocument();
+      expect(screen.getByText(/waiting on a reviewer/i)).toBeInTheDocument();
+      // …but nothing actionable renders.
+      expect(screen.queryByRole('button', { name: /^Approve$/ })).not.toBeInTheDocument();
+      expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /let ai assign/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /review…/i })).not.toBeInTheDocument();
+      expect(decide).not.toHaveBeenCalled();
+    });
+
+    test('manual assignment from the member list still works for viewers', async () => {
+      const onAssigned = vi.fn();
+      render(<MobileAssignSheet open ticket={suggestedTicket} technicians={team} canSeeAi onClose={() => {}} onAssigned={onAssigned} />);
+      fireEvent.click(screen.getByText('Brendan Navoa'));
+      await waitFor(() => expect(assign).toHaveBeenCalledWith(1, 11));
+      expect(onAssigned).toHaveBeenCalledWith(11);
+      expect(decide).not.toHaveBeenCalled();
+    });
+
+    test('pending run renders as a non-interactive note (span/div, not a button)', () => {
+      const pendingTicket = { ...suggestedTicket, ai: { runId: 7, state: 'analyzing' } };
+      render(<MobileAssignSheet open ticket={pendingTicket} technicians={team} canSeeAi onClose={() => {}} onAssigned={() => {}} />);
+      const note = screen.getByText('AI is analyzing this ticket…');
+      expect(note.closest('button')).toBeNull();
+    });
+
+    test('reviewer behavior is unchanged when canSeeAi rides along', () => {
+      render(<MobileAssignSheet open ticket={suggestedTicket} technicians={team} canReview canSeeAi onClose={() => {}} onAssigned={() => {}} />);
+      expect(screen.getByRole('button', { name: /^Approve$/ })).toBeInTheDocument();
+      expect(screen.getByRole('radio', { name: /Zoe Dio/ })).toBeInTheDocument();
+      expect(screen.queryByText(/waiting on a reviewer/i)).not.toBeInTheDocument();
+    });
+
+    test('no AI content at all without canSeeAi (legacy callers unchanged)', () => {
+      render(<MobileAssignSheet open ticket={suggestedTicket} technicians={team} onClose={() => {}} onAssigned={() => {}} />);
+      expect(screen.queryByText('AI suggests')).not.toBeInTheDocument();
+      expect(screen.queryByText(/waiting on a reviewer/i)).not.toBeInTheDocument();
+    });
+  });
 });

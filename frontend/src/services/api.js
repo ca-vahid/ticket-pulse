@@ -1268,6 +1268,12 @@ export const workspaceAPI = {
     return await api.get(`/workspaces/${workspaceId}/access`);
   },
 
+  // App-access ∪ active-technician union for the Members panel (Mega 08-23
+  // AC3): [{ email, name, photoUrl, technicianId?, accessRole|null }].
+  getMembers: async (workspaceId) => {
+    return await api.get(`/workspaces/${workspaceId}/members`);
+  },
+
   grantAccess: async (workspaceId, email, role = 'viewer') => {
     return await api.post(`/workspaces/${workspaceId}/access`, { email, role });
   },

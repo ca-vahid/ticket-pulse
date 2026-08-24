@@ -2,12 +2,13 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   useReactTable, getCoreRowModel, getSortedRowModel, flexRender, createColumnHelper,
 } from '@tanstack/react-table';
-import { settingsAPI } from '../../services/api';
+import { settingsAPI, workspaceAPI } from '../../services/api';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
+import { useAuth } from '../../contexts/AuthContext';
 import {
   Users, Loader, Cloud, Home, Power, PowerOff, Pencil, Check, X,
   AlertCircle, CheckCircle2, MapPin, Search, UserPlus, Brain,
-  ArrowUpDown, ArrowUp, ArrowDown,
+  ArrowUpDown, ArrowUp, ArrowDown, KeyRound,
 } from 'lucide-react';
 
 const COMMON_TIMEZONES = [
@@ -167,8 +168,18 @@ const FILTERS = [
 
 const columnHelper = createColumnHelper();
 
+/** Labels for the App-access dropdown. '' = no workspace_access row. */
+const ACCESS_OPTIONS = [
+  { value: '', label: 'No access' },
+  { value: 'viewer', label: 'Viewer' },
+  { value: 'reviewer', label: 'Reviewer' },
+  { value: 'admin', label: 'Admin' },
+];
+
 export default function MembersPanel() {
   const { currentWorkspace } = useWorkspace();
+  const { user } = useAuth();
+  const isGlobalAdmin = user?.role === 'admin';
   const [members, setMembers] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -180,6 +191,12 @@ export default function MembersPanel() {
   const [filter, setFilter] = useState('active');
   const [searchQ, setSearchQ] = useState('');
   const [sorting, setSorting] = useState([{ id: 'name', desc: false }]);
+  // App-access map (QA 08-19 #1): lowercased email → 'viewer'|'reviewer'|'admin'.
+  // null = not loaded / not permitted → the column stays hidden.
+  const [accessByEmail, setAccessByEmail] = useState(null);
+  const [accessBusyEmail, setAccessBusyEmail] = useState(null);
+
+  const wsId = currentWorkspace?.id;
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
@@ -193,7 +210,24 @@ export default function MembersPanel() {
     }
   }, []);
 
+  // Access roles load separately and best-effort: a 403 (not an admin of this
+  // workspace) simply hides the App access column instead of erroring the panel.
+  const loadAccess = useCallback(async () => {
+    if (!wsId) return;
+    try {
+      const res = await workspaceAPI.getMembers(wsId);
+      const map = {};
+      for (const m of res?.data || []) {
+        if (m.email && m.accessRole) map[String(m.email).toLowerCase()] = m.accessRole;
+      }
+      setAccessByEmail(map);
+    } catch {
+      setAccessByEmail(null);
+    }
+  }, [wsId]);
+
   useEffect(() => { load(); }, [load, currentWorkspace?.id]);
+  useEffect(() => { loadAccess(); }, [loadAccess]);
 
   const flash = (msg) => { setSuccessMsg(msg); setTimeout(() => setSuccessMsg(null), 4000); };
 
@@ -247,6 +281,43 @@ export default function MembersPanel() {
     } catch (err) { setError(err.message || 'Failed to change status'); }
     finally { setTogglingId(null); }
   }, [load]);
+
+  // App-access change (QA 08-19 #1): optimistic dropdown write-through to the
+  // hardened grant/revoke routes, rolled back on error.
+  const changeAccess = useCallback(async (t, newRole) => {
+    const email = String(t.email || '').toLowerCase();
+    if (!email || !wsId) return;
+    const prev = accessByEmail?.[email] || '';
+    if (prev === newRole) return;
+    setAccessBusyEmail(email);
+    setError(null);
+    setAccessByEmail((m) => {
+      const next = { ...(m || {}) };
+      if (newRole) next[email] = newRole;
+      else delete next[email];
+      return next;
+    });
+    try {
+      if (newRole) {
+        await workspaceAPI.grantAccess(wsId, email, newRole);
+        flash(`${t.name} can now sign in as ${newRole} — it applies on their next page load.`);
+      } else {
+        await workspaceAPI.revokeAccess(wsId, email);
+        flash(`App access removed for ${t.name}.`);
+      }
+    } catch (err) {
+      // Roll the optimistic update back and surface the refusal.
+      setAccessByEmail((m) => {
+        const next = { ...(m || {}) };
+        if (prev) next[email] = prev;
+        else delete next[email];
+        return next;
+      });
+      setError(err.response?.data?.message || err.message || 'Failed to change app access');
+    } finally {
+      setAccessBusyEmail(null);
+    }
+  }, [wsId, accessByEmail]);
 
   // AI routing guidance (QA 07-14): a standing instruction the assignment AI
   // reads whenever this person is a candidate — e.g. reduced capacity.
@@ -325,7 +396,49 @@ export default function MembersPanel() {
         </span>
       )),
     }),
-  ], []);
+    // App access column (QA 08-19 #1) — only when the caller could load the
+    // access map (workspace admin+). Sortable like the rest (alphabetical on
+    // the role label, no-access rows group together).
+    ...(accessByEmail ? [columnHelper.accessor((t) => accessByEmail[String(t.email || '').toLowerCase()] || '', {
+      id: 'access',
+      header: 'App access',
+      cell: ({ row }) => {
+        const t = row.original;
+        const email = String(t.email || '').toLowerCase();
+        if (!email) return <span className="text-xs text-slate-300" title="No email — app access is keyed by email">—</span>;
+        const value = accessByEmail[email] || '';
+        const busy = accessBusyEmail === email;
+        // Ceiling: a workspace admin cannot touch an existing admin's grant.
+        const lockedAdminRow = value === 'admin' && !isGlobalAdmin;
+        return (
+          <div className="inline-flex items-center gap-1.5">
+            <select
+              value={value}
+              onChange={(e) => changeAccess(t, e.target.value)}
+              disabled={busy || lockedAdminRow}
+              aria-label={`App access for ${t.name}`}
+              title={lockedAdminRow ? 'Global admin only' : 'App access role for this person'}
+              className={`px-2 py-1 rounded-lg border text-xs bg-white tp-focus-ring disabled:opacity-60 ${
+                value ? 'border-blue-200 text-blue-700 font-medium' : 'border-slate-200 text-slate-500'
+              }`}
+            >
+              {ACCESS_OPTIONS.map((o) => (
+                <option
+                  key={o.value || 'none'}
+                  value={o.value}
+                  disabled={o.value === 'admin' && !isGlobalAdmin}
+                  title={o.value === 'admin' && !isGlobalAdmin ? 'Global admin only' : undefined}
+                >
+                  {o.label}{o.value === 'admin' && !isGlobalAdmin ? ' (global admin only)' : ''}
+                </option>
+              ))}
+            </select>
+            {busy && <Loader className="w-3.5 h-3.5 text-blue-500 animate-spin" aria-hidden="true" />}
+          </div>
+        );
+      },
+    })] : []),
+  ], [accessByEmail, accessBusyEmail, isGlobalAdmin, changeAccess]);
 
   const table = useReactTable({
     data: rows,
@@ -354,6 +467,19 @@ export default function MembersPanel() {
           </p>
         </div>
       </div>
+
+      {/* What "App access" means + cross-link to the full-list surface (AC3/AC4) */}
+      {accessByEmail && (
+        <p className="flex items-start gap-1.5 text-xs text-slate-500 max-w-3xl">
+          <KeyRound className="w-3.5 h-3.5 mt-0.5 text-slate-400 shrink-0" aria-hidden="true" />
+          <span>
+            <strong className="font-semibold text-slate-600">App access</strong> lets this person open dashboards
+            and settings per their role — technicians without access can still sign in and use the ticket queue.
+            The full access list, including non-technician users, is in{' '}
+            <a href="#workspace-access" className="text-blue-600 hover:text-blue-800 underline underline-offset-2 tp-focus-ring rounded">Workspace access</a>.
+          </span>
+        </p>
+      )}
 
       {/* Alerts */}
       {error && (

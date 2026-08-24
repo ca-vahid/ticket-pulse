@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { workspaceAPI } from '../../services/api';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
+import { useAuth } from '../../contexts/AuthContext';
 import { Users, Loader, Plus, Trash2, AlertTriangle, ShieldCheck, Eye, Search, Check, Pencil } from 'lucide-react';
 
 const ROLE_OPTIONS = [
@@ -8,6 +9,28 @@ const ROLE_OPTIONS = [
   { value: 'reviewer', label: 'Reviewer' },
   { value: 'admin', label: 'Admin' },
 ];
+
+/**
+ * Role dropdown with the admin ceiling applied (Mega 08-23 AC1): only global
+ * admins may hand out the admin role — for workspace admins the option is
+ * visible but disabled with a hint, matching the server-side rule.
+ */
+function RoleSelect({ value, onChange, isGlobalAdmin, className }) {
+  return (
+    <select value={value} onChange={onChange} className={className}>
+      {ROLE_OPTIONS.map(r => (
+        <option
+          key={r.value}
+          value={r.value}
+          disabled={r.value === 'admin' && !isGlobalAdmin}
+          title={r.value === 'admin' && !isGlobalAdmin ? 'Global admin only' : undefined}
+        >
+          {r.label}{r.value === 'admin' && !isGlobalAdmin ? ' (global admin only)' : ''}
+        </option>
+      ))}
+    </select>
+  );
+}
 
 function UserSearchInput({ value, onChange, onSelect }) {
   const [query, setQuery] = useState(value);
@@ -112,6 +135,8 @@ function UserSearchInput({ value, onChange, onSelect }) {
 
 export default function WorkspaceAccessPanel() {
   const { currentWorkspace } = useWorkspace();
+  const { user } = useAuth();
+  const isGlobalAdmin = user?.role === 'admin';
   const [accessList, setAccessList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -202,7 +227,9 @@ export default function WorkspaceAccessPanel() {
             Workspace Access — {currentWorkspace?.name || 'Unknown'}
           </h3>
           <p className="text-sm text-gray-500">
-            Control who can access this workspace and their permission level.
+            Control who can access this workspace and their permission level — including people who are not
+            technicians. You can also manage per-member access from the{' '}
+            <a href="#agents" className="text-indigo-600 hover:text-indigo-800 underline underline-offset-2">Members</a> panel.
           </p>
         </div>
         <div className="ml-auto text-xs text-gray-500">
@@ -226,15 +253,12 @@ export default function WorkspaceAccessPanel() {
         />
         <div className="w-32">
           <label className="block text-xs font-medium text-gray-600 mb-1">Role</label>
-          <select
+          <RoleSelect
             value={newRole}
             onChange={(e) => setNewRole(e.target.value)}
+            isGlobalAdmin={isGlobalAdmin}
             className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-400"
-          >
-            {ROLE_OPTIONS.map(r => (
-              <option key={r.value} value={r.value}>{r.label}</option>
-            ))}
-          </select>
+          />
         </div>
         <button
           type="submit"
@@ -273,15 +297,12 @@ export default function WorkspaceAccessPanel() {
                   <td className="px-4 py-2.5 font-medium text-gray-900">{item.email}</td>
                   <td className="px-4 py-2.5 text-center">
                     {editingEmail === item.email ? (
-                      <select
+                      <RoleSelect
                         value={editRole}
                         onChange={(e) => setEditRole(e.target.value)}
+                        isGlobalAdmin={isGlobalAdmin}
                         className="px-2 py-0.5 text-xs border border-indigo-300 rounded focus:outline-none focus:ring-1 focus:ring-indigo-400"
-                      >
-                        {ROLE_OPTIONS.map(r => (
-                          <option key={r.value} value={r.value}>{r.label}</option>
-                        ))}
-                      </select>
+                      />
                     ) : item.role === 'admin' ? (
                       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium bg-amber-100 text-amber-700 border border-amber-300 rounded">
                         <ShieldCheck className="w-3 h-3" /> Admin
@@ -320,18 +341,20 @@ export default function WorkspaceAccessPanel() {
                       </div>
                     ) : (
                       <div className="flex items-center justify-center gap-1">
+                        {/* Ceiling (AC1): only global admins can change or revoke an admin grant */}
                         <button
                           onClick={() => handleStartEdit(item)}
-                          className="p-1 text-gray-400 hover:text-indigo-500 rounded"
-                          title="Edit role"
+                          disabled={item.role === 'admin' && !isGlobalAdmin}
+                          className="p-1 text-gray-400 hover:text-indigo-500 disabled:opacity-40 disabled:hover:text-gray-400 rounded"
+                          title={item.role === 'admin' && !isGlobalAdmin ? 'Global admin only' : 'Edit role'}
                         >
                           <Pencil className="w-3.5 h-3.5" />
                         </button>
                         <button
                           onClick={() => handleRevoke(item.email)}
-                          disabled={revoking === item.email}
-                          className="p-1 text-gray-400 hover:text-red-500 disabled:opacity-50 rounded"
-                          title={`Remove ${item.email}`}
+                          disabled={revoking === item.email || (item.role === 'admin' && !isGlobalAdmin)}
+                          className="p-1 text-gray-400 hover:text-red-500 disabled:opacity-40 disabled:hover:text-gray-400 rounded"
+                          title={item.role === 'admin' && !isGlobalAdmin ? 'Global admin only' : `Remove ${item.email}`}
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
