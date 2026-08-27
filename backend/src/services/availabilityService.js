@@ -432,23 +432,42 @@ class AvailabilityService {
   }
 
   /**
-   * Load common Canadian holidays
+   * The Canadian statutory calendar for one year (Phase HD, QA 08-25 #3).
+   * Every date is a UTC-midnight instant (`Date.UTC`) — the `holidays.date`
+   * column is a PostgreSQL DATE that Prisma represents as UTC midnight, so
+   * a server-local `new Date(y, m, d)` on a non-UTC box drifted a day.
+   * Floating rules: Family Day = 3rd Mon Feb (BC/ON/AB/SK), Victoria Day =
+   * Mon before May 25, Civic = 1st Mon Aug (BC Day is the same date),
+   * Labour Day = 1st Mon Sep, Thanksgiving = 2nd Mon Oct.
    */
-  async loadCanadianHolidays(year = new Date().getFullYear(), workspaceId = null) {
-    const holidays = [
-      { name: 'New Year\'s Day', date: new Date(year, 0, 1), isRecurring: true, country: 'CA' },
+  canadianHolidaysForYear(year) {
+    return [
+      { name: 'New Year\'s Day', date: utcDate(year, 0, 1), isRecurring: true, country: 'CA' },
       { name: 'Family Day', date: this.getNthDayOfMonth(year, 1, 1, 3), isRecurring: false, country: 'CA' },
       { name: 'Good Friday', date: this.getGoodFriday(year), isRecurring: false, country: 'CA' },
       { name: 'Victoria Day', date: this.getVictoriaDay(year), isRecurring: false, country: 'CA' },
-      { name: 'Canada Day', date: new Date(year, 6, 1), isRecurring: true, country: 'CA' },
+      { name: 'Canada Day', date: utcDate(year, 6, 1), isRecurring: true, country: 'CA' },
       { name: 'Civic Holiday', date: this.getNthDayOfMonth(year, 7, 1, 1), isRecurring: false, country: 'CA' },
       { name: 'Labour Day', date: this.getNthDayOfMonth(year, 8, 1, 1), isRecurring: false, country: 'CA' },
-      { name: 'Truth and Reconciliation', date: new Date(year, 8, 30), isRecurring: true, country: 'CA' },
+      { name: 'Truth and Reconciliation', date: utcDate(year, 8, 30), isRecurring: true, country: 'CA' },
       { name: 'Thanksgiving', date: this.getNthDayOfMonth(year, 9, 1, 2), isRecurring: false, country: 'CA' },
-      { name: 'Remembrance Day', date: new Date(year, 10, 11), isRecurring: true, country: 'CA' },
-      { name: 'Christmas Day', date: new Date(year, 11, 25), isRecurring: true, country: 'CA' },
-      { name: 'Boxing Day', date: new Date(year, 11, 26), isRecurring: true, country: 'CA' },
+      { name: 'Remembrance Day', date: utcDate(year, 10, 11), isRecurring: true, country: 'CA' },
+      { name: 'Christmas Day', date: utcDate(year, 11, 25), isRecurring: true, country: 'CA' },
+      { name: 'Boxing Day', date: utcDate(year, 11, 26), isRecurring: true, country: 'CA' },
     ];
+  }
+
+  /**
+   * Load common Canadian holidays for ONE year. Idempotent: an exact
+   * (name, date) match in scope is skipped, and a RECURRING holiday that
+   * already exists under the same name (any year) is skipped too — a
+   * recurring row matches on month-day, so a second "Canada Day" row would
+   * only clutter the settings list. Returns counts so callers (route, UI
+   * toast, auto-load) can report honestly.
+   * @returns {Promise<{year:number, created:number, skipped:number, createdNames:string[]}>}
+   */
+  async loadCanadianHolidays(year = new Date().getUTCFullYear(), workspaceId = null) {
+    const holidays = this.canadianHolidaysForYear(year);
 
     const dedupScope = workspaceId !== null
       ? {
@@ -459,42 +478,69 @@ class AvailabilityService {
       }
       : {};
 
+    let created = 0;
+    let skipped = 0;
+    const createdNames = [];
     for (const holiday of holidays) {
       const existing = await prisma.holiday.findFirst({
         where: {
           name: holiday.name,
-          date: holiday.date,
+          ...(holiday.isRecurring ? { isRecurring: true } : { date: holiday.date }),
           ...dedupScope,
         },
       });
 
-      if (!existing) {
+      if (existing) {
+        skipped += 1;
+      } else {
         await this.addHoliday(holiday, workspaceId);
+        created += 1;
+        createdNames.push(holiday.name);
       }
     }
 
-    logger.info(`Loaded Canadian holidays for ${year}`, { workspaceId });
+    logger.info(`Loaded Canadian holidays for ${year}: ${created} created, ${skipped} already present`, { workspaceId });
+    return { year, created, skipped, createdNames };
   }
 
   /**
-   * Helper: Get nth occurrence of a day in a month
+   * Multi-year variant (default: this year + next) used by the route and the
+   * yearly auto-load. Years are deduped, sorted and capped to a sane window.
+   * @returns {Promise<{years:number[], created:number, skipped:number, perYear:Array}>}
+   */
+  async loadCanadianHolidaysForYears(years = null, workspaceId = null) {
+    const targetYears = normalizeHolidayYears(years);
+    const perYear = [];
+    let created = 0;
+    let skipped = 0;
+    for (const year of targetYears) {
+      const result = await this.loadCanadianHolidays(year, workspaceId);
+      perYear.push(result);
+      created += result.created;
+      skipped += result.skipped;
+    }
+    return { years: targetYears, created, skipped, perYear };
+  }
+
+  /**
+   * Helper: Get nth occurrence of a day in a month (UTC calendar)
    * @param {number} year
    * @param {number} month - 0-indexed
    * @param {number} dayOfWeek - 0=Sunday
    * @param {number} occurrence - 1st, 2nd, etc.
    */
   getNthDayOfMonth(year, month, dayOfWeek, occurrence) {
-    const date = new Date(year, month, 1);
+    const date = utcDate(year, month, 1);
     let count = 0;
 
-    while (date.getMonth() === month) {
-      if (date.getDay() === dayOfWeek) {
+    while (date.getUTCMonth() === month) {
+      if (date.getUTCDay() === dayOfWeek) {
         count++;
         if (count === occurrence) {
           return new Date(date);
         }
       }
-      date.setDate(date.getDate() + 1);
+      date.setUTCDate(date.getUTCDate() + 1);
     }
 
     return null;
@@ -519,20 +565,46 @@ class AvailabilityService {
     const m = Math.floor((a + 11 * h + 22 * l) / 451);
     const month = Math.floor((h + l - 7 * m + 114) / 31) - 1;
     const day = ((h + l - 7 * m + 114) % 31) + 1;
-    const easter = new Date(year, month, day);
-    easter.setDate(easter.getDate() - 2);
+    const easter = utcDate(year, month, day);
+    easter.setUTCDate(easter.getUTCDate() - 2);
     return easter;
   }
 
   /**
-   * Victoria Day: Monday before May 25.
+   * Victoria Day: Monday before May 25 (UTC calendar).
    */
   getVictoriaDay(year) {
-    const may25 = new Date(year, 4, 25);
-    const dayOfWeek = may25.getDay();
+    const may25 = utcDate(year, 4, 25);
+    const dayOfWeek = may25.getUTCDay();
     const daysBack = dayOfWeek === 0 ? 6 : (dayOfWeek === 1 ? 7 : dayOfWeek - 1);
-    return new Date(year, 4, 25 - daysBack);
+    return utcDate(year, 4, 25 - daysBack);
   }
+}
+
+/** UTC-midnight instant for a calendar date — timezone-independent. */
+function utcDate(year, month, day) {
+  return new Date(Date.UTC(year, month, day));
+}
+
+export const MAX_HOLIDAY_LOAD_YEARS = 5;
+
+/**
+ * Accepts a number, an array of numbers/strings, or nothing → sorted unique
+ * integer years within 2000-2100, capped at MAX_HOLIDAY_LOAD_YEARS. Nothing
+ * valid → [thisYear, thisYear + 1] (the "keep next year ready" default that
+ * Phase HD introduced so Labour Day never goes missing again).
+ */
+export function normalizeHolidayYears(input) {
+  const thisYear = new Date().getUTCFullYear();
+  const raw = input === null || input === undefined
+    ? []
+    : (Array.isArray(input) ? input : [input]);
+  const years = [...new Set(raw
+    .map((value) => Number.parseInt(value, 10))
+    .filter((year) => Number.isInteger(year) && year >= 2000 && year <= 2100))]
+    .sort((a, b) => a - b)
+    .slice(0, MAX_HOLIDAY_LOAD_YEARS);
+  return years.length > 0 ? years : [thisYear, thisYear + 1];
 }
 
 export default new AvailabilityService();

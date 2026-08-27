@@ -182,6 +182,23 @@ export const METRICS_GLOSSARY = {
     label: 'App-assigned',
     definition: 'Range tickets assigned by Ticket Pulse’s automation (the app service account) — the AI routing pipeline.',
   },
+  // QA 08-25 #2: the two actor-less buckets. Structural, not a cutoff —
+  // never "pre-dates X" framing, and never a person metric.
+  agentWorkflowAssigned: {
+    label: 'Assigned at creation / workflow',
+    definition: 'Range tickets that landed on this technician with no recorded assigning person: FreshService set the owner when the ticket was created (a workflow, automator rule, email rule or API call). The activity history was synced and simply contains no "assigned" event.',
+    caveats: 'Unattributed volume, not a behaviour signal — excluded from self-pick and coordinator reads.',
+  },
+  agentSourceUnavailable: {
+    label: 'Source unavailable',
+    definition: 'Range tickets assigned to this technician whose FreshService activity history has not been synced yet, or whose last activity sync failed — so nobody can say who assigned them. Self-heals as the activity sync catches up.',
+    caveats: 'Not a technician data-quality failure — a sync coverage gap. Excluded from self-pick and coordinator reads.',
+  },
+  assignmentMixUnknown: {
+    label: 'Unattributed assignments',
+    definition: 'Assigned tickets with no recorded assigning person. Most are "assigned at creation / workflow": FreshService set the owner as the ticket was created (workflow, automator, email rule or API responder), so no "assigned" activity exists. The rest are "source unavailable": the activity history was never synced or the sync failed, or the actor is one FreshService no longer returns.',
+    caveats: 'Neither bucket reflects a technician’s behaviour. Both are excluded from self-pick and coordinator shares; treat them as unattributed volume.',
+  },
   agentClosed: {
     label: 'Closed',
     definition: 'This technician’s range-assigned tickets that are now closed or resolved.',

@@ -94,38 +94,101 @@ const US_HOLIDAYS = {
 };
 
 // ---------------------------------------------------------------------------
-// Dynamic holiday registry — populated at runtime from the backend API.
-// Entries are keyed by 'YYYY-MM-DD' → holiday name string.
-// These are merged with the hardcoded lists when getHolidayInfo is called.
+// Dynamic holiday registry — populated at runtime from the backend API
+// (the `holidays` table — the SAME calendar the auto-responder and the SLA
+// clocks use). Since Phase HD (QA 08-25 #3) the DB feed WINS: for any
+// country+year the feed covers, the hardcoded tables above are ignored, so
+// a holiday deleted/renamed in Settings is deleted/renamed on the dashboard
+// too. The hardcoded tables remain an offline fallback for years the feed
+// does not cover (feed unavailable, or e.g. 2027 not loaded yet).
+//   _dynamicByDate   'YYYY-MM-DD' → { name, country }   (exact-date rows)
+//   _dynamicByMonthDay 'MM-DD'    → { name, country }   (recurring rows)
+//   _dynamicCoverage  'CA'|'US'   → Set<year>            (feed covers this year)
 // ---------------------------------------------------------------------------
-const _dynamicHolidays = {};
+const _dynamicByDate = {};
+const _dynamicByMonthDay = {};
+const _dynamicCoverage = { CA: new Set(), US: new Set() };
+
+const clearObject = (obj) => {
+  for (const key of Object.keys(obj)) delete obj[key];
+};
+
+/**
+ * Normalize an API/DB date value to its calendar key 'YYYY-MM-DD'. The
+ * column is a DATE serialized as UTC midnight ("2026-09-07T00:00:00.000Z"),
+ * so the calendar date is the ISO prefix — NEVER local getters, which roll
+ * back a day west of UTC (the "Labour Day 8/31" bug).
+ * @param {Date|string} value
+ * @returns {string} 'YYYY-MM-DD' or '' when unparseable
+ */
+export const toCalendarDateKey = (value) => {
+  if (typeof value === 'string') {
+    const key = value.substring(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(key) ? key : '';
+  }
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().substring(0, 10);
+  }
+  return '';
+};
+
+/**
+ * Human-readable calendar date for a holiday row, UTC-safe. Parses the
+ * calendar key at LOCAL noon so no timezone can shift the day.
+ * @param {Date|string} value
+ * @param {string|string[]} [locale]
+ * @param {Intl.DateTimeFormatOptions} [options]
+ * @returns {string}
+ */
+export const formatHolidayDate = (value, locale = undefined, options = undefined) => {
+  const key = toCalendarDateKey(value);
+  if (!key) return value ? String(value) : '';
+  return new Date(`${key}T12:00:00`).toLocaleDateString(locale, options);
+};
 
 /**
  * Register holidays fetched from the backend (holidays DB table).
  * Call once after fetching GET /api/autoresponse/holidays.
- * @param {Array<{name: string, date: string}>} holidays - from API
+ * @param {Array<{name: string, date: string, country?: string|null, isRecurring?: boolean, isEnabled?: boolean}>} holidays - from API
  */
 export const registerDynamicHolidays = (holidays) => {
-  // Clear existing dynamic entries
-  for (const key of Object.keys(_dynamicHolidays)) {
-    delete _dynamicHolidays[key];
-  }
+  clearObject(_dynamicByDate);
+  clearObject(_dynamicByMonthDay);
+  _dynamicCoverage.CA.clear();
+  _dynamicCoverage.US.clear();
   if (!Array.isArray(holidays)) return;
   for (const h of holidays) {
-    if (!h.date || !h.name) continue;
-    const dateKey = typeof h.date === 'string' ? h.date.substring(0, 10) : '';
-    if (dateKey) _dynamicHolidays[dateKey] = h.name;
+    if (!h || !h.date || !h.name) continue;
+    if (h.isEnabled === false) continue;
+    const dateKey = toCalendarDateKey(h.date);
+    if (!dateKey) continue;
+    const country = typeof h.country === 'string' && h.country.trim() ? h.country.trim().toUpperCase() : null;
+    const entry = { name: h.name, country };
+    if (h.isRecurring) {
+      _dynamicByMonthDay[dateKey.substring(5)] = entry;
+    } else {
+      _dynamicByDate[dateKey] = entry;
+      // Only exact-date rows prove a year is covered (recurring rows carry
+      // the year they were first loaded, not the years they apply to).
+      if (country && _dynamicCoverage[country]) {
+        _dynamicCoverage[country].add(parseInt(dateKey.substring(0, 4), 10));
+      }
+    }
   }
 };
 
 /**
- * Get a dynamic (DB-sourced) holiday name for a date.
- * @returns {string|null}
+ * Get the dynamic (DB-sourced) holiday for a date — exact date first, then
+ * a recurring month-day match.
+ * @returns {{name: string, country: string|null}|null}
  */
 const getDynamicHoliday = (date) => {
   const dateKey = formatDateToKey(date);
-  return _dynamicHolidays[dateKey] || null;
+  return _dynamicByDate[dateKey] || _dynamicByMonthDay[dateKey.substring(5)] || null;
 };
+
+/** True when the DB feed has exact-date rows for this country+year. */
+const hasDynamicCoverage = (country, year) => _dynamicCoverage[country]?.has(year) === true;
 
 /**
  * Format a Date object to YYYY-MM-DD string
@@ -162,6 +225,11 @@ export const isWeekend = (date) => {
 export const getCanadianHoliday = (date) => {
   const dateKey = formatDateToKey(date);
   const year = parseInt(dateKey.substring(0, 4), 10);
+  // DB feed wins (Phase HD5): a CA row names the day; a covered year with
+  // no row means "not a holiday" even if the hardcoded table says so.
+  const dynamic = getDynamicHoliday(date);
+  if (dynamic?.country === 'CA') return dynamic.name;
+  if (hasDynamicCoverage('CA', year)) return null;
   const yearHolidays = CANADIAN_HOLIDAYS[year];
   if (!yearHolidays) return null;
   return yearHolidays[dateKey] || null;
@@ -175,6 +243,9 @@ export const getCanadianHoliday = (date) => {
 export const getUSHoliday = (date) => {
   const dateKey = formatDateToKey(date);
   const year = parseInt(dateKey.substring(0, 4), 10);
+  const dynamic = getDynamicHoliday(date);
+  if (dynamic?.country === 'US') return dynamic.name;
+  if (hasDynamicCoverage('US', year)) return null;
   const yearHolidays = US_HOLIDAYS[year];
   if (!yearHolidays) return null;
   return yearHolidays[dateKey] || null;
@@ -188,8 +259,11 @@ export const getUSHoliday = (date) => {
 export const getHolidayInfo = (date) => {
   const canadianName = getCanadianHoliday(date);
   const usName = getUSHoliday(date);
-  const dynamicName = getDynamicHoliday(date);
-  
+  // Rows without a country (custom "Add Holiday" entries) stay the generic
+  // violet "📅" kind; CA/US rows already surfaced through the two getters.
+  const dynamic = getDynamicHoliday(date);
+  const dynamicName = dynamic?.name || null;
+
   return {
     isCanadian: !!canadianName,
     isUS: !!usName,

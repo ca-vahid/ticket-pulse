@@ -378,6 +378,30 @@ export function timeAgo(value) {
 }
 
 /**
+ * Relative-only sibling of timeAgo: keeps counting past the 7-day mark
+ * ("9d ago", "3w ago", "5mo ago", "2y ago") instead of falling back to a
+ * date. For surfaces that already show the absolute date on another line —
+ * the queue's Created column paired this with a date-only primary and, once
+ * a ticket was a week old, both lines read "Aug 17" (QA 08-24 #2).
+ */
+export function timeAgoShort(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  const seconds = Math.round((Date.now() - date.getTime()) / 1000);
+  if (Number.isNaN(seconds)) return '—';
+  if (seconds < 45) return 'just now';
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  if (days < 30) return `${Math.floor(days / 7)}w ago`;
+  if (days < 365) return `${Math.max(1, Math.floor(days / 30))}mo ago`;
+  return `${Math.floor(days / 365)}y ago`;
+}
+
+/**
  * "Jul 27, 3:42 PM" — with the year spelled out ("Jul 27, 2025, 3:42 PM")
  * whenever the date isn't in the current year (QA 08-04 #17a: a year-less
  * "Jul 27" on an old ticket read as this year). Same rule timeAgo uses.

@@ -3,7 +3,7 @@ import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, test } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import {
-  AgentFirstName, ExternalChip, FeaturedFieldChip, MirrorChip, OriginChip, PersonAvatar, PriorityDot, SlaChip, SlaTargetChip, StatusPill, formatDay, formatDayTime, initials, slaTargetState, timeAgo,
+  AgentFirstName, ExternalChip, FeaturedFieldChip, MirrorChip, OriginChip, PersonAvatar, PriorityDot, SlaChip, SlaTargetChip, StatusPill, formatDay, formatDayTime, initials, slaTargetState, timeAgo, timeAgoShort,
 } from './ticketUi';
 
 afterEach(cleanup);
@@ -14,6 +14,30 @@ describe('ticketUi helpers', () => {
     expect(timeAgo(new Date(Date.now() - 5 * 60 * 1000))).toBe('5m ago');
     expect(timeAgo(new Date(Date.now() - 3 * 3600 * 1000))).toBe('3h ago');
     expect(timeAgo(null)).toBe('—');
+  });
+
+  test('timeAgoShort keeps counting past 7 days instead of returning a date (QA 08-24 #2)', () => {
+    const ago = (ms) => new Date(Date.now() - ms);
+    const DAY = 24 * 3600 * 1000;
+    // Shares timeAgo's sub-week ladder…
+    expect(timeAgoShort(ago(10 * 1000))).toBe('just now');
+    expect(timeAgoShort(ago(5 * 60 * 1000))).toBe('5m ago');
+    expect(timeAgoShort(ago(3 * 3600 * 1000))).toBe('3h ago');
+    expect(timeAgoShort(ago(6 * DAY))).toBe('6d ago');
+    // …and at the 7-day boundary timeAgo becomes a DATE while timeAgoShort stays relative.
+    expect(timeAgo(ago(7 * DAY))).not.toMatch(/ago$/);
+    expect(timeAgoShort(ago(7 * DAY))).toBe('1w ago');
+    expect(timeAgoShort(ago(8 * DAY))).toBe('1w ago');
+    expect(timeAgoShort(ago(13 * DAY))).toBe('1w ago');
+    expect(timeAgoShort(ago(14 * DAY))).toBe('2w ago');
+    expect(timeAgoShort(ago(29 * DAY))).toBe('4w ago');
+    expect(timeAgoShort(ago(30 * DAY))).toBe('1mo ago');
+    expect(timeAgoShort(ago(150 * DAY))).toBe('5mo ago');
+    expect(timeAgoShort(ago(364 * DAY))).toBe('12mo ago');
+    expect(timeAgoShort(ago(365 * DAY))).toBe('1y ago');
+    expect(timeAgoShort(ago(2 * 365 * DAY + DAY))).toBe('2y ago');
+    expect(timeAgoShort(null)).toBe('—');
+    expect(timeAgoShort('not a date')).toBe('—');
   });
 
   test('formatDayTime/formatDay spell out the year only when the date is off-year (QA 08-04 #17a)', () => {

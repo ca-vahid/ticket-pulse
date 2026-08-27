@@ -3,76 +3,17 @@ import { useNavigate } from 'react-router-dom';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import { divIcon } from 'leaflet';
 import { visualsAPI } from '../services/api';
-import { ArrowLeft, Users, Crown, Activity, Loader, ChevronLeft, ChevronRight, Edit2, Check, X, Maximize } from 'lucide-react';
+import { ArrowLeft, Users, Crown, Activity, Loader, ChevronLeft, ChevronRight, Edit2, Check, X, Maximize, MapPinOff, AlertTriangle } from 'lucide-react';
+import {
+  MAP_DEFAULT_VIEW, PRESET_LOCATIONS, UNRESOLVED_LOCATION_HINT, resolveLocation,
+} from '../utils/officeLocations';
 import MobileTabBar from '../components/nav/MobileTabBar';
 import SideRail from '../components/nav/SideRail';
 import 'leaflet/dist/leaflet.css';
 
-// Office locations (lat/lng coordinates) — Canadian cities + major North American cities
-const OFFICE_LOCATIONS = {
-  // British Columbia
-  Vancouver: { lat: 49.2827, lng: -123.1207, zoom: 10 },
-  Victoria: { lat: 48.4284, lng: -123.3656, zoom: 10 },
-  Kamloops: { lat: 50.6745, lng: -120.3273, zoom: 10 },
-  Kelowna: { lat: 49.8880, lng: -119.4960, zoom: 10 },
-  'Prince George': { lat: 53.9171, lng: -122.7497, zoom: 10 },
-  Nanaimo: { lat: 49.1659, lng: -123.9401, zoom: 10 },
-  Burnaby: { lat: 49.2488, lng: -122.9805, zoom: 10 },
-  Surrey: { lat: 49.1913, lng: -122.8490, zoom: 10 },
-  Richmond: { lat: 49.1666, lng: -123.1336, zoom: 10 },
-  // Alberta
-  Calgary: { lat: 51.0447, lng: -114.0719, zoom: 10 },
-  Edmonton: { lat: 53.5461, lng: -113.4938, zoom: 10 },
-  'Red Deer': { lat: 52.2681, lng: -113.8112, zoom: 10 },
-  Lethbridge: { lat: 49.6942, lng: -112.8328, zoom: 10 },
-  // Saskatchewan & Manitoba
-  Saskatoon: { lat: 52.1332, lng: -106.6700, zoom: 10 },
-  Regina: { lat: 50.4452, lng: -104.6189, zoom: 10 },
-  Winnipeg: { lat: 49.8951, lng: -97.1384, zoom: 10 },
-  // Ontario
-  Toronto: { lat: 43.6532, lng: -79.3832, zoom: 10 },
-  Ottawa: { lat: 45.4215, lng: -75.6972, zoom: 10 },
-  Mississauga: { lat: 43.5890, lng: -79.6441, zoom: 10 },
-  Hamilton: { lat: 43.2557, lng: -79.8711, zoom: 10 },
-  London: { lat: 42.9849, lng: -81.2453, zoom: 10 },
-  Kitchener: { lat: 43.4516, lng: -80.4925, zoom: 10 },
-  Waterloo: { lat: 43.4643, lng: -80.5204, zoom: 10 },
-  'Thunder Bay': { lat: 48.3809, lng: -89.2477, zoom: 10 },
-  // Quebec
-  Montreal: { lat: 45.5017, lng: -73.5673, zoom: 10 },
-  'Quebec City': { lat: 46.8139, lng: -71.2080, zoom: 10 },
-  // Atlantic
-  Halifax: { lat: 44.6488, lng: -63.5752, zoom: 10 },
-  'St. John\'s': { lat: 47.5615, lng: -52.7126, zoom: 10 },
-  Fredericton: { lat: 45.9636, lng: -66.6431, zoom: 10 },
-  Moncton: { lat: 46.0878, lng: -64.7782, zoom: 10 },
-  Charlottetown: { lat: 46.2382, lng: -63.1311, zoom: 10 },
-  // Territories
-  Whitehorse: { lat: 60.7212, lng: -135.0568, zoom: 10 },
-  Yellowknife: { lat: 62.4540, lng: -114.3718, zoom: 10 },
-  // Default fallback
-  Default: { lat: 54.5, lng: -105.0, zoom: 4 },
-};
-
-// Normalize location string to match OFFICE_LOCATIONS keys (case-insensitive)
-function resolveLocation(locationStr) {
-  if (!locationStr) return OFFICE_LOCATIONS.Default;
-  const exact = OFFICE_LOCATIONS[locationStr];
-  if (exact) return exact;
-  const lower = locationStr.toLowerCase();
-  for (const [key, val] of Object.entries(OFFICE_LOCATIONS)) {
-    if (key.toLowerCase() === lower) return val;
-  }
-  return OFFICE_LOCATIONS.Default;
-}
-
-// Preset location options for the dropdown
-const PRESET_LOCATIONS = [
-  'Vancouver', 'Calgary', 'Edmonton', 'Ottawa', 'Toronto',
-  'Halifax', 'Kamloops', 'Kelowna', 'Montreal', 'Winnipeg',
-  'Victoria', 'Saskatoon', 'Regina',
-];
-
+// Office table + resolver live in utils/officeLocations.js (mirrored on the
+// backend so PATCH /visuals/agents/:id/location can say whether a value
+// resolves). MAP_DEFAULT_VIEW is a viewport only — never a pin (QA 08-24 #1).
 // Get initials from name (e.g., "Vahid Haeri" -> "VH")
 const getInitials = (name) => {
   const parts = name.split(' ').filter(p => p.length > 0);
@@ -174,8 +115,8 @@ function FitBounds({ bounds }) {
         }
       });
     } else {
-      // If no markers, show full Canada view
-      map.setView([54.5, -105.0], 4);
+      // Nothing resolvable: rest on the default viewport (a view, not a pin).
+      map.setView([MAP_DEFAULT_VIEW.lat, MAP_DEFAULT_VIEW.lng], MAP_DEFAULT_VIEW.zoom);
     }
   }, [JSON.stringify(bounds), map]);
   
@@ -193,6 +134,9 @@ export default function Visuals() {
   const [editingLocationId, setEditingLocationId] = useState(null);
   const [editingLocationValue, setEditingLocationValue] = useState('');
   const [isCustomLocation, setIsCustomLocation] = useState(false);
+  // Post-save feedback for the location editor: { agentId, resolved, text }.
+  // Shown inline under the agent's location line until the next edit.
+  const [locationNotice, setLocationNotice] = useState(null);
   const [radiusScale, setRadiusScale] = useState(1.0); // Manual radius multiplier
   const [bubbleScale, setBubbleScale] = useState(1.0); // Manual bubble size multiplier
 
@@ -289,31 +233,55 @@ export default function Visuals() {
   // Start editing location
   const startEditingLocation = (agentId, currentLocation) => {
     setEditingLocationId(agentId);
-    // Always start with dropdown (not custom mode)
-    setIsCustomLocation(false);
-    // If current location is in presets, select it; otherwise leave empty
-    const isPreset = PRESET_LOCATIONS.includes(currentLocation);
-    setEditingLocationValue(isPreset ? currentLocation : '');
+    setLocationNotice(null);
+    // A value that resolves to a preset city opens the dropdown on it
+    // ("Santiago, Chile" → Santiago); any other existing text opens the
+    // custom input prefilled so a typo can be corrected rather than retyped.
+    const hit = resolveLocation(currentLocation);
+    if (hit && hit.kind === 'city' && PRESET_LOCATIONS.includes(hit.key)) {
+      setIsCustomLocation(false);
+      setEditingLocationValue(hit.key);
+    } else if (currentLocation) {
+      setIsCustomLocation(true);
+      setEditingLocationValue(currentLocation);
+    } else {
+      setIsCustomLocation(false);
+      setEditingLocationValue('');
+    }
+  };
+
+  // Scroll the agent's card into view and open its editor (tray → card).
+  const editFromTray = (agent) => {
+    startEditingLocation(agent.id, agent.location);
+    requestAnimationFrame(() => {
+      document.getElementById(`visuals-agent-${agent.id}`)?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+    });
   };
 
   // Save location
   const saveLocation = async (agentId) => {
     try {
-      await visualsAPI.updateAgentLocation(agentId, editingLocationValue);
-      
-      // Update local state
-      setAgents(agents.map(agent => 
-        agent.id === agentId 
-          ? { ...agent, location: editingLocationValue }
+      const response = await visualsAPI.updateAgentLocation(agentId, editingLocationValue.trim());
+      const data = response?.data || {};
+      const savedLocation = data.location !== undefined ? data.location : (editingLocationValue.trim() || null);
+      const resolved = data.resolved !== undefined ? Boolean(data.resolved) : Boolean(resolveLocation(savedLocation));
+
+      setAgents(agents.map(agent =>
+        agent.id === agentId
+          ? { ...agent, location: savedLocation }
           : agent,
       ));
-      
+      setLocationNotice(savedLocation && !resolved
+        ? { agentId, resolved: false, text: UNRESOLVED_LOCATION_HINT }
+        : null);
+
       setEditingLocationId(null);
       setEditingLocationValue('');
       setIsCustomLocation(false);
     } catch (err) {
       console.error('Failed to update location:', err);
-      alert('Failed to update location');
+      const message = err?.response?.data?.message || 'Failed to update location';
+      setLocationNotice({ agentId, resolved: false, text: message });
     }
   };
 
@@ -325,21 +293,27 @@ export default function Visuals() {
   };
 
 
-  // Group agents by location
+  // Group selected agents by RESOLVED location. Agents whose location is
+  // unset or unrecognized go to `unplaced` (sidebar tray) — never a marker.
   const getAgentsByLocation = () => {
     const grouped = {};
-    
+    const unplaced = [];
+
     agents.forEach(agent => {
       if (!selectedAgents.has(agent.id)) return;
-      
-      const location = agent.location || 'Unknown';
-      if (!grouped[location]) {
-        grouped[location] = [];
+
+      const hit = resolveLocation(agent.location);
+      if (!hit) {
+        unplaced.push(agent);
+        return;
       }
-      grouped[location].push(agent);
+      if (!grouped[hit.key]) {
+        grouped[hit.key] = { coords: hit, agents: [] };
+      }
+      grouped[hit.key].agents.push(agent);
     });
-    
-    return grouped;
+
+    return { grouped, unplaced };
   };
 
   // Calculate positions for agents in a circle (for Vancouver clustering)
@@ -369,10 +343,9 @@ export default function Visuals() {
   // Get all markers for the map
   const getMarkers = () => {
     const markers = [];
-    const agentsByLocation = getAgentsByLocation();
-    
-    Object.entries(agentsByLocation).forEach(([location, locationAgents]) => {
-      const officeCoords = resolveLocation(location);
+    const { grouped } = getAgentsByLocation();
+
+    Object.values(grouped).forEach(({ coords: officeCoords, agents: locationAgents }) => {
       
       // Check if this location has the manager
       const managerInLocation = locationAgents.find(a => a.id === managerId);
@@ -415,6 +388,8 @@ export default function Visuals() {
   };
 
   const markers = getMarkers();
+  const unplacedAgents = getAgentsByLocation().unplaced
+    .sort((a, b) => a.name.localeCompare(b.name));
   
   // Calculate bounds for all markers
   const bounds = markers.length > 0
@@ -575,6 +550,50 @@ export default function Visuals() {
                     </div>
                   )}
 
+                  {/* Unplaced tray (QA 08-24 #1): selected agents with no
+                      or an unrecognized location. They used to get a fake
+                      pin at the Canada centroid; now they wait here with a
+                      direct path to the editor. */}
+                  {!sidebarCollapsed && unplacedAgents.length > 0 && (
+                    <section
+                      aria-label={`Location not set / unrecognized (${unplacedAgents.length})`}
+                      className="mb-4 rounded-lg border border-amber-200 bg-amber-50/70 p-2.5"
+                    >
+                      <h3 className="flex items-center gap-1.5 text-xs font-semibold text-amber-900">
+                        <MapPinOff className="h-3.5 w-3.5 shrink-0 text-amber-600" aria-hidden="true" />
+                        <span className="truncate">Location not set / unrecognized ({unplacedAgents.length})</span>
+                      </h3>
+                      <p className="mt-0.5 text-[11px] leading-snug text-amber-800/80">Not on the map until a known city or lat,lng is set.</p>
+                      <ul className="mt-2 space-y-1">
+                        {unplacedAgents.map((agent) => (
+                          <li key={agent.id} className="flex items-center gap-2 rounded-md bg-white/70 px-1.5 py-1">
+                            {agent.photoUrl ? (
+                              <img src={agent.photoUrl} alt="" className="h-6 w-6 shrink-0 rounded-full border border-gray-200 object-cover" />
+                            ) : (
+                              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-blue-600" aria-hidden="true">
+                                <span className="text-[9px] font-bold text-white">{getInitials(agent.name)}</span>
+                              </div>
+                            )}
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-xs font-medium text-gray-900">{agent.name}</p>
+                              <p className="truncate text-[11px] text-gray-500">
+                                {agent.location ? <>Unrecognized: <span className="text-gray-700">{agent.location}</span></> : 'Not set'}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => editFromTray(agent)}
+                              className="tp-focus-ring shrink-0 rounded-md border border-amber-300 bg-white px-2 py-0.5 text-[11px] font-medium text-amber-900 hover:bg-amber-100"
+                              aria-label={`Edit location for ${agent.name}`}
+                            >
+                              Edit location
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  )}
+
                   {/* Agent List */}
                   <div className={`${sidebarCollapsed ? 'flex gap-2 overflow-x-auto pb-1 lg:block lg:space-y-1 lg:overflow-visible lg:pb-0' : 'space-y-2'}`}>
                     {agents
@@ -639,6 +658,7 @@ export default function Visuals() {
                         return (
                           <div
                             key={agent.id}
+                            id={`visuals-agent-${agent.id}`}
                             className={`border rounded-lg p-2 transition-all ${
                               isSelected
                                 ? 'border-blue-300 bg-blue-50'
@@ -693,7 +713,8 @@ export default function Visuals() {
                                           type="text"
                                           value={editingLocationValue}
                                           onChange={(e) => setEditingLocationValue(e.target.value)}
-                                          placeholder="Enter custom location"
+                                          placeholder="City or lat,lng"
+                                          aria-label="Custom location (city name or lat,lng)"
                                           className="flex-1 px-2 py-1 text-xs border border-blue-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
                                           autoFocus
                                           onKeyDown={(e) => {
@@ -755,6 +776,21 @@ export default function Visuals() {
                                         </button>
                                       </div>
                                     )}
+                                    {isCustomLocation && (() => {
+                                      const value = editingLocationValue.trim();
+                                      if (!value) return null;
+                                      const hit = resolveLocation(value);
+                                      return hit ? (
+                                        <p className="text-[11px] text-emerald-700" role="status">
+                                          Pins at {hit.kind === 'coords' ? hit.key : `${hit.key} (${hit.lat}, ${hit.lng})`}
+                                        </p>
+                                      ) : (
+                                        <p className="flex items-start gap-1 text-[11px] text-amber-800" role="status">
+                                          <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
+                                          <span>{UNRESOLVED_LOCATION_HINT}</span>
+                                        </p>
+                                      );
+                                    })()}
                                   </div>
                                 ) : (
                                   <div className="flex items-center gap-1 mt-0.5">
@@ -765,10 +801,17 @@ export default function Visuals() {
                                       onClick={() => startEditingLocation(agent.id, agent.location)}
                                       className="p-0.5 hover:bg-gray-200 rounded"
                                       title="Edit location"
+                                      aria-label={`Edit location for ${agent.name}`}
                                     >
                                       <Edit2 className="w-3 h-3 text-gray-400" />
                                     </button>
                                   </div>
+                                )}
+                                {locationNotice && locationNotice.agentId === agent.id && editingLocationId !== agent.id && (
+                                  <p className="mt-1 flex items-start gap-1 rounded-md border border-amber-200 bg-amber-50 px-1.5 py-1 text-[11px] leading-snug text-amber-900" role="alert">
+                                    <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-amber-600" aria-hidden="true" />
+                                    <span>{locationNotice.text}</span>
+                                  </p>
                                 )}
 
                                 {/* Manager Checkbox */}
@@ -811,7 +854,7 @@ export default function Visuals() {
                   <p className="text-gray-600">{error}</p>
                 </div>
               </div>
-            ) : markers.length === 0 ? (
+            ) : selectedAgents.size === 0 ? (
               <div className="absolute inset-0 flex items-center justify-center bg-gray-50">
                 <div className="text-center">
                   <Users className="w-16 h-16 mx-auto mb-4 text-gray-400" />
@@ -822,8 +865,8 @@ export default function Visuals() {
             ) : (
               <MapContainer
                 key={mapKey}
-                center={[54.5, -105.0]}
-                zoom={4}
+                center={[MAP_DEFAULT_VIEW.lat, MAP_DEFAULT_VIEW.lng]}
+                zoom={MAP_DEFAULT_VIEW.zoom}
                 className="h-full min-h-[55vh] w-full lg:min-h-0"
                 scrollWheelZoom={true}
                 zoomSnap={0.1} // Allow finer zoom steps

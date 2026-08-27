@@ -207,6 +207,19 @@ async function initialize() {
     }
     logger.info('Availability and LLM configuration initialized for all active workspaces');
 
+    // Boot-time holiday backfill (Phase HD4): make sure this year + next have
+    // their Canadian floating holidays in every workspace with business
+    // hours, independent of the FS sync scheduler (dev boxes run with sync
+    // off). Off the critical path — a slow DB must not delay listen().
+    setImmediate(async () => {
+      try {
+        const { default: holidayAutoloadService } = await import('./services/holidayAutoloadService.js');
+        await holidayAutoloadService.ensureHolidaysLoaded({ reason: 'boot' });
+      } catch (error) {
+        logger.warn('Boot-time holiday auto-load failed (non-fatal):', error.message || error);
+      }
+    });
+
     // Seed default IT noise rules only; other workspaces intentionally start empty.
     try {
       await noiseRuleService.seedDefaults();

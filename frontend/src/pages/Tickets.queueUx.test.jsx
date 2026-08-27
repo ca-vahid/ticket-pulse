@@ -234,13 +234,32 @@ describe('Columns flyout (Phase QC — QC4)', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: 'Created column' }));
 
     // Template gains the createdAt track at the end of the chosen order.
-    await waitFor(() => expect(currentTemplate()).toBe(`${DEFAULT_COMPACT_TEMPLATE} 96px`));
+    await waitFor(() => expect(currentTemplate()).toBe(`${DEFAULT_COMPACT_TEMPLATE} 124px`));
     // The new column renders: header + a dated cell per row. (createdAt is the
     // default sort, so the header carries the ↓ indicator — query by title.)
     expect(screen.getByTitle('Sort by created date')).toBeInTheDocument();
     // Optimistic localStorage mirror, then the debounced server PUT.
     expect(JSON.parse(localStorage.getItem('tp_queue_columns'))).toEqual([...DEFAULT_COLUMN_KEYS, 'createdAt']);
     await waitFor(() => expect(setPrefSpy).toHaveBeenCalledWith('queue.columns', [...DEFAULT_COLUMN_KEYS, 'createdAt']), { timeout: 2500 });
+  });
+
+  test('Created cell: day+time primary and a still-relative secondary for a week-old ticket (QA 08-24 #2)', async () => {
+    // Regression: at ≥7 days timeAgo returned a DATE, so both lines read
+    // "Aug 17". The primary now carries the time and the secondary keeps
+    // counting ("1w ago").
+    const eightDaysAgo = new Date(Date.now() - 8 * 24 * 3600 * 1000);
+    eightDaysAgo.setSeconds(0, 0);
+    listSpy.mockResolvedValue({ data: { items: [{ ...row(1, 'Open'), createdAt: eightDaysAgo.toISOString() }], total: 1 } });
+    getPrefSpy.mockResolvedValue({ data: { key: 'queue.columns', value: [...DEFAULT_COLUMN_KEYS, 'createdAt'] } });
+    mount();
+    await waitFor(() => expect(screen.getAllByText('Row 1').length).toBeGreaterThan(0));
+    await waitFor(() => expect(currentTemplate()).toBe(`${DEFAULT_COMPACT_TEMPLATE} 124px`));
+
+    const cell = await screen.findByTitle(eightDaysAgo.toLocaleString());
+    const [primary, secondary] = Array.from(cell.querySelectorAll('span')).map((el) => el.textContent);
+    expect(primary).toMatch(/\d{1,2}:\d{2}/); // "Aug 18, 9:14 AM" — a time, not a bare date
+    expect(secondary).toBe('1w ago');
+    expect(primary).not.toBe(secondary);
   });
 
   test('toggling a column off removes its track; mandatory columns are locked "Always shown"', async () => {
@@ -314,7 +333,7 @@ describe('Column preference round-trip (Phase QC — QC1/QC4)', () => {
     mount();
     await waitFor(() => expect(screen.getAllByText('Row 1').length).toBeGreaterThan(0));
 
-    await waitFor(() => expect(currentTemplate()).toBe(`${DEFAULT_COMPACT_TEMPLATE} 96px 96px`));
+    await waitFor(() => expect(currentTemplate()).toBe(`${DEFAULT_COMPACT_TEMPLATE} 124px 96px`));
     expect(screen.getByRole('button', { name: /^Source$/ })).toBeInTheDocument();
     // The mirror is refreshed to the server truth for the next first paint.
     expect(JSON.parse(localStorage.getItem('tp_queue_columns'))).toEqual([...DEFAULT_COLUMN_KEYS, 'createdAt', 'source']);

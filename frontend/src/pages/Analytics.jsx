@@ -75,30 +75,47 @@ const HEADER_SELECT_CLASS = 'h-10 w-full min-w-0 rounded-xl border border-slate-
 const HEADER_FILTER_CONTROL_CLASS = '[&>button]:h-10 [&>button]:rounded-xl [&>button]:px-3 [&>button]:shadow-sm';
 const HEADER_LEGACY_FILTER_CONTROL_CLASS = '[&>div>button]:h-10 [&>div>button]:rounded-xl [&>div>button]:px-3 [&>div>button]:text-sm [&>div>button]:shadow-sm';
 
+// One palette for every assignment-source surface (Overview mix, Team Balance
+// stacked bars, table legend). The two actor-less buckets stay muted — they
+// are unattributed volume, never a person metric (QA 08-25 #2).
+export const ASSIGNMENT_SOURCE_COLORS = {
+  selfPicked: '#f59e0b',
+  coordinatorAssigned: '#059669',
+  appAssigned: '#2563eb',
+  workflowAssigned: '#7c93c4',
+  unknown: '#94a3b8',
+};
+
 const ASSIGNMENT_MIX_LABELS = {
   appAssigned: {
     label: 'Assigned by Ticket Pulse',
     shortLabel: 'Ticket Pulse',
     description: 'Assigned by the app service account.',
-    color: '#2563eb',
+    color: ASSIGNMENT_SOURCE_COLORS.appAssigned,
   },
   coordinatorAssigned: {
     label: 'Assigned by coordinator',
     shortLabel: 'Coordinator',
     description: 'Assigned by a person other than the technician.',
-    color: '#059669',
+    color: ASSIGNMENT_SOURCE_COLORS.coordinatorAssigned,
   },
   selfPicked: {
     label: 'Self-picked by technician',
     shortLabel: 'Self-picked',
     description: 'Picked up by the technician assigned to the ticket.',
-    color: '#f59e0b',
+    color: ASSIGNMENT_SOURCE_COLORS.selfPicked,
+  },
+  workflowAssigned: {
+    label: 'Assigned at creation / workflow',
+    shortLabel: 'Workflow',
+    description: 'FreshService set the owner when the ticket was created (workflow, automator, email rule or API) — no person assigned it.',
+    color: ASSIGNMENT_SOURCE_COLORS.workflowAssigned,
   },
   unknown: {
     label: 'Source unavailable',
     shortLabel: 'Unavailable',
-    description: 'Ticket is assigned, but local data does not identify who assigned it.',
-    color: '#64748b',
+    description: 'Assigned, but the ticket’s activity history has not been synced yet (or the sync failed), so the assigner is not known.',
+    color: ASSIGNMENT_SOURCE_COLORS.unknown,
   },
 };
 
@@ -108,6 +125,8 @@ const TEAM_TIMELINE_METRICS = [
   { key: 'selfPicked', label: 'Self-picked' },
   { key: 'coordinatorAssigned', label: 'Coordinator-assigned' },
   { key: 'appAssigned', label: 'Ticket Pulse-assigned' },
+  { key: 'workflowAssigned', label: 'Assigned at creation / workflow' },
+  { key: 'unknown', label: 'Source unavailable' },
   { key: 'rejected', label: 'Rejected assignments' },
   { key: 'leaveDays', label: 'Leave days' },
   { key: 'wfhDays', label: 'WFH days' },
@@ -125,6 +144,8 @@ const TEAM_TABLE_COLUMNS = [
   ['selfPicked', 'Self', 'agentSelfPicked'],
   ['coordinatorAssigned', 'Coordinator', 'agentCoordinatorAssigned'],
   ['appAssigned', 'App', 'agentAppAssigned'],
+  ['workflowAssigned', 'Workflow', 'agentWorkflowAssigned'],
+  ['unknown', 'Unattrib.', 'agentSourceUnavailable'],
   ['closed', 'Closed', 'agentClosed'],
   ['closeRatePct', 'Close %', 'agentCloseRate'],
   ['avgResolutionHours', 'Avg Res.', 'agentAvgResolution'],
@@ -372,6 +393,46 @@ function chartBase(type = 'column') {
   };
 }
 
+// Team Balance → "Assignment Source by Agent" stacked bars. Exported so the
+// series contract (5 buckets, muted actor-less pair last) is unit-testable.
+export const ASSIGNMENT_SOURCE_SERIES = [
+  { key: 'selfPicked', name: 'Self-picked' },
+  { key: 'coordinatorAssigned', name: 'Coordinator' },
+  { key: 'appAssigned', name: 'Ticket Pulse' },
+  { key: 'workflowAssigned', name: 'Assigned at creation / workflow' },
+  { key: 'unknown', name: 'Source unavailable' },
+];
+
+export function buildAssignmentSourceSeries(teamRows = []) {
+  return ASSIGNMENT_SOURCE_SERIES.map(({ key, name }) => ({
+    name,
+    color: ASSIGNMENT_SOURCE_COLORS[key],
+    data: teamRows.map((row) => ({ y: row[key] || 0, technicianId: row.technicianId })),
+  }));
+}
+
+/**
+ * Shared-tooltip HTML for the source chart: header, one line per series,
+ * total, plus a footnote whenever the "Source unavailable" point is > 0 so
+ * the grey band is explained where the question gets asked (QA 08-25 #2).
+ */
+export function assignmentSourceTooltipHtml(points = [], key = '') {
+  const escape = (value) => String(value ?? '').replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+  const lines = points.map((pt) => `<span style="color:${pt.color || pt.series?.color}">●</span> ${escape(pt.series?.name)}: <b>${pt.y}</b><br/>`);
+  const total = points.reduce((sum, pt) => sum + (Number(pt.y) || 0), 0);
+  const unknown = points.find((pt) => pt.series?.name === 'Source unavailable');
+  const workflow = points.find((pt) => pt.series?.name === 'Assigned at creation / workflow');
+  const notes = [];
+  if (workflow && workflow.y > 0) notes.push('Assigned at creation / workflow: FreshService set the owner on creation — no person assigned it.');
+  if (unknown && unknown.y > 0) notes.push('Source unavailable: activity history not synced yet (or failed) — assigner unknown. Not a technician metric.');
+  return [
+    `<span style="font-size:12px;font-weight:700;color:#0f172a">${escape(key)}</span><br/>`,
+    ...lines,
+    `<span style="color:#64748b">Total: <b>${total}</b> tickets</span>`,
+    ...notes.map((note) => `<br/><span style="display:inline-block;max-width:260px;white-space:normal;color:#64748b;font-size:10px;line-height:1.3">${note}</span>`),
+  ].join('');
+}
+
 export function StatCard({ title, value, subtitle, icon: Icon = Info, tone = 'blue', delta, info, metric }) {
   const toneClass = {
     blue: 'border-blue-100 bg-blue-50 text-blue-700',
@@ -424,7 +485,7 @@ function Panel({ title, subtitle, children, actions }) {
 }
 
 function buildAssignmentMixRows(mix = {}) {
-  const orderedKeys = ['appAssigned', 'coordinatorAssigned', 'selfPicked', 'unknown'];
+  const orderedKeys = ['appAssigned', 'coordinatorAssigned', 'selfPicked', 'workflowAssigned', 'unknown'];
   const total = orderedKeys.reduce((sum, key) => sum + (mix[key] || 0), 0);
   return orderedKeys
     .map((key) => {
@@ -1985,7 +2046,7 @@ export default function Analytics({ view = 'standard' }) {
     // See workloadChartOptions: empty array (not undefined) so chart.update()
     // actively clears any stale colorAxis from a reused chart instance.
     colorAxis: [],
-    colors: ['#f59e0b', '#059669', '#2563eb', '#64748b'],
+    colors: ASSIGNMENT_SOURCE_SERIES.map(({ key }) => ASSIGNMENT_SOURCE_COLORS[key]),
     xAxis: {
       type: 'category',
       categories: teamRows.map((row) => row.name || 'Unknown agent'),
@@ -2009,9 +2070,12 @@ export default function Analytics({ view = 'standard' }) {
       shared: true,
       useHTML: true,
       borderColor: '#cbd5e1',
-      headerFormat: '<span style="font-size:12px;font-weight:700;color:#0f172a">{point.key}</span><br/>',
-      pointFormat: '<span style="color:{series.color}">●</span> {series.name}: <b>{point.y}</b><br/>',
-      footerFormat: '<span style="color:#64748b">Total: <b>{point.total}</b> tickets</span>',
+      formatter() {
+        // Category axis: the agent name rides on the points' `key`; `this.x`
+        // is the numeric index.
+        const label = this.points?.[0]?.key ?? this.key ?? this.x;
+        return assignmentSourceTooltipHtml(this.points || [], label);
+      },
     },
     plotOptions: {
       series: {
@@ -2028,12 +2092,7 @@ export default function Analytics({ view = 'standard' }) {
         },
       },
     },
-    series: [
-      { name: 'Self-picked', data: teamRows.map((row) => ({ y: row.selfPicked || 0, technicianId: row.technicianId })) },
-      { name: 'Coordinator', data: teamRows.map((row) => ({ y: row.coordinatorAssigned || 0, technicianId: row.technicianId })) },
-      { name: 'Ticket Pulse', data: teamRows.map((row) => ({ y: row.appAssigned || 0, technicianId: row.technicianId })) },
-      { name: 'Source unavailable', data: teamRows.map((row) => ({ y: row.unknown || 0, technicianId: row.technicianId })) },
-    ],
+    series: buildAssignmentSourceSeries(teamRows),
   }), [teamRows, toggleTeamSelection]);
 
   const timelineChartOptions = useMemo(() => {
@@ -2535,9 +2594,15 @@ export default function Analytics({ view = 'standard' }) {
                   <p className="mt-1 break-words text-xs text-slate-500">{row.pct}% · {row.description}</p>
                 </div>
               ))}
-              {(overview?.assignmentMix?.unknown || 0) > 0 && (
+              {((overview?.assignmentMix?.unknown || 0) > 0 || (overview?.assignmentMix?.workflowAssigned || 0) > 0) && (
                 <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-                  <span className="font-semibold text-slate-800">Source unavailable</span> means FreshService/local activity data did not include a usable `assignedBy` value for that assigned ticket.
+                  <p>
+                    <span className="font-semibold text-slate-800">Assigned at creation / workflow</span> — FreshService put the ticket on its owner when it was created (workflow, automator, email rule or API), so there is no “assigned by” person to credit.
+                  </p>
+                  <p className="mt-1">
+                    <span className="font-semibold text-slate-800">Source unavailable</span> — the ticket’s activity history has not been synced yet, or the sync failed, so the assigner is not known. Neither band is a technician metric; both are excluded from self-pick and coordinator reads.
+                    <MetricHint metric="assignmentMixUnknown" title="Unattributed assignments" className="ml-1 align-middle" />
+                  </p>
                 </div>
               )}
             </div>
@@ -3409,7 +3474,11 @@ export default function Analytics({ view = 'standard' }) {
           <Panel title="Workload by Agent" subtitle="Assigned tickets, current open queue, and closed count by agent.">
             {teamRows.length ? <HighchartsBlock options={workloadChartOptions} height={teamBarChartHeight} /> : <EmptyState text="No agents match the current filters." />}
           </Panel>
-          <Panel title="Assignment Source by Agent" subtitle="Shows self-picked, coordinator-assigned, and Ticket Pulse-assigned volume.">
+          <Panel
+            title="Assignment Source by Agent"
+            subtitle="Self-picked, coordinator-assigned and Ticket Pulse-assigned volume, plus two unattributed bands: assigned at creation / workflow (slate-blue) and source unavailable (grey)."
+            actions={<MetricHint metric="assignmentMixUnknown" title="Unattributed assignments" />}
+          >
             {teamRows.length ? <HighchartsBlock options={sourceChartOptions} height={teamBarChartHeight} /> : <EmptyState text="No agents match the current filters." />}
           </Panel>
         </div>

@@ -1,4 +1,5 @@
 import {
+  assignmentSource,
   buildCategoryIntelligence,
   buildInsight,
   categoryBreakdownFromTickets,
@@ -9,6 +10,24 @@ import {
 } from '../src/services/analyticsService.js';
 
 describe('analyticsService pure helpers', () => {
+  test('assignmentSource classification matrix (QA 08-25 #2 — workflow vs source-unavailable split)', () => {
+    const tech = { id: 5, name: 'Mehdi M' };
+    const synced = { activitiesSyncedAt: new Date('2026-08-20T00:00:00Z'), activitiesSyncError: null };
+    const svc = ['ticket pulse bot'];
+    // Named actors keep their buckets regardless of sync state.
+    expect(assignmentSource({ isSelfPicked: true, assignedBy: '', assignedTech: tech, ...synced }, svc)).toBe('selfPicked');
+    expect(assignmentSource({ isSelfPicked: false, assignedBy: 'Mehdi M', assignedTech: tech }, svc)).toBe('selfPicked');
+    expect(assignmentSource({ isSelfPicked: false, assignedBy: 'Ticket Pulse Bot', assignedTech: tech }, svc)).toBe('appAssigned');
+    expect(assignmentSource({ isSelfPicked: false, assignedBy: 'Gaby G', assignedTech: tech, activitiesSyncError: 'boom' }, svc)).toBe('coordinatorAssigned');
+    // Actor-less: clean activity sync with no assign event → set at creation by a workflow/automation.
+    expect(assignmentSource({ isSelfPicked: false, assignedBy: null, assignedTech: tech, ...synced }, svc)).toBe('workflowAssigned');
+    expect(assignmentSource({ isSelfPicked: false, assignedBy: '   ', assignedTech: tech, ...synced }, svc)).toBe('workflowAssigned');
+    // Actor-less: never synced, or the sync errored → genuinely unknown.
+    expect(assignmentSource({ isSelfPicked: false, assignedBy: null, assignedTech: tech, activitiesSyncedAt: null, activitiesSyncError: null }, svc)).toBe('unknown');
+    expect(assignmentSource({ isSelfPicked: false, assignedBy: null, assignedTech: tech, activitiesSyncedAt: new Date(), activitiesSyncError: 'FS 429' }, svc)).toBe('unknown');
+    expect(assignmentSource({ assignedTech: tech }, svc)).toBe('unknown');
+  });
+
   test('parseAnalyticsRange defaults to a 30-day window with previous comparison', () => {
     const range = parseAnalyticsRange(
       { timezone: 'America/Los_Angeles' },

@@ -5,7 +5,7 @@ import AssigneePicker from './AssigneePicker';
 import StatusPicker from './StatusPicker';
 import {
   AgentFirstName, PersonAvatar, SlaChip, StatusPill, UnassignedBadge,
-  ticketCategoryLabels, ticketSourceLabel, timeAgo,
+  formatDayTime, ticketCategoryLabels, ticketSourceLabel, timeAgo, timeAgoShort,
 } from './ticketUi';
 import { baseStatusOf, statusToneFromDefs } from './statusDefs';
 import { ticketsAPI } from '../../services/api';
@@ -406,26 +406,23 @@ function renderLastActivity(ticket, ctx) {
   );
 }
 
-// Created date (Phase QC): absolute · relative, same recipe as Updated —
-// short date on the primary line, quiet "3d ago" beneath, full timestamp on
-// hover.
+// Created (Phase QC → QA 08-24 #2): absolute · relative. Primary line is the
+// Phase E day+time convention ("Aug 17, 9:14 AM", year spelled out off-year);
+// the secondary keeps counting ("9d ago", "3w ago") instead of collapsing
+// into a second copy of the date at the 7-day mark. Full timestamp on hover.
 function renderCreatedAt(ticket, ctx) {
   const d = ticket.createdAt ? new Date(ticket.createdAt) : null;
-  const dateLabel = d
-    ? d.toLocaleDateString(undefined, d.getFullYear() === new Date().getFullYear()
-      ? { month: 'short', day: 'numeric' }
-      : { month: 'short', day: 'numeric', year: 'numeric' })
-    : null;
+  const dateLabel = d && !Number.isNaN(d.getTime()) ? formatDayTime(d) : null;
   return (
     <span
       className={`${ctx.cell('createdAt')} ${ctx.cellPad} flex-col !items-start justify-center gap-0.5`}
       style={ctx.cellStyle('createdAt')}
-      title={d ? d.toLocaleString() : undefined}
+      title={dateLabel ? d.toLocaleString() : undefined}
     >
       {dateLabel ? (
         <>
           <span className="block w-full text-xs text-slate-600 truncate">{dateLabel}</span>
-          <span className="block w-full text-[10px] text-slate-400 truncate">{timeAgo(ticket.createdAt)}</span>
+          <span className="block w-full text-[10px] text-slate-400 truncate">{timeAgoShort(ticket.createdAt)}</span>
         </>
       ) : (
         <span className="text-xs text-slate-300">—</span>
@@ -496,7 +493,7 @@ export const QUEUE_COLUMNS = [
   { key: 'status', label: 'Status', defaultOn: true, sortField: 'status', headerTitle: 'Sort by status (Open first)', track: '116px', minPx: 90, mdEssential: true, render: renderStatus },
   { key: 'due', label: 'Due', defaultOn: true, sortField: 'dueBy', headerTitle: 'Sort by due date (soonest first)', track: '88px', minPx: 70, mdEssential: true, render: renderDue },
   { key: 'lastActivity', label: 'Updated', defaultOn: true, sortField: 'updatedAt', track: '74px', minPx: 60, headerClass: 'justify-end', render: renderLastActivity },
-  { key: 'createdAt', label: 'Created', defaultOn: false, sortField: 'createdAt', headerTitle: 'Sort by created date', track: '96px', minPx: 80, render: renderCreatedAt },
+  { key: 'createdAt', label: 'Created', defaultOn: false, sortField: 'createdAt', headerTitle: 'Sort by created date', track: '124px', minPx: 100, render: renderCreatedAt },
   { key: 'source', label: 'Source', defaultOn: false, sortField: 'source', track: '96px', minPx: 70, render: renderSource },
   { key: 'department', label: 'Department', defaultOn: false, sortField: 'department', headerTitle: 'Sort by department (blanks last)', track: '130px', minPx: 100, render: renderDepartment },
   { key: 'group', label: 'Group', defaultOn: false, sortField: null, track: '120px', minPx: 90, render: renderGroup },

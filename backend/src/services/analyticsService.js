@@ -90,6 +90,12 @@ const CATEGORY_TICKET_SELECT = {
   assignedBy: true,
   assignedTechId: true,
   isSelfPicked: true,
+  // QA 08-25 #2: assignmentSource() splits actor-less assignments into
+  // "assigned at creation / workflow" (activities were synced cleanly and
+  // simply contain no assign event) vs "source unavailable" (never synced /
+  // sync errored). Both columns are tiny (timestamp + usually-null text).
+  activitiesSyncedAt: true,
+  activitiesSyncError: true,
   ticketCategory: true,
   tpSkill: true,
   tpSubskill: true,
@@ -584,6 +590,7 @@ function emptyCategoryRow(identity, source = 'canonical') {
     selfPicked: 0,
     coordinatorAssigned: 0,
     appAssigned: 0,
+    workflowAssigned: 0,
     unknown: 0,
     csatResponses: 0,
     csatTotal: 0,
@@ -621,6 +628,7 @@ function finalizeCategoryRow(row, totalCreated = 0) {
       selfPicked: row.selfPicked,
       coordinatorAssigned: row.coordinatorAssigned,
       appAssigned: row.appAssigned,
+      workflowAssigned: row.workflowAssigned,
       unknown: row.unknown,
     },
     csatAverage: row.csatResponses ? Number((row.csatTotal / row.csatResponses).toFixed(2)) : null,
@@ -858,7 +866,7 @@ function buildCategoryAssignmentFlow(rows) {
     const current = byCategory.get(key) || {
       name: row.categoryName || row.name,
       assigned: 0,
-      assignmentMix: { selfPicked: 0, coordinatorAssigned: 0, appAssigned: 0, unknown: 0 },
+      assignmentMix: { selfPicked: 0, coordinatorAssigned: 0, appAssigned: 0, workflowAssigned: 0, unknown: 0 },
       automationRuns: 0,
       automationFailures: 0,
       automationRebounds: 0,
@@ -1039,6 +1047,7 @@ function labelFromAssignmentSource(source) {
     appAssigned: 'Ticket Pulse assigned',
     coordinatorAssigned: 'Coordinator assigned',
     selfPicked: 'Self-picked',
+    workflowAssigned: 'Assigned at creation / workflow',
     unknown: 'Source unavailable',
   }[source] || 'Source unavailable';
 }
@@ -1123,11 +1132,28 @@ async function getServiceAccountNames() {
     .filter(Boolean);
 }
 
-function assignmentSource(ticket, serviceAccountNames = []) {
+/**
+ * Who put this ticket on its technician.
+ *   selfPicked          — is_self_picked, or the assigner IS the assignee
+ *   appAssigned         — assigner is a Ticket Pulse service account
+ *   coordinatorAssigned — any other named assigner
+ *   workflowAssigned    — no assigner recorded, but the FreshService activity
+ *                         history WAS synced cleanly and contains no
+ *                         "assigned" event: FreshService set the owner at
+ *                         creation (workflow / automator / email rule /
+ *                         API responder). Structural, not a data gap.
+ *   unknown             — no assigner recorded AND activities were never
+ *                         synced or the sync errored — genuinely unknown
+ *                         (self-heals via activitySyncFreshness). QA 08-25 #2.
+ * Neither actor-less bucket is a technician metric; the UI must keep them
+ * out of self-pick / coordinator reads.
+ */
+export function assignmentSource(ticket, serviceAccountNames = []) {
   const assignedBy = String(ticket.assignedBy || '').trim();
   if (ticket.isSelfPicked || (assignedBy && assignedBy === ticket.assignedTech?.name)) return 'selfPicked';
   if (assignedBy && serviceAccountNames.includes(assignedBy.toLowerCase())) return 'appAssigned';
   if (assignedBy) return 'coordinatorAssigned';
+  if (ticket.activitiesSyncedAt && !ticket.activitiesSyncError) return 'workflowAssigned';
   return 'unknown';
 }
 
@@ -1253,7 +1279,7 @@ export async function getOverview(workspaceId, query = {}) {
     const now = new Date();
     const overdueTickets = openTickets.filter((t) => t.dueBy && new Date(t.dueBy) < now);
     const firstResponseRisk = openTickets.filter((t) => t.frDueBy && new Date(t.frDueBy) < now);
-    const assignmentMix = { selfPicked: 0, coordinatorAssigned: 0, appAssigned: 0, unknown: 0 };
+    const assignmentMix = { selfPicked: 0, coordinatorAssigned: 0, appAssigned: 0, workflowAssigned: 0, unknown: 0 };
     for (const ticket of rangeTickets) {
       assignmentMix[assignmentSource(ticket, serviceAccountNames)] += 1;
     }
@@ -1558,6 +1584,7 @@ export async function getTeamBalance(workspaceId, query = {}) {
       selfPicked: 0,
       coordinatorAssigned: 0,
       appAssigned: 0,
+      workflowAssigned: 0,
       unknown: 0,
       closed: 0,
       openNow: 0,
@@ -1597,6 +1624,7 @@ export async function getTeamBalance(workspaceId, query = {}) {
           selfPicked: 0,
           coordinatorAssigned: 0,
           appAssigned: 0,
+          workflowAssigned: 0,
           unknown: 0,
           rejected: 0,
           leaveDays: 0,

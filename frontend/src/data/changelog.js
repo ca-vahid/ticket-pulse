@@ -1,6 +1,17 @@
-export const APP_VERSION = '3.6.03-preview';
+export const APP_VERSION = '3.7.00-preview';
 
 export const changelog = [
+  {
+    version: '3.7.00-preview',
+    date: 'August 27, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>📧 Reply CCs (and attachments) actually send now</strong> — on Ticket-Pulse-born tickets the Cc list reached every step except the final email call, so the thread showed “Cc: you” while nothing went out. Cc recipients and reply attachments now ride the outbound email (and are recorded in the delivery audit), with the requester never duplicated across To/Cc. (QA 08-26 #1)' },
+      { type: 'fixed', html: '<strong>📅 Holidays: right dates, and 2026 exists</strong> — the Holidays list rendered every date one day early for anyone west of UTC (that’s the “Labour Day 8/31”), and only 2025 had ever been loaded. “Load Canadian” now loads this year + next with correct floating dates (Labour Day Sept 7, 2026; Good Friday Apr 3; Thanksgiving Oct 12…), reports what it added, and a yearly auto-load keeps future years filled — which matters because calendar-aware SLAs read this table. The dashboard now trusts the holiday feed over its old built-in list. (QA 08-25 #3)' },
+      { type: 'fixed', html: '<strong>🗺️ Agent Maps: no more phantom Saskatchewan</strong> — unknown or unset locations used to be pinned at the map’s Canada-centre default (that’s where Victor landed). The office table now includes Santiago and other non-Canadian offices, “Santiago, Chile”-style entries resolve, exact <code>lat,lng</code> pins are accepted, and anyone still unplaced goes to a clearly labeled sidebar tray with an Edit-location button and a save-time warning. (QA 08-24 #1)' },
+      { type: 'improved', html: '<strong>🕒 Created column shows the time</strong> — “Aug 17, 9:14 AM” with a relative age that keeps counting (“1w ago”) instead of repeating the date after a week. (QA 08-24 #2)' },
+      { type: 'improved', html: '<strong>📊 “Source unavailable” explained — and split</strong> — the grey band in Assignment Source by Agent now has an ℹ️, a tooltip note, and glossary entry: these are tickets that have an owner but no recorded assigner. It’s now two bands: “Assigned at creation / workflow” (FreshService set the owner when the ticket was created — nothing to attribute) vs a true “Source unavailable” (history never synced). Unattributed volume, never a person metric. (QA 08-25 #2)' },
+    ],
+  },
   {
     version: '3.6.03-preview',
     date: 'August 24, 2026',
