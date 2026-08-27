@@ -49,6 +49,11 @@ const T = {
         description: 'Workspace custom-field values keyed by definition key (snake_case). {} when none are set. See GET /custom-fields for this workspace’s definitions.',
         example: { client_name: 'ACME Inc', share_point_item_link: 'https://…/DispForm.aspx?ID=1260' },
       },
+      ccEmails: {
+        type: 'array', items: { type: 'string', format: 'email' },
+        description: 'Additional requesters ("Also for") — carbon copies stored on the ticket. Every reply to the requester reaches them; requester-facing lifecycle mails (created/status/resolved) do too when the workspace’s "Also notify additional requesters" toggle is on. [] when none.',
+        example: ['manager@example.com', 'assistant@example.com'],
+      },
       createdAt: { type: 'string', format: 'date-time' }, updatedAt: { type: 'string', format: 'date-time' },
       resolvedAt: { type: 'string', format: 'date-time', nullable: true },
     },
@@ -86,7 +91,8 @@ const T = {
       },
       ccEmails: {
         type: 'array', items: { type: 'string', format: 'email' },
-        description: 'Addresses cc’d on the ticket (stored on the ticket and shown on the detail page).',
+        description: 'Additional requesters ("Also for"): addresses cc’d on the ticket. Normalized (lowercase), deduped, max 10; invalid addresses 400. They receive every reply to the requester, ride to the FreshService copy as cc_emails, and (workspace toggle) requester-facing lifecycle mails.',
+        example: ['manager@example.com'],
       },
       source: {
         type: 'integer',
@@ -125,6 +131,11 @@ const T = {
         description: 'Category BY NAME (same resolution as create). Explicit internalCategoryId wins when both are sent; `category: null` clears the pair.',
       },
       subcategory: { type: 'string', nullable: true, description: 'Subcategory BY NAME — must be a child of the (new) category.' },
+      ccEmails: {
+        type: 'array', items: { type: 'string', format: 'email' },
+        description: 'Replace the "Also for" additional-requester list (normalized, deduped, max 10; invalid addresses 400). [] clears it. Ticket Pulse–born tickets only — on FreshService-born tickets the list is FreshService-owned (edit it there or through the app’s FS write-back).',
+        example: ['manager@example.com', 'assistant@example.com'],
+      },
       customFields: {
         type: 'object',
         additionalProperties: { type: ['string', 'number', 'boolean', 'null'] },

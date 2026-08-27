@@ -27,6 +27,33 @@ function backoffMs(attempts) {
   return Math.min(BASE_BACKOFF_MS * (2 ** Math.max(0, attempts - 1)), MAX_BACKOFF_MS);
 }
 
+/**
+ * The ticket's "Also for" list as the FS `cc_emails` payload value (Phase
+ * MR5): lowercased, deduped, the requester excluded (FS rejects a requester
+ * that is also cc'd). `undefined` when empty so compactObject/updateTicket
+ * drop the key instead of sending `[]`.
+ */
+export function mirrorCcEmails(ticket) {
+  const requester = String(ticket?.requester?.email || '').trim().toLowerCase();
+  const seen = new Set();
+  const out = [];
+  for (const raw of Array.isArray(ticket?.ccEmails) ? ticket.ccEmails : []) {
+    const address = String(raw || '').trim().toLowerCase();
+    if (!address || address === requester || seen.has(address)) continue;
+    seen.add(address);
+    out.push(address);
+  }
+  return out.length ? out : undefined;
+}
+
+/** FS rejected the request because of the cc_emails attribute specifically. */
+function isCcEmailsRejection(err) {
+  const detail = err?.freshserviceDetail;
+  const fieldErrors = Array.isArray(detail?.errors) ? detail.errors : [];
+  if (fieldErrors.some((fe) => String(fe.field || '').toLowerCase() === 'cc_emails')) return true;
+  return /cc_emails/i.test(String(err?.message || ''));
+}
+
 function textToHtml(text) {
   if (!text) return '';
   return `<p>${String(text)
@@ -457,6 +484,10 @@ class MirrorService {
       group_id: ticket.groupId ? Number(ticket.groupId) : undefined,
       responder_id: ticket.assignedTech?.freshserviceId ? Number(ticket.assignedTech.freshserviceId) : undefined,
       department_id: await this.resolveDepartmentId(client, ticket),
+      // "Also for" additional requesters (Phase MR5): the FS copy carries them
+      // as cc_emails so FS-side replies reach them too (before MR the
+      // fallback copy silently lost every additional requester).
+      cc_emails: mirrorCcEmails(ticket),
     };
     // Ticket type rides along only when the registry maps it to an FS choice
     // for this workspace — TP-native-only types (fsTypeValue null) stay
@@ -525,14 +556,27 @@ class MirrorService {
     }
 
     const customFields = await this._skillCustomFields(client, ticket);
-    await client.updateTicket(Number(ticket.freshserviceTicketId), {
+    const payload = {
       subject: ticket.subject || undefined,
       status: (await this._fsStatusCode(ticket)) ?? undefined,
       priority: ticket.priority || undefined,
       group_id: ticket.groupId ? Number(ticket.groupId) : undefined,
       responder_id: ticket.assignedTech?.freshserviceId ? Number(ticket.assignedTech.freshserviceId) : null,
       custom_fields: customFields || undefined,
-    });
+      // "Also for" additional requesters (Phase MR5) — edits after create
+      // propagate to the FS copy. cc_emails is accepted on ticket update by
+      // FS; should a tenant reject it, retry once without so the rest of the
+      // field sync still lands (and log it — the copy then keeps the cc list
+      // it got at create time).
+      cc_emails: mirrorCcEmails(ticket),
+    };
+    try {
+      await client.updateTicket(Number(ticket.freshserviceTicketId), payload);
+    } catch (err) {
+      if (payload.cc_emails === undefined || !isCcEmailsRejection(err)) throw err;
+      logger.warn(`Mirror: FreshService rejected cc_emails on update for #${ticket.freshserviceTicketId} (${err.message}) — re-sending the field sync without it`);
+      await client.updateTicket(Number(ticket.freshserviceTicketId), { ...payload, cc_emails: undefined });
+    }
 
     await prisma.ticket.update({
       where: { id: ticket.id },

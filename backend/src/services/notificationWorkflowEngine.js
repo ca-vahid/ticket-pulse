@@ -2109,7 +2109,22 @@ async function executeNode({
       return hasGroupToken ? uniqueEmails([direct, groupEmails]) : direct;
     };
     const to = resolveWithGroups(node.data?.to || ['requester']);
-    const cc = excludeExistingEmails(resolveWithGroups(node.data?.cc || []), to);
+    let cc = excludeExistingEmails(resolveWithGroups(node.data?.cc || []), to);
+    // "Also notify additional requesters" (Phase MR6): when the workspace
+    // toggle is ON and this mail is requester-facing (the requester is in
+    // To), the ticket's "Also for" list joins the cc — so status/resolution
+    // mails reach every requester without editing each workflow. Off by
+    // default; the `original_ccs` token remains the explicit opt-in per node.
+    let alsoFor = [];
+    if (requesterFacingDelivery(eventContext, to)) {
+      try {
+        const { additionalRequesterCc } = await import('./alsoForNotifyService.js');
+        alsoFor = await additionalRequesterCc(workflow?.workspaceId ?? eventContext.workspace?.id, eventContext.ticket, [...to, ...cc]);
+      } catch (err) {
+        logger.warn(`recipient_resolver: additional-requester lookup failed (treated as off): ${err.message}`);
+      }
+      if (alsoFor.length) cc = uniqueEmails([cc, alsoFor]);
+    }
     const bcc = excludeExistingEmails(resolveWithGroups(node.data?.bcc || []), [...to, ...cc]);
     const recipients = {
       to,
@@ -2117,7 +2132,7 @@ async function executeNode({
       bcc,
     };
     state.recipients = recipients;
-    return { recipients };
+    return { recipients, ...(alsoFor.length ? { additionalRequesters: alsoFor } : {}) };
   }
 
   if (node.type === 'template_render') {

@@ -725,6 +725,10 @@ export const ticketsAPI = {
     return await api.get('/tickets/meta');
   },
 
+  // "Also notify additional requesters" workspace toggle (Phase MR6).
+  getAlsoForSettings: async () => await api.get('/tickets/also-for-settings'),
+  updateAlsoForSettings: async (notifyAdditionalRequesters) => await api.put('/tickets/also-for-settings', { notifyAdditionalRequesters }),
+
   stats: async () => {
     return await api.get('/tickets/stats');
   },

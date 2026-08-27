@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.7.02-preview';
+export const APP_VERSION = '3.7.03-preview';
 
 export const changelog = [
+  {
+    version: '3.7.03-preview',
+    date: 'August 27, 2026',
+    entries: [
+      { type: 'new', html: '<strong>👥 Additional requesters (“Also for”)</strong> — a ticket can now be for more than one person: add them in the new “Also for (additional requesters)” block when creating a ticket, or on the ticket page’s requester card any time later. Every reply to the requester reaches them too (the composer pre-fills them and the server guarantees it), and they’re mirrored to FreshService as CCs. (QA 08-26 #3)' },
+      { type: 'new', html: '<strong>🔔 “Also notify additional requesters” switch</strong> — Settings → Ticket Ops: when on, created/status-change/resolved emails copy the additional requesters as well (off by default; satisfaction surveys stay requester-only). Public API v1 accepts <code>ccEmails</code> on PATCH and returns it on tickets.' },
+    ],
+  },
   {
     version: '3.7.02-preview',
     date: 'August 27, 2026',

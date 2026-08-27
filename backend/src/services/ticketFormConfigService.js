@@ -35,7 +35,9 @@ export const BUILT_IN_FORM_FIELDS = [
   { key: 'source', label: 'Source', locked: false, requirable: false },
   { key: 'group', label: 'Group', locked: false, requirable: true },
   { key: 'tags', label: 'Tags', locked: false, requirable: true },
-  { key: 'cc', label: 'Cc', locked: false, requirable: true },
+  // Key stays `cc` (config/API surface); the composer shows it as the
+  // "Also for (additional requesters)" block (Phase MR3).
+  { key: 'cc', label: 'Also for (additional requesters)', locked: false, requirable: true },
   { key: 'attachments', label: 'Attachments', locked: false, requirable: true },
 ];
 

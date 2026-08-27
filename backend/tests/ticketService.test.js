@@ -1667,3 +1667,209 @@ describe('ticketService per-user signatures on reply sends (Mega 08-15 Phase D)'
     expect(entry.eventType).toBe('reply');
   });
 });
+
+// Phase MR (QA 08-26 #3) — "Also for" additional requesters = Ticket.ccEmails.
+describe('ticketService "Also for" additional requesters (Phase MR)', () => {
+  const nativeTicket = {
+    id: 501,
+    workspaceId: 1,
+    origin: 'ticketpulse',
+    nativeNumber: 1042,
+    freshserviceTicketId: null,
+    subject: 'Laptop will not boot',
+    status: 'Open',
+    priority: 3,
+    createdAt: new Date('2026-08-26T10:00:00Z'),
+    assignedTechId: null,
+    firstPublicAgentReplyAt: null,
+    internalCategoryId: null,
+    internalSubcategoryId: null,
+    groupId: null,
+    internalGroupId: null,
+    ccEmails: ['manager@example.com'],
+    requester: { id: 40, name: 'Rita Requester', email: 'rita@example.com' },
+    assignedTech: null,
+    internalCategory: null,
+    internalSubcategory: null,
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...nativeTicket });
+    prismaMock.ticket.update.mockImplementation(({ data }) => Promise.resolve({
+      ...nativeTicket, ...data, requester: nativeTicket.requester, assignedTech: null,
+    }));
+    prismaMock.ticketThreadEntry.create.mockImplementation(({ data }) => Promise.resolve({ id: 9001, ...data }));
+    prismaMock.notificationDelivery.create.mockResolvedValue({});
+    ticketActivityRepositoryMock.create.mockResolvedValue({});
+    lifecycleMock.emitTicketLifecycleNotifications.mockResolvedValue({ status: 'completed' });
+    sendgridMock.sendEmail.mockResolvedValue({ provider: 'sendgrid', providerMessageId: 'sg-1' });
+    prismaMock.userEmailSignature.findUnique.mockResolvedValue(null);
+  });
+
+  test('MR1: PATCH ccEmails normalizes (trim/lowercase), dedupes, writes the list, audits cc_changed and queues the mirror', async () => {
+    const result = await ticketService.updateTicketFields(501, 1, {
+      ccEmails: [' Manager@Example.com ', 'assistant@example.com', 'MANAGER@example.com'],
+    }, actor);
+
+    expect(prismaMock.ticket.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ ccEmails: ['manager@example.com', 'assistant@example.com'], mirrorState: 'pending' }),
+    }));
+    expect(ticketActivityRepositoryMock.create).toHaveBeenCalledWith(expect.objectContaining({
+      activityType: 'cc_changed',
+      details: expect.objectContaining({ from: ['manager@example.com'], to: ['manager@example.com', 'assistant@example.com'] }),
+    }));
+    // Not double-logged as a generic fields_updated entry.
+    expect(ticketActivityRepositoryMock.create).not.toHaveBeenCalledWith(expect.objectContaining({ activityType: 'fields_updated' }));
+    expect(mirrorServiceMock.enqueueFieldSync).toHaveBeenCalledWith(1, 501);
+    expect(result.changed).toBe(true);
+    expect(result.ccEmails).toEqual(['manager@example.com', 'assistant@example.com']);
+  });
+
+  test('MR1: a comma-separated string is accepted; [] clears the list', async () => {
+    await ticketService.updateTicketFields(501, 1, { ccEmails: 'a@example.com; B@example.com' }, actor);
+    expect(prismaMock.ticket.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ ccEmails: ['a@example.com', 'b@example.com'] }),
+    }));
+
+    jest.clearAllMocks();
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...nativeTicket });
+    ticketActivityRepositoryMock.create.mockResolvedValue({});
+    await ticketService.updateTicketFields(501, 1, { ccEmails: [] }, actor);
+    expect(prismaMock.ticket.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ ccEmails: [] }),
+    }));
+    expect(ticketActivityRepositoryMock.create).toHaveBeenCalledWith(expect.objectContaining({
+      activityType: 'cc_changed',
+      details: expect.objectContaining({ from: ['manager@example.com'], to: [] }),
+    }));
+  });
+
+  test('MR1: an invalid address rejects the whole PATCH; more than 10 (after dedupe) rejects; unknown keys still rejected (.strict)', async () => {
+    await expect(ticketService.updateTicketFields(501, 1, { ccEmails: ['ok@example.com', 'not-an-email'] }, actor))
+      .rejects.toThrow(/invalid email/i);
+    const eleven = Array.from({ length: 11 }, (_, i) => `person${i}@example.com`);
+    await expect(ticketService.updateTicketFields(501, 1, { ccEmails: eleven }, actor))
+      .rejects.toThrow(/10/);
+    // 11 entries that dedupe to 10 pass the cap.
+    await ticketService.updateTicketFields(501, 1, { ccEmails: [...eleven.slice(0, 10), 'PERSON0@example.com'] }, actor);
+    expect(prismaMock.ticket.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ ccEmails: eleven.slice(0, 10) }),
+    }));
+    await expect(ticketService.updateTicketFields(501, 1, { alsoFor: ['x@example.com'] }, actor)).rejects.toThrow();
+    // Exactly one row write carried a cc list (the _audit lastRealActivityAt touch is the other update call).
+    expect(prismaMock.ticket.update.mock.calls.filter((c) => c[0]?.data?.ccEmails !== undefined)).toHaveLength(1);
+  });
+
+  test('MR1: re-sending the same list (any order/case) is a no-op — no write, no audit, no mirror job', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...nativeTicket, ccEmails: ['a@example.com', 'b@example.com'] });
+    const result = await ticketService.updateTicketFields(501, 1, { ccEmails: ['B@example.com', 'a@example.com'] }, actor);
+    expect(result.changed).toBe(false);
+    expect(prismaMock.ticket.update).not.toHaveBeenCalled();
+    expect(ticketActivityRepositoryMock.create).not.toHaveBeenCalled();
+    expect(mirrorServiceMock.enqueueFieldSync).not.toHaveBeenCalled();
+  });
+
+  test('MR4: a public reply reaches ticket.ccEmails + composer cc, deduped, the requester never duplicated', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue({
+      ...nativeTicket, ccEmails: ['manager@example.com', 'rita@example.com'],
+    });
+    const { entry } = await ticketService.addReply(501, 1, {
+      bodyText: 'Update for everyone',
+      cc: ['Colleague@Example.com', 'manager@example.com', 'RITA@example.com'],
+    }, actor);
+
+    expect(sendgridMock.sendEmail).toHaveBeenCalledWith(expect.objectContaining({
+      to: ['rita@example.com'],
+      cc: ['manager@example.com', 'colleague@example.com'],
+    }));
+    expect(prismaMock.notificationDelivery.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ ccRecipients: ['manager@example.com', 'colleague@example.com'] }),
+    }));
+    expect(entry.rawPayload).toEqual({ to_emails: ['rita@example.com'], cc_emails: ['manager@example.com', 'colleague@example.com'] });
+  });
+
+  test('MR4: a reply with NO composer cc still reaches the "Also for" list (server-side safety net); notes never do', async () => {
+    await ticketService.addReply(501, 1, { bodyText: 'API client, no cc' }, actor);
+    expect(sendgridMock.sendEmail).toHaveBeenCalledWith(expect.objectContaining({ cc: ['manager@example.com'] }));
+
+    jest.clearAllMocks();
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...nativeTicket });
+    prismaMock.ticketThreadEntry.create.mockImplementation(({ data }) => Promise.resolve({ id: 9002, ...data }));
+    const { entry } = await ticketService.addPrivateNote(501, 1, { bodyText: 'internal', cc: ['leak@example.com'] }, actor);
+    expect(sendgridMock.sendEmail).not.toHaveBeenCalled();
+    expect(entry.rawPayload).toBeUndefined();
+  });
+
+  test('MR4: FS-born replies carry the union to FreshService (createReply ccEmails)', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue({
+      ...nativeTicket, origin: 'freshservice', freshserviceTicketId: BigInt(231900), ccEmails: ['manager@example.com'],
+    });
+    fsClientMock.createReply.mockResolvedValue({ conversation: { id: 555 } });
+    await ticketService.addReply(501, 1, { bodyText: 'fs reply', cc: ['colleague@example.com'] }, actor);
+    expect(fsClientMock.createReply).toHaveBeenCalledWith(231900, expect.any(String), expect.objectContaining({
+      ccEmails: ['manager@example.com', 'colleague@example.com'],
+    }));
+  });
+});
+
+describe('ticketService.updateFsTicket — "Also for" on FS-born tickets (Phase MR1, FS write-back seam)', () => {
+  const fsBornTicket = {
+    id: 601,
+    workspaceId: 1,
+    origin: 'freshservice',
+    freshserviceTicketId: BigInt(231309),
+    subject: 'Payment receipt',
+    status: 'Open',
+    priority: 3,
+    createdAt: new Date('2026-08-01T10:00:00Z'),
+    assignedTechId: null,
+    ccEmails: [],
+    requester: { id: 40, name: 'Rita Requester', email: 'rita@example.com' },
+    assignedTech: null,
+    internalCategory: null,
+    internalSubcategory: null,
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prismaMock.workspace.findUnique.mockResolvedValue({
+      id: 1, name: 'IT', isActive: true, tpSkillCustomField: 'tp_skill', tpSubskillCustomField: 'tp_subskill',
+    });
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...fsBornTicket });
+    prismaMock.ticket.update.mockImplementation(({ data }) => Promise.resolve({ ...fsBornTicket, ...data, assignedTech: null }));
+    prismaMock.assignmentPipelineRun.findFirst.mockResolvedValue(null);
+    ticketActivityRepositoryMock.create.mockResolvedValue({});
+  });
+
+  test('PUTs cc_emails to FreshService first, then mirrors the list locally once FS echoes it', async () => {
+    fsClientMock.updateTicketFields.mockResolvedValue({ cc_emails: ['Manager@Example.com'], updated_at: '2026-08-26T10:00:00Z' });
+    await ticketService.updateFsTicket(601, 1, { ccEmails: ['manager@example.com'] }, actor);
+
+    expect(fsClientMock.updateTicketFields).toHaveBeenCalledWith(231309, { cc_emails: ['manager@example.com'] });
+    expect(prismaMock.ticket.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ ccEmails: ['manager@example.com'] }),
+    }));
+    expect(ticketActivityRepositoryMock.create).toHaveBeenCalledWith(expect.objectContaining({
+      activityType: 'fs_write_back',
+      details: expect.objectContaining({ changes: expect.objectContaining({ ccEmails: { from: [], to: ['manager@example.com'] } }) }),
+    }));
+  });
+
+  test('a silently-dropped cc_emails (FS 200 without it) changes NOTHING locally', async () => {
+    fsClientMock.updateTicketFields.mockResolvedValue({ cc_emails: [], updated_at: '2026-08-26T10:00:00Z' });
+    await expect(ticketService.updateFsTicket(601, 1, { ccEmails: ['manager@example.com'] }, actor))
+      .rejects.toThrow(/did not accept: additional requesters/);
+    expect(prismaMock.ticket.update).not.toHaveBeenCalled();
+  });
+
+  test('an invalid address is rejected before any FS call; the same list is a no-op', async () => {
+    await expect(ticketService.updateFsTicket(601, 1, { ccEmails: ['nope'] }, actor)).rejects.toThrow(/invalid email/i);
+    expect(fsClientMock.updateTicketFields).not.toHaveBeenCalled();
+
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...fsBornTicket, ccEmails: ['manager@example.com'] });
+    const result = await ticketService.updateFsTicket(601, 1, { ccEmails: ['MANAGER@example.com'] }, actor);
+    expect(result.noChanges).toBe(true);
+    expect(fsClientMock.updateTicketFields).not.toHaveBeenCalled();
+  });
+});

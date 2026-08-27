@@ -3,6 +3,21 @@ import logger from '../utils/logger.js';
 import emailHealthService from './emailHealthService.js';
 import { resolveFromName } from './workspaceEmailIdentityService.js';
 
+function normalizeList(value) {
+  const list = Array.isArray(value) ? value : [value];
+  const seen = new Set();
+  const out = [];
+  for (const raw of list) {
+    const address = String(raw || '').trim();
+    if (!address) continue;
+    const key = address.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(address);
+  }
+  return out;
+}
+
 /**
  * Shared one-off ("transactional") email transport. Prefers sending as a
  * workspace's connected mailbox via Microsoft Graph (so it comes from a real
@@ -10,11 +25,17 @@ import { resolveFromName } from './workspaceEmailIdentityService.js';
  * the exact path approval emails proved out; tasks and future notifications
  * reuse it instead of duplicating the graph→sendgrid fallback.
  *
+ * `cc` (Phase MR6): optional carbon copies — deduped, and any address already
+ * in `to` is dropped (SendGrid rejects an address present in both; Graph
+ * would deliver twice). Used for "Also for" additional requesters.
+ *
  * @returns {{ sent: boolean, via?: string, reason?: string, error?: string }}
  */
-export async function sendTransactionalEmail({ workspaceId, to, subject, html, label = 'email' }) {
-  const recipients = Array.isArray(to) ? to.filter(Boolean) : [to].filter(Boolean);
+export async function sendTransactionalEmail({ workspaceId, to, cc = [], subject, html, label = 'email' }) {
+  const recipients = normalizeList(to);
   if (recipients.length === 0) return { sent: false, reason: 'no_recipient' };
+  const toKeys = new Set(recipients.map((a) => a.toLowerCase()));
+  const ccRecipients = normalizeList(cc).filter((a) => !toKeys.has(a.toLowerCase()));
   try {
     // Per-workspace From display name (Phase EB) — guaranteed on the
     // SendGrid fallback; best-effort on Graph (Exchange usually rewrites it
@@ -32,17 +53,17 @@ export async function sendTransactionalEmail({ workspaceId, to, subject, html, l
         const startedAt = Date.now();
         try {
           await graphMailClient.sendMailAsMailbox(connection.address, {
-            to: recipients, subject, html, fromName,
+            to: recipients, cc: ccRecipients, subject, html, fromName,
           });
           await emailHealthService.recordSuccess({
             workspaceId, channel: 'email', context: label, provider: 'msgraph',
-            durationMs: Date.now() - startedAt, recipients,
+            durationMs: Date.now() - startedAt, recipients: [...recipients, ...ccRecipients],
           });
           return { sent: true, via: 'msgraph' };
         } catch (graphErr) {
           await emailHealthService.recordFailure({
             workspaceId, channel: 'email', context: label, provider: 'msgraph',
-            error: graphErr, durationMs: Date.now() - startedAt, recipients,
+            error: graphErr, durationMs: Date.now() - startedAt, recipients: [...recipients, ...ccRecipients],
           });
           throw graphErr;
         }
@@ -51,7 +72,7 @@ export async function sendTransactionalEmail({ workspaceId, to, subject, html, l
     // sendgridNotificationService.sendEmail records its own health event.
     const { default: sendgrid } = await import('./sendgridNotificationService.js');
     await sendgrid.sendEmail({
-      to: recipients, subject, html, fromName, context: label, workspaceId,
+      to: recipients, cc: ccRecipients, subject, html, fromName, context: label, workspaceId,
     });
     return { sent: true, via: 'sendgrid' };
   } catch (err) {
