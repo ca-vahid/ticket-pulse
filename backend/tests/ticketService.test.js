@@ -81,6 +81,19 @@ jest.unstable_mockModule('../src/services/azureAdService.js', () => ({
 jest.unstable_mockModule('../src/services/mirrorService.js', () => ({
   default: mirrorServiceMock,
 }));
+// Attachment storage (Phase CC attachment tests): "configured", accepts any
+// upload, returns a stored row so the reply path can build mailable copies.
+const attachmentServiceMock = {
+  isConfigured: jest.fn(() => true),
+  validateUpload: jest.fn(),
+  upload: jest.fn(async ({ fileName, contentType }) => ({ id: 77, fileName, contentType })),
+  ingestForFsTicket: jest.fn(async () => ({ ingested: 0 })),
+};
+jest.unstable_mockModule('../src/services/attachmentService.js', () => ({
+  default: attachmentServiceMock,
+  MAX_ATTACHMENT_BYTES: 100 * 1024 * 1024,
+  MAX_ATTACHMENTS_PER_TICKET: 20,
+}));
 
 const { default: ticketService } = await import('../src/services/ticketService.js');
 const { invalidateStatusCache } = await import('../src/services/statusService.js');
@@ -274,6 +287,77 @@ describe('ticketService conversation + status + assignment', () => {
     }));
     expect(entry.eventType).toBe('reply');
     expect(email.sent).toBe(true);
+  });
+
+  // Phase CC (QA 08-26 #1): the SendGrid branch must SEND the cc, not just
+  // echo it on the thread entry — the old test asserted storage only.
+  test('TP-born reply with a Cc: sendEmail receives the cc AND the audit row persists ccRecipients', async () => {
+    const { entry, email } = await ticketService.addReply(501, 1, {
+      bodyText: 'Looping in your manager',
+      cc: ['Boss@Example.com', 'colleague@example.com'],
+    }, actor);
+
+    expect(sendgridMock.sendEmail).toHaveBeenCalledWith(expect.objectContaining({
+      to: ['rita@example.com'],
+      // emailListSchema lowercases on the way in; the wire gets the normalized list.
+      cc: ['boss@example.com', 'colleague@example.com'],
+    }));
+    expect(prismaMock.notificationDelivery.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        status: 'sent',
+        toRecipients: ['rita@example.com'],
+        ccRecipients: ['boss@example.com', 'colleague@example.com'],
+      }),
+    }));
+    // The thread entry still echoes the recipients for the conversation UI.
+    expect(entry.rawPayload).toEqual({ to_emails: ['rita@example.com'], cc_emails: ['boss@example.com', 'colleague@example.com'] });
+    expect(email.sent).toBe(true);
+  });
+
+  test('a Cc that is the requester (any case) is dropped from the wire — SendGrid rejects to/cc duplicates', async () => {
+    await ticketService.addReply(501, 1, { bodyText: 'hi', cc: ['RITA@example.com'] }, actor);
+
+    expect(sendgridMock.sendEmail).toHaveBeenCalledWith(expect.objectContaining({
+      to: ['rita@example.com'],
+      cc: [],
+    }));
+    expect(prismaMock.notificationDelivery.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ ccRecipients: [] }),
+    }));
+  });
+
+  test('a failed requester email still records the attempted ccRecipients on the failed audit row', async () => {
+    sendgridMock.sendEmail.mockRejectedValue(new Error('SendGrid 403'));
+
+    const { email } = await ticketService.addReply(501, 1, { bodyText: 'hi', cc: ['boss@example.com'] }, actor);
+
+    expect(email.sent).toBe(false);
+    expect(prismaMock.notificationDelivery.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'failed_permanent', ccRecipients: ['boss@example.com'] }),
+    }));
+  });
+
+  test('reply attachments ride the SendGrid path as mailable copies (name/contentType/base64)', async () => {
+    const files = [
+      { originalname: 'invoice.pdf', mimetype: 'application/pdf', size: 5, buffer: Buffer.from('%PDF-') },
+    ];
+
+    await ticketService.addReply(501, 1, { bodyText: 'attached' }, actor, files);
+
+    expect(attachmentServiceMock.upload).toHaveBeenCalledWith(expect.objectContaining({ fileName: 'invoice.pdf', threadEntryId: 9001 }));
+    expect(sendgridMock.sendEmail).toHaveBeenCalledWith(expect.objectContaining({
+      attachments: [{ name: 'invoice.pdf', contentType: 'application/pdf', contentBytes: Buffer.from('%PDF-').toString('base64') }],
+    }));
+  });
+
+  test('FS-born reply with a Cc forwards ccEmails to createReply (FS emails the cc itself)', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...nativeTicket, origin: 'freshservice', freshserviceTicketId: BigInt(9) });
+    fsClientMock.createReply.mockResolvedValue({ conversation: { id: 42020 } });
+
+    await ticketService.addReply(501, 1, { bodyText: 'fs cc', cc: ['boss@example.com'] }, actor);
+
+    expect(fsClientMock.createReply).toHaveBeenCalledWith(9, expect.stringContaining('fs cc'), { ccEmails: ['boss@example.com'], attachments: [] });
+    expect(sendgridMock.sendEmail).not.toHaveBeenCalled();
   });
 
   test('private notes never email the requester', async () => {

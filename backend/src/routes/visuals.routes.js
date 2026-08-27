@@ -3,6 +3,7 @@ import { asyncHandler } from '../middleware/errorHandler.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import technicianRepository from '../services/technicianRepository.js';
 import { FRESHSERVICE_TZ_TO_IANA } from '../config/constants.js';
+import { formatLatLng, parseLatLng, resolveLocation } from '../config/officeLocations.js';
 import logger from '../utils/logger.js';
 
 const router = express.Router();
@@ -75,19 +76,47 @@ router.patch(
       });
     }
 
-    // Update the technician's location
+    // QA 08-24 #1: the map used to pin every unrecognized value at the
+    // Canada centroid. The value is still stored as free text (an admin may
+    // legitimately type an office we don't have coordinates for), but the
+    // response says whether it resolves so the UI can warn at save time.
+    // A "lat,lng" pair is validated, normalized and stored as coordinates.
+    let normalized = location.trim();
+    if (normalized.length > 100) {
+      return res.status(400).json({
+        success: false,
+        message: 'Location must be 100 characters or fewer',
+      });
+    }
+    if (/^-?\d+(?:\.\d+)?\s*[, ]\s*-?\d+(?:\.\d+)?$/.test(normalized)) {
+      const coords = parseLatLng(normalized);
+      if (!coords) {
+        return res.status(400).json({
+          success: false,
+          message: 'Coordinates must be "lat,lng" with lat in -90..90 and lng in -180..180',
+        });
+      }
+      normalized = formatLatLng(coords);
+    }
+
     const updatedTech = await technicianRepository.update(agentId, {
-      location: location || null,
+      location: normalized || null,
     });
 
+    const resolved = resolveLocation(updatedTech.location);
     res.json({
       success: true,
       data: {
         id: updatedTech.id,
         name: updatedTech.name,
         location: updatedTech.location,
+        resolved: Boolean(resolved),
+        lat: resolved ? resolved.lat : null,
+        lng: resolved ? resolved.lng : null,
       },
-      message: 'Location updated successfully',
+      message: resolved || !updatedTech.location
+        ? 'Location updated successfully'
+        : 'Location saved, but it is not a known city — the agent will not be pinned on the map',
     });
   }),
 );

@@ -264,10 +264,17 @@ export default function Dashboard() {
     localStorage.setItem('dashboardViewMode', viewMode);
   }, [viewMode]);
 
-  // Fetch workspace holidays from DB and register them for calendar display
+  // Fetch workspace holidays from DB and register them for calendar display.
+  // The registry is module state, so bump a counter after registering — the
+  // calendar cells compute their holiday styling during render, and since
+  // Phase HD the feed WINS over the hardcoded tables, a frame rendered before
+  // the feed arrives would otherwise keep the fallback names until the next
+  // unrelated re-render.
+  const [, setHolidayFeedVersion] = useState(0);
   useEffect(() => {
     api.get('/autoresponse/holidays').then(res => {
       registerDynamicHolidays(res?.data || []);
+      setHolidayFeedVersion((v) => v + 1);
     }).catch(() => {});
   }, [currentWorkspace?.id]);
 

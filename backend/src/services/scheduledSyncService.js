@@ -48,6 +48,8 @@ class ScheduledSyncService {
       // Start email polling for assignment pipeline
       await emailPollingService.startAll();
 
+      this.startHolidayAutoload();
+
       logger.info(`Scheduled sync started for ${workspaces.length} workspace(s)`);
       return true;
     } catch (error) {
@@ -342,6 +344,33 @@ class ScheduledSyncService {
     }
   }
 
+  /**
+   * Yearly holiday auto-load (Phase HD4): Jan 1, 04:00 Pacific — ensures the
+   * new current year AND the next one have their Canadian floating holidays
+   * for every workspace with business hours, so SLA math never silently
+   * treats Labour Day as a working day. One global job (not per workspace);
+   * the boot-time backfill in app.js covers a server that was down on Jan 1.
+   * Kill switch: HOLIDAY_AUTOLOAD=false (honored inside the service).
+   */
+  startHolidayAutoload() {
+    this.stopHolidayAutoload();
+    this.holidayAutoloadJob = cron.schedule('0 4 1 1 *', async () => {
+      try {
+        const { default: holidayAutoloadService } = await import('./holidayAutoloadService.js');
+        await holidayAutoloadService.ensureHolidaysLoaded({ reason: 'yearly-cron' });
+      } catch (error) {
+        logger.error('Yearly holiday auto-load failed:', error);
+      }
+    }, { scheduled: true, timezone: 'America/Vancouver' });
+  }
+
+  stopHolidayAutoload() {
+    if (this.holidayAutoloadJob) {
+      this.holidayAutoloadJob.stop();
+      this.holidayAutoloadJob = null;
+    }
+  }
+
   stopForWorkspace(wsId) {
     const entry = this.cronJobs.get(wsId);
     if (entry) {
@@ -366,6 +395,7 @@ class ScheduledSyncService {
   }
 
   stopAll() {
+    this.stopHolidayAutoload();
     if (this.cronJobs.size > 0) {
       logger.info(`Stopping all ${this.cronJobs.size} scheduled sync(s)`);
       for (const [wsId] of this.cronJobs) {

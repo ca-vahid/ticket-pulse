@@ -210,6 +210,103 @@ describe('sendgridNotificationService', () => {
     );
   });
 
+  // Phase CC (QA 08-26 #1): cc + attachments on both delivery paths, and the
+  // provider guard that keeps an address out of to AND cc.
+  describe('cc + attachments', () => {
+    const apiConfig = { apiKey: 'SG.test', fromEmail: 'ticketpulse@example.com', configured: true, mode: 'api' };
+    const smtpConfig = {
+      apiKey: null, fromEmail: null, smtpConfigured: true, smtpHost: '127.0.0.1', smtpPort: 2525,
+      smtpUser: 'sink', smtpPassword: 'sink', smtpFromEmail: 'ticketpulse@example.com', configured: true, mode: 'smtp',
+    };
+    const pdfBase64 = Buffer.from('%PDF-1.4').toString('base64');
+
+    test('API path: personalizations.cc carries the cc and attachments[] uses the SendGrid v3 shape', async () => {
+      settingsRepositoryMock.getSendGridConfig.mockResolvedValue(apiConfig);
+      axiosPostMock.mockResolvedValue({ headers: { 'x-message-id': 'api-cc-1' } });
+
+      await sendEmail({
+        to: 'requester@example.com',
+        cc: ['boss@example.com', 'Boss@Example.com', 'colleague@example.com'],
+        subject: 'Re: Laptop [TP-1042]',
+        html: '<p>Looping in</p>',
+        attachments: [{ name: 'invoice.pdf', contentType: 'application/pdf', contentBytes: pdfBase64 }],
+      });
+
+      const [, payload] = axiosPostMock.mock.calls[0];
+      expect(payload.personalizations[0]).toEqual(expect.objectContaining({
+        to: [{ email: 'requester@example.com' }],
+        cc: [{ email: 'boss@example.com' }, { email: 'colleague@example.com' }],
+      }));
+      expect(payload.attachments).toEqual([
+        { content: pdfBase64, filename: 'invoice.pdf', type: 'application/pdf', disposition: 'attachment' },
+      ]);
+    });
+
+    test('API path: a cc/bcc address already in `to` is dropped (SendGrid rejects duplicates across the personalization)', async () => {
+      settingsRepositoryMock.getSendGridConfig.mockResolvedValue(apiConfig);
+      axiosPostMock.mockResolvedValue({ headers: {} });
+
+      await sendEmail({
+        to: ['requester@example.com'],
+        cc: ['REQUESTER@example.com', 'boss@example.com'],
+        bcc: ['boss@example.com', 'audit@example.com'],
+        subject: 'dedupe',
+        text: 'Hello',
+      });
+
+      const [, payload] = axiosPostMock.mock.calls[0];
+      expect(payload.personalizations[0].cc).toEqual([{ email: 'boss@example.com' }]);
+      expect(payload.personalizations[0].bcc).toEqual([{ email: 'audit@example.com' }]);
+      expect(payload.attachments).toBeUndefined();
+    });
+
+    test('API path: cc that collapses entirely onto `to` yields no cc key at all', async () => {
+      settingsRepositoryMock.getSendGridConfig.mockResolvedValue(apiConfig);
+      axiosPostMock.mockResolvedValue({ headers: {} });
+
+      await sendEmail({ to: 'requester@example.com', cc: ['requester@example.com'], subject: 's', text: 'Hello' });
+
+      const [, payload] = axiosPostMock.mock.calls[0];
+      expect(payload.personalizations[0]).not.toHaveProperty('cc');
+    });
+
+    test('SMTP path: cc rides the envelope, to/cc are deduped, and attachments become nodemailer Buffers', async () => {
+      settingsRepositoryMock.getSendGridConfig.mockResolvedValue(smtpConfig);
+      sendMailMock.mockResolvedValue({ messageId: 'smtp-cc-1' });
+
+      await sendEmail({
+        to: 'requester@example.com',
+        cc: ['boss@example.com', 'requester@example.com'],
+        subject: 'Re: Laptop [TP-1042]',
+        html: '<p>Looping in</p>',
+        attachments: [
+          { filename: 'notes.txt', type: 'text/plain', content: Buffer.from('hello') },
+          { name: 'invoice.pdf', contentType: 'application/pdf', contentBytes: pdfBase64 },
+          { name: 'empty.bin', contentType: 'application/octet-stream', contentBytes: '' },
+        ],
+      });
+
+      expect(sendMailMock).toHaveBeenCalledWith(expect.objectContaining({
+        to: ['requester@example.com'],
+        cc: ['boss@example.com'],
+        attachments: [
+          { filename: 'notes.txt', content: Buffer.from('hello'), contentType: 'text/plain' },
+          { filename: 'invoice.pdf', content: Buffer.from('%PDF-1.4'), contentType: 'application/pdf' },
+        ],
+      }));
+      expect(axiosPostMock).not.toHaveBeenCalled();
+    });
+
+    test('SMTP path: no attachments → attachments undefined (unchanged envelope for existing callers)', async () => {
+      settingsRepositoryMock.getSendGridConfig.mockResolvedValue(smtpConfig);
+      sendMailMock.mockResolvedValue({ messageId: 'smtp-cc-2' });
+
+      await sendEmail({ to: 'requester@example.com', subject: 's', text: 'Hello' });
+
+      expect(sendMailMock).toHaveBeenCalledWith(expect.objectContaining({ attachments: undefined, cc: undefined }));
+    });
+  });
+
   test('rejects send attempts when no email provider configuration is available', async () => {
     settingsRepositoryMock.getSendGridConfig.mockResolvedValue({
       apiKey: null,

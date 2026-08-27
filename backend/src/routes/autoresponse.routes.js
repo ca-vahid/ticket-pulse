@@ -129,17 +129,22 @@ router.delete('/holidays/:id', asyncHandler(async (req, res) => {
 
 /**
  * POST /api/autoresponse/holidays/load-canadian
- * Load Canadian holidays for a given year
+ * Load Canadian holidays. Body: `{ years: number[] }` (preferred) or the
+ * legacy `{ year }`; nothing → this year + next. Idempotent — re-running
+ * only reports what was already there. Phase HD (QA 08-25 #3).
  */
 router.post('/holidays/load-canadian', asyncHandler(async (req, res) => {
-  const { year } = req.body;
-  const targetYear = year || new Date().getFullYear();
-
-  await availabilityService.loadCanadianHolidays(targetYear, req.workspaceId);
+  const body = req.body || {};
+  const requested = Array.isArray(body.years) && body.years.length > 0 ? body.years : body.year;
+  const result = await availabilityService.loadCanadianHolidaysForYears(requested ?? null, req.workspaceId);
+  const yearLabel = result.years.length === 1
+    ? String(result.years[0])
+    : `${result.years[0]}–${result.years[result.years.length - 1]}`;
 
   res.json({
     success: true,
-    message: `Canadian holidays loaded for ${targetYear}`,
+    data: result,
+    message: `Canadian holidays ${yearLabel}: ${result.created} added, ${result.skipped} already present`,
   });
 }));
 

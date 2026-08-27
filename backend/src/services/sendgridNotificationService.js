@@ -2,6 +2,7 @@ import axios from 'axios';
 import nodemailer from 'nodemailer';
 import settingsRepository from './settingsRepository.js';
 import emailHealthService from './emailHealthService.js';
+import logger from '../utils/logger.js';
 import { ExternalAPIError, ValidationError } from '../utils/errors.js';
 import { formatSender, sanitizeFromName } from '../utils/emailSender.js';
 
@@ -52,6 +53,55 @@ function mapEmails(values) {
   return normalizeEmailList(values).map((email) => ({ email }));
 }
 
+/**
+ * Drop every address in `list` that already appears in `taken`
+ * (case-insensitive). SendGrid rejects a message whose to/cc/bcc share an
+ * address ("Each email address in the personalization block should be
+ * unique"), and SMTP servers would deliver twice — so the provider guard
+ * lives here, not in each caller (Phase CC, QA 08-26 #1).
+ */
+function withoutAddresses(list, taken) {
+  const seen = new Set(taken.map((email) => email.toLowerCase()));
+  return list.filter((email) => !seen.has(email.toLowerCase()));
+}
+
+// SendGrid caps the whole message at 30 MB; keep headroom for body + base64
+// overhead. Callers pre-filter per file (the reply path keeps ≤3 MB/file).
+export const MAX_ATTACHMENT_PAYLOAD_BYTES = 25 * 1024 * 1024;
+
+/**
+ * Normalize caller attachments into one shape for both delivery paths.
+ * Accepts the Graph-style `{name, contentType, contentBytes}` the reply path
+ * already builds AND the plainer `{filename, type, content}`; `content` may
+ * be a base64 string or a Buffer. Empty/oversized entries are dropped and
+ * reported through `dropped` so callers can log honestly instead of
+ * silently losing files.
+ */
+function normalizeAttachments(value) {
+  const list = Array.isArray(value) ? value : [];
+  const kept = [];
+  const dropped = [];
+  let totalBase64Bytes = 0;
+  for (const item of list) {
+    if (!item || typeof item !== 'object') continue;
+    const filename = trim(item.filename || item.name) || 'attachment';
+    const contentType = trim(item.contentType || item.type) || 'application/octet-stream';
+    const raw = item.contentBytes ?? item.content;
+    const contentBase64 = Buffer.isBuffer(raw) ? raw.toString('base64') : trim(raw);
+    if (!contentBase64) {
+      dropped.push({ filename, reason: 'empty' });
+      continue;
+    }
+    if (totalBase64Bytes + contentBase64.length > MAX_ATTACHMENT_PAYLOAD_BYTES) {
+      dropped.push({ filename, reason: 'payload_cap' });
+      continue;
+    }
+    totalBase64Bytes += contentBase64.length;
+    kept.push({ filename, contentType, contentBase64 });
+  }
+  return { attachments: kept, dropped };
+}
+
 function hasApiConfig(sendgridConfig) {
   return Boolean(sendgridConfig.apiKey && sendgridConfig.fromEmail);
 }
@@ -91,6 +141,7 @@ async function sendViaSendgridApi({
   htmlBody,
   textBody,
   customArgs,
+  attachments,
 }) {
   const personalization = { to: mapEmails(toRecipients) };
   const ccMapped = mapEmails(ccRecipients);
@@ -102,6 +153,13 @@ async function sendViaSendgridApi({
   const content = [];
   if (textBody) content.push({ type: 'text/plain', value: textBody });
   if (htmlBody) content.push({ type: 'text/html', value: htmlBody });
+  // SendGrid v3 attachments: base64 content + filename + type (+ disposition).
+  const apiAttachments = attachments.map((a) => ({
+    content: a.contentBase64,
+    filename: a.filename,
+    type: a.contentType,
+    disposition: 'attachment',
+  }));
 
   // SendGrid v3 supports from.name natively — never stuff the display name
   // into from.email (that breaks sender verification matching). Callers
@@ -115,6 +173,7 @@ async function sendViaSendgridApi({
     subject: emailSubject,
     content,
   };
+  if (apiAttachments.length > 0) payload.attachments = apiAttachments;
   const normalizedReplyTo = trim(replyTo);
   if (normalizedReplyTo) payload.reply_to = { email: normalizedReplyTo };
 
@@ -150,6 +209,7 @@ async function sendViaSmtp({
   htmlBody,
   textBody,
   customArgs,
+  attachments,
 }) {
   const transporter = nodemailer.createTransport({
     host: sendgridConfig.smtpHost,
@@ -176,6 +236,14 @@ async function sendViaSmtp({
     html: htmlBody || undefined,
     replyTo: trim(replyTo) || undefined,
     headers: customArgsToHeaders(customArgs),
+    // nodemailer attachments: Buffer content + filename + contentType.
+    attachments: attachments.length > 0
+      ? attachments.map((a) => ({
+        filename: a.filename,
+        content: Buffer.from(a.contentBase64, 'base64'),
+        contentType: a.contentType,
+      }))
+      : undefined,
   });
 
   return {
@@ -199,10 +267,18 @@ export async function sendEmail({
   customArgs = null,
   context = null,
   workspaceId = null,
+  attachments: rawAttachments = [],
 }) {
   const toRecipients = normalizeEmailList(to);
-  const ccRecipients = normalizeEmailList(cc);
-  const bccRecipients = normalizeEmailList(bcc);
+  // Provider guard (Phase CC3): an address may appear in exactly one of
+  // to/cc/bcc — SendGrid rejects duplicates across the personalization,
+  // and SMTP would deliver the same message twice.
+  const ccRecipients = withoutAddresses(normalizeEmailList(cc), toRecipients);
+  const bccRecipients = withoutAddresses(normalizeEmailList(bcc), [...toRecipients, ...ccRecipients]);
+  const { attachments, dropped: droppedAttachments } = normalizeAttachments(rawAttachments);
+  if (droppedAttachments.length > 0) {
+    logger.warn(`sendEmail: ${droppedAttachments.length} attachment(s) not sent (${droppedAttachments.map((d) => `${d.filename}: ${d.reason}`).join(', ')})`);
+  }
   const textBody = trim(text);
   const htmlBody = trim(html);
   const emailSubject = trim(subject) || 'Ticket Pulse notification';
@@ -230,6 +306,7 @@ export async function sendEmail({
       htmlBody,
       textBody,
       customArgs,
+      attachments,
     };
     const result = smtpMode
       ? await sendViaSmtp(deliveryParams)

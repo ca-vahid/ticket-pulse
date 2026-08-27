@@ -3473,8 +3473,16 @@ class TicketService {
     // Workspace sender identity (Phase EB): guaranteed on the SendGrid
     // fallback, best-effort on Graph (Exchange rewrites to the mailbox name).
     const fromName = await resolveFromName(ticket.workspaceId);
+    // Cc for the wire (Phase CC, QA 08-26 #1): the requester is already the
+    // To — SendGrid rejects an address that appears in both to and cc, and
+    // Graph would deliver twice. Case-insensitive, order preserved.
+    const requesterEmail = String(ticket.requester.email || '').trim();
+    const ccForSend = (Array.isArray(cc) ? cc : [])
+      .map((address) => String(address || '').trim())
+      .filter((address) => address && address.toLowerCase() !== requesterEmail.toLowerCase());
     // Graph simple attach tops out at ~3 MB per file; bigger ones stay
-    // download-only in Ticket Pulse (the thread still lists them).
+    // download-only in Ticket Pulse (the thread still lists them). The same
+    // per-file cap applies on the SendGrid/SMTP path (30 MB message total).
     const mailableAttachments = attachments
       .filter((a) => a.buffer && a.buffer.length <= 3 * 1024 * 1024)
       .map((a) => ({
@@ -3494,7 +3502,7 @@ class TicketService {
         if (graphMailClient.isConfigured()) {
           const sent = await graphMailClient.sendMailAsMailbox(connection.address, {
             to: [ticket.requester.email],
-            cc,
+            cc: ccForSend,
             subject,
             html,
             attachments: mailableAttachments,
@@ -3516,7 +3524,7 @@ class TicketService {
               notificationType: 'native_reply_to_requester',
               recipient: ticket.requester.email,
               toRecipients: [ticket.requester.email],
-              ccRecipients: cc,
+              ccRecipients: ccForSend,
               subject,
               htmlBody: html.slice(0, 20000),
               textBody: text.slice(0, 20000),
@@ -3535,12 +3543,19 @@ class TicketService {
     }
 
     try {
+      // SendGrid/SMTP fallback carries the SAME cc + attachments as Graph —
+      // before Phase CC this branch dropped both while the thread entry
+      // echoed "+1 Cc", so replies LOOKED sent to the cc'd colleague.
       const result = await sendgridNotificationService.sendEmail({
         to: [ticket.requester.email],
+        cc: ccForSend,
         subject,
         html,
         text: `${text}\n\n— ${entry.actorName || 'Ticket Pulse'} · ${ref}`,
         fromName,
+        attachments: mailableAttachments,
+        context: 'native_reply',
+        workspaceId: ticket.workspaceId,
       });
       await prisma.notificationDelivery.create({
         data: {
@@ -3552,6 +3567,7 @@ class TicketService {
           notificationType: 'native_reply_to_requester',
           recipient: ticket.requester.email,
           toRecipients: [ticket.requester.email],
+          ccRecipients: ccForSend,
           subject,
           htmlBody: html.slice(0, 20000),
           textBody: text.slice(0, 20000),
@@ -3574,6 +3590,7 @@ class TicketService {
           notificationType: 'native_reply_to_requester',
           recipient: ticket.requester.email,
           toRecipients: [ticket.requester.email],
+          ccRecipients: ccForSend,
           subject,
           error: String(err.message || err).slice(0, 2000),
           dedupeKey,

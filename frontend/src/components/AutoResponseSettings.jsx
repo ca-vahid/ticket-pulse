@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react';
 import api from '../services/api';
 import { Clock, Plus, Trash2, CheckCircle, XCircle, Calendar, Globe } from 'lucide-react';
+import { formatHolidayDate } from '../utils/holidays';
+
+const CURRENT_YEAR = new Date().getFullYear();
 
 export default function AutoResponseSettings() {
   const [businessHours, setBusinessHours] = useState([]);
@@ -8,6 +11,13 @@ export default function AutoResponseSettings() {
   const [isLoading, setIsLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState(null);
   const [availability, setAvailability] = useState(null);
+  // "Load Canadian" fills TWO years (start + next) so next year's floating
+  // holidays — Labour Day, Thanksgiving, Good Friday… — exist before the SLA
+  // clocks need them (Phase HD, QA 08-25 #3).
+  const [loadStartYear, setLoadStartYear] = useState(CURRENT_YEAR);
+  const [isLoadingHolidays, setIsLoadingHolidays] = useState(false);
+  const loadYears = Number.isInteger(loadStartYear) ? [loadStartYear, loadStartYear + 1] : [CURRENT_YEAR, CURRENT_YEAR + 1];
+  const loadYearsLabel = `${loadYears[0]}–${loadYears[1]}`;
 
   const daysOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -101,15 +111,23 @@ export default function AutoResponseSettings() {
   };
 
   const handleLoadCanadianHolidays = async () => {
-    const year = new Date().getFullYear();
-    if (!confirm(`Load Canadian holidays for ${year}?`)) return;
+    if (!confirm(`Load Canadian statutory holidays for ${loadYearsLabel}? Existing entries are kept (nothing is duplicated).`)) return;
 
+    setIsLoadingHolidays(true);
     try {
-      await api.post('/autoresponse/holidays/load-canadian', { year });
-      setSaveStatus({ success: true, message: `Canadian holidays loaded for ${year}!` });
+      const res = await api.post('/autoresponse/holidays/load-canadian', { years: loadYears });
+      const result = res?.data || {};
+      const created = Number(result.created) || 0;
+      const skipped = Number(result.skipped) || 0;
+      setSaveStatus({
+        success: true,
+        message: `Canadian holidays ${loadYearsLabel}: ${created} added, ${skipped} already present.`,
+      });
       fetchData();
     } catch (error) {
       setSaveStatus({ success: false, message: error.message || 'Failed to load holidays' });
+    } finally {
+      setIsLoadingHolidays(false);
     }
   };
 
@@ -229,13 +247,31 @@ export default function AutoResponseSettings() {
             <Calendar className="w-5 h-5" />
             Holidays
           </h2>
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
+            <label className="flex items-center gap-1 text-xs text-gray-600" title="First year to load; the following year is loaded too">
+              <span>From</span>
+              <input
+                type="number"
+                min={2000}
+                max={2099}
+                value={Number.isInteger(loadStartYear) ? loadStartYear : ''}
+                onChange={(e) => {
+                  const next = parseInt(e.target.value, 10);
+                  setLoadStartYear(Number.isInteger(next) ? next : NaN);
+                }}
+                onBlur={() => { if (!Number.isInteger(loadStartYear)) setLoadStartYear(CURRENT_YEAR); }}
+                aria-label="First year of Canadian holidays to load"
+                className="w-[4.5rem] px-2 py-1 border border-gray-300 rounded text-sm tp-focus-ring"
+              />
+            </label>
             <button
               onClick={handleLoadCanadianHolidays}
-              className="flex items-center gap-1 text-sm bg-purple-600 hover:bg-purple-700 text-white px-3 py-1 rounded"
+              disabled={isLoadingHolidays}
+              title="Adds the Canadian statutory holidays for both years; existing entries are kept"
+              className="flex items-center gap-1 text-sm bg-purple-600 hover:bg-purple-700 disabled:opacity-60 text-white px-3 py-1 rounded"
             >
               <Globe className="w-4 h-4" />
-              Load Canadian
+              {isLoadingHolidays ? 'Loading…' : `Load Canadian (${loadYearsLabel})`}
             </button>
             <button
               onClick={handleAddHoliday}
@@ -257,7 +293,10 @@ export default function AutoResponseSettings() {
                   <div className="flex-1">
                     <p className="font-medium text-sm">{holiday.name}</p>
                     <p className="text-xs text-gray-500">
-                      {new Date(holiday.date).toLocaleDateString()}
+                      {/* UTC-safe: the DATE column serializes as UTC midnight —
+                          `new Date(...).toLocaleDateString()` showed the previous
+                          day west of UTC ("Labour Day 8/31", QA 08-25 #3). */}
+                      {formatHolidayDate(holiday.date)}
                       {holiday.isRecurring && ' (Recurring)'}
                       {holiday.country && ` - ${holiday.country}`}
                     </p>
