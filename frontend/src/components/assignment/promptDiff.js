@@ -1,76 +1,23 @@
-function splitPromptLines(text) {
-  const normalized = String(text || '').replace(/\r\n/g, '\n');
-  if (!normalized) return [];
-  return normalized.split('\n');
+// Prompt diff size guard (Mega 08-26 Phase PD1).
+//
+// This file used to hold a hand-rolled LCS line diff: a full O(L·M) DP matrix
+// (8·L·M bytes — 4k lines ≈ 114MB, 8k ≈ 366MB) computed synchronously inside
+// a useMemo, which is what froze the tab on "Compare this version with live"
+// (QA 08-25 #1). The diff itself is now Monaco's <DiffEditor> (Myers +
+// virtualized rendering); what remains here is the guard that decides when a
+// pair is big enough to show raw side-by-side first and let the user opt in.
+
+export const DIFF_MAX_LINES = 1500;
+export const DIFF_MAX_CELLS = 2e6;
+
+export function countLines(text) {
+  const value = String(text || '');
+  return value ? value.split(/\r\n|\r|\n/).length : 0;
 }
 
-export function buildLineDiff(leftText = '', rightText = '') {
-  const left = splitPromptLines(leftText);
-  const right = splitPromptLines(rightText);
-  const rows = Array.from({ length: left.length + 1 }, () => Array(right.length + 1).fill(0));
-
-  for (let i = left.length - 1; i >= 0; i -= 1) {
-    for (let j = right.length - 1; j >= 0; j -= 1) {
-      rows[i][j] = left[i] === right[j]
-        ? rows[i + 1][j + 1] + 1
-        : Math.max(rows[i + 1][j], rows[i][j + 1]);
-    }
-  }
-
-  const ops = [];
-  let i = 0;
-  let j = 0;
-  let leftLine = 1;
-  let rightLine = 1;
-
-  while (i < left.length || j < right.length) {
-    if (i < left.length && j < right.length && left[i] === right[j]) {
-      ops.push({ type: 'equal', left: left[i], right: right[j], leftLine, rightLine });
-      i += 1;
-      j += 1;
-      leftLine += 1;
-      rightLine += 1;
-    } else if (j >= right.length || (i < left.length && rows[i + 1][j] >= rows[i][j + 1])) {
-      ops.push({ type: 'removed', left: left[i], right: '', leftLine, rightLine: null });
-      i += 1;
-      leftLine += 1;
-    } else {
-      ops.push({ type: 'added', left: '', right: right[j], leftLine: null, rightLine });
-      j += 1;
-      rightLine += 1;
-    }
-  }
-
-  const paired = [];
-  for (let index = 0; index < ops.length; index += 1) {
-    const op = ops[index];
-    if (op.type === 'equal') {
-      paired.push(op);
-      continue;
-    }
-
-    const removed = [];
-    const added = [];
-    while (index < ops.length && ops[index].type !== 'equal') {
-      if (ops[index].type === 'removed') removed.push(ops[index]);
-      if (ops[index].type === 'added') added.push(ops[index]);
-      index += 1;
-    }
-    index -= 1;
-
-    const max = Math.max(removed.length, added.length);
-    for (let offset = 0; offset < max; offset += 1) {
-      const leftOp = removed[offset];
-      const rightOp = added[offset];
-      paired.push({
-        type: leftOp && rightOp ? 'changed' : leftOp ? 'removed' : 'added',
-        left: leftOp?.left || '',
-        right: rightOp?.right || '',
-        leftLine: leftOp?.leftLine || null,
-        rightLine: rightOp?.rightLine || null,
-      });
-    }
-  }
-
-  return paired;
+/** True when either side is past DIFF_MAX_LINES or the L·M cell count is past DIFF_MAX_CELLS. */
+export function isDiffTooLarge(baseText, compareText) {
+  const left = countLines(baseText);
+  const right = countLines(compareText);
+  return Math.max(left, right) > DIFF_MAX_LINES || left * right > DIFF_MAX_CELLS;
 }

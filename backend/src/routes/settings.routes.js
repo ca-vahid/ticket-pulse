@@ -5,7 +5,7 @@ import {
   requireWorkspaceMemberOrAgent,
 } from '../middleware/auth.js';
 import { requireWorkspace } from '../middleware/workspace.js';
-import { ValidationError } from '../utils/errors.js';
+import { NotFoundError, ValidationError } from '../utils/errors.js';
 import settingsRepository from '../services/settingsRepository.js';
 import prisma from '../services/prisma.js';
 import technicianRepository from '../services/technicianRepository.js';
@@ -883,29 +883,66 @@ router.get(
   }),
 );
 
+// Create-form templates (Settings → Ticket Ops). POST + PATCH share one
+// coercion table so an edit can change EVERY captured field (QA 08-26 #2:
+// PATCH used to whitelist name/subject/description/priority/isActive only,
+// silently dropping type/category/sort edits).
+const TEMPLATE_PRIORITY_ERROR = 'Priority must be 1–4';
+function coerceTemplatePriority(value) {
+  if (value === undefined) return undefined;
+  if (value === null || value === '') return null;
+  const priority = Number(value);
+  if (!Number.isInteger(priority) || priority < 1 || priority > 4) throw new ValidationError(TEMPLATE_PRIORITY_ERROR);
+  return priority;
+}
+function coerceTemplateFields(body = {}, { partial = false } = {}) {
+  const has = (key) => !partial || body[key] !== undefined;
+  const data = {};
+  if (has('name')) {
+    const name = String(body.name || '').trim();
+    if (!name) throw new ValidationError('Template needs a name');
+    data.name = name.slice(0, 120);
+  }
+  if (has('subject')) data.subject = String(body.subject || '').slice(0, 500) || null;
+  if (has('description')) data.description = body.description || null;
+  if (has('priority')) data.priority = coerceTemplatePriority(body.priority) ?? null;
+  if (has('ticketType')) data.ticketType = String(body.ticketType || '').trim().slice(0, 30) || null;
+  if (has('internalCategoryId')) data.internalCategoryId = Number(body.internalCategoryId) || null;
+  if (has('internalSubcategoryId')) data.internalSubcategoryId = Number(body.internalSubcategoryId) || null;
+  if (has('sortOrder')) data.sortOrder = Number.isFinite(Number(body.sortOrder)) ? Math.trunc(Number(body.sortOrder)) : 0;
+  if (partial && body.isActive !== undefined) data.isActive = body.isActive !== false;
+  return data;
+}
+/** Prisma P2002 on @@unique([workspaceId, name]) → a friendly 400 (create + rename). */
+function isTemplateNameCollision(err) {
+  return err?.code === 'P2002';
+}
+function templateNameTakenError(name) {
+  const err = new ValidationError(`A template named "${name}" already exists in this workspace — pick another name`);
+  err.code = 'template_name_taken';
+  return err;
+}
+
 router.post(
   '/ticket-templates',
   requireWorkspace,
   requireWorkspaceAccess,
   requireAdmin,
   asyncHandler(async (req, res) => {
-    const name = String(req.body?.name || '').trim();
-    if (!name) throw new ValidationError('Template needs a name');
-    const priority = req.body?.priority ? Number(req.body.priority) : null;
-    if (priority !== null && !(priority >= 1 && priority <= 4)) throw new ValidationError('Priority must be 1–4');
-    const template = await prisma.ticketTemplate.create({
-      data: {
-        workspaceId: req.workspaceId,
-        name: name.slice(0, 120),
-        subject: String(req.body?.subject || '').slice(0, 500) || null,
-        description: req.body?.description || null,
-        priority,
-        ticketType: req.body?.ticketType || null,
-        internalCategoryId: Number(req.body?.internalCategoryId) || null,
-        internalSubcategoryId: Number(req.body?.internalSubcategoryId) || null,
-        createdBy: requestActor(req)?.email || null,
-      },
-    });
+    const data = coerceTemplateFields(req.body || {});
+    let template;
+    try {
+      template = await prisma.ticketTemplate.create({
+        data: {
+          workspaceId: req.workspaceId,
+          ...data,
+          createdBy: requestActor(req)?.email || null,
+        },
+      });
+    } catch (err) {
+      if (isTemplateNameCollision(err)) throw templateNameTakenError(data.name);
+      throw err;
+    }
     res.status(201).json({ success: true, data: template });
   }),
 );
@@ -919,14 +956,15 @@ router.patch(
     const existing = await prisma.ticketTemplate.findFirst({
       where: { id: parsePositiveId(req.params.id, 'template id'), workspaceId: req.workspaceId },
     });
-    if (!existing) throw new ValidationError('Template not found');
-    const patch = {};
-    if (req.body?.name !== undefined) patch.name = String(req.body.name).trim().slice(0, 120);
-    if (req.body?.subject !== undefined) patch.subject = String(req.body.subject || '').slice(0, 500) || null;
-    if (req.body?.description !== undefined) patch.description = req.body.description || null;
-    if (req.body?.priority !== undefined) patch.priority = Number(req.body.priority) || null;
-    if (req.body?.isActive !== undefined) patch.isActive = req.body.isActive !== false;
-    const template = await prisma.ticketTemplate.update({ where: { id: existing.id }, data: patch });
+    if (!existing) throw new NotFoundError('Template not found');
+    const patch = coerceTemplateFields(req.body || {}, { partial: true });
+    let template;
+    try {
+      template = await prisma.ticketTemplate.update({ where: { id: existing.id }, data: patch });
+    } catch (err) {
+      if (isTemplateNameCollision(err)) throw templateNameTakenError(patch.name ?? existing.name);
+      throw err;
+    }
     res.json({ success: true, data: template });
   }),
 );
@@ -940,7 +978,7 @@ router.delete(
     const existing = await prisma.ticketTemplate.findFirst({
       where: { id: parsePositiveId(req.params.id, 'template id'), workspaceId: req.workspaceId },
     });
-    if (!existing) throw new ValidationError('Template not found');
+    if (!existing) throw new NotFoundError('Template not found');
     await prisma.ticketTemplate.delete({ where: { id: existing.id } });
     res.json({ success: true, data: { deleted: true } });
   }),

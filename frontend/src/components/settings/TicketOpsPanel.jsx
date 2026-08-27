@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, Archive, ArrowDown, ArrowUp, CalendarClock, Check, Eye, EyeOff, FileText, FormInput, Globe as GlobeGlyph, LayoutGrid, Layers, Loader2, Plus, RefreshCw, RotateCcw, Sparkles, Star, StickyNote, Tag as TagGlyph, Timer, Trash2, Wand2 } from 'lucide-react';
+import { AlertTriangle, Archive, ArrowDown, ArrowUp, CalendarClock, Check, Eye, EyeOff, FileText, FormInput, Globe as GlobeGlyph, LayoutGrid, Layers, Loader2, Pencil, Plus, RefreshCw, RotateCcw, Sparkles, Star, StickyNote, Tag as TagGlyph, Timer, Trash2, Wand2 } from 'lucide-react';
 import { settingsAPI, ticketsAPI, workspaceAPI } from '../../services/api';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 import { SOURCE_OPTIONS, TAG_CHIP_TONES, TYPE_COLOR_TONES } from '../tickets/ticketUi';
@@ -686,69 +686,215 @@ export function CustomFieldsSection() {
   );
 }
 
-function CreateTemplatesSection() {
+const EMPTY_TEMPLATE_DRAFT = { name: '', subject: '', description: '', priority: '', ticketType: '', internalCategoryId: '', internalSubcategoryId: '' };
+
+/** Template row → draft form values (everything the composer can apply). */
+function templateToDraft(template) {
+  return {
+    name: template.name || '',
+    subject: template.subject || '',
+    description: template.description || '',
+    priority: template.priority ? String(template.priority) : '',
+    ticketType: template.ticketType || '',
+    internalCategoryId: template.internalCategoryId ? String(template.internalCategoryId) : '',
+    internalSubcategoryId: template.internalSubcategoryId ? String(template.internalSubcategoryId) : '',
+  };
+}
+
+export function CreateTemplatesSection() {
+  const { activeTypes, types } = useTicketTypes();
   const [templates, setTemplates] = useState([]);
-  const [draft, setDraft] = useState(null); // { name, subject, description, priority }
+  const [categoryTree, setCategoryTree] = useState([]);
+  const [draft, setDraft] = useState(null); // see EMPTY_TEMPLATE_DRAFT
+  const [editingId, setEditingId] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const load = useCallback(() => {
     settingsAPI.getTicketTemplates().then((res) => setTemplates(res.data?.data || res.data || [])).catch(() => {});
   }, []);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    // Same tree the composer's Category/Subcategory pickers use, so a template
+    // can only point at categories the new-ticket form can actually apply.
+    ticketsAPI.meta().then((res) => setCategoryTree(res.data?.categoryTree || [])).catch(() => {});
+  }, []);
+
+  const categoryById = (id) => categoryTree.find((c) => String(c.id) === String(id)) || null;
+  const subcategoryLabel = (categoryId, subcategoryId) => {
+    if (!subcategoryId) return null;
+    const sub = (categoryById(categoryId)?.subcategories || []).find((sc) => String(sc.id) === String(subcategoryId));
+    return sub?.name || null;
+  };
+  const typeTone = (name) => {
+    const t = (types || []).find((x) => x.name === name);
+    return TYPE_COLOR_TONES[t?.color] || TYPE_COLOR_TONES.slate;
+  };
+  const draftSubcategories = draft ? (categoryById(draft.internalCategoryId)?.subcategories || []) : [];
+
+  const payloadFromDraft = () => ({
+    name: draft.name.trim(),
+    subject: draft.subject,
+    description: draft.description,
+    priority: draft.priority ? Number(draft.priority) : null,
+    ticketType: draft.ticketType || null,
+    internalCategoryId: draft.internalCategoryId ? Number(draft.internalCategoryId) : null,
+    internalSubcategoryId: draft.internalSubcategoryId ? Number(draft.internalSubcategoryId) : null,
+  });
 
   const save = async () => {
     setBusy(true); setError(null);
     try {
-      await settingsAPI.createTicketTemplate({ ...draft, priority: Number(draft.priority) || null });
-      setDraft(null);
+      const payload = payloadFromDraft();
+      if (editingId) {
+        await settingsAPI.updateTicketTemplate(editingId, payload);
+      } else {
+        await settingsAPI.createTicketTemplate(payload);
+      }
+      setDraft(null); setEditingId(null);
       load();
     } catch (e) { setError(e.response?.data?.message || e.message); }
     setBusy(false);
   };
 
+  const startEdit = (template) => {
+    setEditingId(template.id);
+    setError(null);
+    setDraft(templateToDraft(template));
+  };
+  const cancel = () => { setDraft(null); setEditingId(null); setError(null); };
+
   return (
-    <SectionCard icon={FileText} title="Create-form templates" hint="Presets that pre-fill the new-ticket form for recurring request shapes (subject, description scaffold, priority).">
+    <SectionCard icon={FileText} title="Create-form templates" hint="Presets that pre-fill the new-ticket form for recurring request shapes: subject, description scaffold, priority, type, and category. Everything a template sets is applied when an agent picks it in the composer; blank fields leave the form untouched.">
       <ul className="space-y-1 mb-2">
-        {templates.map((template) => (
-          <li key={template.id} className="flex items-center gap-2 text-xs">
-            <span className={`font-semibold ${template.isActive ? 'text-slate-700' : 'text-slate-300 line-through'}`}>{template.name}</span>
-            <span className="text-slate-400 truncate flex-1">{template.subject || '—'}</span>
-            <button
-              onClick={async () => { await settingsAPI.updateTicketTemplate(template.id, { isActive: !template.isActive }).catch(() => {}); load(); }}
-              className="tp-focus-ring text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 hover:bg-slate-50"
-            >
-              {template.isActive ? 'Disable' : 'Enable'}
-            </button>
-            <button
-              onClick={async () => { await settingsAPI.deleteTicketTemplate(template.id).catch(() => {}); load(); }}
-              aria-label={`Delete template ${template.name}`}
-              className="tp-focus-ring p-1 rounded text-slate-300 hover:text-red-500"
-            >
-              <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
-            </button>
-          </li>
-        ))}
+        {templates.map((template) => {
+          const category = categoryById(template.internalCategoryId);
+          const subcategory = subcategoryLabel(template.internalCategoryId, template.internalSubcategoryId);
+          const isEditing = editingId === template.id;
+          return (
+            <li key={template.id} className={`flex items-center gap-2 text-xs rounded-md px-1.5 py-1 -mx-1.5 ${isEditing ? 'bg-blue-50/70' : ''}`}>
+              <span className={`font-semibold whitespace-nowrap ${template.isActive ? 'text-slate-700' : 'text-slate-300 line-through'}`}>{template.name}</span>
+              <span
+                className={`truncate min-w-0 flex-1 ${template.subject ? 'text-slate-500' : 'text-slate-300 italic'}`}
+                title={template.subject ? `Subject: ${template.subject}` : 'No subject — the composer keeps whatever the agent typed'}
+              >
+                {template.subject || 'no subject'}
+              </span>
+              {template.ticketType && (
+                <span className={`text-[10px] font-semibold rounded-full px-1.5 py-px whitespace-nowrap ${typeTone(template.ticketType).tile}`} title="Ticket type applied by this template">
+                  {template.ticketType}
+                </span>
+              )}
+              {category && (
+                <span className="text-[10px] text-slate-500 border border-slate-200 bg-slate-50 rounded-full px-1.5 py-px whitespace-nowrap" title="Category applied by this template">
+                  {category.name}{subcategory ? ` › ${subcategory}` : ''}
+                </span>
+              )}
+              {template.priority && (
+                <span className="text-[10px] text-slate-400 border border-slate-200 rounded-full px-1.5 py-px whitespace-nowrap" title="Priority applied by this template">
+                  {PRIORITY_LABELS[template.priority] || template.priority}
+                </span>
+              )}
+              {!template.isActive && <span className="text-[10px] text-slate-300 italic">disabled</span>}
+              <button
+                onClick={() => startEdit(template)}
+                aria-label={`Edit template ${template.name}`}
+                title="Edit this template (name, subject, scaffold, priority, type, category)"
+                className="tp-focus-ring p-1 rounded text-slate-400 hover:text-blue-600 hover:bg-white"
+              >
+                <Pencil className="w-3.5 h-3.5" aria-hidden="true" />
+              </button>
+              <button
+                onClick={async () => { await settingsAPI.updateTicketTemplate(template.id, { isActive: !template.isActive }).catch(() => {}); load(); }}
+                className="tp-focus-ring text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 hover:bg-slate-50"
+                title={template.isActive ? 'Hide this template from the composer (kept for later)' : 'Show this template in the composer again'}
+              >
+                {template.isActive ? 'Disable' : 'Enable'}
+              </button>
+              <button
+                onClick={async () => { await settingsAPI.deleteTicketTemplate(template.id).catch(() => {}); load(); }}
+                aria-label={`Delete template ${template.name}`}
+                className="tp-focus-ring p-1 rounded text-slate-300 hover:text-red-500"
+              >
+                <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+              </button>
+            </li>
+          );
+        })}
         {templates.length === 0 && <li className="text-xs text-slate-400 italic">No templates yet.</li>}
       </ul>
       {draft ? (
-        <div className="rounded-lg border border-slate-200 p-2.5 space-y-1.5 text-xs">
-          <div className="grid grid-cols-2 gap-1.5">
-            <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Template name" aria-label="Template name" className="tp-focus-ring border border-slate-200 rounded-md px-2 py-1" />
-            <select value={draft.priority || ''} onChange={(e) => setDraft({ ...draft, priority: e.target.value })} aria-label="Priority" className="tp-focus-ring border border-slate-200 rounded-md px-1.5 py-1">
-              <option value="">Priority: none</option>
-              {[1, 2, 3, 4].map((p) => <option key={p} value={p}>Priority → {PRIORITY_LABELS[p]}</option>)}
-            </select>
+        <div className="rounded-lg border border-slate-200 p-2.5 space-y-2 text-xs" data-testid="template-form">
+          {editingId && (
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-blue-600">Editing “{templates.find((t) => t.id === editingId)?.name || draft.name}”</p>
+          )}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <label className="block">
+              <span className="mb-0.5 block font-semibold text-slate-600">Template name <span className="text-red-500">*</span></span>
+              <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="e.g. New starter" aria-label="Template name" className="tp-focus-ring w-full border border-slate-200 rounded-md px-2 py-1" />
+            </label>
+            <label className="block">
+              <span className="mb-0.5 block font-semibold text-slate-600">Priority</span>
+              <select value={draft.priority || ''} onChange={(e) => setDraft({ ...draft, priority: e.target.value })} aria-label="Priority" className="tp-focus-ring w-full border border-slate-200 rounded-md px-1.5 py-1">
+                <option value="">Leave as-is</option>
+                {[1, 2, 3, 4].map((p) => <option key={p} value={p}>{PRIORITY_LABELS[p]}</option>)}
+              </select>
+            </label>
           </div>
-          <input value={draft.subject} onChange={(e) => setDraft({ ...draft, subject: e.target.value })} placeholder="Subject (e.g. New starter — laptop + accounts)" aria-label="Subject" className="tp-focus-ring w-full border border-slate-200 rounded-md px-2 py-1" />
-          <textarea value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} placeholder={'Description scaffold, e.g.\nStart date:\nManager:\nEquipment needed:'} aria-label="Description scaffold" className="tp-focus-ring w-full h-20 border border-slate-200 rounded-md px-2 py-1" />
-          {error && <p className="text-red-500">{error}</p>}
+          <label className="block">
+            <span className="mb-0.5 block font-semibold text-slate-600">Subject <span className="font-normal text-slate-400">— fills the composer’s Subject field</span></span>
+            <input value={draft.subject} onChange={(e) => setDraft({ ...draft, subject: e.target.value })} placeholder="e.g. New starter — laptop + accounts" aria-label="Subject" maxLength={500} className="tp-focus-ring w-full border border-slate-200 rounded-md px-2 py-1" />
+          </label>
+          <label className="block">
+            <span className="mb-0.5 block font-semibold text-slate-600">Description scaffold</span>
+            <textarea value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} placeholder={'e.g.\nStart date:\nManager:\nEquipment needed:'} aria-label="Description scaffold" className="tp-focus-ring w-full h-20 border border-slate-200 rounded-md px-2 py-1" />
+          </label>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <label className="block">
+              <span className="mb-0.5 block font-semibold text-slate-600">Type</span>
+              <select value={draft.ticketType} onChange={(e) => setDraft({ ...draft, ticketType: e.target.value })} aria-label="Ticket type" className="tp-focus-ring w-full border border-slate-200 rounded-md px-1.5 py-1">
+                <option value="">Leave as-is</option>
+                {activeTypes.map((t) => <option key={t.id} value={t.name}>{t.name}</option>)}
+                {draft.ticketType && !activeTypes.some((t) => t.name === draft.ticketType) && (
+                  <option value={draft.ticketType}>{draft.ticketType} (retired)</option>
+                )}
+              </select>
+            </label>
+            <label className="block">
+              <span className="mb-0.5 block font-semibold text-slate-600">Category</span>
+              <select
+                value={draft.internalCategoryId}
+                onChange={(e) => setDraft({ ...draft, internalCategoryId: e.target.value, internalSubcategoryId: '' })}
+                aria-label="Category"
+                className="tp-focus-ring w-full border border-slate-200 rounded-md px-1.5 py-1"
+              >
+                <option value="">Leave as-is</option>
+                {categoryTree.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </label>
+            <label className="block">
+              <span className="mb-0.5 block font-semibold text-slate-600">Subcategory</span>
+              <select
+                value={draft.internalSubcategoryId}
+                onChange={(e) => setDraft({ ...draft, internalSubcategoryId: e.target.value })}
+                disabled={!draft.internalCategoryId || draftSubcategories.length === 0}
+                aria-label="Subcategory"
+                className="tp-focus-ring w-full border border-slate-200 rounded-md px-1.5 py-1 disabled:bg-slate-50 disabled:text-slate-400"
+              >
+                <option value="">{draft.internalCategoryId && draftSubcategories.length === 0 ? 'No subcategories' : 'Leave as-is'}</option>
+                {draftSubcategories.map((sc) => <option key={sc.id} value={sc.id}>{sc.name}</option>)}
+              </select>
+            </label>
+          </div>
+          {error && <p className="text-red-500" role="alert">{error}</p>}
           <div className="flex gap-1.5">
-            <button onClick={save} disabled={busy || !draft.name} className="tp-focus-ring px-2.5 py-1 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-60">Create</button>
-            <button onClick={() => setDraft(null)} className="tp-focus-ring px-2.5 py-1 rounded-md text-slate-500 hover:bg-slate-50">Cancel</button>
+            <button onClick={save} disabled={busy || !draft.name.trim()} className="tp-focus-ring px-2.5 py-1 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-60">
+              {busy ? <Loader2 className="w-3 h-3 animate-spin inline" aria-hidden="true" /> : (editingId ? 'Save' : 'Create')}
+            </button>
+            <button onClick={cancel} className="tp-focus-ring px-2.5 py-1 rounded-md text-slate-500 hover:bg-slate-50">Cancel</button>
           </div>
         </div>
       ) : (
-        <button onClick={() => setDraft({ name: '', subject: '', description: '', priority: '' })} className="tp-focus-ring inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700">
+        <button onClick={() => { setEditingId(null); setError(null); setDraft({ ...EMPTY_TEMPLATE_DRAFT }); }} className="tp-focus-ring inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700">
           <Plus className="w-3.5 h-3.5" aria-hidden="true" /> New template
         </button>
       )}

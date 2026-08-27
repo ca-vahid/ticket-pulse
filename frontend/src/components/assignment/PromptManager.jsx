@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { memo, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { assignmentAPI } from '../../services/api';
@@ -8,7 +8,8 @@ import {
   BookOpen, Columns2, GitCompare, ArrowRight, Plus, Minus, ChevronUp, Undo2,
 } from 'lucide-react';
 import { formatDateOnlyInTimezone } from '../../utils/dateHelpers';
-import { buildLineDiff } from './promptDiff';
+import { DiffEditor } from '@monaco-editor/react';
+import { countLines, isDiffTooLarge } from './promptDiff';
 
 const EDITOR_MODES = [
   { id: 'edit', label: 'Edit', icon: Code2 },
@@ -101,7 +102,7 @@ function ModeToggle({ value, onChange, modes = EDITOR_MODES }) {
   );
 }
 
-function MarkdownPreview({ value, className = '' }) {
+const MarkdownPreview = memo(function MarkdownPreview({ value, className = '' }) {
   if (!String(value || '').trim()) {
     return (
       <div className={`flex min-h-[240px] items-center justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50 text-sm text-slate-400 ${className}`}>
@@ -117,7 +118,7 @@ function MarkdownPreview({ value, className = '' }) {
       </Markdown>
     </div>
   );
-}
+});
 
 function PromptEditorSurface({
   value,
@@ -382,172 +383,61 @@ function optionLabel(option) {
   return option?.label || 'Unknown prompt';
 }
 
-function splitPromptText(text) {
-  return String(text || '').replace(/\r\n/g, '\n').split('\n');
-}
+const DIFF_EDITOR_OPTIONS = {
+  originalEditable: false,
+  readOnly: false,
+  hideUnchangedRegions: { enabled: true, contextLineCount: 3, minimumLineCount: 3, revealLineCount: 20 },
+  wordWrap: 'on',
+  diffWordWrap: 'on',
+  minimap: { enabled: false },
+  scrollBeyondLastLine: false,
+  renderOverviewRuler: false,
+  diffAlgorithm: 'advanced',
+  fontSize: 12,
+  lineNumbers: 'on',
+  quickSuggestions: false,
+  suggestOnTriggerCharacters: false,
+  wordBasedSuggestions: 'off',
+  renderLineHighlight: 'none',
+  glyphMargin: false,
+  folding: false,
+  automaticLayout: true,
+};
 
-function DiffLine({ line }) {
-  return <span className="whitespace-pre-wrap break-words">{line || ' '}</span>;
-}
-
-function SplitDiffView({
-  diffRows,
-  leftPaneRef,
-  rightPaneRef,
-  activeRowIndex,
-  diffNavControls,
-  onUpdateCompareLine,
-  onInsertCompareLineAfter,
-  onRemoveAddedBlock,
-  onRestoreRemovedBlock,
-  onUseBaseBlock,
-  compareLineCount,
-}) {
+function DiffLoading() {
   return (
-    <div className="grid min-h-[560px] overflow-hidden rounded-lg border border-slate-200 bg-white font-mono text-xs lg:grid-cols-2">
-      <div className="min-w-0 border-b border-slate-200 lg:border-b-0 lg:border-r">
-        <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-3 py-2 text-[10px] font-semibold uppercase text-slate-500">
-          <span>Base</span>
-          {diffNavControls}
-        </div>
-        <div ref={leftPaneRef} className="h-[52vh] overflow-auto bg-white leading-relaxed lg:h-[64vh]">
-          {diffRows.map((row, index) => {
-            const isFirstRemovedBlock = row.type === 'removed' && diffRows[index - 1]?.type !== 'removed';
-            const isActive = activeRowIndex === index;
-            const tone = row.type === 'removed' || row.type === 'changed'
-              ? 'bg-red-50 text-red-900'
-              : row.type === 'added'
-                ? 'bg-slate-50 text-slate-300'
-                : 'bg-white text-slate-700';
-            return (
-              <div
-                key={`left-${row.leftLine || 'x'}-${row.rightLine || 'x'}-${index}`}
-                data-diff-row={index}
-                className={`grid min-w-[560px] grid-cols-[56px_minmax(0,1fr)_96px] border-b border-slate-100 px-2 py-1.5 last:border-b-0 ${tone} ${isActive ? 'ring-2 ring-blue-400 ring-inset' : ''}`}
-              >
-                <span className="select-none text-right text-slate-400">{row.leftLine || ''}</span>
-                <span className="min-w-0 pl-3"><DiffLine line={row.left} /></span>
-                <span className="pl-2 text-right">
-                  {isFirstRemovedBlock && (
-                    <button
-                      type="button"
-                      onClick={() => onRestoreRemovedBlock(row.leftLine)}
-                      className="rounded border border-red-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-red-600 hover:bg-red-50"
-                      title="Put this removed block back into the compare prompt"
-                    >
-                      Put back
-                    </button>
-                  )}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-      <div className="min-w-0">
-        <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-blue-50 px-3 py-2 text-[10px] font-semibold uppercase text-blue-700">
-          <span>Compare · Editable</span>
-          <button
-            type="button"
-            onClick={() => onInsertCompareLineAfter(compareLineCount)}
-            className="rounded border border-blue-200 bg-white px-2 py-0.5 text-[10px] font-semibold normal-case tracking-normal text-blue-600 hover:bg-blue-50"
-          >
-            Add line
-          </button>
-        </div>
-        <div ref={rightPaneRef} className="h-[52vh] overflow-auto bg-white leading-relaxed lg:h-[64vh]">
-          {diffRows.map((row, index) => {
-            const isFirstAddedBlock = row.type === 'added' && diffRows[index - 1]?.type !== 'added';
-            const isFirstChangedBlock = row.type === 'changed' && diffRows[index - 1]?.type !== 'changed';
-            const isActive = activeRowIndex === index;
-            const tone = row.type === 'added' || row.type === 'changed'
-              ? 'bg-emerald-50 text-emerald-900'
-              : row.type === 'removed'
-                ? 'bg-slate-50 text-slate-300'
-                : 'bg-white text-slate-700';
-            return (
-              <div
-                key={`right-${row.leftLine || 'x'}-${row.rightLine || 'x'}-${index}`}
-                data-diff-row={index}
-                className={`grid min-w-[560px] grid-cols-[56px_minmax(0,1fr)_112px] border-b border-slate-100 px-2 py-1.5 last:border-b-0 ${tone} ${isActive ? 'ring-2 ring-blue-400 ring-inset' : ''}`}
-              >
-                <span className="select-none text-right text-slate-400">{row.rightLine || ''}</span>
-                {row.rightLine ? (
-                  <span
-                    className="min-h-[1.45rem] min-w-0 whitespace-pre-wrap rounded border border-transparent px-3 py-0.5 outline-none transition-colors focus:border-blue-200 focus:bg-white focus:ring-2 focus:ring-blue-100"
-                    contentEditable
-                    suppressContentEditableWarning
-                    onBlur={(event) => onUpdateCompareLine(row.rightLine, event.currentTarget.innerText.replace(/\n$/u, ''))}
-                  >
-                    {row.right || ' '}
-                  </span>
-                ) : (
-                  <span className="min-w-0 px-3 py-0.5"><DiffLine line="" /></span>
-                )}
-                <span className="flex justify-end gap-1 pl-2 text-right">
-                  {isFirstAddedBlock && (
-                    <button
-                      type="button"
-                      onClick={() => onRemoveAddedBlock(row.rightLine)}
-                      className="rounded border border-red-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-red-600 hover:bg-red-50"
-                      title="Remove this added block from the compare prompt"
-                    >
-                      Remove
-                    </button>
-                  )}
-                  {isFirstChangedBlock && (
-                    <button
-                      type="button"
-                      onClick={() => onUseBaseBlock(index)}
-                      className="rounded border border-blue-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-blue-600 hover:bg-blue-50"
-                      title="Replace this changed block with the base prompt text"
-                    >
-                      Use base
-                    </button>
-                  )}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+    <div className="flex h-full items-center justify-center text-sm text-slate-500">
+      <Loader2 className="mr-2 h-4 w-4 animate-spin text-blue-600" />
+      Loading diff editor...
     </div>
   );
 }
 
-function UnifiedDiffView({ diffRows, paneRef, activeRowIndex }) {
-  const unifiedRows = diffRows.flatMap((row, index) => {
-    if (row.type === 'equal') return [{ key: `${index}-equal`, sourceRowIndex: index, type: 'equal', marker: ' ', line: row.left, lineNo: row.leftLine }];
-    if (row.type === 'changed') {
-      return [
-        { key: `${index}-removed`, sourceRowIndex: index, type: 'removed', marker: '-', line: row.left, lineNo: row.leftLine },
-        { key: `${index}-added`, sourceRowIndex: index, type: 'added', marker: '+', line: row.right, lineNo: row.rightLine },
-      ];
-    }
-    if (row.type === 'removed') return [{ key: `${index}-removed`, sourceRowIndex: index, type: 'removed', marker: '-', line: row.left, lineNo: row.leftLine }];
-    return [{ key: `${index}-added`, sourceRowIndex: index, type: 'added', marker: '+', line: row.right, lineNo: row.rightLine }];
-  });
-
+/** Raw side-by-side used when the pair is past the size guard. */
+function RawSideBySide({ leftLabel, rightLabel, leftText, rightText, onComputeAnyway }) {
   return (
-    <div ref={paneRef} className="h-full overflow-auto rounded-lg border border-slate-200 bg-white font-mono text-xs">
-      {unifiedRows.map((row) => {
-        const tone = row.type === 'removed'
-          ? 'bg-red-50 text-red-900'
-          : row.type === 'added'
-            ? 'bg-emerald-50 text-emerald-900'
-            : 'bg-white text-slate-700';
-        return (
-          <div
-            key={row.key}
-            data-diff-row={row.sourceRowIndex}
-            className={`grid min-w-[760px] grid-cols-[56px_32px_1fr] border-b border-slate-100 last:border-b-0 ${tone} ${activeRowIndex === row.sourceRowIndex ? 'ring-2 ring-blue-400 ring-inset' : ''}`}
-          >
-            <div className="px-2 py-1.5 text-right text-slate-400">{row.lineNo || ''}</div>
-            <div className="px-2 py-1.5 font-bold">{row.marker}</div>
-            <div className="px-3 py-1.5"><DiffLine line={row.line} /></div>
+    <div className="flex h-full min-h-0 flex-col gap-3" data-testid="diff-size-guard">
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        <span>
+          Prompts too large for a line-by-line diff ({formatStat(countLines(leftText))} vs {formatStat(countLines(rightText))} lines) — showing raw side-by-side.
+        </span>
+        <button
+          type="button"
+          onClick={onComputeAnyway}
+          className="inline-flex h-8 items-center gap-1.5 rounded-md border border-amber-300 bg-white px-3 text-xs font-semibold text-amber-800 hover:bg-amber-100"
+        >
+          <GitCompare className="h-3.5 w-3.5" />
+          Compute anyway
+        </button>
+      </div>
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-2">
+        {[[leftLabel, leftText], [rightLabel, rightText]].map(([label, text]) => (
+          <div key={label} className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white">
+            <div className="border-b border-slate-200 bg-slate-50 px-3 py-2 text-[10px] font-semibold uppercase text-slate-500">{label}</div>
+            <pre className="settings-scrollbar min-h-0 flex-1 overflow-auto p-3 font-mono text-xs leading-relaxed text-slate-700 whitespace-pre-wrap break-words">{text}</pre>
           </div>
-        );
-      })}
+        ))}
+      </div>
     </div>
   );
 }
@@ -568,12 +458,24 @@ function PromptDiffModal({
   const [mode, setMode] = useState('split');
   const [content, setContent] = useState({});
   const [loading, setLoading] = useState(false);
-  const [compareDraft, setCompareDraft] = useState('');
-  const [draftHistory, setDraftHistory] = useState([]);
-  const [activeDiffIndex, setActiveDiffIndex] = useState(-1);
-  const leftPaneRef = useRef(null);
-  const rightPaneRef = useRef(null);
-  const unifiedPaneRef = useRef(null);
+  const [loadError, setLoadError] = useState(null);
+  const [computeAnyway, setComputeAnyway] = useState(false);
+  const [compareDirty, setCompareDirty] = useState(false);
+  const [changeStats, setChangeStats] = useState({ added: 0, removed: 0, blocks: 0 });
+  const [editorReady, setEditorReady] = useState(false);
+  // Resolved prompt bodies live in a ref so resolveContent never changes
+  // identity on a state write (the old version re-fired the loader effect and
+  // duplicated GET /assignment/prompts/:id on every render).
+  const contentRef = useRef({});
+  const diffEditorRef = useRef(null);
+  const editorSubscriptionsRef = useRef([]);
+  const keptModelsRef = useRef([]);
+  const disposeKeptModels = () => {
+    keptModelsRef.current.forEach((model) => {
+      try { if (!model.isDisposed?.()) model.dispose(); } catch { /* already gone */ }
+    });
+    keptModelsRef.current = [];
+  };
 
   const options = useMemo(() => {
     const all = [
@@ -603,21 +505,20 @@ function PromptDiffModal({
     if (key === 'current') {
       return { label: 'Editor draft (current)', systemPrompt: editText };
     }
-
-    if (content[key]) return content[key];
+    if (contentRef.current[key]) return contentRef.current[key];
 
     const id = Number(String(key).replace('version:', ''));
+    let resolved;
     if (published?.id === id) {
-      const resolved = { ...published, label: `Live published v${published.version}` };
-      setContent((prev) => ({ ...prev, [key]: resolved }));
-      return resolved;
+      resolved = { ...published, label: `Live published v${published.version}` };
+    } else {
+      const prompt = await loadPromptVersion(id);
+      if (!prompt) throw new Error(`Prompt version ${id} was not found`);
+      resolved = { ...prompt, label: `${prompt.status} v${prompt.version}` };
     }
-
-    const prompt = await loadPromptVersion(id);
-    const resolved = { ...prompt, label: `${prompt.status} v${prompt.version}` };
-    setContent((prev) => ({ ...prev, [key]: resolved }));
+    contentRef.current = { ...contentRef.current, [key]: resolved };
     return resolved;
-  }, [content, editText, loadPromptVersion, published]);
+  }, [editText, loadPromptVersion, published]);
 
   useEffect(() => {
     if (!isOpen) return undefined;
@@ -639,174 +540,143 @@ function PromptDiffModal({
     if (!isOpen) return undefined;
     let cancelled = false;
     setLoading(true);
+    setLoadError(null);
     Promise.all([resolveContent(leftKey), resolveContent(rightKey)])
+      .then(() => {
+        if (cancelled) return;
+        setContent(contentRef.current);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        const failedKeys = [leftKey, rightKey].filter((key) => key !== 'current' && !contentRef.current[key]);
+        const labels = failedKeys.map((key) => {
+          const option = options.find((item) => item.key === key);
+          return option ? `version ${option.label.replace(/^.*\bv/, '')}` : key;
+        });
+        setLoadError(`Could not load ${labels.join(' and ') || 'the selected prompt'}${err?.message ? ` — ${err.message}` : ''}`);
+      })
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [isOpen, leftKey, rightKey, resolveContent]);
+  }, [isOpen, leftKey, rightKey, resolveContent, options]);
 
   const left = leftKey === 'current' ? { label: 'Editor draft (current)', systemPrompt: editText } : content[leftKey];
   const right = rightKey === 'current' ? { label: 'Editor draft (current)', systemPrompt: editText } : content[rightKey];
   const leftPrompt = left?.systemPrompt || '';
   const rightSourceText = right?.systemPrompt || '';
+  const tooLarge = useMemo(() => isDiffTooLarge(leftPrompt, rightSourceText), [leftPrompt, rightSourceText]);
+  const showGuard = tooLarge && !computeAnyway;
 
+  // New pair → fresh compare side, fresh guard decision, fresh stats.
   useEffect(() => {
-    if (!isOpen || loading) return;
-    setCompareDraft(rightSourceText);
-    setDraftHistory([]);
-    setActiveDiffIndex(-1);
-  }, [isOpen, loading, rightKey, rightSourceText]);
+    setComputeAnyway(false);
+    setCompareDirty(false);
+    setChangeStats({ added: 0, removed: 0, blocks: 0 });
+    setEditorReady(false);
+  }, [leftKey, rightKey]);
 
-  const diffRows = useMemo(() => buildLineDiff(leftPrompt, compareDraft), [compareDraft, leftPrompt]);
-  const compareLineCount = compareDraft ? splitPromptText(compareDraft).length : 0;
-  const added = diffRows.filter((row) => row.type === 'added' || row.type === 'changed').length;
-  const removed = diffRows.filter((row) => row.type === 'removed' || row.type === 'changed').length;
-  const diffRowIndexes = useMemo(
-    () => diffRows.map((row, index) => (row.type !== 'equal' ? index : null)).filter((index) => index !== null),
-    [diffRows],
-  );
-  const activeRowIndex = activeDiffIndex >= 0 ? diffRowIndexes[activeDiffIndex] : null;
+  useEffect(() => () => {
+    editorSubscriptionsRef.current.forEach((sub) => sub?.dispose?.());
+    editorSubscriptionsRef.current = [];
+    // Defer past the child <DiffEditor> unmount so the editor is disposed
+    // before its models are.
+    const models = keptModelsRef.current;
+    keptModelsRef.current = [];
+    setTimeout(() => models.forEach((model) => {
+      try { if (!model.isDisposed?.()) model.dispose(); } catch { /* already gone */ }
+    }), 0);
+  }, []);
 
-  useEffect(() => {
-    if (!diffRowIndexes.length && activeDiffIndex !== -1) {
-      setActiveDiffIndex(-1);
-      return;
+  const readModifiedValue = () => {
+    const model = diffEditorRef.current?.getModifiedEditor?.()?.getModel?.();
+    return model ? model.getValue() : rightSourceText;
+  };
+
+  const handleEditorMount = (editor) => {
+    diffEditorRef.current = editor;
+    editorSubscriptionsRef.current.forEach((sub) => sub?.dispose?.());
+    editorSubscriptionsRef.current = [];
+    // @monaco-editor/react disposes the text models BEFORE the diff editor on
+    // unmount ("TextModel got disposed before DiffEditorWidget model got
+    // reset"), so we keep the models ourselves (keepCurrent*Model) and drop
+    // the previous pair here — by now its editor instance is already gone.
+    disposeKeptModels();
+    const models = editor.getModel();
+    keptModelsRef.current = models ? [models.original, models.modified] : [];
+    const modified = editor.getModifiedEditor();
+    editorSubscriptionsRef.current.push(modified.onDidChangeModelContent(() => {
+      setCompareDirty(modified.getModel()?.getValue() !== rightSourceText);
+    }));
+    editorSubscriptionsRef.current.push(editor.onDidUpdateDiff(() => {
+      const changes = editor.getLineChanges() || [];
+      let added = 0;
+      let removed = 0;
+      changes.forEach((change) => {
+        if (change.modifiedEndLineNumber >= change.modifiedStartLineNumber && change.modifiedEndLineNumber > 0) {
+          added += change.modifiedEndLineNumber - change.modifiedStartLineNumber + 1;
+        }
+        if (change.originalEndLineNumber >= change.originalStartLineNumber && change.originalEndLineNumber > 0) {
+          removed += change.originalEndLineNumber - change.originalStartLineNumber + 1;
+        }
+      });
+      setChangeStats({ added, removed, blocks: changes.length });
+    }));
+    setEditorReady(true);
+  };
+
+  const goToDiff = (direction) => {
+    const editor = diffEditorRef.current;
+    if (!editor) return;
+    if (typeof editor.goToDiff === 'function') {
+      editor.goToDiff(direction);
+    } else {
+      editor.getModifiedEditor().trigger('keyboard', direction === 'next' ? 'editor.action.diffReview.next' : 'editor.action.diffReview.prev', null);
     }
-    if (activeDiffIndex > diffRowIndexes.length - 1) {
-      setActiveDiffIndex(diffRowIndexes.length - 1);
-    }
-  }, [activeDiffIndex, diffRowIndexes.length]);
-
-  const scrollToDiff = (direction) => {
-    if (!diffRowIndexes.length) return;
-    const nextIndex = direction === 'previous'
-      ? Math.max(activeDiffIndex - 1, 0)
-      : Math.min(activeDiffIndex + 1, diffRowIndexes.length - 1);
-    const rowIndex = diffRowIndexes[nextIndex];
-    setActiveDiffIndex(nextIndex);
-    [leftPaneRef.current, rightPaneRef.current, unifiedPaneRef.current].forEach((pane) => {
-      const target = pane?.querySelector(`[data-diff-row="${rowIndex}"]`);
-      target?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    });
   };
 
-  const commitCompareDraft = (nextPrompt) => {
-    if (nextPrompt === compareDraft) return;
-    setDraftHistory((prev) => [...prev.slice(-19), compareDraft]);
-    setCompareDraft(nextPrompt);
-  };
-
-  const undoCompareDraft = () => {
-    setDraftHistory((prev) => {
-      if (!prev.length) return prev;
-      const nextHistory = prev.slice(0, -1);
-      setCompareDraft(prev[prev.length - 1]);
-      return nextHistory;
-    });
-  };
-
-  const updateCompareLine = (lineNumber, value) => {
-    if (!lineNumber) return;
-    const lines = splitPromptText(compareDraft);
-    while (lines.length < lineNumber) lines.push('');
-    lines[lineNumber - 1] = value;
-    commitCompareDraft(lines.join('\n'));
-  };
-
-  const insertCompareLineAfter = (lineNumber) => {
-    const lines = compareDraft ? splitPromptText(compareDraft) : [''];
-    const insertAt = lineNumber ? lineNumber : lines.length;
-    lines.splice(insertAt, 0, '');
-    commitCompareDraft(lines.join('\n'));
-  };
-
-  const removeAddedBlock = (lineNumber) => {
-    if (!lineNumber) return;
-    const targetIndex = diffRows.findIndex((row) => row.type === 'added' && row.rightLine === lineNumber);
-    if (targetIndex < 0) return;
-
-    let start = targetIndex;
-    let end = targetIndex;
-    while (start > 0 && diffRows[start - 1].type === 'added' && diffRows[start - 1].rightLine) start -= 1;
-    while (end + 1 < diffRows.length && diffRows[end + 1].type === 'added' && diffRows[end + 1].rightLine) end += 1;
-
-    const removeLines = new Set(diffRows.slice(start, end + 1).map((row) => row.rightLine).filter(Boolean));
-    const lines = splitPromptText(compareDraft).filter((_, index) => !removeLines.has(index + 1));
-    commitCompareDraft(lines.join('\n'));
-  };
-
-  const restoreRemovedBlock = (lineNumber) => {
-    if (!lineNumber) return;
-    const targetIndex = diffRows.findIndex((row) => row.type === 'removed' && row.leftLine === lineNumber);
-    if (targetIndex < 0) return;
-
-    let start = targetIndex;
-    let end = targetIndex;
-    while (start > 0 && diffRows[start - 1].type === 'removed' && diffRows[start - 1].leftLine) start -= 1;
-    while (end + 1 < diffRows.length && diffRows[end + 1].type === 'removed' && diffRows[end + 1].leftLine) end += 1;
-
-    const restoredLines = diffRows.slice(start, end + 1).map((row) => row.left);
-    const nextAnchor = diffRows.slice(end + 1).find((row) => row.rightLine);
-    const lines = compareDraft ? splitPromptText(compareDraft) : [];
-    const insertAt = nextAnchor?.rightLine ? nextAnchor.rightLine - 1 : lines.length;
-    lines.splice(insertAt, 0, ...restoredLines);
-    commitCompareDraft(lines.join('\n'));
-  };
-
-  const useBaseBlock = (rowIndex) => {
-    if (rowIndex == null || diffRows[rowIndex]?.type !== 'changed') return;
-
-    let start = rowIndex;
-    let end = rowIndex;
-    while (start > 0 && diffRows[start - 1].type === 'changed') start -= 1;
-    while (end + 1 < diffRows.length && diffRows[end + 1].type === 'changed') end += 1;
-
-    const lines = splitPromptText(compareDraft);
-    diffRows.slice(start, end + 1).forEach((row) => {
-      if (row.rightLine) {
-        lines[row.rightLine - 1] = row.left;
-      }
-    });
-    commitCompareDraft(lines.join('\n'));
+  const undoCompareEdit = () => {
+    diffEditorRef.current?.getModifiedEditor()?.trigger('keyboard', 'undo', null);
   };
 
   const resetCompareDraft = () => {
-    commitCompareDraft(rightSourceText);
+    const model = diffEditorRef.current?.getModifiedEditor?.()?.getModel?.();
+    if (model) model.setValue(rightSourceText);
+    setCompareDirty(false);
   };
 
   const applyCompareDraftToEditor = () => {
-    onApplyPrompt?.(compareDraft);
+    onApplyPrompt?.(readModifiedValue());
     onClose();
   };
+
+  if (!isOpen) return null;
 
   const diffNavControls = (
     <div className="flex items-center gap-1 normal-case tracking-normal">
       <span className="mr-1 text-[10px] font-medium text-slate-400">
-        {diffRowIndexes.length ? `${Math.max(activeDiffIndex + 1, 0)}/${diffRowIndexes.length}` : '0/0'}
+        {changeStats.blocks ? `${changeStats.blocks} change${changeStats.blocks === 1 ? '' : 's'}` : 'no changes'}
       </span>
       <button
         type="button"
-        onClick={() => scrollToDiff('previous')}
-        disabled={!diffRowIndexes.length || activeDiffIndex <= 0}
+        onClick={() => goToDiff('previous')}
+        disabled={!editorReady || !changeStats.blocks}
         className="rounded border border-slate-200 bg-white p-0.5 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-        title="Previous diff"
+        title="Previous change"
       >
         <ChevronUp className="h-3.5 w-3.5" />
       </button>
       <button
         type="button"
-        onClick={() => scrollToDiff('next')}
-        disabled={!diffRowIndexes.length || activeDiffIndex >= diffRowIndexes.length - 1}
+        onClick={() => goToDiff('next')}
+        disabled={!editorReady || !changeStats.blocks}
         className="rounded border border-slate-200 bg-white p-0.5 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-        title="Next diff"
+        title="Next change"
       >
         <ChevronDown className="h-3.5 w-3.5" />
       </button>
     </div>
   );
-
-  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-3 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="prompt-diff-title">
@@ -818,15 +688,17 @@ function PromptDiffModal({
                 <GitCompare className="h-4 w-4 text-blue-600" />
                 Prompt Diff
               </h3>
-              <p className="mt-0.5 text-xs text-slate-500">Compare any saved prompt against the live published prompt or the current editor draft.</p>
+              <p className="mt-0.5 text-xs text-slate-500">
+                Compare any saved prompt against the live published prompt or the current editor draft. The compare side is editable — unchanged regions are collapsed; use the arrows in the gutter to take or revert a block.
+              </p>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
               <button
                 type="button"
-                onClick={undoCompareDraft}
-                disabled={!draftHistory.length}
+                onClick={undoCompareEdit}
+                disabled={!editorReady || !compareDirty}
                 className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                title="Undo the last compare-side edit"
+                title="Undo the last compare-side edit (Ctrl+Z inside the editor also works)"
               >
                 <Undo2 className="h-3.5 w-3.5" />
                 Undo
@@ -834,7 +706,7 @@ function PromptDiffModal({
               <button
                 type="button"
                 onClick={resetCompareDraft}
-                disabled={compareDraft === rightSourceText}
+                disabled={!editorReady || !compareDirty}
                 className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
                 title="Reset compare prompt back to the selected source"
               >
@@ -844,8 +716,9 @@ function PromptDiffModal({
               <button
                 type="button"
                 onClick={applyCompareDraftToEditor}
-                className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-blue-500 bg-blue-600 px-3 text-xs font-bold text-white shadow-sm shadow-blue-200 hover:bg-blue-700"
-                title="Apply the compare prompt edits to the main prompt editor"
+                disabled={loading || Boolean(loadError)}
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-blue-500 bg-blue-600 px-3 text-xs font-bold text-white shadow-sm shadow-blue-200 hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                title="Apply the compare prompt (with any edits) to the main prompt editor"
               >
                 <CheckCircle className="h-3.5 w-3.5" />
                 Apply to editor
@@ -890,14 +763,14 @@ function PromptDiffModal({
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-5 py-2 text-xs text-slate-600">
           <span className="font-semibold text-slate-700">
             {optionLabel(left)} to {optionLabel(right)}
-            {compareDraft !== rightSourceText && (
+            {compareDirty && (
               <span className="ml-2 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">compare edited</span>
             )}
           </span>
           <div className="flex items-center gap-3">
             {diffNavControls}
-            <span className="inline-flex items-center gap-1 text-emerald-700"><Plus className="h-3.5 w-3.5" /> {added} added/changed</span>
-            <span className="inline-flex items-center gap-1 text-red-700"><Minus className="h-3.5 w-3.5" /> {removed} removed/changed</span>
+            <span className="inline-flex items-center gap-1 text-emerald-700"><Plus className="h-3.5 w-3.5" /> {formatStat(changeStats.added)} added/changed</span>
+            <span className="inline-flex items-center gap-1 text-red-700"><Minus className="h-3.5 w-3.5" /> {formatStat(changeStats.removed)} removed/changed</span>
           </div>
         </div>
 
@@ -908,27 +781,36 @@ function PromptDiffModal({
               Loading prompt versions...
             </div>
           )}
-          {!loading && mode === 'split' && (
-            <SplitDiffView
-              diffRows={diffRows}
-              leftPaneRef={leftPaneRef}
-              rightPaneRef={rightPaneRef}
-              activeRowIndex={activeRowIndex}
-              diffNavControls={null}
-              onUpdateCompareLine={updateCompareLine}
-              onInsertCompareLineAfter={insertCompareLineAfter}
-              onRemoveAddedBlock={removeAddedBlock}
-              onRestoreRemovedBlock={restoreRemovedBlock}
-              onUseBaseBlock={useBaseBlock}
-              compareLineCount={compareLineCount}
+          {!loading && loadError && (
+            <div className="flex h-full flex-col items-center justify-center gap-3 text-center" role="alert">
+              <p className="text-sm font-semibold text-red-700">{loadError}</p>
+              <p className="max-w-md text-xs text-slate-500">Pick a different version above, or close and reopen the diff to retry.</p>
+            </div>
+          )}
+          {!loading && !loadError && showGuard && (
+            <RawSideBySide
+              leftLabel={`Base · ${optionLabel(left)}`}
+              rightLabel={`Compare · ${optionLabel(right)}`}
+              leftText={leftPrompt}
+              rightText={rightSourceText}
+              onComputeAnyway={() => setComputeAnyway(true)}
             />
           )}
-          {!loading && mode === 'unified' && (
-            <UnifiedDiffView
-              diffRows={diffRows}
-              paneRef={unifiedPaneRef}
-              activeRowIndex={activeRowIndex}
-            />
+          {!loading && !loadError && !showGuard && (
+            <div className="h-full overflow-hidden rounded-lg border border-slate-200" data-testid="prompt-diff-editor">
+              <DiffEditor
+                key={`${leftKey}|${rightKey}`}
+                height="100%"
+                language="markdown"
+                original={leftPrompt}
+                modified={rightSourceText}
+                keepCurrentOriginalModel
+                keepCurrentModifiedModel
+                loading={<DiffLoading />}
+                onMount={handleEditorMount}
+                options={{ ...DIFF_EDITOR_OPTIONS, renderSideBySide: mode === 'split' }}
+              />
+            </div>
           )}
         </div>
       </div>
@@ -939,7 +821,14 @@ function PromptDiffModal({
 export default function PromptManager({ workspaceTimezone = 'America/Los_Angeles' }) {
   const [versions, setVersions] = useState([]);
   const [published, setPublished] = useState(null);
-  const [promptCache, setPromptCache] = useState({});
+  // Version bodies are cached in a ref (not state) so loadPromptVersion keeps
+  // one identity for the modal's effects, and an in-flight map dedupes
+  // concurrent GET /assignment/prompts/:id for the same version (Phase PD3).
+  const promptCacheRef = useRef({});
+  const promptInflightRef = useRef(new Map());
+  const cachePrompt = useCallback((prompt) => {
+    if (prompt?.id) promptCacheRef.current[String(prompt.id)] = prompt;
+  }, []);
   const [editText, setEditText] = useState('');
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(true);
@@ -959,9 +848,7 @@ export default function PromptManager({ workspaceTimezone = 'America/Los_Angeles
       const data = res?.data || {};
       setVersions(data.versions || []);
       setPublished(data.published || null);
-      if (data.published?.id) {
-        setPromptCache((prev) => ({ ...prev, [String(data.published.id)]: data.published }));
-      }
+      if (data.published?.id) cachePrompt(data.published);
       if (data.published?.systemPrompt) {
         setEditText((prev) => prev || data.published.systemPrompt);
       }
@@ -970,20 +857,25 @@ export default function PromptManager({ workspaceTimezone = 'America/Los_Angeles
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [cachePrompt]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const loadPromptVersion = useCallback(async (id) => {
     const key = String(id);
-    if (promptCache[key]) return promptCache[key];
-    const res = await assignmentAPI.getPrompt(id);
-    const prompt = res?.data || null;
-    if (prompt) {
-      setPromptCache((prev) => ({ ...prev, [key]: prompt }));
-    }
-    return prompt;
-  }, [promptCache]);
+    if (promptCacheRef.current[key]) return promptCacheRef.current[key];
+    const inflight = promptInflightRef.current;
+    if (inflight.has(key)) return inflight.get(key);
+    const request = assignmentAPI.getPrompt(id)
+      .then((res) => {
+        const prompt = res?.data || null;
+        if (prompt) promptCacheRef.current[key] = prompt;
+        return prompt;
+      })
+      .finally(() => inflight.delete(key));
+    inflight.set(key, request);
+    return request;
+  }, []);
 
   const handleSaveDraft = async () => {
     if (!editText.trim()) return;
@@ -992,7 +884,7 @@ export default function PromptManager({ workspaceTimezone = 'America/Los_Angeles
       setSaveMsg(null);
       const res = await assignmentAPI.createPrompt({ systemPrompt: editText, notes: notes || null });
       const draft = res?.data;
-      if (draft?.id) setPromptCache((prev) => ({ ...prev, [String(draft.id)]: draft }));
+      cachePrompt(draft);
       setSaveMsg('Draft saved');
       setNotes('');
       await fetchData();
@@ -1009,7 +901,7 @@ export default function PromptManager({ workspaceTimezone = 'America/Los_Angeles
       setPublishing(true);
       const res = await assignmentAPI.publishPrompt(id);
       const prompt = res?.data;
-      if (prompt?.id) setPromptCache((prev) => ({ ...prev, [String(prompt.id)]: prompt }));
+      cachePrompt(prompt);
       setSaveMsg('Published successfully');
       await fetchData();
       setTimeout(() => setSaveMsg(null), 3000);
@@ -1025,7 +917,7 @@ export default function PromptManager({ workspaceTimezone = 'America/Los_Angeles
       const res = await assignmentAPI.restorePrompt(id);
       const draft = res?.data;
       if (draft?.systemPrompt) setEditText(draft.systemPrompt);
-      if (draft?.id) setPromptCache((prev) => ({ ...prev, [String(draft.id)]: draft }));
+      cachePrompt(draft);
       setSaveMsg('Restored as new draft');
       await fetchData();
       setTimeout(() => setSaveMsg(null), 3000);
@@ -1038,11 +930,7 @@ export default function PromptManager({ workspaceTimezone = 'America/Los_Angeles
     if (!window.confirm('Delete this prompt version? This cannot be undone.')) return;
     try {
       await assignmentAPI.deletePrompt(id);
-      setPromptCache((prev) => {
-        const next = { ...prev };
-        delete next[String(id)];
-        return next;
-      });
+      delete promptCacheRef.current[String(id)];
       setSaveMsg('Version deleted');
       await fetchData();
       setTimeout(() => setSaveMsg(null), 3000);

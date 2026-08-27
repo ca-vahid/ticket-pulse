@@ -122,9 +122,14 @@ export default function TicketCreate() {
 
   // Pre-fill the form from a saved preset. Only fields the template SETS are
   // touched — everything the agent already typed elsewhere is left alone.
+  // The picker can be used BEFORE meta lands (templates are a tiny query;
+  // meta is the slow one), so remember the pick: the one-time config seed
+  // below re-applies it after seeding priority/type (QA 08-26 #2).
+  const appliedTemplateRef = useRef(null);
   const applyCreateTemplate = (templateId) => {
     const template = createTemplates.find((t) => t.id === templateId);
     if (!template) return;
+    appliedTemplateRef.current = template;
     if (template.subject) setSubject(template.subject);
     if (template.description) {
       const html = isRichContent(template.description)
@@ -277,6 +282,11 @@ export default function TicketCreate() {
     setNotifyRequester(d.notifyRequester);
     setAiClassify(d.aiClassify);
     setAssignMode(d.assignMode);
+    // A template picked before meta landed wins over the config defaults
+    // for the fields it sets (the seed above would otherwise clobber them).
+    const picked = appliedTemplateRef.current;
+    if (picked?.priority) setPriority(picked.priority);
+    if (picked?.ticketType) setTicketType(picked.ticketType);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [meta]);
   const cfInitRef = useRef(false);
