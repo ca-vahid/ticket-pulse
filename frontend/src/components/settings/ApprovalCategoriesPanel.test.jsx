@@ -58,6 +58,12 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe('ApprovalCategoriesPanel as a reviewer (directory 403)', () => {
+  test('header names the Approvals page as the reviewer home (v3.7.02 — Settings is admin-only)', async () => {
+    render(<ApprovalCategoriesPanel />);
+    expect(await screen.findByText('Laptop purchase')).toBeInTheDocument();
+    expect(screen.getByText(/manage these here on the Approvals page — no admin needed/)).toBeInTheDocument();
+  });
+
   test('categories render from reviewer-reachable sources — NO red banner, amber notice instead', async () => {
     render(<ApprovalCategoriesPanel />);
 

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useAuth } from '../contexts/AuthContext';
 import { LogOut, ArrowRight } from 'lucide-react';
+import { homePathFor } from '../components/nav/navDestinations';
 import { useDemoMode, useDemoLabel, scrubFreeText as scrubDemoText } from '../utils/demoMode';
 
 export default function WorkspacePicker() {
@@ -19,7 +20,8 @@ export default function WorkspacePicker() {
     setError(null);
     try {
       await selectWorkspace(ws.id);
-      window.location.href = '/dashboard';
+      // Role-aware landing (v3.7.02): the picker knows this workspace's role.
+      window.location.href = homePathFor(user, ws.role);
     } catch (err) {
       setError(err.message || 'Failed to select workspace');
       setSelecting(null);

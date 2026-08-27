@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.7.01-preview';
+export const APP_VERSION = '3.7.02-preview';
 
 export const changelog = [
+  {
+    version: '3.7.02-preview',
+    date: 'August 27, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>🛡️ Roles now mean what the names say</strong> — Viewers and Reviewers see <strong>Tickets and Approvals only</strong> (plus their personal pages). Viewers still <em>see</em> AI assignment suggestions but cannot approve them; Reviewers approve or dismiss AI suggestions and manage approval categories from a new <strong>Approvals → Categories</strong> tab. Everything else — Dashboard, Technician detail, Timeline, Analytics, Agent Maps, Assignment Review, Mail Workflows, Settings — is admin-only, enforced on the server as well as in the UI. Old bookmarks land on Tickets with a one-time notice; sign-in lands viewers/reviewers on Tickets and admins on the Dashboard. Technicians without app access are unchanged; live updates keep flowing for everyone. (QA 08-24 #3)' },
+      { type: 'improved', html: '<strong>📍 Where approval categories moved</strong> — reviewers manage them at Approvals → Categories; admins also keep Settings → Approval Categories. Members → App access descriptions now spell out exactly what each role can do.' },
+    ],
+  },
   {
     version: '3.7.01-preview',
     date: 'August 27, 2026',

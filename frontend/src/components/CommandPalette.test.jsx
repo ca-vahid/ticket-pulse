@@ -20,14 +20,17 @@ vi.mock('../services/api', () => ({
 }));
 
 const authState = { isAuthenticated: true, user: { email: 'me@x.com', role: 'coordinator' } };
+// Workspace role drives the admin-only nav entries (v3.7.02): default = admin.
+const wsState = { currentWorkspace: { id: 1 }, availableWorkspaces: [{ id: 1, role: 'admin' }] };
 vi.mock('../contexts/AuthContext', () => ({ useAuth: () => authState }));
-vi.mock('../contexts/WorkspaceContext', () => ({ useWorkspace: () => ({ currentWorkspace: { id: 1 } }) }));
+vi.mock('../contexts/WorkspaceContext', () => ({ useWorkspace: () => wsState }));
 
 afterEach(() => {
   cleanup();
   globalSearch.mockClear();
   globalSearch.mockResolvedValue({ data: { sections: {} } });
   authState.user = { email: 'me@x.com', role: 'coordinator' };
+  wsState.availableWorkspaces = [{ id: 1, role: 'admin' }];
 });
 
 const openPalette = () => fireEvent.keyDown(document, { key: 'k', ctrlKey: true });
@@ -163,6 +166,26 @@ describe('CommandPalette', () => {
     expect(screen.getByRole('option', { name: /My Competencies/ })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: /^Assignment$/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('option', { name: /Dashboard/ })).not.toBeInTheDocument();
+  });
+
+  test.each(['viewer', 'reviewer'])('%s sees only the ticket surface in "Go to" (v3.7.02 role lockdown)', (role) => {
+    wsState.availableWorkspaces = [{ id: 1, role }];
+    renderPalette('/tickets');
+    openPalette();
+    for (const label of ['Tickets', 'New ticket', 'Approvals']) {
+      expect(screen.getByRole('option', { name: new RegExp(`^${label}$`) })).toBeInTheDocument();
+    }
+    for (const label of ['Dashboard', 'Timeline Explorer', 'Analytics', 'Assignment', 'Mail Workflows', 'Agent Maps', 'Settings']) {
+      expect(screen.queryByRole('option', { name: new RegExp(`^${label}$`) })).not.toBeInTheDocument();
+    }
+  });
+
+  test('an unresolved workspace role (not hydrated) hides the admin entries too', () => {
+    wsState.availableWorkspaces = [];
+    renderPalette('/tickets');
+    openPalette();
+    expect(screen.getByRole('option', { name: /^Tickets$/ })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /^Dashboard$/ })).not.toBeInTheDocument();
   });
 
   test('plain typing on the page (no modifier) never opens it', () => {

@@ -4,10 +4,12 @@ import { useWorkspace } from '../../contexts/WorkspaceContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { Users, Loader, Plus, Trash2, AlertTriangle, ShieldCheck, Eye, Search, Check, Pencil } from 'lucide-react';
 
+// v3.7.02 role model (QA 08-24 #3): descriptions render as option tooltips
+// and in the header legend.
 const ROLE_OPTIONS = [
-  { value: 'viewer', label: 'Viewer' },
-  { value: 'reviewer', label: 'Reviewer' },
-  { value: 'admin', label: 'Admin' },
+  { value: 'viewer', label: 'Viewer', description: 'Tickets + Approvals; sees AI suggestions, cannot approve them' },
+  { value: 'reviewer', label: 'Reviewer', description: 'Tickets + Approvals; approves AI suggestions, manages approval categories' },
+  { value: 'admin', label: 'Admin', description: 'Everything — Dashboard, Analytics, Assignment Review, Mail Workflows, Settings' },
 ];
 
 /**
@@ -23,7 +25,7 @@ function RoleSelect({ value, onChange, isGlobalAdmin, className }) {
           key={r.value}
           value={r.value}
           disabled={r.value === 'admin' && !isGlobalAdmin}
-          title={r.value === 'admin' && !isGlobalAdmin ? 'Global admin only' : undefined}
+          title={r.value === 'admin' && !isGlobalAdmin ? 'Global admin only' : r.description}
         >
           {r.label}{r.value === 'admin' && !isGlobalAdmin ? ' (global admin only)' : ''}
         </option>
@@ -230,6 +232,11 @@ export default function WorkspaceAccessPanel() {
             Control who can access this workspace and their permission level — including people who are not
             technicians. You can also manage per-member access from the{' '}
             <a href="#agents" className="text-indigo-600 hover:text-indigo-800 underline underline-offset-2">Members</a> panel.
+          </p>
+          <p className="mt-1 text-xs text-gray-500">
+            <strong className="font-semibold text-gray-600">Viewer</strong> — Tickets + Approvals; sees AI suggestions but can&rsquo;t approve them.{' '}
+            <strong className="font-semibold text-gray-600">Reviewer</strong> — also approves AI suggestions and manages approval categories (Approvals → Categories).{' '}
+            <strong className="font-semibold text-gray-600">Admin</strong> — everything, including Dashboard, Analytics and Settings.
           </p>
         </div>
         <div className="ml-auto text-xs text-gray-500">

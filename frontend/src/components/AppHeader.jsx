@@ -25,7 +25,7 @@ import {
 } from '../utils/demoMode';
 import { APP_VERSION } from '../data/changelog';
 import { syncAPI } from '../services/api';
-import { NAV_DESTINATIONS, canAccessSettings } from './nav/navDestinations';
+import { NAV_DESTINATIONS, useCanAccessSettings, useWorkspaceRole } from './nav/navDestinations';
 import SideRail from './nav/SideRail';
 import ChangelogModal from './ChangelogModal';
 
@@ -151,13 +151,11 @@ export default function AppHeader({
     .map((part) => part[0])
     .join('')
     .toUpperCase() || 'U';
-  const isGlobalAdmin = user?.role === 'admin';
-  const wsRole = (() => {
-    if (isGlobalAdmin) return 'admin';
-    const ws = availableWorkspaces?.find(w => w.id === currentWorkspace?.id);
-    return ws?.role || 'viewer';
-  })();
+  // Fails closed (null) until the workspace list has hydrated — admin-only
+  // menu rows never flash for a viewer (v3.7.02 role lockdown).
+  const wsRole = useWorkspaceRole();
   const canManageWorkspace = wsRole === 'admin';
+  const showSettingsMenuItem = useCanAccessSettings();
   const showAdminSummitLink = canManageWorkspace && (Number(currentWorkspace?.id) === 1 || currentWorkspace?.slug === 'it');
 
   // One outside-click/Escape closer for all three header popups.
@@ -627,7 +625,7 @@ export default function AppHeader({
               </button>
             ))}
 
-            {canAccessSettings(user) && (
+            {showSettingsMenuItem && (
               <button
                 type="button"
                 role="menuitem"

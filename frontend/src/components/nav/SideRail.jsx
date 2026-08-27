@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ChevronsLeft, ChevronsRight, Settings } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { NAV_DESTINATIONS, canAccessSettings, useNavDestinations } from './navDestinations';
+import { NAV_DESTINATIONS, homePathFor, useCanAccessSettings, useNavDestinations, useWorkspaceRole } from './navDestinations';
 import { useApprovalCount } from '../../hooks/useApprovalCount';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -30,14 +30,17 @@ export default function SideRail() {
   const location = useLocation();
   const approvalCount = useApprovalCount();
   const { user } = useAuth();
-  // Agents have no Settings sections (Phase A1) — hide the entry entirely
-  // rather than bouncing them into the "No settings available" card.
-  const showSettings = canAccessSettings(user);
+  const wsRole = useWorkspaceRole();
+  // Settings is workspace-admin only (v3.7.02 role lockdown; agents never had
+  // sections) — hide the entry entirely rather than bouncing into the
+  // "No settings available" card.
+  const showSettings = useCanAccessSettings();
+  const homePath = homePathFor(user, wsRole);
 
   const matchPath = (path) => location.pathname === path || location.pathname.startsWith(`${path}/`);
   const activeId = NAV_DESTINATIONS.find((dest) => matchPath(dest.path))?.id
     || (matchPath('/settings') ? 'settings' : null);
-  const destinations = useNavDestinations(activeId);
+  const destinations = useNavDestinations();
   const onTickets = matchPath('/tickets');
   const [railCollapsed, setRailCollapsed] = useState(() => {
     try { return localStorage.getItem(RAIL_COLLAPSED_KEY) === 'true'; } catch { return false; }
@@ -124,8 +127,8 @@ export default function SideRail() {
       <div className="tp-rail-content flex min-h-0 flex-1 flex-col gap-1">
         <button
           type="button"
-          onClick={() => navigate('/dashboard')}
-          title="Ticket Pulse — Dashboard"
+          onClick={() => navigate(homePath)}
+          title={homePath === '/dashboard' ? 'Ticket Pulse — Dashboard' : 'Ticket Pulse — Tickets'}
           className="mx-[9px] mb-2 flex h-10 flex-none items-center gap-2.5 overflow-hidden whitespace-nowrap rounded-xl px-[4px] text-left tp-focus-ring"
         >
           <img src="/brand/logo-mark.png" alt="Ticket Pulse" className="h-8 w-8 flex-none object-contain" />

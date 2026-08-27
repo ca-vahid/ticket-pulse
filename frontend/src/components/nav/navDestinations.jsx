@@ -8,10 +8,20 @@ import { AssignmentNavIcon, MapNavIcon, WorkflowNavIcon } from './NavIcons';
 // Each destination carries its route, glyph, accent classes (inactive tile +
 // hover saturate + active underline hue), and an optional role `gate`.
 //
-//   gate: 'review'  -> visible to reviewers/admins (Assignment Review)
-//   gate: 'manage'  -> visible to workspace admins (Mail Workflows)
+//   gate: 'review'  -> visible to reviewers/admins
+//   gate: 'manage'  -> visible to workspace admins (Dashboard, Timeline,
+//                      Analytics, Assignment, Mail Workflows, Agent Maps)
 //   gate: 'tickets' -> visible when the workspace has native ticketing enabled
-//   gate: null      -> visible to everyone
+//   gate: null      -> visible to everyone (Tickets, Approvals)
+//
+// ROLE MODEL (QA 08-24 #3, v3.7.02): viewers and reviewers get the ticket
+// surface only — Tickets + Approvals. Viewers SEE AI suggestions but cannot
+// act on them; reviewers approve/dismiss AI suggestions and manage approval
+// categories (Approvals → Categories tab). Everything else — Dashboard,
+// Technician detail, Timeline, Analytics, Agent Maps, Assignment Review, Mail
+// Workflows, Settings — is workspace-admin (or global-admin) territory, the
+// same as "No access" for everyone else. Agents (technician-only, no
+// workspace_access row) were already on this footprint and are unchanged.
 export const NAV_DESTINATIONS = [
   {
     id: 'dashboard',
@@ -21,7 +31,7 @@ export const NAV_DESTINATIONS = [
     tile: 'border-blue-200 bg-blue-50 text-blue-700',
     hover: 'hover:border-blue-300 hover:bg-blue-100',
     bar: 'bg-blue-600',
-    gate: null,
+    gate: 'manage',
   },
   {
     id: 'tickets',
@@ -44,7 +54,7 @@ export const NAV_DESTINATIONS = [
     tile: 'border-indigo-200 bg-indigo-50 text-indigo-700',
     hover: 'hover:border-indigo-300 hover:bg-indigo-100',
     bar: 'bg-indigo-600',
-    gate: null,
+    gate: 'manage',
   },
   {
     id: 'analytics',
@@ -54,7 +64,7 @@ export const NAV_DESTINATIONS = [
     tile: 'border-emerald-200 bg-emerald-50 text-emerald-700',
     hover: 'hover:border-emerald-300 hover:bg-emerald-100',
     bar: 'bg-emerald-600',
-    gate: null,
+    gate: 'manage',
   },
   {
     id: 'assignments',
@@ -64,7 +74,7 @@ export const NAV_DESTINATIONS = [
     tile: 'border-[#ddccf8] bg-[#f1ebfd] text-[#7c3aed]',
     hover: 'hover:border-[#cdb3f6] hover:bg-[#e9ddfc]',
     bar: 'bg-[#7c3aed]',
-    gate: 'review',
+    gate: 'manage',
   },
   {
     id: 'workflows',
@@ -84,7 +94,7 @@ export const NAV_DESTINATIONS = [
     tile: 'border-[#f8d5a8] bg-[#fdeede] text-[#e07b22]',
     hover: 'hover:border-[#f4c486] hover:bg-[#fbe3c8]',
     bar: 'bg-[#e07b22]',
-    gate: null,
+    gate: 'manage',
   },
   {
     id: 'approvals',
@@ -99,30 +109,77 @@ export const NAV_DESTINATIONS = [
   },
 ];
 
-// Single source of truth for whether a user gets Settings affordances at all
-// (Phase A1). Global-'agent' users (technicians without workspace_access
-// rows) have no Settings sections — their configuration home is the agent
-// portal (/my-competencies, My Alerts) — so every Settings entry point must
-// hide behind this: SideRail (applied), AppHeader's account-menu item
-// (TODO for the AppHeader owner — import { canAccessSettings } from
-// './navDestinations' and gate the Settings menu row with it), MobileTabBar
-// if it ever grows a Settings tab.
-export function canAccessSettings(user) {
-  return Boolean(user) && user.role !== 'agent';
+// Session-scoped marker written by AdminRoute when it bounces a non-admin off
+// an admin page; AccessBounceToast reads it once so Tickets can say why.
+export const ACCESS_BOUNCE_KEY = 'tp_accessBounce';
+
+/**
+ * Effective workspace role for the current user, or `null` while it cannot be
+ * determined. Fails CLOSED (Phase RM2): before the workspace list has hydrated,
+ * or when the selected workspace is not in the user's list, the answer is
+ * `null` — never a fabricated 'viewer' — so admin-only chrome and routes stay
+ * hidden until the role is actually known. Callers that need a member-tier
+ * answer (canSeeAi etc.) treat any non-null role as membership; agents carry
+ * role 'agent' from their technician-derived workspace entry.
+ */
+export function resolveWorkspaceRole(user, currentWorkspace, availableWorkspaces) {
+  if (!user) return null;
+  if (user.role === 'admin') return 'admin';
+  if (!currentWorkspace?.id) return null;
+  const ws = availableWorkspaces?.find((w) => w.id === currentWorkspace.id);
+  if (!ws) return null;
+  // Membership confirmed but no role label (older session payloads): lowest
+  // member tier — never admin.
+  return ws.role || 'viewer';
 }
 
 export function useWorkspaceRole() {
   const { user } = useAuth();
   const { currentWorkspace, availableWorkspaces } = useWorkspace();
-  if (user?.role === 'admin') return 'admin';
-  const ws = availableWorkspaces?.find((w) => w.id === currentWorkspace?.id);
-  return ws?.role || 'viewer';
+  return resolveWorkspaceRole(user, currentWorkspace, availableWorkspaces);
 }
 
-// Returns the role-filtered destination list. A gated destination is always
-// included when it is the currently active page (so a directly-visited page
-// still shows its own tile), mirroring the previous header behavior.
-export function useNavDestinations(activeId = null) {
+/** Workspace admin (or global admin) — the only tier that sees beyond tickets. */
+export function isWorkspaceAdmin(user, wsRole) {
+  return Boolean(user) && (user.role === 'admin' || wsRole === 'admin');
+}
+
+/**
+ * Single source of truth for whether a user gets Settings affordances at all.
+ * Since v3.7.02 Settings is workspace-admin only: viewers/reviewers have zero
+ * sections (approval categories moved to Approvals → Categories), and
+ * global-'agent' users never had any. Every Settings entry point — SideRail,
+ * MobileTabBar "More" sheet, AppHeader account menu, the command palette —
+ * goes through `useCanAccessSettings()` (or this pure form).
+ */
+export function canAccessSettings(user, wsRole) {
+  if (!user || user.role === 'agent') return false;
+  return isWorkspaceAdmin(user, wsRole);
+}
+
+export function useCanAccessSettings() {
+  const { user } = useAuth();
+  const wsRole = useWorkspaceRole();
+  return canAccessSettings(user, wsRole);
+}
+
+/**
+ * Where a signed-in user lands: admins on the Dashboard, everyone else
+ * (viewer / reviewer / agent — and an unresolved role) on Tickets. Used by
+ * HomeRedirect, PublicRoute, AuthCallback, Login, WorkspacePicker and the
+ * SideRail logo so "/dashboard" is no longer hardcoded as the home.
+ */
+export function homePathFor(user, wsRole) {
+  return isWorkspaceAdmin(user, wsRole) ? '/dashboard' : '/tickets';
+}
+
+/**
+ * Role-filtered destination list. No deep-link escape hatch (v3.7.02): a
+ * gated destination is NEVER force-shown just because it is the active page —
+ * AdminRoute bounces such visits, and the rail must not advertise a page the
+ * role can't open. An unresolved role (`null`) yields only the ungated tiles.
+ */
+export function useNavDestinations() {
   const { user } = useAuth();
   const wsRole = useWorkspaceRole();
   const canReview = wsRole === 'admin' || wsRole === 'reviewer';
@@ -136,7 +193,6 @@ export function useNavDestinations(activeId = null) {
   }
 
   return NAV_DESTINATIONS.filter((dest) => {
-    if (dest.id === activeId) return true;
     if (dest.gate === 'review') return canReview;
     if (dest.gate === 'manage') return canManage;
     return true;

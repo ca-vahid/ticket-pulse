@@ -33,41 +33,16 @@ import ErrorBoundary from './components/ErrorBoundary';
 import EmailHealthBanner from './components/EmailHealthBanner';
 import SyncHealthBanner from './components/SyncHealthBanner';
 import CommandPalette from './components/CommandPalette';
-import { Activity } from 'lucide-react';
+import AdminRoute, { LoadingScreen } from './components/nav/AdminRoute';
+import AccessBounceToast from './components/nav/AccessBounceToast';
+import { homePathFor, useWorkspaceRole } from './components/nav/navDestinations';
 
-/**
- * Protected Route wrapper
- * Redirects to login if not authenticated
+/*
+ * Role model (v3.7.02, QA 08-24 #3): the former ProtectedRoute (any member)
+ * is gone — every page beyond Tickets/Approvals is workspace-admin only and
+ * sits behind AdminRoute (components/nav/AdminRoute.jsx). Viewers, reviewers
+ * and agents share the ticket surface via TicketsRoute.
  */
-function ProtectedRoute({ children }) {
-  const { user, isAuthenticated, isLoading } = useAuth();
-  const { isWorkspaceSelected, availableWorkspaces, isHydrated } = useWorkspace();
-
-  if (isLoading || !isHydrated) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-100">
-        <div className="text-center">
-          <Activity className="w-12 h-12 animate-spin mx-auto mb-4 text-blue-600" />
-          <p className="text-gray-600">Loading...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
-  }
-
-  if (user?.role === 'agent') {
-    return <Navigate to="/tickets" replace />;
-  }
-
-  if (!isWorkspaceSelected && availableWorkspaces.length !== 1) {
-    return <Navigate to="/workspace" replace />;
-  }
-
-  return children;
-}
 
 /**
  * Tickets Route wrapper — like ProtectedRoute but agents are first-class:
@@ -77,16 +52,7 @@ function TicketsRoute({ children }) {
   const { isAuthenticated, isLoading } = useAuth();
   const { isWorkspaceSelected, availableWorkspaces, isHydrated } = useWorkspace();
 
-  if (isLoading || !isHydrated) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-100">
-        <div className="text-center">
-          <Activity className="w-12 h-12 animate-spin mx-auto mb-4 text-blue-600" />
-          <p className="text-gray-600">Loading...</p>
-        </div>
-      </div>
-    );
-  }
+  if (isLoading || !isHydrated) return <LoadingScreen />;
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
@@ -100,28 +66,19 @@ function TicketsRoute({ children }) {
 }
 
 /**
- * Public Route wrapper
- * Redirects to dashboard if already authenticated
+ * Public Route wrapper — sends an already signed-in user home. Home is role
+ * aware (homePathFor): admins → /dashboard, everyone else → /tickets, and it
+ * waits for workspace hydration so the role is known rather than guessed.
  */
 function PublicRoute({ children }) {
   const { user, isAuthenticated, isLoading } = useAuth();
+  const { isHydrated } = useWorkspace();
+  const wsRole = useWorkspaceRole();
 
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-100">
-        <div className="text-center">
-          <Activity className="w-12 h-12 animate-spin mx-auto mb-4 text-blue-600" />
-          <p className="text-gray-600">Loading...</p>
-        </div>
-      </div>
-    );
-  }
+  if (isLoading || (isAuthenticated && !isHydrated)) return <LoadingScreen />;
 
   if (isAuthenticated) {
-    if (user?.role === 'agent') {
-      return <Navigate to="/tickets" replace />;
-    }
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to={homePathFor(user, wsRole)} replace />;
   }
 
   return children;
@@ -130,16 +87,7 @@ function PublicRoute({ children }) {
 function AgentRoute({ children }) {
   const { isAuthenticated, isLoading } = useAuth();
 
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-100">
-        <div className="text-center">
-          <Activity className="w-12 h-12 animate-spin mx-auto mb-4 text-blue-600" />
-          <p className="text-gray-600">Loading...</p>
-        </div>
-      </div>
-    );
-  }
+  if (isLoading) return <LoadingScreen />;
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
@@ -150,29 +98,24 @@ function AgentRoute({ children }) {
 
 function HomeRedirect() {
   const { user, isAuthenticated, isLoading } = useAuth();
+  const { isHydrated } = useWorkspace();
+  const wsRole = useWorkspaceRole();
 
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-100">
-        <div className="text-center">
-          <Activity className="w-12 h-12 animate-spin mx-auto mb-4 text-blue-600" />
-          <p className="text-gray-600">Loading...</p>
-        </div>
-      </div>
-    );
-  }
+  if (isLoading || (isAuthenticated && !isHydrated)) return <LoadingScreen />;
 
   if (!isAuthenticated) return <Navigate to="/login" replace />;
-  return <Navigate to={user?.role === 'agent' ? '/tickets' : '/dashboard'} replace />;
+  return <Navigate to={homePathFor(user, wsRole)} replace />;
 }
 
 function AuthCallback() {
   const { user, isAuthenticated, isLoading } = useAuth();
+  const { isHydrated } = useWorkspace();
+  const wsRole = useWorkspaceRole();
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (!isLoading && isAuthenticated) {
-      navigate(user?.role === 'agent' ? '/tickets' : '/dashboard', { replace: true });
+    if (!isLoading && isAuthenticated && isHydrated) {
+      navigate(homePathFor(user, wsRole), { replace: true });
     }
     if (!isLoading && !isAuthenticated) {
       const timer = setTimeout(() => {
@@ -180,16 +123,9 @@ function AuthCallback() {
       }, 5000);
       return () => clearTimeout(timer);
     }
-  }, [isAuthenticated, isLoading, navigate, user?.role]);
+  }, [isAuthenticated, isLoading, isHydrated, navigate, user, wsRole]);
 
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100">
-      <div className="text-center">
-        <Activity className="w-12 h-12 animate-spin mx-auto mb-4 text-blue-600" />
-        <p className="text-gray-600">Completing sign-in...</p>
-      </div>
-    </div>
-  );
+  return <LoadingScreen label="Completing sign-in..." />;
 }
 
 function App() {
@@ -309,150 +245,150 @@ function App() {
                     }
                   />
 
-                  {/* Protected Routes */}
+                  {/* Admin-only routes (v3.7.02 role lockdown) */}
                   <Route
                     path="/dashboard"
                     element={
-                      <ProtectedRoute>
+                      <AdminRoute>
                         <Dashboard />
-                      </ProtectedRoute>
+                      </AdminRoute>
                     }
                   />
 
                   <Route
                     path="/technician/:id"
                     element={
-                      <ProtectedRoute>
+                      <AdminRoute>
                         <TechnicianDetailNew />
-                      </ProtectedRoute>
+                      </AdminRoute>
                     }
                   />
 
                   <Route
                     path="/settings"
                     element={
-                      <ProtectedRoute>
+                      <AdminRoute>
                         <Settings />
-                      </ProtectedRoute>
+                      </AdminRoute>
                     }
                   />
 
                   <Route
                     path="/visuals"
                     element={
-                      <ProtectedRoute>
+                      <AdminRoute>
                         <Visuals />
-                      </ProtectedRoute>
+                      </AdminRoute>
                     }
                   />
 
                   <Route
                     path="/timeline"
                     element={
-                      <ProtectedRoute>
+                      <AdminRoute>
                         <TimelineExplorer />
-                      </ProtectedRoute>
+                      </AdminRoute>
                     }
                   />
 
                   <Route
                     path="/analytics"
                     element={
-                      <ProtectedRoute>
+                      <AdminRoute>
                         <Analytics />
-                      </ProtectedRoute>
+                      </AdminRoute>
                     }
                   />
 
                   <Route
                     path="/analytics/category-map"
                     element={
-                      <ProtectedRoute>
+                      <AdminRoute>
                         <Analytics view="category-map" />
-                      </ProtectedRoute>
+                      </AdminRoute>
                     }
                   />
 
                   <Route
                     path="/workflows"
                     element={
-                      <ProtectedRoute>
+                      <AdminRoute>
                         <WorkflowsPage />
-                      </ProtectedRoute>
+                      </AdminRoute>
                     }
                   />
                   <Route
                     path="/workflows/:tab"
                     element={
-                      <ProtectedRoute>
+                      <AdminRoute>
                         <WorkflowsPage />
-                      </ProtectedRoute>
+                      </AdminRoute>
                     }
                   />
 
                   <Route
                     path="/summit-taxonomy"
                     element={
-                      <ProtectedRoute>
+                      <AdminRoute>
                         <SummitTaxonomyWorkshop />
-                      </ProtectedRoute>
+                      </AdminRoute>
                     }
                   />
 
                   <Route
                     path="/assignments"
                     element={
-                      <ProtectedRoute>
+                      <AdminRoute>
                         <AssignmentReview />
-                      </ProtectedRoute>
+                      </AdminRoute>
                     }
                   />
                   <Route
                     path="/assignments/:tab"
                     element={
-                      <ProtectedRoute>
+                      <AdminRoute>
                         <AssignmentReview />
-                      </ProtectedRoute>
+                      </AdminRoute>
                     }
                   />
                   <Route
                     path="/assignments/run/:runId"
                     element={
-                      <ProtectedRoute>
+                      <AdminRoute>
                         <AssignmentReview />
-                      </ProtectedRoute>
+                      </AdminRoute>
                     }
                   />
                   <Route
                     path="/assignments/history/:historyRunId"
                     element={
-                      <ProtectedRoute>
+                      <AdminRoute>
                         <AssignmentReview />
-                      </ProtectedRoute>
+                      </AdminRoute>
                     }
                   />
                   <Route
                     path="/assignments/live/:ticketId"
                     element={
-                      <ProtectedRoute>
+                      <AdminRoute>
                         <AssignmentReview />
-                      </ProtectedRoute>
+                      </AdminRoute>
                     }
                   />
                   <Route
                     path="/assignments/competency-run/:competencyRunId"
                     element={
-                      <ProtectedRoute>
+                      <AdminRoute>
                         <AssignmentReview />
-                      </ProtectedRoute>
+                      </AdminRoute>
                     }
                   />
                   <Route
                     path="/assignments/competency-live/:analyzeTechId"
                     element={
-                      <ProtectedRoute>
+                      <AdminRoute>
                         <AssignmentReview />
-                      </ProtectedRoute>
+                      </AdminRoute>
                     }
                   />
 
@@ -476,6 +412,7 @@ function App() {
                 <SyncHealthBanner />
                 <EmailHealthBanner />
               </div>
+              <AccessBounceToast />
               <CommandPalette />
             </SettingsProvider>
           </DashboardProvider>

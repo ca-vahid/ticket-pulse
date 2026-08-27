@@ -31,14 +31,22 @@ describe('filterSettingsNavItems', () => {
     expect(ids(items)).not.toContain('ai-usage');
   });
 
-  test('reviewer sees approval categories + viewer sections only', () => {
-    const items = filterSettingsNavItems({ isWsReviewer: true });
-    expect(ids(items).sort()).toEqual(['approval-categories', 'dashboard']);
+  // v3.7.02 role lockdown (QA 08-24 #3): Settings is workspace-admin only.
+  // Reviewers manage approval categories from Approvals → Categories now, and
+  // the viewer "Dashboard prefs" form (which 403'd on save) is admin-only.
+  test('reviewer gets ZERO sections (approval categories moved to Approvals → Categories)', () => {
+    expect(filterSettingsNavItems({ isWsReviewer: true })).toEqual([]);
   });
 
-  test('plain viewer gets only viewer-tier sections', () => {
-    const items = filterSettingsNavItems({});
-    expect(ids(items)).toEqual(['dashboard']);
+  test('plain viewer gets ZERO sections', () => {
+    expect(filterSettingsNavItems({})).toEqual([]);
+  });
+
+  test('approval categories and dashboard prefs are admin-tier items', () => {
+    const byId = Object.fromEntries(ALL_SETTINGS_NAV_ITEMS.map((item) => [item.id, item.minRole]));
+    expect(byId['approval-categories']).toBe('admin');
+    expect(byId.dashboard).toBe('admin');
+    expect(ALL_SETTINGS_NAV_ITEMS.some((item) => item.minRole === 'viewer' || item.minRole === 'reviewer')).toBe(false);
   });
 
   test('agents get ZERO sections regardless of other flags', () => {

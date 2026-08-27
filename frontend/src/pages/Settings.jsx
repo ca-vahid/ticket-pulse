@@ -59,6 +59,7 @@ import {
 } from 'lucide-react';
 import { AssignmentConfigPanel } from './AssignmentReview';
 import { filterSettingsNavItems, resolveActiveSettingsItem } from './settingsNav';
+import { useWorkspaceRole } from '../components/nav/navDestinations';
 import useSettingsSectionHash from '../hooks/useSettingsSectionHash';
 
 export default function Settings() {
@@ -68,14 +69,12 @@ export default function Settings() {
   const { user } = useAuth();
 
   const isGlobalAdmin = user?.role === 'admin';
-  const wsRole = (() => {
-    if (isGlobalAdmin) return 'admin';
-    const ws = availableWorkspaces?.find(w => w.id === currentWorkspace?.id);
-    return ws?.role || 'viewer';
-  })();
+  // Fails closed (null until hydrated) — the same resolver the nav uses.
+  const wsRole = useWorkspaceRole();
   const isWsAdmin = wsRole === 'admin';
-  // Reviewer tier (FR 08-07 #11): reviewers manage approval categories —
-  // approvals are daily coordination, not admin-only setup.
+  // Reviewers no longer have Settings sections (v3.7.02): approval categories
+  // moved to Approvals → Categories. Kept as an input to the nav filter so
+  // the role model stays explicit in one place (settingsNav.js).
   const isWsReviewer = isWsAdmin || wsRole === 'reviewer';
 
   // The user's REQUEST (deep-link hash or nav click). What actually renders

@@ -1,6 +1,6 @@
 import express from 'express';
 import { asyncHandler } from '../middleware/errorHandler.js';
-import { requireAdmin, requireReviewer } from '../middleware/auth.js';
+import { requireAdmin } from '../middleware/auth.js';
 import providerSettingsService from '../services/aiProviders/providerSettingsService.js';
 import providerHealthService from '../services/aiProviders/providerHealthService.js';
 import anthropicProvider from '../services/aiProviders/anthropicProvider.js';
@@ -35,7 +35,9 @@ function isToolOperation(operation) {
   ].includes(operation);
 }
 
-router.get('/models', requireReviewer, asyncHandler(async (req, res) => {
+// v3.7.02 role lockdown: every read here backs admin-only surfaces (Settings →
+// AI Providers, Assignment Review), so reviewer-tier reads became requireAdmin.
+router.get('/models', requireAdmin, asyncHandler(async (req, res) => {
   res.json({
     success: true,
     data: providerSettingsService.getModels({
@@ -45,7 +47,7 @@ router.get('/models', requireReviewer, asyncHandler(async (req, res) => {
   });
 }));
 
-router.get('/settings', requireReviewer, asyncHandler(async (req, res) => {
+router.get('/settings', requireAdmin, asyncHandler(async (req, res) => {
   const settings = await providerSettingsService.listSettings(req.workspaceId);
   res.json({ success: true, data: settings });
 }));
@@ -60,7 +62,7 @@ router.put('/settings', requireAdmin, asyncHandler(async (req, res) => {
   res.json({ success: true, data: settings });
 }));
 
-router.get('/health', requireReviewer, asyncHandler(async (req, res) => {
+router.get('/health', requireAdmin, asyncHandler(async (req, res) => {
   const operation = AI_OPERATIONS.includes(req.query.operation) ? req.query.operation : null;
   const statuses = await providerHealthService.getStatuses({
     workspaceId: req.workspaceId,
@@ -151,7 +153,7 @@ router.post('/test', requireAdmin, asyncHandler(async (req, res) => {
   }
 }));
 
-router.get('/metadata', requireReviewer, asyncHandler(async (_req, res) => {
+router.get('/metadata', requireAdmin, asyncHandler(async (_req, res) => {
   res.json({ success: true, data: { operations: AI_OPERATIONS, models: getModelMetadata() } });
 }));
 

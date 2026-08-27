@@ -29,7 +29,7 @@ import searchRoutes from './search.routes.js';
 import apiV1Routes from './apiV1.routes.js';
 import backupRoutes from './backup.routes.js';
 import { requireWorkspace } from '../middleware/workspace.js';
-import { requireAuth, requireWorkspaceAccess, requireWorkspaceMemberOrAgent } from '../middleware/auth.js';
+import { requireAdmin, requireAuth, requireWorkspaceAccess, requireWorkspaceMemberOrAgent } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -105,14 +105,21 @@ router.use(requireWorkspace);
 router.use(requireWorkspaceAccess);
 
 // Mount route modules (individual route files no longer need requireAuth)
-router.use('/dashboard', dashboardRoutes);
+//
+// ROLE MODEL (QA 08-24 #3, v3.7.02): viewers and reviewers are ticket-surface
+// users — Tickets + Approvals (+ the reviewer-tier AI decide/override path in
+// assignment.routes). Dashboard, Analytics, Agent Maps and the Summit
+// workshop are workspace-admin only, the same as "No access" for everyone
+// else. `/sse` stays ABOVE these gates on purpose — viewers need live queue
+// updates. Global admins pass requireAdmin without a DB lookup.
+router.use('/dashboard', requireAdmin, dashboardRoutes);
 // Ticket-status registry (Phase 8a): Settings CRUD, admin-gated in the router.
 router.use('/ticket-statuses', statusesRoutes);
 router.use('/sync', syncRoutes);
 router.use('/photos', photosRoutes);
 router.use('/autoresponse', autoresponseRoutes);
 router.use('/admin/llm-settings', llmAdminRoutes);
-router.use('/visuals', visualsRoutes);
+router.use('/visuals', requireAdmin, visualsRoutes);
 router.use('/noise-rules', noiseRoutes);
 router.use('/vacation-tracker', vacationTrackerRoutes);
 router.use('/calendar-leave', calendarLeaveRoutes);
@@ -120,8 +127,8 @@ router.use('/notifications', notificationsRoutes);
 router.use('/notification-workflows', notificationWorkflowRoutes);
 router.use('/ai-providers', aiProviderRoutes);
 router.use('/assignment', assignmentRoutes);
-router.use('/analytics', analyticsRoutes);
-router.use('/summit', summitRoutes);
+router.use('/analytics', requireAdmin, analyticsRoutes);
+router.use('/summit', requireAdmin, summitRoutes);
 router.use('/backup', backupRoutes);
 
 export default router;
