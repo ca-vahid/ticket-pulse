@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.7.00-preview';
+export const APP_VERSION = '3.7.01-preview';
 
 export const changelog = [
+  {
+    version: '3.7.01-preview',
+    date: 'August 27, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>🔍 “Compare this version with live” no longer freezes</strong> — the prompt diff now runs on the same editor engine as the workflow editor: side-by-side or inline, unchanged regions collapsed, the compare side editable, Apply-to-editor kept. A rewritten draft that used to lock the page now diffs in well under a second; truly huge pairs show a raw side-by-side with a “Compute anyway” option, and a version that fails to load says so instead of painting everything red. (QA 08-25 #1)' },
+      { type: 'improved', html: '<strong>📝 Create-form templates you can edit</strong> — a pencil on every template opens it prefilled; the form has a labeled Subject plus Type, Category and Subcategory pickers, and rows show the subject with type/category/priority chips so a mis-saved template is obvious. Duplicate names get a clear error. Note: with “Classify & assess with AI” on, Type/Category/Priority are advisory — AI sets them at create. (QA 08-26 #2)' },
+    ],
+  },
   {
     version: '3.7.00-preview',
     date: 'August 27, 2026',
