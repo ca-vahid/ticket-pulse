@@ -66,7 +66,7 @@ create/update payload actually carries `customFields`.
 |---|---|
 | `category` / `subcategory` | **By name**, case-insensitive against the workspace taxonomy; a wrong name 400s listing the allowed values (nothing is created). Subcategory must be a child of category. |
 | `customFields` | Object of scalar values. Keys normalize to snake_case (`clientName` → `client_name`); known keys validate against their definition; **unknown keys auto-provision** a definition (type inferred, `source:'api'`, active immediately, curatable in Settings → Ticket Ops → Custom fields). Nothing is silently dropped — unusable entries return in `meta.rejectedCustomFields` `{key, reason}`. Caps: ≤40 keys/request, ≤2000 chars/value, ≤200 definitions/workspace. Requires `customfields:write`. |
-| `ccEmails` | Array of cc addresses, stored and shown on the ticket. |
+| `ccEmails` | **Additional requesters ("Also for")** — array of cc addresses stored on the ticket. Normalized (lowercase), deduped, max 10; an invalid address 400s. See "Additional requesters / carbon copies" below. |
 | `source` | Arrival-channel override (1 Email, 2 Portal, 3 Phone, 9 Walk-up, 102 MS Teams, 103 Agent); defaults to 100 = API. |
 | `ticketType` (alias `type`) | Type by name from the workspace registry; omitted → default. |
 
@@ -95,6 +95,44 @@ naming every offender.
 Route on the metadata with workflows: condition
 `custom:source_request_type is "Project Setup"` → update-ticket "Category by
 name". The installable **API intake router** workflow template is exactly this.
+
+## Additional requesters / carbon copies (`ccEmails`)
+
+A ticket has ONE primary requester (`requesterEmail`) plus an optional
+**"Also for"** list — additional requesters carried as `ccEmails` on the
+ticket (the same field the app's create form and ticket page label
+*Also for (additional requesters)*).
+
+What the list does:
+
+- **Every public reply** to the requester is sent To the requester and Cc the
+  list (deduped, the requester never duplicated). A per-reply `cc` on
+  `POST /tickets/{id}/replies` is **unioned** with the ticket list, not a
+  replacement.
+- The FreshService fallback copy carries the list as `cc_emails` (create and
+  later edits), so FS-side replies reach them too.
+- **Lifecycle mails** (created / status changed / resolved workflow sends whose
+  To is the requester) cc the list **only when** the workspace toggle
+  *Settings → Ticket Ops → Additional requesters → "Also notify additional
+  requesters"* is on (default off). CSAT surveys are always primary-only.
+
+Surface:
+
+| Where | Behavior |
+|---|---|
+| `POST /tickets` `ccEmails` | Initial list. |
+| `PATCH /tickets/{id}` `ccEmails` | **Replaces** the list (`[]` clears it). Ticket Pulse–born tickets only — on a FreshService-born ticket the list is FreshService-owned (the app's FS write-back edits it there; the API returns 400). |
+| `GET /tickets/{id}` / list items | `ccEmails: string[]` (always present, `[]` when none). |
+
+Validation: addresses are trimmed + lowercased, duplicates collapse, max **10**
+after dedupe, and an invalid address rejects the whole request (400).
+
+```bash
+curl -X PATCH "$BASE/api/v1/tickets/1084" -H "Authorization: Bearer $KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "ccEmails": ["manager@example.com", "assistant@example.com"] }'
+# → { "data": { "ref": "TP-1084", "ccEmails": ["manager@example.com", "assistant@example.com"], … } }
+```
 
 ## Groups — `groupId` vs `internalGroupId`
 

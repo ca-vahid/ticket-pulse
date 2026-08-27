@@ -11,7 +11,19 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
  * highlighted match) to add. A fully-typed address still commits on
  * Enter/comma/semicolon/blur. Backspace on an empty input removes the last chip.
  */
-export default function CcChips({ value = [], onChange, max = 10, placeholder = 'Add Cc…', label = 'Cc recipients' }) {
+export default function CcChips({
+  value = [],
+  onChange,
+  max = 10,
+  placeholder = 'Add Cc…',
+  label = 'Cc recipients',
+  // Chip-row prefix ("Cc" in the composer, "Also for" on the ticket page).
+  prefix = 'Cc',
+  // readOnly: chips only (no input, no remove) — FS-owned lists / no write
+  // access. disabled: keep the row but block edits while a save is in flight.
+  readOnly = false,
+  disabled = false,
+}) {
   const [input, setInput] = useState('');
   const [results, setResults] = useState([]); // [{name, email, hint}]
   const [open, setOpen] = useState(false);
@@ -112,22 +124,28 @@ export default function CcChips({ value = [], onChange, max = 10, placeholder = 
         }`}
       >
         <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mr-0.5">
-          Cc{value.length > 0 && <span className="ml-1 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-blue-100 text-blue-700 text-[10px] font-bold">{value.length}</span>}
+          {prefix}{value.length > 0 && <span className="ml-1 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-blue-100 text-blue-700 text-[10px] font-bold">{value.length}</span>}
         </span>
         {value.map((email) => (
-          <span key={email} className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full bg-blue-50 border border-blue-200 text-xs text-blue-800">
+          <span key={email} className={`inline-flex items-center gap-1 pl-2 py-0.5 rounded-full bg-blue-50 border border-blue-200 text-xs text-blue-800 ${readOnly ? 'pr-2' : 'pr-1'}`}>
             {email}
-            <button
-              type="button"
-              onClick={() => onChange(value.filter((v) => v !== email))}
-              aria-label={`Remove ${email} from Cc`}
-              className="tp-focus-ring rounded-full p-0.5 hover:bg-blue-100 text-blue-500"
-            >
-              <X className="w-3 h-3" aria-hidden="true" />
-            </button>
+            {!readOnly && (
+              <button
+                type="button"
+                onClick={() => onChange(value.filter((v) => v !== email))}
+                disabled={disabled}
+                aria-label={`Remove ${email} from ${prefix}`}
+                className="tp-focus-ring rounded-full p-0.5 hover:bg-blue-100 text-blue-500 disabled:opacity-50"
+              >
+                <X className="w-3 h-3" aria-hidden="true" />
+              </button>
+            )}
           </span>
         ))}
-        <span className="relative flex-1 min-w-[140px] flex items-center">
+        {readOnly && value.length === 0 && (
+          <span className="text-xs text-slate-400">{placeholder}</span>
+        )}
+        {!readOnly && <span className="relative flex-1 min-w-[140px] flex items-center">
           <input
             type="text"
             value={input}
@@ -136,7 +154,7 @@ export default function CcChips({ value = [], onChange, max = 10, placeholder = 
             onFocus={() => { if (results.length) setOpen(true); }}
             onBlur={() => commit(input)}
             placeholder={value.length >= max ? `Max ${max} recipients` : placeholder}
-            disabled={value.length >= max}
+            disabled={disabled || value.length >= max}
             aria-label={label}
             aria-invalid={invalid || undefined}
             aria-expanded={open}
@@ -146,8 +164,8 @@ export default function CcChips({ value = [], onChange, max = 10, placeholder = 
             className="w-full text-xs py-0.5 outline-none placeholder:text-slate-400 disabled:bg-transparent"
           />
           {loading && <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-300 flex-shrink-0" aria-hidden="true" />}
-        </span>
-        {invalid && <span className="text-[10px] text-red-500 w-full">Not a valid email address yet — press Enter once fixed</span>}
+        </span>}
+        {invalid &&<span className="text-[10px] text-red-500 w-full">Not a valid email address yet — press Enter once fixed</span>}
       </div>
 
       {open && results.length > 0 && (

@@ -670,6 +670,31 @@ router.get('/quick-notes', asyncHandler(async (req, res) => {
   res.json({ success: true, data: notes });
 }));
 
+// ------------------------------- "Also for" additional requesters (Phase MR6)
+// Per-workspace toggle: when ON, requester-facing lifecycle mails (created /
+// status / resolution workflow sends) cc the ticket's "Also for" list. Replies
+// ALWAYS reach the list; CSAT stays primary-only. Stored in app_settings
+// (workspace-scoped key) — read by any member, written by admins.
+
+router.get('/also-for-settings', asyncHandler(async (req, res) => {
+  const { isAlsoForNotifyEnabled } = await import('../services/alsoForNotifyService.js');
+  res.json({ success: true, data: { notifyAdditionalRequesters: await isAlsoForNotifyEnabled(req.workspaceId) } });
+}));
+
+router.put('/also-for-settings', asyncHandler(async (req, res) => {
+  const actor = req.ticketActor;
+  if (!(actor?.role === 'admin' || actor?.workspaceRole === 'admin')) {
+    return res.status(403).json({ success: false, message: 'Changing requester notification settings requires admin access.' });
+  }
+  if (typeof req.body?.notifyAdditionalRequesters !== 'boolean') {
+    throw new ValidationError('notifyAdditionalRequesters must be true or false');
+  }
+  const { setAlsoForNotifyEnabled } = await import('../services/alsoForNotifyService.js');
+  const enabled = await setAlsoForNotifyEnabled(req.workspaceId, req.body.notifyAdditionalRequesters);
+  logger.info(`Also-notify additional requesters ${enabled ? 'ON' : 'OFF'} for workspace ${req.workspaceId} by ${actor?.email || 'unknown'}`);
+  res.json({ success: true, data: { notifyAdditionalRequesters: enabled } });
+}));
+
 // ------------------------------------------------- watch subscriptions (T3.6)
 // Per-category or per-group, never per-ticket (decision d7).
 

@@ -340,3 +340,61 @@ describe('mirrorService._fsStatusCode (base-mapped FS codes)', () => {
     expect(await mirrorService._fsStatusCode({ workspaceId: 1, status: 'Spam' })).toBeNull();
   });
 });
+
+// Phase MR5 (QA 08-26 #3): the FS fallback copy carries the "Also for" list.
+describe('mirrorService — "Also for" additional requesters → cc_emails (Phase MR5)', () => {
+  test('create_ticket sends cc_emails (lowercased, deduped, requester excluded); none → key omitted', async () => {
+    prismaMock.ticket.findUnique.mockResolvedValue({
+      ...baseTicket, ccEmails: ['Manager@Example.com', 'assistant@example.com', 'manager@example.com', 'rita@example.com'],
+    });
+    clientMock.createTicket.mockResolvedValue({ id: 90001, requester_id: 555001 });
+    clientMock.updateTicket.mockResolvedValue({ id: 90001 });
+
+    expect(await mirrorService._processJob({ id: 11, ticketId: 501, workspaceId: 1, kind: 'create_ticket', attempts: 0 })).toBe(true);
+    expect(clientMock.createTicket).toHaveBeenCalledWith(expect.objectContaining({
+      email: 'rita@example.com',
+      cc_emails: ['manager@example.com', 'assistant@example.com'],
+    }));
+
+    jest.clearAllMocks();
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...baseTicket, ccEmails: [] });
+    clientMock.createTicket.mockResolvedValue({ id: 90002, requester_id: 555001 });
+    clientMock.updateTicket.mockResolvedValue({ id: 90002 });
+    await mirrorService._processJob({ id: 12, ticketId: 501, workspaceId: 1, kind: 'create_ticket', attempts: 0 });
+    expect(clientMock.createTicket).toHaveBeenCalledWith(expect.not.objectContaining({ cc_emails: expect.anything() }));
+  });
+
+  test('update_fields propagates the current list to the FS copy', async () => {
+    prismaMock.ticket.findUnique.mockResolvedValue({
+      ...baseTicket, freshserviceTicketId: BigInt(90001), ccEmails: ['assistant@example.com'],
+    });
+    clientMock.updateTicket.mockResolvedValue({ id: 90001 });
+
+    expect(await mirrorService._processJob({ id: 13, ticketId: 501, workspaceId: 1, kind: 'update_fields', attempts: 0 })).toBe(true);
+    expect(clientMock.updateTicket).toHaveBeenCalledWith(90001, expect.objectContaining({ cc_emails: ['assistant@example.com'] }));
+  });
+
+  test('update_fields: an FS rejection of cc_emails specifically retries once without it (rest of the sync still lands)', async () => {
+    prismaMock.ticket.findUnique.mockResolvedValue({
+      ...baseTicket, freshserviceTicketId: BigInt(90001), ccEmails: ['assistant@example.com'], status: 'Pending',
+    });
+    const rejection = new Error('Validation failed');
+    rejection.freshserviceDetail = { errors: [{ field: 'cc_emails', message: 'Unexpected/invalid field in request' }] };
+    clientMock.updateTicket.mockRejectedValueOnce(rejection).mockResolvedValueOnce({ id: 90001 });
+
+    expect(await mirrorService._processJob({ id: 14, ticketId: 501, workspaceId: 1, kind: 'update_fields', attempts: 0 })).toBe(true);
+    expect(clientMock.updateTicket).toHaveBeenCalledTimes(2);
+    expect(clientMock.updateTicket).toHaveBeenLastCalledWith(90001, expect.objectContaining({ status: 3 }));
+    expect(clientMock.updateTicket.mock.calls[1][1].cc_emails).toBeUndefined();
+    expect(loggerMock.warn).toHaveBeenCalledWith(expect.stringContaining('rejected cc_emails'));
+  });
+
+  test('update_fields: any OTHER FS error still fails the job (no blind retry)', async () => {
+    prismaMock.ticket.findUnique.mockResolvedValue({
+      ...baseTicket, freshserviceTicketId: BigInt(90001), ccEmails: ['assistant@example.com'],
+    });
+    clientMock.updateTicket.mockRejectedValue(new Error('FS is down'));
+    expect(await mirrorService._processJob({ id: 15, ticketId: 501, workspaceId: 1, kind: 'update_fields', attempts: 0 })).toBe(false);
+    expect(clientMock.updateTicket).toHaveBeenCalledTimes(1);
+  });
+});

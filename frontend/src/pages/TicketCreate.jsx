@@ -348,7 +348,7 @@ export default function TicketCreate() {
     }
     need('group', Boolean(groupId), 'Pick a group');
     need('tags', tagIds.length > 0, 'Pick at least one tag');
-    need('cc', cc.length > 0, 'Add at least one Cc address');
+    need('cc', cc.length > 0, 'Add at least one additional requester');
     need('attachments', files.length > 0, 'Attach at least one file');
     for (const def of customFieldDefs) {
       if (def.isRequiredOnCreate !== true) continue;
@@ -655,8 +655,23 @@ export default function TicketCreate() {
                     </>
                   )}
                   {fieldVisible('cc') && (
-                    <div className="mt-2">
-                      <CcChips value={cc} onChange={setCc} placeholder={`Cc colleagues on this ticket…${fieldRequired('cc') ? ' (required)' : ''}`} />
+                    <div className="mt-3" data-testid="also-for-block">
+                      {/* "Also for" = additional requesters (Phase MR3, QA 08-26 #3):
+                          stored as the ticket's ccEmails — every reply to the
+                          requester reaches them, and the FS copy carries them. */}
+                      <div className="flex items-baseline justify-between gap-2 mb-1">
+                        <span className="text-xs font-semibold text-slate-600">
+                          Also for <span className="font-normal text-slate-400">(additional requesters{fieldRequired('cc') ? ', required' : ''})</span>
+                        </span>
+                        <span className="text-[11px] text-slate-400">They receive every reply to the requester</span>
+                      </div>
+                      <CcChips
+                        value={cc}
+                        onChange={setCc}
+                        prefix="Also for"
+                        label="Also for (additional requesters)"
+                        placeholder={`Add additional requesters by name or email…${fieldRequired('cc') ? ' (required)' : ''}`}
+                      />
                       {fieldErrors.cc && <p className="mt-1 text-xs text-red-600" role="alert">{fieldErrors.cc}</p>}
                     </div>
                   )}

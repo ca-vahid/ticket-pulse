@@ -89,6 +89,10 @@ function ticketShape(t) {
     // Structured intake metadata (FR 08-05 #1) — the workspace's custom-field
     // values keyed by definition key. {} when none are set.
     customFields: t.customFields || {},
+    // "Also for" additional requesters (Phase MR7): carbon copies stored on
+    // the ticket — every reply to the requester reaches them; requester-facing
+    // lifecycle mails do too when the workspace toggle is on.
+    ccEmails: Array.isArray(t.ccEmails) ? t.ccEmails : [],
     createdAt: t.createdAt,
     updatedAt: t.updatedAt,
     resolvedAt: t.resolvedAt || null,
@@ -302,7 +306,9 @@ router.patch('/tickets/:id', S('tickets:write'), withIdempotency, asyncHandler(a
   // groupId = the freshserviceId of an origin:'freshservice' group;
   // internalGroupId = the id of an origin:'local' group (GET /groups carries
   // both identifiers). updateTicketFields clears whichever one is sent null.
-  const fieldKeys = ['subject', 'priority', 'internalCategoryId', 'internalSubcategoryId', 'groupId', 'internalGroupId'];
+  // ccEmails = the "Also for" additional-requester list (Phase MR7): replaces
+  // the whole list (normalized, deduped, ≤10); [] clears it.
+  const fieldKeys = ['subject', 'priority', 'internalCategoryId', 'internalSubcategoryId', 'groupId', 'internalGroupId', 'ccEmails'];
   const fields = Object.fromEntries(fieldKeys.filter((k) => body[k] !== undefined).map((k) => [k, body[k]]));
   // Category/subcategory BY NAME (FR 08-05 #1) — explicit IDs win when both
   // spellings are sent; `category: null` clears the pair.

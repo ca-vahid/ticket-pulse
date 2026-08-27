@@ -137,12 +137,37 @@ function tpNoteMarkerHtml(actorLabel) {
 // FS's numeric codes 1–10 plus the TP extension range (API/Webhook/Agent).
 
 // Accepts an array or a comma/semicolon-separated string of addresses.
+// Normalized (trim + lowercase) and deduped BEFORE the ≤10 cap (Phase MR):
+// "A@x.com, a@x.com" is one address, not two.
 const emailListSchema = z.preprocess(
-  (v) => (Array.isArray(v) ? v : String(v ?? '').split(/[,;]/))
-    .map((s) => String(s).trim().toLowerCase())
-    .filter(Boolean),
-  z.array(z.string().email({ message: 'Cc contains an invalid email address' })).max(10),
+  (v) => [...new Set(
+    (Array.isArray(v) ? v : String(v ?? '').split(/[,;]/))
+      .map((s) => String(s).trim().toLowerCase())
+      .filter(Boolean),
+  )],
+  z.array(z.string().email({ message: 'Cc contains an invalid email address' })).max(10, { message: 'At most 10 addresses' }),
 );
+
+/**
+ * Reply recipients (Phase MR4): the ticket's "Also for" list ∪ the composer's
+ * cc, deduped case-insensitively, the requester excluded (they are the To).
+ * Runs server-side as the safety net — the composer seeds the same union,
+ * but an address added to the ticket AFTER the draft was opened, or a client
+ * that never seeds (API v1 replies), must still reach every additional
+ * requester.
+ */
+export function unionReplyCc(ticket, composerCc = []) {
+  const requester = String(ticket?.requester?.email || '').trim().toLowerCase();
+  const seen = new Set();
+  const out = [];
+  for (const raw of [...(Array.isArray(ticket?.ccEmails) ? ticket.ccEmails : []), ...(Array.isArray(composerCc) ? composerCc : [])]) {
+    const address = String(raw || '').trim().toLowerCase();
+    if (!address || address === requester || seen.has(address)) continue;
+    seen.add(address);
+    out.push(address);
+  }
+  return out;
+}
 
 const createTicketSchema = z.object({
   subject: z.string().trim().min(3).max(500),
@@ -221,6 +246,10 @@ const updateTicketSchema = z.object({
   // customFieldService.setValues — NO auto-provisioning on update (creation
   // is the intake path); unknown keys are a hard ValidationError.
   customFields: z.record(z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
+  // "Also for" — additional requesters (Phase MR1). Normalized/deduped/≤10
+  // by emailListSchema; [] clears the list. Every reply to the requester
+  // reaches them (unionReplyCc), the FS mirror carries them as cc_emails.
+  ccEmails: emailListSchema.optional(),
 }).strict();
 
 const threadBodySchema = z.object({
@@ -2525,6 +2554,17 @@ class TicketService {
         };
       }
     }
+    // "Also for" additional requesters (Phase MR1): order-insensitive
+    // comparison so a re-sent identical list is a no-op (no audit, no mirror
+    // churn). Audited as its own cc_changed entry with the full old/new lists.
+    if (data.ccEmails !== undefined) {
+      const prev = (Array.isArray(ticket.ccEmails) ? ticket.ccEmails : []).map((e) => String(e).toLowerCase());
+      const same = prev.length === data.ccEmails.length && prev.every((e) => data.ccEmails.includes(e));
+      if (!same) {
+        patch.ccEmails = data.ccEmails;
+        changes.ccEmails = { from: prev, to: data.ccEmails };
+      }
+    }
 
     if (Object.keys(patch).length === 0) {
       // A customFields-only PATCH is still a change — setValues already
@@ -2539,8 +2579,9 @@ class TicketService {
     const dueChanges = {};
     if (changes.dueBy) dueChanges.dueBy = changes.dueBy;
     if (changes.frDueBy) dueChanges.frDueBy = changes.frDueBy;
-    const otherChanges = Object.fromEntries(Object.entries(changes).filter(([k]) => !(k in dueChanges)));
-    const dueOnly = Object.keys(otherChanges).length === 0 && Object.keys(dueChanges).length > 0;
+    const ccChanged = Boolean(changes.ccEmails);
+    const otherChanges = Object.fromEntries(Object.entries(changes).filter(([k]) => !(k in dueChanges) && k !== 'ccEmails'));
+    const dueOnly = Object.keys(otherChanges).length === 0 && !ccChanged && Object.keys(dueChanges).length > 0;
     if (!dueOnly) patch.mirrorState = 'pending';
 
     const updated = await prisma.ticket.update({
@@ -2554,6 +2595,9 @@ class TicketService {
     // generic fields_updated entry.
     if (Object.keys(otherChanges).length) await this._audit(ticket.id, 'fields_updated', actor, { changes: otherChanges });
     if (Object.keys(dueChanges).length) await this._audit(ticket.id, 'due_changed', actor, { changes: dueChanges });
+    // "Also for" edits get their own cc_changed entry (old/new lists) so the
+    // activity timeline reads "additional requesters changed", not "fields".
+    if (ccChanged) await this._audit(ticket.id, 'cc_changed', actor, { from: changes.ccEmails.from, to: changes.ccEmails.to });
     this._broadcast(workspaceId, 'updated', updated, { changes: Object.keys(changes) });
     if (!dueOnly) await mirrorService.enqueueFieldSync(workspaceId, ticket.id);
     // Subject/description changed → the content embedding is stale (P5.2).
@@ -2688,6 +2732,22 @@ class TicketService {
       };
     }
 
+    // "Also for" additional requesters on an FS-born ticket (Phase MR1): FS
+    // owns the ticket, so the list rides the same PUT-first/verify seam as
+    // the other fields (cc_emails is a documented ticket attribute). A silent
+    // drop by FS is caught by the echo check below — nothing changes locally.
+    if (input.ccEmails !== undefined) {
+      const parsedCc = emailListSchema.safeParse(input.ccEmails);
+      if (!parsedCc.success) throw new ValidationError(zodMessage(parsedCc.error));
+      const prev = (Array.isArray(ticket.ccEmails) ? ticket.ccEmails : []).map((e) => String(e).toLowerCase());
+      const same = prev.length === parsedCc.data.length && prev.every((e) => parsedCc.data.includes(e));
+      if (!same) {
+        fsPayload.cc_emails = parsedCc.data;
+        localPatch.ccEmails = parsedCc.data;
+        changes.ccEmails = { from: prev, to: parsedCc.data };
+      }
+    }
+
     if (Object.keys(fsPayload).length === 0) {
       // Everything requested already matches (e.g. a retried status change) —
       // succeed as a no-op instead of erroring or re-writing FS.
@@ -2758,6 +2818,12 @@ class TicketService {
     }
     if (fsPayload.priority !== undefined && fsTicket.priority !== fsPayload.priority) rejected.push('priority');
     if (fsPayload.responder_id !== undefined && String(fsTicket.responder_id ?? '') !== String(fsPayload.responder_id ?? '')) rejected.push('assignee');
+    if (fsPayload.cc_emails !== undefined) {
+      const echoed = (Array.isArray(fsTicket.cc_emails) ? fsTicket.cc_emails : []).map((e) => String(e).trim().toLowerCase());
+      const wanted = fsPayload.cc_emails;
+      const accepted = echoed.length === wanted.length && wanted.every((e) => echoed.includes(e));
+      if (!accepted) rejected.push('additional requesters (cc_emails)');
+    }
     if (fsPayload.custom_fields) {
       const cf = fsTicket.custom_fields || {};
       if (String(cf[workspace.tpSkillCustomField] ?? '') !== String(fsPayload.custom_fields[workspace.tpSkillCustomField] ?? '')) rejected.push('category');
@@ -3058,7 +3124,10 @@ class TicketService {
 
     const parsed = threadBodySchema.safeParse(input || {});
     if (!parsed.success) throw new ValidationError(zodMessage(parsed.error));
-    const cc = isPrivate ? [] : parsed.data.cc;
+    // Public replies reach the ticket's "Also for" list ∪ the composer cc
+    // (Phase MR4) — the requester is dropped here already (they are the To;
+    // _emailRequesterReply dedupes again for the wire). Notes carry none.
+    const cc = isPrivate ? [] : unionReplyCc(ticket, parsed.data.cc);
 
     // Validate attachments up front so a bad file can't leave an orphan entry.
     if (files.length > 0 && !attachmentService.isConfigured()) {

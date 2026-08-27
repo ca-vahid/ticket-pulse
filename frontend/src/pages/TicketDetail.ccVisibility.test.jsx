@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 // QA 08-05 #3 — Cc visibility on the ticket page: the description card shows
@@ -206,5 +206,115 @@ describe('TicketDetail Cc visibility', () => {
     fireEvent.click(screen.getByRole('button', { name: /internal note/i }));
     fireEvent.click(screen.getByRole('button', { name: /reply\s?to requester/i }));
     expect(screen.queryByRole('button', { name: 'Remove reply-cc@example.com from Cc' })).not.toBeInTheDocument();
+  });
+});
+
+// Phase MR2/MR4 (QA 08-26 #3) — the "Also for" card next to the requester:
+// editable chips → PATCH ccEmails (TP-born) / FS write-back (FS-born),
+// optimistic + refetch; and the reply composer re-seeds from the new list
+// while the user has not touched its Cc row.
+describe('TicketDetail "Also for" additional requesters (Phase MR)', () => {
+  const NATIVE = {
+    ...TICKET,
+    origin: 'ticketpulse',
+    freshserviceTicketId: null,
+    nativeNumber: 1084,
+    displayRef: 'TP-1084',
+    toEmails: [],
+    ccEmails: ['cc-one@example.com'],
+    replyCcEmails: [],
+    thread: [],
+  };
+  let current;
+
+  beforeEach(() => {
+    localStorage.clear();
+    current = { ...NATIVE };
+    apiOverrides.get = vi.fn(() => Promise.resolve({ data: { ...current } }));
+    apiOverrides.update = vi.fn((_id, payload) => {
+      if (payload.ccEmails) current = { ...current, ccEmails: payload.ccEmails };
+      return Promise.resolve({ data: { ...current } });
+    });
+    apiOverrides.fsUpdate = vi.fn((_id, payload) => {
+      if (payload.ccEmails) current = { ...current, ccEmails: payload.ccEmails };
+      return Promise.resolve({ data: { ...current } });
+    });
+  });
+  afterEach(() => {
+    cleanup();
+    apiOverrides.get = vi.fn(() => Promise.resolve({ data: TICKET }));
+    delete apiOverrides.update;
+    delete apiOverrides.fsUpdate;
+  });
+
+  const alsoForCard = async () => screen.findByRole('group', { name: 'Also for (additional requesters)' });
+  const addAlsoFor = (card, email) => {
+    const input = within(card).getByRole('combobox', { name: 'Also for (additional requesters)' });
+    fireEvent.change(input, { target: { value: email } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+  };
+
+  test('shows the current list as chips and PATCHes ccEmails when one is added (TP-born)', async () => {
+    renderPage();
+    const card = await alsoForCard();
+    expect(within(card).getByText('cc-one@example.com')).toBeInTheDocument();
+    expect(within(card).getByText(/receive every reply to the requester/i)).toBeInTheDocument();
+
+    addAlsoFor(card, 'New.Person@Example.com');
+    await waitFor(() => expect(apiOverrides.update).toHaveBeenCalledWith(501, { ccEmails: ['cc-one@example.com', 'new.person@example.com'] }));
+    expect(apiOverrides.fsUpdate).not.toHaveBeenCalled();
+    // Optimistic chip, kept by the refetch.
+    expect(await within(card).findByRole('button', { name: 'Remove new.person@example.com from Also for' })).toBeInTheDocument();
+    expect(await screen.findByText(/Additional requester added/)).toBeInTheDocument();
+  });
+
+  test('removing a chip PATCHes the shorter list; a failed save restores the previous chips', async () => {
+    renderPage();
+    const card = await alsoForCard();
+    apiOverrides.update.mockRejectedValueOnce({ response: { data: { message: 'Cc contains an invalid email address' } } });
+    fireEvent.click(within(card).getByRole('button', { name: 'Remove cc-one@example.com from Also for' }));
+    await waitFor(() => expect(apiOverrides.update).toHaveBeenCalledWith(501, { ccEmails: [] }));
+    expect(await screen.findByText('Cc contains an invalid email address')).toBeInTheDocument();
+    expect(await within(card).findByRole('button', { name: 'Remove cc-one@example.com from Also for' })).toBeInTheDocument();
+  });
+
+  test('FS-born tickets edit through the FS write-back (fsUpdate) and say so', async () => {
+    current = { ...TICKET, toEmails: [], replyCcEmails: [], thread: [] };
+    renderPage();
+    const card = await alsoForCard();
+    expect(within(card).getByText(/saved to FreshService first/i)).toBeInTheDocument();
+    addAlsoFor(card, 'extra@example.com');
+    await waitFor(() => expect(apiOverrides.fsUpdate).toHaveBeenCalledWith(501, {
+      ccEmails: ['cc-one@example.com', 'cc-two@example.com', 'cc-three@example.com', 'extra@example.com'],
+    }));
+    expect(apiOverrides.update).not.toHaveBeenCalled();
+  });
+
+  test('MR4: an "Also for" address added after the reply composer opened re-seeds its untouched Cc row', async () => {
+    renderPage();
+    const card = await alsoForCard();
+    fireEvent.click(screen.getByRole('button', { name: /reply\s?to requester/i }));
+    expect(await screen.findByRole('button', { name: 'Remove cc-one@example.com from Cc' })).toBeInTheDocument();
+
+    addAlsoFor(card, 'late@example.com');
+    await waitFor(() => expect(apiOverrides.update).toHaveBeenCalled());
+    // The composer now carries the late addition too.
+    expect(await screen.findByRole('button', { name: 'Remove late@example.com from Cc' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Remove cc-one@example.com from Cc' })).toBeInTheDocument();
+  });
+
+  test('MR4: a user-edited Cc row is authoritative — no re-seed over their changes', async () => {
+    renderPage();
+    const card = await alsoForCard();
+    fireEvent.click(screen.getByRole('button', { name: /reply\s?to requester/i }));
+    // User deliberately clears the seeded cc.
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove cc-one@example.com from Cc' }));
+    expect(screen.queryByRole('button', { name: 'Remove cc-one@example.com from Cc' })).not.toBeInTheDocument();
+
+    addAlsoFor(card, 'late@example.com');
+    await waitFor(() => expect(apiOverrides.update).toHaveBeenCalled());
+    await screen.findByRole('button', { name: 'Remove late@example.com from Also for' });
+    expect(screen.queryByRole('button', { name: 'Remove late@example.com from Cc' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Remove cc-one@example.com from Cc' })).not.toBeInTheDocument();
   });
 });

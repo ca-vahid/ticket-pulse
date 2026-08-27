@@ -744,6 +744,11 @@ export default function TicketDetail() {
   // Cc seeding guard (QA 08-05 #3): true once the reply composer was seeded
   // (or deliberately left alone) for THIS ticket; reset on ticket change.
   const ccSeededRef = useRef(false);
+  // The seed the composer currently carries (Phase MR4): while the user has
+  // not touched the Cc row (it still equals this seed), an "Also for" edit on
+  // the ticket re-seeds it — a requester added after the draft was opened is
+  // not silently left out. Any user edit breaks the equality and wins.
+  const ccSeedRef = useRef([]);
 
   const showToast = useCallback((tone, message, { undo = null, duration = 3500 } = {}) => {
     setToast({ tone, message, undo });
@@ -773,7 +778,14 @@ export default function TicketDetail() {
           setComposerBody(draft.body);
           setComposerText(htmlToText(draft.body));
         }
-        if (Array.isArray(draft.cc) && draft.cc.length) setComposerCc(draft.cc);
+        if (Array.isArray(draft.cc) && draft.cc.length) {
+          setComposerCc(draft.cc);
+          // A restored cc counts as the current seed (the create page stashes
+          // the "Also for" list this way) — so a later "Also for" edit still
+          // re-seeds an otherwise untouched row (Phase MR4).
+          ccSeedRef.current = draft.cc;
+          ccSeededRef.current = true;
+        }
         if (draft.mode === 'note' || draft.mode === 'reply') setComposerMode(draft.mode);
       }
     } catch { /* corrupt stash — start clean */ }
@@ -812,12 +824,32 @@ export default function TicketDetail() {
       ccSeededRef.current = true;
       if (composerCc.length === 0) {
         const seed = seedReplyCc(ticket);
+        ccSeedRef.current = seed;
         if (seed.length > 0) setComposerCc(seed);
       }
     }
     setComposerMode(mode);
     setTimeout(() => composerRef.current?.focus(), 0);
   };
+
+  // Re-seed on "Also for" changes (Phase MR4): the ticket's list changed
+  // (sidebar edit, SSE from a colleague) while the reply composer still holds
+  // the untouched seed → swap in the new seed. Untouched = the Cc row equals
+  // the last seed as a set; a user edit (add/remove/clear) ends re-seeding.
+  const alsoForKey = (ticket?.ccEmails || []).join('|') + '||' + (ticket?.replyCcEmails || []).join('|');
+  useEffect(() => {
+    if (composerMode !== 'reply' || !ccSeededRef.current) return;
+    const current = [...composerCc].map((e) => String(e).toLowerCase()).sort();
+    const lastSeed = [...ccSeedRef.current].map((e) => String(e).toLowerCase()).sort();
+    const untouched = current.length === lastSeed.length && current.every((e, i) => e === lastSeed[i]);
+    if (!untouched) return;
+    const seed = seedReplyCc(ticket);
+    const sortedSeed = [...seed].sort();
+    if (sortedSeed.length === current.length && sortedSeed.every((e, i) => e === current[i])) return;
+    ccSeedRef.current = seed;
+    setComposerCc(seed);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [alsoForKey]);
 
   const addComposerFiles = (fileList) => {
     const incoming = [...fileList];
@@ -1217,6 +1249,29 @@ export default function TicketDetail() {
       setSavingField(null);
     }
   }, [fetchTicket, showToast]);
+
+  // "Also for" additional requesters (Phase MR2): optimistic chip edit →
+  // PATCH ccEmails (TP-born) or the FS write-back (FS-born, FS owns the
+  // list); the silent refetch + the ticket-change SSE reconcile the server
+  // truth. On failure the previous list comes back with the error toast.
+  const canEditAlsoFor = Boolean(ticket) && (canWrite || fsEditable) && ticket.status !== 'Deleted';
+  const saveAlsoFor = useCallback(async (next) => {
+    const prev = Array.isArray(ticket?.ccEmails) ? ticket.ccEmails : [];
+    setSavingField('alsoFor');
+    lastLocalMutationRef.current = Date.now();
+    setTicket((t) => (t ? { ...t, ccEmails: next } : t));
+    try {
+      if (isNative) await ticketsAPI.update(ticketId, { ccEmails: next });
+      else await ticketsAPI.fsUpdate(ticketId, { ccEmails: next });
+      await fetchTicket({ silent: true });
+      showToast('emerald', next.length > prev.length ? 'Additional requester added — they now receive every reply' : 'Additional requesters updated');
+    } catch (err) {
+      setTicket((t) => (t ? { ...t, ccEmails: prev } : t));
+      showToast('red', err.response?.data?.message || err.message || 'Could not update additional requesters');
+    } finally {
+      setSavingField(null);
+    }
+  }, [ticket?.ccEmails, isNative, ticketId, fetchTicket, showToast]);
 
   // Force this native ticket's pending/failed FreshService mirror to run now.
   const retryMirror = useCallback(async () => {
@@ -2076,6 +2131,28 @@ export default function TicketDetail() {
                             <ChevronRight className="w-3 h-3 flex-shrink-0" aria-hidden="true" />
                           </Link>
                         )}
+                      </div>
+
+                      {/* "Also for" — additional requesters (Phase MR2, QA 08-26 #3):
+                          the ticket's ccEmails as editable chips. Every reply to the
+                          requester reaches them; the FS copy carries them as cc_emails.
+                          TP-born → PATCH; FS-born → the FS write-back (FS owns the list). */}
+                      <div className="mt-3" data-testid="also-for-card" aria-label="Also for (additional requesters)" role="group">
+                        <CcChips
+                          value={ticket.ccEmails || []}
+                          onChange={saveAlsoFor}
+                          prefix="Also for"
+                          label="Also for (additional requesters)"
+                          placeholder={canEditAlsoFor ? 'Add additional requesters…' : 'No additional requesters'}
+                          readOnly={!canEditAlsoFor}
+                          disabled={savingField === 'alsoFor'}
+                        />
+                        <p className="mt-1 text-[11px] text-slate-400">
+                          {savingField === 'alsoFor'
+                            ? 'Saving…'
+                            : (ticket.ccEmails?.length ? 'Additional requesters — they receive every reply to the requester' : 'Additional requesters receive every reply to the requester')}
+                          {canEditAlsoFor && !isNative && ' · saved to FreshService first (the list lives on the FreshService ticket).'}
+                        </p>
                       </div>
                     </div>
                   ) : (

@@ -114,3 +114,44 @@ describe('transactionalEmailService sender identity', () => {
     }));
   });
 });
+
+// Phase MR6: `cc` for "Also for" additional requesters — both transports,
+// deduped against `to` (SendGrid rejects an address present in both).
+describe('transactionalEmailService cc (Phase MR6)', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  test('Graph path receives cc minus anything already in to (case-insensitive) and deduped', async () => {
+    resolveFromNameMock.mockResolvedValue('Ticket Pulse IT');
+    prismaMock.mailboxConnection.findFirst.mockResolvedValue({ address: 'ticketpulse@bgcengineering.ca' });
+    isConfiguredMock.mockReturnValue(true);
+    sendMailAsMailboxMock.mockResolvedValue({});
+
+    await sendTransactionalEmail({
+      workspaceId: 1,
+      to: 'rita@example.com',
+      cc: ['Manager@example.com', 'RITA@example.com', 'manager@example.com', 'assistant@example.com'],
+      subject: 'Resolved',
+      html: '<p>Done</p>',
+      label: 'lifecycle',
+    });
+    expect(sendMailAsMailboxMock).toHaveBeenCalledWith('ticketpulse@bgcengineering.ca', expect.objectContaining({
+      to: ['rita@example.com'],
+      cc: ['Manager@example.com', 'assistant@example.com'],
+    }));
+    expect(emailHealthMock.recordSuccess).toHaveBeenCalledWith(expect.objectContaining({
+      recipients: ['rita@example.com', 'Manager@example.com', 'assistant@example.com'],
+    }));
+  });
+
+  test('SendGrid fallback receives the same cc; no cc → empty array (unchanged behaviour)', async () => {
+    resolveFromNameMock.mockResolvedValue('Ticket Pulse');
+    prismaMock.mailboxConnection.findFirst.mockResolvedValue(null);
+    sendgridSendEmailMock.mockResolvedValue({});
+
+    await sendTransactionalEmail({ workspaceId: 2, to: ['rita@example.com'], cc: ['boss@example.com'], subject: 'S', html: '<p>B</p>' });
+    expect(sendgridSendEmailMock).toHaveBeenCalledWith(expect.objectContaining({ to: ['rita@example.com'], cc: ['boss@example.com'] }));
+
+    await sendTransactionalEmail({ workspaceId: 2, to: 'agent@example.com', subject: 'S', html: '<p>B</p>' });
+    expect(sendgridSendEmailMock).toHaveBeenLastCalledWith(expect.objectContaining({ to: ['agent@example.com'], cc: [] }));
+  });
+});

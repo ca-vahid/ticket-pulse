@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, Archive, ArrowDown, ArrowUp, CalendarClock, Check, Eye, EyeOff, FileText, FormInput, Globe as GlobeGlyph, LayoutGrid, Layers, Loader2, Pencil, Plus, RefreshCw, RotateCcw, Sparkles, Star, StickyNote, Tag as TagGlyph, Timer, Trash2, Wand2 } from 'lucide-react';
+import { AlertTriangle, Archive, ArrowDown, ArrowUp, CalendarClock, Check, Eye, EyeOff, FileText, FormInput, Globe as GlobeGlyph, LayoutGrid, Layers, Loader2, Pencil, Plus, RefreshCw, RotateCcw, Sparkles, Star, StickyNote, Tag as TagGlyph, Timer, Trash2, Users, Wand2 } from 'lucide-react';
 import { settingsAPI, ticketsAPI, workspaceAPI } from '../../services/api';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 import { SOURCE_OPTIONS, TAG_CHIP_TONES, TYPE_COLOR_TONES } from '../tickets/ticketUi';
@@ -1700,6 +1700,74 @@ export function TicketFormSection() {
   );
 }
 
+/**
+ * "Also for" additional requesters (Phase MR6, QA 08-26 #3): the workspace
+ * toggle that lets requester-facing lifecycle mails (created / status /
+ * resolved workflow sends) cc a ticket's additional requesters. Replies
+ * always reach them; CSAT surveys never do. Default OFF — no surprise mail.
+ */
+export function AdditionalRequestersSection() {
+  const [enabled, setEnabled] = useState(null); // null = loading
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    Promise.resolve()
+      .then(() => ticketsAPI.getAlsoForSettings())
+      .then((res) => { if (!cancelled) setEnabled((res?.data?.data ?? res?.data)?.notifyAdditionalRequesters === true); })
+      .catch(() => { if (!cancelled) setEnabled(false); });
+    return () => { cancelled = true; };
+  }, []);
+  const toggle = async () => {
+    if (enabled === null || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await ticketsAPI.updateAlsoForSettings(!enabled);
+      setEnabled((res?.data?.data ?? res?.data)?.notifyAdditionalRequesters === true);
+    } catch (e) {
+      setError(e.response?.data?.message || e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <SectionCard
+      icon={Users}
+      title="Additional requesters"
+      hint='A ticket has one requester plus an optional "Also for" list (additional requesters). They always receive every reply to the requester; this decides whether lifecycle mails reach them too.'
+    >
+      <div className="rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2.5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-slate-700">Also notify additional requesters</p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              When on, ticket-created, status-change and resolution emails that go to the requester are cc&apos;d to the ticket&apos;s &quot;Also for&quot; addresses. Satisfaction surveys stay requester-only.
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={enabled === true}
+            aria-label={`Also notify additional requesters ${enabled ? 'on' : 'off'}`}
+            onClick={toggle}
+            disabled={enabled === null || busy}
+            className={`tp-focus-ring relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-60 ${enabled ? 'bg-blue-600' : 'bg-slate-300'}`}
+          >
+            <span className="absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform" style={{ transform: enabled ? 'translateX(16px)' : 'translateX(0)' }} aria-hidden="true" />
+          </button>
+        </div>
+        {enabled === true && (
+          <p className="text-[11px] text-blue-600/90 mt-1.5">
+            Lifecycle mails now carry the additional requesters in Cc (never duplicating the requester).
+          </p>
+        )}
+        {error && <p className="text-xs text-red-600 mt-1.5" role="alert">{error}</p>}
+      </div>
+    </SectionCard>
+  );
+}
+
 export default function TicketOpsPanel() {
   return (
     <div className="space-y-4 animate-fadeIn">
@@ -1715,6 +1783,7 @@ export default function TicketOpsPanel() {
       {/* New-ticket form ABOVE Custom fields: the two lists read as one
           FreshService-style Ticket Fields editor (built-ins, then customs). */}
       <TicketFormSection />
+      <AdditionalRequestersSection />
       <CustomFieldsSection />
       <CreateTemplatesSection />
     </div>
