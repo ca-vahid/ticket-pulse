@@ -168,12 +168,16 @@ const FILTERS = [
 
 const columnHelper = createColumnHelper();
 
-/** Labels for the App-access dropdown. '' = no workspace_access row. */
+/**
+ * Labels for the App-access dropdown. '' = no workspace_access row. The
+ * descriptions are the v3.7.02 role model (QA 08-24 #3) and double as the
+ * option tooltips.
+ */
 const ACCESS_OPTIONS = [
-  { value: '', label: 'No access' },
-  { value: 'viewer', label: 'Viewer' },
-  { value: 'reviewer', label: 'Reviewer' },
-  { value: 'admin', label: 'Admin' },
+  { value: '', label: 'No access', description: 'Cannot open the app for this workspace (technicians still sign in for the ticket queue).' },
+  { value: 'viewer', label: 'Viewer', description: 'Tickets + Approvals. Sees AI suggestions but cannot approve them.' },
+  { value: 'reviewer', label: 'Reviewer', description: 'Tickets + Approvals. Approves or dismisses AI suggestions and manages approval categories.' },
+  { value: 'admin', label: 'Admin', description: 'Everything — Dashboard, Analytics, Assignment Review, Mail Workflows, Agent Maps, Settings.' },
 ];
 
 export default function MembersPanel() {
@@ -427,7 +431,7 @@ export default function MembersPanel() {
                   key={o.value || 'none'}
                   value={o.value}
                   disabled={o.value === 'admin' && !isGlobalAdmin}
-                  title={o.value === 'admin' && !isGlobalAdmin ? 'Global admin only' : undefined}
+                  title={o.value === 'admin' && !isGlobalAdmin ? 'Global admin only' : o.description}
                 >
                   {o.label}{o.value === 'admin' && !isGlobalAdmin ? ' (global admin only)' : ''}
                 </option>
@@ -473,8 +477,11 @@ export default function MembersPanel() {
         <p className="flex items-start gap-1.5 text-xs text-slate-500 max-w-3xl">
           <KeyRound className="w-3.5 h-3.5 mt-0.5 text-slate-400 shrink-0" aria-hidden="true" />
           <span>
-            <strong className="font-semibold text-slate-600">App access</strong> lets this person open dashboards
-            and settings per their role — technicians without access can still sign in and use the ticket queue.
+            <strong className="font-semibold text-slate-600">App access</strong> sets what this person can open here.
+            <strong className="font-semibold text-slate-600"> Viewer</strong>: Tickets + Approvals, sees AI suggestions but can&rsquo;t approve them.
+            <strong className="font-semibold text-slate-600"> Reviewer</strong>: also approves AI suggestions and manages approval categories (Approvals → Categories).
+            <strong className="font-semibold text-slate-600"> Admin</strong>: everything, including Dashboard, Analytics and Settings.
+            Technicians without access can still sign in and use the ticket queue.
             The full access list, including non-technician users, is in{' '}
             <a href="#workspace-access" className="text-blue-600 hover:text-blue-800 underline underline-offset-2 tp-focus-ring rounded">Workspace access</a>.
           </span>

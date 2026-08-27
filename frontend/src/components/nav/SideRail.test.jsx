@@ -6,13 +6,9 @@ import { MemoryRouter } from 'react-router-dom';
 import SideRail from './SideRail';
 
 const authState = { user: { email: 'me@x.com', role: 'admin' } };
+const wsState = { currentWorkspace: { id: 1 }, availableWorkspaces: [{ id: 1, role: 'admin' }] };
 vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => authState }));
-vi.mock('../../contexts/WorkspaceContext', () => ({
-  useWorkspace: () => ({
-    currentWorkspace: { id: 1 },
-    availableWorkspaces: [{ id: 1, role: 'admin' }],
-  }),
-}));
+vi.mock('../../contexts/WorkspaceContext', () => ({ useWorkspace: () => wsState }));
 
 const approvalCount = vi.fn(() => 0);
 vi.mock('../../hooks/useApprovalCount', () => ({ useApprovalCount: () => approvalCount() }));
@@ -20,8 +16,16 @@ vi.mock('../../hooks/useApprovalCount', () => ({ useApprovalCount: () => approva
 afterEach(() => {
   cleanup();
   authState.user = { email: 'me@x.com', role: 'admin' };
+  wsState.availableWorkspaces = [{ id: 1, role: 'admin' }];
   approvalCount.mockReturnValue(0);
 });
+
+const asMember = (role) => {
+  authState.user = { email: 'member@x.com', role: 'viewer' };
+  wsState.availableWorkspaces = [{ id: 1, role }];
+};
+
+const ADMIN_ONLY_LABELS = ['Dashboard', 'Timeline', 'Analytics', 'Assignment', 'Mail Workflows', 'Agent Maps'];
 
 function renderRail(path = '/dashboard') {
   return render(
@@ -48,6 +52,49 @@ describe('SideRail', () => {
   test('marks Settings active on /settings', () => {
     renderRail('/settings');
     expect(screen.getByRole('button', { name: 'Settings' })).toHaveAttribute('aria-current', 'page');
+  });
+
+  test.each(['viewer', 'reviewer'])('%s sees Tickets + Approvals only — no Settings (v3.7.02 role lockdown)', (role) => {
+    asMember(role);
+    renderRail('/tickets');
+    expect(screen.getByRole('button', { name: /Tickets/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Approvals/ })).toBeInTheDocument();
+    for (const label of ADMIN_ONLY_LABELS) {
+      expect(screen.queryByRole('button', { name: new RegExp(label) })).not.toBeInTheDocument();
+    }
+    expect(screen.queryByRole('button', { name: 'Settings' })).not.toBeInTheDocument();
+  });
+
+  test('a workspace admin (global viewer) gets the full rail + Settings', () => {
+    asMember('admin');
+    renderRail('/dashboard');
+    for (const label of [...ADMIN_ONLY_LABELS, 'Tickets', 'Approvals', 'Settings']) {
+      expect(screen.getByRole('button', { name: new RegExp(label) })).toBeInTheDocument();
+    }
+  });
+
+  test('no deep-link escape hatch: a viewer on /dashboard does NOT get a Dashboard tile', () => {
+    asMember('viewer');
+    renderRail('/dashboard');
+    expect(screen.queryByRole('button', { name: /Dashboard/ })).not.toBeInTheDocument();
+  });
+
+  test('unresolved role (workspace not in the list yet) fails closed to the ticket surface', () => {
+    authState.user = { email: 'member@x.com', role: 'viewer' };
+    wsState.availableWorkspaces = [];
+    renderRail('/tickets');
+    expect(screen.getByRole('button', { name: /Tickets/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Analytics/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Settings' })).not.toBeInTheDocument();
+  });
+
+  test('logo button goes home by role: admin → /dashboard, viewer → /tickets', () => {
+    renderRail('/tickets');
+    expect(screen.getByTitle('Ticket Pulse — Dashboard')).toBeInTheDocument();
+    cleanup();
+    asMember('viewer');
+    renderRail('/tickets');
+    expect(screen.getByTitle('Ticket Pulse — Tickets')).toBeInTheDocument();
   });
 
   test('agents only see Tickets and Approvals', () => {

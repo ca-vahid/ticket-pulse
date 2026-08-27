@@ -2,17 +2,23 @@ import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FlaskConical, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { useWorkspace } from '../contexts/WorkspaceContext';
+import { homePathFor, useWorkspaceRole } from '../components/nav/navDestinations';
 
 export default function Login() {
-  const { loginWithSSO, loginWithDevBypass, isAuthenticated, isLoading, error } = useAuth();
+  const { loginWithSSO, loginWithDevBypass, isAuthenticated, isLoading, error, user } = useAuth();
+  const { isHydrated } = useWorkspace();
+  const wsRole = useWorkspaceRole();
   const navigate = useNavigate();
   const showDevBypass = import.meta.env.DEV && import.meta.env.VITE_ENABLE_DEV_AUTH_BYPASS !== 'false';
 
+  // Role-aware landing (v3.7.02): admins → Dashboard, everyone else →
+  // Tickets. Waits for the workspace list so the role is known, not guessed.
   useEffect(() => {
-    if (isAuthenticated) {
-      navigate('/dashboard');
+    if (isAuthenticated && isHydrated) {
+      navigate(homePathFor(user, wsRole));
     }
-  }, [isAuthenticated, navigate]);
+  }, [isAuthenticated, isHydrated, user, wsRole, navigate]);
 
   useEffect(() => {
     const previousBodyBackground = document.body.style.backgroundColor;

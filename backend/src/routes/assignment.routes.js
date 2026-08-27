@@ -84,7 +84,13 @@ function normalizeEscalationChannels(value) {
   return channels.filter((channel) => ESCALATION_CHANNELS.has(channel));
 }
 
-router.get('/freshservice-domain', requireReviewer, (req, res) => {
+// ROLE MODEL (QA 08-24 #3, v3.7.02): the Assignment Review PAGE is workspace-
+// admin only, so its reads (queue, runs list/detail, freshness, audit, queued
+// runs, competency technicians, FS domain) are requireAdmin. The TICKET-
+// SURFACE AI path stays requireReviewer — reviewers approve/dismiss AI
+// suggestions from the queue/detail: runs/:id/decide, ticket/:id/latest-run,
+// ticket/:id/runs, ticket/:id/override-reason.
+router.get('/freshservice-domain', requireAdmin, (req, res) => {
   const domain = appConfig.freshservice.domain;
   const fullDomain = domain?.includes('.freshservice.com') ? domain : domain ? `${domain}.freshservice.com` : null;
   res.json({ success: true, domain: fullDomain });
@@ -326,7 +332,7 @@ router.post('/webhook-config/test', requireAdmin, asyncHandler(async (req, res) 
 
 // ─── Pipeline Runs ──────────────────────────────────────────────────────
 
-router.get('/queued', requireReviewer, asyncHandler(async (req, res) => {
+router.get('/queued', requireAdmin, asyncHandler(async (req, res) => {
   // limit defaults to 500 (was 50, which silently truncated large queues
   // and hid that the queue had problems). Also return totalCount so the UI
   // can warn when the queue exceeds the display cap.
@@ -351,7 +357,7 @@ router.get('/queued', requireReviewer, asyncHandler(async (req, res) => {
 // longer eligible for assignment (closed, deleted, or assigned). FreshService
 // live checks are intentionally batch-limited here; scheduled reconciliation
 // and drain-time validation provide the deeper safety net.
-router.post('/queued/prune', requireReviewer, asyncHandler(async (req, res) => {
+router.post('/queued/prune', requireAdmin, asyncHandler(async (req, res) => {
   const result = await assignmentPipelineService.reconcileQueuedRuns(req.workspaceId, {
     limit: 40,
     source: 'assignment-queued-prune',
@@ -360,7 +366,7 @@ router.post('/queued/prune', requireReviewer, asyncHandler(async (req, res) => {
   res.json({ success: true, data: result });
 }));
 
-router.get('/queue-status', requireReviewer, asyncHandler(async (req, res) => {
+router.get('/queue-status', requireAdmin, asyncHandler(async (req, res) => {
   const workspace = await prisma.workspace.findUnique({
     where: { id: req.workspaceId },
     select: { defaultTimezone: true },
@@ -640,7 +646,7 @@ function compactAnd(clauses) {
   return filtered.length > 1 ? { AND: filtered } : filtered[0] || {};
 }
 
-router.get('/queue', requireReviewer, asyncHandler(async (req, res) => {
+router.get('/queue', requireAdmin, asyncHandler(async (req, res) => {
   const limit = parseInt(req.query.limit) || 50;
   const offset = parseInt(req.query.offset) || 0;
   const assignmentStatus = ['unassigned', 'outside_assigned', 'all'].includes(req.query.assignmentStatus)
@@ -668,7 +674,7 @@ router.get('/queue', requireReviewer, asyncHandler(async (req, res) => {
   res.json({ success: true, ...result });
 }));
 
-router.get('/runs', requireReviewer, asyncHandler(async (req, res) => {
+router.get('/runs', requireAdmin, asyncHandler(async (req, res) => {
   const limit = parseInt(req.query.limit) || 50;
   const offset = parseInt(req.query.offset) || 0;
   const { status, decision, since, sinceField, decisions } = req.query;
@@ -696,7 +702,7 @@ router.get('/runs', requireReviewer, asyncHandler(async (req, res) => {
   res.json({ success: true, ...result });
 }));
 
-router.get('/audit/priority-alerts', requireReviewer, asyncHandler(async (req, res) => {
+router.get('/audit/priority-alerts', requireAdmin, asyncHandler(async (req, res) => {
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
   const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
   const pageWindow = offset + limit;
@@ -1025,7 +1031,7 @@ router.get('/audit/priority-alerts', requireReviewer, asyncHandler(async (req, r
   });
 }));
 
-router.get('/runs/:id', requireReviewer, asyncHandler(async (req, res) => {
+router.get('/runs/:id', requireAdmin, asyncHandler(async (req, res) => {
   const run = await assignmentRepository.getPipelineRun(parseInt(req.params.id));
   if (run.workspaceId !== req.workspaceId) {
     return res.status(403).json({ success: false, message: 'Pipeline run belongs to a different workspace' });
@@ -1222,7 +1228,7 @@ router.post('/runs/:id/sync-preview', requireAdmin, asyncHandler(async (req, res
 
 // ─── Freshness Check & Rerun ──────────────────────────────────────────────
 
-router.get('/runs/:id/freshness', requireReviewer, asyncHandler(async (req, res) => {
+router.get('/runs/:id/freshness', requireAdmin, asyncHandler(async (req, res) => {
   const runId = parseInt(req.params.id);
   const run = await assignmentRepository.getPipelineRun(runId);
   if (run.workspaceId !== req.workspaceId) {
@@ -2123,7 +2129,7 @@ router.post('/competencies/runs/:id/cancel', requireAdmin, asyncHandler(async (r
   res.json({ success: true, message: 'Run cancelled' });
 }));
 
-router.get('/competencies/technicians', requireReviewer, asyncHandler(async (req, res) => {
+router.get('/competencies/technicians', requireAdmin, asyncHandler(async (req, res) => {
   const technicians = await prisma.technician.findMany({
     where: { workspaceId: req.workspaceId, isActive: true },
     select: {

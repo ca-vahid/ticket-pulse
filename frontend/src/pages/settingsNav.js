@@ -46,7 +46,9 @@ export const ALL_SETTINGS_NAV_ITEMS = [
   // Tickets & AI
   { id: 'ai-routing', label: 'AI & Routing', Icon: Brain, minRole: 'admin', group: 'Tickets & AI' },
   { id: 'ai-providers', label: 'AI Providers', Icon: Bot, minRole: 'admin', group: 'Tickets & AI' },
-  { id: 'approval-categories', label: 'Approval Categories', Icon: Stamp, minRole: 'reviewer', group: 'Tickets & AI' },
+  // Reviewers manage approval categories from Approvals → Categories (v3.7.02);
+  // this Settings mount is the admin's second door to the same panel.
+  { id: 'approval-categories', label: 'Approval Categories', Icon: Stamp, minRole: 'admin', group: 'Tickets & AI' },
   { id: 'noise-rules', label: 'Noise Rules', Icon: VolumeX, minRole: 'admin', group: 'Tickets & AI' },
   { id: 'ticket-ops', label: 'Ticket Ops', Icon: Wand2, minRole: 'admin', group: 'Tickets & AI' },
   { id: 'urgent-escalation', label: 'Urgent Escalation', Icon: Siren, minRole: 'admin', group: 'Tickets & AI' },
@@ -74,16 +76,18 @@ export const ALL_SETTINGS_NAV_ITEMS = [
   // Workspace
   { id: 'admins', label: 'Admins', Icon: Shield, minRole: 'global', group: 'Workspace' },
   { id: 'ai-usage', label: 'AI Usage & Cost', Icon: BarChart3, minRole: 'global', group: 'Workspace' },
-  { id: 'dashboard', label: 'Dashboard', Icon: LayoutDashboard, minRole: 'viewer', group: 'Workspace' },
+  // Was viewer-tier: a dead form for non-admins (PUT /settings is admin-only).
+  { id: 'dashboard', label: 'Dashboard', Icon: LayoutDashboard, minRole: 'admin', group: 'Workspace' },
   { id: 'workspace-access', label: 'Workspace Access', Icon: KeyRound, minRole: 'admin', group: 'Workspace' },
   { id: 'workspaces', label: 'Workspaces', Icon: Globe, minRole: 'global', group: 'Workspace' },
 ];
 
 /**
- * Role-filtered section list. Global-'agent' users get NO sections at all —
- * their configuration home is the agent portal, and every Settings entry
- * point hides behind canAccessSettings(user) (navDestinations.jsx); this
- * empty list is the belt-and-braces guard for deep links, rendered as the
+ * Role-filtered section list. Settings is workspace-admin only since v3.7.02
+ * (QA 08-24 #3): viewers and reviewers — like global-'agent' users — get NO
+ * sections. Every Settings entry point hides behind useCanAccessSettings()
+ * (navDestinations.jsx) and /settings sits behind AdminRoute; this empty list
+ * is the belt-and-braces guard for deep links, rendered as the
  * "No settings available for your role" card.
  */
 export function filterSettingsNavItems({ isAgent = false, isGlobalAdmin = false, isWsAdmin = false, isWsReviewer = false } = {}) {

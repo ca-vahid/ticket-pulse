@@ -107,6 +107,10 @@ export function DashboardProvider({ children }) {
   // Prefetches weekly (default view), daily, and weekly stats.
   // ------------------------------------------------------------------
   useEffect(() => {
+    // Only warm the cache when the page being loaded IS a dashboard route
+    // (v3.7.02): /api/dashboard is admin-only now, and viewers/reviewers land
+    // on /tickets — three speculative 403s per page load would be noise.
+    if (!matchesRoute(window.location.pathname, DASHBOARD_REFRESH_SSE_ROUTES)) return;
     const now = new Date();
     const dayOfWeek = (now.getDay() + 6) % 7;
     const monday = new Date(now);

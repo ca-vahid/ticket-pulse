@@ -22,16 +22,19 @@ const NAV_ITEMS = [
   { id: 'nav-tickets', label: 'Tickets', path: '/tickets', Icon: TicketIcon, keywords: 'queue inbox' },
   { id: 'nav-new-ticket', label: 'New ticket', path: '/tickets/new', Icon: Plus, keywords: 'create compose' },
   { id: 'nav-approvals', label: 'Approvals', path: '/approvals', Icon: Stamp, keywords: 'pending requests decisions' },
-  { id: 'nav-dashboard', label: 'Dashboard', path: '/dashboard', Icon: LayoutDashboard, keywords: 'home workload technicians', full: true },
-  { id: 'nav-timeline', label: 'Timeline Explorer', path: '/timeline', Icon: Clock, keywords: 'ownership coverage history', full: true },
+  // `admin: true` = workspace-admin only (v3.7.02 role lockdown): viewers and
+  // reviewers get the ticket surface (Tickets, New ticket, Approvals) and
+  // nothing else — the palette must not advertise pages AdminRoute bounces.
+  { id: 'nav-dashboard', label: 'Dashboard', path: '/dashboard', Icon: LayoutDashboard, keywords: 'home workload technicians', full: true, admin: true },
+  { id: 'nav-timeline', label: 'Timeline Explorer', path: '/timeline', Icon: Clock, keywords: 'ownership coverage history', full: true, admin: true },
   // Labels mirror the side-rail/page titles exactly (QA 07-28 #1) — a palette
   // entry that says "Assignment Review" for a page titled "Assignment" reads
   // as two different destinations.
-  { id: 'nav-analytics', label: 'Analytics', path: '/analytics', Icon: BarChart3, keywords: 'reports charts demand quality insights', full: true },
-  { id: 'nav-assignments', label: 'Assignment', path: '/assignments', Icon: UserCheck, keywords: 'ai review pipeline assignment review', full: true },
-  { id: 'nav-workflows', label: 'Mail Workflows', path: '/workflows', Icon: Mail, keywords: 'automation rules triggers templates notifications', full: true, manage: true },
-  { id: 'nav-visuals', label: 'Agent Maps', path: '/visuals', Icon: MapIcon, keywords: 'map schedule agents visuals locations', full: true },
-  { id: 'nav-settings', label: 'Settings', path: '/settings', Icon: SettingsIcon, keywords: 'workflows mail admin config', full: true },
+  { id: 'nav-analytics', label: 'Analytics', path: '/analytics', Icon: BarChart3, keywords: 'reports charts demand quality insights', full: true, admin: true },
+  { id: 'nav-assignments', label: 'Assignment', path: '/assignments', Icon: UserCheck, keywords: 'ai review pipeline assignment review', full: true, admin: true },
+  { id: 'nav-workflows', label: 'Mail Workflows', path: '/workflows', Icon: Mail, keywords: 'automation rules triggers templates notifications', full: true, admin: true },
+  { id: 'nav-visuals', label: 'Agent Maps', path: '/visuals', Icon: MapIcon, keywords: 'map schedule agents visuals locations', full: true, admin: true },
+  { id: 'nav-settings', label: 'Settings', path: '/settings', Icon: SettingsIcon, keywords: 'workflows mail admin config', full: true, admin: true },
   { id: 'nav-competencies', label: 'My Competencies', path: '/my-competencies', Icon: UserCheck, keywords: 'skills profile', agent: true },
 ];
 
@@ -236,7 +239,7 @@ export default function CommandPalette() {
     for (const nav of showCommands ? NAV_ITEMS : []) {
       if (isAgent && nav.full) continue;
       if (!isAgent && nav.agent) continue;
-      if (nav.manage && !canManage) continue;
+      if (nav.admin && !canManage) continue;
       if (!matches(query, nav.label, nav.keywords)) continue;
       out.push({
         id: nav.id, section: 'Go to', label: nav.label, Icon: nav.Icon,

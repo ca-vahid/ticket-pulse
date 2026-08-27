@@ -17,7 +17,7 @@ import { scrubFreeText as scrubDemoText, useDemoMode } from '../../utils/demoMod
 import { cn } from '../../lib/utils';
 import { APP_VERSION } from '../../data/changelog';
 import ChangelogModal from '../ChangelogModal';
-import { NAV_DESTINATIONS, canAccessSettings, useNavDestinations } from './navDestinations';
+import { NAV_DESTINATIONS, useCanAccessSettings, useNavDestinations } from './navDestinations';
 
 // Short labels so the fixed tabs stay legible on narrow phones.
 const SHORT_LABEL = {
@@ -37,7 +37,8 @@ const SHORT_LABEL = {
 export default function MobileTabBar() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { logout, user } = useAuth();
+  const { logout } = useAuth();
+  const showSettings = useCanAccessSettings();
   const { currentWorkspace, availableWorkspaces, switchWorkspace } = useWorkspace();
   const { lastUpdated, sseConnectionStatus } = useDashboard();
   const demoMode = useDemoMode();
@@ -46,7 +47,7 @@ export default function MobileTabBar() {
 
   const matchPath = (path) => location.pathname === path || location.pathname.startsWith(`${path}/`);
   const activeId = NAV_DESTINATIONS.find((dest) => matchPath(dest.path))?.id || null;
-  const destinations = useNavDestinations(activeId);
+  const destinations = useNavDestinations();
   const primaryTabs = destinations.slice(0, 4);
   const overflowDests = destinations.slice(4);
   const moreActive = !primaryTabs.some((dest) => dest.id === activeId);
@@ -165,9 +166,9 @@ export default function MobileTabBar() {
                 );
               })}
 
-              {/* Agents have no Settings sections (Phase A1) — same gate as
+              {/* Settings is workspace-admin only (v3.7.02) — same gate as
                   the SideRail entry. */}
-              {canAccessSettings(user) && (
+              {showSettings && (
                 <button
                   type="button"
                   onClick={() => go('/settings')}

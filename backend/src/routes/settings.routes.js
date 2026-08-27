@@ -174,10 +174,15 @@ router.use(requireAuth);
 
 /**
  * GET /api/settings
- * Get all settings
+ * Get all settings. Admin-only (v3.7.02 role lockdown): the only caller is the
+ * Settings page (SettingsContext.fetchSettings), which is itself admin-only —
+ * nothing on the ticket surface reads the global settings bundle. Workspace
+ * admins pass via the attached workspace id; global admins always pass.
  */
 router.get(
   '/',
+  attachWorkspaceIdIfPresent,
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const settings = await settingsRepository.getAll();
     maskSensitiveSettings(settings);
@@ -1301,6 +1306,8 @@ router.put(
  */
 router.post(
   '/test-connection',
+  attachWorkspaceIdIfPresent,
+  requireAdmin,
   asyncHandler(async (req, res) => {
     logger.info('Testing FreshService connection');
 
@@ -1401,6 +1408,8 @@ router.post(
  */
 router.post(
   '/initialize',
+  attachWorkspaceIdIfPresent,
+  requireAdmin,
   asyncHandler(async (req, res) => {
     logger.info('Initializing default settings');
 

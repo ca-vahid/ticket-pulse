@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Stamp, Loader2, Check, X, MessageCircleQuestion, Inbox, ExternalLink, RotateCcw, ClipboardList } from 'lucide-react';
+import { Stamp, Loader2, Check, X, MessageCircleQuestion, Inbox, ExternalLink, RotateCcw, ClipboardList, Tags } from 'lucide-react';
 import AppHeader from '../components/AppHeader';
 import MobileTabBar from '../components/nav/MobileTabBar';
+import ApprovalCategoriesPanel from '../components/settings/ApprovalCategoriesPanel';
 import { ticketsAPI } from '../services/api';
 import { useSSE } from '../hooks/useSSE';
 import { useWorkspace } from '../contexts/WorkspaceContext';
@@ -31,7 +32,12 @@ export default function ApprovalsInbox() {
   const { currentWorkspace, isWorkspaceSelected } = useWorkspace();
   const wsRole = useWorkspaceRole();
   const canReview = wsRole === 'admin' || wsRole === 'reviewer';
-  const [view, setView] = useState('mine'); // mine | all
+  // mine | all | categories. `categories` (v3.7.02, QA 08-24 #3) is the
+  // reviewer's home for approval-category management now that Settings is
+  // admin-only — same <ApprovalCategoriesPanel/> the admin sees in Settings.
+  // Deep-linkable via ?tab= (the Settings → Approval Categories cross-link).
+  const requestedTab = new URLSearchParams(location.search).get('tab');
+  const [view, setView] = useState(['mine', 'all', 'categories'].includes(requestedTab) ? requestedTab : 'mine');
   const [pending, setPending] = useState([]);
   const [needsInfo, setNeedsInfo] = useState([]);
   const [overview, setOverview] = useState(null); // { stats, items }
@@ -96,7 +102,11 @@ export default function ApprovalsInbox() {
         {/* Reviewer/admin tab toggle: my inbox vs. everything in the workspace */}
         {canReview && (
           <div role="tablist" className="flex items-end gap-1 border-b border-slate-200 mb-4">
-            {[{ k: 'mine', label: 'For you', Icon: Inbox }, { k: 'all', label: 'All approvals', Icon: ClipboardList }].map(({ k, label, Icon }) => (
+            {[
+              { k: 'mine', label: 'For you', Icon: Inbox },
+              { k: 'all', label: 'All approvals', Icon: ClipboardList },
+              { k: 'categories', label: 'Categories', Icon: Tags },
+            ].map(({ k, label, Icon }) => (
               <button
                 key={k}
                 role="tab"
@@ -119,7 +129,11 @@ export default function ApprovalsInbox() {
           </div>
         )}
 
-        {loading ? (
+        {view === 'categories' && canReview ? (
+          <section aria-label="Approval categories" className="tp-card rounded-xl p-5">
+            <ApprovalCategoriesPanel />
+          </section>
+        ) : loading ? (
           <div className="flex items-center justify-center py-24 text-slate-400"><Loader2 className="w-6 h-6 animate-spin" aria-hidden="true" /></div>
         ) : view === 'all' && canReview ? (
           <div className="space-y-4">
