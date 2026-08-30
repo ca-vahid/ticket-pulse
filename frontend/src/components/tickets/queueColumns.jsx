@@ -363,6 +363,12 @@ function renderStatus(ticket, ctx) {
               try { await ticketsAPI.setStatus(ticket.id, prev); ctx.refreshAfterEdit(); } catch { /* refresh shows truth */ }
             }) : null);
           }}
+          // Loud failures (Phase MB3): the server's own message when there is
+          // one ("FreshService did not accept: status…"), a plain one otherwise.
+          onError={(err, next) => {
+            ctx.refreshAfterEdit();
+            ctx.showToast(err?.response?.data?.message || err?.message || `Could not move ${ticket.displayRef} to ${next}`, null, { tone: 'red' });
+          }}
         />
       ) : (
         <StatusPill status={ticket.status} size="sm" tone={statusToneFromDefs(statusDefs, ticket.status)} />

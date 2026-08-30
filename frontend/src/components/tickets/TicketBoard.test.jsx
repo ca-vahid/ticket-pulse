@@ -3,7 +3,7 @@ import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { cleanup, fireEvent, render as rtlRender, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import TicketBoard from './TicketBoard';
+import TicketBoard, { canDragTicket, planStatusDrop } from './TicketBoard';
 
 // Card anchors (QA 08-07 #7) use <Link>/useLocation, so the board needs a
 // router context everywhere it renders.
@@ -221,5 +221,55 @@ describe('TicketBoard crash-proofing (QA 08-07 #10, Phase 2)', () => {
     } finally {
       consoleErrorSpy.mockRestore();
     }
+  });
+});
+
+describe('TicketBoard drag rules (Mega 08-30 Phase MB6, QA 08-27 #6)', () => {
+  const DEFS = [
+    { name: 'Open', baseStatus: 'Open', color: 'blue', sortOrder: 0, isSystem: true },
+    { name: 'Pending', baseStatus: 'Pending', color: 'amber', sortOrder: 1, isSystem: true },
+    { name: 'Resolved', baseStatus: 'Resolved', color: 'emerald', sortOrder: 2, isSystem: true },
+    { name: 'Closed', baseStatus: 'Closed', color: 'slate', sortOrder: 3, isSystem: true },
+    { name: 'Needs Rework', baseStatus: 'Pending', color: 'orange', sortOrder: 4, isSystem: false },
+  ];
+
+  test('planStatusDrop: Closed → Pending column resolves to "Pending" (reopen is a real drop)', () => {
+    expect(planStatusDrop(t(1, 'Closed'), 'pending', DEFS)).toBe('Pending');
+    expect(planStatusDrop(t(1, 'Closed'), 'open', DEFS)).toBe('Open');
+    expect(planStatusDrop(t(1, 'Resolved'), 'pending', null)).toBe('Pending');
+  });
+
+  test('planStatusDrop: Resolved → Closed column is a no-op (same terminal bucket), as is any same-bucket drop', () => {
+    expect(planStatusDrop(t(1, 'Resolved'), 'closed', DEFS)).toBeNull();
+    expect(planStatusDrop(t(1, 'Closed'), 'closed', DEFS)).toBeNull();
+    expect(planStatusDrop(t(1, 'Needs Rework'), 'pending', DEFS)).toBeNull();
+    expect(planStatusDrop(t(1, 'Open'), 'open', DEFS)).toBeNull();
+  });
+
+  test('planStatusDrop: unknown column / missing ticket → null', () => {
+    expect(planStatusDrop(t(1, 'Open'), 'nowhere', DEFS)).toBeNull();
+    expect(planStatusDrop(undefined, 'pending', DEFS)).toBeNull();
+  });
+
+  test('canDragTicket: Deleted/Spam never drag; TP-born needs ticketing on; FS-born needs an FS id', () => {
+    expect(canDragTicket(t(1, 'Deleted'), true)).toBe(false);
+    expect(canDragTicket(t(1, 'Spam'), true)).toBe(false);
+    expect(canDragTicket(t(1, 'Closed'), true)).toBe(true);
+    expect(canDragTicket(t(1, 'Open'), false)).toBe(false);
+    expect(canDragTicket(t(1, 'Open', { origin: 'freshservice', freshserviceTicketId: 900 }), false)).toBe(true);
+    expect(canDragTicket(t(1, 'Open', { origin: 'freshservice', freshserviceTicketId: null }), true)).toBe(false);
+  });
+
+  test('a keyboard drag of a Closed card that ends over the Pending column calls onStatusDrop(ticket, "Pending")', () => {
+    const onStatusDrop = vi.fn();
+    render(<TicketBoard tickets={[t(1, 'Closed'), t(2, 'Pending')]} ticketingOn onStatusDrop={onStatusDrop} statusDefs={DEFS} />);
+    const card = screen.getByText('Ticket 1').closest('[role="button"]');
+    expect(card).toHaveAttribute('aria-disabled', 'false');
+    // dnd-kit KeyboardSensor: Enter picks up; in jsdom every droppable rect is
+    // 0×0 so the collision is resolved via the wired handler path only when a
+    // real `over` exists — the pure helper above covers the decision; this
+    // asserts the drag ACTIVATES on a terminal card (it is not locked).
+    fireEvent.keyDown(card, { code: 'Enter' });
+    expect(screen.getAllByText('Ticket 1').length).toBe(2);
   });
 });

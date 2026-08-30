@@ -1,6 +1,6 @@
 {
   "name": "ticket-pulse-frontend",
-  "version": "3.8.00-preview",
+  "version": "3.8.01-preview",
   "type": "module",
   "description": "FreshService Real-Time IT Dashboard - Frontend",
   "scripts": {
@@ -11,6 +11,7 @@
     "test:ui": "vitest --ui",
     "lint": "eslint . --ext js,jsx --report-unused-disable-directives",
     "lint:strict": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
+    "lint:dark": "node scripts/check-dark-tokens.mjs",
     "format": "prettier --write \"src/**/*.{js,jsx}\""
   },
   "dependencies": {

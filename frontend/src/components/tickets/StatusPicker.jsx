@@ -23,6 +23,7 @@ export default function StatusPicker({
   value,
   fsChange = null, // (nextStatus) => Promise — FS-born write-back w/ confirm modal
   onChanged, // (nextStatus, prevStatus) => void after success
+  onError = null, // (err, nextStatus) => void — real failures only (a cancelled FS confirm is silent)
   disabled = false,
   statusDefs = null, // workspace registry defs [{name, baseStatus, color, ...}]
 }) {
@@ -78,7 +79,12 @@ export default function StatusPicker({
       else await ticketsAPI.setStatus(ticketId, next);
       setOpen(false);
       onChanged?.(next, value);
-    } catch { /* cancelled or failed — refresh shows the true state */ }
+    } catch (err) {
+      // A dismissed FS confirm rejects with 'cancelled' — nothing to report.
+      // Anything else (4xx/5xx, "FreshService did not accept: …") must reach
+      // the user instead of a silent snap-back (Phase MB3, QA 08-27 #6).
+      if (err?.message !== 'cancelled') onError?.(err, next);
+    }
     setBusy(false);
   };
 

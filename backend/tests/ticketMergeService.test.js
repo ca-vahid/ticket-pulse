@@ -189,3 +189,34 @@ describe('ticketMergeService.merge', () => {
     expect(result.swept).toEqual({ tasks: 3, children: 1, approvals: 2 });
   });
 });
+
+describe('ticketMergeService — terminal sources (Phase MB2/MB6)', () => {
+  test('a Resolved TP-born source merges (only Deleted/Spam are refused): entries copied, source re-closed', async () => {
+    prismaMock.ticket.findFirst
+      .mockResolvedValueOnce({ ...TP_SOURCE, status: 'Resolved' })
+      .mockResolvedValueOnce(TARGET);
+    const result = await ticketMergeService.merge(10, 1, { targetTicketId: 20 }, null);
+    expect(result.merged).toBe(true);
+    expect(prismaMock.ticketThreadEntry.createMany).toHaveBeenCalled();
+    // Already terminal → folded in as-is, no second close (sourceClosed false).
+    expect(ticketServiceMock.changeStatus).not.toHaveBeenCalled();
+    expect(result.sourceClosed).toBe(false);
+  });
+
+  test('a Closed FS-born source merges too (folded in as-is — no FS status write)', async () => {
+    prismaMock.ticket.findFirst
+      .mockResolvedValueOnce({ ...FS_SOURCE, status: 'Closed' })
+      .mockResolvedValueOnce(TARGET);
+    const result = await ticketMergeService.merge(11, 1, { targetTicketId: 20 }, null);
+    expect(result.merged).toBe(true);
+    expect(ticketServiceMock.updateFsTicket).not.toHaveBeenCalled();
+    expect(result.sourceClosed).toBe(false);
+  });
+
+  test('a Spam source is still refused', async () => {
+    prismaMock.ticket.findFirst
+      .mockResolvedValueOnce({ ...TP_SOURCE, status: 'Spam' })
+      .mockResolvedValueOnce(TARGET);
+    await expect(ticketMergeService.merge(10, 1, { targetTicketId: 20 }, null)).rejects.toThrow(ValidationError);
+  });
+});

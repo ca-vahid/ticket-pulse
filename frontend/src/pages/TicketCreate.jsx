@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   AlertCircle, ArrowLeft, Building2, Check, ChevronDown, Clock, Loader2, MapPin,
-  Paperclip, Search, Send, Sparkles, Ticket, X,
+  Paperclip, Send, Sparkles, Ticket, X,
 } from 'lucide-react';
 import AppHeader from '../components/AppHeader';
 import MobileTabBar from '../components/nav/MobileTabBar';
@@ -12,11 +12,11 @@ import RichTextEditor, { isRichContent } from '../components/tickets/RichTextEdi
 import StagedFileChip from '../components/tickets/StagedFileChip';
 import ImageMarkupModal from '../components/tickets/ImageMarkupModal';
 import { PRIORITY_LABELS, SOURCE_OPTIONS, initials } from '../components/tickets/ticketUi';
+import RequesterTypeahead, { EMAIL_RE } from '../components/tickets/RequesterTypeahead';
 import { useTicketTypes } from '../hooks/useTicketTypes';
 
 const MAX_FILES = 5;
 const MAX_FILE_MB = 100;
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // Selected-state classes per registry color token (Tailwind needs literals).
 const TYPE_SELECTED_CLASSES = {
@@ -97,16 +97,11 @@ export default function TicketCreate() {
   const fileInputRef = useRef(null);
   const pasteCountRef = useRef(0);
 
-  // ---- Requester typeahead ----
+  // ---- Requester typeahead (shared RequesterTypeahead, Phase ET3) ----
   const [requester, setRequester] = useState(null); // {id?, name, email, hint, jobTitle, department, location, fromDirectory}
-  const [rqQuery, setRqQuery] = useState('');
-  const [rqResults, setRqResults] = useState(null);
-  const [rqOpen, setRqOpen] = useState(false);
-  const [rqLoading, setRqLoading] = useState(false);
-  const [rqPhoto, setRqPhoto] = useState(null);
-  const [rqStats, setRqStats] = useState(null);
+  const [rqQuery, setRqQuery] = useState(''); // typed text — a bare valid email is accepted without a pick
+  const [rqEnrich, setRqEnrich] = useState({ photo: null, stats: null }); // Entra photo + history for the rail card
   const rqRef = useRef(null);
-  const rqInputRef = useRef(null);
 
   useEffect(() => {
     ticketsAPI.meta()
@@ -144,62 +139,7 @@ export default function TicketCreate() {
     if (template.internalSubcategoryId) setSubcategoryId(String(template.internalSubcategoryId));
   };
 
-  useEffect(() => { rqInputRef.current?.focus(); }, [meta]);
-
-  useEffect(() => {
-    const q = rqQuery.trim();
-    if (q.length < 2) { setRqResults(null); return undefined; }
-    setRqLoading(true);
-    const timer = setTimeout(async () => {
-      try {
-        const res = await ticketsAPI.requesterSearch(q);
-        setRqResults(res.data);
-        setRqOpen(true);
-      } catch { setRqResults(null); }
-      setRqLoading(false);
-    }, 300);
-    return () => { clearTimeout(timer); setRqLoading(false); };
-  }, [rqQuery]);
-
-  useEffect(() => {
-    const onDoc = (e) => { if (rqRef.current && !rqRef.current.contains(e.target)) setRqOpen(false); };
-    document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
-  }, []);
-
-  // Enrich the picked requester: photo (Entra) + helpdesk history (known ones).
-  useEffect(() => {
-    setRqPhoto(null);
-    setRqStats(null);
-    if (!requester?.email) return;
-    let alive = true;
-    ticketsAPI.requesterPhoto(requester.email)
-      .then((res) => { if (alive) setRqPhoto(res.data?.photo || null); })
-      .catch(() => {});
-    if (requester.id) {
-      ticketsAPI.requesterStats(requester.id)
-        .then((res) => { if (alive) setRqStats(res.data || null); })
-        .catch(() => {});
-    }
-    return () => { alive = false; };
-  }, [requester?.email, requester?.id]);
-
-  const pickRequester = (person, fromDirectory = false) => {
-    const location = person.entraOfficeLocation || person.entraCity || null;
-    setRequester({
-      id: fromDirectory ? null : person.id,
-      name: person.name,
-      email: person.email,
-      jobTitle: person.jobTitle || null,
-      department: person.department || null,
-      location,
-      hint: [person.jobTitle, location || person.department].filter(Boolean).join(' · '),
-      fromDirectory,
-    });
-    setRqQuery('');
-    setRqResults(null);
-    setRqOpen(false);
-  };
+  useEffect(() => { rqRef.current?.focus(); }, [meta]);
 
   const typedEmailOk = EMAIL_RE.test(rqQuery.trim());
   const requesterReady = Boolean(requester) || typedEmailOk;
@@ -327,7 +267,7 @@ export default function TicketCreate() {
     setFiles([]);
     setRequester(null);
     setRqQuery('');
-    setTimeout(() => rqInputRef.current?.focus(), 0);
+    setTimeout(() => rqRef.current?.focus(), 0);
   };
 
   /**
@@ -547,113 +487,17 @@ export default function TicketCreate() {
             <div className="lg:col-span-2 space-y-5">
               <div className="tp-card rounded-2xl p-5 space-y-5">
                 {/* Requester */}
-                <div ref={rqRef} className="relative">
+                <div className="relative">
                   <label htmlFor="tc-requester" className={labelClass}>Requester <span className="text-red-500">*</span></label>
-                  {requester ? (
-                    <div className="flex items-center gap-3 px-3 py-2.5 bg-blue-50/60 border border-blue-200 rounded-xl">
-                      {rqPhoto ? (
-                        <img src={rqPhoto} alt="" className="h-9 w-9 rounded-full object-cover flex-shrink-0" />
-                      ) : (
-                        <span className="h-9 w-9 rounded-full bg-blue-100 text-blue-700 inline-flex items-center justify-center text-xs font-semibold flex-shrink-0">
-                          {initials(requester.name)}
-                        </span>
-                      )}
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-sm font-medium text-slate-800 truncate">
-                          {requester.name}
-                          {requester.fromDirectory && <span className="ml-1.5 text-[10px] font-semibold text-violet-600 uppercase">Entra</span>}
-                        </span>
-                        <span className="block text-xs text-slate-500 truncate">{requester.email}{requester.hint ? ` · ${requester.hint}` : ''}</span>
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => { setRequester(null); setTimeout(() => rqInputRef.current?.focus(), 0); }}
-                        aria-label="Clear requester"
-                        className="tp-focus-ring p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-white"
-                      >
-                        <X className="w-4 h-4" aria-hidden="true" />
-                      </button>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="relative">
-                        <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
-                        <input
-                          id="tc-requester"
-                          ref={rqInputRef}
-                          type="text"
-                          value={rqQuery}
-                          onChange={(e) => setRqQuery(e.target.value)}
-                          onFocus={() => { if (rqResults) setRqOpen(true); }}
-                          placeholder="Search people by name or email…"
-                          autoComplete="off"
-                          role="combobox"
-                          aria-expanded={rqOpen}
-                          aria-autocomplete="list"
-                          className={`${fieldClass} pl-9`}
-                        />
-                        {rqLoading && <Loader2 className="w-4 h-4 animate-spin text-slate-300 absolute right-3 top-1/2 -translate-y-1/2" aria-hidden="true" />}
-                      </div>
-                      {typedEmailOk && !rqOpen && (
-                        <p className="mt-1 text-[11px] text-emerald-600">New requester — “{rqQuery.trim()}” will be created with the ticket.</p>
-                      )}
-                      {rqOpen && rqResults && (rqResults.requesters.length > 0 || rqResults.directory.length > 0 || typedEmailOk) && (
-                        <div className="absolute left-0 right-0 top-full mt-1 z-30 tp-card rounded-xl shadow-soft py-1 max-h-80 overflow-y-auto settings-scrollbar" role="listbox">
-                          {rqResults.requesters.length > 0 && (
-                            <p className="px-3 pt-1.5 pb-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">Requesters</p>
-                          )}
-                          {rqResults.requesters.map((p) => (
-                            <button
-                              key={`r-${p.id}`}
-                              type="button"
-                              role="option"
-                              aria-selected="false"
-                              onClick={() => pickRequester(p)}
-                              className="tp-focus-ring w-full text-left px-3 py-2 hover:bg-blue-50 flex items-center gap-2.5"
-                            >
-                              <span className="h-7 w-7 rounded-full bg-blue-50 text-blue-700 border border-blue-100 inline-flex items-center justify-center text-[10px] font-semibold flex-shrink-0">{initials(p.name)}</span>
-                              <span className="min-w-0">
-                                <span className="block text-sm text-slate-800 truncate">{p.name}</span>
-                                <span className="block text-xs text-slate-400 truncate">{p.email}{p.jobTitle ? ` · ${p.jobTitle}` : ''}</span>
-                              </span>
-                            </button>
-                          ))}
-                          {rqResults.directory.length > 0 && (
-                            <p className="px-3 pt-2 pb-0.5 text-[10px] font-bold uppercase tracking-wide text-violet-400 flex items-center gap-1">
-                              <Building2 className="w-3 h-3" aria-hidden="true" /> Entra directory
-                            </p>
-                          )}
-                          {rqResults.directory.map((p) => (
-                            <button
-                              key={`d-${p.email}`}
-                              type="button"
-                              role="option"
-                              aria-selected="false"
-                              onClick={() => pickRequester(p, true)}
-                              className="tp-focus-ring w-full text-left px-3 py-2 hover:bg-violet-50 flex items-center gap-2.5"
-                            >
-                              <span className="h-7 w-7 rounded-full bg-violet-50 text-violet-700 border border-violet-100 inline-flex items-center justify-center text-[10px] font-semibold flex-shrink-0">{initials(p.name)}</span>
-                              <span className="min-w-0">
-                                <span className="block text-sm text-slate-800 truncate">{p.name}</span>
-                                <span className="block text-xs text-slate-400 truncate">{p.email}{p.jobTitle ? ` · ${p.jobTitle}` : ''}</span>
-                              </span>
-                            </button>
-                          ))}
-                          {typedEmailOk && (
-                            <button
-                              type="button"
-                              role="option"
-                              aria-selected="false"
-                              onClick={() => pickRequester({ name: rqQuery.trim().split('@')[0], email: rqQuery.trim().toLowerCase() }, false)}
-                              className="tp-focus-ring w-full text-left px-3 py-2 hover:bg-emerald-50 text-sm text-emerald-700 border-t border-slate-100 mt-1"
-                            >
-                              Use “{rqQuery.trim()}” as a new requester
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </>
-                  )}
+                  <RequesterTypeahead
+                    ref={rqRef}
+                    inputId="tc-requester"
+                    value={requester}
+                    onChange={setRequester}
+                    onQueryChange={setRqQuery}
+                    onEnrich={setRqEnrich}
+                    fieldClass={fieldClass}
+                  />
                   {fieldVisible('cc') && (
                     <div className="mt-3" data-testid="also-for-block">
                       {/* "Also for" = additional requesters (Phase MR3, QA 08-26 #3):
@@ -1065,8 +909,8 @@ export default function TicketCreate() {
                 <div className="tp-card rounded-2xl p-4">
                   <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-2.5">Requester</p>
                   <div className="flex items-center gap-3">
-                    {rqPhoto ? (
-                      <img src={rqPhoto} alt="" className="h-11 w-11 rounded-full object-cover flex-shrink-0" />
+                    {rqEnrich.photo ? (
+                      <img src={rqEnrich.photo} alt="" className="h-11 w-11 rounded-full object-cover flex-shrink-0" />
                     ) : (
                       <span className="h-11 w-11 rounded-full bg-blue-100 text-blue-700 inline-flex items-center justify-center text-sm font-semibold flex-shrink-0">
                         {initials(requester.name)}
@@ -1084,8 +928,8 @@ export default function TicketCreate() {
                     {requester.location && (
                       <div className="flex items-center gap-1.5 text-slate-600"><MapPin className="w-3.5 h-3.5 text-slate-400" aria-hidden="true" /><span className="truncate">{requester.location}</span></div>
                     )}
-                    {rqStats && (rqStats.total ?? rqStats.totalTickets) != null && (
-                      <div className="flex items-center gap-1.5 text-slate-600"><Ticket className="w-3.5 h-3.5 text-slate-400" aria-hidden="true" /><span>{rqStats.total ?? rqStats.totalTickets} previous ticket{(rqStats.total ?? rqStats.totalTickets) === 1 ? '' : 's'}</span></div>
+                    {rqEnrich.stats && (rqEnrich.stats.total ?? rqEnrich.stats.totalTickets) != null && (
+                      <div className="flex items-center gap-1.5 text-slate-600"><Ticket className="w-3.5 h-3.5 text-slate-400" aria-hidden="true" /><span>{rqEnrich.stats.total ?? rqEnrich.stats.totalTickets} previous ticket{(rqEnrich.stats.total ?? rqEnrich.stats.totalTickets) === 1 ? '' : 's'}</span></div>
                     )}
                   </dl>
                   {requester.fromDirectory && (

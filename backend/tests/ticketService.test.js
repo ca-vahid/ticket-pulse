@@ -1960,3 +1960,357 @@ describe('ticketService.updateFsTicket — "Also for" on FS-born tickets (Phase 
     expect(fsClientMock.updateTicketFields).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Mega 08-30 Phase ET (edit ticket: requester / subject / description, both
+// origins) + Phase MB5 (FS-born reopen correctness) + statusService lock.
+// ---------------------------------------------------------------------------
+describe('ticketService.updateTicketFields — requester change (Phase ET1)', () => {
+  const nativeTicket = {
+    id: 501,
+    workspaceId: 1,
+    origin: 'ticketpulse',
+    nativeNumber: 1042,
+    freshserviceTicketId: null,
+    subject: 'Laptop will not boot',
+    status: 'Open',
+    priority: 3,
+    createdAt: new Date('2026-08-01T10:00:00Z'),
+    assignedTechId: null,
+    requesterId: 40,
+    dueBy: null,
+    frDueBy: null,
+    internalCategoryId: null,
+    internalSubcategoryId: null,
+    groupId: null,
+    internalGroupId: null,
+    requester: { id: 40, name: 'Rita Requester', email: 'rita@example.com' },
+    assignedTech: null,
+    internalCategory: null,
+    internalSubcategory: null,
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...nativeTicket });
+    prismaMock.ticket.update.mockImplementation(({ data }) => Promise.resolve({
+      ...nativeTicket, ...data, requester: nativeTicket.requester, assignedTech: null,
+    }));
+    ticketActivityRepositoryMock.create.mockResolvedValue({});
+  });
+
+  test('PATCH requesterId repoints the ticket, audits changes.requester {from,to} and broadcasts it', async () => {
+    prismaMock.requester.findUnique.mockResolvedValue({ id: 41, name: 'Nadia New', email: 'nadia@example.com' });
+
+    const result = await ticketService.updateTicketFields(501, 1, { requesterId: 41 }, actor);
+
+    expect(prismaMock.requester.findUnique).toHaveBeenCalledWith({ where: { id: 41 } });
+    expect(prismaMock.ticket.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ requesterId: 41, mirrorState: 'pending' }),
+    }));
+    expect(ticketActivityRepositoryMock.create).toHaveBeenCalledWith(expect.objectContaining({
+      activityType: 'fields_updated',
+      details: expect.objectContaining({
+        changes: {
+          requester: {
+            from: { id: 40, name: 'Rita Requester', email: 'rita@example.com' },
+            to: { id: 41, name: 'Nadia New', email: 'nadia@example.com' },
+          },
+        },
+      }),
+    }));
+    expect(sseBroadcastMock).toHaveBeenCalledWith('ticket-change', expect.objectContaining({
+      action: 'updated', ticketId: 501, changes: ['requester'],
+    }), 1);
+    expect(mirrorServiceMock.enqueueFieldSync).toHaveBeenCalledWith(1, 501);
+    expect(result.changed).toBe(true);
+  });
+
+  test('requesterEmail resolves through the same ladder (known email → existing row, no create)', async () => {
+    requesterRepositoryMock.findByEmail.mockResolvedValue({ id: 42, name: 'Known Person', email: 'known@example.com' });
+    await ticketService.updateTicketFields(501, 1, { requesterEmail: 'Known@Example.com' }, actor);
+    expect(requesterRepositoryMock.findByEmail).toHaveBeenCalledWith('known@example.com');
+    expect(requesterRepositoryMock.createNative).not.toHaveBeenCalled();
+    expect(prismaMock.ticket.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ requesterId: 42 }),
+    }));
+  });
+
+  test('an unknown requesterId is a ValidationError before any write', async () => {
+    prismaMock.requester.findUnique.mockResolvedValue(null);
+    await expect(ticketService.updateTicketFields(501, 1, { requesterId: 999 }, actor))
+      .rejects.toThrow(ValidationError);
+    expect(prismaMock.ticket.update).not.toHaveBeenCalled();
+    expect(ticketActivityRepositoryMock.create).not.toHaveBeenCalled();
+  });
+
+  test('re-sending the current requester is a no-op (no update, no audit)', async () => {
+    prismaMock.requester.findUnique.mockResolvedValue({ id: 40, name: 'Rita Requester', email: 'rita@example.com' });
+    const result = await ticketService.updateTicketFields(501, 1, { requesterId: 40 }, actor);
+    expect(result.changed).toBe(false);
+    expect(prismaMock.ticket.update).not.toHaveBeenCalled();
+  });
+
+  test('.strict() still rejects unknown keys', async () => {
+    await expect(ticketService.updateTicketFields(501, 1, { requesterId: 41, bogus: true }, actor))
+      .rejects.toThrow(ValidationError);
+    expect(prismaMock.requester.findUnique).not.toHaveBeenCalled();
+    expect(prismaMock.ticket.update).not.toHaveBeenCalled();
+  });
+
+  test('subject + description + requester in ONE patch → one update, one fields_updated audit carrying all three', async () => {
+    prismaMock.requester.findUnique.mockResolvedValue({ id: 41, name: 'Nadia New', email: 'nadia@example.com' });
+    await ticketService.updateTicketFields(501, 1, {
+      requesterId: 41, subject: 'Laptop boots to a black screen', description: '<p>Now with <b>detail</b></p>',
+    }, actor);
+    // One field patch (a later ticket.update may come from the fire-and-forget embedding refresh).
+    const { data } = prismaMock.ticket.update.mock.calls[0][0];
+    expect(data).toMatchObject({ requesterId: 41, subject: 'Laptop boots to a black screen', description: '<p>Now with <b>detail</b></p>', descriptionText: 'Now with detail' });
+    const audit = ticketActivityRepositoryMock.create.mock.calls.find((c) => c[0].activityType === 'fields_updated')[0];
+    expect(Object.keys(audit.details.changes).sort()).toEqual(['description', 'requester', 'subject']);
+  });
+});
+
+describe('ticketService.updateFsTicket — subject / description / requester write-back (Phase ET2)', () => {
+  const fsBornTicket = {
+    id: 601,
+    workspaceId: 1,
+    origin: 'freshservice',
+    nativeNumber: null,
+    freshserviceTicketId: BigInt(231309),
+    subject: 'Payment receipt',
+    description: '<p>Old body</p>',
+    descriptionText: 'Old body',
+    status: 'Open',
+    priority: 3,
+    createdAt: new Date('2026-08-01T10:00:00Z'),
+    assignedTechId: 3,
+    requesterId: 40,
+    resolvedAt: null,
+    closedAt: null,
+    internalCategoryId: null,
+    internalSubcategoryId: null,
+    tpSkill: null,
+    tpSubskill: null,
+    requester: { id: 40, name: 'Rita Requester', email: 'rita@example.com' },
+    assignedTech: { id: 3, name: 'Ava Original' },
+    internalCategory: null,
+    internalSubcategory: null,
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prismaMock.workspace.findUnique.mockResolvedValue({
+      id: 1, name: 'IT', isActive: true, tpSkillCustomField: 'tp_skill', tpSubskillCustomField: 'tp_subskill',
+    });
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...fsBornTicket });
+    prismaMock.ticket.update.mockImplementation(({ data }) => Promise.resolve({ ...fsBornTicket, ...data }));
+    ticketActivityRepositoryMock.create.mockResolvedValue({});
+  });
+
+  test('subject: PUTs {ticket:{subject}} first, verifies the echo, then mirrors locally + audits fs_write_back', async () => {
+    fsClientMock.updateTicketFields.mockResolvedValue({ subject: 'Payment receipt — June', updated_at: '2026-08-30T10:00:00Z' });
+
+    const result = await ticketService.updateFsTicket(601, 1, { subject: 'Payment receipt — June' }, actor);
+
+    expect(fsClientMock.updateTicketFields).toHaveBeenCalledWith(231309, { subject: 'Payment receipt — June' });
+    expect(prismaMock.ticket.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ subject: 'Payment receipt — June' }),
+    }));
+    expect(ticketActivityRepositoryMock.create).toHaveBeenCalledWith(expect.objectContaining({
+      activityType: 'fs_write_back',
+      details: expect.objectContaining({ changes: { subject: { from: 'Payment receipt', to: 'Payment receipt — June' } } }),
+    }));
+    expect(result.synced).toEqual(['subject']);
+  });
+
+  test('subject echo mismatch → "did not accept: subject", ZERO local writes', async () => {
+    fsClientMock.updateTicketFields.mockResolvedValue({ subject: 'Payment receipt', updated_at: '2026-08-30T10:00:00Z' });
+    await expect(ticketService.updateFsTicket(601, 1, { subject: 'Payment receipt — June' }, actor))
+      .rejects.toThrow(/did not accept: subject/);
+    expect(prismaMock.ticket.update).not.toHaveBeenCalled();
+    expect(ticketActivityRepositoryMock.create).not.toHaveBeenCalled();
+    expect(sseBroadcastMock).not.toHaveBeenCalled();
+  });
+
+  test('description: goes up as HTML, verified as collapsed text against description_text (FS re-serializes HTML)', async () => {
+    fsClientMock.updateTicketFields.mockResolvedValue({
+      description: '<div>New   body with <strong>detail</strong></div>',
+      description_text: 'New body with  detail',
+      updated_at: '2026-08-30T10:00:00Z',
+    });
+    await ticketService.updateFsTicket(601, 1, { description: '<p>New body with <b>detail</b></p>' }, actor);
+    expect(fsClientMock.updateTicketFields).toHaveBeenCalledWith(231309, { description: '<p>New body with <b>detail</b></p>' });
+    expect(prismaMock.ticket.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ description: '<p>New body with <b>detail</b></p>', descriptionText: 'New body with detail' }),
+    }));
+  });
+
+  test('description echo with different text → rejected, nothing local; echo without any description → accepted unverified', async () => {
+    fsClientMock.updateTicketFields.mockResolvedValue({ description_text: 'Something else entirely', updated_at: '2026-08-30T10:00:00Z' });
+    await expect(ticketService.updateFsTicket(601, 1, { description: '<p>New body</p>' }, actor))
+      .rejects.toThrow(/did not accept: description/);
+    expect(prismaMock.ticket.update).not.toHaveBeenCalled();
+
+    fsClientMock.updateTicketFields.mockResolvedValue({ updated_at: '2026-08-30T10:00:00Z' });
+    const result = await ticketService.updateFsTicket(601, 1, { description: '<p>New body</p>' }, actor);
+    expect(result.synced).toEqual(['description']);
+  });
+
+  test('requester: TP requester → FS requester_id, exact echo; no FS id → clear ValidationError and no PUT', async () => {
+    prismaMock.requester.findUnique.mockResolvedValue({ id: 41, name: 'Nadia New', email: 'nadia@example.com', freshserviceId: BigInt(1002090777) });
+    fsClientMock.updateTicketFields.mockResolvedValue({ requester_id: 1002090777, updated_at: '2026-08-30T10:00:00Z' });
+    await ticketService.updateFsTicket(601, 1, { requesterId: 41 }, actor);
+    expect(fsClientMock.updateTicketFields).toHaveBeenCalledWith(231309, { requester_id: 1002090777 });
+    expect(prismaMock.ticket.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ requesterId: 41 }),
+    }));
+    expect(ticketActivityRepositoryMock.create).toHaveBeenCalledWith(expect.objectContaining({
+      details: expect.objectContaining({ changes: expect.objectContaining({ requester: expect.objectContaining({ to: expect.objectContaining({ id: 41 }) }) }) }),
+    }));
+
+    jest.clearAllMocks();
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...fsBornTicket });
+    prismaMock.requester.findUnique.mockResolvedValue({ id: 43, name: 'Local Only', email: 'local@example.com', freshserviceId: null });
+    await expect(ticketService.updateFsTicket(601, 1, { requesterId: 43 }, actor))
+      .rejects.toThrow(/Local Only has no FreshService requester record/);
+    expect(fsClientMock.updateTicketFields).not.toHaveBeenCalled();
+    expect(prismaMock.ticket.update).not.toHaveBeenCalled();
+  });
+
+  test('requester echo mismatch (FS kept the old requester) → rejected, nothing local', async () => {
+    prismaMock.requester.findUnique.mockResolvedValue({ id: 41, name: 'Nadia New', email: 'nadia@example.com', freshserviceId: BigInt(1002090777) });
+    fsClientMock.updateTicketFields.mockResolvedValue({ requester_id: 1002090001, updated_at: '2026-08-30T10:00:00Z' });
+    await expect(ticketService.updateFsTicket(601, 1, { requesterId: 41 }, actor))
+      .rejects.toThrow(/did not accept: requester/);
+    expect(prismaMock.ticket.update).not.toHaveBeenCalled();
+  });
+
+  test('a too-short subject is refused before any FS call; the current subject is a no-op', async () => {
+    await expect(ticketService.updateFsTicket(601, 1, { subject: 'ab' }, actor)).rejects.toThrow(ValidationError);
+    expect(fsClientMock.updateTicketFields).not.toHaveBeenCalled();
+    const result = await ticketService.updateFsTicket(601, 1, { subject: 'Payment receipt' }, actor);
+    expect(result.noChanges).toBe(true);
+  });
+});
+
+describe('ticketService.updateFsTicket — leaving a terminal status (Phase MB5)', () => {
+  const closedFsTicket = {
+    id: 601,
+    workspaceId: 1,
+    origin: 'freshservice',
+    freshserviceTicketId: BigInt(231309),
+    subject: 'Payment receipt',
+    status: 'Closed',
+    priority: 3,
+    createdAt: new Date('2026-08-01T10:00:00Z'),
+    assignedTechId: 3,
+    requesterId: 40,
+    resolvedAt: new Date('2026-08-02T10:00:00Z'),
+    closedAt: new Date('2026-08-03T10:00:00Z'),
+    resolutionTimeSeconds: 86400,
+    internalCategoryId: null,
+    internalSubcategoryId: null,
+    requester: { id: 40, name: 'Rita Requester', email: 'rita@example.com' },
+    assignedTech: { id: 3, name: 'Ava Original' },
+    internalCategory: null,
+    internalSubcategory: null,
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prismaMock.workspace.findUnique.mockResolvedValue({ id: 1, name: 'IT', isActive: true, tpSkillCustomField: 'tp_skill', tpSubskillCustomField: 'tp_subskill' });
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...closedFsTicket });
+    prismaMock.ticket.update.mockImplementation(({ data }) => Promise.resolve({ ...closedFsTicket, ...data }));
+    prismaMock.ticketAssignmentEpisode.create.mockResolvedValue({ id: 9 });
+    ticketActivityRepositoryMock.create.mockResolvedValue({});
+  });
+
+  test('Closed → Pending (board reopen) nulls resolvedAt/closedAt/resolutionTimeSeconds and opens a reopen episode', async () => {
+    fsClientMock.updateTicketFields.mockResolvedValue({ status: 3, updated_at: '2026-08-30T10:00:00Z' });
+
+    await ticketService.updateFsTicket(601, 1, { status: 'Pending' }, actor);
+
+    expect(fsClientMock.updateTicketFields).toHaveBeenCalledWith(231309, { status: 3 });
+    expect(prismaMock.ticket.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'Pending', resolvedAt: null, closedAt: null, resolutionTimeSeconds: null }),
+    }));
+    expect(prismaMock.ticketAssignmentEpisode.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ ticketId: 601, technicianId: 3, workspaceId: 1, startMethod: 'unknown', startAssignedByName: 'Cora Coordinator' }),
+    }));
+  });
+
+  test('reopening an UNASSIGNED ticket clears the stamps but opens no episode', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...closedFsTicket, assignedTechId: null, assignedTech: null });
+    prismaMock.ticket.update.mockImplementation(({ data }) => Promise.resolve({ ...closedFsTicket, assignedTechId: null, ...data }));
+    fsClientMock.updateTicketFields.mockResolvedValue({ status: 2, updated_at: '2026-08-30T10:00:00Z' });
+    await ticketService.updateFsTicket(601, 1, { status: 'Open' }, actor);
+    expect(prismaMock.ticket.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ resolvedAt: null, closedAt: null, resolutionTimeSeconds: null }),
+    }));
+    expect(prismaMock.ticketAssignmentEpisode.create).not.toHaveBeenCalled();
+  });
+
+  test('Resolved → Closed (terminal → terminal) keeps the stamps; Open → Resolved still stamps resolvedAt', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...closedFsTicket, status: 'Resolved', closedAt: null });
+    fsClientMock.updateTicketFields.mockResolvedValue({ status: 5, updated_at: '2026-08-30T10:00:00Z' });
+    await ticketService.updateFsTicket(601, 1, { status: 'Closed' }, actor);
+    let { data } = prismaMock.ticket.update.mock.calls[0][0];
+    expect(data.resolvedAt).toBeUndefined();
+    expect(data.resolutionTimeSeconds).toBeUndefined();
+    expect(prismaMock.ticketAssignmentEpisode.create).not.toHaveBeenCalled();
+
+    jest.clearAllMocks();
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...closedFsTicket, status: 'Open', resolvedAt: null, closedAt: null, resolutionTimeSeconds: null });
+    prismaMock.ticket.update.mockImplementation(({ data: d }) => Promise.resolve({ ...closedFsTicket, status: 'Open', ...d }));
+    fsClientMock.updateTicketFields.mockResolvedValue({ status: 4, updated_at: '2026-08-30T10:00:00Z' });
+    await ticketService.updateFsTicket(601, 1, { status: 'Resolved' }, actor);
+    ({ data } = prismaMock.ticket.update.mock.calls[0][0]);
+    expect(data.resolvedAt).toEqual(expect.any(Date));
+    expect(data.closedAt).toBeUndefined();
+  });
+
+  test('FS refusing the reopen (echo keeps Closed) → nothing local, no episode', async () => {
+    fsClientMock.updateTicketFields.mockResolvedValue({ status: 5, updated_at: '2026-08-30T10:00:00Z' });
+    await expect(ticketService.updateFsTicket(601, 1, { status: 'Pending' }, actor))
+      .rejects.toThrow(/did not accept: status \(FS kept Closed\)/);
+    expect(prismaMock.ticket.update).not.toHaveBeenCalled();
+    expect(prismaMock.ticketAssignmentEpisode.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('status transitions — regression lock (Phase MB6): no transition is forbidden', () => {
+  const nativeTicket = {
+    id: 501, workspaceId: 1, origin: 'ticketpulse', nativeNumber: 1042, freshserviceTicketId: null,
+    subject: 'Laptop will not boot', priority: 3, createdAt: new Date('2026-08-01T10:00:00Z'), assignedTechId: null,
+    requester: { id: 40, name: 'Rita Requester', email: 'rita@example.com' }, assignedTech: null,
+  };
+  const STAMPED = { resolvedAt: new Date('2026-08-02T10:00:00Z'), closedAt: new Date('2026-08-03T10:00:00Z'), resolutionTimeSeconds: 100 };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prismaMock.ticket.update.mockImplementation(({ data }) => Promise.resolve({ ...nativeTicket, ...data }));
+    prismaMock.ticketAssignmentEpisode.updateMany.mockResolvedValue({ count: 0 });
+    ticketActivityRepositoryMock.create.mockResolvedValue({});
+    lifecycleMock.emitTicketLifecycleNotifications.mockResolvedValue({ status: 'completed' });
+  });
+
+  test('every ordered pair of the canonical 4 (incl. Closed → Pending, Closed → Open, Resolved → Open) is accepted by changeStatus', async () => {
+    const STATUSES = ['Open', 'Pending', 'Resolved', 'Closed'];
+    for (const from of STATUSES) {
+      for (const to of STATUSES) {
+        if (from === to) continue;
+        prismaMock.ticket.update.mockClear();
+        const terminal = ['Resolved', 'Closed'].includes(from);
+        prismaMock.ticket.findFirst.mockResolvedValue({ ...nativeTicket, status: from, ...(terminal ? STAMPED : { resolvedAt: null, closedAt: null, resolutionTimeSeconds: null }) });
+        const result = await ticketService.changeStatus(501, 1, to, actor);
+        expect(result.changed).toBe(true);
+        const { data } = prismaMock.ticket.update.mock.calls[0][0];
+        expect(data.status).toBe(to);
+        if (terminal && !['Resolved', 'Closed'].includes(to)) {
+          expect(data).toMatchObject({ resolvedAt: null, closedAt: null, resolutionTimeSeconds: null });
+        }
+      }
+    }
+  });
+});

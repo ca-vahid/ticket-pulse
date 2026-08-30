@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, GitMerge, Loader2, Search, Sparkles, X } from 'lucide-react';
 import { ticketsAPI } from '../../services/api';
 import { StatusPill, formatDay } from './ticketUi';
+import { baseStatusOf, isTerminalStatus } from './statusDefs';
+// Survivor rules shared with the detail header's Merge button (Phase MB1/MB2).
+import { mergeSurvivorBlockedReason } from './mergeRules';
 
 // List rows carry displayRef from the server; the detail ticket may not.
 const refOf = (t) => t?.displayRef
@@ -17,7 +20,7 @@ const refOf = (t) => t?.displayRef
  * tickets can be folded IN as sources — their conversation is copied and the
  * FreshService ticket is closed with a pointer note (QA 07-16 #5).
  */
-export default function MergeTicketsModal({ ticket, onClose, onMerged }) {
+export default function MergeTicketsModal({ ticket, onClose, onMerged, statusDefs = null }) {
   const [candidates, setCandidates] = useState(null); // [{...ticket, why}]
   const [query, setQuery] = useState('');
   const [searching, setSearching] = useState(false);
@@ -38,9 +41,14 @@ export default function MergeTicketsModal({ ticket, onClose, onMerged }) {
     return () => document.removeEventListener('keydown', onKey);
   }, [busy, onClose]);
 
-  // Sources may be TP- or FS-born; only the surviving primary must be TP-born.
-  const isMergeable = (t) => ['Open', 'Pending'].includes(t.status) && t.id !== ticket.id;
+  // Sources may be TP- or FS-born and in ANY status except Deleted/Spam —
+  // exactly the service's source rule (Phase MB2; was Open/Pending only,
+  // compared on raw labels so custom Pending-base statuses were invisible).
+  // Only the surviving primary must be a TP-born Open/Pending ticket.
+  const isMergeable = (t) => t.id !== ticket.id && !['Deleted', 'Spam'].includes(t.status)
+    && !['Deleted', 'Spam'].includes(baseStatusOf(statusDefs, t.status));
   const isFsBorn = (t) => t.origin !== 'ticketpulse';
+  const isTerminal = (t) => isTerminalStatus(statusDefs, t.status);
 
   // Pre-suggestions: near-duplicates (same subject / similar content) plus the
   // requester's other open TP-born tickets. Suggested rows come pre-checked
@@ -63,7 +71,8 @@ export default function MergeTicketsModal({ ticket, onClose, onMerged }) {
       } catch { /* suggestions are best-effort */ }
       try {
         if (ticket.requester?.id) {
-          const res = await ticketsAPI.list({ requesterId: ticket.requester.id, status: 'Open,Pending', pageSize: 10 });
+          // No status filter: the service accepts any non-Deleted/Spam source.
+          const res = await ticketsAPI.list({ requesterId: ticket.requester.id, pageSize: 10 });
           for (const t of res?.data?.items || []) {
             if (isMergeable(t) && !seen.has(t.id)) { seen.add(t.id); out.push({ ...t, why: 'same requester' }); }
           }
@@ -89,7 +98,7 @@ export default function MergeTicketsModal({ ticket, onClose, onMerged }) {
     const timer = setTimeout(async () => {
       setSearching(true);
       try {
-        const res = await ticketsAPI.list({ q, status: 'Open,Pending', pageSize: 8 });
+        const res = await ticketsAPI.list({ q, pageSize: 8 });
         setSearchResults((res?.data?.items || []).filter((t) => isMergeable(t)));
       } catch { setSearchResults([]); }
       setSearching(false);
@@ -112,7 +121,8 @@ export default function MergeTicketsModal({ ticket, onClose, onMerged }) {
   const group = useMemo(() => [...selected.values()].sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0)), [selected]);
   const secondaries = group.filter((t) => t.id !== primaryId);
   const primary = group.find((t) => t.id === primaryId);
-  const canMerge = group.length >= 2 && !!primary && !isFsBorn(primary);
+  const primaryBlocked = primary ? mergeSurvivorBlockedReason(primary, statusDefs) : null;
+  const canMerge = group.length >= 2 && !!primary && !primaryBlocked;
 
   const doMerge = useCallback(async () => {
     setBusy(true); setError(null);
@@ -148,6 +158,9 @@ export default function MergeTicketsModal({ ticket, onClose, onMerged }) {
             {refOf(t)}
             {t.createdAt ? ` · ${formatDay(t.createdAt)}` : ''}
             {why && <span className="ml-1 inline-flex items-center gap-0.5 text-violet-500"><Sparkles className="h-3 w-3" aria-hidden="true" />{why}</span>}
+            {isTerminal(t) && (
+              <span className="ml-1 text-slate-400" data-testid="merge-terminal-note">· {baseStatusOf(statusDefs, t.status) === 'Resolved' ? 'Resolved' : 'Closed'} — will be folded in as-is</span>
+            )}
           </span>
         </span>
         {isFsBorn(t) && (
@@ -227,8 +240,8 @@ export default function MergeTicketsModal({ ticket, onClose, onMerged }) {
                       name="merge-primary"
                       checked={primaryId === t.id}
                       onChange={() => setPrimaryId(t.id)}
-                      disabled={isFsBorn(t)}
-                      title={isFsBorn(t) ? 'FreshService owns this ticket’s conversation — it can be folded in, but the survivor must be a Ticket Pulse ticket' : undefined}
+                      disabled={Boolean(mergeSurvivorBlockedReason(t, statusDefs))}
+                      title={mergeSurvivorBlockedReason(t, statusDefs) || undefined}
                       aria-label={`Keep ${refOf(t)} as the primary`}
                       className="tp-focus-ring h-4 w-4 disabled:opacity-40"
                     />
@@ -238,9 +251,11 @@ export default function MergeTicketsModal({ ticket, onClose, onMerged }) {
                         {refOf(t)}
                         {primaryId === t.id
                           ? ' · stays open, receives every conversation'
-                          : isFsBorn(t)
-                            ? ' · will be closed in FreshService with a pointer note'
-                            : ' · will be closed with a pointer note'}
+                          : isTerminal(t)
+                            ? ' · already closed — folded in as-is with a pointer note'
+                            : isFsBorn(t)
+                              ? ' · will be closed in FreshService with a pointer note'
+                              : ' · will be closed with a pointer note'}
                       </span>
                     </span>
                   </li>
@@ -265,8 +280,8 @@ export default function MergeTicketsModal({ ticket, onClose, onMerged }) {
           <p className="text-xs text-slate-400">
             {canMerge
               ? `${secondaries.length} ticket${secondaries.length === 1 ? '' : 's'} → ${refOf(primary || ticket)} · cannot be undone`
-              : group.length >= 2 && primary && isFsBorn(primary)
-                ? 'Pick a Ticket Pulse ticket as the survivor'
+              : group.length >= 2 && primaryBlocked
+                ? (isFsBorn(primary) ? 'Pick a Ticket Pulse ticket as the survivor' : 'Pick an Open or Pending ticket as the survivor')
                 : 'Select at least one other ticket'}
           </p>
           <div className="flex gap-2">

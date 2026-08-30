@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.8.00-preview';
+export const APP_VERSION = '3.8.01-preview';
 
 export const changelog = [
+  {
+    version: '3.8.01-preview',
+    date: 'August 30, 2026',
+    entries: [
+      { type: 'new', html: '<strong>✏️ Edit ticket — requester, subject, description</strong> — an Edit button in the ticket header (like FreshService’s) opens a dialog to change the requester (typeahead), subject, and rich-text description. Works on Ticket-Pulse-born tickets directly and on FreshService-born tickets through the usual “FreshService owns this” confirm + write-back. The inline pencils stay; the description editor now keeps formatting. (QA 08-27 #1)' },
+      { type: 'improved', html: '<strong>🔗 Merge is always visible — and says why when it can’t</strong> — the button no longer vanishes: on FreshService-born or closed tickets it’s disabled with the reason (FreshService owns that ticket’s conversation / reopen first). The merge dialog now lists resolved/closed duplicates too, so they can be folded in. (QA 08-27 #7)' },
+      { type: 'fixed', html: '<strong>📋 Board: dragging Closed → Pending works</strong> — the reopen always worked on the server; the board was silently swallowing failures and, on success, refetching with your “closed” filter so the reopened card vanished. Failures now show a red toast with the real reason, a reopened card stays visible (the filter widens), and FreshService-born reopens correctly clear the resolved timestamps. (QA 08-27 #6)' },
+    ],
+  },
   {
     version: '3.8.00-preview',
     date: 'August 30, 2026',
