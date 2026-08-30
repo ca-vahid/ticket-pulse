@@ -15,7 +15,7 @@ export default function DemoModeBanner() {
       role="status"
       aria-live="polite"
     >
-      <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-500/95 text-white text-xs font-semibold shadow-lg ring-1 ring-amber-600">
+      <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-500/95 text-white text-xs font-semibold shadow-lg ring-1 ring-amber-600 dark:ring-amber-300/50 dark:shadow-black/50">
         <Camera className="w-3.5 h-3.5" />
         DEMO MODE - identities anonymized
       </div>

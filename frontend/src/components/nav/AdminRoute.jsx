@@ -6,10 +6,10 @@ import { ACCESS_BOUNCE_KEY, isWorkspaceAdmin, useWorkspaceRole } from './navDest
 
 export function LoadingScreen({ label = 'Loading...' }) {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100">
+    <div className="min-h-screen flex items-center justify-center bg-background">
       <div className="text-center">
         <Activity className="w-12 h-12 animate-spin mx-auto mb-4 text-blue-600" />
-        <p className="text-gray-600">{label}</p>
+        <p className="text-muted-foreground">{label}</p>
       </div>
     </div>
   );

@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { WorkspaceProvider, useWorkspace } from './contexts/WorkspaceContext';
 import { DashboardProvider } from './contexts/DashboardContext';
 import { SettingsProvider } from './contexts/SettingsContext';
+import { ThemeProvider } from './contexts/ThemeContext';
 import Login from './pages/Login';
 import WorkspacePicker from './pages/WorkspacePicker';
 import Dashboard from './pages/Dashboard';
@@ -130,295 +131,297 @@ function AuthCallback() {
 
 function App() {
   return (
-    <BrowserRouter>
-      <AuthProvider>
-        <WorkspaceProvider>
-          <DashboardProvider>
-            <SettingsProvider>
-              {/* Top-level crash guard (QA 08-07 #10): a render throw anywhere
+    <ThemeProvider>
+      <BrowserRouter>
+        <AuthProvider>
+          <WorkspaceProvider>
+            <DashboardProvider>
+              <SettingsProvider>
+                {/* Top-level crash guard (QA 08-07 #10): a render throw anywhere
                   in the routed tree shows a recoverable fallback card instead
                   of white-screening ("the page refreshed itself"). */}
-              <ErrorBoundary>
-                <Routes>
-                  {/* Public Routes */}
-                  <Route
-                    path="/login"
-                    element={
-                      <PublicRoute>
-                        <Login />
-                      </PublicRoute>
-                    }
-                  />
+                <ErrorBoundary>
+                  <Routes>
+                    {/* Public Routes */}
+                    <Route
+                      path="/login"
+                      element={
+                        <PublicRoute>
+                          <Login />
+                        </PublicRoute>
+                      }
+                    />
 
-                  {/* Workspace Selection (authenticated but no workspace yet) */}
-                  <Route
-                    path="/workspace"
-                    element={
-                      <WorkspacePicker />
-                    }
-                  />
+                    {/* Workspace Selection (authenticated but no workspace yet) */}
+                    <Route
+                      path="/workspace"
+                      element={
+                        <WorkspacePicker />
+                      }
+                    />
 
-                  <Route
-                    path="/summit/vote/:token"
-                    element={<SummitVote />}
-                  />
+                    <Route
+                      path="/summit/vote/:token"
+                      element={<SummitVote />}
+                    />
 
-                  <Route
-                    path="/summit/report/:token"
-                    element={<SummitReport />}
-                  />
+                    <Route
+                      path="/summit/report/:token"
+                      element={<SummitReport />}
+                    />
 
-                  <Route
-                    path="/ticket-status/:token"
-                    element={<PublicTicketStatus />}
-                  />
+                    <Route
+                      path="/ticket-status/:token"
+                      element={<PublicTicketStatus />}
+                    />
 
-                  <Route
-                    path="/ticket-escalation/:token"
-                    element={<PublicTicketEscalation />}
-                  />
+                    <Route
+                      path="/ticket-escalation/:token"
+                      element={<PublicTicketEscalation />}
+                    />
 
-                  <Route
-                    path="/ticket-urgency/:token"
-                    element={<PublicTicketUrgency />}
-                  />
+                    <Route
+                      path="/ticket-urgency/:token"
+                      element={<PublicTicketUrgency />}
+                    />
 
-                  <Route
-                    path="/feedback/:token"
-                    element={<PublicTicketFeedback />}
-                  />
+                    <Route
+                      path="/feedback/:token"
+                      element={<PublicTicketFeedback />}
+                    />
 
-                  <Route
-                    path="/approval/:token"
-                    element={<PublicApprovalDecision />}
-                  />
+                    <Route
+                      path="/approval/:token"
+                      element={<PublicApprovalDecision />}
+                    />
 
-                  <Route
-                    path="/my-competencies"
-                    element={
-                      <AgentRoute>
-                        <MyCompetencies />
-                      </AgentRoute>
-                    }
-                  />
+                    <Route
+                      path="/my-competencies"
+                      element={
+                        <AgentRoute>
+                          <MyCompetencies />
+                        </AgentRoute>
+                      }
+                    />
 
-                  <Route
-                    path="/notifications"
-                    element={
-                      <AgentRoute>
-                        <Notifications />
-                      </AgentRoute>
-                    }
-                  />
+                    <Route
+                      path="/notifications"
+                      element={
+                        <AgentRoute>
+                          <Notifications />
+                        </AgentRoute>
+                      }
+                    />
 
-                  {/* Native ticketing (agents are first-class here) */}
-                  <Route
-                    path="/tickets"
-                    element={
-                      <TicketsRoute>
-                        <Tickets />
-                      </TicketsRoute>
-                    }
-                  />
-                  <Route
-                    path="/tickets/new"
-                    element={
-                      <TicketsRoute>
-                        <TicketCreate />
-                      </TicketsRoute>
-                    }
-                  />
-                  <Route
-                    path="/approvals"
-                    element={
-                      <TicketsRoute>
-                        <ApprovalsInbox />
-                      </TicketsRoute>
-                    }
-                  />
-                  <Route
-                    path="/tickets/:id"
-                    element={
-                      <TicketsRoute>
-                        <TicketDetail />
-                      </TicketsRoute>
-                    }
-                  />
+                    {/* Native ticketing (agents are first-class here) */}
+                    <Route
+                      path="/tickets"
+                      element={
+                        <TicketsRoute>
+                          <Tickets />
+                        </TicketsRoute>
+                      }
+                    />
+                    <Route
+                      path="/tickets/new"
+                      element={
+                        <TicketsRoute>
+                          <TicketCreate />
+                        </TicketsRoute>
+                      }
+                    />
+                    <Route
+                      path="/approvals"
+                      element={
+                        <TicketsRoute>
+                          <ApprovalsInbox />
+                        </TicketsRoute>
+                      }
+                    />
+                    <Route
+                      path="/tickets/:id"
+                      element={
+                        <TicketsRoute>
+                          <TicketDetail />
+                        </TicketsRoute>
+                      }
+                    />
 
-                  {/* Admin-only routes (v3.7.02 role lockdown) */}
-                  <Route
-                    path="/dashboard"
-                    element={
-                      <AdminRoute>
-                        <Dashboard />
-                      </AdminRoute>
-                    }
-                  />
+                    {/* Admin-only routes (v3.7.02 role lockdown) */}
+                    <Route
+                      path="/dashboard"
+                      element={
+                        <AdminRoute>
+                          <Dashboard />
+                        </AdminRoute>
+                      }
+                    />
 
-                  <Route
-                    path="/technician/:id"
-                    element={
-                      <AdminRoute>
-                        <TechnicianDetailNew />
-                      </AdminRoute>
-                    }
-                  />
+                    <Route
+                      path="/technician/:id"
+                      element={
+                        <AdminRoute>
+                          <TechnicianDetailNew />
+                        </AdminRoute>
+                      }
+                    />
 
-                  <Route
-                    path="/settings"
-                    element={
-                      <AdminRoute>
-                        <Settings />
-                      </AdminRoute>
-                    }
-                  />
+                    <Route
+                      path="/settings"
+                      element={
+                        <AdminRoute>
+                          <Settings />
+                        </AdminRoute>
+                      }
+                    />
 
-                  <Route
-                    path="/visuals"
-                    element={
-                      <AdminRoute>
-                        <Visuals />
-                      </AdminRoute>
-                    }
-                  />
+                    <Route
+                      path="/visuals"
+                      element={
+                        <AdminRoute>
+                          <Visuals />
+                        </AdminRoute>
+                      }
+                    />
 
-                  <Route
-                    path="/timeline"
-                    element={
-                      <AdminRoute>
-                        <TimelineExplorer />
-                      </AdminRoute>
-                    }
-                  />
+                    <Route
+                      path="/timeline"
+                      element={
+                        <AdminRoute>
+                          <TimelineExplorer />
+                        </AdminRoute>
+                      }
+                    />
 
-                  <Route
-                    path="/analytics"
-                    element={
-                      <AdminRoute>
-                        <Analytics />
-                      </AdminRoute>
-                    }
-                  />
+                    <Route
+                      path="/analytics"
+                      element={
+                        <AdminRoute>
+                          <Analytics />
+                        </AdminRoute>
+                      }
+                    />
 
-                  <Route
-                    path="/analytics/category-map"
-                    element={
-                      <AdminRoute>
-                        <Analytics view="category-map" />
-                      </AdminRoute>
-                    }
-                  />
+                    <Route
+                      path="/analytics/category-map"
+                      element={
+                        <AdminRoute>
+                          <Analytics view="category-map" />
+                        </AdminRoute>
+                      }
+                    />
 
-                  <Route
-                    path="/workflows"
-                    element={
-                      <AdminRoute>
-                        <WorkflowsPage />
-                      </AdminRoute>
-                    }
-                  />
-                  <Route
-                    path="/workflows/:tab"
-                    element={
-                      <AdminRoute>
-                        <WorkflowsPage />
-                      </AdminRoute>
-                    }
-                  />
+                    <Route
+                      path="/workflows"
+                      element={
+                        <AdminRoute>
+                          <WorkflowsPage />
+                        </AdminRoute>
+                      }
+                    />
+                    <Route
+                      path="/workflows/:tab"
+                      element={
+                        <AdminRoute>
+                          <WorkflowsPage />
+                        </AdminRoute>
+                      }
+                    />
 
-                  <Route
-                    path="/summit-taxonomy"
-                    element={
-                      <AdminRoute>
-                        <SummitTaxonomyWorkshop />
-                      </AdminRoute>
-                    }
-                  />
+                    <Route
+                      path="/summit-taxonomy"
+                      element={
+                        <AdminRoute>
+                          <SummitTaxonomyWorkshop />
+                        </AdminRoute>
+                      }
+                    />
 
-                  <Route
-                    path="/assignments"
-                    element={
-                      <AdminRoute>
-                        <AssignmentReview />
-                      </AdminRoute>
-                    }
-                  />
-                  <Route
-                    path="/assignments/:tab"
-                    element={
-                      <AdminRoute>
-                        <AssignmentReview />
-                      </AdminRoute>
-                    }
-                  />
-                  <Route
-                    path="/assignments/run/:runId"
-                    element={
-                      <AdminRoute>
-                        <AssignmentReview />
-                      </AdminRoute>
-                    }
-                  />
-                  <Route
-                    path="/assignments/history/:historyRunId"
-                    element={
-                      <AdminRoute>
-                        <AssignmentReview />
-                      </AdminRoute>
-                    }
-                  />
-                  <Route
-                    path="/assignments/live/:ticketId"
-                    element={
-                      <AdminRoute>
-                        <AssignmentReview />
-                      </AdminRoute>
-                    }
-                  />
-                  <Route
-                    path="/assignments/competency-run/:competencyRunId"
-                    element={
-                      <AdminRoute>
-                        <AssignmentReview />
-                      </AdminRoute>
-                    }
-                  />
-                  <Route
-                    path="/assignments/competency-live/:analyzeTechId"
-                    element={
-                      <AdminRoute>
-                        <AssignmentReview />
-                      </AdminRoute>
-                    }
-                  />
+                    <Route
+                      path="/assignments"
+                      element={
+                        <AdminRoute>
+                          <AssignmentReview />
+                        </AdminRoute>
+                      }
+                    />
+                    <Route
+                      path="/assignments/:tab"
+                      element={
+                        <AdminRoute>
+                          <AssignmentReview />
+                        </AdminRoute>
+                      }
+                    />
+                    <Route
+                      path="/assignments/run/:runId"
+                      element={
+                        <AdminRoute>
+                          <AssignmentReview />
+                        </AdminRoute>
+                      }
+                    />
+                    <Route
+                      path="/assignments/history/:historyRunId"
+                      element={
+                        <AdminRoute>
+                          <AssignmentReview />
+                        </AdminRoute>
+                      }
+                    />
+                    <Route
+                      path="/assignments/live/:ticketId"
+                      element={
+                        <AdminRoute>
+                          <AssignmentReview />
+                        </AdminRoute>
+                      }
+                    />
+                    <Route
+                      path="/assignments/competency-run/:competencyRunId"
+                      element={
+                        <AdminRoute>
+                          <AssignmentReview />
+                        </AdminRoute>
+                      }
+                    />
+                    <Route
+                      path="/assignments/competency-live/:analyzeTechId"
+                      element={
+                        <AdminRoute>
+                          <AssignmentReview />
+                        </AdminRoute>
+                      }
+                    />
 
-                  {/* Auth callback */}
-                  <Route
-                    path="/auth/callback"
-                    element={<AuthCallback />}
-                  />
+                    {/* Auth callback */}
+                    <Route
+                      path="/auth/callback"
+                      element={<AuthCallback />}
+                    />
 
-                  {/* Default Route */}
-                  <Route path="/" element={<HomeRedirect />} />
+                    {/* Default Route */}
+                    <Route path="/" element={<HomeRedirect />} />
 
-                  {/* 404 Catch-all */}
-                  <Route path="*" element={<HomeRedirect />} />
-                </Routes>
-              </ErrorBoundary>
-              <DemoModeBanner />
-              {/* Admin health banners share one bottom-left stack so email +
+                    {/* 404 Catch-all */}
+                    <Route path="*" element={<HomeRedirect />} />
+                  </Routes>
+                </ErrorBoundary>
+                <DemoModeBanner />
+                {/* Admin health banners share one bottom-left stack so email +
                   stale-sync warnings never overlap each other. */}
-              <div className="fixed bottom-3 left-3 z-[9998] flex flex-col gap-2">
-                <SyncHealthBanner />
-                <EmailHealthBanner />
-              </div>
-              <AccessBounceToast />
-              <CommandPalette />
-            </SettingsProvider>
-          </DashboardProvider>
-        </WorkspaceProvider>
-      </AuthProvider>
-    </BrowserRouter>
+                <div className="fixed bottom-3 left-3 z-[9998] flex flex-col gap-2">
+                  <SyncHealthBanner />
+                  <EmailHealthBanner />
+                </div>
+                <AccessBounceToast />
+                <CommandPalette />
+              </SettingsProvider>
+            </DashboardProvider>
+          </WorkspaceProvider>
+        </AuthProvider>
+      </BrowserRouter>
+    </ThemeProvider>
   );
 }
 

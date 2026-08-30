@@ -39,15 +39,15 @@ const NAV_ITEMS = [
 ];
 
 const STATUS_STYLES = {
-  Open: 'bg-blue-50 text-blue-700',
-  Pending: 'bg-amber-50 text-amber-700',
-  Resolved: 'bg-emerald-50 text-emerald-700',
-  Closed: 'bg-slate-100 text-slate-500',
+  Open: 'bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-200',
+  Pending: 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200',
+  Resolved: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200',
+  Closed: 'bg-muted text-muted-foreground',
 };
 
 // Task lifecycle chips (ticket_tasks.status → label + tint).
 const TASK_STATUS = {
-  open: { label: 'Open', style: 'bg-blue-50 text-blue-700' },
+  open: { label: 'Open', style: 'bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-200' },
   in_progress: { label: 'In progress', style: 'bg-amber-50 text-amber-700' },
   done: { label: 'Done', style: 'bg-emerald-50 text-emerald-700' },
 };
@@ -377,15 +377,15 @@ export default function CommandPalette() {
   let lastSection = null;
   return (
     <div
-      className="fixed inset-0 z-[70] flex items-start justify-center pt-[14vh] px-4 bg-slate-900/30 backdrop-blur-[2px] animate-fadeIn"
+      className="fixed inset-0 z-[70] flex items-start justify-center pt-[14vh] px-4 bg-slate-900/30 dark:bg-black/60 backdrop-blur-[2px] animate-fadeIn"
       onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}
       role="dialog"
       aria-modal="true"
       aria-label="Command palette"
     >
       <div className="tp-card w-full max-w-xl rounded-xl shadow-soft overflow-hidden animate-scaleIn">
-        <div className="flex items-center gap-2 px-3.5 py-3 border-b border-slate-100">
-          <Search className="w-4 h-4 text-slate-400 shrink-0" aria-hidden="true" />
+        <div className="flex items-center gap-2 px-3.5 py-3 border-b border-border">
+          <Search className="w-4 h-4 text-muted-foreground shrink-0" aria-hidden="true" />
           <input
             ref={inputRef}
             value={query}
@@ -397,10 +397,10 @@ export default function CommandPalette() {
             aria-expanded="true"
             aria-controls="tp-palette-list"
             aria-activedescendant={items[activeIndex]?.id || undefined}
-            className="flex-1 min-w-0 bg-transparent text-sm text-slate-800 placeholder:text-slate-400 outline-none"
+            className="flex-1 min-w-0 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none"
           />
-          {searching && <Loader2 className="w-4 h-4 text-slate-300 animate-spin shrink-0" aria-hidden="true" />}
-          <kbd className="hidden sm:inline-flex items-center gap-0.5 text-[10px] font-mono text-slate-400 border border-slate-200 rounded px-1 py-0.5">esc</kbd>
+          {searching && <Loader2 className="w-4 h-4 text-muted-foreground/70 animate-spin shrink-0" aria-hidden="true" />}
+          <kbd className="hidden sm:inline-flex items-center gap-0.5 text-[10px] font-mono text-muted-foreground border border-border rounded px-1 py-0.5">esc</kbd>
         </div>
 
         {/* Entity scope pills (QA 08-04 #2) — All keeps commands + every
@@ -408,7 +408,7 @@ export default function CommandPalette() {
         <div
           role="group"
           aria-label="Search scope"
-          className="flex items-center gap-1 px-3.5 py-2 border-b border-slate-100 overflow-x-auto"
+          className="flex items-center gap-1 px-3.5 py-2 border-b border-border overflow-x-auto"
         >
           {SCOPES.map((s) => (
             <button
@@ -418,8 +418,8 @@ export default function CommandPalette() {
               onClick={() => { setScope(s.id); inputRef.current?.focus(); }}
               className={`tp-focus-ring shrink-0 px-2.5 py-1 rounded-full text-[11px] font-semibold transition-colors ${
                 scope === s.id
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-muted text-muted-foreground hover:bg-secondary hover:text-foreground'
               }`}
             >
               {s.label}
@@ -428,12 +428,12 @@ export default function CommandPalette() {
         </div>
 
         {actionError && (
-          <p className="px-4 py-2 text-xs text-red-600 bg-red-50 border-b border-red-100">{actionError}</p>
+          <p className="px-4 py-2 text-xs text-red-600 bg-red-50 border-b border-red-100 dark:text-red-300 dark:bg-red-500/10 dark:border-red-400/30">{actionError}</p>
         )}
 
         <ul id="tp-palette-list" role="listbox" aria-label="Results" className="max-h-[46vh] overflow-y-auto settings-scrollbar py-1.5">
           {items.length === 0 && (
-            <li className="px-4 py-6 text-center text-sm text-slate-400">
+            <li className="px-4 py-6 text-center text-sm text-muted-foreground">
               {query.trim().length >= 2 && !searching
                 ? 'No matches.'
                 : scope === 'all'
@@ -447,7 +447,7 @@ export default function CommandPalette() {
             return (
               <li key={item.id} role="presentation">
                 {showSection && (
-                  <p className="px-4 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">{item.section}</p>
+                  <p className="px-4 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">{item.section}</p>
                 )}
                 <button
                   id={item.id}
@@ -456,18 +456,18 @@ export default function CommandPalette() {
                   onMouseEnter={() => setActiveIndex(idx)}
                   onClick={() => item.run()}
                   className={`w-full flex items-center gap-2.5 px-4 py-2 text-left text-sm ${
-                    idx === activeIndex ? 'bg-blue-50 text-blue-900' : 'text-slate-700'
+                    idx === activeIndex ? 'bg-accent text-accent-foreground' : 'text-foreground'
                   }`}
                 >
                   {actionBusy && item.busyKey === actionBusy
                     ? <Loader2 className="w-4 h-4 shrink-0 animate-spin text-blue-500" aria-hidden="true" />
-                    : <item.Icon className={`w-4 h-4 shrink-0 ${idx === activeIndex ? 'text-blue-500' : 'text-slate-400'}`} aria-hidden="true" />}
+                    : <item.Icon className={`w-4 h-4 shrink-0 ${idx === activeIndex ? 'text-primary' : 'text-muted-foreground'}`} aria-hidden="true" />}
                   <span className="min-w-0 flex-1">
                     <span className="block truncate font-medium">{item.label}</span>
-                    {item.sub && <span className="block truncate text-[11px] text-slate-400">{item.sub}</span>}
+                    {item.sub && <span className="block truncate text-[11px] text-muted-foreground">{item.sub}</span>}
                   </span>
                   {item.status && (
-                    <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold ${item.statusStyle || 'bg-slate-100 text-slate-500'}`}>
+                    <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold ${item.statusStyle || 'bg-muted text-muted-foreground'}`}>
                       {item.status}
                     </span>
                   )}
@@ -477,7 +477,7 @@ export default function CommandPalette() {
           })}
         </ul>
 
-        <div className="flex items-center gap-3 px-4 py-2 border-t border-slate-100 text-[10px] text-slate-400">
+        <div className="flex items-center gap-3 px-4 py-2 border-t border-border text-[10px] text-muted-foreground">
           <span className="inline-flex items-center gap-1"><Command className="w-3 h-3" aria-hidden="true" />K to toggle</span>
           <span>↑↓ navigate</span>
           <span>↵ select</span>

@@ -25,6 +25,7 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 - Axios for HTTP
 - Context API + useReducer (state management)
 - Server-Sent Events (SSE) for real-time updates
+- Theming (v3.8.02, dark mode Early access): class-driven — `darkMode: 'class'`, `.dark` on `<html>` stamped by `contexts/ThemeContext.jsx` (system/light/dark; matchMedia follow) and by an inline pre-paint script in `index.html` (no white flash). Every HSL token in `src/index.css` is redefined under `.dark`; the `.tp-card/.tp-surface/.tp-glass*` utilities carry dark recipes. **Convention: use tokens, not `slate-*`** (`bg-card`, `text-foreground`, `text-muted-foreground`, `border-border`, `bg-muted`); `dark:` twins only for accent tints with no token. Persistence: localStorage `tp_theme` is authoritative, `ui.theme` in the per-user preference store (`PREFERENCE_KEYS`, validated to the three strings) is cross-device seeding only. Guard: `npm run lint:dark --prefix frontend`. Not yet converted: Tickets pages, Dashboard/Settings/Analytics content, modals, charts, map — a scoped "readability net" in index.css keeps their legacy slate text legible inside dark panels until DM-B; Login + public token pages stay light by design.
 
 **Infrastructure:**
 - Azure App Service (hosting)

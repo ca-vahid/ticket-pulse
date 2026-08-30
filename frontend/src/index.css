@@ -4,6 +4,12 @@
 
 @layer base {
   :root {
+    /* Light is the canonical theme; `.dark` on <html> (ThemeContext + the
+       index.html pre-paint script) swaps every token below. Class-driven, so
+       color-scheme is pinned per theme rather than `light dark` — an explicit
+       Light choice under an OS dark preference must keep light form controls
+       and scrollbars. */
+    color-scheme: light;
     --background: 210 40% 98%;
     --foreground: 222 47% 11%;
     --card: 0 0% 100%;
@@ -41,6 +47,49 @@
     /* Simple style (QA 07-30 #8): plain numbers under full-word two-line headers. */
     --tp-compact-grid-weekly-simple: 28px minmax(220px, 1.5fr) minmax(280px, 1.3fr) 64px 92px 82px 108px 76px 72px 84px;
     --tp-compact-grid-daily-simple: 28px 250px 76px 76px 92px 82px 108px 76px 72px minmax(84px, 1fr);
+  }
+
+  /* Dark theme (Phase DM-A, v3.8.02 — Early access). Same product at night:
+     a deep blue-slate ground (950/900 mix), slate-900 cards one step lighter,
+     slate-100 text, slate-400 secondary text, and the brand blue lifted two
+     steps so it still reads on the dark card. Measured (WCAG relative
+     luminance, see qa/evidence-0830/phaseDMA/FINDINGS.md):
+       foreground on card 15.98 : 1 · muted-foreground on card 7.50 : 1
+       border vs card 1.57 : 1 · primary on card 3.83 : 1 · white on primary 4.57 : 1 */
+  .dark {
+    color-scheme: dark;
+    --background: 222 47% 7%;
+    --foreground: 210 40% 96%;
+    --card: 222 42% 12%;
+    --card-foreground: 210 40% 96%;
+    --primary: 219 88% 55%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 217 33% 17%;
+    --secondary-foreground: 210 40% 96%;
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20% 68%;
+    --accent: 221 50% 20%;
+    --accent-foreground: 213 94% 84%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 216 26% 25%;
+    --input: 216 26% 28%;
+    --ring: 217 91% 60%;
+    --success: 158 64% 48%;
+    --warning: 38 92% 55%;
+    --danger: 0 84% 62%;
+    --surface: 222 42% 12%;
+    --surface-muted: 222 38% 15%;
+  }
+
+  /* High-contrast preference: lift the dark dividers and secondary text so
+     card edges and captions never sink into the ground. */
+  @media (prefers-contrast: more) {
+    .dark {
+      --border: 216 26% 38%;
+      --input: 216 26% 42%;
+      --muted-foreground: 215 20% 80%;
+    }
   }
 
   /* ≤1536px (laptops): tighten name/heatmap minimums and metric columns. */
@@ -99,6 +148,24 @@ code {
   .tp-page-backdrop {
     background:
       linear-gradient(180deg, rgb(248 250 252) 0%, rgb(241 245 249) 44%, rgb(248 250 252) 100%);
+  }
+  /* Night: the DM0 dark panel art under a near-opaque slate veil — texture,
+     not a picture, so the eye stays on the cards. */
+  .dark .tp-page-backdrop {
+    background:
+      linear-gradient(180deg, hsl(222 47% 7% / 0.84) 0%, hsl(222 45% 9% / 0.90) 44%, hsl(222 47% 7% / 0.94) 100%),
+      url('/brand/panel-background-dark.webp') center / cover no-repeat fixed;
+  }
+
+  /* AppShell ground (Dashboard & co.): the brand raster photo by day, the DM0
+     dark contour texture by night. Class-driven (not an inline style) so the
+     `.dark` swap needs no JS and no re-render. */
+  .tp-app-backdrop {
+    background-color: hsl(var(--background));
+    background-image: url('/brand/dashboard-background.webp');
+  }
+  .dark .tp-app-backdrop {
+    background-image: url('/brand/dashboard-background-dark.webp');
   }
 
   /* SideRail labels: hidden while the rail is a 58px icon strip, revealed as
@@ -159,38 +226,66 @@ code {
     }
   }
 
+  /* Glass, surface, card and focus ring are token-driven (Phase DM-A): the
+     light output is byte-for-byte what it was (surface = white), and `.dark`
+     gets a designed recipe — dark translucent ground, a white/8% hairline
+     border and a faint top highlight — instead of an alpha tweak. */
   .tp-glass {
-    background: rgb(255 255 255 / 0.68);
-    border-color: rgb(255 255 255 / 0.62);
-    box-shadow: 0 18px 45px rgb(15 23 42 / 0.08), inset 0 1px 0 rgb(255 255 255 / 0.65);
+    background: hsl(var(--surface) / 0.68);
+    border-color: hsl(var(--surface) / 0.62);
+    box-shadow: 0 18px 45px rgb(15 23 42 / 0.08), inset 0 1px 0 hsl(var(--surface) / 0.65);
     -webkit-backdrop-filter: blur(18px) saturate(1.25);
     backdrop-filter: blur(18px) saturate(1.25);
   }
+  .dark .tp-glass {
+    background: hsl(222 44% 11% / 0.72);
+    border-color: hsl(0 0% 100% / 0.08);
+    box-shadow: 0 18px 45px rgb(0 0 0 / 0.45), inset 0 1px 0 hsl(0 0% 100% / 0.06);
+  }
 
   .tp-glass-strong {
-    background: rgb(255 255 255 / 0.82);
-    border-color: rgb(255 255 255 / 0.74);
-    box-shadow: 0 22px 60px rgb(15 23 42 / 0.10), inset 0 1px 0 rgb(255 255 255 / 0.72);
+    background: hsl(var(--surface) / 0.82);
+    border-color: hsl(var(--surface) / 0.74);
+    box-shadow: 0 22px 60px rgb(15 23 42 / 0.10), inset 0 1px 0 hsl(var(--surface) / 0.72);
     -webkit-backdrop-filter: blur(22px) saturate(1.35);
     backdrop-filter: blur(22px) saturate(1.35);
   }
+  .dark .tp-glass-strong {
+    background: hsl(222 44% 11% / 0.86);
+    border-color: hsl(0 0% 100% / 0.10);
+    box-shadow: 0 22px 60px rgb(0 0 0 / 0.55), inset 0 1px 0 hsl(0 0% 100% / 0.07);
+  }
 
   .tp-surface {
-    /* bracket form: non-scale opacity steps inside @apply break on newer tailwind 3.4.x */
-    @apply rounded-xl border border-white/70 bg-white/[.78] shadow-subtle;
+    @apply rounded-xl border shadow-subtle;
+    background: hsl(var(--surface) / 0.78);
+    border-color: hsl(var(--surface) / 0.7);
+  }
+  .dark .tp-surface {
+    background: hsl(var(--surface) / 0.82);
+    border-color: hsl(0 0% 100% / 0.08);
+    box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.05), 0 1px 2px rgb(0 0 0 / 0.4);
   }
 
   .tp-card {
-    @apply rounded-xl border border-slate-200/80 bg-white shadow-subtle;
+    @apply rounded-xl border bg-card shadow-subtle;
+    border-color: hsl(var(--border) / 0.8);
+  }
+  .dark .tp-card {
+    border-color: hsl(0 0% 100% / 0.08);
+    box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.04), 0 1px 2px rgb(0 0 0 / 0.5);
   }
 
   .tp-focus-ring {
-    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white;
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background;
   }
 
   .settings-scrollbar {
     scrollbar-width: thin;
     scrollbar-color: rgb(148 163 184 / 0.65) transparent;
+  }
+  .dark .settings-scrollbar {
+    scrollbar-color: hsl(215 16% 52% / 0.7) transparent;
   }
 
   .settings-scrollbar::-webkit-scrollbar {
@@ -202,6 +297,10 @@ code {
     background: rgb(148 163 184 / 0.55);
     border: 3px solid transparent;
     border-radius: 999px;
+    background-clip: content-box;
+  }
+  .dark .settings-scrollbar::-webkit-scrollbar-thumb {
+    background: hsl(215 16% 52% / 0.6);
     background-clip: content-box;
   }
 
@@ -283,13 +382,17 @@ code {
     max-width: 100%;
     margin: 0.375rem 0;
   }
+  /* Table chrome reads the legacy-net bridge vars (see "Early-access
+     readability net" below): light originals by day and inside any still-
+     white composer; the dark border/muted tokens once the composer itself
+     converts (DM-B). */
   .tp-rich-editor td,
   .tp-rich-editor th {
-    border: 1px solid hsl(215 25% 84%);
+    border: 1px solid var(--tp-lg-border, hsl(215 25% 84%));
     padding: 0.25rem 0.5rem;
   }
   .tp-rich-editor th {
-    background: hsl(210 40% 97%);
+    background: var(--tp-lg-tint-soft, hsl(210 40% 97%));
     font-weight: 600;
     text-align: left;
   }
@@ -360,6 +463,13 @@ code {
       linear-gradient(180deg, rgb(248 250 252 / 0.60) 0%, rgb(248 250 252 / 0.78) 55%, rgb(248 250 252 / 0.88) 100%),
       url('./assets/tickets-backdrop.png') center / cover no-repeat fixed;
   }
+  /* Night wallpaper (DM0 asset). The Tickets pages themselves convert in
+     DM-B; the ground is CSS-only so it swaps with the chrome now. */
+  .dark .tp-tickets-backdrop {
+    background:
+      linear-gradient(180deg, hsl(222 47% 7% / 0.72) 0%, hsl(222 46% 8% / 0.84) 55%, hsl(222 47% 7% / 0.92) 100%),
+      url('./assets/tickets-backdrop-dark.png') center / cover no-repeat fixed;
+  }
 
   /* react-day-picker sized for the 248px ticket filter rail */
   .tp-rail-calendar .rdp-root {
@@ -385,9 +495,95 @@ code {
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .tp-glass,
   .tp-glass-strong {
-    background: rgb(255 255 255 / 0.96);
+    background: hsl(var(--surface) / 0.96);
+  }
+  .dark .tp-glass,
+  .dark .tp-glass-strong {
+    background: hsl(var(--card) / 0.98);
   }
 }
+
+/* ---- Early-access readability net (Phase DM-A; DELETE when DM-B lands) ----
+   The chrome is token-driven, but ~5,000 sites in not-yet-swept pages still
+   hardcode slate/gray utilities. Because the token-driven panels (.tp-card,
+   .tp-glass, the page grounds) now turn dark, a `text-slate-900` heading
+   inside one would be black-on-slate. This net makes those legacy utilities
+   READ THE TOKENS whenever they sit inside a dark container, and fall back to
+   their original light values inside any still-white container (`bg-white`).
+   It works by custom-property inheritance — nearest container wins — so
+   nesting in either direction stays readable. It is a scoped bridge, not an
+   inversion: converted chrome uses tokens and never touches these vars, and
+   `frontend/scripts/check-dark-tokens.mjs` stops NEW legacy classes landing
+   in swept files. Deleted once the sweep finishes (DM-B/DM10). */
+.dark :is(.tp-app-backdrop, .tp-page-backdrop, .tp-tickets-backdrop, .tp-card, .tp-surface, .tp-glass, .tp-glass-strong) {
+  --tp-lg-900: hsl(var(--foreground));
+  --tp-lg-800: hsl(var(--foreground) / 0.94);
+  --tp-lg-700: hsl(215 20% 84%);
+  --tp-lg-600: hsl(215 20% 76%);
+  --tp-lg-500: hsl(var(--muted-foreground));
+  --tp-lg-400: hsl(215 16% 56%);
+  --tp-lg-300: hsl(215 16% 42%);
+  --tp-lg-border: hsl(var(--border));
+  --tp-lg-border-soft: hsl(var(--border) / 0.6);
+  --tp-lg-border-strong: hsl(var(--input));
+  --tp-lg-tint: hsl(var(--muted));
+  --tp-lg-tint-soft: hsl(var(--muted) / 0.55);
+}
+/* Still-white containers (opaque or translucent bg-white) restore the light
+   originals for everything inside them. `initial` = guaranteed-invalid, so
+   every var() below drops to its fallback. Listed AFTER the dark containers so
+   an element carrying both (`tp-card bg-white`) reads as white. */
+.dark :is([class~="bg-white"], [class*=" bg-white/"], [class^="bg-white/"]),
+/* A white gradient wash (from-/via-/to-white) is a light surface too — on the
+   element itself, or on its parent when the wash is an absolutely positioned
+   overlay child (the Tickets hero card: text sits beside the overlay, so the
+   parent is what the text inherits from). */
+.dark :is([class~="from-white"], [class*=" from-white/"], [class^="from-white/"], [class~="via-white"], [class*=" via-white/"]),
+.dark :has(> [class*="bg-gradient-to"][class*="from-white"]) {
+  --tp-lg-900: initial;
+  --tp-lg-800: initial;
+  --tp-lg-700: initial;
+  --tp-lg-600: initial;
+  --tp-lg-500: initial;
+  --tp-lg-400: initial;
+  --tp-lg-300: initial;
+  --tp-lg-border: initial;
+  --tp-lg-border-soft: initial;
+  --tp-lg-border-strong: initial;
+  --tp-lg-tint: initial;
+  --tp-lg-tint-soft: initial;
+}
+.dark .text-slate-950 { color: var(--tp-lg-900, #020617); }
+.dark .text-slate-900 { color: var(--tp-lg-900, #0f172a); }
+.dark .text-gray-900 { color: var(--tp-lg-900, #111827); }
+.dark .text-slate-800 { color: var(--tp-lg-800, #1e293b); }
+.dark .text-gray-800 { color: var(--tp-lg-800, #1f2937); }
+.dark .text-slate-700 { color: var(--tp-lg-700, #334155); }
+.dark .text-gray-700 { color: var(--tp-lg-700, #374151); }
+.dark .text-slate-600 { color: var(--tp-lg-600, #475569); }
+.dark .text-gray-600 { color: var(--tp-lg-600, #4b5563); }
+.dark .text-slate-500 { color: var(--tp-lg-500, #64748b); }
+.dark .text-gray-500 { color: var(--tp-lg-500, #6b7280); }
+.dark .text-slate-400 { color: var(--tp-lg-400, #94a3b8); }
+.dark .text-gray-400 { color: var(--tp-lg-400, #9ca3af); }
+.dark .text-slate-300 { color: var(--tp-lg-300, #cbd5e1); }
+.dark .text-gray-300 { color: var(--tp-lg-300, #d1d5db); }
+.dark .border-slate-100 { border-color: var(--tp-lg-border-soft, #f1f5f9); }
+.dark .border-gray-100 { border-color: var(--tp-lg-border-soft, #f3f4f6); }
+.dark .border-slate-200 { border-color: var(--tp-lg-border, #e2e8f0); }
+.dark .border-gray-200 { border-color: var(--tp-lg-border, #e5e7eb); }
+.dark .border-slate-300 { border-color: var(--tp-lg-border-strong, #cbd5e1); }
+.dark .border-gray-300 { border-color: var(--tp-lg-border-strong, #d1d5db); }
+.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]) { border-color: var(--tp-lg-border-soft, #f1f5f9); }
+.dark .divide-slate-200 > :not([hidden]) ~ :not([hidden]) { border-color: var(--tp-lg-border, #e2e8f0); }
+.dark .bg-slate-50 { background-color: var(--tp-lg-tint-soft, #f8fafc); }
+.dark .bg-gray-50 { background-color: var(--tp-lg-tint-soft, #f9fafb); }
+.dark .bg-slate-100 { background-color: var(--tp-lg-tint, #f1f5f9); }
+.dark .bg-gray-100 { background-color: var(--tp-lg-tint, #f3f4f6); }
+.dark .hover\:bg-slate-50:hover { background-color: var(--tp-lg-tint-soft, #f8fafc); }
+.dark .hover\:bg-slate-100:hover { background-color: var(--tp-lg-tint, #f1f5f9); }
+.dark .hover\:bg-gray-50:hover { background-color: var(--tp-lg-tint-soft, #f9fafb); }
+.dark .hover\:bg-gray-100:hover { background-color: var(--tp-lg-tint, #f3f4f6); }
 
 /* Smooth view transition animations */
 @keyframes fadeIn {
