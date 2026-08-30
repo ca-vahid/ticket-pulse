@@ -47,25 +47,25 @@ export default function ComposerSignatureStrip({ workspaceId }) {
   if (!signature?.enabled || !String(signature.html || signature.text || '').trim()) return null;
 
   return (
-    <div className="mt-1.5 rounded-lg border border-slate-200 bg-slate-50/70" data-testid="composer-signature-strip">
+    <div className="mt-1.5 rounded-lg border border-border bg-muted/35" data-testid="composer-signature-strip">
       <button
         type="button"
         onClick={() => setExpanded((prev) => !prev)}
         aria-expanded={expanded}
-        className="tp-focus-ring flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-left text-[11px] text-slate-500 hover:text-slate-700"
+        className="tp-focus-ring flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-left text-[11px] text-muted-foreground hover:text-foreground/85"
       >
-        <PenLine className="h-3 w-3 flex-shrink-0 text-slate-400" aria-hidden="true" />
+        <PenLine className="h-3 w-3 flex-shrink-0 text-muted-foreground/75" aria-hidden="true" />
         <span className="min-w-0 truncate">— your signature will be appended to the email</span>
-        <span className="ml-auto inline-flex items-center gap-0.5 font-semibold text-blue-600">
+        <span className="ml-auto inline-flex items-center gap-0.5 font-semibold text-blue-600 dark:text-blue-300">
           {expanded ? 'Hide' : 'Preview'}
           <ChevronDown className={`h-3 w-3 transition-transform ${expanded ? 'rotate-180' : ''}`} aria-hidden="true" />
         </span>
       </button>
       {expanded && (
-        <div className="border-t border-slate-200 px-2.5 py-2" data-testid="composer-signature-preview">
+        <div className="border-t border-border px-2.5 py-2" data-testid="composer-signature-preview">
           {signature.html
             ? <SafeHtml html={signature.html} className="text-xs" />
-            : <p className="whitespace-pre-wrap text-xs text-slate-600">{signature.text}</p>}
+            : <p className="whitespace-pre-wrap text-xs text-muted-foreground">{signature.text}</p>}
         </div>
       )}
     </div>

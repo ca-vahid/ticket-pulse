@@ -19,10 +19,10 @@ function initials(name) {
 
 function Avatar({ name, photoUrl, size = 'h-6 w-6' }) {
   return (
-    <span className={`${size} rounded-full bg-slate-100 overflow-hidden inline-flex items-center justify-center shrink-0`}>
+    <span className={`${size} rounded-full bg-muted overflow-hidden inline-flex items-center justify-center shrink-0`}>
       {photoUrl
         ? <img src={photoUrl} alt="" className="w-full h-full object-cover" />
-        : <span className="text-[9px] font-semibold text-slate-500">{initials(name)}</span>}
+        : <span className="text-[9px] font-semibold text-muted-foreground">{initials(name)}</span>}
     </span>
   );
 }
@@ -95,22 +95,22 @@ function MemberPicker({ members, exclude = [], onPick, directoryLocked = false, 
       key={key}
       type="button"
       onClick={() => pick(email)}
-      className="w-full flex items-center gap-3 px-2.5 py-2 rounded-lg text-left hover:bg-blue-50 tp-focus-ring"
+      className="w-full flex items-center gap-3 px-2.5 py-2 rounded-lg text-left hover:bg-blue-50 dark:hover:bg-blue-500/15 tp-focus-ring"
     >
       <Avatar name={name} photoUrl={photoUrl} size="h-9 w-9" />
       <span className="min-w-0 flex-1">
-        <span className="block text-sm font-medium text-gray-900 truncate">{name || email}</span>
-        <span className="block text-xs text-gray-500 truncate">{email}</span>
+        <span className="block text-sm font-medium text-foreground truncate">{name || email}</span>
+        <span className="block text-xs text-muted-foreground truncate">{email}</span>
       </span>
-      {badge && <span className="text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 shrink-0">{badge}</span>}
-      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 shrink-0"><UserPlus className="w-3.5 h-3.5" /> Add</span>
+      {badge && <span className="text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-muted text-muted-foreground shrink-0">{badge}</span>}
+      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 dark:text-blue-300 shrink-0"><UserPlus className="w-3.5 h-3.5" /> Add</span>
     </button>
   );
 
   return (
     <div ref={rootRef} className="relative">
       <div className="relative">
-        <Search className={`w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 ${directoryLocked ? 'text-slate-300' : 'text-slate-400'}`} aria-hidden="true" />
+        <Search className={`w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 ${directoryLocked ? 'text-muted-foreground/50' : 'text-muted-foreground/75'}`} aria-hidden="true" />
         <input
           value={query}
           onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
@@ -119,7 +119,7 @@ function MemberPicker({ members, exclude = [], onPick, directoryLocked = false, 
             ? 'Add an approval manager — search members or type an email address…'
             : 'Add an approval manager — search members or the directory…'}
           className={`w-full pl-10 py-2.5 border border-input rounded-lg text-sm tp-focus-ring ${
-            directoryLocked ? 'pr-10 bg-slate-50 text-slate-600 placeholder:text-slate-400' : 'pr-3'
+            directoryLocked ? 'pr-10 bg-muted/50 text-muted-foreground placeholder:text-muted-foreground/75' : 'pr-3'
           }`}
         />
         {directoryLocked && (
@@ -130,16 +130,16 @@ function MemberPicker({ members, exclude = [], onPick, directoryLocked = false, 
             onClick={() => setLockInfoOpen((v) => !v)}
             onMouseEnter={() => setLockInfoOpen(true)}
             onMouseLeave={() => setLockInfoOpen(false)}
-            className="tp-focus-ring absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md text-amber-500 hover:text-amber-600 hover:bg-amber-50"
+            className="tp-focus-ring absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md text-amber-500 hover:text-amber-600 dark:hover:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-500/15"
           >
             <Lock className="w-4 h-4" aria-hidden="true" />
           </button>
         )}
         {directoryLocked && lockInfoOpen && (
-          <div role="tooltip" className="absolute right-0 top-full mt-1.5 z-40 w-72 tp-card rounded-lg shadow-soft p-3 text-xs text-slate-600 animate-scaleIn">
+          <div role="tooltip" className="absolute right-0 top-full mt-1.5 z-40 w-72 tp-card rounded-lg shadow-soft p-3 text-xs text-muted-foreground animate-scaleIn">
             <p className="flex items-start gap-1.5">
               <Lock className="w-3.5 h-3.5 mt-0.5 text-amber-500 shrink-0" aria-hidden="true" />
-              <span><strong className="text-slate-800">Directory search needs admin access</strong> — you can still search workspace members, or type an email address to add anyone.</span>
+              <span><strong className="text-foreground">Directory search needs admin access</strong> — you can still search workspace members, or type an email address to add anyone.</span>
             </p>
           </div>
         )}
@@ -148,28 +148,28 @@ function MemberPicker({ members, exclude = [], onPick, directoryLocked = false, 
         <div className="absolute z-30 mt-1 w-full tp-card rounded-xl shadow-soft p-1.5 max-h-72 overflow-y-auto settings-scrollbar animate-scaleIn">
           {memberResults.map((m) => row(`m-${m.email}`, m.name, m.email, null, m.photoUrl))}
           {directoryResults.length > 0 && (
-            <p className="px-2.5 pt-1.5 pb-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">Directory</p>
+            <p className="px-2.5 pt-1.5 pb-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/75">Directory</p>
           )}
           {directoryResults.map((p) => row(`d-${p.mail}`, p.displayName, p.mail, 'directory', p.photoUrl))}
           {typedEmailAddable && (
             <button
               type="button"
               onClick={() => pick(typedEmail)}
-              className="w-full flex items-center gap-3 px-2.5 py-2 rounded-lg text-left hover:bg-blue-50 tp-focus-ring"
+              className="w-full flex items-center gap-3 px-2.5 py-2 rounded-lg text-left hover:bg-blue-50 dark:hover:bg-blue-500/15 tp-focus-ring"
             >
-              <span className="h-9 w-9 rounded-full bg-blue-50 border border-blue-100 inline-flex items-center justify-center shrink-0">
+              <span className="h-9 w-9 rounded-full bg-blue-50 dark:bg-blue-500/15 border border-blue-100 dark:border-blue-500/20 inline-flex items-center justify-center shrink-0">
                 <AtSign className="w-4 h-4 text-blue-500" aria-hidden="true" />
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block text-sm font-medium text-gray-900 truncate">Use this email address</span>
-                <span className="block text-xs text-gray-500 truncate">{typedEmail}</span>
+                <span className="block text-sm font-medium text-foreground truncate">Use this email address</span>
+                <span className="block text-xs text-muted-foreground truncate">{typedEmail}</span>
               </span>
-              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 shrink-0"><UserPlus className="w-3.5 h-3.5" /> Add</span>
+              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 dark:text-blue-300 shrink-0"><UserPlus className="w-3.5 h-3.5" /> Add</span>
             </button>
           )}
-          {searching && <p className="px-3 py-2 text-xs text-slate-400">Searching directory…</p>}
+          {searching && <p className="px-3 py-2 text-xs text-muted-foreground/75">Searching directory…</p>}
           {!searching && memberResults.length === 0 && directoryResults.length === 0 && !typedEmailAddable && (
-            <div className="px-3 py-4 text-sm text-slate-400">
+            <div className="px-3 py-4 text-sm text-muted-foreground/75">
               {query.trim().length >= 2
                 ? `No one matches “${query}”.`
                 : directoryLocked
@@ -187,11 +187,11 @@ function MemberPicker({ members, exclude = [], onPick, directoryLocked = false, 
 /** Enriched manager chip: avatar + display name (falls back to email). */
 function ManagerChip({ email, member, onRemove }) {
   return (
-    <span className="inline-flex items-center gap-1.5 pl-1 pr-1.5 py-0.5 rounded-full bg-blue-50 border border-blue-200 text-xs text-blue-900">
+    <span className="inline-flex items-center gap-1.5 pl-1 pr-1.5 py-0.5 rounded-full bg-blue-50 dark:bg-blue-500/15 border border-blue-200 dark:border-blue-500/30 text-xs text-blue-900 dark:text-blue-200">
       <Avatar name={member?.name || email} photoUrl={member?.photoUrl} size="h-5 w-5" />
       <span className="truncate max-w-[180px]">{member?.name || email}</span>
       {onRemove && (
-        <button type="button" onClick={onRemove} aria-label={`Remove ${email}`} className="tp-focus-ring rounded-full p-0.5 hover:bg-blue-100 text-blue-500">
+        <button type="button" onClick={onRemove} aria-label={`Remove ${email}`} className="tp-focus-ring rounded-full p-0.5 hover:bg-blue-100 dark:hover:bg-blue-500/20 text-blue-500">
           <X className="w-3 h-3" aria-hidden="true" />
         </button>
       )}
@@ -207,7 +207,7 @@ function CategoryForm({ initial, members, memberByEmail, onCancel, onSave, savin
   const removeEmail = (email) => setForm((f) => ({ ...f, managerEmails: f.managerEmails.filter((x) => x !== email) }));
 
   return (
-    <div className="tp-card p-4 border-blue-200 ring-1 ring-blue-100 space-y-3">
+    <div className="tp-card p-4 border-blue-200 dark:border-blue-500/30 ring-1 ring-blue-100 dark:ring-blue-500/30 space-y-3">
       <input
         value={form.name}
         onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
@@ -221,7 +221,7 @@ function CategoryForm({ initial, members, memberByEmail, onCancel, onSave, savin
         className="w-full px-3 py-2 border border-input rounded-lg text-sm tp-focus-ring"
       />
       <div>
-        <p className="text-xs font-semibold text-slate-600 mb-1.5 flex items-center gap-1.5"><Users className="w-3.5 h-3.5" /> Approval managers <span className="font-normal text-slate-400">(any one can approve)</span></p>
+        <p className="text-xs font-semibold text-muted-foreground mb-1.5 flex items-center gap-1.5"><Users className="w-3.5 h-3.5" /> Approval managers <span className="font-normal text-muted-foreground/75">(any one can approve)</span></p>
         {form.managerEmails.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mb-2">
             {form.managerEmails.map((email) => (
@@ -240,10 +240,10 @@ function CategoryForm({ initial, members, memberByEmail, onCancel, onSave, savin
         >
           {saving ? <Loader className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} Save
         </button>
-        <button type="button" onClick={onCancel} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-600 hover:text-gray-900 tp-focus-ring rounded-lg">
+        <button type="button" onClick={onCancel} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground tp-focus-ring rounded-lg">
           <X className="w-3.5 h-3.5" /> Cancel
         </button>
-        {form.managerEmails.length === 0 && <span className="text-[11px] text-amber-600">Add at least one manager</span>}
+        {form.managerEmails.length === 0 && <span className="text-[11px] text-amber-600 dark:text-amber-300">Add at least one manager</span>}
       </div>
     </div>
   );
@@ -356,10 +356,10 @@ export default function ApprovalCategoriesPanel() {
   return (
     <div className="space-y-5">
       <div className="flex items-center gap-3">
-        <div className="p-2 bg-blue-100 rounded-lg"><Stamp className="w-5 h-5 text-blue-600" /></div>
+        <div className="p-2 bg-blue-100 dark:bg-blue-500/20 rounded-lg"><Stamp className="w-5 h-5 text-blue-600 dark:text-blue-300" /></div>
         <div>
-          <h3 className="text-lg font-semibold text-gray-900">Approval Categories</h3>
-          <p className="text-sm text-gray-500 max-w-2xl">
+          <h3 className="text-lg font-semibold text-foreground">Approval Categories</h3>
+          <p className="text-sm text-muted-foreground max-w-2xl">
             Define what needs sign-off (e.g. <strong>Laptop purchase</strong>) and which <strong>members</strong> approve it.
             On a ticket, a member requests approval by category and every manager is notified — <strong>any one</strong> can
             approve, reject, or ask for more info. Approvals stay inside Ticket Pulse.
@@ -369,17 +369,17 @@ export default function ApprovalCategoriesPanel() {
       </div>
 
       {error && (
-        <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+        <div className="flex items-start gap-2 p-3 bg-red-50 dark:bg-red-500/15 border border-red-200 dark:border-red-500/30 rounded-lg text-sm text-red-700 dark:text-red-200">
           <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" /><span>{error}</span>
         </div>
       )}
       {successMsg && (
-        <div className="flex items-start gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-700">
+        <div className="flex items-start gap-2 p-3 bg-emerald-50 dark:bg-emerald-500/15 border border-emerald-200 dark:border-emerald-500/30 rounded-lg text-sm text-emerald-700 dark:text-emerald-200">
           <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" /><span>{successMsg}</span>
         </div>
       )}
       {(directoryLocked || membersUnavailable) && (
-        <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+        <div className="flex items-start gap-2 p-3 bg-amber-50 dark:bg-amber-500/15 border border-amber-200 dark:border-amber-500/30 rounded-lg text-sm text-amber-800 dark:text-amber-200">
           <Lock className="w-4 h-4 mt-0.5 shrink-0 text-amber-500" aria-hidden="true" />
           <span>
             {directoryLocked
@@ -402,9 +402,9 @@ export default function ApprovalCategoriesPanel() {
       )}
 
       {loading ? (
-        <div className="flex items-center justify-center py-12 text-gray-400"><Loader className="w-5 h-5 animate-spin mr-2" /> Loading…</div>
+        <div className="flex items-center justify-center py-12 text-muted-foreground/75"><Loader className="w-5 h-5 animate-spin mr-2" /> Loading…</div>
       ) : (categories || []).length === 0 ? (
-        <p className="text-sm text-gray-400 italic px-1">No approval categories yet. Create one above to enable ticket approvals.</p>
+        <p className="text-sm text-muted-foreground/75 italic px-1">No approval categories yet. Create one above to enable ticket approvals.</p>
       ) : (
         <div className="space-y-2">
           {categories.map((c) => (
@@ -421,37 +421,37 @@ export default function ApprovalCategoriesPanel() {
                 onDirectoryLocked={() => setDirectoryLocked(true)}
               />
             ) : (
-              <div key={c.id} className={`relative rounded-lg border px-3.5 py-3 ${c.isActive ? 'border-slate-200 bg-white' : 'border-dashed border-slate-300 bg-slate-100/70'}`}>
+              <div key={c.id} className={`relative rounded-lg border px-3.5 py-3 ${c.isActive ? 'border-border bg-card' : 'border-dashed border-input bg-muted/70'}`}>
                 {!c.isActive && <span className="absolute left-0 top-0 bottom-0 w-1 rounded-l-lg bg-red-400" aria-hidden="true" />}
                 <div className="flex items-start gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5">
-                      <span className={`text-sm font-semibold ${c.isActive ? 'text-gray-900' : 'text-slate-500'}`}>{c.name}</span>
+                      <span className={`text-sm font-semibold ${c.isActive ? 'text-foreground' : 'text-muted-foreground'}`}>{c.name}</span>
                       {!c.isActive && (
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-red-100 text-red-700"><Ban className="w-3 h-3" /> Inactive</span>
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-200"><Ban className="w-3 h-3" /> Inactive</span>
                       )}
                     </div>
-                    {c.description && <p className="text-xs text-slate-500 mt-0.5">{c.description}</p>}
+                    {c.description && <p className="text-xs text-muted-foreground mt-0.5">{c.description}</p>}
                     <div className="flex flex-wrap gap-1.5 mt-2">
                       {(c.managerEmails || []).length === 0
-                        ? <span className="text-[11px] text-amber-600">No managers — add some so this can be used</span>
+                        ? <span className="text-[11px] text-amber-600 dark:text-amber-300">No managers — add some so this can be used</span>
                         : (c.managerEmails || []).map((email) => (
                           <ManagerChip key={email} email={email} member={memberByEmail[email.toLowerCase()]} />
                         ))}
                     </div>
                   </div>
                   <div className="flex items-center gap-0.5 shrink-0">
-                    <button onClick={() => { setEditingId(c.id); setCreating(false); }} title="Edit" className="p-1.5 text-gray-400 hover:text-blue-600 rounded-lg tp-focus-ring"><Pencil className="w-4 h-4" /></button>
-                    <button onClick={() => toggleActive(c)} title={c.isActive ? 'Deactivate' : 'Reactivate'} className={`p-1.5 rounded-lg tp-focus-ring ${c.isActive ? 'text-gray-400 hover:text-red-600' : 'text-emerald-600 hover:text-emerald-700'}`}>
+                    <button onClick={() => { setEditingId(c.id); setCreating(false); }} title="Edit" className="p-1.5 text-muted-foreground/75 hover:text-blue-600 dark:hover:text-blue-300 rounded-lg tp-focus-ring"><Pencil className="w-4 h-4" /></button>
+                    <button onClick={() => toggleActive(c)} title={c.isActive ? 'Deactivate' : 'Reactivate'} className={`p-1.5 rounded-lg tp-focus-ring ${c.isActive ? 'text-muted-foreground/75 hover:text-red-600 dark:hover:text-red-300' : 'text-emerald-600 dark:text-emerald-300 hover:text-emerald-700 dark:hover:text-emerald-200'}`}>
                       {c.isActive ? <PowerOff className="w-4 h-4" /> : <Power className="w-4 h-4" />}
                     </button>
                     {confirmDeleteId === c.id ? (
                       <span className="inline-flex items-center gap-1">
                         <button onClick={() => remove(c)} className="px-2 py-1 rounded-md text-xs font-semibold bg-red-600 text-white hover:bg-red-700 tp-focus-ring">Delete</button>
-                        <button onClick={() => setConfirmDeleteId(null)} className="p-1 text-slate-400 hover:text-slate-600 rounded tp-focus-ring"><X className="w-4 h-4" /></button>
+                        <button onClick={() => setConfirmDeleteId(null)} className="p-1 text-muted-foreground/75 hover:text-muted-foreground rounded tp-focus-ring"><X className="w-4 h-4" /></button>
                       </span>
                     ) : (
-                      <button onClick={() => setConfirmDeleteId(c.id)} title="Delete" className="p-1.5 text-gray-400 hover:text-red-600 rounded-lg tp-focus-ring"><Trash2 className="w-4 h-4" /></button>
+                      <button onClick={() => setConfirmDeleteId(c.id)} title="Delete" className="p-1.5 text-muted-foreground/75 hover:text-red-600 dark:hover:text-red-300 rounded-lg tp-focus-ring"><Trash2 className="w-4 h-4" /></button>
                     )}
                   </div>
                 </div>

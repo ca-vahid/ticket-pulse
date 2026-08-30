@@ -174,7 +174,7 @@ const RichTextEditor = forwardRef(function RichTextEditor({
   onSubmit,
   placeholder = 'Write…',
   ariaLabel = 'Rich text editor',
-  className = 'border-input bg-white',
+  className = 'border-input bg-card',
   minHeight = 170,
   onImagePaste,
 }, ref) {
@@ -242,18 +242,18 @@ const RichTextEditor = forwardRef(function RichTextEditor({
     emit();
   };
 
-  const toolBtn = 'tp-focus-ring p-1.5 rounded-md text-slate-500 hover:text-blue-700 hover:bg-blue-50';
+  const toolBtn = 'tp-focus-ring p-1.5 rounded-md text-muted-foreground hover:text-blue-700 dark:hover:text-blue-200 hover:bg-blue-50 dark:hover:bg-blue-500/15';
 
   return (
-    <div className={`border rounded-lg transition-colors focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100 ${className}`}>
-      <div className="flex items-center gap-0.5 px-1.5 py-1 border-b border-slate-100 relative" role="toolbar" aria-label="Formatting">
+    <div className={`border rounded-lg transition-colors focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100 dark:focus-within:ring-blue-500/30 ${className}`}>
+      <div className="flex items-center gap-0.5 px-1.5 py-1 border-b border-border/60 relative" role="toolbar" aria-label="Formatting">
         <button type="button" onClick={() => exec('bold')} title="Bold (Ctrl+B)" aria-label="Bold" className={toolBtn}><Bold className="w-3.5 h-3.5" aria-hidden="true" /></button>
         <button type="button" onClick={() => exec('italic')} title="Italic (Ctrl+I)" aria-label="Italic" className={toolBtn}><Italic className="w-3.5 h-3.5" aria-hidden="true" /></button>
         <button type="button" onClick={() => exec('underline')} title="Underline (Ctrl+U)" aria-label="Underline" className={toolBtn}><Underline className="w-3.5 h-3.5" aria-hidden="true" /></button>
-        <span className="w-px h-4 bg-slate-200 mx-1" aria-hidden="true" />
+        <span className="w-px h-4 bg-secondary mx-1" aria-hidden="true" />
         <button type="button" onClick={() => exec('insertUnorderedList')} title="Bulleted list" aria-label="Bulleted list" className={toolBtn}><List className="w-3.5 h-3.5" aria-hidden="true" /></button>
         <button type="button" onClick={() => exec('insertOrderedList')} title="Numbered list" aria-label="Numbered list" className={toolBtn}><ListOrdered className="w-3.5 h-3.5" aria-hidden="true" /></button>
-        <span className="w-px h-4 bg-slate-200 mx-1" aria-hidden="true" />
+        <span className="w-px h-4 bg-secondary mx-1" aria-hidden="true" />
         <button type="button" onClick={openLink} title="Insert link" aria-label="Insert link" className={toolBtn}><Link2 className="w-3.5 h-3.5" aria-hidden="true" /></button>
         <button type="button" onClick={() => exec('removeFormat')} title="Clear formatting" aria-label="Clear formatting" className={`${toolBtn} ml-auto`}><RemoveFormatting className="w-3.5 h-3.5" aria-hidden="true" /></button>
 
@@ -270,17 +270,17 @@ const RichTextEditor = forwardRef(function RichTextEditor({
               placeholder="https://…"
               aria-label="Link URL"
               autoFocus
-              className="tp-focus-ring flex-1 text-xs bg-white border border-input rounded-md px-2 py-1.5"
+              className="tp-focus-ring flex-1 text-xs bg-card border border-input rounded-md px-2 py-1.5"
             />
             <button type="button" onClick={applyLink} className="tp-focus-ring px-2 py-1.5 text-xs font-semibold rounded-md bg-primary text-primary-foreground hover:bg-blue-700">Add</button>
-            <button type="button" onClick={() => setLinkOpen(false)} className="tp-focus-ring px-1.5 py-1.5 text-xs rounded-md text-slate-500 hover:bg-slate-100">Esc</button>
+            <button type="button" onClick={() => setLinkOpen(false)} className="tp-focus-ring px-1.5 py-1.5 text-xs rounded-md text-muted-foreground hover:bg-muted">Esc</button>
           </div>
         )}
       </div>
 
       <div className="relative">
         {isEmpty && (
-          <span aria-hidden="true" className="absolute left-3 top-2.5 text-sm text-slate-400 pointer-events-none select-none">
+          <span aria-hidden="true" className="absolute left-3 top-2.5 text-sm text-muted-foreground/75 pointer-events-none select-none">
             {placeholder}
           </span>
         )}
@@ -329,7 +329,7 @@ const RichTextEditor = forwardRef(function RichTextEditor({
             document.execCommand('insertHTML', false, insert);
             emit();
           }}
-          className="tp-rich-editor tp-focus-ring w-full text-sm text-slate-800 px-3 py-2.5 rounded-b-lg outline-none overflow-y-auto settings-scrollbar [&_a]:text-blue-600 [&_a]:underline [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5"
+          className="tp-rich-editor tp-focus-ring w-full text-sm text-foreground px-3 py-2.5 rounded-b-lg outline-none overflow-y-auto settings-scrollbar [&_a]:text-blue-600 dark:text-blue-300 [&_a]:underline [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5"
           style={{ minHeight, maxHeight: 460 }}
         />
       </div>

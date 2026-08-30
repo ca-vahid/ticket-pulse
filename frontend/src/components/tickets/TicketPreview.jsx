@@ -249,22 +249,22 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
     setAiDeciding(false);
   };
 
-  const fieldClass = 'tp-focus-ring w-full text-xs bg-white border border-input rounded-lg px-2 py-1.5 text-slate-700 disabled:bg-slate-50 disabled:text-slate-400';
+  const fieldClass = 'tp-focus-ring w-full text-xs bg-card border border-input rounded-lg px-2 py-1.5 text-foreground/85 disabled:bg-muted/50 disabled:text-muted-foreground/75';
 
   return (
     <aside
-      className="fixed inset-y-0 right-0 z-40 w-[440px] max-w-[94vw] bg-white border-l border-slate-200 shadow-soft flex flex-col animate-slide-in-right"
+      className="fixed inset-y-0 right-0 z-40 w-[440px] max-w-[94vw] bg-card border-l border-border shadow-soft flex flex-col animate-slide-in-right"
       aria-label="Ticket preview"
       role="complementary"
     >
       {/* Header */}
-      <div className="p-3.5 border-b border-slate-100 bg-slate-50/60">
+      <div className="p-3.5 border-b border-border/60 bg-muted/30">
         <div className="flex items-center gap-2 mb-1">
           {/* min-w-0 + overflow-hidden lets the chip cluster shrink; the action
               cluster is flex-shrink-0 so the close X can never be pushed out
               of the panel (QA 07-14 #9). */}
           <span className="flex items-center gap-2 min-w-0 overflow-hidden">
-            <span className="font-mono text-xs font-bold text-slate-500 whitespace-nowrap">{ticket?.displayRef || '…'}</span>
+            <span className="font-mono text-xs font-bold text-muted-foreground whitespace-nowrap">{ticket?.displayRef || '…'}</span>
             {ticket && <OriginChip origin={ticket.origin} />}
             {ticket?.isExternal && <ExternalChip />}
             {ticket && <MirrorChip ticket={ticket} />}
@@ -278,12 +278,12 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                   disabled={!stepInfo || stepInfo.index <= 0}
                   aria-label="Previous ticket"
                   title="Previous ticket (↑)"
-                  className="tp-focus-ring p-1.5 rounded-lg text-slate-400 hover:text-blue-700 hover:bg-blue-50 disabled:opacity-30"
+                  className="tp-focus-ring p-1.5 rounded-lg text-muted-foreground/75 hover:text-blue-700 dark:hover:text-blue-200 hover:bg-blue-50 dark:hover:bg-blue-500/15 disabled:opacity-30"
                 >
                   <ChevronUp className="w-3.5 h-3.5" aria-hidden="true" />
                 </button>
                 {stepInfo && (
-                  <span className="text-[10px] text-slate-400 tabular-nums px-0.5 whitespace-nowrap">
+                  <span className="text-[10px] text-muted-foreground/75 tabular-nums px-0.5 whitespace-nowrap">
                     {stepInfo.index + 1}/{stepInfo.total}
                   </span>
                 )}
@@ -292,11 +292,11 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                   disabled={!stepInfo || stepInfo.index >= stepInfo.total - 1}
                   aria-label="Next ticket"
                   title="Next ticket (↓)"
-                  className="tp-focus-ring p-1.5 rounded-lg text-slate-400 hover:text-blue-700 hover:bg-blue-50 disabled:opacity-30"
+                  className="tp-focus-ring p-1.5 rounded-lg text-muted-foreground/75 hover:text-blue-700 dark:hover:text-blue-200 hover:bg-blue-50 dark:hover:bg-blue-500/15 disabled:opacity-30"
                 >
                   <ChevronDown className="w-3.5 h-3.5" aria-hidden="true" />
                 </button>
-                <span className="w-px h-4 bg-slate-200 mx-1" aria-hidden="true" />
+                <span className="w-px h-4 bg-secondary mx-1" aria-hidden="true" />
               </>
             )}
             {isNative && canReview && (
@@ -307,7 +307,7 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                 aria-label={confirmDelete ? 'Confirm delete' : 'Delete ticket'}
                 title="Delete this Ticket Pulse ticket"
                 className={`tp-focus-ring inline-flex items-center gap-1 px-1.5 py-1 rounded-lg text-[11px] font-semibold ${
-                  confirmDelete ? 'bg-red-600 text-white hover:bg-red-700' : 'text-slate-400 hover:text-red-600 hover:bg-red-50'
+                  confirmDelete ? 'bg-red-600 text-white hover:bg-red-700' : 'text-muted-foreground/75 hover:text-red-600 dark:hover:text-red-300 hover:bg-red-50 dark:hover:bg-red-500/15'
                 }`}
               >
                 {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />}
@@ -322,7 +322,7 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                 onClick={(e) => e.stopPropagation()}
                 aria-label="Open in FreshService (new tab)"
                 title="Open in FreshService (new tab)"
-                className="tp-focus-ring inline-flex items-center gap-1 px-1.5 py-1 rounded-lg text-[11px] font-semibold text-sky-600 hover:text-sky-700 hover:bg-sky-50"
+                className="tp-focus-ring inline-flex items-center gap-1 px-1.5 py-1 rounded-lg text-[11px] font-semibold text-sky-600 dark:text-sky-300 hover:text-sky-700 dark:hover:text-sky-200 hover:bg-sky-50 dark:hover:bg-sky-500/15"
               >
                 FS <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
               </a>
@@ -331,14 +331,14 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
               onClick={openFullTicket}
               aria-label="Open full ticket"
               title="Open full ticket in Ticket Pulse"
-              className="tp-focus-ring p-1.5 rounded-lg text-slate-400 hover:text-blue-700 hover:bg-blue-50"
+              className="tp-focus-ring p-1.5 rounded-lg text-muted-foreground/75 hover:text-blue-700 dark:hover:text-blue-200 hover:bg-blue-50 dark:hover:bg-blue-500/15"
             >
               <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
             </button>
             <button
               onClick={onClose}
               aria-label="Close preview"
-              className="tp-focus-ring p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+              className="tp-focus-ring p-1.5 rounded-lg text-muted-foreground/75 hover:text-muted-foreground hover:bg-muted"
             >
               <X className="w-3.5 h-3.5" aria-hidden="true" />
             </button>
@@ -346,7 +346,7 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
         </div>
         {ticket && (
           <>
-            <h2 className="text-sm font-bold text-slate-900 leading-snug line-clamp-2">{ticket.subject || '(no subject)'}</h2>
+            <h2 className="text-sm font-bold text-foreground leading-snug line-clamp-2">{ticket.subject || '(no subject)'}</h2>
             <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
               <StateChip state={ticket.stateChip} />
               <TypePill type={ticket.ticketType} full />
@@ -355,7 +355,7 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
               {(ticket.frDueBy && !ticket.firstPublicAgentReplyAt && !ticketTerminal && !['Deleted', 'Spam'].includes(ticket.status)) && <SlaChip value={ticket.frDueBy} paused={ticketSlaPaused} calendarAware={meta?.slaCalendarAware === true} />}
               {(ticket.tags || []).map((tag) => <TagChip key={tag.id} tag={tag} size="xs" />)}
               {(ticket.impact || ticket.urgency) && (
-                <span className="text-[10px] text-slate-400">
+                <span className="text-[10px] text-muted-foreground/75">
                   {ticket.impact ? `Impact ${['Low', 'Medium', 'High'][ticket.impact - 1]}` : null}
                   {ticket.impact && ticket.urgency ? ' · ' : ''}
                   {ticket.urgency ? `Urgency ${['Low', 'Medium', 'High'][ticket.urgency - 1]}` : null}
@@ -363,7 +363,7 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
               )}
             </div>
             {ticket.mergedInto && (
-              <p className="mt-1.5 rounded-lg bg-violet-50 border border-violet-200 px-2 py-1 text-[11px] text-violet-800">
+              <p className="mt-1.5 rounded-lg bg-violet-50 dark:bg-violet-500/15 border border-violet-200 dark:border-violet-500/30 px-2 py-1 text-[11px] text-violet-800 dark:text-violet-200">
                 Merged into <span className="font-mono font-bold">{ticket.mergedInto.displayRef}</span> — the conversation continues there.
               </p>
             )}
@@ -380,7 +380,7 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
             aria-selected={tab === t.key}
             onClick={() => setTab(t.key)}
             className={`tp-focus-ring px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${
-              tab === t.key ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
+              tab === t.key ? 'bg-foreground text-background border-foreground' : 'bg-card text-muted-foreground border-border hover:border-input'
             }`}
           >
             {t.label}
@@ -391,40 +391,40 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
       {/* Body */}
       <div className="flex-1 overflow-y-auto settings-scrollbar p-3.5 space-y-3.5">
         {isLoading ? (
-          <div className="py-10 text-center"><Activity className="w-6 h-6 animate-spin mx-auto text-blue-600" aria-label="Loading" /></div>
+          <div className="py-10 text-center"><Activity className="w-6 h-6 animate-spin mx-auto text-blue-600 dark:text-blue-300" aria-label="Loading" /></div>
         ) : error ? (
-          <p className="text-sm text-red-600">{error}</p>
+          <p className="text-sm text-red-600 dark:text-red-300">{error}</p>
         ) : ticket && tab === 'details' ? (
           <>
             {/* Requester card: photo, role, contact, helpdesk history */}
-            <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-3">
+            <div className="rounded-xl border border-border/60 bg-muted/35 p-3">
               <div className="flex items-start gap-3">
                 {requesterPhoto ? (
-                  <img src={requesterPhoto} alt="" className="h-11 w-11 rounded-full object-cover ring-2 ring-white shadow-subtle flex-shrink-0" />
+                  <img src={requesterPhoto} alt="" className="h-11 w-11 rounded-full object-cover ring-2 ring-card shadow-subtle flex-shrink-0" />
                 ) : (
                   <PersonAvatar name={ticket.requester?.name} size="h-11 w-11" textSize="text-sm" />
                 )}
                 <div className="min-w-0 flex-1 text-xs space-y-0.5">
-                  <p className="text-sm font-bold text-slate-900 truncate">{ticket.requester?.name || 'Unknown requester'}</p>
+                  <p className="text-sm font-bold text-foreground truncate">{ticket.requester?.name || 'Unknown requester'}</p>
                   {(ticket.requester?.entraJobTitle || ticket.requester?.jobTitle || ticket.requester?.entraDepartment || ticket.requester?.department) && (
-                    <p className="text-slate-500 truncate">
+                    <p className="text-muted-foreground truncate">
                       {[ticket.requester.entraJobTitle || ticket.requester.jobTitle, ticket.requester.entraDepartment || ticket.requester.department]
                         .filter(Boolean).join(' · ')}
                     </p>
                   )}
                   {ticket.requester?.email && (
-                    <p className="flex items-center gap-1.5 text-slate-400 truncate">
+                    <p className="flex items-center gap-1.5 text-muted-foreground/75 truncate">
                       <Mail className="w-3 h-3 flex-shrink-0" aria-hidden="true" />{ticket.requester.email}
                     </p>
                   )}
                   {(ticket.requester?.entraOfficeLocation || ticket.requester?.entraCity) && (
-                    <p className="flex items-center gap-1.5 text-slate-400 truncate">
+                    <p className="flex items-center gap-1.5 text-muted-foreground/75 truncate">
                       <MapPin className="w-3 h-3 flex-shrink-0" aria-hidden="true" />
                       {[...new Set([ticket.requester.entraOfficeLocation, ticket.requester.entraCity, ticket.requester.entraState].filter(Boolean))].join(' · ')}
                     </p>
                   )}
                   {(ticket.requester?.phone || ticket.requester?.mobile) && (
-                    <p className="flex items-center gap-1.5 text-slate-400 truncate">
+                    <p className="flex items-center gap-1.5 text-muted-foreground/75 truncate">
                       <Phone className="w-3 h-3 flex-shrink-0" aria-hidden="true" />
                       {[...new Set([ticket.requester.phone, ticket.requester.mobile].filter(Boolean))].join(' · ')}
                     </p>
@@ -432,31 +432,31 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                 </div>
               </div>
               {requesterStats && requesterStats.total > 0 && (
-                <div className="mt-2.5 pt-2 border-t border-slate-200/70 grid grid-cols-3 gap-1 text-center">
+                <div className="mt-2.5 pt-2 border-t border-border/70 grid grid-cols-3 gap-1 text-center">
                   <span>
-                    <span className="block text-sm font-bold text-slate-700">{requesterStats.total}</span>
-                    <span className="block text-[9px] font-semibold uppercase tracking-wide text-slate-400">Tickets ever</span>
+                    <span className="block text-sm font-bold text-foreground/85">{requesterStats.total}</span>
+                    <span className="block text-[9px] font-semibold uppercase tracking-wide text-muted-foreground/75">Tickets ever</span>
                   </span>
                   <span>
-                    <span className={`block text-sm font-bold ${requesterStats.open > 0 ? 'text-amber-600' : 'text-slate-700'}`}>{requesterStats.open}</span>
-                    <span className="block text-[9px] font-semibold uppercase tracking-wide text-slate-400">Open now</span>
+                    <span className={`block text-sm font-bold ${requesterStats.open > 0 ? 'text-amber-600 dark:text-amber-300' : 'text-foreground/85'}`}>{requesterStats.open}</span>
+                    <span className="block text-[9px] font-semibold uppercase tracking-wide text-muted-foreground/75">Open now</span>
                   </span>
                   <span>
-                    <span className="block text-sm font-bold text-emerald-600">{requesterStats.resolved}</span>
-                    <span className="block text-[9px] font-semibold uppercase tracking-wide text-slate-400">Resolved</span>
+                    <span className="block text-sm font-bold text-emerald-600 dark:text-emerald-300">{requesterStats.resolved}</span>
+                    <span className="block text-[9px] font-semibold uppercase tracking-wide text-muted-foreground/75">Resolved</span>
                   </span>
                 </div>
               )}
             </div>
 
             {ticket.isNoise && canWrite && (
-              <div className="flex flex-wrap items-center gap-2 p-2 bg-violet-50 border border-violet-200 rounded-lg text-[11px] text-violet-800">
+              <div className="flex flex-wrap items-center gap-2 p-2 bg-violet-50 dark:bg-violet-500/15 border border-violet-200 dark:border-violet-500/30 rounded-lg text-[11px] text-violet-800 dark:text-violet-200">
                 <VolumeX className="w-3.5 h-3.5 text-violet-500 flex-shrink-0" aria-hidden="true" />
                 <span>Flagged as noise</span>
                 <button
                   onClick={() => act('noise', () => ticketsAPI.setNoise(ticketId, { noise: false }))}
                   disabled={saving === 'noise'}
-                  className="tp-focus-ring ml-auto inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold rounded-lg bg-white text-violet-700 border border-violet-300 hover:bg-violet-100 disabled:opacity-50"
+                  className="tp-focus-ring ml-auto inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold rounded-lg bg-card text-violet-700 dark:text-violet-200 border border-violet-300 dark:border-violet-500/40 hover:bg-violet-100 dark:hover:bg-violet-500/20 disabled:opacity-50"
                 >
                   {saving === 'noise' ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" /> : null}
                   Not noise — restore
@@ -467,7 +467,7 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
             {/* Quick edits */}
             <div className="grid grid-cols-2 gap-2">
               <label className="block">
-                <span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-0.5">Status</span>
+                <span className="block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/75 mb-0.5">Status</span>
                 <select
                   value={ticket.status}
                   disabled={!canWrite || saving === 'status'}
@@ -480,7 +480,7 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                 </select>
               </label>
               <label className="block">
-                <span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-0.5">Priority</span>
+                <span className="block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/75 mb-0.5">Priority</span>
                 <select
                   value={ticket.priority}
                   disabled={!canWrite || saving === 'priority'}
@@ -493,7 +493,7 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
               </label>
             </div>
             <div>
-              <span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-0.5">Assignee</span>
+              <span className="block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/75 mb-0.5">Assignee</span>
               {(canWrite || fsEditable) ? (
                 <AssigneePicker
                   ticketId={ticketId}
@@ -508,14 +508,14 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                   onAssigned={() => { load({ silent: true }); onChanged?.(); }}
                 />
               ) : (
-                <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-slate-50 border border-slate-100">
+                <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-muted/50 border border-border/60">
                   <PersonAvatar name={ticket.assignedTech?.name} photoUrl={ticket.assignedTech?.photoUrl} size="h-6 w-6" />
-                  <span className="text-sm text-slate-600 truncate">{ticket.assignedTech?.name || 'Unassigned'}</span>
+                  <span className="text-sm text-muted-foreground truncate">{ticket.assignedTech?.name || 'Unassigned'}</span>
                 </div>
               )}
               {canSeeAi && aiPending && aiTop && !ticket.assignedTechId && (
                 <div
-                  className="mt-1.5 rounded-lg border border-indigo-200 bg-gradient-to-r from-indigo-50 to-violet-50/60 p-2"
+                  className="mt-1.5 rounded-lg border border-indigo-200 dark:border-indigo-500/30 bg-gradient-to-r from-indigo-50 dark:from-indigo-500/15 to-violet-50/60 dark:to-violet-500/10 p-2"
                   title={canReview ? undefined : 'AI suggestion — waiting on a reviewer’s approval'}
                 >
                   <p className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-indigo-500 mb-1">
@@ -527,7 +527,7 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                       photoUrl={(meta?.technicians || []).find((t) => t.id === aiTop.techId)?.photoUrl}
                       size="h-6 w-6"
                     />
-                    <span className="text-xs font-semibold text-slate-800 truncate flex-1">{aiTop.techName || 'Unknown'}</span>
+                    <span className="text-xs font-semibold text-foreground truncate flex-1">{aiTop.techName || 'Unknown'}</span>
                     {typeof aiTop.score === 'number' && (
                       <span className="text-[10px] text-indigo-500 font-medium whitespace-nowrap">{Math.round(aiTop.score * 100)}%</span>
                     )}
@@ -543,7 +543,7 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                       </button>
                       <button
                         onClick={() => setAiOpen(true)}
-                        className="tp-focus-ring px-2 py-1 rounded-md border border-indigo-200 text-indigo-700 text-[11px] font-medium hover:bg-indigo-100/60"
+                        className="tp-focus-ring px-2 py-1 rounded-md border border-indigo-200 dark:border-indigo-500/30 text-indigo-700 dark:text-indigo-200 text-[11px] font-medium hover:bg-indigo-100/60 dark:hover:bg-indigo-500/15"
                       >
                         Review…
                       </button>
@@ -562,14 +562,14 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
             {/* Description — full rich rendering, same sanitizer as the detail page */}
             {(ticket.descriptionText || ticket.description) && (
               <div>
-                <span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-1">Description</span>
+                <span className="block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/75 mb-1">Description</span>
                 {/* Who else received the original email (QA 08-05 #3) */}
                 <RecipientsLine to={ticket.toEmails} cc={ticket.ccEmails} compact className="mb-1" />
-                <div className="rounded-lg border border-slate-100 bg-white p-2.5 max-h-64 overflow-y-auto settings-scrollbar">
+                <div className="rounded-lg border border-border/60 bg-card p-2.5 max-h-64 overflow-y-auto settings-scrollbar">
                   {looksLikeHtml(ticket.description) ? (
                     <SafeHtml html={ticket.description} className="!text-xs" />
                   ) : (
-                    <p className="text-xs text-slate-600 whitespace-pre-wrap break-words">
+                    <p className="text-xs text-muted-foreground whitespace-pre-wrap break-words">
                       {(ticket.descriptionText || ticket.description || '').replace(/\n{3,}/g, '\n\n').trim()}
                     </p>
                   )}
@@ -582,27 +582,27 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
 
             {/* Ticket details */}
             <div>
-              <span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-1">Details</span>
-              <dl className="rounded-lg border border-slate-100 divide-y divide-slate-50 text-xs">
+              <span className="block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/75 mb-1">Details</span>
+              <dl className="rounded-lg border border-border/60 divide-y divide-border/60 text-xs">
                 <div className="flex items-center gap-2 px-2.5 py-1.5">
-                  <dt className="flex items-center gap-1.5 text-slate-400 w-24 flex-shrink-0"><CalendarDays className="w-3 h-3" aria-hidden="true" />Created</dt>
-                  <dd className="text-slate-600 truncate" title={new Date(ticket.createdAt).toLocaleString()}>
+                  <dt className="flex items-center gap-1.5 text-muted-foreground/75 w-24 flex-shrink-0"><CalendarDays className="w-3 h-3" aria-hidden="true" />Created</dt>
+                  <dd className="text-muted-foreground truncate" title={new Date(ticket.createdAt).toLocaleString()}>
                     {formatDayTime(ticket.createdAt)}
-                    <span className="text-slate-400"> · {timeAgo(ticket.createdAt)}</span>
+                    <span className="text-muted-foreground/75"> · {timeAgo(ticket.createdAt)}</span>
                   </dd>
                 </div>
                 {ticket.frDueBy && !['Deleted', 'Spam'].includes(ticket.status) && (
                   <div className="flex items-center gap-2 px-2.5 py-1.5">
-                    <dt className="text-slate-400 w-24 flex-shrink-0 pl-[18px]">First response</dt>
+                    <dt className="text-muted-foreground/75 w-24 flex-shrink-0 pl-[18px]">First response</dt>
                     <dd className="flex items-center gap-1.5 min-w-0">
-                      <span className="text-slate-600" title={`${new Date(ticket.frDueBy).toLocaleString()}${isNative ? '' : ' — FreshService owns this date'}`}>{formatDayTime(ticket.frDueBy)}</span>
+                      <span className="text-muted-foreground" title={`${new Date(ticket.frDueBy).toLocaleString()}${isNative ? '' : ' — FreshService owns this date'}`}>{formatDayTime(ticket.frDueBy)}</span>
                       <SlaTargetChip target={ticket.frDueBy} metAt={ticket.firstPublicAgentReplyAt} status={ticket.status} terminal={ticketTerminal} paused={ticketSlaPaused} calendarAware={meta?.slaCalendarAware === true} kind="response" className="!px-1.5 !text-[10px]" />
                       {canWrite && (
                         <button
                           onClick={openFullTicket}
                           aria-label="Edit first response due date on the full ticket"
                           title="Edit due date on the full ticket"
-                          className="tp-focus-ring rounded p-0.5 text-slate-300 hover:bg-slate-100 hover:text-slate-600"
+                          className="tp-focus-ring rounded p-0.5 text-muted-foreground/50 hover:bg-muted hover:text-muted-foreground"
                         >
                           <Pencil className="h-3 w-3" aria-hidden="true" />
                         </button>
@@ -616,22 +616,22 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                     affordance is discoverable. */}
                 {(ticket.dueBy || canWrite) && !['Deleted', 'Spam'].includes(ticket.status) && (
                   <div className="flex items-center gap-2 px-2.5 py-1.5">
-                    <dt className="text-slate-400 w-24 flex-shrink-0 pl-[18px]">Resolution</dt>
+                    <dt className="text-muted-foreground/75 w-24 flex-shrink-0 pl-[18px]">Resolution</dt>
                     <dd className="flex items-center gap-1.5 min-w-0">
                       {ticket.dueBy ? (
                         <>
-                          <span className="text-slate-600" title={`${new Date(ticket.dueBy).toLocaleString()}${isNative ? '' : ' — FreshService owns this date'}`}>{formatDayTime(ticket.dueBy)}</span>
+                          <span className="text-muted-foreground" title={`${new Date(ticket.dueBy).toLocaleString()}${isNative ? '' : ' — FreshService owns this date'}`}>{formatDayTime(ticket.dueBy)}</span>
                           <SlaTargetChip target={ticket.dueBy} metAt={ticket.resolvedAt || ticket.closedAt} status={ticket.status} terminal={ticketTerminal} paused={ticketSlaPaused} calendarAware={meta?.slaCalendarAware === true} kind="resolution" className="!px-1.5 !text-[10px]" />
                         </>
                       ) : (
-                        <span className="text-slate-300">Not set</span>
+                        <span className="text-muted-foreground/50">Not set</span>
                       )}
                       {canWrite && (
                         <button
                           onClick={openFullTicket}
                           aria-label="Edit resolution due date on the full ticket"
                           title="Edit due date on the full ticket"
-                          className="tp-focus-ring rounded p-0.5 text-slate-300 hover:bg-slate-100 hover:text-slate-600"
+                          className="tp-focus-ring rounded p-0.5 text-muted-foreground/50 hover:bg-muted hover:text-muted-foreground"
                         >
                           <Pencil className="h-3 w-3" aria-hidden="true" />
                         </button>
@@ -640,17 +640,17 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                   </div>
                 )}
                 <div className="flex items-center gap-2 px-2.5 py-1.5">
-                  <dt className="flex items-center gap-1.5 text-slate-400 w-24 flex-shrink-0"><Inbox className="w-3 h-3" aria-hidden="true" />Category</dt>
-                  <dd className="text-slate-600 truncate" title={[ticketCategoryLabels(ticket).category, ticketCategoryLabels(ticket).subcategory].filter(Boolean).join(' / ') || undefined}>
+                  <dt className="flex items-center gap-1.5 text-muted-foreground/75 w-24 flex-shrink-0"><Inbox className="w-3 h-3" aria-hidden="true" />Category</dt>
+                  <dd className="text-muted-foreground truncate" title={[ticketCategoryLabels(ticket).category, ticketCategoryLabels(ticket).subcategory].filter(Boolean).join(' / ') || undefined}>
                     {ticketCategoryLabels(ticket).category || 'Uncategorized'}
-                    {ticketCategoryLabels(ticket).subcategory && <span className="text-slate-400"> / {ticketCategoryLabels(ticket).subcategory}</span>}
+                    {ticketCategoryLabels(ticket).subcategory && <span className="text-muted-foreground/75"> / {ticketCategoryLabels(ticket).subcategory}</span>}
                   </dd>
                 </div>
                 {/* Featured custom field (Phase 2) — same line the queue chip shows */}
                 {featuredDef && featuredValue !== null && featuredValue !== undefined && featuredValue !== '' && (
                   <div className="flex items-center gap-2 px-2.5 py-1.5" data-testid="peek-featured-field">
-                    <dt className="text-slate-400 w-24 flex-shrink-0 pl-[18px] truncate" title={featuredDef.label}>{featuredDef.label}</dt>
-                    <dd className="text-slate-600 truncate" title={String(featuredValue)}>
+                    <dt className="text-muted-foreground/75 w-24 flex-shrink-0 pl-[18px] truncate" title={featuredDef.label}>{featuredDef.label}</dt>
+                    <dd className="text-muted-foreground truncate" title={String(featuredValue)}>
                       {typeof featuredValue === 'boolean' ? (featuredValue ? 'Yes' : 'No') : String(featuredValue)}
                     </dd>
                   </div>
@@ -667,15 +667,15 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                     || null;
                   return groupName ? (
                     <div className="flex items-center gap-2 px-2.5 py-1.5">
-                      <dt className="text-slate-400 w-24 flex-shrink-0 pl-[18px]">Group</dt>
-                      <dd className="text-slate-600 truncate">{groupName}</dd>
+                      <dt className="text-muted-foreground/75 w-24 flex-shrink-0 pl-[18px]">Group</dt>
+                      <dd className="text-muted-foreground truncate">{groupName}</dd>
                     </div>
                   ) : null;
                 })()}
                 {ticket.source != null && (meta?.sources || []).some((s) => s.value === ticket.source) && (
                   <div className="flex items-center gap-2 px-2.5 py-1.5">
-                    <dt className="text-slate-400 w-24 flex-shrink-0 pl-[18px]">Source</dt>
-                    <dd className="text-slate-600 truncate">{(meta.sources.find((s) => s.value === ticket.source) || {}).label}</dd>
+                    <dt className="text-muted-foreground/75 w-24 flex-shrink-0 pl-[18px]">Source</dt>
+                    <dd className="text-muted-foreground truncate">{(meta.sources.find((s) => s.value === ticket.source) || {}).label}</dd>
                   </div>
                 )}
                 {canReview && (() => {
@@ -686,24 +686,24 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                   const queuedToo = Boolean(lead && lead.status !== 'queued' && runs.some((r) => r.status === 'queued'));
                   return (
                     <div className="flex items-center gap-2 px-2.5 py-1.5">
-                      <dt className="flex items-center gap-1.5 text-slate-400 w-24 flex-shrink-0"><Sparkles className="w-3 h-3 text-indigo-400" aria-hidden="true" />AI runs</dt>
+                      <dt className="flex items-center gap-1.5 text-muted-foreground/75 w-24 flex-shrink-0"><Sparkles className="w-3 h-3 text-indigo-400" aria-hidden="true" />AI runs</dt>
                       <dd className="min-w-0 truncate">
                         {lead ? (
                           <Link
                             to={`/assignments/history/${lead.id}`}
-                            className="tp-focus-ring inline-flex items-center gap-1 text-indigo-600 hover:underline rounded"
+                            className="tp-focus-ring inline-flex items-center gap-1 text-indigo-600 dark:text-indigo-300 hover:underline rounded"
                             title={`via ${pipelineTriggerLabel(lead.triggerSource)}`}
                           >
                             <Bot className="w-3 h-3 flex-shrink-0" aria-hidden="true" />
                             {pipelineRunLabel(lead)}
-                            <span className="text-slate-400"> · {timeAgo(lead.decidedAt || lead.createdAt)}</span>
-                            {queuedToo && <span className="text-amber-600"> · +1 queued</span>}
-                            {runs.length > 1 && !queuedToo && <span className="text-slate-400"> · {runs.length} runs</span>}
+                            <span className="text-muted-foreground/75"> · {timeAgo(lead.decidedAt || lead.createdAt)}</span>
+                            {queuedToo && <span className="text-amber-600 dark:text-amber-300"> · +1 queued</span>}
+                            {runs.length > 1 && !queuedToo && <span className="text-muted-foreground/75"> · {runs.length} runs</span>}
                           </Link>
                         ) : (
                           <button
                             onClick={() => setAiOpen(true)}
-                            className="tp-focus-ring inline-flex items-center gap-1 text-indigo-600 hover:underline rounded"
+                            className="tp-focus-ring inline-flex items-center gap-1 text-indigo-600 dark:text-indigo-300 hover:underline rounded"
                             title="Run the assignment pipeline and watch it live"
                           >
                             <Sparkles className="w-3 h-3" aria-hidden="true" /> no run yet — run now
@@ -718,26 +718,26 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
           </>
         ) : ticket && tab === 'conversation' ? (
           conversation.length === 0 ? (
-            <p className="text-xs text-slate-400 text-center py-6">No conversation yet.</p>
+            <p className="text-xs text-muted-foreground/75 text-center py-6">No conversation yet.</p>
           ) : (
             <ul className="space-y-2.5">
               {conversation.map((e) => (
-                <li key={e.id} className={`rounded-lg border p-2.5 ${e.isPrivate ? 'bg-amber-50/70 border-amber-200' : (e.incoming || e.authorType === 'requester') ? 'bg-indigo-50/60 border-indigo-100' : 'bg-white border-slate-200'}`}>
+                <li key={e.id} className={`rounded-lg border p-2.5 ${e.isPrivate ? 'bg-amber-50/70 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/30' : (e.incoming || e.authorType === 'requester') ? 'bg-indigo-50/60 dark:bg-indigo-500/10 border-indigo-100 dark:border-indigo-500/20' : 'bg-card border-border'}`}>
                   <div className="flex items-center gap-1.5 mb-1">
-                    <span className="text-xs font-semibold text-slate-700 truncate">{e.actorName || (e.isPrivate ? 'Ticket Pulse' : 'Unknown')}</span>
+                    <span className="text-xs font-semibold text-foreground/85 truncate">{e.actorName || (e.isPrivate ? 'Ticket Pulse' : 'Unknown')}</span>
                     {e.isPrivate
-                      ? <Lock className="w-2.5 h-2.5 text-amber-600" aria-label="Internal note" />
+                      ? <Lock className="w-2.5 h-2.5 text-amber-600 dark:text-amber-300" aria-label="Internal note" />
                       : <Mail className="w-2.5 h-2.5 text-blue-500" aria-label="Public reply" />}
                     <span className="ml-auto flex items-center gap-1 whitespace-nowrap">
                       {e.editedAt && (
                         <span
-                          className="text-[9px] font-medium text-slate-400 bg-slate-100/80 border border-slate-200 rounded-full px-1 py-px"
+                          className="text-[9px] font-medium text-muted-foreground/75 bg-muted/80 border border-border rounded-full px-1 py-px"
                           title={`Edited ${e.editedBy ? `by ${e.editedBy} · ` : ''}${new Date(e.editedAt).toLocaleString()}`}
                         >
                           edited
                         </span>
                       )}
-                      <span className="text-[10px] text-slate-400">{timeAgo(e.occurredAt)}</span>
+                      <span className="text-[10px] text-muted-foreground/75">{timeAgo(e.occurredAt)}</span>
                     </span>
                   </div>
                   {e.bodyHtml && looksLikeHtml(e.bodyHtml) ? (
@@ -745,7 +745,7 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
                       <SafeHtml html={e.bodyHtml} className="!text-xs" />
                     </div>
                   ) : (
-                    <p className="text-xs text-slate-600 whitespace-pre-wrap break-words max-h-44 overflow-y-auto settings-scrollbar">
+                    <p className="text-xs text-muted-foreground whitespace-pre-wrap break-words max-h-44 overflow-y-auto settings-scrollbar">
                       {String(e.bodyText || e.content || '').replace(/\n{2,}/g, '\n').trim()}
                     </p>
                   )}
@@ -755,16 +755,16 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
           )
         ) : ticket && tab === 'activity' ? (
           activity.length === 0 ? (
-            <p className="text-xs text-slate-400 text-center py-6">No activity recorded.</p>
+            <p className="text-xs text-muted-foreground/75 text-center py-6">No activity recorded.</p>
           ) : (
             <ul className="space-y-1.5">
               {activity.map((a) => (
-                <li key={a.id} className="flex items-start gap-2 text-xs text-slate-500">
-                  <span className="w-1.5 h-1.5 rounded-full bg-slate-300 mt-1.5 flex-shrink-0" aria-hidden="true" />
+                <li key={a.id} className="flex items-start gap-2 text-xs text-muted-foreground">
+                  <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40 mt-1.5 flex-shrink-0" aria-hidden="true" />
                   <span className="min-w-0">
-                    <span className="font-medium text-slate-600 capitalize">{String(a.activityType || '').replace(/_/g, ' ')}</span>
+                    <span className="font-medium text-muted-foreground capitalize">{String(a.activityType || '').replace(/_/g, ' ')}</span>
                     {a.performedBy ? ` · ${a.performedBy}` : ''}
-                    <span className="text-slate-400"> · {timeAgo(a.performedAt)}</span>
+                    <span className="text-muted-foreground/75"> · {timeAgo(a.performedAt)}</span>
                   </span>
                 </li>
               ))}
@@ -775,7 +775,7 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
 
       {/* Footer actions */}
       {ticket && (
-        <div className="p-3 border-t border-slate-100 flex items-center gap-2">
+        <div className="p-3 border-t border-border/60 flex items-center gap-2">
           {canPickUp && (
             <button
               onClick={() => {
@@ -786,7 +786,7 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
               onBlur={() => setConfirmPickup(false)}
               disabled={saving === 'pickup'}
               className={`tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-lg border ${
-                confirmPickup ? 'bg-blue-600 text-white border-blue-600' : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'
+                confirmPickup ? 'bg-blue-600 text-white border-blue-600' : 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 border-blue-200 dark:border-blue-500/30 hover:bg-blue-100 dark:hover:bg-blue-500/20'
               }`}
             >
               {saving === 'pickup' ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" /> : <Hand className="w-3 h-3" aria-hidden="true" />}
@@ -797,7 +797,7 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
             <button
               onClick={() => act('resolve', () => ticketsAPI.setStatus(ticketId, 'Resolved'))}
               disabled={saving === 'resolve'}
-              className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100"
+              className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 border border-emerald-200 dark:border-emerald-500/30 hover:bg-emerald-100 dark:hover:bg-emerald-500/20"
             >
               {saving === 'resolve' ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" /> : <Check className="w-3 h-3" aria-hidden="true" />}
               Resolve

@@ -95,8 +95,9 @@ describe('TechCard — mobile stat presentation (detailed style)', () => {
   test('zero-value stats render muted, not colored (calm quiet-day cards)', () => {
     const { container } = renderCard(quietTechnician);
     const mobileBlock = container.querySelector('.sm\\:hidden');
-    // All six values are zero/none -> every value in the strip is slate-300
-    const mutedValues = mobileBlock.querySelectorAll('.text-slate-300');
+    // All six values are zero/none -> every value in the strip is muted
+    // (dark-mode migration: text-slate-300 became the token text-muted-foreground/50)
+    const mutedValues = mobileBlock.querySelectorAll('.text-muted-foreground\\/50');
     expect(mutedValues.length).toBeGreaterThanOrEqual(6);
     // And no rejected button when there is nothing to drill into
     expect(within(mobileBlock).queryByRole('button')).toBeNull();

@@ -66,9 +66,9 @@ describe('WorkflowIndex sidebar cards (QA 08-02 legibility polish)', () => {
     const card = cardFor('VIP variant with a much longer descriptive workflow name for wrapping');
     expect(card).toHaveClass('rounded-lg');
     expect(card).toHaveClass('border');
-    expect(card).toHaveClass('border-slate-200');
+    expect(card).toHaveClass('border-border');
     // Unselected cards get the hover affordances.
-    expect(card.className).toContain('hover:border-slate-300');
+    expect(card.className).toContain('hover:border-input');
     expect(card.className).toContain('hover:shadow-subtle');
   });
 
@@ -88,7 +88,7 @@ describe('WorkflowIndex sidebar cards (QA 08-02 legibility polish)', () => {
     const name = screen.getByTitle('Assignment notice');
     expect(name).toHaveClass('text-sm');
     expect(name).toHaveClass('font-semibold');
-    expect(name).toHaveClass('text-slate-800');
+    expect(name).toHaveClass('text-foreground');
     expect(name).toHaveClass('line-clamp-2');
   });
 

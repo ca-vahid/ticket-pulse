@@ -71,7 +71,7 @@ export default function DueDateEditor({ label, value, onSave, saving = false }) 
 
   const choose = (date) => { close(); onSave(date ? new Date(date).toISOString() : null); };
 
-  const rowClass = 'tp-focus-ring flex w-full items-center justify-between gap-3 rounded-md px-2 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50';
+  const rowClass = 'tp-focus-ring flex w-full items-center justify-between gap-3 rounded-md px-2 py-1.5 text-left text-xs text-foreground/85 hover:bg-muted/50';
 
   return (
     <span ref={rootRef} className="relative inline-flex">
@@ -82,7 +82,7 @@ export default function DueDateEditor({ label, value, onSave, saving = false }) 
         aria-haspopup="dialog"
         aria-expanded={open}
         title={`Edit ${label.toLowerCase()} due date`}
-        className="tp-focus-ring rounded p-0.5 text-slate-300 hover:bg-slate-100 hover:text-slate-600 disabled:opacity-50"
+        className="tp-focus-ring rounded p-0.5 text-muted-foreground/50 hover:bg-muted hover:text-muted-foreground disabled:opacity-50"
       >
         <Pencil className="h-3 w-3" aria-hidden="true" />
       </button>
@@ -93,23 +93,23 @@ export default function DueDateEditor({ label, value, onSave, saving = false }) 
           onKeyDown={(e) => { if (e.key === 'Escape') close(); }}
           className="tp-card absolute right-0 top-6 z-30 w-64 animate-scaleIn rounded-xl p-2 shadow-soft"
         >
-          <p className="px-2 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">{label} due</p>
+          <p className="px-2 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/75">{label} due</p>
           <div className="space-y-0.5">
             {presets.map((p) => (
               <button key={p.key} onClick={() => choose(p.date)} className={rowClass}>
                 <span className="font-medium">{p.label}</span>
-                <span className="text-[11px] text-slate-400">{formatDayTime(p.date)}</span>
+                <span className="text-[11px] text-muted-foreground/75">{formatDayTime(p.date)}</span>
               </button>
             ))}
           </div>
-          <div className="my-1.5 border-t border-slate-100" />
+          <div className="my-1.5 border-t border-border/60" />
           <button
             onClick={() => setPicking((v) => !v)}
             aria-expanded={picking}
             className={rowClass}
           >
             <span className="inline-flex items-center gap-1.5 font-medium">
-              <CalendarClock className="h-3.5 w-3.5 text-slate-400" aria-hidden="true" />
+              <CalendarClock className="h-3.5 w-3.5 text-muted-foreground/75" aria-hidden="true" />
               Pick date and time
             </span>
           </button>
@@ -121,7 +121,7 @@ export default function DueDateEditor({ label, value, onSave, saving = false }) 
                 type="datetime-local"
                 value={custom}
                 onChange={(e) => setCustom(e.target.value)}
-                className="tp-focus-ring min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-1.5 py-1 text-[11px] text-slate-700"
+                className="tp-focus-ring min-w-0 flex-1 rounded-md border border-border bg-card px-1.5 py-1 text-[11px] text-foreground/85"
               />
               <button
                 onClick={() => { const d = new Date(custom); if (!Number.isNaN(d.getTime())) choose(d); }}
@@ -134,8 +134,8 @@ export default function DueDateEditor({ label, value, onSave, saving = false }) 
           )}
           {value && (
             <>
-              <div className="my-1.5 border-t border-slate-100" />
-              <button onClick={() => choose(null)} className={`${rowClass} !text-rose-600 hover:!bg-rose-50`}>
+              <div className="my-1.5 border-t border-border/60" />
+              <button onClick={() => choose(null)} className={`${rowClass} !text-rose-600 dark:!text-rose-300 hover:!bg-rose-50 dark:hover:!bg-rose-500/15`}>
                 <span className="inline-flex items-center gap-1.5 font-medium">
                   <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
                   Remove due date

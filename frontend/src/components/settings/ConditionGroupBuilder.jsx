@@ -164,7 +164,7 @@ const isGroup = (entry) => entry && typeof entry === 'object' && Array.isArray(e
 
 function LogicToggle({ logic, onChange }) {
   return (
-    <div className="inline-flex overflow-hidden rounded-md border border-indigo-200 text-[11px] font-semibold" role="radiogroup" aria-label="Match mode">
+    <div className="inline-flex overflow-hidden rounded-md border border-indigo-200 dark:border-indigo-500/30 text-[11px] font-semibold" role="radiogroup" aria-label="Match mode">
       {[['all', 'ALL'], ['any', 'ANY']].map(([value, label]) => (
         <button
           key={value}
@@ -172,7 +172,7 @@ function LogicToggle({ logic, onChange }) {
           role="radio"
           aria-checked={logic === value}
           onClick={() => onChange(value)}
-          className={`px-2.5 py-1 transition-colors ${logic === value ? 'bg-indigo-600 text-white' : 'bg-white text-indigo-600 hover:bg-indigo-50'}`}
+          className={`px-2.5 py-1 transition-colors ${logic === value ? 'bg-indigo-600 text-white' : 'bg-card text-indigo-600 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-500/15'}`}
         >
           {label}
         </button>
@@ -193,7 +193,7 @@ function ValueInput({ row, onChange, fields }) {
         onChange={(e) => onChange(e.target.value.split(',').map((v) => v.trim()).filter(Boolean))}
         placeholder="value, value, …"
         aria-label="Values (comma-separated)"
-        className="w-full rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-slate-900"
+        className="w-full rounded-md border border-border bg-card px-2.5 py-1.5 text-sm text-foreground"
       />
     );
   }
@@ -203,7 +203,7 @@ function ValueInput({ row, onChange, fields }) {
         value={String(row.value ?? spec.options[0])}
         onChange={(e) => onChange(e.target.value)}
         aria-label="Value"
-        className="w-full rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-slate-900"
+        className="w-full rounded-md border border-border bg-card px-2.5 py-1.5 text-sm text-foreground"
       >
         {spec.options.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
       </select>
@@ -217,7 +217,7 @@ function ValueInput({ row, onChange, fields }) {
         onChange={(e) => onChange(e.target.value === '' ? '' : Number(e.target.value))}
         placeholder="minutes (120 = 2h)"
         aria-label="Minutes"
-        className="w-full rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-slate-900 tabular-nums"
+        className="w-full rounded-md border border-border bg-card px-2.5 py-1.5 text-sm text-foreground tabular-nums"
       />
     );
   }
@@ -229,7 +229,7 @@ function ValueInput({ row, onChange, fields }) {
         onChange={(e) => onChange(e.target.value === '' ? '' : Number(e.target.value))}
         placeholder="number"
         aria-label="Number"
-        className="w-full rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-slate-900 tabular-nums"
+        className="w-full rounded-md border border-border bg-card px-2.5 py-1.5 text-sm text-foreground tabular-nums"
       />
     );
   }
@@ -240,7 +240,7 @@ function ValueInput({ row, onChange, fields }) {
         value={String(row.value ?? '').slice(0, 10)}
         onChange={(e) => onChange(e.target.value)}
         aria-label="Date"
-        className="w-full rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-slate-900 tabular-nums"
+        className="w-full rounded-md border border-border bg-card px-2.5 py-1.5 text-sm text-foreground tabular-nums"
       />
     );
   }
@@ -250,7 +250,7 @@ function ValueInput({ row, onChange, fields }) {
       onChange={(e) => onChange(e.target.value)}
       placeholder={row.operator === 'matches_regex' ? 'pattern (case-insensitive)' : 'value'}
       aria-label="Value"
-      className="w-full rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-slate-900"
+      className="w-full rounded-md border border-border bg-card px-2.5 py-1.5 text-sm text-foreground"
     />
   );
 }
@@ -267,7 +267,7 @@ function ConditionRow({ row, onChange, onRemove, fields }) {
           onChange({ field: next.value, operator: defaultOperator(next), value: next.type === 'enum' ? next.options?.[0] : '' });
         }}
         aria-label="Field"
-        className="w-full rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-slate-900"
+        className="w-full rounded-md border border-border bg-card px-2.5 py-1.5 text-sm text-foreground"
       >
         {fields.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
       </select>
@@ -275,16 +275,16 @@ function ConditionRow({ row, onChange, onRemove, fields }) {
         value={row.operator}
         onChange={(e) => onChange({ ...row, operator: e.target.value, ...(VALUELESS.has(e.target.value) ? { value: undefined } : {}) })}
         aria-label="Operator"
-        className="w-full rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-slate-900"
+        className="w-full rounded-md border border-border bg-card px-2.5 py-1.5 text-sm text-foreground"
       >
         {operators.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
       </select>
-      <div>{VALUELESS.has(row.operator) ? <span className="text-xs text-slate-400 pl-1">—</span> : <ValueInput row={row} onChange={(value) => onChange({ ...row, value })} fields={fields} />}</div>
+      <div>{VALUELESS.has(row.operator) ? <span className="text-xs text-muted-foreground/75 pl-1">—</span> : <ValueInput row={row} onChange={(value) => onChange({ ...row, value })} fields={fields} />}</div>
       <button
         type="button"
         onClick={onRemove}
         aria-label="Remove condition"
-        className="rounded-md p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-500"
+        className="rounded-md p-1.5 text-muted-foreground/75 hover:bg-red-50 dark:hover:bg-red-500/15 hover:text-red-500"
       >
         <X className="h-3.5 w-3.5" />
       </button>
@@ -303,16 +303,16 @@ function GroupEditor({ group, onChange, onRemove, nested = false, fields }) {
   };
 
   return (
-    <div className={`rounded-lg border p-2.5 space-y-2 ${nested ? 'border-indigo-200 bg-indigo-50/40' : 'border-slate-200 bg-white'}`}>
+    <div className={`rounded-lg border p-2.5 space-y-2 ${nested ? 'border-indigo-200 dark:border-indigo-500/30 bg-indigo-50/40 dark:bg-indigo-500/10' : 'border-border bg-card'}`}>
       <div className="flex items-center gap-2">
         <LogicToggle logic={group.logic} onChange={(logic) => onChange({ ...group, logic })} />
-        <span className="text-[11px] text-slate-500">{group.logic === 'all' ? 'every condition must match' : 'any condition may match'}</span>
+        <span className="text-[11px] text-muted-foreground">{group.logic === 'all' ? 'every condition must match' : 'any condition may match'}</span>
         {nested && (
           <button
             type="button"
             onClick={onRemove}
             aria-label="Remove group"
-            className="ml-auto rounded-md p-1 text-slate-400 hover:bg-red-50 hover:text-red-500"
+            className="ml-auto rounded-md p-1 text-muted-foreground/75 hover:bg-red-50 dark:hover:bg-red-500/15 hover:text-red-500"
           >
             <Trash2 className="h-3.5 w-3.5" />
           </button>
@@ -340,14 +340,14 @@ function GroupEditor({ group, onChange, onRemove, nested = false, fields }) {
           )
         ))}
         {group.conditions.length === 0 && (
-          <p className="text-xs italic text-slate-400 px-1">No conditions — matches every ticket.</p>
+          <p className="text-xs italic text-muted-foreground/75 px-1">No conditions — matches every ticket.</p>
         )}
       </div>
       <div className="flex items-center gap-2">
         <button
           type="button"
           onClick={() => onChange({ ...group, conditions: [...group.conditions, emptyRow()] })}
-          className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
+          className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-muted/50"
         >
           <Plus className="h-3 w-3" /> Condition
         </button>
@@ -355,7 +355,7 @@ function GroupEditor({ group, onChange, onRemove, nested = false, fields }) {
           <button
             type="button"
             onClick={() => onChange({ ...group, conditions: [...group.conditions, { logic: 'any', conditions: [emptyRow()] }] })}
-            className="inline-flex items-center gap-1 rounded-md border border-indigo-200 px-2 py-1 text-[11px] font-medium text-indigo-600 hover:bg-indigo-50"
+            className="inline-flex items-center gap-1 rounded-md border border-indigo-200 dark:border-indigo-500/30 px-2 py-1 text-[11px] font-medium text-indigo-600 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-500/15"
           >
             <Plus className="h-3 w-3" /> Group
           </button>
@@ -374,7 +374,7 @@ export default function ConditionGroupBuilder({ value, onChange, onClear }) {
       <button
         type="button"
         onClick={() => onChange(emptyGroup())}
-        className="w-full rounded-lg border border-dashed border-indigo-300 bg-indigo-50/50 px-3 py-2.5 text-left text-sm font-medium text-indigo-700 hover:bg-indigo-50"
+        className="w-full rounded-lg border border-dashed border-indigo-300 dark:border-indigo-500/40 bg-indigo-50/50 dark:bg-indigo-500/10 px-3 py-2.5 text-left text-sm font-medium text-indigo-700 dark:text-indigo-200 hover:bg-indigo-50 dark:hover:bg-indigo-500/15"
       >
         + Build conditions visually (AND/OR groups)
       </button>
@@ -385,11 +385,11 @@ export default function ConditionGroupBuilder({ value, onChange, onClear }) {
     <div className="space-y-2">
       <GroupEditor group={group} onChange={onChange} fields={fields} />
       <div className="flex items-center justify-between">
-        <p className="text-[11px] text-slate-400">Structured conditions override the raw JSONLogic rule below.</p>
+        <p className="text-[11px] text-muted-foreground/75">Structured conditions override the raw JSONLogic rule below.</p>
         <button
           type="button"
           onClick={onClear}
-          className="text-[11px] font-medium text-slate-500 hover:text-red-600"
+          className="text-[11px] font-medium text-muted-foreground hover:text-red-600 dark:hover:text-red-300"
         >
           Remove &amp; use raw rule
         </button>

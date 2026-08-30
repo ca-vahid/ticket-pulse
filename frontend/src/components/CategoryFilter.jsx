@@ -70,8 +70,8 @@ export default function CategoryFilter({
           onClick={() => setIsOpen(!isOpen)}
           className={`group flex w-full items-center justify-center gap-1.5 pl-1.5 pr-3 py-1.5 rounded-full text-xs font-semibold transition-all border whitespace-nowrap sm:w-auto ${
             hasSelection
-              ? 'border-blue-300 bg-blue-100 text-blue-800 hover:bg-blue-200 hover:border-blue-400 hover:shadow-sm'
-              : 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 hover:border-blue-300 hover:shadow-sm'
+              ? 'border-blue-300 dark:border-blue-500/40 bg-blue-100 dark:bg-blue-500/20 text-blue-800 dark:text-blue-200 hover:bg-blue-200 dark:hover:bg-blue-500/30 hover:border-blue-400 hover:shadow-sm'
+              : 'border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 hover:bg-blue-100 dark:hover:bg-blue-500/20 hover:border-blue-300 dark:hover:border-blue-500/40 hover:shadow-sm'
           }`}
           title={hasSelection ? `${selected.length} categor${selected.length === 1 ? 'y' : 'ies'} selected` : 'Filter by category'}
         >
@@ -89,13 +89,13 @@ export default function CategoryFilter({
 
         {/* Dropdown Menu */}
         {isOpen && (
-          <div className="absolute top-full right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-xl z-50 w-[min(20rem,calc(100vw-2rem))] max-h-[320px] overflow-auto sm:min-w-[220px]">
+          <div className="absolute top-full right-0 mt-1 bg-card border border-border rounded-lg shadow-xl z-50 w-[min(20rem,calc(100vw-2rem))] max-h-[320px] overflow-auto sm:min-w-[220px]">
             {hasSelection && (
-              <div className="border-b border-gray-200 p-2 sticky top-0 bg-white">
+              <div className="border-b border-border p-2 sticky top-0 bg-card">
                 <button
                   type="button"
                   onClick={handleClearAll}
-                  className="w-full text-left text-xs text-red-600 hover:bg-red-50 px-2 py-1 rounded transition-colors font-medium"
+                  className="w-full text-left text-xs text-red-600 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-500/15 px-2 py-1 rounded transition-colors font-medium"
                 >
                   Clear all filters
                 </button>
@@ -106,15 +106,15 @@ export default function CategoryFilter({
               {categories.map((category) => (
                 <label
                   key={category}
-                  className="flex items-center gap-2 px-2 py-1.5 hover:bg-blue-50 rounded cursor-pointer transition-colors"
+                  className="flex items-center gap-2 px-2 py-1.5 hover:bg-blue-50 dark:hover:bg-blue-500/15 rounded cursor-pointer transition-colors"
                 >
                   <input
                     type="checkbox"
                     checked={selected.includes(category)}
                     onChange={() => handleToggleCategory(category)}
-                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                    className="w-4 h-4 text-blue-600 dark:text-blue-300 border-input rounded focus:ring-2 focus:ring-blue-500"
                   />
-                  <span className="text-sm text-gray-700">{category}</span>
+                  <span className="text-sm text-foreground/85">{category}</span>
                 </label>
               ))}
             </div>
@@ -129,13 +129,13 @@ export default function CategoryFilter({
           {selected.map((category) => (
             <div
               key={category}
-              className="flex items-center gap-1 bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full text-[11px] font-medium border border-blue-200"
+              className="flex items-center gap-1 bg-blue-100 dark:bg-blue-500/20 text-blue-800 dark:text-blue-200 px-2 py-0.5 rounded-full text-[11px] font-medium border border-blue-200 dark:border-blue-500/30"
             >
               <span>{category}</span>
               <button
                 type="button"
                 onClick={() => handleRemoveCategory(category)}
-                className="hover:text-blue-900 transition-colors"
+                className="hover:text-blue-900 dark:hover:text-blue-200 transition-colors"
                 title={`Remove ${category} filter`}
               >
                 <X className="w-3 h-3" />

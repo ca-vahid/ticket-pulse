@@ -114,41 +114,41 @@ export default function AgentAlertsPanel({ workspaceId }) {
     { key: 'channelPhone', Icon: Phone, label: 'Phone call', ready: readiness.phoneVerified, blockReason: 'verify a phone in Notifications' },
   ];
 
-  if (loading) return <div className="flex items-center gap-2 py-8 text-sm text-slate-400"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Loading your alerts…</div>;
+  if (loading) return <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground/75"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Loading your alerts…</div>;
 
   return (
     <div className="space-y-4">
       <div className="flex items-start gap-2.5">
-        <span className="mt-0.5 inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600"><BellRing className="h-4 w-4" aria-hidden="true" /></span>
+        <span className="mt-0.5 inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-300"><BellRing className="h-4 w-4" aria-hidden="true" /></span>
         <div>
-          <h3 className="text-base font-bold text-slate-900">My alerts</h3>
-          <p className="text-xs text-slate-500">Get notified when tickets matching a category, tag, or priority come in — or when one escalates or is re-categorized into your scope. Bursts are grouped into one alert.</p>
+          <h3 className="text-base font-bold text-foreground">My alerts</h3>
+          <p className="text-xs text-muted-foreground">Get notified when tickets matching a category, tag, or priority come in — or when one escalates or is re-categorized into your scope. Bursts are grouped into one alert.</p>
         </div>
       </div>
 
-      {error && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700" role="alert">{error}</div>}
+      {error && <div className="rounded-lg border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 px-3 py-2 text-xs text-red-700 dark:text-red-200" role="alert">{error}</div>}
 
       {/* Empty state with one-click starter templates */}
       {subs.length === 0 && !draft && (
-        <div className="rounded-2xl border border-slate-200 bg-gradient-to-b from-slate-50 to-white p-5 text-center">
-          <span className="mx-auto mb-2 inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-50 text-blue-500"><BellRing className="h-5 w-5" aria-hidden="true" /></span>
-          <p className="text-sm font-semibold text-slate-700">No alerts yet</p>
-          <p className="mx-auto mt-0.5 max-w-sm text-xs text-slate-400">Get a heads-up the moment tickets you care about arrive or change. Start from a template:</p>
+        <div className="rounded-2xl border border-border bg-gradient-to-b from-muted/50 to-card p-5 text-center">
+          <span className="mx-auto mb-2 inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-50 dark:bg-blue-500/15 text-blue-500"><BellRing className="h-5 w-5" aria-hidden="true" /></span>
+          <p className="text-sm font-semibold text-foreground/85">No alerts yet</p>
+          <p className="mx-auto mt-0.5 max-w-sm text-xs text-muted-foreground/75">Get a heads-up the moment tickets you care about arrive or change. Start from a template:</p>
           <div className="mx-auto mt-3 grid max-w-lg gap-2 sm:grid-cols-3">
             {PRESETS.map(({ key, Icon, tone, label, desc, draft: preset }) => (
               <button
                 key={key}
                 type="button"
                 onClick={() => setDraft({ ...preset })}
-                className="tp-focus-ring group flex flex-col items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-3 text-center transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-sm"
+                className="tp-focus-ring group flex flex-col items-center gap-1 rounded-xl border border-border bg-card px-3 py-3 text-center transition hover:-translate-y-0.5 hover:border-blue-200 dark:hover:border-blue-500/30 hover:shadow-sm"
               >
                 <Icon className={`h-5 w-5 ${tone}`} aria-hidden="true" />
-                <span className="text-xs font-semibold text-slate-700">{label}</span>
-                <span className="text-[11px] leading-tight text-slate-400">{desc}</span>
+                <span className="text-xs font-semibold text-foreground/85">{label}</span>
+                <span className="text-[11px] leading-tight text-muted-foreground/75">{desc}</span>
               </button>
             ))}
           </div>
-          <button onClick={() => setDraft({ ...EMPTY_DRAFT })} className="tp-focus-ring mt-3 text-xs font-semibold text-blue-600 hover:underline">
+          <button onClick={() => setDraft({ ...EMPTY_DRAFT })} className="tp-focus-ring mt-3 text-xs font-semibold text-blue-600 dark:text-blue-300 hover:underline">
             or build one from scratch →
           </button>
         </div>
@@ -157,16 +157,16 @@ export default function AgentAlertsPanel({ workspaceId }) {
       {/* Subscriptions */}
       <ul className={subs.length ? 'space-y-2' : 'hidden'}>
         {subs.map((sub) => (
-          <li key={sub.id} className={`rounded-xl border px-3.5 py-3 ${sub.isActive ? 'border-slate-200 bg-white' : 'border-slate-200 bg-slate-50/70'}`}>
+          <li key={sub.id} className={`rounded-xl border px-3.5 py-3 ${sub.isActive ? 'border-border bg-card' : 'border-border bg-muted/35'}`}>
             <div className="flex items-start gap-3">
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                  <span className="text-sm font-semibold text-slate-800">{sub.label || scopeText(sub)}</span>
-                  {sub.label && <span className="text-xs text-slate-400">({scopeText(sub)})</span>}
-                  {!sub.isActive && <span className="rounded-full bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">Paused</span>}
+                  <span className="text-sm font-semibold text-foreground">{sub.label || scopeText(sub)}</span>
+                  {sub.label && <span className="text-xs text-muted-foreground/75">({scopeText(sub)})</span>}
+                  {!sub.isActive && <span className="rounded-full bg-secondary px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">Paused</span>}
                 </div>
-                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
-                  <span>Alert on: <b className="font-semibold text-slate-600">{triggerText(sub)}</b></span>
+                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                  <span>Alert on: <b className="font-semibold text-muted-foreground">{triggerText(sub)}</b></span>
                   <span className="flex items-center gap-1.5">
                     {sub.channelEmail && <Mail className="h-3 w-3" aria-hidden="true" />}
                     {sub.channelSms && <MessageSquare className="h-3 w-3" aria-hidden="true" />}
@@ -176,9 +176,9 @@ export default function AgentAlertsPanel({ workspaceId }) {
                 </div>
               </div>
               <div className="flex flex-shrink-0 items-center gap-1">
-                <button onClick={() => toggleActive(sub)} className="tp-focus-ring rounded px-2 py-1 text-[11px] font-semibold text-slate-500 hover:bg-slate-100" title={sub.isActive ? 'Pause' : 'Resume'}>{sub.isActive ? 'Pause' : 'Resume'}</button>
-                <button onClick={() => setDraft({ ...EMPTY_DRAFT, ...sub, categoryId: sub.categoryId ?? '', tagId: sub.tagId ?? '', priorityMin: sub.priorityMin ?? '', label: sub.label || '' })} className="tp-focus-ring rounded px-2 py-1 text-[11px] font-semibold text-blue-600 hover:bg-blue-50">Edit</button>
-                <button onClick={() => remove(sub.id)} aria-label="Delete alert" className="tp-focus-ring rounded p-1 text-slate-300 hover:bg-red-50 hover:text-red-500"><Trash2 className="h-3.5 w-3.5" aria-hidden="true" /></button>
+                <button onClick={() => toggleActive(sub)} className="tp-focus-ring rounded px-2 py-1 text-[11px] font-semibold text-muted-foreground hover:bg-muted" title={sub.isActive ? 'Pause' : 'Resume'}>{sub.isActive ? 'Pause' : 'Resume'}</button>
+                <button onClick={() => setDraft({ ...EMPTY_DRAFT, ...sub, categoryId: sub.categoryId ?? '', tagId: sub.tagId ?? '', priorityMin: sub.priorityMin ?? '', label: sub.label || '' })} className="tp-focus-ring rounded px-2 py-1 text-[11px] font-semibold text-blue-600 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-500/15">Edit</button>
+                <button onClick={() => remove(sub.id)} aria-label="Delete alert" className="tp-focus-ring rounded p-1 text-muted-foreground/50 hover:bg-red-50 dark:hover:bg-red-500/15 hover:text-red-500"><Trash2 className="h-3.5 w-3.5" aria-hidden="true" /></button>
               </div>
             </div>
           </li>
@@ -187,38 +187,38 @@ export default function AgentAlertsPanel({ workspaceId }) {
 
       {/* Draft form */}
       {draft ? (
-        <div className="rounded-xl border border-blue-200 bg-blue-50/40 p-3.5">
+        <div className="rounded-xl border border-blue-200 dark:border-blue-500/30 bg-blue-50/40 dark:bg-blue-500/10 p-3.5">
           <div className="mb-2 flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">{draft.id ? 'Edit alert' : 'New alert'}</span>
-            <button onClick={() => setDraft(null)} aria-label="Cancel" className="tp-focus-ring rounded p-1 text-slate-400 hover:text-slate-600"><X className="h-4 w-4" aria-hidden="true" /></button>
+            <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{draft.id ? 'Edit alert' : 'New alert'}</span>
+            <button onClick={() => setDraft(null)} aria-label="Cancel" className="tp-focus-ring rounded p-1 text-muted-foreground/75 hover:text-muted-foreground"><X className="h-4 w-4" aria-hidden="true" /></button>
           </div>
 
           <div className="grid gap-2.5 sm:grid-cols-3">
             <label className="block">
-              <span className="mb-0.5 block text-[11px] font-semibold text-slate-500">Category</span>
-              <select value={draft.categoryId} onChange={(e) => setDraft((d) => ({ ...d, categoryId: e.target.value }))} className="tp-focus-ring w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm">
+              <span className="mb-0.5 block text-[11px] font-semibold text-muted-foreground">Category</span>
+              <select value={draft.categoryId} onChange={(e) => setDraft((d) => ({ ...d, categoryId: e.target.value }))} className="tp-focus-ring w-full rounded-lg border border-border bg-card px-2 py-1.5 text-sm">
                 <option value="">Any category</option>
                 {options.categories.map((c) => <option key={c.id} value={c.id}>{c.path}</option>)}
               </select>
             </label>
             <label className="block">
-              <span className="mb-0.5 block text-[11px] font-semibold text-slate-500">Tag</span>
-              <select value={draft.tagId} onChange={(e) => setDraft((d) => ({ ...d, tagId: e.target.value }))} className="tp-focus-ring w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm">
+              <span className="mb-0.5 block text-[11px] font-semibold text-muted-foreground">Tag</span>
+              <select value={draft.tagId} onChange={(e) => setDraft((d) => ({ ...d, tagId: e.target.value }))} className="tp-focus-ring w-full rounded-lg border border-border bg-card px-2 py-1.5 text-sm">
                 <option value="">Any tag</option>
                 {options.tags.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
               </select>
             </label>
             <label className="block">
-              <span className="mb-0.5 block text-[11px] font-semibold text-slate-500">Priority</span>
-              <select value={draft.priorityMin} onChange={(e) => setDraft((d) => ({ ...d, priorityMin: e.target.value }))} className="tp-focus-ring w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm">
+              <span className="mb-0.5 block text-[11px] font-semibold text-muted-foreground">Priority</span>
+              <select value={draft.priorityMin} onChange={(e) => setDraft((d) => ({ ...d, priorityMin: e.target.value }))} className="tp-focus-ring w-full rounded-lg border border-border bg-card px-2 py-1.5 text-sm">
                 {PRIORITY_MIN.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
               </select>
             </label>
           </div>
 
           <div className="mt-3">
-            <span className="mb-1 block text-[11px] font-semibold text-slate-500">Alert me when a matching ticket…</span>
-            <div className="flex flex-wrap gap-3 text-xs text-slate-600">
+            <span className="mb-1 block text-[11px] font-semibold text-muted-foreground">Alert me when a matching ticket…</span>
+            <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
               <label className="flex items-center gap-1.5"><input type="checkbox" checked={draft.onCreated} onChange={(e) => setDraft((d) => ({ ...d, onCreated: e.target.checked }))} className="tp-focus-ring" /> arrives (new)</label>
               <label className="flex items-center gap-1.5"><input type="checkbox" checked={draft.onPriorityRaised} onChange={(e) => setDraft((d) => ({ ...d, onPriorityRaised: e.target.checked }))} className="tp-focus-ring" /> is escalated (priority raised)</label>
               <label className="flex items-center gap-1.5"><input type="checkbox" checked={draft.onRecategorized} onChange={(e) => setDraft((d) => ({ ...d, onRecategorized: e.target.checked }))} className="tp-focus-ring" /> is re-categorized into scope</label>
@@ -226,58 +226,58 @@ export default function AgentAlertsPanel({ workspaceId }) {
           </div>
 
           <div className="mt-3">
-            <span className="mb-1 block text-[11px] font-semibold text-slate-500">Deliver via</span>
-            <div className="flex flex-wrap gap-3 text-xs text-slate-600">
+            <span className="mb-1 block text-[11px] font-semibold text-muted-foreground">Deliver via</span>
+            <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
               {CH.map(({ key, Icon, label, ready, blockReason }) => (
-                <label key={key} className={`flex items-center gap-1.5 ${!ready ? 'text-slate-300' : ''}`} title={!ready ? `Unavailable — ${blockReason}` : undefined}>
+                <label key={key} className={`flex items-center gap-1.5 ${!ready ? 'text-muted-foreground/50' : ''}`} title={!ready ? `Unavailable — ${blockReason}` : undefined}>
                   <input type="checkbox" checked={draft[key]} disabled={!ready} onChange={(e) => setDraft((d) => ({ ...d, [key]: e.target.checked }))} className="tp-focus-ring" />
                   <Icon className="h-3.5 w-3.5" aria-hidden="true" /> {label}
                 </label>
               ))}
             </div>
             {!readiness.phoneVerified && (draft.channelSms || draft.channelWhatsapp || draft.channelPhone) && (
-              <p className="mt-1 text-[11px] text-amber-600">Verify a phone number in the Notifications tab to use SMS, WhatsApp, or phone-call alerts.</p>
+              <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-300">Verify a phone number in the Notifications tab to use SMS, WhatsApp, or phone-call alerts.</p>
             )}
           </div>
 
           <label className="mt-3 block">
-            <span className="mb-0.5 block text-[11px] font-semibold text-slate-500">Name (optional)</span>
-            <input value={draft.label} onChange={(e) => setDraft((d) => ({ ...d, label: e.target.value }))} placeholder="e.g. Licensing escalations" className="tp-focus-ring w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm" />
+            <span className="mb-0.5 block text-[11px] font-semibold text-muted-foreground">Name (optional)</span>
+            <input value={draft.label} onChange={(e) => setDraft((d) => ({ ...d, label: e.target.value }))} placeholder="e.g. Licensing escalations" className="tp-focus-ring w-full rounded-lg border border-border bg-card px-2.5 py-1.5 text-sm" />
           </label>
 
           <div className="mt-3 flex items-center gap-2">
             <button onClick={save} disabled={saving} className="tp-focus-ring inline-flex items-center gap-1.5 rounded-lg bg-primary px-3.5 py-1.5 text-sm font-semibold text-primary-foreground hover:bg-blue-700 disabled:opacity-50">
               {saving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null} {draft.id ? 'Save' : 'Create alert'}
             </button>
-            <button onClick={() => setDraft(null)} className="tp-focus-ring rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50">Cancel</button>
+            <button onClick={() => setDraft(null)} className="tp-focus-ring rounded-lg border border-border bg-card px-3 py-1.5 text-sm font-medium text-muted-foreground hover:bg-muted/50">Cancel</button>
           </div>
         </div>
       ) : subs.length > 0 ? (
-        <button onClick={() => setDraft({ ...EMPTY_DRAFT })} className="tp-focus-ring inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-blue-600 hover:bg-blue-50">
+        <button onClick={() => setDraft({ ...EMPTY_DRAFT })} className="tp-focus-ring inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-sm font-semibold text-blue-600 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-500/15">
           <Plus className="h-4 w-4" aria-hidden="true" /> Add an alert
         </button>
       ) : null}
 
       {/* Quiet hours */}
-      <div className="rounded-xl border border-slate-200 bg-white p-3.5">
+      <div className="rounded-xl border border-border bg-card p-3.5">
         <label className="flex items-center gap-2">
           <input type="checkbox" checked={quietHours.enabled} onChange={(e) => saveQuiet({ ...quietHours, enabled: e.target.checked })} className="tp-focus-ring" />
-          <Moon className="h-3.5 w-3.5 text-slate-400" aria-hidden="true" />
-          <span className="text-sm font-semibold text-slate-700">Quiet hours</span>
+          <Moon className="h-3.5 w-3.5 text-muted-foreground/75" aria-hidden="true" />
+          <span className="text-sm font-semibold text-foreground/85">Quiet hours</span>
         </label>
         {quietHours.enabled && (
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <span>Mute alerts from</span>
-            <input type="time" value={quietHours.start || ''} onChange={(e) => saveQuiet({ ...quietHours, start: e.target.value })} className="tp-focus-ring rounded-lg border border-slate-200 px-2 py-1" />
+            <input type="time" value={quietHours.start || ''} onChange={(e) => saveQuiet({ ...quietHours, start: e.target.value })} className="tp-focus-ring rounded-lg border border-border px-2 py-1" />
             <span>to</span>
-            <input type="time" value={quietHours.end || ''} onChange={(e) => saveQuiet({ ...quietHours, end: e.target.value })} className="tp-focus-ring rounded-lg border border-slate-200 px-2 py-1" />
-            <span className="text-slate-400">(your local time; alerts queue and deliver after)</span>
+            <input type="time" value={quietHours.end || ''} onChange={(e) => saveQuiet({ ...quietHours, end: e.target.value })} className="tp-focus-ring rounded-lg border border-border px-2 py-1" />
+            <span className="text-muted-foreground/75">(your local time; alerts queue and deliver after)</span>
             <label className="flex items-center gap-1.5"><input type="checkbox" checked={quietHours.allowUrgent} onChange={(e) => saveQuiet({ ...quietHours, allowUrgent: e.target.checked })} className="tp-focus-ring" /> let Urgent through</label>
           </div>
         )}
       </div>
 
-      <p className="flex items-center gap-1.5 text-[11px] text-slate-400"><Tag className="h-3 w-3" aria-hidden="true" /> Alerts cover any matching ticket in your workspace, not just ones assigned to you.</p>
+      <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground/75"><Tag className="h-3 w-3" aria-hidden="true" /> Alerts cover any matching ticket in your workspace, not just ones assigned to you.</p>
     </div>
   );
 }

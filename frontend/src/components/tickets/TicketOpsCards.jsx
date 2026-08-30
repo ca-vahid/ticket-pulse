@@ -83,35 +83,35 @@ export function TicketLinksCard({ ticketId, canWrite = false, canMerge = false, 
   return (
     <div className="tp-card rounded-xl p-3" data-testid="ticket-links-card">
       <div className="flex items-center gap-1.5 mb-2">
-        <Link2 className="w-3.5 h-3.5 text-slate-400" aria-hidden="true" />
-        <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Linked tickets</span>
+        <Link2 className="w-3.5 h-3.5 text-muted-foreground/75" aria-hidden="true" />
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/75">Linked tickets</span>
         {canWrite && (
           <button
             onClick={() => setAdding((v) => !v)}
-            className="tp-focus-ring ml-auto text-[11px] font-medium text-blue-600 hover:text-blue-700 px-1.5 py-0.5 rounded"
+            className="tp-focus-ring ml-auto text-[11px] font-medium text-blue-600 dark:text-blue-300 hover:text-blue-700 dark:hover:text-blue-200 px-1.5 py-0.5 rounded"
           >
             {adding ? 'Cancel' : '+ Link'}
           </button>
         )}
       </div>
-      {links.length === 0 && <p className="text-xs text-slate-400 italic">No linked tickets.</p>}
+      {links.length === 0 && <p className="text-xs text-muted-foreground/75 italic">No linked tickets.</p>}
       <ul className="space-y-1">
         {links.map((link) => (
           <li key={`${link.direction}-${link.id}`} className="group flex items-center gap-1.5 text-xs">
-            <span className="text-slate-400 flex-shrink-0">{link.direction === 'in' ? (link.label || link.kind) : (KIND_LABEL[link.kind] || link.kind)}</span>
+            <span className="text-muted-foreground/75 flex-shrink-0">{link.direction === 'in' ? (link.label || link.kind) : (KIND_LABEL[link.kind] || link.kind)}</span>
             <button
               onClick={() => onNavigate?.(link.other.id)}
-              className="tp-focus-ring font-mono font-semibold text-blue-600 hover:underline truncate"
+              className="tp-focus-ring font-mono font-semibold text-blue-600 dark:text-blue-300 hover:underline truncate"
               title={link.other.subject}
             >
               {link.other.displayRef}
             </button>
-            <span className="text-slate-500 truncate flex-1">{link.other.subject}</span>
+            <span className="text-muted-foreground truncate flex-1">{link.other.subject}</span>
             {canWrite && (
               <button
                 onClick={() => remove(link.id)}
                 aria-label="Remove link"
-                className="tp-focus-ring opacity-0 group-hover:opacity-100 p-0.5 rounded text-slate-300 hover:text-red-500"
+                className="tp-focus-ring opacity-0 group-hover:opacity-100 p-0.5 rounded text-muted-foreground/50 hover:text-red-500"
               >
                 <X className="w-3 h-3" aria-hidden="true" />
               </button>
@@ -126,7 +126,7 @@ export function TicketLinksCard({ ticketId, canWrite = false, canMerge = false, 
               value={kind}
               onChange={(e) => setKind(e.target.value)}
               aria-label="Link kind"
-              className="tp-focus-ring text-xs border border-slate-200 rounded-md px-1.5 py-1 bg-white"
+              className="tp-focus-ring text-xs border border-border rounded-md px-1.5 py-1 bg-card"
             >
               <option value="related_to">related to</option>
               <option value="duplicate_of">duplicate of</option>
@@ -138,7 +138,7 @@ export function TicketLinksCard({ ticketId, canWrite = false, canMerge = false, 
               onChange={(e) => setTargetId(e.target.value)}
               placeholder="TP-1042 or 231164"
               aria-label="Ticket reference"
-              className="tp-focus-ring flex-1 min-w-0 text-xs border border-slate-200 rounded-md px-2 py-1"
+              className="tp-focus-ring flex-1 min-w-0 text-xs border border-border rounded-md px-2 py-1 bg-card"
             />
             <button
               onClick={add}
@@ -150,7 +150,7 @@ export function TicketLinksCard({ ticketId, canWrite = false, canMerge = false, 
           </div>
           {['duplicate_of', 'merge_into'].includes(kind) && suggestions?.length > 0 && (
             <div className="flex flex-wrap items-center gap-1">
-              <span className="text-[10px] text-slate-400">Likely:</span>
+              <span className="text-[10px] text-muted-foreground/75">Likely:</span>
               {suggestions.map((s) => (
                 <button
                   key={s.id}
@@ -158,8 +158,8 @@ export function TicketLinksCard({ ticketId, canWrite = false, canMerge = false, 
                   title={`${s.subject || '(no subject)'} — ${s.why}`}
                   className={`tp-focus-ring inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[10px] font-mono font-semibold ${
                     s.displayRef === targetId
-                      ? 'bg-violet-100 border-violet-300 text-violet-800'
-                      : 'bg-violet-50 border-violet-200 text-violet-700 hover:bg-violet-100'
+                      ? 'bg-violet-100 dark:bg-violet-500/20 border-violet-300 dark:border-violet-500/40 text-violet-800 dark:text-violet-200'
+                      : 'bg-violet-50 dark:bg-violet-500/15 border-violet-200 dark:border-violet-500/30 text-violet-700 dark:text-violet-200 hover:bg-violet-100 dark:hover:bg-violet-500/20'
                   }`}
                 >
                   {s.displayRef}
@@ -169,19 +169,19 @@ export function TicketLinksCard({ ticketId, canWrite = false, canMerge = false, 
             </div>
           )}
           {kind === 'duplicate_of' && (
-            <p className="text-[10px] text-amber-600">Marks this ticket as the duplicate and resolves it (TP-born) with an audit note.</p>
+            <p className="text-[10px] text-amber-600 dark:text-amber-300">Marks this ticket as the duplicate and resolves it (TP-born) with an audit note.</p>
           )}
           {kind === 'merge_into' && (
             <>
-              <p className="text-[10px] text-amber-600">
+              <p className="text-[10px] text-amber-600 dark:text-amber-300">
                 Copies this ticket&apos;s conversation onto the target, carries its tags over, and closes this ticket (TP-born) with an audit trail. Attachments stay here, referenced from the target.
               </p>
-              <label className="flex items-center gap-1.5 text-[11px] text-slate-600">
+              <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
                 <input
                   type="checkbox"
                   checked={notifyRequester}
                   onChange={(e) => setNotifyRequester(e.target.checked)}
-                  className="tp-focus-ring rounded border-slate-300 text-blue-600"
+                  className="tp-focus-ring rounded border-input text-blue-600 dark:text-blue-300"
                 />
                 Email the requester that their ticket was consolidated (TP-born only)
               </label>
@@ -208,7 +208,7 @@ function UrlValueLink({ href, label }) {
       target="_blank"
       rel="noopener noreferrer"
       title={href}
-      className="tp-focus-ring inline-flex min-w-0 shrink items-center gap-1 text-xs text-blue-600 hover:text-blue-700 hover:underline"
+      className="tp-focus-ring inline-flex min-w-0 shrink items-center gap-1 text-xs text-blue-600 dark:text-blue-300 hover:text-blue-700 dark:hover:text-blue-200 hover:underline"
       aria-label={`${label} (opens in a new tab)`}
     >
       <span className="truncate">{href.replace(/^https?:\/\//i, '')}</span>
@@ -261,7 +261,7 @@ export function CustomFieldsCard({ ticketId, values = {}, canWrite = false, onSa
   const input = (definition) => {
     const value = draft[definition.key] ?? '';
     const set = (v) => { setDraft((d) => ({ ...d, [definition.key]: v })); setDirty(true); };
-    const base = 'tp-focus-ring w-full text-xs border border-slate-200 rounded-md px-2 py-1 bg-white disabled:bg-slate-50 disabled:text-slate-500';
+    const base = 'tp-focus-ring w-full text-xs border border-border rounded-md px-2 py-1 bg-card disabled:bg-muted/50 disabled:text-muted-foreground';
     if (definition.type === 'select') {
       return (
         <select value={value} onChange={(e) => set(e.target.value)} disabled={!canWrite} className={base} aria-label={definition.label}>
@@ -290,7 +290,7 @@ export function CustomFieldsCard({ ticketId, values = {}, canWrite = false, onSa
               type="button"
               onClick={() => setEditingKeys((prev) => new Set(prev).add(definition.key))}
               aria-label={`Edit ${definition.label}`}
-              className="tp-focus-ring p-0.5 rounded text-slate-300 hover:text-slate-500 flex-shrink-0"
+              className="tp-focus-ring p-0.5 rounded text-muted-foreground/50 hover:text-muted-foreground flex-shrink-0"
             >
               <Pencil className="w-3 h-3" aria-hidden="true" />
             </button>
@@ -313,8 +313,8 @@ export function CustomFieldsCard({ ticketId, values = {}, canWrite = false, onSa
   return (
     <div className="tp-card rounded-xl p-3 overflow-hidden" data-testid="custom-fields-card">
       <div className="flex items-center gap-1.5 mb-2">
-        <Copy className="w-3.5 h-3.5 text-slate-400" aria-hidden="true" />
-        <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Custom fields</span>
+        <Copy className="w-3.5 h-3.5 text-muted-foreground/75" aria-hidden="true" />
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/75">Custom fields</span>
         {dirty && canWrite && (
           <button
             onClick={save}
@@ -328,7 +328,7 @@ export function CustomFieldsCard({ ticketId, values = {}, canWrite = false, onSa
       <div className="space-y-1.5">
         {definitions.map((definition) => (
           <label key={definition.key} className="block">
-            <span className="block text-[10px] text-slate-400 mb-0.5">{definition.label}</span>
+            <span className="block text-[10px] text-muted-foreground/75 mb-0.5">{definition.label}</span>
             {input(definition)}
           </label>
         ))}
@@ -336,18 +336,18 @@ export function CustomFieldsCard({ ticketId, values = {}, canWrite = false, onSa
           const value = values[key];
           return (
             <div key={key} className="block">
-              <span className="block text-[10px] text-slate-400 mb-0.5">{prettifyKey(key)}</span>
+              <span className="block text-[10px] text-muted-foreground/75 mb-0.5">{prettifyKey(key)}</span>
               {isUrlValue(value) ? (
                 <UrlValueLink href={String(value).trim()} label={prettifyKey(key)} />
               ) : (
                 <span
-                  className="inline-flex max-w-full items-center rounded-md bg-slate-50 border border-slate-200 px-2 py-1 text-xs text-slate-500"
+                  className="inline-flex max-w-full items-center rounded-md bg-muted/50 border border-border px-2 py-1 text-xs text-muted-foreground"
                   title="This field's definition was retired — the value is kept read-only"
                 >
                   <span className="truncate">{String(value)}</span>
                 </span>
               )}
-              <span className="block text-[9px] text-slate-300 mt-0.5 italic" title="This field's definition was retired — the value is kept read-only">definition retired</span>
+              <span className="block text-[9px] text-muted-foreground/50 mt-0.5 italic" title="This field's definition was retired — the value is kept read-only">definition retired</span>
             </div>
           );
         })}
@@ -384,27 +384,27 @@ export function MacroMenu({ ticketId, onApplied, disabled = false }) {
       <button
         onClick={() => setOpen((v) => !v)}
         disabled={disabled}
-        className="tp-focus-ring inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-600 hover:border-violet-300 hover:text-violet-700 disabled:opacity-50"
+        className="tp-focus-ring inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border bg-card text-xs font-medium text-muted-foreground hover:border-violet-300 dark:hover:border-violet-500/40 hover:text-violet-700 dark:hover:text-violet-200 disabled:opacity-50"
       >
         <Wand2 className="w-3.5 h-3.5" aria-hidden="true" /> Macros
         <ChevronDown className={`w-3 h-3 transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden="true" />
       </button>
       {open && (
         <div className="absolute right-0 top-full z-40 mt-1 w-72 tp-card rounded-xl shadow-soft p-1.5">
-          {macros === null && <p className="px-2 py-2 text-xs text-slate-400">Loading…</p>}
-          {macros?.length === 0 && <p className="px-2 py-2 text-xs text-slate-400">No macros yet — admins create them in Settings.</p>}
+          {macros === null && <p className="px-2 py-2 text-xs text-muted-foreground/75">Loading…</p>}
+          {macros?.length === 0 && <p className="px-2 py-2 text-xs text-muted-foreground/75">No macros yet — admins create them in Settings.</p>}
           {(macros || []).map((macro) => (
             <button
               key={macro.id}
               onClick={() => apply(macro)}
               disabled={applying !== null}
-              className="tp-focus-ring w-full rounded-lg px-2 py-1.5 text-left hover:bg-violet-50 disabled:opacity-60"
+              className="tp-focus-ring w-full rounded-lg px-2 py-1.5 text-left hover:bg-violet-50 dark:hover:bg-violet-500/15 disabled:opacity-60"
             >
               <span className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-slate-700">{macro.name}</span>
+                <span className="text-xs font-semibold text-foreground/85">{macro.name}</span>
                 {applying === macro.id && <Loader2 className="w-3 h-3 animate-spin text-violet-500" aria-hidden="true" />}
               </span>
-              {macro.description && <span className="block text-[10px] text-slate-400 truncate">{macro.description}</span>}
+              {macro.description && <span className="block text-[10px] text-muted-foreground/75 truncate">{macro.description}</span>}
             </button>
           ))}
         </div>

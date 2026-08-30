@@ -11,10 +11,10 @@ const PRIORITY_DOT_COLORS = {
 };
 
 const STATUS_COLORS = {
-  'Open': 'bg-red-100 text-red-700',
-  'Pending': 'bg-yellow-100 text-yellow-800',
-  'Resolved': 'bg-green-100 text-green-700',
-  'Closed': 'bg-gray-100 text-gray-600',
+  'Open': 'bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-200',
+  'Pending': 'bg-yellow-100 dark:bg-yellow-500/20 text-yellow-800 dark:text-yellow-200',
+  'Resolved': 'bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-200',
+  'Closed': 'bg-muted text-muted-foreground',
 };
 
 const FRESHDOMAIN = import.meta.env.VITE_FRESHSERVICE_DOMAIN || 'efusion.freshservice.com';
@@ -42,8 +42,8 @@ function TicketRow({ ticket, variant = 'active', techName, viewMode = 'daily', n
   // Return address so /tickets/:id's Back control comes back to this page
   // (dashboard expanded row, tech detail, …) instead of the /tickets queue.
   const linkState = { from: `${location.pathname}${location.search}` };
-  const priorityDot = PRIORITY_DOT_COLORS[ticket.priority] || 'bg-gray-400';
-  const statusClass = STATUS_COLORS[ticket.status] || 'bg-gray-100 text-gray-600';
+  const priorityDot = PRIORITY_DOT_COLORS[ticket.priority] || 'bg-muted-foreground/60';
+  const statusClass = STATUS_COLORS[ticket.status] || 'bg-muted text-muted-foreground';
   const isSelf = ticket.isSelfPicked || ticket.assignedBy === techName;
   const isClosed = ticket.status === 'Closed' || ticket.status === 'Resolved';
   const categoryLabel = getTicketCategoryLabel(ticket);
@@ -67,7 +67,7 @@ function TicketRow({ ticket, variant = 'active', techName, viewMode = 'daily', n
     : ticket.freshserviceTicketId
       ? `#${ticket.freshserviceTicketId}`
       : `TP-ID-${ticket.id}`;
-  const refClass = `font-semibold flex-shrink-0 ${isMuted ? 'text-gray-400 hover:text-gray-600' : 'text-blue-600 hover:text-blue-800'}`;
+  const refClass = `font-semibold flex-shrink-0 ${isMuted ? 'text-muted-foreground/75 hover:text-muted-foreground' : 'text-blue-600 dark:text-blue-300 hover:text-blue-800 dark:hover:text-blue-200'}`;
 
   // Shared pieces so the wide (single-line) and narrow (stacked) layouts keep
   // identical link targets + `state.from` return-address behavior.
@@ -99,7 +99,7 @@ function TicketRow({ ticket, variant = 'active', techName, viewMode = 'daily', n
       target="_blank"
       rel="noopener noreferrer"
       title="Open in FreshService"
-      className={`flex-shrink-0 ${isMuted ? 'text-gray-300 hover:text-gray-500' : 'text-blue-300 hover:text-blue-600'}`}
+      className={`flex-shrink-0 ${isMuted ? 'text-muted-foreground/50 hover:text-muted-foreground' : 'text-blue-300 hover:text-blue-600 dark:hover:text-blue-300'}`}
       onClick={(e) => e.stopPropagation()}
     >
       <ExternalLink className="w-2.5 h-2.5" />
@@ -111,20 +111,20 @@ function TicketRow({ ticket, variant = 'active', techName, viewMode = 'daily', n
       to={internalHref}
       state={linkState}
       title="Open in Ticket Pulse"
-      className={`truncate flex-1 min-w-0 hover:underline ${isMuted ? 'text-gray-400' : 'text-gray-800'}`}
+      className={`truncate flex-1 min-w-0 hover:underline ${isMuted ? 'text-muted-foreground/75' : 'text-foreground'}`}
       onClick={(e) => e.stopPropagation()}
     >
       {ticket.subject}
     </Link>
   ) : (
-    <span className={`truncate flex-1 min-w-0 ${isMuted ? 'text-gray-400' : 'text-gray-800'}`}>{ticket.subject}</span>
+    <span className={`truncate flex-1 min-w-0 ${isMuted ? 'text-muted-foreground/75' : 'text-foreground'}`}>{ticket.subject}</span>
   );
 
   if (narrow) {
     // Stacked two-line layout for tight containers (dashboard tech cards):
     // every segment truncates, so the row can never exceed the card width.
     return (
-      <div className={`min-w-0 py-1 px-2 hover:bg-gray-50 rounded text-[11px] leading-tight ${isMuted ? 'opacity-50' : ''}`}>
+      <div className={`min-w-0 py-1 px-2 hover:bg-muted/50 rounded text-[11px] leading-tight ${isMuted ? 'opacity-50' : ''}`}>
         {/* Line 1: priority dot + ref + subject */}
         <div className="flex min-w-0 items-center gap-1.5">
           <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${priorityDot}`} title={`Priority ${ticket.priority}`} />
@@ -138,26 +138,26 @@ function TicketRow({ ticket, variant = 'active', techName, viewMode = 'daily', n
             {ticket.status}
           </span>
           {categoryLabel && (
-            <span className="bg-blue-50 text-blue-600 px-1 py-0.5 rounded text-[9px] min-w-0 truncate">
+            <span className="bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-300 px-1 py-0.5 rounded text-[9px] min-w-0 truncate">
               {categoryLabel}
             </span>
           )}
           {isSelf && variant !== 'closed' && (
-            <span className="bg-purple-50 text-purple-600 px-1 py-0.5 rounded text-[9px] flex-shrink-0 flex items-center gap-0.5">
+            <span className="bg-purple-50 dark:bg-purple-500/15 text-purple-600 dark:text-purple-300 px-1 py-0.5 rounded text-[9px] flex-shrink-0 flex items-center gap-0.5">
               <Star className="w-2 h-2 fill-purple-600" />
               Self
             </span>
           )}
           {ticket.requesterName && (
             <span
-              className="text-gray-400 text-[9px] min-w-0 flex-1 truncate"
+              className="text-muted-foreground/75 text-[9px] min-w-0 flex-1 truncate"
               title={ticket.requesterEmail ? `${ticket.requesterName} (${ticket.requesterEmail})` : ticket.requesterName}
             >
               {ticket.requesterName}
             </span>
           )}
           {timeLabel && (
-            <span className="text-gray-400 text-[9px] flex-shrink-0 tabular-nums ml-auto">{timeLabel}</span>
+            <span className="text-muted-foreground/75 text-[9px] flex-shrink-0 tabular-nums ml-auto">{timeLabel}</span>
           )}
         </div>
       </div>
@@ -165,7 +165,7 @@ function TicketRow({ ticket, variant = 'active', techName, viewMode = 'daily', n
   }
 
   return (
-    <div className={`flex min-w-0 items-center gap-1.5 py-1 px-2 hover:bg-gray-50 rounded text-[11px] leading-tight ${isMuted ? 'opacity-50' : ''}`}>
+    <div className={`flex min-w-0 items-center gap-1.5 py-1 px-2 hover:bg-muted/50 rounded text-[11px] leading-tight ${isMuted ? 'opacity-50' : ''}`}>
       <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${priorityDot}`} title={`Priority ${ticket.priority}`} />
 
       {refEl}
@@ -176,12 +176,12 @@ function TicketRow({ ticket, variant = 'active', techName, viewMode = 'daily', n
         {ticket.status}
       </span>
       {categoryLabel && (
-        <span className="bg-blue-50 text-blue-600 px-1 py-0.5 rounded text-[9px] flex-shrink-0 max-w-[100px] truncate">
+        <span className="bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-300 px-1 py-0.5 rounded text-[9px] flex-shrink-0 max-w-[100px] truncate">
           {categoryLabel}
         </span>
       )}
       {isSelf && variant !== 'closed' && (
-        <span className="bg-purple-50 text-purple-600 px-1 py-0.5 rounded text-[9px] flex-shrink-0 flex items-center gap-0.5">
+        <span className="bg-purple-50 dark:bg-purple-500/15 text-purple-600 dark:text-purple-300 px-1 py-0.5 rounded text-[9px] flex-shrink-0 flex items-center gap-0.5">
           <Star className="w-2 h-2 fill-purple-600" />
           Self
         </span>
@@ -189,7 +189,7 @@ function TicketRow({ ticket, variant = 'active', techName, viewMode = 'daily', n
 
       {ticket.requesterName && (
         <span
-          className="text-gray-400 text-[9px] flex-shrink-0 max-w-[200px] truncate"
+          className="text-muted-foreground/75 text-[9px] flex-shrink-0 max-w-[200px] truncate"
           title={ticket.requesterEmail ? `${ticket.requesterName} (${ticket.requesterEmail})` : ticket.requesterName}
         >
           {ticket.requesterName}{ticket.requesterEmail ? ` (${ticket.requesterEmail})` : ''}
@@ -197,7 +197,7 @@ function TicketRow({ ticket, variant = 'active', techName, viewMode = 'daily', n
       )}
 
       {timeLabel && (
-        <span className="text-gray-400 text-[9px] flex-shrink-0 tabular-nums">{timeLabel}</span>
+        <span className="text-muted-foreground/75 text-[9px] flex-shrink-0 tabular-nums">{timeLabel}</span>
       )}
     </div>
   );
@@ -262,13 +262,13 @@ export default function ExpandableTicketList({ activeTickets, closedTickets, tec
   const periodLabel = PERIOD_LABELS[viewMode] || PERIOD_LABELS.daily;
 
   return (
-    <div className="expanded-tickets min-w-0 border-t border-gray-200 bg-gray-50/80 px-4 py-2">
+    <div className="expanded-tickets min-w-0 border-t border-border bg-muted/40 px-4 py-2">
       {/* Active (open/pending) tickets for the period */}
       {activeTickets.length > 0 && (
         <div className="mb-1.5">
           <div className="flex items-center gap-1.5 mb-0.5">
-            <Hand className="w-3 h-3 text-blue-600" />
-            <span className="text-[10px] font-bold text-blue-700 uppercase">
+            <Hand className="w-3 h-3 text-blue-600 dark:text-blue-300" />
+            <span className="text-[10px] font-bold text-blue-700 dark:text-blue-200 uppercase">
               {periodLabel} ({activeTickets.length})
             </span>
           </div>
@@ -291,11 +291,11 @@ export default function ExpandableTicketList({ activeTickets, closedTickets, tec
       {closedTickets.length > 0 && (
         <div className={activeTickets.length > 0 ? 'pt-1.5' : ''}>
           {activeTickets.length > 0 && (
-            <div className="border-t border-gray-300 mb-1.5" />
+            <div className="border-t border-input mb-1.5" />
           )}
           <div className="flex items-center gap-1.5 mb-0.5">
-            <CheckSquare className="w-3 h-3 text-gray-500" />
-            <span className="text-[10px] font-bold text-gray-500 uppercase">
+            <CheckSquare className="w-3 h-3 text-muted-foreground" />
+            <span className="text-[10px] font-bold text-muted-foreground uppercase">
               Closed / Resolved ({closedTickets.length})
             </span>
           </div>
@@ -315,7 +315,7 @@ export default function ExpandableTicketList({ activeTickets, closedTickets, tec
       )}
 
       {activeTickets.length === 0 && closedTickets.length === 0 && (
-        <div className="text-[10px] text-gray-400 text-center py-2">
+        <div className="text-[10px] text-muted-foreground/75 text-center py-2">
           Ticket details not loaded yet. Try clicking &quot;Sync Week&quot; or refreshing the dashboard.
         </div>
       )}

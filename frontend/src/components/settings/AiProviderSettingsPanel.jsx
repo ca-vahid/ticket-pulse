@@ -18,16 +18,16 @@ const AI_OPERATION_OPTIONS = [
 
 function ConfigToggle({ label, description, checked, onChange }) {
   return (
-    <label className="flex items-start gap-3 rounded-lg border border-slate-200 bg-white px-3 py-3">
+    <label className="flex items-start gap-3 rounded-lg border border-border bg-card px-3 py-3">
       <input
         type="checkbox"
         checked={checked}
         onChange={onChange}
-        className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600"
+        className="mt-0.5 h-4 w-4 rounded border-input text-blue-600 dark:text-blue-300"
       />
       <span>
-        <span className="block text-sm font-medium text-slate-800">{label}</span>
-        <span className="block text-xs text-slate-500">{description}</span>
+        <span className="block text-sm font-medium text-foreground">{label}</span>
+        <span className="block text-xs text-muted-foreground">{description}</span>
       </span>
     </label>
   );
@@ -143,7 +143,7 @@ export default function AiProviderSettingsPanel({ defaultOperation = 'notificati
           const firstModel = modelOptions(provider)[0]?.model || (provider === 'openai' ? 'gpt-5.6-sol' : 'claude-sonnet-5');
           updateSelected({ [field]: provider, [field === 'primaryProvider' ? 'primaryModel' : 'fallbackModel']: firstModel });
         }}
-        className={`px-3 py-1.5 text-xs font-semibold border transition-colors ${checked ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+        className={`px-3 py-1.5 text-xs font-semibold border transition-colors ${checked ? 'bg-blue-50 dark:bg-blue-500/15 border-blue-200 dark:border-blue-500/30 text-blue-700 dark:text-blue-200' : 'bg-card border-border text-muted-foreground hover:bg-muted/50'}`}
       >
         {provider === 'openai' ? 'OpenAI' : 'Anthropic'}
       </button>
@@ -153,10 +153,10 @@ export default function AiProviderSettingsPanel({ defaultOperation = 'notificati
   const healthPill = (provider) => {
     const status = health?.[provider]?.status || 'unknown';
     const styles = {
-      healthy: 'bg-green-50 text-green-700 border-green-200',
-      degraded: 'bg-yellow-50 text-yellow-700 border-yellow-200',
-      down: 'bg-red-50 text-red-700 border-red-200',
-      unknown: 'bg-slate-50 text-slate-600 border-slate-200',
+      healthy: 'bg-green-50 dark:bg-green-500/15 text-green-700 dark:text-green-200 border-green-200 dark:border-green-500/30',
+      degraded: 'bg-yellow-50 dark:bg-yellow-500/15 text-yellow-700 dark:text-yellow-200 border-yellow-200 dark:border-yellow-500/30',
+      down: 'bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200 border-red-200 dark:border-red-500/30',
+      unknown: 'bg-muted/50 text-muted-foreground border-border',
     };
     return (
       <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${styles[status] || styles.unknown}`}>
@@ -167,7 +167,7 @@ export default function AiProviderSettingsPanel({ defaultOperation = 'notificati
 
   if (loading) {
     return (
-      <div className="tp-glass flex items-center gap-2 rounded-2xl border border-white/70 p-5 text-sm text-slate-500">
+      <div className="tp-glass flex items-center gap-2 rounded-2xl border border-card/70 dark:border-white/10 p-5 text-sm text-muted-foreground">
         <Loader2 className="h-4 w-4 animate-spin" />
         Loading provider settings...
       </div>
@@ -184,11 +184,11 @@ export default function AiProviderSettingsPanel({ defaultOperation = 'notificati
         tone="purple"
       />
       <div>
-        <label className="mb-1.5 block text-sm font-medium text-slate-800">Operation</label>
+        <label className="mb-1.5 block text-sm font-medium text-foreground">Operation</label>
         <select
           value={operation}
           onChange={(event) => setOperation(event.target.value)}
-          className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+          className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm"
         >
           {AI_OPERATION_OPTIONS.map((option) => (
             <option key={option.value} value={option.value}>{option.label}</option>
@@ -197,9 +197,9 @@ export default function AiProviderSettingsPanel({ defaultOperation = 'notificati
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">
-        <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-4">
+        <div className="space-y-2 rounded-lg border border-border bg-card p-4">
           <div className="flex items-center justify-between">
-            <h4 className="text-sm font-medium text-slate-800">Primary</h4>
+            <h4 className="text-sm font-medium text-foreground">Primary</h4>
             {healthPill(selected.primaryProvider)}
           </div>
           <div className="inline-flex overflow-hidden rounded-lg">
@@ -209,7 +209,7 @@ export default function AiProviderSettingsPanel({ defaultOperation = 'notificati
           <select
             value={selected.primaryModel || ''}
             onChange={(event) => updateSelected({ primaryModel: event.target.value })}
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+            className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm"
           >
             {modelOptions(selected.primaryProvider).map((model) => (
               <option key={model.model} value={model.model}>{model.label}</option>
@@ -219,16 +219,16 @@ export default function AiProviderSettingsPanel({ defaultOperation = 'notificati
             type="button"
             onClick={() => test(selected.primaryProvider, selected.primaryModel)}
             disabled={testingProvider === selected.primaryProvider}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-muted/50 disabled:opacity-50"
           >
             {testingProvider === selected.primaryProvider ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
             Test
           </button>
         </div>
 
-        <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-4">
+        <div className="space-y-2 rounded-lg border border-border bg-card p-4">
           <div className="flex items-center justify-between">
-            <h4 className="text-sm font-medium text-slate-800">Fallback</h4>
+            <h4 className="text-sm font-medium text-foreground">Fallback</h4>
             {healthPill(selected.fallbackProvider)}
           </div>
           <div className="inline-flex overflow-hidden rounded-lg">
@@ -238,7 +238,7 @@ export default function AiProviderSettingsPanel({ defaultOperation = 'notificati
           <select
             value={selected.fallbackModel || ''}
             onChange={(event) => updateSelected({ fallbackModel: event.target.value })}
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+            className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm"
           >
             {modelOptions(selected.fallbackProvider).map((model) => (
               <option key={model.model} value={model.model}>{model.label}</option>
@@ -248,7 +248,7 @@ export default function AiProviderSettingsPanel({ defaultOperation = 'notificati
             type="button"
             onClick={() => test(selected.fallbackProvider, selected.fallbackModel)}
             disabled={testingProvider === selected.fallbackProvider}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-muted/50 disabled:opacity-50"
           >
             {testingProvider === selected.fallbackProvider ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
             Test
@@ -264,7 +264,7 @@ export default function AiProviderSettingsPanel({ defaultOperation = 'notificati
       />
 
       <div className="flex items-center justify-between gap-3">
-        <p className="text-xs text-slate-500">Provider API keys are configured server-side through environment variables or Key Vault.</p>
+        <p className="text-xs text-muted-foreground">Provider API keys are configured server-side through environment variables or Key Vault.</p>
         <Button
           type="button"
           onClick={save}
@@ -276,7 +276,7 @@ export default function AiProviderSettingsPanel({ defaultOperation = 'notificati
         </Button>
       </div>
       {testResult && (
-        <div className={`rounded-lg border px-3 py-2 text-xs ${testResult.ok ? 'border-green-200 bg-green-50 text-green-700' : 'border-red-200 bg-red-50 text-red-700'}`}>
+        <div className={`rounded-lg border px-3 py-2 text-xs ${testResult.ok ? 'border-green-200 dark:border-green-500/30 bg-green-50 dark:bg-green-500/15 text-green-700 dark:text-green-200' : 'border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200'}`}>
           {testResult.message}
         </div>
       )}

@@ -13,19 +13,19 @@ import {
 
 function StatusBadge({ status }) {
   const styles = {
-    running: 'bg-blue-100 text-blue-800',
-    collecting: 'bg-blue-100 text-blue-800',
-    analyzing: 'bg-purple-100 text-purple-800',
-    saving: 'bg-purple-100 text-purple-800',
-    completed: 'bg-green-100 text-green-800',
-    applied: 'bg-blue-100 text-blue-800',
-    partially_applied: 'bg-amber-100 text-amber-800',
-    failed: 'bg-red-100 text-red-800',
-    cancelled: 'bg-slate-100 text-slate-700',
+    running: 'bg-blue-100 dark:bg-blue-500/20 text-blue-800 dark:text-blue-200',
+    collecting: 'bg-blue-100 dark:bg-blue-500/20 text-blue-800 dark:text-blue-200',
+    analyzing: 'bg-purple-100 dark:bg-purple-500/20 text-purple-800 dark:text-purple-200',
+    saving: 'bg-purple-100 dark:bg-purple-500/20 text-purple-800 dark:text-purple-200',
+    completed: 'bg-green-100 dark:bg-green-500/20 text-green-800 dark:text-green-200',
+    applied: 'bg-blue-100 dark:bg-blue-500/20 text-blue-800 dark:text-blue-200',
+    partially_applied: 'bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-200',
+    failed: 'bg-red-100 dark:bg-red-500/20 text-red-800 dark:text-red-200',
+    cancelled: 'bg-muted text-foreground/85',
   };
 
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${styles[status] || 'bg-slate-100 text-slate-700'}`}>
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${styles[status] || 'bg-muted text-foreground/85'}`}>
       {status?.replace(/_/g, ' ')}
     </span>
   );
@@ -33,11 +33,11 @@ function StatusBadge({ status }) {
 
 function MetricCard({ label, value, tone = 'slate' }) {
   const tones = {
-    slate: 'bg-slate-50 border-slate-200 text-slate-800',
-    green: 'bg-green-50 border-green-200 text-green-700',
-    amber: 'bg-amber-50 border-amber-200 text-amber-700',
-    red: 'bg-red-50 border-red-200 text-red-700',
-    blue: 'bg-blue-50 border-blue-200 text-blue-700',
+    slate: 'bg-muted/50 border-border text-foreground',
+    green: 'bg-green-50 dark:bg-green-500/15 border-green-200 dark:border-green-500/30 text-green-700 dark:text-green-200',
+    amber: 'bg-amber-50 dark:bg-amber-500/15 border-amber-200 dark:border-amber-500/30 text-amber-700 dark:text-amber-200',
+    red: 'bg-red-50 dark:bg-red-500/15 border-red-200 dark:border-red-500/30 text-red-700 dark:text-red-200',
+    blue: 'bg-blue-50 dark:bg-blue-500/15 border-blue-200 dark:border-blue-500/30 text-blue-700 dark:text-blue-200',
   };
 
   return (
@@ -49,19 +49,19 @@ function MetricCard({ label, value, tone = 'slate' }) {
 }
 
 const RECOMMENDATION_STATUS_STYLES = {
-  pending: 'bg-slate-100 text-slate-700 border-slate-200',
-  approved: 'bg-green-100 text-green-700 border-green-200',
-  rejected: 'bg-red-100 text-red-700 border-red-200',
-  applied: 'bg-blue-100 text-blue-700 border-blue-200',
-  skipped: 'bg-amber-100 text-amber-700 border-amber-200',
-  documented: 'bg-purple-100 text-purple-700 border-purple-200',
+  pending: 'bg-muted text-foreground/85 border-border',
+  approved: 'bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-200 border-green-200 dark:border-green-500/30',
+  rejected: 'bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-200 border-red-200 dark:border-red-500/30',
+  applied: 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200 border-blue-200 dark:border-blue-500/30',
+  skipped: 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-200 border-amber-200 dark:border-amber-500/30',
+  documented: 'bg-purple-100 dark:bg-purple-500/20 text-purple-700 dark:text-purple-200 border-purple-200 dark:border-purple-500/30',
 };
 
 const PROFICIENCY_LEVELS = [
-  { value: 'basic', label: 'Basic', num: '1', color: 'bg-yellow-100 text-yellow-800 border-yellow-200' },
-  { value: 'intermediate', label: 'Comfortable', num: '2', color: 'bg-blue-100 text-blue-800 border-blue-200' },
-  { value: 'advanced', label: 'Advanced', num: '3', color: 'bg-indigo-100 text-indigo-800 border-indigo-200' },
-  { value: 'expert', label: 'Expert / SME', num: '4', color: 'bg-green-100 text-green-800 border-green-200' },
+  { value: 'basic', label: 'Basic', num: '1', color: 'bg-yellow-100 dark:bg-yellow-500/20 text-yellow-800 dark:text-yellow-200 border-yellow-200 dark:border-yellow-500/30' },
+  { value: 'intermediate', label: 'Comfortable', num: '2', color: 'bg-blue-100 dark:bg-blue-500/20 text-blue-800 dark:text-blue-200 border-blue-200 dark:border-blue-500/30' },
+  { value: 'advanced', label: 'Advanced', num: '3', color: 'bg-indigo-100 dark:bg-indigo-500/20 text-indigo-800 dark:text-indigo-200 border-indigo-200 dark:border-indigo-500/30' },
+  { value: 'expert', label: 'Expert / SME', num: '4', color: 'bg-green-100 dark:bg-green-500/20 text-green-800 dark:text-green-200 border-green-200 dark:border-green-500/30' },
 ];
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -119,7 +119,7 @@ function getRecommendationMotionClass(state) {
     return 'pointer-events-none -translate-x-2 scale-[0.985] opacity-0';
   }
   if (state === 'entering') {
-    return 'translate-x-0 scale-100 opacity-100 ring-2 ring-emerald-200';
+    return 'translate-x-0 scale-100 opacity-100 ring-2 ring-emerald-200 dark:ring-emerald-500/30';
   }
   return 'translate-x-0 scale-100 opacity-100';
 }
@@ -245,7 +245,7 @@ function RecommendationCard({
             onRecommendationAction?.(item.id, 'rejected', notes);
           }}
           disabled={isSaving}
-          className="flex-1 rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 sm:flex-none"
+          className="flex-1 rounded-lg border border-red-200 dark:border-red-500/30 px-3 py-1.5 text-xs font-semibold text-red-600 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-500/15 disabled:cursor-not-allowed disabled:opacity-60 sm:flex-none"
         >
           Reject
         </button>
@@ -257,7 +257,7 @@ function RecommendationCard({
             onRecommendationAction?.(item.id, 'applied', notes);
           }}
           disabled={isSaving}
-          className="w-full rounded-lg border border-blue-200 px-3 py-1.5 text-xs font-semibold text-blue-600 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+          className="w-full rounded-lg border border-blue-200 dark:border-blue-500/30 px-3 py-1.5 text-xs font-semibold text-blue-600 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-500/15 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
         >
           Mark Applied
         </button>
@@ -266,13 +266,13 @@ function RecommendationCard({
   );
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 transition-all hover:border-slate-300">
+    <div className="rounded-lg border border-border bg-muted/50 p-3 transition-all hover:border-input">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex min-w-0 flex-1 items-start gap-2">
           <button
             type="button"
             onClick={() => setExpanded((value) => !value)}
-            className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-white hover:text-slate-700"
+            className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-muted-foreground/75 transition-colors hover:bg-card hover:text-foreground/85"
             aria-expanded={expanded}
             aria-label={expanded ? 'Collapse recommendation' : 'Expand recommendation'}
           >
@@ -283,7 +283,7 @@ function RecommendationCard({
               type="checkbox"
               checked={selected}
               onChange={() => onToggleSelected?.(item.id)}
-              className="mt-1 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+              className="mt-1 h-4 w-4 rounded border-input text-indigo-600 dark:text-indigo-300 focus:ring-indigo-500"
             />
           )}
           <button
@@ -294,32 +294,32 @@ function RecommendationCard({
           >
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2 mb-1">
-                <div className="text-sm font-semibold text-slate-800">{item.title}</div>
+                <div className="text-sm font-semibold text-foreground">{item.title}</div>
                 <span className={`text-[10px] uppercase tracking-wide font-semibold px-2 py-0.5 rounded-full ${
                   item.severity === 'high'
-                    ? 'bg-red-100 text-red-700'
+                    ? 'bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-200'
                     : item.severity === 'medium'
-                      ? 'bg-amber-100 text-amber-700'
-                      : 'bg-blue-100 text-blue-700'
+                      ? 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-200'
+                      : 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200'
                 }`}>
                   {item.severity || 'low'}
                 </span>
                 <RecommendationStatusBadge status={item.status} />
                 {readOnly && (
-                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
+                  <span className="rounded-full bg-amber-100 dark:bg-amber-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-200">
                   visibility only
                   </span>
                 )}
               </div>
               {(showDate || showRunMeta) && (
-                <div className="text-[11px] text-slate-500 mb-1">
+                <div className="text-[11px] text-muted-foreground mb-1">
                   {showDate && <span>{formatDateOnlyInTimezone(item.reviewDate, workspaceTimezone)}</span>}
                   {showDate && showRunMeta && <span> · </span>}
                   {showRunMeta && <span>Run #{item.runId}</span>}
                 </div>
               )}
               {!expanded && item.suggestedAction && (
-                <div className="mt-1 text-xs text-slate-500">
+                <div className="mt-1 text-xs text-muted-foreground">
                   {item.suggestedAction.length > 140 ? `${item.suggestedAction.slice(0, 140)}...` : item.suggestedAction}
                 </div>
               )}
@@ -329,10 +329,10 @@ function RecommendationCard({
         {actionButtons}
       </div>
       <SmoothCollapse open={expanded}>
-        <div className="mt-3 border-t border-slate-200 pt-3">
-          <div className="text-xs text-slate-600 mb-2">{item.rationale}</div>
+        <div className="mt-3 border-t border-border pt-3">
+          <div className="text-xs text-muted-foreground mb-2">{item.rationale}</div>
           {item.metadata?.promptLimitation?.requiredTools?.length > 0 && (
-            <div className="mb-3 rounded-lg border border-sky-100 bg-sky-50 px-3 py-2 text-xs text-sky-800">
+            <div className="mb-3 rounded-lg border border-sky-100 dark:border-sky-500/20 bg-sky-50 dark:bg-sky-500/15 px-3 py-2 text-xs text-sky-800 dark:text-sky-200">
               <div className="font-semibold">Tool dependency</div>
               <div className="mt-1">
                 Requires {item.metadata.promptLimitation.requiredTools.join(', ')}.
@@ -341,7 +341,7 @@ function RecommendationCard({
             </div>
           )}
           {item.kind === 'tools_data' && (
-            <div className="mb-3 rounded-lg border border-sky-100 bg-sky-50 px-3 py-2 text-xs text-sky-800">
+            <div className="mb-3 rounded-lg border border-sky-100 dark:border-sky-500/20 bg-sky-50 dark:bg-sky-500/15 px-3 py-2 text-xs text-sky-800 dark:text-sky-200">
               <div className="font-semibold">{item.metadata?.requiredToolName || 'Tool / data capability'}</div>
               {item.metadata?.missingCapability && <div className="mt-1">{item.metadata.missingCapability}</div>}
               {Array.isArray(item.metadata?.dataSources) && item.metadata.dataSources.length > 0 && (
@@ -350,72 +350,72 @@ function RecommendationCard({
             </div>
           )}
           {item.kind === 'dev_policy' && item.metadata?.changeType && (
-            <div className="mb-3 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            <div className="mb-3 rounded-lg border border-amber-100 dark:border-amber-500/20 bg-amber-50 dark:bg-amber-500/15 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
               <span className="font-semibold">Dev / policy type:</span> {item.metadata.changeType}
             </div>
           )}
           {taxonomyProposal && (
-            <div className="mb-3 rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2">
-              <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-emerald-800">
+            <div className="mb-3 rounded-lg border border-emerald-100 dark:border-emerald-500/20 bg-emerald-50 dark:bg-emerald-500/15 px-3 py-2">
+              <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-emerald-800 dark:text-emerald-200">
                 <Tags className="h-3.5 w-3.5" />
                 Category proposal
               </div>
               <div className="flex flex-wrap gap-1.5">
-                <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-emerald-800">
+                <span className="rounded-full bg-card px-2 py-0.5 text-[11px] font-semibold text-emerald-800 dark:text-emerald-200">
                   {taxonomyProposal.action}
                 </span>
                 {taxonomyProposal.parentCategoryName && (
-                  <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-emerald-800">
+                  <span className="rounded-full bg-card px-2 py-0.5 text-[11px] text-emerald-800 dark:text-emerald-200">
                     Parent: {taxonomyProposal.parentCategoryName}
                   </span>
                 )}
                 {taxonomyProposal.categoryName && (
-                  <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-emerald-800">
+                  <span className="rounded-full bg-card px-2 py-0.5 text-[11px] text-emerald-800 dark:text-emerald-200">
                     Target: {taxonomyProposal.categoryName}
                   </span>
                 )}
                 {taxonomyProposal.newName && (
-                  <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-emerald-800">
+                  <span className="rounded-full bg-card px-2 py-0.5 text-[11px] text-emerald-800 dark:text-emerald-200">
                     New: {taxonomyProposal.newName}
                   </span>
                 )}
                 {taxonomyProposal.categoryFit && (
-                  <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-emerald-800">
+                  <span className="rounded-full bg-card px-2 py-0.5 text-[11px] text-emerald-800 dark:text-emerald-200">
                     Category {taxonomyProposal.categoryFit}
                   </span>
                 )}
                 {taxonomyProposal.subcategoryFit && (
-                  <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-emerald-800">
+                  <span className="rounded-full bg-card px-2 py-0.5 text-[11px] text-emerald-800 dark:text-emerald-200">
                     Subcategory {taxonomyProposal.subcategoryFit}
                   </span>
                 )}
                 {taxonomyProposal.evidenceRunIds.length > 0 && (
-                  <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-emerald-800">
+                  <span className="rounded-full bg-card px-2 py-0.5 text-[11px] text-emerald-800 dark:text-emerald-200">
                     Runs {taxonomyProposal.evidenceRunIds.map((id) => `#${id}`).join(', ')}
                   </span>
                 )}
               </div>
             </div>
           )}
-          <div className="text-xs text-slate-700 mb-2">
+          <div className="text-xs text-foreground/85 mb-2">
             <span className="font-medium">Suggested action:</span> {item.suggestedAction}
           </div>
           {Array.isArray(item.skillsAffected) && item.skillsAffected.length > 0 && (
             <div className="mb-2 flex flex-wrap gap-1">
               {item.skillsAffected.map((skill) => (
-                <span key={skill} className="inline-flex items-center rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-medium text-indigo-700">
+                <span key={skill} className="inline-flex items-center rounded-full bg-indigo-100 dark:bg-indigo-500/20 px-2 py-0.5 text-[10px] font-medium text-indigo-700 dark:text-indigo-200">
                   {skill}
                 </span>
               ))}
             </div>
           )}
           {Array.isArray(supportTicketIds) && supportTicketIds.length > 0 && (
-            <div className="mb-2 text-[11px] text-slate-500">
+            <div className="mb-2 text-[11px] text-muted-foreground">
               <span className="font-medium">Supporting tickets:</span> {supportTicketIds.map((ticketId) => `#${ticketId}`).join(', ')}
             </div>
           )}
           {(item.reviewedBy || item.appliedBy) && (
-            <div className="mb-2 text-[11px] text-slate-500 space-y-1">
+            <div className="mb-2 text-[11px] text-muted-foreground space-y-1">
               {item.reviewedBy && (
                 <div>
                   Reviewed by {item.reviewedBy}
@@ -436,7 +436,7 @@ function RecommendationCard({
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder="Optional review notes"
-                className="mb-3 min-h-[72px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700"
+                className="mb-3 min-h-[72px] w-full rounded-lg border border-border bg-card px-3 py-2 text-xs text-foreground/85"
               />
             </>
           )}
@@ -448,12 +448,12 @@ function RecommendationCard({
 
 function RunSignalCard({ label, value, detail, tone = 'slate', icon: Icon }) {
   const tones = {
-    slate: 'border-slate-200 bg-white text-slate-800',
-    green: 'border-green-200 bg-green-50 text-green-800',
-    amber: 'border-amber-200 bg-amber-50 text-amber-800',
-    red: 'border-red-200 bg-red-50 text-red-800',
-    blue: 'border-blue-200 bg-blue-50 text-blue-800',
-    purple: 'border-purple-200 bg-purple-50 text-purple-800',
+    slate: 'border-border bg-card text-foreground',
+    green: 'border-green-200 dark:border-green-500/30 bg-green-50 dark:bg-green-500/15 text-green-800 dark:text-green-200',
+    amber: 'border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 text-amber-800 dark:text-amber-200',
+    red: 'border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 text-red-800 dark:text-red-200',
+    blue: 'border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 text-blue-800 dark:text-blue-200',
+    purple: 'border-purple-200 dark:border-purple-500/30 bg-purple-50 dark:bg-purple-500/15 text-purple-800 dark:text-purple-200',
   };
 
   return (
@@ -513,50 +513,50 @@ function ReviewHighlights({ summary, warnings, promptRecommendations, toolsDataR
 function getReviewRecommendationTone(tone, status) {
   if (status === 'approved') {
     return {
-      card: 'border-green-200 bg-green-50/70 shadow-green-100/70',
-      icon: 'bg-green-100 text-green-700',
+      card: 'border-green-200 dark:border-green-500/30 bg-green-50/70 dark:bg-green-500/10 shadow-green-100/70',
+      icon: 'bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-200',
       accent: 'from-green-400 to-emerald-500',
     };
   }
   if (status === 'rejected') {
     return {
-      card: 'border-red-200 bg-red-50/70 shadow-red-100/70',
-      icon: 'bg-red-100 text-red-700',
+      card: 'border-red-200 dark:border-red-500/30 bg-red-50/70 dark:bg-red-500/10 shadow-red-100/70',
+      icon: 'bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-200',
       accent: 'from-red-400 to-rose-500',
     };
   }
   if (status === 'applied') {
     return {
-      card: 'border-blue-200 bg-blue-50/70 shadow-blue-100/70',
-      icon: 'bg-blue-100 text-blue-700',
+      card: 'border-blue-200 dark:border-blue-500/30 bg-blue-50/70 dark:bg-blue-500/10 shadow-blue-100/70',
+      icon: 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200',
       accent: 'from-blue-400 to-cyan-500',
     };
   }
 
   const tones = {
     indigo: {
-      card: 'border-indigo-100 bg-indigo-50/40 shadow-indigo-100/60',
-      icon: 'bg-indigo-100 text-indigo-700',
+      card: 'border-indigo-100 dark:border-indigo-500/20 bg-indigo-50/40 dark:bg-indigo-500/10 shadow-indigo-100/60',
+      icon: 'bg-indigo-100 dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-200',
       accent: 'from-indigo-400 to-blue-500',
     },
     sky: {
-      card: 'border-sky-100 bg-sky-50/40 shadow-sky-100/60',
-      icon: 'bg-sky-100 text-sky-700',
+      card: 'border-sky-100 dark:border-sky-500/20 bg-sky-50/40 dark:bg-sky-500/10 shadow-sky-100/60',
+      icon: 'bg-sky-100 dark:bg-sky-500/20 text-sky-700 dark:text-sky-200',
       accent: 'from-sky-400 to-cyan-500',
     },
     emerald: {
-      card: 'border-emerald-100 bg-emerald-50/40 shadow-emerald-100/60',
-      icon: 'bg-emerald-100 text-emerald-700',
+      card: 'border-emerald-100 dark:border-emerald-500/20 bg-emerald-50/40 dark:bg-emerald-500/10 shadow-emerald-100/60',
+      icon: 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-200',
       accent: 'from-emerald-400 to-teal-500',
     },
     violet: {
-      card: 'border-violet-100 bg-violet-50/40 shadow-violet-100/60',
-      icon: 'bg-violet-100 text-violet-700',
+      card: 'border-violet-100 dark:border-violet-500/20 bg-violet-50/40 dark:bg-violet-500/10 shadow-violet-100/60',
+      icon: 'bg-violet-100 dark:bg-violet-500/20 text-violet-700 dark:text-violet-200',
       accent: 'from-violet-400 to-fuchsia-500',
     },
     amber: {
-      card: 'border-amber-100 bg-amber-50/50 shadow-amber-100/60',
-      icon: 'bg-amber-100 text-amber-700',
+      card: 'border-amber-100 dark:border-amber-500/20 bg-amber-50/50 dark:bg-amber-500/10 shadow-amber-100/60',
+      icon: 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-200',
       accent: 'from-amber-400 to-orange-500',
     },
   };
@@ -603,57 +603,57 @@ function ReviewRecommendationCard({
             <div className="mb-2 flex flex-wrap items-center gap-2">
               <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
                 item.severity === 'high'
-                  ? 'bg-red-100 text-red-700'
+                  ? 'bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-200'
                   : item.severity === 'medium'
-                    ? 'bg-amber-100 text-amber-700'
-                    : 'bg-blue-100 text-blue-700'
+                    ? 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-200'
+                    : 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200'
               }`}>
                 {item.severity || 'low'}
               </span>
               <RecommendationStatusBadge status={item.status} />
               {Array.isArray(supportTicketIds) && supportTicketIds.length > 0 && (
-                <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                <span className="rounded-full bg-card/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                   {supportTicketIds.length} ticket{supportTicketIds.length === 1 ? '' : 's'}
                 </span>
               )}
             </div>
-            <h4 className="text-base font-semibold leading-snug text-slate-900">{item.title}</h4>
-            <p className="mt-2 text-sm leading-6 text-slate-600">{item.rationale || 'No recommendation rationale provided.'}</p>
+            <h4 className="text-base font-semibold leading-snug text-foreground">{item.title}</h4>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">{item.rationale || 'No recommendation rationale provided.'}</p>
           </div>
         </div>
 
         {taxonomyProposal && (
-          <div className="rounded-lg border border-emerald-100 bg-white/70 px-3 py-2">
-            <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-emerald-800">
+          <div className="rounded-lg border border-emerald-100 dark:border-emerald-500/20 bg-card/70 px-3 py-2">
+            <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-emerald-800 dark:text-emerald-200">
               <Tags className="h-3.5 w-3.5" />
               Category proposal
             </div>
             <div className="flex flex-wrap gap-1.5">
-              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-800">
+              <span className="rounded-full bg-emerald-100 dark:bg-emerald-500/20 px-2 py-0.5 text-[11px] font-semibold text-emerald-800 dark:text-emerald-200">
                 {taxonomyProposal.action}
               </span>
               {taxonomyProposal.parentCategoryName && (
-                <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-emerald-800">
+                <span className="rounded-full bg-card px-2 py-0.5 text-[11px] text-emerald-800 dark:text-emerald-200">
                   Parent: {taxonomyProposal.parentCategoryName}
                 </span>
               )}
               {taxonomyProposal.categoryName && (
-                <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-emerald-800">
+                <span className="rounded-full bg-card px-2 py-0.5 text-[11px] text-emerald-800 dark:text-emerald-200">
                   Target: {taxonomyProposal.categoryName}
                 </span>
               )}
               {taxonomyProposal.newName && (
-                <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-emerald-800">
+                <span className="rounded-full bg-card px-2 py-0.5 text-[11px] text-emerald-800 dark:text-emerald-200">
                   New: {taxonomyProposal.newName}
                 </span>
               )}
               {taxonomyProposal.categoryFit && (
-                <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-emerald-800">
+                <span className="rounded-full bg-card px-2 py-0.5 text-[11px] text-emerald-800 dark:text-emerald-200">
                   Category {taxonomyProposal.categoryFit}
                 </span>
               )}
               {taxonomyProposal.subcategoryFit && (
-                <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-emerald-800">
+                <span className="rounded-full bg-card px-2 py-0.5 text-[11px] text-emerald-800 dark:text-emerald-200">
                   Subcategory {taxonomyProposal.subcategoryFit}
                 </span>
               )}
@@ -661,13 +661,13 @@ function ReviewRecommendationCard({
           </div>
         )}
 
-        <div className="rounded-lg border border-white/70 bg-white/75 p-3">
-          <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Recommendation</div>
-          <div className="text-sm leading-6 text-slate-700">{item.suggestedAction || 'No suggested action provided.'}</div>
+        <div className="rounded-lg border border-card/70 dark:border-white/10 bg-card/75 p-3">
+          <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Recommendation</div>
+          <div className="text-sm leading-6 text-foreground/85">{item.suggestedAction || 'No suggested action provided.'}</div>
           {Array.isArray(item.skillsAffected) && item.skillsAffected.length > 0 && (
             <div className="mt-3 flex flex-wrap gap-1.5">
               {item.skillsAffected.map((skill) => (
-                <span key={skill} className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">
+                <span key={skill} className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
                   {skill}
                 </span>
               ))}
@@ -676,39 +676,39 @@ function ReviewRecommendationCard({
         </div>
 
         <SmoothCollapse open={expanded}>
-          <div className="space-y-2 rounded-lg border border-white/70 bg-white/70 p-3 text-xs text-slate-600">
+          <div className="space-y-2 rounded-lg border border-card/70 dark:border-white/10 bg-card/70 p-3 text-xs text-muted-foreground">
             {Array.isArray(supportTicketIds) && supportTicketIds.length > 0 && (
               <div>
-                <span className="font-semibold text-slate-700">Supporting tickets:</span> {supportTicketIds.map((ticketId) => `#${ticketId}`).join(', ')}
+                <span className="font-semibold text-foreground/85">Supporting tickets:</span> {supportTicketIds.map((ticketId) => `#${ticketId}`).join(', ')}
               </div>
             )}
             {item.reviewedBy && (
               <div>
-                <span className="font-semibold text-slate-700">Reviewed:</span> {item.reviewedBy}
+                <span className="font-semibold text-foreground/85">Reviewed:</span> {item.reviewedBy}
                 {item.reviewedAt ? ` on ${formatDateTimeInTimezone(item.reviewedAt, workspaceTimezone)}` : ''}
               </div>
             )}
             {item.appliedBy && (
               <div>
-                <span className="font-semibold text-slate-700">Applied:</span> {item.appliedBy}
+                <span className="font-semibold text-foreground/85">Applied:</span> {item.appliedBy}
                 {item.appliedAt ? ` on ${formatDateTimeInTimezone(item.appliedAt, workspaceTimezone)}` : ''}
               </div>
             )}
           </div>
         </SmoothCollapse>
 
-        <div className="grid gap-3 border-t border-white/70 pt-3 md:grid-cols-[1fr_auto] md:items-end">
+        <div className="grid gap-3 border-t border-card/70 dark:border-white/10 pt-3 md:grid-cols-[1fr_auto] md:items-end">
           <textarea
             value={notes}
             onChange={(event) => setNotes(event.target.value)}
             placeholder="Optional review note"
-            className="min-h-[44px] resize-y rounded-lg border border-white bg-white/90 px-3 py-2 text-xs text-slate-700 shadow-sm outline-none transition focus:border-indigo-200 focus:ring-2 focus:ring-indigo-100"
+            className="min-h-[44px] resize-y rounded-lg border border-card bg-card/90 px-3 py-2 text-xs text-foreground/85 shadow-sm outline-none transition focus:border-indigo-200 dark:focus:border-indigo-500/30 focus:ring-2 focus:ring-indigo-100 dark:focus:ring-indigo-500/30"
           />
           <div className="flex flex-wrap items-center justify-end gap-2">
             <button
               type="button"
               onClick={() => setExpanded((value) => !value)}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
+              className="rounded-lg border border-border bg-card px-3 py-2 text-xs font-semibold text-muted-foreground transition hover:bg-muted/50"
             >
               {expanded ? 'Less' : 'Details'}
             </button>
@@ -728,7 +728,7 @@ function ReviewRecommendationCard({
                 type="button"
                 onClick={() => handleAction('rejected')}
                 disabled={isSaving}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-600 shadow-sm transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 dark:border-red-500/30 bg-card px-3 py-2 text-xs font-semibold text-red-600 dark:text-red-300 shadow-sm transition hover:bg-red-50 dark:hover:bg-red-500/15 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <XCircle className="h-3.5 w-3.5" />
                 Decline
@@ -739,7 +739,7 @@ function ReviewRecommendationCard({
                 type="button"
                 onClick={() => handleAction('applied')}
                 disabled={isSaving}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-semibold text-blue-600 shadow-sm transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-blue-200 dark:border-blue-500/30 bg-card px-3 py-2 text-xs font-semibold text-blue-600 dark:text-blue-300 shadow-sm transition hover:bg-blue-50 dark:hover:bg-blue-500/15 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <CheckCircle className="h-3.5 w-3.5" />
                 Mark Applied
@@ -757,24 +757,24 @@ function getTaxonomyActionInfo(action) {
   if (normalized.includes('remove') || normalized.includes('delete')) {
     return {
       label: 'Remove',
-      className: 'bg-red-100 text-red-700 border-red-200',
+      className: 'bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-200 border-red-200 dark:border-red-500/30',
     };
   }
   if (normalized.includes('update') || normalized.includes('rename') || normalized.includes('cleanup')) {
     return {
       label: 'Update',
-      className: 'bg-blue-100 text-blue-700 border-blue-200',
+      className: 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200 border-blue-200 dark:border-blue-500/30',
     };
   }
   if (normalized.includes('add') || normalized.includes('create')) {
     return {
       label: 'Add',
-      className: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+      className: 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-200 border-emerald-200 dark:border-emerald-500/30',
     };
   }
   return {
     label: 'Review',
-    className: 'bg-slate-100 text-slate-700 border-slate-200',
+    className: 'bg-muted text-foreground/85 border-border',
   };
 }
 
@@ -809,9 +809,9 @@ function TaxonomyContextPopover({
   align = 'left',
 }) {
   const tones = {
-    slate: 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50',
-    emerald: 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100',
-    indigo: 'border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100',
+    slate: 'border-border bg-card text-foreground/85 hover:bg-muted/50',
+    emerald: 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 hover:bg-emerald-100 dark:hover:bg-emerald-500/20',
+    indigo: 'border-indigo-200 dark:border-indigo-500/30 bg-indigo-50 dark:bg-indigo-500/15 text-indigo-700 dark:text-indigo-200 hover:bg-indigo-100 dark:hover:bg-indigo-500/20',
   };
 
   return (
@@ -836,12 +836,12 @@ function TaxonomyContextPopover({
       </button>
       {open && (
         <span
-          className={`absolute top-8 z-50 w-[360px] rounded-xl border border-slate-200 bg-white p-3 text-left text-xs leading-5 text-slate-700 shadow-xl ring-1 ring-slate-900/5 ${
+          className={`absolute top-8 z-50 w-[360px] rounded-xl border border-border bg-card p-3 text-left text-xs leading-5 text-foreground/85 shadow-xl ring-1 ring-black/5 dark:ring-white/10 ${
             align === 'right' ? 'right-0' : 'left-0'
           }`}
           onClick={(event) => event.stopPropagation()}
         >
-          <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">{title}</span>
+          <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{title}</span>
           {children}
         </span>
       )}
@@ -852,11 +852,11 @@ function TaxonomyContextPopover({
 function TruncatedHoverText({ value, muted = false }) {
   return (
     <span className="group relative min-w-0">
-      <span className={`block truncate text-sm leading-5 ${muted ? 'text-slate-400' : 'font-semibold text-slate-800'}`}>
+      <span className={`block truncate text-sm leading-5 ${muted ? 'text-muted-foreground/75' : 'font-semibold text-foreground'}`}>
         {value}
       </span>
       {value && value !== '-' && (
-        <span className="pointer-events-none absolute left-0 top-7 z-40 hidden max-w-[360px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium leading-5 text-slate-700 shadow-lg ring-1 ring-slate-900/5 group-hover:block">
+        <span className="pointer-events-none absolute left-0 top-7 z-40 hidden max-w-[360px] rounded-lg border border-border bg-card px-3 py-2 text-xs font-medium leading-5 text-foreground/85 shadow-lg ring-1 ring-black/5 dark:ring-white/10 group-hover:block">
           {value}
         </span>
       )}
@@ -885,27 +885,27 @@ function TaxonomyRecommendationsTable({
   };
 
   return (
-    <div className="rounded-xl border border-emerald-100 bg-white shadow-sm">
-      <div className="rounded-t-xl border-b border-emerald-100 bg-emerald-50/70 px-4 py-3">
+    <div className="rounded-xl border border-emerald-100 dark:border-emerald-500/20 bg-card shadow-sm">
+      <div className="rounded-t-xl border-b border-emerald-100 dark:border-emerald-500/20 bg-emerald-50/70 dark:bg-emerald-500/10 px-4 py-3">
         <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <div className="text-sm font-semibold text-emerald-950">Subcategory & Category Cleanup List</div>
-            <div className="text-xs text-emerald-700">New entries should be subcategories under an existing parent; top-level category additions are not part of IT go-live.</div>
+            <div className="text-sm font-semibold text-emerald-950 dark:text-emerald-200">Subcategory & Category Cleanup List</div>
+            <div className="text-xs text-emerald-700 dark:text-emerald-200">New entries should be subcategories under an existing parent; top-level category additions are not part of IT go-live.</div>
           </div>
-          <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-emerald-700 shadow-sm">
+          <span className="rounded-full bg-card px-2.5 py-1 text-xs font-semibold text-emerald-700 dark:text-emerald-200 shadow-sm">
             {items.length} proposed
           </span>
         </div>
       </div>
       <div className="overflow-visible">
-        <table className="w-full table-fixed divide-y divide-slate-100">
+        <table className="w-full table-fixed divide-y divide-border/60">
           <colgroup>
             <col className="w-[120px]" />
             <col className="w-[300px]" />
             <col className="w-[370px]" />
             <col className="w-[360px]" />
           </colgroup>
-          <thead className="bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+          <thead className="bg-muted/50 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
             <tr>
               <th className="px-4 py-3">Action</th>
               <th className="px-4 py-3">Category</th>
@@ -913,19 +913,19 @@ function TaxonomyRecommendationsTable({
               <th className="px-4 py-3">Decision</th>
             </tr>
           </thead>
-          <tbody className="bg-white">
+          <tbody className="bg-card">
             {items.map((item) => {
               const row = getTaxonomyTableRow(item);
               const actionInfo = getTaxonomyActionInfo(row.action);
               const isSaving = savingRecommendationId === item.id;
               const supportCount = Array.isArray(row.supportTicketIds) ? row.supportTicketIds.length : 0;
               const rowStateClass = item.status === 'approved'
-                ? 'bg-green-50/60'
+                ? 'bg-green-50/60 dark:bg-green-500/10'
                 : item.status === 'rejected'
-                  ? 'bg-red-50/60'
+                  ? 'bg-red-50/60 dark:bg-red-500/10'
                   : item.status === 'applied'
-                    ? 'bg-blue-50/60'
-                    : 'hover:bg-emerald-50/35';
+                    ? 'bg-blue-50/60 dark:bg-blue-500/10'
+                    : 'hover:bg-emerald-50/35 dark:hover:bg-emerald-500/10';
 
               return (
                 <tr key={item.id || `${item.title}-${item.ordinal || 0}`} className={`align-middle transition-colors duration-200 ${rowStateClass}`}>
@@ -935,9 +935,9 @@ function TaxonomyRecommendationsTable({
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    <div className="text-sm font-semibold leading-5 text-slate-900">{row.category}</div>
+                    <div className="text-sm font-semibold leading-5 text-foreground">{row.category}</div>
                     {supportCount > 0 && (
-                      <div className="mt-0.5 text-[11px] font-medium text-slate-400">
+                      <div className="mt-0.5 text-[11px] font-medium text-muted-foreground/75">
                         {supportCount} ticket{supportCount === 1 ? '' : 's'}
                       </div>
                     )}
@@ -970,7 +970,7 @@ function TaxonomyRecommendationsTable({
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2 whitespace-nowrap">
                       <RecommendationStatusBadge status={item.status} />
-                      {isSaving && <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-400" />}
+                      {isSaving && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground/75" />}
                       {item.status !== 'approved' && item.status !== 'applied' && (
                         <button
                           type="button"
@@ -988,7 +988,7 @@ function TaxonomyRecommendationsTable({
                           type="button"
                           onClick={() => handleAction(item, 'rejected')}
                           disabled={isSaving}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-red-200 bg-white text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-red-200 dark:border-red-500/30 bg-card text-red-600 dark:text-red-300 transition hover:bg-red-50 dark:hover:bg-red-500/15 disabled:cursor-not-allowed disabled:opacity-60"
                           aria-label="Decline category recommendation"
                           title="Decline"
                         >
@@ -1000,7 +1000,7 @@ function TaxonomyRecommendationsTable({
                           type="button"
                           onClick={() => handleAction(item, 'applied')}
                           disabled={isSaving}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-blue-200 bg-white text-blue-600 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-blue-200 dark:border-blue-500/30 bg-card text-blue-600 dark:text-blue-300 transition hover:bg-blue-50 dark:hover:bg-blue-500/15 disabled:cursor-not-allowed disabled:opacity-60"
                           aria-label="Mark category recommendation applied"
                           title="Mark applied"
                         >
@@ -1019,7 +1019,7 @@ function TaxonomyRecommendationsTable({
                           value={notesById[item.id] ?? item.reviewNotes ?? ''}
                           onChange={(event) => updateNotes(item.id, event.target.value)}
                           placeholder="Optional note"
-                          className="min-h-[72px] w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700 outline-none transition focus:border-emerald-200 focus:ring-2 focus:ring-emerald-100"
+                          className="min-h-[72px] w-full rounded-lg border border-border bg-card px-2 py-1.5 text-xs text-foreground/85 outline-none transition focus:border-emerald-200 dark:focus:border-emerald-500/30 focus:ring-2 focus:ring-emerald-100 dark:focus:ring-emerald-500/30"
                         />
                       </TaxonomyContextPopover>
                     </div>
@@ -1055,9 +1055,9 @@ function RunRecommendationsPanel({
   const activeTone = backlogTabTone(activeSection.tone);
 
   return (
-    <section className="overflow-visible rounded-xl border border-slate-200 bg-white shadow-sm">
-      <div className="border-b border-slate-100 bg-slate-50/80 p-3 sm:p-4">
-        <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white p-1.5">
+    <section className="overflow-visible rounded-xl border border-border bg-card shadow-sm">
+      <div className="border-b border-border/60 bg-muted/40 p-3 sm:p-4">
+        <div className="overflow-x-auto rounded-2xl border border-border bg-card p-1.5">
           <div className="grid min-w-[780px] grid-cols-5 gap-1.5 sm:min-w-0">
             {sections.map((section) => {
               const Icon = section.icon;
@@ -1077,7 +1077,7 @@ function RunRecommendationsPanel({
                   </span>
                   <span>{section.label}</span>
                   <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${
-                    active ? 'bg-white/20 text-white' : 'bg-white/80 text-slate-500'
+                    active ? 'bg-white/20 text-white' : 'bg-card/80 text-muted-foreground'
                   }`}>
                     {section.items.length}
                   </span>
@@ -1087,21 +1087,21 @@ function RunRecommendationsPanel({
           </div>
         </div>
 
-        <div className="mt-3 flex flex-col gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm sm:flex-row sm:items-center sm:justify-between">
+        <div className="mt-3 flex flex-col gap-2 rounded-xl border border-border bg-muted/50 px-3 py-2.5 text-sm sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 items-center gap-2">
             <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${activeTone.icon}`}>
               <ActiveIcon className="h-4 w-4" />
             </div>
             <div className="min-w-0">
-              <div className="text-sm font-semibold text-slate-900">{activeSection.title}</div>
-              <div className="text-xs text-slate-500">{activeSection.description}</div>
+              <div className="text-sm font-semibold text-foreground">{activeSection.title}</div>
+              <div className="text-xs text-muted-foreground">{activeSection.description}</div>
             </div>
           </div>
           <div className="flex flex-wrap gap-2 text-xs">
-            <span className="rounded-full bg-white px-2.5 py-1 font-semibold text-slate-600 shadow-sm">
+            <span className="rounded-full bg-card px-2.5 py-1 font-semibold text-muted-foreground shadow-sm">
               {activeSection.items.length} in this category
             </span>
-            <span className="rounded-full bg-white px-2.5 py-1 font-semibold text-slate-500 shadow-sm">
+            <span className="rounded-full bg-card px-2.5 py-1 font-semibold text-muted-foreground shadow-sm">
               {total} total
             </span>
           </div>
@@ -1129,7 +1129,7 @@ function RunRecommendationsPanel({
             ))}
           </div>
         ) : (
-          <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
+          <div className="rounded-xl border border-dashed border-border bg-muted/50 px-4 py-8 text-center text-sm text-muted-foreground">
             {activeSection.emptyText}
           </div>
         )}
@@ -1147,9 +1147,9 @@ function getSupportingTicketIds(item) {
 function CompactSeverity({ severity }) {
   const normalized = severity || 'low';
   const styles = {
-    high: 'bg-red-100 text-red-700',
-    medium: 'bg-amber-100 text-amber-700',
-    low: 'bg-blue-100 text-blue-700',
+    high: 'bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-200',
+    medium: 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-200',
+    low: 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200',
   };
   const labels = {
     high: 'H',
@@ -1171,13 +1171,13 @@ function ProficiencyBadge({ level, muted = false }) {
   const info = PROFICIENCY_LEVELS.find((item) => item.value === level);
   if (!info) {
     return (
-      <span className="inline-flex h-7 min-w-7 items-center justify-center rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-400">
+      <span className="inline-flex h-7 min-w-7 items-center justify-center rounded-lg border border-border bg-card px-2 text-xs font-semibold text-muted-foreground/75">
         -
       </span>
     );
   }
   return (
-    <span className={`inline-flex h-7 min-w-7 items-center justify-center rounded-lg border px-2 text-xs font-bold ${muted ? 'bg-slate-50 text-slate-500 border-slate-200' : info.color}`}>
+    <span className={`inline-flex h-7 min-w-7 items-center justify-center rounded-lg border px-2 text-xs font-bold ${muted ? 'bg-muted/50 text-muted-foreground border-border' : info.color}`}>
       {info.num}
     </span>
   );
@@ -1186,16 +1186,16 @@ function ProficiencyBadge({ level, muted = false }) {
 function RecommendationMeta({ item, workspaceTimezone }) {
   const supportTicketIds = getSupportingTicketIds(item);
   return (
-    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500">
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
       <CompactSeverity severity={item.severity} />
       <span>{formatDateOnlyInTimezone(item.reviewDate, workspaceTimezone)}</span>
-      <span className="text-slate-300">•</span>
+      <span className="text-muted-foreground/50">•</span>
       <span>Run #{item.runId}</span>
-      <span className="text-slate-300">•</span>
+      <span className="text-muted-foreground/50">•</span>
       <span>{recommendationKindLabel(item.kind)}</span>
       {Array.isArray(supportTicketIds) && supportTicketIds.length > 0 && (
         <>
-          <span className="text-slate-300">•</span>
+          <span className="text-muted-foreground/50">•</span>
           <span>{supportTicketIds.length} ticket{supportTicketIds.length === 1 ? '' : 's'}</span>
         </>
       )}
@@ -1255,8 +1255,8 @@ function BacklogRecommendationRow({
   }, [item.id, item.reviewNotes]);
 
   return (
-    <div className={`overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition-all duration-300 ease-out hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md ${
-      selected ? 'ring-2 ring-indigo-200' : ''
+    <div className={`overflow-hidden rounded-xl border border-border bg-card shadow-sm transition-all duration-300 ease-out hover:-translate-y-0.5 hover:border-input hover:shadow-md ${
+      selected ? 'ring-2 ring-indigo-200 dark:ring-indigo-500/30' : ''
     } ${getRecommendationMotionClass(motionState)}`}>
       <div className="grid grid-cols-[auto,auto,1fr] gap-x-3 gap-y-2 px-3 py-3 sm:grid-cols-[auto,auto,1fr,auto] sm:items-start">
         {selectable && (
@@ -1264,32 +1264,32 @@ function BacklogRecommendationRow({
             type="checkbox"
             checked={selected}
             onChange={() => onToggleSelected?.(item.id)}
-            className="mt-1 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+            className="mt-1 h-4 w-4 rounded border-input text-indigo-600 dark:text-indigo-300 focus:ring-indigo-500"
             aria-label={`Select ${item.title}`}
           />
         )}
         <button
           type="button"
           onClick={() => setExpanded((prev) => !prev)}
-          className="mt-0.5 self-start rounded-lg p-1 text-slate-400 transition hover:bg-slate-50 hover:text-slate-700"
+          className="mt-0.5 self-start rounded-lg p-1 text-muted-foreground/75 transition hover:bg-muted/50 hover:text-foreground/85"
           title={expanded ? 'Collapse details' : 'Expand details'}
         >
           {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
         </button>
         <div className="min-w-0 flex-1">
           {!hideTitle && (
-            <div className="whitespace-normal break-words text-sm font-semibold leading-snug text-slate-900">
+            <div className="whitespace-normal break-words text-sm font-semibold leading-snug text-foreground">
               {item.title}
             </div>
           )}
           <RecommendationMeta item={item} workspaceTimezone={workspaceTimezone} />
           <div className="mt-2 flex flex-wrap gap-1.5">
-            <span className="inline-flex items-center gap-1 rounded-md bg-indigo-50 px-2 py-1 text-[11px] font-semibold text-indigo-700">
+            <span className="inline-flex items-center gap-1 rounded-md bg-indigo-50 dark:bg-indigo-500/15 px-2 py-1 text-[11px] font-semibold text-indigo-700 dark:text-indigo-200">
               <TrendingUp className="h-3 w-3" />
               {item.severity === 'high' ? 'High impact' : item.severity === 'medium' ? 'Medium impact' : 'Low impact'}
             </span>
             {Array.isArray(supportTicketIds) && supportTicketIds.length > 0 && (
-              <span className="inline-flex items-center gap-1 rounded-md bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700">
+              <span className="inline-flex items-center gap-1 rounded-md bg-blue-50 dark:bg-blue-500/15 px-2 py-1 text-[11px] font-semibold text-blue-700 dark:text-blue-200">
                 <MessageCircle className="h-3 w-3" />
                 {supportTicketIds.length} ticket{supportTicketIds.length === 1 ? '' : 's'}
               </span>
@@ -1298,7 +1298,7 @@ function BacklogRecommendationRow({
         </div>
         <div className="col-span-3 mt-0.5 grid shrink-0 grid-cols-2 gap-2 sm:col-span-1 sm:min-w-[118px] sm:grid-cols-1">
           {readOnly && (
-            <span className="rounded-full bg-amber-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
+            <span className="rounded-full bg-amber-100 dark:bg-amber-500/20 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-200">
               visibility
             </span>
           )}
@@ -1307,7 +1307,7 @@ function BacklogRecommendationRow({
               <button
                 onClick={() => onRecommendationAction?.(item.id, 'approved', notes)}
                 disabled={isSaving}
-                className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs font-semibold text-green-700 transition hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-green-200 dark:border-green-500/30 bg-green-50 dark:bg-green-500/15 px-3 py-2 text-xs font-semibold text-green-700 dark:text-green-200 transition hover:bg-green-100 dark:hover:bg-green-500/20 disabled:cursor-not-allowed disabled:opacity-60"
                 title="Approve"
               >
                 <CheckCircle className="h-4 w-4" />
@@ -1316,7 +1316,7 @@ function BacklogRecommendationRow({
               <button
                 onClick={() => onRecommendationAction?.(item.id, 'rejected', notes)}
                 disabled={isSaving}
-                className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-600 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 px-3 py-2 text-xs font-semibold text-red-600 dark:text-red-300 transition hover:bg-red-100 dark:hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-60"
                 title="Reject"
               >
                 <XCircle className="h-4 w-4" />
@@ -1329,7 +1329,7 @@ function BacklogRecommendationRow({
               <button
                 onClick={() => onRecommendationAction?.(item.id, 'pending', notes)}
                 disabled={isSaving}
-                className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 hover:bg-slate-50 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+                className="rounded-lg border border-border bg-card p-1.5 text-muted-foreground hover:bg-muted/50 hover:text-foreground/85 disabled:cursor-not-allowed disabled:opacity-60"
                 title="Move back to pending"
               >
                 <Undo2 className="h-4 w-4" />
@@ -1337,7 +1337,7 @@ function BacklogRecommendationRow({
               <button
                 onClick={() => onRecommendationAction?.(item.id, 'applied', notes)}
                 disabled={isSaving}
-                className="rounded-lg border border-blue-200 bg-blue-50 p-1.5 text-blue-600 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+                className="rounded-lg border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 p-1.5 text-blue-600 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-60"
                 title="Mark applied"
               >
                 <CheckCircle className="h-4 w-4" />
@@ -1347,25 +1347,25 @@ function BacklogRecommendationRow({
         </div>
       </div>
       <SmoothCollapse open={expanded}>
-        <div className="border-t border-slate-100 bg-slate-50 px-3 py-3">
-          <div className="space-y-2 text-xs text-slate-600">
+        <div className="border-t border-border/60 bg-muted/50 px-3 py-3">
+          <div className="space-y-2 text-xs text-muted-foreground">
             <p>{item.rationale}</p>
             {item.suggestedAction && (
               <p>
-                <span className="font-semibold text-slate-700">Suggested action:</span> {item.suggestedAction}
+                <span className="font-semibold text-foreground/85">Suggested action:</span> {item.suggestedAction}
               </p>
             )}
             {Array.isArray(item.skillsAffected) && item.skillsAffected.length > 0 && (
               <div className="flex flex-wrap gap-1">
                 {item.skillsAffected.map((skill) => (
-                  <span key={skill} className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-medium text-indigo-700">
+                  <span key={skill} className="rounded-full bg-indigo-100 dark:bg-indigo-500/20 px-2 py-0.5 text-[10px] font-medium text-indigo-700 dark:text-indigo-200">
                     {skill}
                   </span>
                 ))}
               </div>
             )}
             {Array.isArray(supportTicketIds) && supportTicketIds.length > 0 && (
-              <div className="text-[11px] text-slate-500">
+              <div className="text-[11px] text-muted-foreground">
                 <span className="font-medium">Supporting tickets:</span> {supportTicketIds.map((ticketId) => `#${ticketId}`).join(', ')}
               </div>
             )}
@@ -1375,7 +1375,7 @@ function BacklogRecommendationRow({
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="Optional review notes"
-              className="mt-3 min-h-[64px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700"
+              className="mt-3 min-h-[64px] w-full rounded-lg border border-border bg-card px-3 py-2 text-xs text-foreground/85"
             />
           )}
         </div>
@@ -1431,14 +1431,14 @@ function ApprovedBacklogGroup({
   };
 
   return (
-    <div className={`overflow-hidden rounded-lg border border-emerald-200 bg-white transition-all duration-300 ease-out ${
-      group.rows.some((item) => motionById[item.id] === 'entering') ? 'ring-2 ring-emerald-200' : ''
+    <div className={`overflow-hidden rounded-lg border border-emerald-200 dark:border-emerald-500/30 bg-card transition-all duration-300 ease-out ${
+      group.rows.some((item) => motionById[item.id] === 'entering') ? 'ring-2 ring-emerald-200 dark:ring-emerald-500/30' : ''
     }`}>
-      <div className="grid w-full grid-cols-[auto,1fr] gap-x-2 gap-y-2 px-3 py-2.5 hover:bg-emerald-50/50 sm:flex sm:items-start">
+      <div className="grid w-full grid-cols-[auto,1fr] gap-x-2 gap-y-2 px-3 py-2.5 hover:bg-emerald-50/50 dark:hover:bg-emerald-500/10 sm:flex sm:items-start">
         <button
           type="button"
           onClick={() => setExpanded((prev) => !prev)}
-          className="mt-0.5 self-start rounded p-1 text-emerald-600 hover:bg-emerald-50"
+          className="mt-0.5 self-start rounded p-1 text-emerald-600 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-500/15"
           title={expanded ? 'Collapse details' : 'Expand details'}
         >
           {expanded ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
@@ -1448,8 +1448,8 @@ function ApprovedBacklogGroup({
           onClick={() => setExpanded((prev) => !prev)}
           className="min-w-0 flex-1 text-left"
         >
-          <div className="whitespace-normal break-words text-sm font-semibold leading-snug text-slate-800">{group.title}</div>
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500">
+          <div className="whitespace-normal break-words text-sm font-semibold leading-snug text-foreground">{group.title}</div>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
             <CompactSeverity severity={strongestSeverity} />
             <span>{group.rows.length} approved</span>
             {kinds.length > 0 && <span>{kinds.join(', ')}</span>}
@@ -1461,21 +1461,21 @@ function ApprovedBacklogGroup({
           type="button"
           onClick={moveGroupToPending}
           disabled={isGroupSaving}
-          className="col-span-2 mt-0.5 justify-self-end rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 hover:bg-slate-50 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-60 sm:col-span-1 sm:self-start"
+          className="col-span-2 mt-0.5 justify-self-end rounded-lg border border-border bg-card p-1.5 text-muted-foreground hover:bg-muted/50 hover:text-foreground/85 disabled:cursor-not-allowed disabled:opacity-60 sm:col-span-1 sm:self-start"
           title={group.rows.length === 1 ? 'Move back to pending' : 'Move group back to pending'}
         >
           <Undo2 className="h-4 w-4" />
         </button>
       </div>
       <SmoothCollapse open={expanded}>
-        <div className="space-y-3 border-t border-emerald-100 bg-slate-50 p-3">
+        <div className="space-y-3 border-t border-emerald-100 dark:border-emerald-500/20 bg-muted/50 p-3">
           {group.rows.map((item) => {
             const supportTicketIds = getSupportingTicketIds(item);
             const isSaving = savingRecommendationId === item.id;
             return (
-              <div key={item.id} className={`rounded-lg border border-slate-200 bg-white p-3 transition-all duration-300 ease-out ${getRecommendationMotionClass(motionById[item.id])}`}>
+              <div key={item.id} className={`rounded-lg border border-border bg-card p-3 transition-all duration-300 ease-out ${getRecommendationMotionClass(motionById[item.id])}`}>
                 {group.rows.length > 1 && (
-                  <div className="mb-2 whitespace-normal break-words text-sm font-semibold leading-snug text-slate-800">{item.title}</div>
+                  <div className="mb-2 whitespace-normal break-words text-sm font-semibold leading-snug text-foreground">{item.title}</div>
                 )}
                 <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0">
@@ -1485,7 +1485,7 @@ function ApprovedBacklogGroup({
                     <button
                       onClick={() => onRecommendationAction?.(item.id, 'pending', notesById[item.id] || '')}
                       disabled={isSaving}
-                      className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 hover:bg-slate-50 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="rounded-lg border border-border bg-card p-1.5 text-muted-foreground hover:bg-muted/50 hover:text-foreground/85 disabled:cursor-not-allowed disabled:opacity-60"
                       title="Move back to pending"
                     >
                       <Undo2 className="h-4 w-4" />
@@ -1493,22 +1493,22 @@ function ApprovedBacklogGroup({
                     <button
                       onClick={() => onRecommendationAction?.(item.id, 'applied', notesById[item.id] || '')}
                       disabled={isSaving}
-                      className="rounded-lg border border-blue-200 bg-blue-50 p-1.5 text-blue-600 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="rounded-lg border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 p-1.5 text-blue-600 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-60"
                       title="Mark applied"
                     >
                       <CheckCircle className="h-4 w-4" />
                     </button>
                   </div>
                 </div>
-                <div className="space-y-2 text-xs leading-relaxed text-slate-600">
+                <div className="space-y-2 text-xs leading-relaxed text-muted-foreground">
                   <p>{item.rationale}</p>
                   {item.suggestedAction && (
                     <p>
-                      <span className="font-semibold text-slate-700">Suggested action:</span> {item.suggestedAction}
+                      <span className="font-semibold text-foreground/85">Suggested action:</span> {item.suggestedAction}
                     </p>
                   )}
                   {Array.isArray(supportTicketIds) && supportTicketIds.length > 0 && (
-                    <div className="text-[11px] text-slate-500">
+                    <div className="text-[11px] text-muted-foreground">
                       <span className="font-medium">Supporting tickets:</span> {supportTicketIds.map((ticketId) => `#${ticketId}`).join(', ')}
                     </div>
                   )}
@@ -1517,7 +1517,7 @@ function ApprovedBacklogGroup({
                   value={notesById[item.id] || ''}
                   onChange={(e) => setNotesById((prev) => ({ ...prev, [item.id]: e.target.value }))}
                   placeholder="Optional review notes"
-                  className="mt-3 min-h-[64px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700"
+                  className="mt-3 min-h-[64px] w-full rounded-lg border border-border bg-card px-3 py-2 text-xs text-foreground/85"
                 />
               </div>
             );
@@ -1607,14 +1607,14 @@ function PromptDiffModal({ item, currentPrompt, onClose, onSaveDraft, saving }) 
 
   const diffNavControls = (
     <div className="flex items-center gap-1 normal-case tracking-normal">
-      <span className="mr-1 text-[10px] font-medium text-slate-400">
+      <span className="mr-1 text-[10px] font-medium text-muted-foreground/75">
         {diffRowIndexes.length ? `${Math.max(activeDiffIndex + 1, 0)}/${diffRowIndexes.length}` : '0/0'}
       </span>
       <button
         type="button"
         onClick={() => scrollToDiff('previous')}
         disabled={!diffRowIndexes.length || activeDiffIndex <= 0}
-        className="rounded border border-slate-200 bg-white p-0.5 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+        className="rounded border border-border bg-card p-0.5 text-muted-foreground hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-40"
         title="Previous diff"
       >
         <ChevronUp className="h-3.5 w-3.5" />
@@ -1623,7 +1623,7 @@ function PromptDiffModal({ item, currentPrompt, onClose, onSaveDraft, saving }) 
         type="button"
         onClick={() => scrollToDiff('next')}
         disabled={!diffRowIndexes.length || activeDiffIndex >= diffRowIndexes.length - 1}
-        className="rounded border border-slate-200 bg-white p-0.5 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+        className="rounded border border-border bg-card p-0.5 text-muted-foreground hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-40"
         title="Next diff"
       >
         <ChevronDown className="h-3.5 w-3.5" />
@@ -1695,12 +1695,12 @@ function PromptDiffModal({ item, currentPrompt, onClose, onSaveDraft, saving }) 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-2 animate-fadeIn sm:p-4">
-      <div className="flex max-h-[94vh] w-full max-w-7xl flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl sm:max-h-[88vh]">
-        <div className="flex flex-col gap-3 border-b border-slate-200 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 dark:bg-black/70 p-2 animate-fadeIn sm:p-4">
+      <div className="flex max-h-[94vh] w-full max-w-7xl flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl sm:max-h-[88vh]">
+        <div className="flex flex-col gap-3 border-b border-border px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
           <div className="min-w-0">
-            <h3 className="text-base font-semibold text-slate-900">Prompt Diff</h3>
-            <p className="break-words text-xs text-slate-500">
+            <h3 className="text-base font-semibold text-foreground">Prompt Diff</h3>
+            <p className="break-words text-xs text-muted-foreground">
               {item.title} · {changedCount} changed line{changedCount === 1 ? '' : 's'}
             </p>
           </div>
@@ -1708,7 +1708,7 @@ function PromptDiffModal({ item, currentPrompt, onClose, onSaveDraft, saving }) 
             <button
               onClick={undoDraftChange}
               disabled={!draftHistory.length}
-              className="inline-flex items-center justify-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+              className="inline-flex items-center justify-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-40"
               title="Undo last prompt edit"
             >
               <Undo2 className="h-3.5 w-3.5" />
@@ -1723,7 +1723,7 @@ function PromptDiffModal({ item, currentPrompt, onClose, onSaveDraft, saving }) 
             </button>
             <button
               onClick={onClose}
-              className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+              className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-muted/50"
             >
               Close
             </button>
@@ -1731,29 +1731,29 @@ function PromptDiffModal({ item, currentPrompt, onClose, onSaveDraft, saving }) 
         </div>
 
         <div className="grid min-h-0 flex-1 overflow-hidden md:grid-cols-2">
-          <div className="min-h-0 border-b border-slate-200 md:border-b-0 md:border-r">
-            <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+          <div className="min-h-0 border-b border-border md:border-b-0 md:border-r">
+            <div className="flex items-center justify-between border-b border-border bg-muted/50 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               <span>Current Prompt</span>
               {diffNavControls}
             </div>
-            <div ref={beforePaneRef} className="h-[36vh] overflow-auto bg-white font-mono text-xs leading-relaxed md:h-[70vh]">
+            <div ref={beforePaneRef} className="h-[36vh] overflow-auto bg-card font-mono text-xs leading-relaxed md:h-[70vh]">
               {rows.map((row, index) => {
                 const isFirstRemovedBlock = row.type === 'removed' && rows[index - 1]?.type !== 'removed';
                 return (
                   <div
                     key={`before-${index}`}
                     data-diff-row={index}
-                    className={`grid grid-cols-[36px,1fr,76px] border-b border-slate-100 px-2 py-1 sm:grid-cols-[48px,1fr,96px] ${
-                      row.type === 'removed' ? 'bg-red-50 text-red-900' : row.type === 'added' ? 'bg-slate-50 text-slate-300' : 'text-slate-700'
+                    className={`grid grid-cols-[36px,1fr,76px] border-b border-border/60 px-2 py-1 sm:grid-cols-[48px,1fr,96px] ${
+                      row.type === 'removed' ? 'bg-red-50 dark:bg-red-500/15 text-red-900 dark:text-red-200' : row.type === 'added' ? 'bg-muted/50 text-muted-foreground/50' : 'text-foreground/85'
                     }`}
                   >
-                    <span className="select-none text-right text-slate-400">{row.beforeLine || ''}</span>
+                    <span className="select-none text-right text-muted-foreground/75">{row.beforeLine || ''}</span>
                     <span className="whitespace-pre-wrap pl-3">{row.before || ' '}</span>
                     <span className="pl-2 text-right">
                       {isFirstRemovedBlock && (
                         <button
                           onClick={() => restoreRemovedBlock(row.beforeLine)}
-                          className="rounded border border-red-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-red-600 hover:bg-red-50"
+                          className="rounded border border-red-200 dark:border-red-500/30 bg-card px-2 py-0.5 text-[10px] font-semibold text-red-600 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-500/15"
                           title="Restore this deleted prompt block"
                         >
                           Restore
@@ -1767,33 +1767,33 @@ function PromptDiffModal({ item, currentPrompt, onClose, onSaveDraft, saving }) 
           </div>
 
           <div>
-            <div className="flex items-center justify-between border-b border-slate-200 bg-blue-50 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-blue-700">
+            <div className="flex items-center justify-between border-b border-border bg-blue-50 dark:bg-blue-500/15 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-200">
               <span>Recommended Prompt · Editable</span>
               <div className="flex items-center gap-2">
                 {diffNavControls}
                 <button
                   onClick={() => insertDraftLineAfter(draftPrompt.split('\n').length)}
-                  className="rounded border border-blue-200 bg-white px-2 py-0.5 text-[10px] font-semibold normal-case tracking-normal text-blue-600 hover:bg-blue-50"
+                  className="rounded border border-blue-200 dark:border-blue-500/30 bg-card px-2 py-0.5 text-[10px] font-semibold normal-case tracking-normal text-blue-600 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-500/15"
                 >
                   Add line at end
                 </button>
               </div>
             </div>
-            <div ref={afterPaneRef} className="h-[42vh] overflow-auto bg-white font-mono text-xs leading-relaxed md:h-[70vh]">
+            <div ref={afterPaneRef} className="h-[42vh] overflow-auto bg-card font-mono text-xs leading-relaxed md:h-[70vh]">
               {rows.map((row, index) => {
                 const isFirstAddedBlock = row.type === 'added' && rows[index - 1]?.type !== 'added';
                 return (
                   <div
                     key={`after-${index}`}
                     data-diff-row={index}
-                    className={`grid grid-cols-[36px,1fr,76px] border-b border-slate-100 px-2 py-1 sm:grid-cols-[48px,1fr,112px] ${
-                      row.type === 'added' ? 'bg-emerald-50 text-emerald-900' : row.type === 'removed' ? 'bg-slate-50 text-slate-300' : 'text-slate-700'
+                    className={`grid grid-cols-[36px,1fr,76px] border-b border-border/60 px-2 py-1 sm:grid-cols-[48px,1fr,112px] ${
+                      row.type === 'added' ? 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-900 dark:text-emerald-200' : row.type === 'removed' ? 'bg-muted/50 text-muted-foreground/50' : 'text-foreground/85'
                     }`}
                   >
-                    <span className="select-none text-right text-slate-400">{row.afterLine || ''}</span>
+                    <span className="select-none text-right text-muted-foreground/75">{row.afterLine || ''}</span>
                     {row.afterLine ? (
                       <span
-                        className="min-h-[1.45rem] whitespace-pre-wrap rounded border border-transparent px-3 py-0.5 outline-none transition-colors focus:border-blue-200 focus:bg-white focus:ring-2 focus:ring-blue-100"
+                        className="min-h-[1.45rem] whitespace-pre-wrap rounded border border-transparent px-3 py-0.5 outline-none transition-colors focus:border-blue-200 dark:focus:border-blue-500/30 focus:bg-card focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
                         contentEditable
                         suppressContentEditableWarning
                         onBlur={(e) => updateDraftLine(row.afterLine, e.currentTarget.innerText.replace(/\n$/u, ''))}
@@ -1807,7 +1807,7 @@ function PromptDiffModal({ item, currentPrompt, onClose, onSaveDraft, saving }) 
                       {isFirstAddedBlock && (
                         <button
                           onClick={() => removeAddedBlock(row.afterLine)}
-                          className="rounded border border-red-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-red-600 hover:bg-red-50"
+                          className="rounded border border-red-200 dark:border-red-500/30 bg-card px-2 py-0.5 text-[10px] font-semibold text-red-600 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-500/15"
                           title="Remove this full added recommendation block"
                         >
                           Remove
@@ -1837,27 +1837,27 @@ function DeleteRunConfirmModal({
   const body = message || `This will delete Run #${run.id} and its saved consolidation recommendations. This cannot be undone.`;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4 animate-fadeIn">
-      <div className="w-full max-w-md overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl">
-        <div className="border-b border-slate-200 px-4 py-3">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 dark:bg-black/70 p-4 animate-fadeIn">
+      <div className="w-full max-w-md overflow-hidden rounded-xl border border-border bg-card shadow-2xl">
+        <div className="border-b border-border px-4 py-3">
           <div className="flex items-start gap-3">
-            <div className="mt-0.5 rounded-full bg-red-50 p-2 text-red-600">
+            <div className="mt-0.5 rounded-full bg-red-50 dark:bg-red-500/15 p-2 text-red-600 dark:text-red-300">
               <AlertTriangle className="h-4 w-4" />
             </div>
             <div>
-              <h3 className="text-base font-semibold text-slate-900">{title}</h3>
-              <p className="mt-1 text-sm leading-relaxed text-slate-500">
+              <h3 className="text-base font-semibold text-foreground">{title}</h3>
+              <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
                 {body}
               </p>
             </div>
           </div>
         </div>
-        <div className="flex justify-end gap-2 bg-slate-50 px-4 py-3">
+        <div className="flex justify-end gap-2 bg-muted/50 px-4 py-3">
           <button
             type="button"
             onClick={onCancel}
             disabled={deleting}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-60"
+            className="rounded-lg border border-border bg-card px-3 py-2 text-xs font-semibold text-muted-foreground hover:bg-muted/50 disabled:opacity-60"
           >
             Cancel
           </button>
@@ -1914,13 +1914,13 @@ function TechnicianCompetencyCompactEditor({
   };
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2">
+    <div className="rounded-lg border border-border bg-muted/35 px-3 py-2">
       <div className="grid items-center gap-2 xl:grid-cols-[minmax(180px,0.9fr)_minmax(220px,1fr)_auto_minmax(160px,auto)_minmax(220px,1fr)_auto]">
         <select
           value={selectedTech?.id || ''}
           onChange={(e) => handleTechnicianChange(e.target.value)}
           disabled={isApplied}
-          className="w-full min-w-0 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-sm font-semibold text-slate-800 disabled:opacity-60"
+          className="w-full min-w-0 rounded-lg border border-border bg-card px-2.5 py-2 text-sm font-semibold text-foreground disabled:opacity-60"
           title="Technician"
         >
           <option value="">{payload.technicianName || 'Select technician'}</option>
@@ -1933,7 +1933,7 @@ function TechnicianCompetencyCompactEditor({
           value={selectedCategory?.id || ''}
           onChange={(e) => handleCategoryChange(e.target.value)}
           disabled={isApplied}
-          className="w-full min-w-0 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-sm text-slate-700 disabled:opacity-60"
+          className="w-full min-w-0 rounded-lg border border-border bg-card px-2.5 py-2 text-sm text-foreground/85 disabled:opacity-60"
           title="Skill / Category"
         >
           <option value="">{payload.categoryName || 'Select skill'}</option>
@@ -1942,12 +1942,12 @@ function TechnicianCompetencyCompactEditor({
           ))}
         </select>
 
-        <div className="flex items-center justify-center gap-1 text-xs text-slate-500">
+        <div className="flex items-center justify-center gap-1 text-xs text-muted-foreground">
           <ProficiencyBadge level={currentLevel} muted />
           <span>to</span>
         </div>
 
-        <div className="flex w-full items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white p-1 xl:w-auto">
+        <div className="flex w-full items-center justify-center gap-1 rounded-lg border border-border bg-card p-1 xl:w-auto">
           {PROFICIENCY_LEVELS.map((level) => {
             const active = proposedLevel === level.value;
             return (
@@ -1957,7 +1957,7 @@ function TechnicianCompetencyCompactEditor({
                 onClick={() => onFieldChange('proficiencyLevel', level.value)}
                 disabled={isApplied}
                 className={`h-7 min-w-8 rounded-md border px-2 text-xs font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
-                  active ? level.color : 'border-transparent text-slate-400 hover:bg-slate-50'
+                  active ? level.color : 'border-transparent text-muted-foreground/75 hover:bg-muted/50'
                 }`}
                 title={level.label}
               >
@@ -1972,30 +1972,30 @@ function TechnicianCompetencyCompactEditor({
           onChange={(e) => onFieldChange('notes', e.target.value)}
           disabled={isApplied}
           placeholder="Optional note"
-          className="w-full min-w-0 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-sm text-slate-700 disabled:opacity-60"
+          className="w-full min-w-0 rounded-lg border border-border bg-card px-2.5 py-2 text-sm text-foreground/85 disabled:opacity-60"
         />
         {!isApplied && (
           <button
             type="button"
             onClick={onSave}
             disabled={saving}
-            className="w-full rounded-lg border border-indigo-200 bg-white px-3 py-2 text-xs font-semibold text-indigo-600 hover:bg-indigo-50 disabled:opacity-60 xl:w-auto"
+            className="w-full rounded-lg border border-indigo-200 dark:border-indigo-500/30 bg-card px-3 py-2 text-xs font-semibold text-indigo-600 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-500/15 disabled:opacity-60 xl:w-auto"
           >
             {saving ? 'Saving...' : 'Save'}
           </button>
         )}
       </div>
-      <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+      <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
         <span>1 Basic</span>
-        <span className="text-slate-300">•</span>
+        <span className="text-muted-foreground/50">•</span>
         <span>2 Comfortable</span>
-        <span className="text-slate-300">•</span>
+        <span className="text-muted-foreground/50">•</span>
         <span>3 Advanced</span>
-        <span className="text-slate-300">•</span>
+        <span className="text-muted-foreground/50">•</span>
         <span>4 Expert / SME</span>
         {currentLevel && (
           <>
-            <span className="text-slate-300">•</span>
+            <span className="text-muted-foreground/50">•</span>
             <span>Current matrix: {currentLevel}</span>
           </>
         )}
@@ -2098,12 +2098,12 @@ function SkillListCompactEditor({
 
   const renderTargetSelect = () => (
     <div className="min-w-0 flex-1 xl:min-w-[220px]">
-      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">{targetLabel}</div>
+      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/75">{targetLabel}</div>
       <select
         value={selectedCategory?.id || ''}
         onChange={(e) => handleCategoryChange(e.target.value)}
         disabled={isApplied}
-        className="w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 disabled:opacity-60"
+        className="w-full min-w-0 rounded-lg border border-border bg-card px-3 py-2 text-sm font-semibold text-foreground disabled:opacity-60"
         title={targetLabel}
       >
         <option value="">{payload.categoryName || `Select ${targetLabel.toLowerCase()}`}</option>
@@ -2116,14 +2116,14 @@ function SkillListCompactEditor({
 
   const renderParentSelect = () => (
     <div className="min-w-0 flex-1 xl:min-w-[220px]">
-      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/75">
         {isMove ? 'Move to' : 'Parent'}
       </div>
       <select
         value={selectedParentId}
         onChange={(e) => handleParentChange(e.target.value)}
         disabled={isApplied}
-        className="w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 disabled:opacity-60"
+        className="w-full min-w-0 rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground/85 disabled:opacity-60"
         title="Parent category"
       >
         <option value="top">Top-level category</option>
@@ -2135,15 +2135,15 @@ function SkillListCompactEditor({
   );
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-white to-slate-50/80 px-3 py-3">
+    <div className="rounded-xl border border-border bg-gradient-to-br from-card to-muted/40 px-3 py-3">
       <div className="flex flex-col gap-3 xl:flex-row xl:items-end">
         <div className="min-w-0 xl:min-w-[140px]">
-          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">Action</div>
+          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/75">Action</div>
           <select
             value={action}
             onChange={(e) => onFieldChange('action', e.target.value)}
             disabled={isApplied}
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold capitalize text-slate-800 disabled:opacity-60"
+            className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm font-semibold capitalize text-foreground disabled:opacity-60"
             title="Action"
           >
             <option value="add">Add</option>
@@ -2159,7 +2159,7 @@ function SkillListCompactEditor({
 
         {needsNewName && (
           <div className="min-w-0 flex-1 xl:min-w-[220px]">
-            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/75">
               {isAdd ? 'New skill' : 'New name'}
             </div>
             <input
@@ -2167,7 +2167,7 @@ function SkillListCompactEditor({
               onChange={(e) => handleNewNameChange(e.target.value)}
               disabled={isApplied}
               placeholder={isAdd ? 'Skill or subcategory name' : 'Rename to...'}
-              className="w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 disabled:opacity-60"
+              className="w-full min-w-0 rounded-lg border border-border bg-card px-3 py-2 text-sm font-semibold text-foreground disabled:opacity-60"
             />
           </div>
         )}
@@ -2175,7 +2175,7 @@ function SkillListCompactEditor({
         {needsParent && renderParentSelect()}
 
         {(isMerge || isDeprecate) && (
-          <div className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 xl:min-w-[210px]">
+          <div className="min-w-0 flex-1 rounded-lg border border-border bg-card px-3 py-2 text-sm text-muted-foreground xl:min-w-[210px]">
             {isMerge ? 'Manual merge note is recorded; no automatic merge is applied.' : 'Deprecates this skill after approval.'}
           </div>
         )}
@@ -2184,7 +2184,7 @@ function SkillListCompactEditor({
           <button
             type="button"
             onClick={() => setDetailsOpen((prev) => !prev)}
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 sm:w-auto"
+            className="w-full rounded-lg border border-border bg-card px-3 py-2 text-xs font-semibold text-muted-foreground hover:bg-muted/50 sm:w-auto"
             title={detailsOpen ? 'Hide notes' : 'Edit notes'}
           >
             <span className="inline-flex items-center gap-1">
@@ -2198,7 +2198,7 @@ function SkillListCompactEditor({
               type="button"
               onClick={handleSave}
               disabled={saving}
-              className="w-full rounded-lg border border-indigo-200 bg-white px-3 py-2 text-xs font-semibold text-indigo-600 hover:bg-indigo-50 disabled:opacity-60 sm:w-auto"
+              className="w-full rounded-lg border border-indigo-200 dark:border-indigo-500/30 bg-card px-3 py-2 text-xs font-semibold text-indigo-600 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-500/15 disabled:opacity-60 sm:w-auto"
             >
               {saving ? 'Saving...' : 'Save'}
             </button>
@@ -2206,33 +2206,33 @@ function SkillListCompactEditor({
         </div>
       </div>
 
-      <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
-        <span className="rounded-full bg-white px-2 py-0.5 font-semibold text-slate-600 ring-1 ring-slate-200">
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+        <span className="rounded-full bg-card px-2 py-0.5 font-semibold text-muted-foreground ring-1 ring-border">
           {actionCopy[action] || 'Skill change'}
         </span>
         {needsTarget && (
           <>
-            <span className="text-slate-300">•</span>
+            <span className="text-muted-foreground/50">•</span>
             <span>{targetLabel}: {selectedCategory ? categoryLabel(selectedCategory) : payload.categoryName || 'unresolved'}</span>
           </>
         )}
         {isAdd && newSkillName && (
           <>
-            <span className="text-slate-300">•</span>
+            <span className="text-muted-foreground/50">•</span>
             <span>Creates: {newSkillName}</span>
           </>
         )}
         {needsParent && (
           <>
-            <span className="text-slate-300">•</span>
+            <span className="text-muted-foreground/50">•</span>
             <span>{selectedParent ? `Under ${selectedParent.name}` : 'Top-level category'}</span>
           </>
         )}
       </div>
 
       <SmoothCollapse open={detailsOpen}>
-        <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3 text-xs leading-relaxed text-slate-600">
-          <label className="font-semibold uppercase tracking-wide text-slate-400" htmlFor={notesFieldId}>
+        <div className="mt-3 rounded-lg border border-border bg-card p-3 text-xs leading-relaxed text-muted-foreground">
+          <label className="font-semibold uppercase tracking-wide text-muted-foreground/75" htmlFor={notesFieldId}>
             Description / Review Notes
           </label>
           <textarea
@@ -2242,10 +2242,10 @@ function SkillListCompactEditor({
             disabled={isApplied}
             rows={3}
             placeholder="Describe what changes and why this category update is justified."
-            className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm leading-relaxed text-slate-700 disabled:opacity-60"
+            className="mt-2 w-full rounded-lg border border-border bg-card px-3 py-2 text-sm leading-relaxed text-foreground/85 disabled:opacity-60"
           />
           {needsParent && selectedParent && (
-            <div className="mt-2 text-slate-500">
+            <div className="mt-2 text-muted-foreground">
               This will be applied as an internal subcategory under {selectedParent.name}.
             </div>
           )}
@@ -2281,15 +2281,15 @@ function ConsolidationItemCard({ item, onSave, saving, currentPrompt, onOpenProm
   };
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-3 animate-[fadeIn_200ms_ease-out] transition-all duration-300 ease-out">
+    <div className="rounded-lg border border-border bg-card p-3 animate-[fadeIn_200ms_ease-out] transition-all duration-300 ease-out">
       <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <div className="text-sm font-semibold text-slate-800">{item.title}</div>
+            <div className="text-sm font-semibold text-foreground">{item.title}</div>
             <RecommendationStatusBadge status={item.status} />
-            {item.actionType && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-slate-500">{item.actionType}</span>}
+            {item.actionType && <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold uppercase text-muted-foreground">{item.actionType}</span>}
           </div>
-          {item.section !== 'prompt' && item.rationale && <div className="mt-1 text-xs text-slate-500">{item.rationale}</div>}
+          {item.section !== 'prompt' && item.rationale && <div className="mt-1 text-xs text-muted-foreground">{item.rationale}</div>}
         </div>
         {!isDocumented && (
           <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 sm:flex-nowrap">
@@ -2297,7 +2297,7 @@ function ConsolidationItemCard({ item, onSave, saving, currentPrompt, onOpenProm
               <button
                 onClick={() => onOpenPromptDiff?.(item)}
                 type="button"
-                className="w-full rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-xs font-semibold text-blue-600 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                className="w-full rounded-lg border border-blue-200 dark:border-blue-500/30 bg-card px-3 py-1.5 text-xs font-semibold text-blue-600 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-500/15 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
                 disabled={!currentPrompt || !payload.updatedPrompt}
               >
                 Compare Prompt
@@ -2310,8 +2310,8 @@ function ConsolidationItemCard({ item, onSave, saving, currentPrompt, onOpenProm
                 disabled={isApplied || saving}
                 className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
                   includeInApply
-                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                    : 'border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100'
+                    ? 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 hover:bg-emerald-100 dark:hover:bg-emerald-500/20'
+                    : 'border-border bg-muted/50 text-muted-foreground hover:bg-muted'
                 }`}
                 title={includeInApply ? 'This item will be applied. Click to skip it.' : 'This item is skipped. Click to apply it.'}
               >
@@ -2325,15 +2325,15 @@ function ConsolidationItemCard({ item, onSave, saving, currentPrompt, onOpenProm
 
       {item.section === 'prompt' && (
         <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.85fr)]">
-          <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-3">
-            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Recommendation</div>
-            <div className="mt-2 text-sm leading-relaxed text-slate-600">
+          <div className="rounded-lg border border-border bg-muted/40 p-3">
+            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Recommendation</div>
+            <div className="mt-2 text-sm leading-relaxed text-muted-foreground">
               {item.rationale || 'No recommendation rationale provided.'}
             </div>
           </div>
-          <div className="rounded-lg border border-blue-100 bg-blue-50 p-3">
-            <div className="text-xs font-semibold uppercase tracking-wide text-blue-700">Change Summary</div>
-            <div className="mt-2 text-sm leading-relaxed text-slate-700">
+          <div className="rounded-lg border border-blue-100 dark:border-blue-500/20 bg-blue-50 dark:bg-blue-500/15 p-3">
+            <div className="text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-200">Change Summary</div>
+            <div className="mt-2 text-sm leading-relaxed text-foreground/85">
               {payload.changeSummary || 'No change summary provided.'}
             </div>
           </div>
@@ -2366,14 +2366,14 @@ function ConsolidationItemCard({ item, onSave, saving, currentPrompt, onOpenProm
       )}
 
       {item.section === 'tools_data' && (
-        <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
+        <div className="rounded-lg border border-sky-200 dark:border-sky-500/30 bg-sky-50 dark:bg-sky-500/15 p-3 text-sm text-sky-900 dark:text-sky-200">
           <div className="font-semibold">{payload.requiredToolName || payload.missingCapability || 'Tool or data capability'}</div>
           {payload.missingCapability && <div className="mt-1 text-xs">{payload.missingCapability}</div>}
           <div className="mt-1 text-xs">{payload.suggestedAction || item.rationale}</div>
           {Array.isArray(payload.dataSources) && payload.dataSources.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1">
               {payload.dataSources.map((source) => (
-                <span key={source} className="rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-sky-700">{source}</span>
+                <span key={source} className="rounded-full bg-card px-2 py-0.5 text-[10px] font-semibold text-sky-700 dark:text-sky-200">{source}</span>
               ))}
             </div>
           )}
@@ -2381,7 +2381,7 @@ function ConsolidationItemCard({ item, onSave, saving, currentPrompt, onOpenProm
       )}
 
       {(item.section === 'dev_policy' || item.section === 'process') && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+        <div className="rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 p-3 text-sm text-amber-900 dark:text-amber-200">
           <div className="font-semibold">{payload.changeType || item.actionType || 'dev_or_policy'}</div>
           <div className="mt-1 text-xs">{payload.suggestedAction || item.rationale}</div>
         </div>
@@ -2392,7 +2392,7 @@ function ConsolidationItemCard({ item, onSave, saving, currentPrompt, onOpenProm
           <button
             onClick={save}
             disabled={saving}
-            className="rounded-lg border border-indigo-200 px-3 py-1.5 text-xs font-semibold text-indigo-600 hover:bg-indigo-50 disabled:opacity-60"
+            className="rounded-lg border border-indigo-200 dark:border-indigo-500/30 px-3 py-1.5 text-xs font-semibold text-indigo-600 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-500/15 disabled:opacity-60"
           >
             {saving ? 'Saving...' : 'Save Item'}
           </button>
@@ -2492,25 +2492,25 @@ function ConsolidationPanel({
   };
 
   return (
-    <div className="rounded-xl border border-indigo-200 bg-white p-3 shadow-sm sm:p-4">
+    <div className="rounded-xl border border-indigo-200 dark:border-indigo-500/30 bg-card p-3 shadow-sm sm:p-4">
       <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <h3 className="flex items-center gap-2 text-base font-semibold text-slate-800">
-            <Sparkles className="h-4 w-4 text-indigo-600" />
+          <h3 className="flex items-center gap-2 text-base font-semibold text-foreground">
+            <Sparkles className="h-4 w-4 text-indigo-600 dark:text-indigo-300" />
             Approved Recommendation Consolidation
           </h3>
-          <p className="text-sm text-slate-500">
+          <p className="text-sm text-muted-foreground">
             Converts approved, unapplied Review findings into editable prompt, tools/data, category, agent-skill, and dev/policy recommendations.
           </p>
         </div>
         <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center sm:justify-end">
-          <button onClick={onRefresh} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50">
+          <button onClick={onRefresh} className="rounded-lg border border-border px-3 py-2 text-xs font-semibold text-muted-foreground hover:bg-muted/50">
             Refresh
           </button>
           {hasRun && isActive && (
             <button
               onClick={onCancel}
-              className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50"
+              className="rounded-lg border border-red-200 dark:border-red-500/30 px-3 py-2 text-xs font-semibold text-red-600 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-500/15"
             >
               Cancel
             </button>
@@ -2518,7 +2518,7 @@ function ConsolidationPanel({
           {hasRun && !isActive && (
             <button
               onClick={() => setDeleteConfirmOpen(true)}
-              className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+              className="rounded-lg border border-border px-3 py-2 text-xs font-semibold text-muted-foreground hover:bg-muted/50"
             >
               Delete Run
             </button>
@@ -2559,15 +2559,15 @@ function ConsolidationPanel({
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center py-8 text-sm text-slate-400">
+        <div className="flex items-center justify-center py-8 text-sm text-muted-foreground/75">
           <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading consolidation...
         </div>
       ) : !hasRun ? (
-        <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50/40 p-4">
+        <div className="rounded-lg border border-dashed border-border bg-muted/20 p-4">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <div>
-              <div className="text-sm font-semibold text-slate-800">Approved queue waiting for Opus</div>
-              <div className="text-xs text-slate-500">
+              <div className="text-sm font-semibold text-foreground">Approved queue waiting for Opus</div>
+              <div className="text-xs text-muted-foreground">
                 {queueLoading ? 'Loading approved recommendations...' : `${queueTotal} approved item${queueTotal === 1 ? '' : 's'} ready to consolidate.`}
               </div>
             </div>
@@ -2584,28 +2584,28 @@ function ConsolidationPanel({
             ].map((item) => (
               <div
                 key={item.key}
-                className={`rounded-lg border bg-white px-3 py-2 ${
+                className={`rounded-lg border bg-card px-3 py-2 ${
                   item.tone === 'blue'
-                    ? 'border-blue-100'
+                    ? 'border-blue-100 dark:border-blue-500/20'
                     : item.tone === 'sky'
-                      ? 'border-sky-100'
+                      ? 'border-sky-100 dark:border-sky-500/20'
                       : item.tone === 'emerald'
-                        ? 'border-emerald-100'
-                        : 'border-amber-100'
+                        ? 'border-emerald-100 dark:border-emerald-500/20'
+                        : 'border-amber-100 dark:border-amber-500/20'
                 }`}
               >
                 <div className={`text-xl font-bold ${
                   item.tone === 'blue'
-                    ? 'text-blue-700'
+                    ? 'text-blue-700 dark:text-blue-200'
                     : item.tone === 'sky'
-                      ? 'text-sky-700'
+                      ? 'text-sky-700 dark:text-sky-200'
                       : item.tone === 'emerald'
-                        ? 'text-emerald-700'
-                        : 'text-amber-700'
+                        ? 'text-emerald-700 dark:text-emerald-200'
+                        : 'text-amber-700 dark:text-amber-200'
                 }`}>
                   {queueByKind[item.key]?.total || 0}
                 </div>
-                <div className="text-xs font-medium text-slate-500">{item.label}</div>
+                <div className="text-xs font-medium text-muted-foreground">{item.label}</div>
               </div>
             ))}
           </div>
@@ -2613,21 +2613,21 @@ function ConsolidationPanel({
           {queuePreviewItems.length > 0 ? (
             <div className="space-y-1.5">
               {queuePreviewItems.map((item) => (
-                <div key={item.id} className="flex items-center gap-2 rounded-lg border border-slate-100 bg-white px-3 py-2 text-xs">
+                <div key={item.id} className="flex items-center gap-2 rounded-lg border border-border/60 bg-card px-3 py-2 text-xs">
                   <CompactSeverity severity={item.severity} />
-                  <span className="min-w-0 flex-1 truncate font-semibold text-slate-700">{item.title}</span>
-                  <span className="shrink-0 text-slate-400">{recommendationKindLabel(item.kind)}</span>
-                  <span className="shrink-0 text-slate-400">Run #{item.runId}</span>
+                  <span className="min-w-0 flex-1 truncate font-semibold text-foreground/85">{item.title}</span>
+                  <span className="shrink-0 text-muted-foreground/75">{recommendationKindLabel(item.kind)}</span>
+                  <span className="shrink-0 text-muted-foreground/75">Run #{item.runId}</span>
                 </div>
               ))}
               {queueMoreCount > 0 && (
-                <div className="px-1 text-xs text-slate-400">
+                <div className="px-1 text-xs text-muted-foreground/75">
                   +{queueMoreCount} more approved item{queueMoreCount === 1 ? '' : 's'}
                 </div>
               )}
             </div>
           ) : (
-            <div className="rounded-lg border border-slate-100 bg-white px-4 py-5 text-center text-sm text-slate-400">
+            <div className="rounded-lg border border-border/60 bg-card px-4 py-5 text-center text-sm text-muted-foreground/75">
               No approved recommendations are waiting.
             </div>
           )}
@@ -2635,14 +2635,14 @@ function ConsolidationPanel({
       ) : (
         <div className="space-y-4">
           {applyNotice && (
-            <div className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+            <div className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 px-4 py-3 text-sm text-emerald-800 dark:text-emerald-200">
               <div className="flex min-w-0 gap-2">
-                <CheckCircle className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                <CheckCircle className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-300" />
                 <div>
                   <div className="font-semibold">
                     Applied {applyNotice.total} consolidation item{applyNotice.total === 1 ? '' : 's'} from Run #{applyNotice.runId}.
                   </div>
-                  <div className="mt-0.5 text-xs text-emerald-700">
+                  <div className="mt-0.5 text-xs text-emerald-700 dark:text-emerald-200">
                     {applyNotice.summary || 'The selected sections were applied and the approved backlog was refreshed.'}
                   </div>
                 </div>
@@ -2650,51 +2650,51 @@ function ConsolidationPanel({
               <button
                 type="button"
                 onClick={onDismissApplyNotice}
-                className="rounded-md px-2 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
+                className="rounded-md px-2 py-1 text-xs font-semibold text-emerald-700 dark:text-emerald-200 hover:bg-emerald-100 dark:hover:bg-emerald-500/20"
               >
                 Dismiss
               </button>
             </div>
           )}
-          <div className="flex flex-wrap items-center gap-3 rounded-lg bg-slate-50 p-3 text-sm">
+          <div className="flex flex-wrap items-center gap-3 rounded-lg bg-muted/50 p-3 text-sm">
             <StatusBadge status={run.status} />
-            <span className="text-slate-500">Run #{run.id}</span>
-            <span className="text-slate-500">{run.sourceCounts?.total || 0} source recommendation(s)</span>
-            {run.progress?.message && <span className="font-medium text-slate-700">{run.progress.message}</span>}
+            <span className="text-muted-foreground">Run #{run.id}</span>
+            <span className="text-muted-foreground">{run.sourceCounts?.total || 0} source recommendation(s)</span>
+            {run.progress?.message && <span className="font-medium text-foreground/85">{run.progress.message}</span>}
           </div>
 
           {(isActive || thinking || visibleText || progressEvents.length > 0) && (
             <div className="grid gap-3 xl:grid-cols-3 transition-all duration-300 ease-out">
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 transition-all duration-300 ease-out">
-                <div className="mb-2 flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <div className="rounded-lg border border-border bg-muted/50 p-3 transition-all duration-300 ease-out">
+                <div className="mb-2 flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   <span>Progress</span>
-                  <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-500">
+                  <span className="rounded-full bg-card px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
                     Plan {structuredPlanKb} KB
                   </span>
                 </div>
-                <div className="h-40 overflow-auto space-y-1 text-xs text-slate-600 transition-all duration-300 ease-out">
+                <div className="h-40 overflow-auto space-y-1 text-xs text-muted-foreground transition-all duration-300 ease-out">
                   {progressEvents.map((event) => (
                     <div key={event.id} className="flex gap-2 animate-fadeIn transition-colors duration-200">
-                      <span className="w-20 shrink-0 font-semibold text-slate-400">{event.type}</span>
+                      <span className="w-20 shrink-0 font-semibold text-muted-foreground/75">{event.type}</span>
                       <span>{event.message}</span>
                     </div>
                   ))}
                 </div>
               </div>
-              <div className="rounded-lg border border-purple-200 bg-purple-50 p-3 transition-all duration-300 ease-out">
-                <div className="mb-2 flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide text-purple-700">
+              <div className="rounded-lg border border-purple-200 dark:border-purple-500/30 bg-purple-50 dark:bg-purple-500/15 p-3 transition-all duration-300 ease-out">
+                <div className="mb-2 flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide text-purple-700 dark:text-purple-200">
                   <span className="flex items-center gap-2">
                     <Brain className="h-3.5 w-3.5" />
                     Thinking / Plan Stream
                   </span>
-                  <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-semibold text-purple-700">
+                  <span className="rounded-full bg-card/80 px-2 py-0.5 text-[10px] font-semibold text-purple-700 dark:text-purple-200">
                     Thinking {thinkingKb} KB · Plan {structuredPlanKb} KB
                   </span>
                 </div>
-                <div className="h-40 overflow-auto whitespace-pre-wrap text-xs leading-relaxed text-purple-900 transition-all duration-300 ease-out">
+                <div className="h-40 overflow-auto whitespace-pre-wrap text-xs leading-relaxed text-purple-900 dark:text-purple-200 transition-all duration-300 ease-out">
                   {thinking && <div className="animate-fadeIn">{thinking}</div>}
                   {latestToolJson && (
-                    <div className={`${thinking ? 'mt-3 border-t border-purple-200 pt-2' : ''} animate-fadeIn`}>
+                    <div className={`${thinking ? 'mt-3 border-t border-purple-200 dark:border-purple-500/30 pt-2' : ''} animate-fadeIn`}>
                       Structured plan JSON: {latestToolJson.payload?.kb || 0} KB generated.
                     </div>
                   )}
@@ -2703,17 +2703,17 @@ function ConsolidationPanel({
                   )}
                 </div>
               </div>
-              <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 transition-all duration-300 ease-out">
-                <div className="mb-2 flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide text-blue-700">
+              <div className="rounded-lg border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 p-3 transition-all duration-300 ease-out">
+                <div className="mb-2 flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-200">
                   <span className="flex items-center gap-2">
                     <MessageCircle className="h-3.5 w-3.5" />
                     Visible Text Stream
                   </span>
-                  <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-semibold text-blue-700">
+                  <span className="rounded-full bg-card/80 px-2 py-0.5 text-[10px] font-semibold text-blue-700 dark:text-blue-200">
                     Text {visibleTextKb} KB
                   </span>
                 </div>
-                <div className="h-40 overflow-auto whitespace-pre-wrap text-xs leading-relaxed text-blue-900 transition-all duration-300 ease-out">
+                <div className="h-40 overflow-auto whitespace-pre-wrap text-xs leading-relaxed text-blue-900 dark:text-blue-200 transition-all duration-300 ease-out">
                   {visibleText ? <div className="animate-fadeIn">{visibleText}</div> : (
                     latestHeartbeat?.payload
                       ? `No visible text yet. Last output channel: ${latestHeartbeat.payload.lastOutputType || 'unknown'}; structured plan: ${latestHeartbeat.payload.structuredPlanKb || 0} KB.`
@@ -2727,36 +2727,36 @@ function ConsolidationPanel({
           {sections.map(({ key, label, icon: Icon, applyable }) => {
             const items = grouped[key] || [];
             return (
-              <div key={key} className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50 transition-all duration-300 ease-out">
-                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3">
+              <div key={key} className="overflow-hidden rounded-xl border border-border bg-muted/50 transition-all duration-300 ease-out">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-card px-4 py-3">
                   <div className="flex items-center gap-3">
                     {applyable && (
                       <input
                         type="checkbox"
                         checked={sectionApply[key] !== false}
                         onChange={(e) => onSectionApplyChange(key, e.target.checked)}
-                        className="h-5 w-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                        className="h-5 w-5 rounded border-input text-indigo-600 dark:text-indigo-300 focus:ring-indigo-500"
                         title={`${sectionApply[key] !== false ? 'Apply' : 'Skip'} ${label}`}
                         aria-label={`${sectionApply[key] !== false ? 'Apply' : 'Skip'} ${label}`}
                       />
                     )}
-                    <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 text-slate-600 ring-1 ring-slate-200">
+                    <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-muted text-muted-foreground ring-1 ring-border">
                       <Icon className="h-5 w-5" />
                     </span>
-                    <h4 className="text-lg font-semibold text-slate-900">{label}</h4>
-                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-sm font-semibold text-slate-600">{items.length}</span>
+                    <h4 className="text-lg font-semibold text-foreground">{label}</h4>
+                    <span className="rounded-full bg-muted px-2.5 py-1 text-sm font-semibold text-muted-foreground">{items.length}</span>
                   </div>
-                  {!applyable && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">Documented only</span>}
+                  {!applyable && <span className="rounded-full bg-amber-100 dark:bg-amber-500/20 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:text-amber-200">Documented only</span>}
                 </div>
                 <div className="p-3">
                   {items.length === 0 ? (
-                    <div className="rounded-lg border border-dashed border-slate-200 bg-white px-4 py-5 text-center text-sm text-slate-400">
+                    <div className="rounded-lg border border-dashed border-border bg-card px-4 py-5 text-center text-sm text-muted-foreground/75">
                       No {label.toLowerCase()} proposed.
                     </div>
                   ) : (
                     <div className="space-y-3 transition-all duration-300 ease-out">
                       {(key === 'technician_competencies' || key === 'skills') && loadingCompetencyOptions && (
-                        <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-medium text-blue-700">
+                        <div className="rounded-lg border border-blue-100 dark:border-blue-500/20 bg-blue-50 dark:bg-blue-500/15 px-3 py-2 text-xs font-medium text-blue-700 dark:text-blue-200">
                           <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />
                           Loading skill matrix options...
                         </div>
@@ -2806,36 +2806,36 @@ function CasesTable({ cases = [], workspaceTimezone }) {
   const displayCases = cases.slice(0, 20);
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-3 sm:p-4">
-      <h3 className="text-sm font-semibold text-slate-800 mb-3">Key Cases</h3>
+    <div className="rounded-xl border border-border bg-card p-3 sm:p-4">
+      <h3 className="text-sm font-semibold text-foreground mb-3">Key Cases</h3>
       {displayCases.length === 0 ? (
-        <div className="text-sm text-slate-400">No cases available.</div>
+        <div className="text-sm text-muted-foreground/75">No cases available.</div>
       ) : (
         <div className="space-y-3">
           {displayCases.map((item) => (
-            <div key={`${item.type}-${item.runId || item.ticketId}`} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <div key={`${item.type}-${item.runId || item.ticketId}`} className="rounded-lg border border-border bg-muted/50 p-3">
               <div className="mb-1 flex flex-wrap items-center gap-2">
-                <span className="text-sm font-semibold text-slate-800">#{item.freshserviceTicketId}</span>
-                <span className="min-w-0 break-words text-sm text-slate-700">{item.subject}</span>
+                <span className="text-sm font-semibold text-foreground">#{item.freshserviceTicketId}</span>
+                <span className="min-w-0 break-words text-sm text-foreground/85">{item.subject}</span>
                 <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
                   item.outcome === 'success'
-                    ? 'bg-green-100 text-green-700'
+                    ? 'bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-200'
                     : item.outcome === 'partial_success'
-                      ? 'bg-blue-100 text-blue-700'
+                      ? 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200'
                       : item.outcome === 'failure'
-                        ? 'bg-red-100 text-red-700'
-                        : 'bg-slate-100 text-slate-700'
+                        ? 'bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-200'
+                        : 'bg-muted text-foreground/85'
                 }`}>
                   {item.outcome.replace(/_/g, ' ')}
                 </span>
-                <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-white border border-slate-200 text-[10px] font-medium text-slate-600">
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-card border border-border text-[10px] font-medium text-muted-foreground">
                   {item.primaryTag.replace(/_/g, ' ')}
                 </span>
               </div>
-              <div className="text-xs text-slate-500 mb-2">
+              <div className="text-xs text-muted-foreground mb-2">
                 {item.category || 'Uncategorized'} · {item.status} · {formatDateTimeInTimezone(item.ticketCreatedAt, workspaceTimezone)}
               </div>
-              <div className="text-xs text-slate-700 space-y-1">
+              <div className="text-xs text-foreground/85 space-y-1">
                 {item.topRecommendation?.techName && (
                   <div><span className="font-medium">Top recommendation:</span> {item.topRecommendation.techName}</div>
                 )}
@@ -2853,7 +2853,7 @@ function CasesTable({ cases = [], workspaceTimezone }) {
                     <span className="font-medium">Thread excerpts:</span>
                     <div className="mt-1 space-y-1">
                       {item.threadExcerpts.slice(0, 3).map((excerpt) => (
-                        <div key={excerpt.id} className="text-slate-600">
+                        <div key={excerpt.id} className="text-muted-foreground">
                           {excerpt.actorName ? `${excerpt.actorName}: ` : ''}{excerpt.excerpt}
                         </div>
                       ))}
@@ -2871,31 +2871,31 @@ function CasesTable({ cases = [], workspaceTimezone }) {
 
 const TONE_STYLES = {
   good: {
-    border: 'border-green-200',
-    bg: 'bg-green-50',
-    text: 'text-green-800',
-    pill: 'bg-green-100 text-green-700',
+    border: 'border-green-200 dark:border-green-500/30',
+    bg: 'bg-green-50 dark:bg-green-500/15',
+    text: 'text-green-800 dark:text-green-200',
+    pill: 'bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-200',
     icon: ThumbsUp,
   },
   bad: {
-    border: 'border-red-200',
-    bg: 'bg-red-50',
-    text: 'text-red-800',
-    pill: 'bg-red-100 text-red-700',
+    border: 'border-red-200 dark:border-red-500/30',
+    bg: 'bg-red-50 dark:bg-red-500/15',
+    text: 'text-red-800 dark:text-red-200',
+    pill: 'bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-200',
     icon: AlertTriangle,
   },
   watch: {
-    border: 'border-amber-200',
-    bg: 'bg-amber-50',
-    text: 'text-amber-800',
-    pill: 'bg-amber-100 text-amber-800',
+    border: 'border-amber-200 dark:border-amber-500/30',
+    bg: 'bg-amber-50 dark:bg-amber-500/15',
+    text: 'text-amber-800 dark:text-amber-200',
+    pill: 'bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-200',
     icon: Eye,
   },
   neutral: {
-    border: 'border-slate-200',
-    bg: 'bg-slate-50',
-    text: 'text-slate-800',
-    pill: 'bg-slate-100 text-slate-700',
+    border: 'border-border',
+    bg: 'bg-muted/50',
+    text: 'text-foreground',
+    pill: 'bg-muted text-foreground/85',
     icon: MessageCircle,
   },
 };
@@ -3005,13 +3005,13 @@ function MeetingBriefingSection({ run, workspaceTimezone }) {
   const isCompleted = run.status === 'completed';
 
   return (
-    <div className="rounded-xl border border-purple-200 bg-gradient-to-br from-purple-50 to-indigo-50 p-3 shadow-sm sm:p-4">
+    <div className="rounded-xl border border-purple-200 dark:border-purple-500/30 bg-gradient-to-br from-purple-50 dark:from-purple-500/15 to-indigo-50 dark:to-indigo-500/15 p-3 shadow-sm sm:p-4">
       <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
-          <Sparkles className="h-5 w-5 text-purple-600" />
-          <h3 className="text-base font-semibold text-purple-900">Meeting Briefing</h3>
+          <Sparkles className="h-5 w-5 text-purple-600 dark:text-purple-300" />
+          <h3 className="text-base font-semibold text-purple-900 dark:text-purple-200">Meeting Briefing</h3>
           {localBriefing && (
-            <span className="rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-purple-700">
+            <span className="rounded-full bg-purple-100 dark:bg-purple-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-purple-700 dark:text-purple-200">
               Ready
             </span>
           )}
@@ -3021,7 +3021,7 @@ function MeetingBriefingSection({ run, workspaceTimezone }) {
             <button
               type="button"
               onClick={copyAsMarkdown}
-              className="inline-flex items-center justify-center gap-1 rounded-lg border border-purple-200 bg-white px-3 py-1.5 text-xs font-semibold text-purple-700 hover:bg-purple-50"
+              className="inline-flex items-center justify-center gap-1 rounded-lg border border-purple-200 dark:border-purple-500/30 bg-card px-3 py-1.5 text-xs font-semibold text-purple-700 dark:text-purple-200 hover:bg-purple-50 dark:hover:bg-purple-500/15"
             >
               <Copy className="h-3.5 w-3.5" /> {copied ? 'Copied!' : 'Copy as Markdown'}
             </button>
@@ -3041,31 +3041,31 @@ function MeetingBriefingSection({ run, workspaceTimezone }) {
         </div>
       </div>
 
-      <p className="mb-4 text-sm text-purple-800">
+      <p className="mb-4 text-sm text-purple-800 dark:text-purple-200">
         A one-page narrative summary of the day for tomorrow&apos;s standup. Optional — generates only when you click. Uses the same analyzed dataset as the recommendations, scoped to this workspace only.
       </p>
 
       {error && (
-        <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <div className="mb-3 rounded-lg border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 px-3 py-2 text-sm text-red-700 dark:text-red-200">
           {error}
         </div>
       )}
 
       {!isCompleted && !localBriefing && (
-        <div className="rounded-lg border border-dashed border-purple-200 bg-white/50 px-4 py-8 text-center text-sm text-purple-700">
+        <div className="rounded-lg border border-dashed border-purple-200 dark:border-purple-500/30 bg-card/50 px-4 py-8 text-center text-sm text-purple-700 dark:text-purple-200">
           The meeting briefing can be generated once the review reaches the <strong>completed</strong> status.
         </div>
       )}
 
       {isCompleted && !localBriefing && !generating && (
-        <div className="rounded-lg border border-dashed border-purple-200 bg-white/50 px-4 py-8 text-center text-sm text-purple-800">
+        <div className="rounded-lg border border-dashed border-purple-200 dark:border-purple-500/30 bg-card/50 px-4 py-8 text-center text-sm text-purple-800 dark:text-purple-200">
           No briefing yet. Click <strong>Generate Briefing</strong> to produce a story-style summary, key metrics, highlights, and talking points for the next standup.
         </div>
       )}
 
       {generating && !localBriefing && (
-        <div className="rounded-lg border border-purple-200 bg-white px-4 py-8 text-center text-sm text-purple-800">
-          <Loader2 className="mx-auto mb-2 h-5 w-5 animate-spin text-purple-600" />
+        <div className="rounded-lg border border-purple-200 dark:border-purple-500/30 bg-card px-4 py-8 text-center text-sm text-purple-800 dark:text-purple-200">
+          <Loader2 className="mx-auto mb-2 h-5 w-5 animate-spin text-purple-600 dark:text-purple-300" />
           Asking the model to write your briefing...
         </div>
       )}
@@ -3073,26 +3073,26 @@ function MeetingBriefingSection({ run, workspaceTimezone }) {
       {localBriefing && (
         <div className="space-y-4">
           {localBriefing.headline && (
-            <div className="rounded-lg border border-purple-200 bg-white p-4">
+            <div className="rounded-lg border border-purple-200 dark:border-purple-500/30 bg-card p-4">
               <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-purple-500">Headline</div>
-              <div className="text-lg font-semibold leading-snug text-slate-900">{localBriefing.headline}</div>
+              <div className="text-lg font-semibold leading-snug text-foreground">{localBriefing.headline}</div>
             </div>
           )}
 
           {localBriefing.narrative && (
-            <div className="rounded-lg border border-slate-200 bg-white p-4">
-              <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            <div className="rounded-lg border border-border bg-card p-4">
+              <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                 <FileText className="h-3.5 w-3.5" /> Story of the day
               </div>
-              <div className="space-y-2 whitespace-pre-line text-sm leading-relaxed text-slate-700">
+              <div className="space-y-2 whitespace-pre-line text-sm leading-relaxed text-foreground/85">
                 {localBriefing.narrative}
               </div>
             </div>
           )}
 
           {Array.isArray(localBriefing.keyMetrics) && localBriefing.keyMetrics.length > 0 && (
-            <div className="rounded-lg border border-slate-200 bg-white p-4">
-              <div className="mb-3 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            <div className="rounded-lg border border-border bg-card p-4">
+              <div className="mb-3 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                 <TrendingUp className="h-3.5 w-3.5" /> Numbers worth saying out loud
               </div>
               <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
@@ -3101,9 +3101,9 @@ function MeetingBriefingSection({ run, workspaceTimezone }) {
                   return (
                     <div key={idx} className={`rounded-lg border ${tone.border} ${tone.bg} p-3`}>
                       <div className={`text-2xl font-bold ${tone.text}`}>{metric.value}</div>
-                      <div className="text-xs font-medium text-slate-700">{metric.label}</div>
+                      <div className="text-xs font-medium text-foreground/85">{metric.label}</div>
                       {metric.context && (
-                        <div className="mt-1 text-[11px] text-slate-500">{metric.context}</div>
+                        <div className="mt-1 text-[11px] text-muted-foreground">{metric.context}</div>
                       )}
                     </div>
                   );
@@ -3113,8 +3113,8 @@ function MeetingBriefingSection({ run, workspaceTimezone }) {
           )}
 
           {Array.isArray(localBriefing.highlights) && localBriefing.highlights.length > 0 && (
-            <div className="rounded-lg border border-slate-200 bg-white p-4">
-              <div className="mb-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Highlights</div>
+            <div className="rounded-lg border border-border bg-card p-4">
+              <div className="mb-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Highlights</div>
               <div className="space-y-2">
                 {localBriefing.highlights.map((item, idx) => {
                   const tone = toneOf(item.tone);
@@ -3125,7 +3125,7 @@ function MeetingBriefingSection({ run, workspaceTimezone }) {
                         <Icon className={`mt-0.5 h-4 w-4 flex-shrink-0 ${tone.text}`} />
                         <div className="flex-1">
                           <div className={`text-sm font-semibold ${tone.text}`}>{item.title}</div>
-                          <div className="mt-0.5 text-sm text-slate-700">{item.detail}</div>
+                          <div className="mt-0.5 text-sm text-foreground/85">{item.detail}</div>
                           {Array.isArray(item.supportingFreshserviceTicketIds) && item.supportingFreshserviceTicketIds.length > 0 && (
                             <div className="mt-2 flex flex-wrap gap-1">
                               {item.supportingFreshserviceTicketIds.map((id) => (
@@ -3145,14 +3145,14 @@ function MeetingBriefingSection({ run, workspaceTimezone }) {
           )}
 
           {Array.isArray(localBriefing.shoutouts) && localBriefing.shoutouts.length > 0 && (
-            <div className="rounded-lg border border-green-200 bg-green-50 p-4">
-              <div className="mb-3 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-green-700">
+            <div className="rounded-lg border border-green-200 dark:border-green-500/30 bg-green-50 dark:bg-green-500/15 p-4">
+              <div className="mb-3 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-green-700 dark:text-green-200">
                 <ThumbsUp className="h-3.5 w-3.5" /> Shoutouts
               </div>
               <div className="space-y-2">
                 {localBriefing.shoutouts.map((s, idx) => (
-                  <div key={idx} className="rounded-lg bg-white px-3 py-2 text-sm text-slate-700">
-                    <span className="font-semibold text-green-800">{s.name}</span> — {s.reason}
+                  <div key={idx} className="rounded-lg bg-card px-3 py-2 text-sm text-foreground/85">
+                    <span className="font-semibold text-green-800 dark:text-green-200">{s.name}</span> — {s.reason}
                   </div>
                 ))}
               </div>
@@ -3160,11 +3160,11 @@ function MeetingBriefingSection({ run, workspaceTimezone }) {
           )}
 
           {Array.isArray(localBriefing.talkingPoints) && localBriefing.talkingPoints.length > 0 && (
-            <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-4">
-              <div className="mb-3 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-indigo-700">
+            <div className="rounded-lg border border-indigo-200 dark:border-indigo-500/30 bg-indigo-50 dark:bg-indigo-500/15 p-4">
+              <div className="mb-3 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-indigo-700 dark:text-indigo-200">
                 <MessageCircle className="h-3.5 w-3.5" /> Talking points for the standup
               </div>
-              <ol className="space-y-2 pl-5 text-sm text-slate-800" style={{ listStyleType: 'decimal' }}>
+              <ol className="space-y-2 pl-5 text-sm text-foreground" style={{ listStyleType: 'decimal' }}>
                 {localBriefing.talkingPoints.map((point, idx) => (
                   <li key={idx} className="leading-relaxed">{point}</li>
                 ))}
@@ -3173,15 +3173,15 @@ function MeetingBriefingSection({ run, workspaceTimezone }) {
           )}
 
           {localBriefing.lookahead && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
-              <div className="mb-1 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-amber-700">
+            <div className="rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 p-4">
+              <div className="mb-1 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-200">
                 <Eye className="h-3.5 w-3.5" /> What to watch today
               </div>
-              <div className="text-sm italic text-amber-900">{localBriefing.lookahead}</div>
+              <div className="text-sm italic text-amber-900 dark:text-amber-200">{localBriefing.lookahead}</div>
             </div>
           )}
 
-          <div className="text-[11px] text-slate-400">
+          <div className="text-[11px] text-muted-foreground/75">
             Generated {generatedAt ? formatDateTimeInTimezone(generatedAt, workspaceTimezone) : ''}
             {generatedBy ? ` by ${generatedBy}` : ''}
             {model ? ` · ${model}` : ''}
@@ -3213,10 +3213,10 @@ function CollectionDiagnosticsSection({ summary }) {
   const activityTone = activityCoverage >= 80 ? 'green' : 'amber';
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-3 sm:p-4">
+    <div className="rounded-xl border border-border bg-card p-3 sm:p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold text-slate-800">Collection Diagnostics</h3>
-        <div className="text-xs text-slate-500">What the LLM actually had to read</div>
+        <h3 className="text-sm font-semibold text-foreground">Collection Diagnostics</h3>
+        <div className="text-xs text-muted-foreground">What the LLM actually had to read</div>
       </div>
 
       <div className="mb-4 grid gap-3 sm:grid-cols-2 md:grid-cols-4">
@@ -3226,50 +3226,50 @@ function CollectionDiagnosticsSection({ summary }) {
         <MetricCard label="No Thread Context" value={ticketsWithoutContext} tone={ticketsWithoutContext > 0 ? 'red' : 'slate'} />
       </div>
 
-      <div className="grid gap-3 text-xs text-slate-600 md:grid-cols-2">
-        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-          <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Local cache (before this run)</div>
+      <div className="grid gap-3 text-xs text-muted-foreground md:grid-cols-2">
+        <div className="rounded-lg border border-border bg-muted/50 p-3">
+          <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Local cache (before this run)</div>
           <div>Activities cached: <strong>{diag.ticketsWithLocalActivitiesBeforeRun || 0}</strong> / {totalCandidates}</div>
           <div>Conversations cached: <strong>{diag.ticketsWithLocalConversationsBeforeRun || 0}</strong> / {totalCandidates}</div>
-          <div className="mt-1 text-[11px] text-slate-500">
+          <div className="mt-1 text-[11px] text-muted-foreground">
             {diag.forceRefresh
               ? 'Force-refresh was on — every ticket re-fetched from FreshService regardless of cache.'
               : 'Run reused already-cached data when present; only missing pieces were pulled.'}
           </div>
         </div>
-        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-          <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Pulled from FreshService this run</div>
+        <div className="rounded-lg border border-border bg-muted/50 p-3">
+          <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Pulled from FreshService this run</div>
           <div>Activity rows fetched: <strong>{diag.activityRowsFetched || 0}</strong> across {diag.ticketsHydratedActivities || 0} ticket(s)</div>
           <div>Conversation rows fetched: <strong>{diag.conversationRowsFetched || 0}</strong> across {diag.ticketsHydratedConversations || 0} ticket(s)</div>
-          <div className="mt-1 text-[11px] text-slate-500">
+          <div className="mt-1 text-[11px] text-muted-foreground">
             {(diag.hydrationFailures || 0) > 0
-              ? <span className="text-red-600">{diag.hydrationFailures} ticket(s) had hydration errors — see warnings above.</span>
+              ? <span className="text-red-600 dark:text-red-300">{diag.hydrationFailures} ticket(s) had hydration errors — see warnings above.</span>
               : 'No hydration errors.'}
           </div>
         </div>
       </div>
 
-      <div className="mt-3 grid gap-3 text-xs text-slate-600 sm:grid-cols-2 md:grid-cols-4">
-        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-          <div className="text-[11px] font-medium text-slate-500">Total thread entries</div>
-          <div className="text-lg font-semibold text-slate-800">{diag.threadEntriesAvailable || 0}</div>
+      <div className="mt-3 grid gap-3 text-xs text-muted-foreground sm:grid-cols-2 md:grid-cols-4">
+        <div className="rounded-lg border border-border bg-muted/50 p-3">
+          <div className="text-[11px] font-medium text-muted-foreground">Total thread entries</div>
+          <div className="text-lg font-semibold text-foreground">{diag.threadEntriesAvailable || 0}</div>
         </div>
-        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-          <div className="text-[11px] font-medium text-slate-500">Conversation entries</div>
-          <div className="text-lg font-semibold text-slate-800">{diag.conversationEntriesAvailable || 0}</div>
+        <div className="rounded-lg border border-border bg-muted/50 p-3">
+          <div className="text-[11px] font-medium text-muted-foreground">Conversation entries</div>
+          <div className="text-lg font-semibold text-foreground">{diag.conversationEntriesAvailable || 0}</div>
         </div>
-        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-          <div className="text-[11px] font-medium text-slate-500">Activity-stream entries</div>
-          <div className="text-lg font-semibold text-slate-800">{diag.activityEntriesAvailable || 0}</div>
+        <div className="rounded-lg border border-border bg-muted/50 p-3">
+          <div className="text-[11px] font-medium text-muted-foreground">Activity-stream entries</div>
+          <div className="text-lg font-semibold text-foreground">{diag.activityEntriesAvailable || 0}</div>
         </div>
-        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-          <div className="text-[11px] font-medium text-slate-500">Episodes / Assignments</div>
-          <div className="text-lg font-semibold text-slate-800">{diag.episodes || 0} / {diag.assignmentActions || 0}</div>
+        <div className="rounded-lg border border-border bg-muted/50 p-3">
+          <div className="text-[11px] font-medium text-muted-foreground">Episodes / Assignments</div>
+          <div className="text-lg font-semibold text-foreground">{diag.episodes || 0} / {diag.assignmentActions || 0}</div>
         </div>
       </div>
 
       {ticketsWithoutContext > 0 && (
-        <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+        <div className="mt-3 rounded-lg border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 px-3 py-2 text-xs text-red-700 dark:text-red-200">
           {ticketsWithoutContext} ticket(s) reached the LLM with no thread context (no activities and no conversations). The model had only metadata for these. Try <strong>Force Refresh Tickets</strong> on a rerun.
         </div>
       )}
@@ -3324,22 +3324,22 @@ function RunDetail({ run, workspaceTimezone, onRecommendationAction, savingRecom
 
   return (
     <div className="space-y-4">
-      <div className="rounded-xl border border-slate-200 bg-white p-3 sm:p-4">
+      <div className="rounded-xl border border-border bg-card p-3 sm:p-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
           <div>
             <div className="flex items-center gap-2 mb-1">
-              <h2 className="text-lg font-semibold text-slate-800">Review #{run.id}</h2>
+              <h2 className="text-lg font-semibold text-foreground">Review #{run.id}</h2>
               <StatusBadge status={run.status} />
             </div>
-            <div className="text-sm text-slate-500">
+            <div className="text-sm text-muted-foreground">
               {summary.workspaceName || 'Workspace'} · {formatReviewRunDateLabel(run, workspaceTimezone)} · {summary.reviewWindow?.startTime || '00:00'}-{summary.reviewWindow?.endTime || '23:59'}
             </div>
           </div>
           <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
-            <button onClick={() => navigate('/assignments/prompts')} className="inline-flex items-center justify-center gap-1 rounded-lg border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50">
+            <button onClick={() => navigate('/assignments/prompts')} className="inline-flex items-center justify-center gap-1 rounded-lg border border-border px-3 py-2 text-sm hover:bg-muted/50">
               <FileText className="w-4 h-4" /> Open Prompts
             </button>
-            <button onClick={() => navigate('/assignments/competencies')} className="inline-flex items-center justify-center gap-1 rounded-lg border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50">
+            <button onClick={() => navigate('/assignments/competencies')} className="inline-flex items-center justify-center gap-1 rounded-lg border border-border px-3 py-2 text-sm hover:bg-muted/50">
               <Award className="w-4 h-4" /> Open Competencies
             </button>
           </div>
@@ -3356,14 +3356,14 @@ function RunDetail({ run, workspaceTimezone, onRecommendationAction, savingRecom
           />
         </div>
         {executiveSummary && (
-          <div className="mt-4 rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-900">
+          <div className="mt-4 rounded-lg border border-indigo-200 dark:border-indigo-500/30 bg-indigo-50 dark:bg-indigo-500/15 p-3 text-sm text-indigo-900 dark:text-indigo-200">
             <div className="mb-2 flex items-center justify-between gap-3">
               <div className="text-[11px] font-semibold uppercase tracking-wide text-indigo-500">Executive summary</div>
               {summaryIsLong && (
                 <button
                   type="button"
                   onClick={() => setSummaryExpanded((value) => !value)}
-                  className="text-xs font-semibold text-indigo-700 hover:text-indigo-900"
+                  className="text-xs font-semibold text-indigo-700 dark:text-indigo-200 hover:text-indigo-900 dark:hover:text-indigo-200"
                 >
                   {summaryExpanded ? 'Show less' : 'Show more'}
                 </button>
@@ -3375,19 +3375,19 @@ function RunDetail({ run, workspaceTimezone, onRecommendationAction, savingRecom
           </div>
         )}
         {warnings.length > 0 && (
-          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
-            <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-amber-700">
+          <div className="mt-3 rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 p-3">
+            <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-200">
               <AlertTriangle className="h-4 w-4" />
               Needs attention
             </div>
             <div className="space-y-1">
               {visibleWarnings.map((warning, index) => (
-                <div key={index} className="text-xs text-amber-800">
+                <div key={index} className="text-xs text-amber-800 dark:text-amber-200">
                   {warning}
                 </div>
               ))}
               {warnings.length > visibleWarnings.length && (
-                <div className="text-xs font-medium text-amber-700">
+                <div className="text-xs font-medium text-amber-700 dark:text-amber-200">
                   +{warnings.length - visibleWarnings.length} more warning{warnings.length - visibleWarnings.length === 1 ? '' : 's'}
                 </div>
               )}
@@ -3395,7 +3395,7 @@ function RunDetail({ run, workspaceTimezone, onRecommendationAction, savingRecom
           </div>
         )}
         {run.errorMessage && (
-          <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+          <div className="mt-3 rounded-lg border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 p-3 text-xs text-red-700 dark:text-red-200">
             <div className="mb-1 font-semibold uppercase tracking-wide">Run error</div>
             {run.errorMessage}
           </div>
@@ -3413,13 +3413,13 @@ function RunDetail({ run, workspaceTimezone, onRecommendationAction, savingRecom
         <MetricCard label="Pipeline Bypass" value={totals.bypassedTickets || 0} tone="red" />
       </div>
       {summary.definitions?.rebounds && (
-        <div className="text-xs text-slate-500">
+        <div className="text-xs text-muted-foreground">
           Rebound metric: {summary.definitions.rebounds}
         </div>
       )}
 
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-        <div className="border-b border-slate-100 bg-slate-50/80 p-2">
+      <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+        <div className="border-b border-border/60 bg-muted/40 p-2">
           <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
             {detailTabs.map((tab) => {
               const Icon = tab.icon;
@@ -3431,14 +3431,14 @@ function RunDetail({ run, workspaceTimezone, onRecommendationAction, savingRecom
                   onClick={() => setDetailSection(tab.key)}
                   className={`flex min-h-[44px] items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition-all duration-200 ${
                     active
-                      ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200'
-                      : 'text-slate-500 hover:bg-white/70 hover:text-slate-800'
+                      ? 'bg-card text-foreground shadow-sm ring-1 ring-border'
+                      : 'text-muted-foreground hover:bg-card/70 hover:text-foreground'
                   }`}
                 >
                   <Icon className="h-4 w-4 shrink-0" />
                   <span>{tab.label}</span>
                   <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${
-                    active ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-500'
+                    active ? 'bg-indigo-100 dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-200' : 'bg-muted text-muted-foreground'
                   }`}>
                     {tab.count}
                   </span>
@@ -3472,34 +3472,34 @@ function RunDetail({ run, workspaceTimezone, onRecommendationAction, savingRecom
 
           {detailSection === 'patterns' && (
             <div className="grid gap-4 lg:grid-cols-2">
-              <div className="bg-white border border-slate-200 rounded-xl p-4">
-                <h3 className="text-sm font-semibold text-slate-800 mb-3">Top Categories</h3>
+              <div className="bg-card border border-border rounded-xl p-4">
+                <h3 className="text-sm font-semibold text-foreground mb-3">Top Categories</h3>
                 {summary.topCategories?.length ? (
                   <div className="space-y-2">
                     {summary.topCategories.map((item) => (
                       <div key={item.name} className="flex items-center justify-between text-sm">
-                        <span className="text-slate-700">{item.name}</span>
-                        <span className="font-semibold text-slate-900">{item.count}</span>
+                        <span className="text-foreground/85">{item.name}</span>
+                        <span className="font-semibold text-foreground">{item.count}</span>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <div className="text-sm text-slate-400">No category mismatches detected.</div>
+                  <div className="text-sm text-muted-foreground/75">No category mismatches detected.</div>
                 )}
               </div>
-              <div className="bg-white border border-slate-200 rounded-xl p-4">
-                <h3 className="text-sm font-semibold text-slate-800 mb-3">Top Technicians Involved</h3>
+              <div className="bg-card border border-border rounded-xl p-4">
+                <h3 className="text-sm font-semibold text-foreground mb-3">Top Technicians Involved</h3>
                 {summary.topTechnicians?.length ? (
                   <div className="space-y-2">
                     {summary.topTechnicians.map((item) => (
                       <div key={item.name} className="flex items-center justify-between text-sm">
-                        <span className="text-slate-700">{item.name}</span>
-                        <span className="font-semibold text-slate-900">{item.count}</span>
+                        <span className="text-foreground/85">{item.name}</span>
+                        <span className="font-semibold text-foreground">{item.count}</span>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <div className="text-sm text-slate-400">No technician mismatch clusters detected.</div>
+                  <div className="text-sm text-muted-foreground/75">No technician mismatch clusters detected.</div>
                 )}
               </div>
             </div>
@@ -3763,22 +3763,22 @@ function LiveDailyReviewView({ reviewDate, reviewStartDate, reviewEndDate, force
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           {(status === 'running' || status === 'starting') ? (
-            <Brain className="w-5 h-5 text-purple-600 animate-spin" />
+            <Brain className="w-5 h-5 text-purple-600 dark:text-purple-300 animate-spin" />
           ) : status === 'cancelled' ? (
-            <StopCircle className="w-5 h-5 text-amber-600" />
+            <StopCircle className="w-5 h-5 text-amber-600 dark:text-amber-300" />
           ) : status === 'completed' ? (
-            <CheckCircle className="w-5 h-5 text-green-600" />
+            <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-300" />
           ) : (
-            <XCircle className="w-5 h-5 text-red-600" />
+            <XCircle className="w-5 h-5 text-red-600 dark:text-red-300" />
           )}
           <span className={`text-sm font-semibold ${
             status === 'completed'
-              ? 'text-green-700'
+              ? 'text-green-700 dark:text-green-200'
               : status === 'cancelled'
-                ? 'text-amber-700'
+                ? 'text-amber-700 dark:text-amber-200'
                 : status === 'error'
-                  ? 'text-red-700'
-                  : 'text-purple-700'
+                  ? 'text-red-700 dark:text-red-200'
+                  : 'text-purple-700 dark:text-purple-200'
           }`}>
             {status === 'running' || status === 'starting'
               ? `Running review... (${elapsedSec}s)`
@@ -3788,41 +3788,41 @@ function LiveDailyReviewView({ reviewDate, reviewStartDate, reviewEndDate, force
                   ? `Review complete (${elapsedSec}s)`
                   : 'Review failed'}
           </span>
-          {runId && <span className="text-xs text-slate-400">Run #{runId}</span>}
+          {runId && <span className="text-xs text-muted-foreground/75">Run #{runId}</span>}
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
           {(status === 'running' || status === 'starting') && runId && (
             <button
               onClick={cancelRun}
               disabled={isCancelling}
-              className="inline-flex w-full items-center justify-center gap-1 rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+              className="inline-flex w-full items-center justify-center gap-1 rounded-lg border border-red-200 dark:border-red-500/30 px-3 py-2 text-sm font-medium text-red-600 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-500/15 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
             >
               <StopCircle className="w-4 h-4" />
               {isCancelling ? 'Cancelling...' : 'Cancel Run'}
             </button>
           )}
           {status === 'completed' && (
-            <button onClick={() => onComplete(runId)} className="w-full rounded-lg border border-blue-100 px-3 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50 hover:text-blue-800 sm:w-auto sm:border-0 sm:px-0 sm:py-0">
+            <button onClick={() => onComplete(runId)} className="w-full rounded-lg border border-blue-100 dark:border-blue-500/20 px-3 py-2 text-sm font-medium text-blue-600 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-500/15 hover:text-blue-800 dark:hover:text-blue-200 sm:w-auto sm:border-0 sm:px-0 sm:py-0">
               View Results
             </button>
           )}
         </div>
       </div>
 
-      <div className="rounded-xl border border-slate-200 bg-white p-3 sm:p-4">
+      <div className="rounded-xl border border-border bg-card p-3 sm:p-4">
         <div className="flex items-center justify-between gap-3 mb-2">
-          <div className="text-sm font-semibold text-slate-800">{phase ? phase.replace(/_/g, ' ') : 'Starting'}</div>
-          <div className="text-xs font-medium text-slate-500">{Math.max(progressPct || 0, 2)}%</div>
+          <div className="text-sm font-semibold text-foreground">{phase ? phase.replace(/_/g, ' ') : 'Starting'}</div>
+          <div className="text-xs font-medium text-muted-foreground">{Math.max(progressPct || 0, 2)}%</div>
         </div>
-        <div className="h-2 rounded-full bg-slate-100 overflow-hidden mb-3">
+        <div className="h-2 rounded-full bg-muted overflow-hidden mb-3">
           <div
             className="h-full rounded-full bg-gradient-to-r from-indigo-600 to-purple-600 transition-all duration-500"
             style={{ width: `${Math.max(progressPct || 0, 2)}%` }}
           />
         </div>
-        <div className="text-sm text-slate-600">{phaseMessage || 'Preparing review run...'}</div>
+        <div className="text-sm text-muted-foreground">{phaseMessage || 'Preparing review run...'}</div>
         {status === 'running' && phase === 'collecting' && (
-          <div className="mt-2 text-xs text-slate-500">
+          <div className="mt-2 text-xs text-muted-foreground">
             Collection can take a bit if the review has to fetch missing thread history from FreshService.
           </div>
         )}
@@ -3855,19 +3855,19 @@ function LiveDailyReviewView({ reviewDate, reviewStartDate, reviewEndDate, force
         </div>
       )}
 
-      <div className="rounded-xl border border-slate-200 bg-white p-3 sm:p-4">
-        <div className="text-sm font-semibold text-slate-800 mb-3">Live Activity</div>
+      <div className="rounded-xl border border-border bg-card p-3 sm:p-4">
+        <div className="text-sm font-semibold text-foreground mb-3">Live Activity</div>
         {activityLog.length === 0 ? (
-          <div className="text-sm text-slate-400">Waiting for the first progress update...</div>
+          <div className="text-sm text-muted-foreground/75">Waiting for the first progress update...</div>
         ) : (
           <div className="space-y-2">
             {activityLog.map((item) => (
-              <div key={item.id} className="flex flex-col gap-2 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+              <div key={item.id} className="flex flex-col gap-2 rounded-lg border border-border/60 bg-muted/50 px-3 py-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
                 <div>
-                  <div className="text-xs font-medium text-slate-700">{item.phase.replace(/_/g, ' ')}</div>
-                  <div className="text-sm text-slate-600">{item.message}</div>
+                  <div className="text-xs font-medium text-foreground/85">{item.phase.replace(/_/g, ' ')}</div>
+                  <div className="text-sm text-muted-foreground">{item.message}</div>
                 </div>
-                <div className="whitespace-nowrap text-[11px] text-slate-400">{item.timeLabel}</div>
+                <div className="whitespace-nowrap text-[11px] text-muted-foreground/75">{item.timeLabel}</div>
               </div>
             ))}
           </div>
@@ -3875,13 +3875,13 @@ function LiveDailyReviewView({ reviewDate, reviewStartDate, reviewEndDate, force
       </div>
 
       {executiveSummary && (
-        <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-900 sm:p-4">
+        <div className="rounded-xl border border-indigo-200 dark:border-indigo-500/30 bg-indigo-50 dark:bg-indigo-500/15 p-3 text-sm text-indigo-900 dark:text-indigo-200 sm:p-4">
           {executiveSummary}
         </div>
       )}
 
       {(error || status === 'error') && (
-        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+        <div className="rounded-xl border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 p-4 text-sm text-red-700 dark:text-red-200">
           {error || 'Review failed'}
         </div>
       )}
@@ -3908,28 +3908,28 @@ const BACKLOG_KIND_TABS = [
 const BACKLOG_TAB_TONES = {
   indigo: {
     selected: 'border-indigo-500 bg-indigo-600 text-white shadow-sm shadow-indigo-500/20',
-    idle: 'border-indigo-100 bg-indigo-50/50 text-indigo-700 hover:border-indigo-200 hover:bg-indigo-50',
-    icon: 'bg-indigo-500/15 text-indigo-700',
+    idle: 'border-indigo-100 dark:border-indigo-500/20 bg-indigo-50/50 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-200 hover:border-indigo-200 dark:hover:border-indigo-500/30 hover:bg-indigo-50 dark:hover:bg-indigo-500/15',
+    icon: 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-200',
   },
   sky: {
     selected: 'border-sky-500 bg-sky-600 text-white shadow-sm shadow-sky-500/20',
-    idle: 'border-sky-100 bg-sky-50/50 text-sky-700 hover:border-sky-200 hover:bg-sky-50',
-    icon: 'bg-sky-500/15 text-sky-700',
+    idle: 'border-sky-100 dark:border-sky-500/20 bg-sky-50/50 dark:bg-sky-500/10 text-sky-700 dark:text-sky-200 hover:border-sky-200 dark:hover:border-sky-500/30 hover:bg-sky-50 dark:hover:bg-sky-500/15',
+    icon: 'bg-sky-500/15 text-sky-700 dark:text-sky-200',
   },
   emerald: {
     selected: 'border-emerald-500 bg-emerald-600 text-white shadow-sm shadow-emerald-500/20',
-    idle: 'border-emerald-100 bg-emerald-50/50 text-emerald-700 hover:border-emerald-200 hover:bg-emerald-50',
-    icon: 'bg-emerald-500/15 text-emerald-700',
+    idle: 'border-emerald-100 dark:border-emerald-500/20 bg-emerald-50/50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-200 hover:border-emerald-200 dark:hover:border-emerald-500/30 hover:bg-emerald-50 dark:hover:bg-emerald-500/15',
+    icon: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-200',
   },
   violet: {
     selected: 'border-violet-500 bg-violet-600 text-white shadow-sm shadow-violet-500/20',
-    idle: 'border-violet-100 bg-violet-50/50 text-violet-700 hover:border-violet-200 hover:bg-violet-50',
-    icon: 'bg-violet-500/15 text-violet-700',
+    idle: 'border-violet-100 dark:border-violet-500/20 bg-violet-50/50 dark:bg-violet-500/10 text-violet-700 dark:text-violet-200 hover:border-violet-200 dark:hover:border-violet-500/30 hover:bg-violet-50 dark:hover:bg-violet-500/15',
+    icon: 'bg-violet-500/15 text-violet-700 dark:text-violet-200',
   },
   amber: {
     selected: 'border-amber-400 bg-amber-500 text-white shadow-sm shadow-amber-500/20',
-    idle: 'border-amber-100 bg-amber-50/70 text-amber-800 hover:border-amber-200 hover:bg-amber-50',
-    icon: 'bg-amber-500/15 text-amber-700',
+    idle: 'border-amber-100 dark:border-amber-500/20 bg-amber-50/70 dark:bg-amber-500/10 text-amber-800 dark:text-amber-200 hover:border-amber-200 dark:hover:border-amber-500/30 hover:bg-amber-50 dark:hover:bg-amber-500/15',
+    icon: 'bg-amber-500/15 text-amber-700 dark:text-amber-200',
   },
 };
 
@@ -3956,31 +3956,31 @@ function DailyReviewHistoryPanel({
   const end = Math.min(total || 0, (page + 1) * pageSize);
 
   return (
-    <div className="mt-4 overflow-hidden rounded-lg border border-indigo-100 bg-white/90 shadow-sm">
+    <div className="mt-4 overflow-hidden rounded-lg border border-indigo-100 dark:border-indigo-500/20 bg-card/90 shadow-sm">
       <div className="flex flex-col gap-3 border-b border-indigo-50 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center gap-2">
-          <History className="h-4 w-4 shrink-0 text-indigo-600" />
-          <span className="text-sm font-semibold text-slate-800">Run History</span>
-          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">{total || 0}</span>
-          <span className="text-xs text-slate-400">Collapsed list</span>
+          <History className="h-4 w-4 shrink-0 text-indigo-600 dark:text-indigo-300" />
+          <span className="text-sm font-semibold text-foreground">Run History</span>
+          <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">{total || 0}</span>
+          <span className="text-xs text-muted-foreground/75">Collapsed list</span>
         </div>
         <button
           type="button"
           onClick={onRefresh}
-          className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 sm:w-auto"
+          className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-muted/50 sm:w-auto"
         >
           <RefreshCw className="h-3.5 w-3.5" />
           Refresh
         </button>
       </div>
 
-      <div className="bg-white">
+      <div className="bg-card">
         {loadingRuns ? (
-          <div className="flex items-center justify-center py-6 text-sm text-gray-400">
+          <div className="flex items-center justify-center py-6 text-sm text-muted-foreground/75">
             <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading history...
           </div>
         ) : runs.length === 0 ? (
-          <div className="py-6 text-center text-sm text-gray-400">
+          <div className="py-6 text-center text-sm text-muted-foreground/75">
             No review runs yet. Start one above.
           </div>
         ) : (
@@ -3991,7 +3991,7 @@ function DailyReviewHistoryPanel({
               return (
                 <div
                   key={run.id}
-                  className="group flex w-full flex-col gap-2 border-b border-slate-100 px-3 py-2.5 text-left last:border-b-0 hover:bg-indigo-50/40 sm:flex-row sm:items-center sm:gap-3"
+                  className="group flex w-full flex-col gap-2 border-b border-border/60 px-3 py-2.5 text-left last:border-b-0 hover:bg-indigo-50/40 dark:hover:bg-indigo-500/10 sm:flex-row sm:items-center sm:gap-3"
                 >
                   <button
                     type="button"
@@ -4000,7 +4000,7 @@ function DailyReviewHistoryPanel({
                     className="min-w-0 flex-1 text-left disabled:cursor-wait"
                   >
                     <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-                      <span className="font-semibold text-slate-900">Run #{run.id}</span>
+                      <span className="font-semibold text-foreground">Run #{run.id}</span>
                       <span className={`h-1.5 w-1.5 rounded-full ${
                         run.status === 'completed'
                           ? 'bg-emerald-500'
@@ -4008,42 +4008,42 @@ function DailyReviewHistoryPanel({
                             ? 'bg-indigo-500'
                             : run.status === 'failed'
                               ? 'bg-red-500'
-                              : 'bg-slate-300'
+                              : 'bg-muted-foreground/40'
                       }`} />
                       <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
                         run.status === 'completed'
-                          ? 'bg-emerald-50 text-emerald-700'
+                          ? 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200'
                           : isActiveStatus
-                            ? 'bg-indigo-50 text-indigo-700'
+                            ? 'bg-indigo-50 dark:bg-indigo-500/15 text-indigo-700 dark:text-indigo-200'
                             : run.status === 'failed'
-                              ? 'bg-red-50 text-red-700'
-                              : 'bg-slate-100 text-slate-600'
+                              ? 'bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200'
+                              : 'bg-muted text-muted-foreground'
                       }`}>
                         {run.status?.replace(/_/g, ' ')}
                       </span>
-                      <span className="text-slate-300">•</span>
-                      <span className="text-slate-500">{formatReviewRunDateLabel(run, workspaceTimezone)}</span>
-                      <span className="text-slate-300">•</span>
-                      <span className="text-slate-500">{formatDateTimeInTimezone(run.createdAt, workspaceTimezone, RUN_HISTORY_TIME_OPTIONS)}</span>
+                      <span className="text-muted-foreground/50">•</span>
+                      <span className="text-muted-foreground">{formatReviewRunDateLabel(run, workspaceTimezone)}</span>
+                      <span className="text-muted-foreground/50">•</span>
+                      <span className="text-muted-foreground">{formatDateTimeInTimezone(run.createdAt, workspaceTimezone, RUN_HISTORY_TIME_OPTIONS)}</span>
                       {run.triggeredBy && (
                         <>
-                          <span className="text-slate-300">•</span>
-                          <span className="max-w-[220px] truncate text-slate-500">{run.triggeredBy}</span>
+                          <span className="text-muted-foreground/50">•</span>
+                          <span className="max-w-[220px] truncate text-muted-foreground">{run.triggeredBy}</span>
                         </>
                       )}
                     </div>
                   </button>
 
-                  <div className="ml-0 flex w-full shrink-0 items-center justify-between gap-2 border-t border-slate-100 pt-2 text-xs text-slate-500 sm:ml-auto sm:w-auto sm:justify-end sm:border-t-0 sm:pt-0">
+                  <div className="ml-0 flex w-full shrink-0 items-center justify-between gap-2 border-t border-border/60 pt-2 text-xs text-muted-foreground sm:ml-auto sm:w-auto sm:justify-end sm:border-t-0 sm:pt-0">
                     {totals.totalTicketsReviewed != null && <span className="tabular-nums">{totals.totalTicketsReviewed}</span>}
-                    {totals.totalTicketsReviewed != null && <span className="text-slate-300">tickets</span>}
-                    {totals.success != null && <span className="font-medium tabular-nums text-emerald-600">{totals.success} ✓</span>}
-                    {totals.failure != null && <span className="font-medium tabular-nums text-red-600">{totals.failure} ✕</span>}
+                    {totals.totalTicketsReviewed != null && <span className="text-muted-foreground/50">tickets</span>}
+                    {totals.success != null && <span className="font-medium tabular-nums text-emerald-600 dark:text-emerald-300">{totals.success} ✓</span>}
+                    {totals.failure != null && <span className="font-medium tabular-nums text-red-600 dark:text-red-300">{totals.failure} ✕</span>}
                     {isActiveStatus && (
                       <button
                         type="button"
                         onClick={(e) => onCancelRun(e, run.id)}
-                        className="rounded px-2 py-1 text-red-600 hover:bg-red-50"
+                        className="rounded px-2 py-1 text-red-600 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-500/15"
                         title="Cancel this run"
                       >
                         <StopCircle className="h-3.5 w-3.5" />
@@ -4056,13 +4056,13 @@ function DailyReviewHistoryPanel({
                           e.stopPropagation();
                           onRequestDeleteRun(run);
                         }}
-                        className="rounded px-2 py-1 text-red-500 opacity-70 hover:bg-red-50 hover:opacity-100"
+                        className="rounded px-2 py-1 text-red-500 opacity-70 hover:bg-red-50 dark:hover:bg-red-500/15 hover:opacity-100"
                         title="Delete this review run"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     )}
-                    <ChevronRight className="h-4 w-4 text-slate-300 transition-colors group-hover:text-indigo-500" />
+                    <ChevronRight className="h-4 w-4 text-muted-foreground/50 transition-colors group-hover:text-indigo-500" />
                   </div>
                 </div>
               );
@@ -4072,7 +4072,7 @@ function DailyReviewHistoryPanel({
       </div>
 
       {totalPages > 1 && (
-        <div className="flex flex-col gap-3 border-t border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 border-t border-border/60 bg-muted/50 px-3 py-2 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
           <span>
             Showing {start}-{end} of {total}
           </span>
@@ -4081,18 +4081,18 @@ function DailyReviewHistoryPanel({
               type="button"
               onClick={() => onPageChange(Math.max(0, page - 1))}
               disabled={page === 0 || loadingRuns}
-              className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-lg border border-border bg-card px-2.5 py-1.5 font-semibold text-muted-foreground hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Previous
             </button>
-            <span className="col-span-2 text-center font-semibold text-slate-600 sm:col-span-1">
+            <span className="col-span-2 text-center font-semibold text-muted-foreground sm:col-span-1">
               Page {page + 1} of {totalPages}
             </span>
             <button
               type="button"
               onClick={() => onPageChange(Math.min(totalPages - 1, page + 1))}
               disabled={page >= totalPages - 1 || loadingRuns}
-              className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-lg border border-border bg-card px-2.5 py-1.5 font-semibold text-muted-foreground hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Next
             </button>
@@ -4673,7 +4673,7 @@ export default function DailyReviewManager({ workspaceTimezone }) {
       <div>
         <button
           onClick={() => { setView('trigger'); loadRuns(); }}
-          className="mb-3 flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800"
+          className="mb-3 flex items-center gap-1 text-sm text-blue-600 dark:text-blue-300 hover:text-blue-800 dark:hover:text-blue-200"
         >
           <ArrowLeft className="h-4 w-4" /> Back to Run History
         </button>
@@ -4696,7 +4696,7 @@ export default function DailyReviewManager({ workspaceTimezone }) {
 
   if (view === 'detail' && loadingDetail && !selectedRun) {
     return (
-      <div className="flex min-h-[240px] items-center justify-center rounded-xl border border-slate-200 bg-white text-sm text-slate-500">
+      <div className="flex min-h-[240px] items-center justify-center rounded-xl border border-border bg-card text-sm text-muted-foreground">
         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
         Loading review...
       </div>
@@ -4709,13 +4709,13 @@ export default function DailyReviewManager({ workspaceTimezone }) {
         <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <button
             onClick={() => { setSelectedRun(null); setView('trigger'); setSelectedRunUrl(null); }}
-            className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800"
+            className="flex items-center gap-1 text-sm text-blue-600 dark:text-blue-300 hover:text-blue-800 dark:hover:text-blue-200"
           >
             <ArrowLeft className="h-4 w-4" /> Back to Run History
           </button>
           <button
             onClick={() => navigate('/assignments/history')}
-            className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700"
+            className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground/85"
           >
             Assignment History <ExternalLink className="h-4 w-4" />
           </button>
@@ -4735,7 +4735,7 @@ export default function DailyReviewManager({ workspaceTimezone }) {
 
   return (
     <div className="space-y-6">
-      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+      <div className="overflow-x-auto rounded-xl border border-border bg-card p-1 shadow-sm">
         <div className="grid min-w-[520px] grid-cols-3 gap-1 sm:min-w-0">
           {REVIEW_PAGE_TABS.map(({ key, label, icon: Icon }) => {
             const isActiveTab = activeTab === key;
@@ -4752,14 +4752,14 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                 className={`flex items-center justify-center gap-2 whitespace-nowrap rounded-lg px-3 py-2.5 text-sm font-semibold transition-all ${
                   isActiveTab
                     ? 'bg-indigo-600 text-white shadow-sm'
-                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                    : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'
                 }`}
               >
                 <Icon className="h-4 w-4" />
                 {label}
                 {badge != null && badge > 0 && (
                   <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                    isActiveTab ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'
+                    isActiveTab ? 'bg-white/20 text-white' : 'bg-muted text-muted-foreground'
                   }`}>
                     {badge}
                   </span>
@@ -4772,20 +4772,20 @@ export default function DailyReviewManager({ workspaceTimezone }) {
 
       {activeTab === 'review' && (
         <div>
-          <h3 className="text-lg font-semibold text-slate-800 mb-1 flex items-center gap-2">
-            <CalendarDays className="w-5 h-5 text-indigo-600" />
+          <h3 className="text-lg font-semibold text-foreground mb-1 flex items-center gap-2">
+            <CalendarDays className="w-5 h-5 text-indigo-600 dark:text-indigo-300" />
           Run History
           </h3>
-          <p className="text-sm text-slate-500 mb-4">
+          <p className="text-sm text-muted-foreground mb-4">
           Run assignment outcome analysis and generate prompt, tools/data, category, agent-skill, and dev/policy recommendations.
           </p>
 
           {activeRun && (
-            <div className="mb-4 flex flex-col gap-3 rounded-xl border border-indigo-200 bg-indigo-50 p-3 sm:flex-row sm:items-center sm:justify-between sm:p-4">
+            <div className="mb-4 flex flex-col gap-3 rounded-xl border border-indigo-200 dark:border-indigo-500/30 bg-indigo-50 dark:bg-indigo-500/15 p-3 sm:flex-row sm:items-center sm:justify-between sm:p-4">
               <div className="flex items-center gap-3">
-                <Brain className="h-5 w-5 animate-spin text-indigo-600" />
+                <Brain className="h-5 w-5 animate-spin text-indigo-600 dark:text-indigo-300" />
                 <div>
-                  <div className="text-sm font-semibold text-indigo-800">Run #{activeRun.id} in progress</div>
+                  <div className="text-sm font-semibold text-indigo-800 dark:text-indigo-200">Run #{activeRun.id} in progress</div>
                   <div className="text-xs text-indigo-500">
                     {formatReviewRunDateLabel(activeRun, workspaceTimezone)} · {activeRun.status.replace(/_/g, ' ')}
                   </div>
@@ -4795,25 +4795,25 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                 <button onClick={() => loadRunDetail(activeRun.id)} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-indigo-700">
                 View Progress
                 </button>
-                <button onClick={(e) => cancelRun(e, activeRun.id)} className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50">
+                <button onClick={(e) => cancelRun(e, activeRun.id)} className="rounded-lg border border-red-200 dark:border-red-500/30 px-3 py-1.5 text-xs font-medium text-red-600 dark:text-red-300 transition-colors hover:bg-red-50 dark:hover:bg-red-500/15">
                 Cancel
                 </button>
               </div>
             </div>
           )}
 
-          <div className="rounded-xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-purple-50 p-3 sm:p-4">
+          <div className="rounded-xl border border-indigo-200 dark:border-indigo-500/30 bg-gradient-to-br from-indigo-50 dark:from-indigo-500/15 to-purple-50 dark:to-purple-500/15 p-3 sm:p-4">
             <div className="mb-3 grid gap-3 sm:grid-cols-2 xl:flex xl:items-end">
               <div className="w-full xl:w-auto">
-                <label className="block text-xs text-slate-600 font-medium mb-1">Mode</label>
-                <div className="flex w-full rounded-lg border border-indigo-200 bg-white p-1 text-xs font-semibold text-slate-600 xl:inline-flex xl:w-auto">
+                <label className="block text-xs text-muted-foreground font-medium mb-1">Mode</label>
+                <div className="flex w-full rounded-lg border border-indigo-200 dark:border-indigo-500/30 bg-card p-1 text-xs font-semibold text-muted-foreground xl:inline-flex xl:w-auto">
                   <button
                     type="button"
                     onClick={() => {
                       setReviewMode('single');
                       setReviewEndDate(reviewDate);
                     }}
-                    className={`flex-1 rounded-md px-3 py-1.5 transition-colors xl:flex-none ${reviewMode === 'single' ? 'bg-indigo-600 text-white shadow-sm' : 'hover:bg-indigo-50'}`}
+                    className={`flex-1 rounded-md px-3 py-1.5 transition-colors xl:flex-none ${reviewMode === 'single' ? 'bg-indigo-600 text-white shadow-sm' : 'hover:bg-indigo-50 dark:hover:bg-indigo-500/15'}`}
                   >
                   One day
                   </button>
@@ -4823,14 +4823,14 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                       setReviewMode('range');
                       setReviewEndDate((prev) => prev || reviewDate);
                     }}
-                    className={`flex-1 rounded-md px-3 py-1.5 transition-colors xl:flex-none ${reviewMode === 'range' ? 'bg-indigo-600 text-white shadow-sm' : 'hover:bg-indigo-50'}`}
+                    className={`flex-1 rounded-md px-3 py-1.5 transition-colors xl:flex-none ${reviewMode === 'range' ? 'bg-indigo-600 text-white shadow-sm' : 'hover:bg-indigo-50 dark:hover:bg-indigo-500/15'}`}
                   >
                   Range
                   </button>
                 </div>
               </div>
               <div className="w-full xl:w-auto">
-                <label className="block text-xs text-slate-600 font-medium mb-1">{reviewMode === 'range' ? 'Start Date' : 'Review Date'}</label>
+                <label className="block text-xs text-muted-foreground font-medium mb-1">{reviewMode === 'range' ? 'Start Date' : 'Review Date'}</label>
                 <input
                   type="date"
                   value={reviewDate}
@@ -4838,17 +4838,17 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                     setReviewDate(e.target.value);
                     if (reviewMode === 'single') setReviewEndDate(e.target.value);
                   }}
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  className="w-full rounded-lg border border-input px-3 py-2 text-sm"
                 />
               </div>
               {reviewMode === 'range' && (
                 <div className="w-full xl:w-auto">
-                  <label className="block text-xs text-slate-600 font-medium mb-1">End Date</label>
+                  <label className="block text-xs text-muted-foreground font-medium mb-1">End Date</label>
                   <input
                     type="date"
                     value={reviewEndDate}
                     onChange={(e) => setReviewEndDate(e.target.value)}
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    className="w-full rounded-lg border border-input px-3 py-2 text-sm"
                   />
                 </div>
               )}
@@ -4858,7 +4858,7 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                   setReviewDate(today);
                   setReviewEndDate(today);
                 }}
-                className="w-full rounded-lg border border-indigo-200 bg-white px-2.5 py-2 text-xs font-medium text-indigo-700 transition-colors hover:bg-indigo-100 sm:w-auto"
+                className="w-full rounded-lg border border-indigo-200 dark:border-indigo-500/30 bg-card px-2.5 py-2 text-xs font-medium text-indigo-700 dark:text-indigo-200 transition-colors hover:bg-indigo-100 dark:hover:bg-indigo-500/20 sm:w-auto"
               >
                   Today
               </button>
@@ -4870,16 +4870,16 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                 <Play className="h-3.5 w-3.5" />
                   Run Review
               </button>
-              <label className="inline-flex w-full cursor-pointer items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-2 text-xs text-slate-700 sm:col-span-2 xl:ml-auto xl:w-auto">
+              <label className="inline-flex w-full cursor-pointer items-center gap-2 rounded-lg border border-indigo-200 dark:border-indigo-500/30 bg-card px-3 py-2 text-xs text-foreground/85 sm:col-span-2 xl:ml-auto xl:w-auto">
                 <input
                   type="checkbox"
                   checked={forceRefreshThreads}
                   onChange={(e) => setForceRefreshThreads(e.target.checked)}
-                  className="h-3.5 w-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                  className="h-3.5 w-3.5 rounded border-input text-indigo-600 dark:text-indigo-300 focus:ring-indigo-500"
                 />
                 <span>
-                  <span className="font-medium text-slate-800">Force Refresh Tickets</span>
-                  <span className="ml-1 text-slate-500">(slower)</span>
+                  <span className="font-medium text-foreground">Force Refresh Tickets</span>
+                  <span className="ml-1 text-muted-foreground">(slower)</span>
                 </span>
               </label>
             </div>
@@ -4939,8 +4939,8 @@ export default function DailyReviewManager({ workspaceTimezone }) {
       )}
 
       {activeTab === 'backlog' && (
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-          <div className="mb-4 overflow-x-auto rounded-2xl border border-slate-200 bg-slate-50 p-1.5">
+        <div className="rounded-2xl border border-border bg-card p-4 shadow-sm sm:p-5">
+          <div className="mb-4 overflow-x-auto rounded-2xl border border-border bg-muted/50 p-1.5">
             <div className="grid min-w-[780px] grid-cols-5 gap-1.5 sm:min-w-0">
               {BACKLOG_KIND_TABS.map(({ key, label, icon: Icon, tone }) => {
                 const selectedKind = backlogKind === key;
@@ -4967,65 +4967,65 @@ export default function DailyReviewManager({ workspaceTimezone }) {
             </div>
           </div>
 
-          <div className="mb-4 flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm lg:flex-row lg:items-center lg:justify-between">
+          <div className="mb-4 flex flex-col gap-3 rounded-xl border border-border bg-muted/50 px-3 py-3 text-sm lg:flex-row lg:items-center lg:justify-between">
             <div className="flex min-w-0 items-center gap-3">
               <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${backlogTabTone(activeBacklogTab.tone).icon}`}>
                 <ActiveBacklogIcon className="h-5 w-5" />
               </span>
               <div className="min-w-0">
-                <div className="font-semibold text-slate-900">{activeBacklogTab.label} backlog</div>
-                <div className="text-xs text-slate-500">{activeBacklogTab.description} Approve useful items, reject noise, and send approved items to consolidation.</div>
+                <div className="font-semibold text-foreground">{activeBacklogTab.label} backlog</div>
+                <div className="text-xs text-muted-foreground">{activeBacklogTab.description} Approve useful items, reject noise, and send approved items to consolidation.</div>
               </div>
             </div>
             <div className="flex flex-wrap gap-2 text-xs">
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-2.5 py-1 font-semibold text-blue-700">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 dark:bg-blue-500/15 px-2.5 py-1 font-semibold text-blue-700 dark:text-blue-200">
                 <Clock3 className="h-3.5 w-3.5" />
                 {pendingBacklogTotal} pending
               </span>
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 font-semibold text-emerald-700">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 dark:bg-emerald-500/15 px-2.5 py-1 font-semibold text-emerald-700 dark:text-emerald-200">
                 <Layers className="h-3.5 w-3.5" />
                 {approvedBacklogTotal} staged
               </span>
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-50 px-2.5 py-1 font-semibold text-violet-700">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-50 dark:bg-violet-500/15 px-2.5 py-1 font-semibold text-violet-700 dark:text-violet-200">
                 <CheckCheck className="h-3.5 w-3.5" />
                 {readyToApplyCount} ready
               </span>
             </div>
           </div>
 
-          <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+          <div className="mb-4 rounded-2xl border border-border bg-card p-3 shadow-sm">
             <div className="flex flex-col gap-3">
               <div className="flex flex-col gap-3 2xl:flex-row 2xl:items-start 2xl:justify-between">
                 <label className="relative min-w-0 flex-1 lg:min-w-[22rem] xl:flex-[1_1_30rem]">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/75" />
                   <input
                     type="search"
                     value={backlogSearch}
                     onChange={(e) => setBacklogSearch(e.target.value)}
                     placeholder="Search recommendations..."
-                    className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm text-slate-800 outline-none transition focus:border-blue-300 focus:bg-white focus:ring-2 focus:ring-blue-100"
+                    className="h-11 w-full rounded-xl border border-border bg-muted/50 py-2 pl-9 pr-3 text-sm text-foreground outline-none transition focus:border-blue-300 dark:focus:border-blue-500/40 focus:bg-card focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
                   />
                 </label>
 
                 {backlogStatus === 'pending' && (
-                  <div className="flex flex-col gap-2 rounded-xl border border-slate-100 bg-slate-50 p-2 sm:flex-row sm:flex-wrap sm:items-center 2xl:flex-nowrap">
-                    <label className="inline-flex h-10 items-center gap-2 rounded-lg px-2 text-sm font-medium text-slate-600">
+                  <div className="flex flex-col gap-2 rounded-xl border border-border/60 bg-muted/50 p-2 sm:flex-row sm:flex-wrap sm:items-center 2xl:flex-nowrap">
+                    <label className="inline-flex h-10 items-center gap-2 rounded-lg px-2 text-sm font-medium text-muted-foreground">
                       <input
                         type="checkbox"
                         checked={allVisiblePendingSelected}
                         onChange={toggleAllVisiblePending}
                         disabled={visiblePendingBacklogItems.length === 0}
-                        className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
+                        className="h-4 w-4 rounded border-input text-blue-600 dark:text-blue-300 focus:ring-blue-500 disabled:opacity-50"
                       />
                       Select all ({visiblePendingBacklogItems.length})
                     </label>
-                    <span className="hidden h-6 w-px bg-slate-200 sm:block" />
-                    <span className="px-2 text-sm font-semibold text-slate-600">{selectedPendingItems.length} selected</span>
+                    <span className="hidden h-6 w-px bg-secondary sm:block" />
+                    <span className="px-2 text-sm font-semibold text-muted-foreground">{selectedPendingItems.length} selected</span>
                     <button
                       type="button"
                       onClick={() => runBulkBacklogAction('approved')}
                       disabled={selectedPendingItems.length === 0 || Boolean(bulkBacklogAction)}
-                      className="inline-flex h-10 items-center justify-center gap-1.5 rounded-lg border border-green-200 bg-green-50 px-3 text-sm font-semibold text-green-700 transition hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex h-10 items-center justify-center gap-1.5 rounded-lg border border-green-200 dark:border-green-500/30 bg-green-50 dark:bg-green-500/15 px-3 text-sm font-semibold text-green-700 dark:text-green-200 transition hover:bg-green-100 dark:hover:bg-green-500/20 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {bulkBacklogAction === 'approved' ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
                       Approve selected
@@ -5034,7 +5034,7 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                       type="button"
                       onClick={() => runBulkBacklogAction('rejected')}
                       disabled={selectedPendingItems.length === 0 || Boolean(bulkBacklogAction)}
-                      className="inline-flex h-10 items-center justify-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 text-sm font-semibold text-red-600 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex h-10 items-center justify-center gap-1.5 rounded-lg border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 px-3 text-sm font-semibold text-red-600 dark:text-red-300 transition hover:bg-red-100 dark:hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {bulkBacklogAction === 'rejected' ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
                       Reject selected
@@ -5042,7 +5042,7 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                     <button
                       type="button"
                       onClick={() => setShowBacklogAdvancedFilters((prev) => !prev)}
-                      className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-50"
+                      className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground transition hover:bg-muted/50"
                       title="More filters"
                     >
                       <MoreHorizontal className="h-4 w-4" />
@@ -5053,11 +5053,11 @@ export default function DailyReviewManager({ workspaceTimezone }) {
 
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:flex lg:flex-wrap lg:items-center lg:shrink-0">
                 <label className="relative">
-                  <Filter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                  <Filter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                   <select
                     value={backlogSeverity}
                     onChange={(e) => setBacklogSeverity(e.target.value)}
-                    className="h-11 w-full appearance-none rounded-xl border border-slate-200 bg-white py-2 pl-9 pr-8 text-sm font-medium text-slate-700 outline-none transition hover:bg-slate-50 focus:border-blue-300 focus:ring-2 focus:ring-blue-100 lg:w-36"
+                    className="h-11 w-full appearance-none rounded-xl border border-border bg-card py-2 pl-9 pr-8 text-sm font-medium text-foreground/85 outline-none transition hover:bg-muted/50 focus:border-blue-300 dark:focus:border-blue-500/40 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30 lg:w-36"
                   >
                     <option value="all">All priority</option>
                     <option value="high">High</option>
@@ -5066,11 +5066,11 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                   </select>
                 </label>
                 <label className="relative">
-                  <ArrowUpDown className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                  <ArrowUpDown className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                   <select
                     value={backlogSort}
                     onChange={(e) => setBacklogSort(e.target.value)}
-                    className="h-11 w-full appearance-none rounded-xl border border-slate-200 bg-white py-2 pl-9 pr-8 text-sm font-medium text-slate-700 outline-none transition hover:bg-slate-50 focus:border-blue-300 focus:ring-2 focus:ring-blue-100 lg:w-36"
+                    className="h-11 w-full appearance-none rounded-xl border border-border bg-card py-2 pl-9 pr-8 text-sm font-medium text-foreground/85 outline-none transition hover:bg-muted/50 focus:border-blue-300 dark:focus:border-blue-500/40 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30 lg:w-36"
                   >
                     <option value="newest">Newest</option>
                     <option value="oldest">Oldest</option>
@@ -5081,7 +5081,7 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                 <select
                   value={backlogStatus}
                   onChange={(e) => setBacklogStatus(e.target.value)}
-                  className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 outline-none transition hover:bg-slate-50 focus:border-blue-300 focus:ring-2 focus:ring-blue-100 lg:w-36"
+                  className="h-11 rounded-xl border border-border bg-card px-3 text-sm font-medium text-foreground/85 outline-none transition hover:bg-muted/50 focus:border-blue-300 dark:focus:border-blue-500/40 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30 lg:w-36"
                 >
                   <option value="pending">Review queue</option>
                   <option value="rejected">Rejected</option>
@@ -5092,7 +5092,7 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                   type="button"
                   onClick={loadBacklog}
                   disabled={loadingBacklog || refreshingBacklog}
-                  className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-border bg-card px-3 text-sm font-semibold text-foreground/85 transition hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-60"
                   title="Refresh review queue"
                 >
                   <RefreshCw className={`h-4 w-4 ${refreshingBacklog ? 'animate-spin' : ''}`} />
@@ -5102,19 +5102,19 @@ export default function DailyReviewManager({ workspaceTimezone }) {
             </div>
 
             <SmoothCollapse open={showBacklogAdvancedFilters || backlogStatus !== 'pending' || Boolean(backlogRunFilter || backlogStartDate || backlogEndDate)}>
-              <div className="mt-3 grid gap-2 border-t border-slate-100 pt-3 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="mt-3 grid gap-2 border-t border-border/60 pt-3 sm:grid-cols-2 xl:grid-cols-4">
                 <input
                   type="date"
                   value={backlogStartDate}
                   onChange={(e) => setBacklogStartDate(e.target.value)}
-                  className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
+                  className="h-10 rounded-lg border border-border bg-card px-3 text-sm text-foreground/85 outline-none focus:border-blue-300 dark:focus:border-blue-500/40 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
                   title="Start date"
                 />
                 <input
                   type="date"
                   value={backlogEndDate}
                   onChange={(e) => setBacklogEndDate(e.target.value)}
-                  className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
+                  className="h-10 rounded-lg border border-border bg-card px-3 text-sm text-foreground/85 outline-none focus:border-blue-300 dark:focus:border-blue-500/40 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
                   title="End date"
                 />
                 <div className="flex gap-2 sm:col-span-2">
@@ -5124,7 +5124,7 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                     value={backlogRunFilter}
                     onChange={(e) => setBacklogRunFilter(e.target.value)}
                     placeholder="All runs"
-                    className="h-10 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
+                    className="h-10 min-w-0 flex-1 rounded-lg border border-border bg-card px-3 text-sm text-foreground/85 outline-none focus:border-blue-300 dark:focus:border-blue-500/40 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
                   />
                   <datalist id="daily-review-run-options">
                     {runs.map((run) => {
@@ -5145,7 +5145,7 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                         setBacklogStartDate('');
                         setBacklogEndDate('');
                       }}
-                      className="rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-500 transition hover:bg-slate-50"
+                      className="rounded-lg border border-border px-3 text-xs font-semibold text-muted-foreground transition hover:bg-muted/50"
                       title="Clear date and run filters"
                     >
                       Clear
@@ -5156,49 +5156,49 @@ export default function DailyReviewManager({ workspaceTimezone }) {
             </SmoothCollapse>
           </div>
 
-          <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-            <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 font-semibold text-blue-700">
+          <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 dark:bg-blue-500/15 px-2.5 py-1 font-semibold text-blue-700 dark:text-blue-200">
               <Clock3 className="h-3.5 w-3.5" />
               Queue
             </span>
-            <ChevronRight className="h-3.5 w-3.5 text-slate-300" />
-            <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2.5 py-1 font-semibold text-green-700">
+            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/50" />
+            <span className="inline-flex items-center gap-1 rounded-full bg-green-50 dark:bg-green-500/15 px-2.5 py-1 font-semibold text-green-700 dark:text-green-200">
               <CheckCircle className="h-3.5 w-3.5" />
               Approve or reject
             </span>
-            <ChevronRight className="h-3.5 w-3.5 text-slate-300" />
-            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 font-semibold text-emerald-700">
+            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/50" />
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 dark:bg-emerald-500/15 px-2.5 py-1 font-semibold text-emerald-700 dark:text-emerald-200">
               <Layers className="h-3.5 w-3.5" />
               Stage for consolidation
             </span>
-            <ChevronRight className="h-3.5 w-3.5 text-slate-300" />
-            <span className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2.5 py-1 font-semibold text-violet-700">
+            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/50" />
+            <span className="inline-flex items-center gap-1 rounded-full bg-violet-50 dark:bg-violet-500/15 px-2.5 py-1 font-semibold text-violet-700 dark:text-violet-200">
               <CheckCheck className="h-3.5 w-3.5" />
               Ready to apply
             </span>
           </div>
 
           {loadingBacklog ? (
-            <div className="flex items-center justify-center py-8 text-gray-400">
+            <div className="flex items-center justify-center py-8 text-muted-foreground/75">
               <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading backlog...
             </div>
           ) : (
             <div className={`transition-opacity duration-200 ease-out ${refreshingBacklog ? 'opacity-70' : 'opacity-100'}`}>
               {backlogStatus === 'pending' ? (
                 <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr),minmax(420px,1fr)]">
-                  <div className="min-w-0 rounded-2xl border border-slate-200 bg-gradient-to-b from-slate-50 to-white p-4 shadow-sm">
+                  <div className="min-w-0 rounded-2xl border border-border bg-gradient-to-b from-muted/50 to-card p-4 shadow-sm">
                     <div className="mb-3 flex items-start justify-between gap-3">
                       <div>
                         <div className="flex items-center gap-2">
-                          <h4 className="text-base font-bold text-slate-900">Pending Ticket Queue</h4>
-                          <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-bold text-blue-700">{visiblePendingBacklogItems.length}</span>
+                          <h4 className="text-base font-bold text-foreground">Pending Ticket Queue</h4>
+                          <span className="rounded-full bg-blue-100 dark:bg-blue-500/20 px-2 py-0.5 text-xs font-bold text-blue-700 dark:text-blue-200">{visiblePendingBacklogItems.length}</span>
                         </div>
-                        <p className="text-xs text-slate-500">Review each recommendation and stage the useful ones.</p>
+                        <p className="text-xs text-muted-foreground">Review each recommendation and stage the useful ones.</p>
                       </div>
-                      <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-slate-500">{pendingBacklogTotal} total</span>
+                      <span className="rounded-full bg-card px-2 py-0.5 text-xs font-semibold text-muted-foreground">{pendingBacklogTotal} total</span>
                     </div>
                     {visiblePendingBacklogItems.length === 0 ? (
-                      <div className="rounded-xl border border-dashed border-slate-200 bg-white px-4 py-12 text-center text-sm text-slate-400">
+                      <div className="rounded-xl border border-dashed border-border bg-card px-4 py-12 text-center text-sm text-muted-foreground/75">
                         No pending recommendations matched the current filters.
                       </div>
                     ) : (
@@ -5217,26 +5217,26 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                             onToggleSelected={toggleBacklogSelection}
                           />
                         ))}
-                        <div className="py-2 text-center text-xs text-slate-400">
+                        <div className="py-2 text-center text-xs text-muted-foreground/75">
                           Showing {visiblePendingBacklogItems.length} of {pendingBacklogTotal} pending recommendations
                         </div>
                       </div>
                     )}
                   </div>
 
-                  <div className="min-w-0 rounded-2xl border border-emerald-200 bg-gradient-to-b from-emerald-50/70 to-white p-4 shadow-sm">
+                  <div className="min-w-0 rounded-2xl border border-emerald-200 dark:border-emerald-500/30 bg-gradient-to-b from-emerald-50/70 to-card p-4 shadow-sm">
                     <div className="mb-3 flex items-start justify-between gap-3">
                       <div>
                         <div className="flex items-center gap-2">
-                          <h4 className="text-base font-bold text-slate-900">Approved for Consolidation</h4>
-                          <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-bold text-emerald-700">{visibleApprovedBacklogItems.length}</span>
+                          <h4 className="text-base font-bold text-foreground">Approved for Consolidation</h4>
+                          <span className="rounded-full bg-emerald-100 dark:bg-emerald-500/20 px-2 py-0.5 text-xs font-bold text-emerald-700 dark:text-emerald-200">{visibleApprovedBacklogItems.length}</span>
                         </div>
-                        <p className="text-xs text-slate-500">Approved recommendations are grouped here for final review.</p>
+                        <p className="text-xs text-muted-foreground">Approved recommendations are grouped here for final review.</p>
                       </div>
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
-                          className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-emerald-700 shadow-sm"
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 dark:border-emerald-500/30 bg-card px-2.5 py-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-200 shadow-sm"
                           title="Grouped by title"
                         >
                           <Layers className="h-3.5 w-3.5" />
@@ -5245,16 +5245,16 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                       </div>
                     </div>
                     {visibleApprovedBacklogItems.length === 0 ? (
-                      <div className="flex min-h-[520px] items-center justify-center rounded-2xl border border-dashed border-emerald-200 bg-white/70 px-6 py-12 text-center">
+                      <div className="flex min-h-[520px] items-center justify-center rounded-2xl border border-dashed border-emerald-200 dark:border-emerald-500/30 bg-card/70 px-6 py-12 text-center">
                         <div className="max-w-sm">
-                          <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-emerald-50 text-emerald-500">
+                          <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-emerald-50 dark:bg-emerald-500/15 text-emerald-500">
                             <Layers className="h-9 w-9" />
                           </div>
-                          <h5 className="text-base font-bold text-slate-800">No approved recommendations yet</h5>
-                          <p className="mt-2 text-sm text-slate-500">
+                          <h5 className="text-base font-bold text-foreground">No approved recommendations yet</h5>
+                          <p className="mt-2 text-sm text-muted-foreground">
                             Approve items from the queue and they will appear here grouped by title for consolidation.
                           </p>
-                          <div className="mt-5 inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">
+                          <div className="mt-5 inline-flex items-center gap-2 rounded-full bg-emerald-50 dark:bg-emerald-500/15 px-3 py-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-200">
                             <CheckCircle className="h-3.5 w-3.5" />
                             Approve items from the queue to get started
                           </div>
@@ -5278,7 +5278,7 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                 </div>
               ) : backlogStatus === 'approved' ? (
                 visibleApprovedBacklogItems.length === 0 ? (
-                  <div className="rounded-lg border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-400">
+                  <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground/75">
                 No approved recommendation items matched the current backlog filters.
                   </div>
                 ) : (
@@ -5296,7 +5296,7 @@ export default function DailyReviewManager({ workspaceTimezone }) {
                   </div>
                 )
               ) : backlogItems.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-400">
+                <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground/75">
               No recommendation items matched the current backlog filters.
                 </div>
               ) : (

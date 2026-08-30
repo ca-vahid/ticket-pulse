@@ -49,11 +49,11 @@ function formatDateTime(d) {
 }
 
 const STATUS_BADGES = {
-  running:     { label: 'Running',     style: 'bg-indigo-100 text-indigo-700 border-indigo-200', Icon: Loader },
-  completed:   { label: 'Completed',   style: 'bg-green-100 text-green-700 border-green-200',    Icon: CheckCircle },
-  failed:      { label: 'Failed',      style: 'bg-red-100 text-red-700 border-red-200',          Icon: XCircle },
-  cancelled:   { label: 'Cancelled',   style: 'bg-amber-100 text-amber-700 border-amber-200',    Icon: StopCircle },
-  interrupted: { label: 'Interrupted', style: 'bg-slate-100 text-slate-700 border-slate-200',    Icon: AlertTriangle },
+  running:     { label: 'Running',     style: 'bg-indigo-100 dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-200 border-indigo-200 dark:border-indigo-500/30', Icon: Loader },
+  completed:   { label: 'Completed',   style: 'bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-200 border-green-200 dark:border-green-500/30',    Icon: CheckCircle },
+  failed:      { label: 'Failed',      style: 'bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-200 border-red-200 dark:border-red-500/30',          Icon: XCircle },
+  cancelled:   { label: 'Cancelled',   style: 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-200 border-amber-200 dark:border-amber-500/30',    Icon: StopCircle },
+  interrupted: { label: 'Interrupted', style: 'bg-muted text-foreground/85 border-border',    Icon: AlertTriangle },
 };
 
 export default function BackfillPanel() {
@@ -265,21 +265,21 @@ export default function BackfillPanel() {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3 mb-2">
-        <div className="p-2 bg-indigo-100 rounded-lg">
-          <Download className="w-5 h-5 text-indigo-600" />
+        <div className="p-2 bg-indigo-100 dark:bg-indigo-500/20 rounded-lg">
+          <Download className="w-5 h-5 text-indigo-600 dark:text-indigo-300" />
         </div>
         <div>
-          <h3 className="text-lg font-semibold text-gray-900">Historical Backfill</h3>
-          <p className="text-sm text-gray-500">
+          <h3 className="text-lg font-semibold text-foreground">Historical Backfill</h3>
+          <p className="text-sm text-muted-foreground">
             Import historical tickets from FreshService. Use this to onboard a new workspace or fill data gaps.
           </p>
         </div>
       </div>
 
       {currentWorkspace && (
-        <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg text-sm">
-          <Zap className="w-4 h-4 text-blue-600" />
-          <span className="text-blue-800">
+        <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 dark:bg-blue-500/15 border border-blue-200 dark:border-blue-500/30 rounded-lg text-sm">
+          <Zap className="w-4 h-4 text-blue-600 dark:text-blue-300" />
+          <span className="text-blue-800 dark:text-blue-200">
             Backfilling for workspace: <strong>{currentWorkspace.name}</strong>
           </span>
         </div>
@@ -287,9 +287,9 @@ export default function BackfillPanel() {
 
       {/* --- Configuration form (only when no run is in progress) --- */}
       {showStartForm && (
-        <div className="bg-white border border-gray-200 rounded-lg p-5 space-y-5">
+        <div className="bg-card border border-border rounded-lg p-5 space-y-5">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+            <label className="block text-sm font-medium text-foreground/85 mb-2">
               <Calendar className="w-4 h-4 inline mr-1" />
               Timeframe
             </label>
@@ -301,7 +301,7 @@ export default function BackfillPanel() {
                   className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-all ${
                     preset.label === p.label
                       ? 'bg-indigo-600 text-white border-indigo-600'
-                      : 'bg-white text-gray-700 border-gray-300 hover:border-indigo-400 hover:bg-indigo-50'
+                      : 'bg-card text-foreground/85 border-input hover:border-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-500/15'
                   }`}
                 >
                   {p.label}
@@ -310,21 +310,21 @@ export default function BackfillPanel() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs text-gray-500 mb-1">Start Date</label>
+                <label className="block text-xs text-muted-foreground mb-1">Start Date</label>
                 <input
                   type="date"
                   value={startDate}
                   onChange={(e) => { setStartDate(e.target.value); setPreset({ label: 'Custom', days: null }); }}
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                  className="w-full px-3 py-2 text-sm border border-input rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                 />
               </div>
               <div>
-                <label className="block text-xs text-gray-500 mb-1">End Date</label>
+                <label className="block text-xs text-muted-foreground mb-1">End Date</label>
                 <input
                   type="date"
                   value={endDate}
                   onChange={(e) => { setEndDate(e.target.value); setPreset({ label: 'Custom', days: null }); }}
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                  className="w-full px-3 py-2 text-sm border border-input rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                 />
               </div>
             </div>
@@ -336,23 +336,23 @@ export default function BackfillPanel() {
                 type="checkbox"
                 checked={skipExisting}
                 onChange={(e) => setSkipExisting(e.target.checked)}
-                className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                className="w-4 h-4 text-indigo-600 dark:text-indigo-300 border-input rounded focus:ring-indigo-500"
               />
               <div>
-                <span className="text-sm font-medium text-gray-700 flex items-center gap-1">
+                <span className="text-sm font-medium text-foreground/85 flex items-center gap-1">
                   <SkipForward className="w-3.5 h-3.5" />
                   Skip existing tickets
                 </span>
-                <span className="text-xs text-gray-500 block">Won&apos;t re-process tickets already in the database</span>
+                <span className="text-xs text-muted-foreground block">Won&apos;t re-process tickets already in the database</span>
               </div>
             </label>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">API Concurrency</label>
+              <label className="block text-sm font-medium text-foreground/85 mb-1">API Concurrency</label>
               <select
                 value={concurrency}
                 onChange={(e) => setConcurrency(Number(e.target.value))}
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                className="w-full px-3 py-2 text-sm border border-input rounded-lg focus:ring-2 focus:ring-indigo-500"
               >
                 <option value={1}>1 (Slowest, safest)</option>
                 <option value={3}>3 (Balanced)</option>
@@ -370,9 +370,9 @@ export default function BackfillPanel() {
             Start Backfill
           </button>
 
-          <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-            <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
-            <div className="text-xs text-amber-800">
+          <div className="flex items-start gap-2 p-3 bg-amber-50 dark:bg-amber-500/15 border border-amber-200 dark:border-amber-500/30 rounded-lg">
+            <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-300 mt-0.5 flex-shrink-0" />
+            <div className="text-xs text-amber-800 dark:text-amber-200">
               <strong>Tip:</strong> You can safely close this tab — backfill continues on the server, and progress will resume here when you return.
               Use the Cancel button to stop a running backfill at any time.
             </div>
@@ -382,28 +382,28 @@ export default function BackfillPanel() {
 
       {/* --- In-progress / completed run display --- */}
       {(isRunning || result) && (
-        <div className="bg-white border border-gray-200 rounded-lg p-5 space-y-4">
+        <div className="bg-card border border-border rounded-lg p-5 space-y-4">
           {/* Header with cancel */}
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-2">
               {isRunning ? (
-                <Loader className="w-4 h-4 text-indigo-600 animate-spin" />
+                <Loader className="w-4 h-4 text-indigo-600 dark:text-indigo-300 animate-spin" />
               ) : result?.status === 'completed' ? (
-                <CheckCircle className="w-4 h-4 text-green-600" />
+                <CheckCircle className="w-4 h-4 text-green-600 dark:text-green-300" />
               ) : (
-                <XCircle className="w-4 h-4 text-red-600" />
+                <XCircle className="w-4 h-4 text-red-600 dark:text-red-300" />
               )}
-              <span className="text-sm font-medium text-gray-900">
+              <span className="text-sm font-medium text-foreground">
                 {activeRun?.progressStep || result?.progressStep || (isStarting ? 'Initializing...' : 'Complete')}
               </span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-sm font-bold text-indigo-600">{Math.max(0, pct)}%</span>
+              <span className="text-sm font-bold text-indigo-600 dark:text-indigo-300">{Math.max(0, pct)}%</span>
               {isRunning && activeRun?.id && (
                 <button
                   onClick={handleCancel}
                   disabled={cancelling || activeRun?.cancelRequested}
-                  className="px-3 py-1.5 bg-red-50 hover:bg-red-100 disabled:opacity-50 text-red-700 border border-red-200 rounded-md text-xs font-medium flex items-center gap-1 transition-colors"
+                  className="px-3 py-1.5 bg-red-50 dark:bg-red-500/15 hover:bg-red-100 dark:hover:bg-red-500/20 disabled:opacity-50 text-red-700 dark:text-red-200 border border-red-200 dark:border-red-500/30 rounded-md text-xs font-medium flex items-center gap-1 transition-colors"
                   title={activeRun?.cancelRequested ? 'Cancellation already requested' : 'Stop the running backfill'}
                 >
                   <StopCircle className="w-3.5 h-3.5" />
@@ -414,7 +414,7 @@ export default function BackfillPanel() {
           </div>
 
           {/* Progress bar */}
-          <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+          <div className="w-full bg-secondary rounded-full h-3 overflow-hidden">
             <div
               className={`h-full rounded-full transition-all duration-500 ${
                 error ? 'bg-red-500' : pct >= 100 ? 'bg-green-500' : 'bg-indigo-600'
@@ -425,27 +425,27 @@ export default function BackfillPanel() {
 
           {/* Stats cards */}
           <div className="grid grid-cols-4 gap-3">
-            <div className="bg-gray-50 rounded-lg p-3 text-center">
-              <div className="text-xs text-gray-500 mb-1 flex items-center justify-center gap-1">
+            <div className="bg-muted/50 rounded-lg p-3 text-center">
+              <div className="text-xs text-muted-foreground mb-1 flex items-center justify-center gap-1">
                 <Clock className="w-3 h-3" />
                 Elapsed
               </div>
-              <div className="text-sm font-bold text-gray-900">
+              <div className="text-sm font-bold text-foreground">
                 {result ? formatElapsedMs(result.elapsedMs) : formatElapsed(elapsedSec)}
               </div>
             </div>
             {eta && isRunning && (
-              <div className="bg-gray-50 rounded-lg p-3 text-center">
-                <div className="text-xs text-gray-500 mb-1">ETA</div>
-                <div className="text-sm font-bold text-gray-900">~{eta}</div>
+              <div className="bg-muted/50 rounded-lg p-3 text-center">
+                <div className="text-xs text-muted-foreground mb-1">ETA</div>
+                <div className="text-sm font-bold text-foreground">~{eta}</div>
               </div>
             )}
-            <div className="bg-blue-50 rounded-lg p-3 text-center">
-              <div className="text-xs text-blue-600 mb-1 flex items-center justify-center gap-1">
+            <div className="bg-blue-50 dark:bg-blue-500/15 rounded-lg p-3 text-center">
+              <div className="text-xs text-blue-600 dark:text-blue-300 mb-1 flex items-center justify-center gap-1">
                 <BarChart3 className="w-3 h-3" />
                 Tickets
               </div>
-              <div className="text-sm font-bold text-blue-800">
+              <div className="text-sm font-bold text-blue-800 dark:text-blue-200">
                 {(activeRun?.ticketsProcessed ?? result?.ticketsSynced) || 0}
                 {(activeRun?.ticketsTotal || result?.ticketsFetched)
                   ? ` / ${activeRun?.ticketsTotal || result?.ticketsFetched}`
@@ -453,51 +453,51 @@ export default function BackfillPanel() {
               </div>
             </div>
             {(result?.skippedCount > 0) && (
-              <div className="bg-yellow-50 rounded-lg p-3 text-center">
-                <div className="text-xs text-yellow-600 mb-1 flex items-center justify-center gap-1">
+              <div className="bg-yellow-50 dark:bg-yellow-500/15 rounded-lg p-3 text-center">
+                <div className="text-xs text-yellow-600 dark:text-yellow-300 mb-1 flex items-center justify-center gap-1">
                   <SkipForward className="w-3 h-3" />
                   Skipped
                 </div>
-                <div className="text-sm font-bold text-yellow-800">{result.skippedCount}</div>
+                <div className="text-sm font-bold text-yellow-800 dark:text-yellow-200">{result.skippedCount}</div>
               </div>
             )}
           </div>
 
           {error && (
-            <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg">
-              <XCircle className="w-4 h-4 text-red-600 mt-0.5 flex-shrink-0" />
-              <div className="text-sm text-red-800">{error}</div>
+            <div className="flex items-start gap-2 p-3 bg-red-50 dark:bg-red-500/15 border border-red-200 dark:border-red-500/30 rounded-lg">
+              <XCircle className="w-4 h-4 text-red-600 dark:text-red-300 mt-0.5 flex-shrink-0" />
+              <div className="text-sm text-red-800 dark:text-red-200">{error}</div>
             </div>
           )}
 
           {result && result.status === 'completed' && (
-            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+            <div className="bg-green-50 dark:bg-green-500/15 border border-green-200 dark:border-green-500/30 rounded-lg p-4">
               <div className="flex items-center gap-2 mb-3">
-                <CheckCircle className="w-5 h-5 text-green-600" />
-                <span className="font-semibold text-green-800">Backfill Complete</span>
+                <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-300" />
+                <span className="font-semibold text-green-800 dark:text-green-200">Backfill Complete</span>
               </div>
               <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
-                <div className="flex justify-between"><span className="text-green-700">Tickets fetched:</span><span className="font-medium text-green-900">{result.ticketsFetched ?? '—'}</span></div>
-                <div className="flex justify-between"><span className="text-green-700">Tickets synced:</span><span className="font-medium text-green-900">{result.ticketsSynced ?? '—'}</span></div>
-                <div className="flex justify-between"><span className="text-green-700">Activities analyzed:</span><span className="font-medium text-green-900">{result.activitiesAnalyzed ?? '—'}</span></div>
-                <div className="flex justify-between"><span className="text-green-700">Skipped (existing):</span><span className="font-medium text-green-900">{result.skippedCount ?? '—'}</span></div>
-                <div className="flex justify-between"><span className="text-green-700">Date range:</span><span className="font-medium text-green-900">{result.startDate} → {result.endDate}</span></div>
-                <div className="flex justify-between"><span className="text-green-700">Duration:</span><span className="font-medium text-green-900">{formatElapsedMs(result.elapsedMs)}</span></div>
+                <div className="flex justify-between"><span className="text-green-700 dark:text-green-200">Tickets fetched:</span><span className="font-medium text-green-900 dark:text-green-200">{result.ticketsFetched ?? '—'}</span></div>
+                <div className="flex justify-between"><span className="text-green-700 dark:text-green-200">Tickets synced:</span><span className="font-medium text-green-900 dark:text-green-200">{result.ticketsSynced ?? '—'}</span></div>
+                <div className="flex justify-between"><span className="text-green-700 dark:text-green-200">Activities analyzed:</span><span className="font-medium text-green-900 dark:text-green-200">{result.activitiesAnalyzed ?? '—'}</span></div>
+                <div className="flex justify-between"><span className="text-green-700 dark:text-green-200">Skipped (existing):</span><span className="font-medium text-green-900 dark:text-green-200">{result.skippedCount ?? '—'}</span></div>
+                <div className="flex justify-between"><span className="text-green-700 dark:text-green-200">Date range:</span><span className="font-medium text-green-900 dark:text-green-200">{result.startDate} → {result.endDate}</span></div>
+                <div className="flex justify-between"><span className="text-green-700 dark:text-green-200">Duration:</span><span className="font-medium text-green-900 dark:text-green-200">{formatElapsedMs(result.elapsedMs)}</span></div>
               </div>
             </div>
           )}
 
           {logs.length > 0 && (
             <div>
-              <div className="text-xs font-medium text-gray-500 uppercase mb-2">Activity Log</div>
+              <div className="text-xs font-medium text-muted-foreground uppercase mb-2">Activity Log</div>
               <div className="bg-gray-900 rounded-lg p-3 max-h-48 overflow-y-auto font-mono text-xs space-y-0.5">
                 {logs.map((log, i) => (
                   <div key={i} className={
                     log.type === 'error' ? 'text-red-400' :
                       log.type === 'success' ? 'text-green-400' :
-                        'text-gray-300'
+                        'text-slate-300'
                   }>
-                    <span className="text-gray-600">[{log.time}]</span> {log.msg}
+                    <span className="text-slate-500">[{log.time}]</span> {log.msg}
                   </div>
                 ))}
               </div>
@@ -519,17 +519,17 @@ export default function BackfillPanel() {
       )}
 
       {/* --- History --- */}
-      <div className="bg-white border border-gray-200 rounded-lg p-5">
+      <div className="bg-card border border-border rounded-lg p-5">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            <History className="w-4 h-4 text-slate-500" />
-            <h4 className="text-sm font-semibold text-gray-900">Recent backfills</h4>
-            <span className="text-xs text-slate-400">({history.length})</span>
+            <History className="w-4 h-4 text-muted-foreground" />
+            <h4 className="text-sm font-semibold text-foreground">Recent backfills</h4>
+            <span className="text-xs text-muted-foreground/75">({history.length})</span>
           </div>
           <button
             onClick={refreshHistory}
             disabled={historyLoading}
-            className="text-xs text-indigo-600 hover:text-indigo-800 font-medium flex items-center gap-1 disabled:opacity-50"
+            className="text-xs text-indigo-600 dark:text-indigo-300 hover:text-indigo-800 dark:hover:text-indigo-200 font-medium flex items-center gap-1 disabled:opacity-50"
           >
             <RotateCcw className={`w-3 h-3 ${historyLoading ? 'animate-spin' : ''}`} />
             Refresh
@@ -537,14 +537,14 @@ export default function BackfillPanel() {
         </div>
 
         {history.length === 0 ? (
-          <p className="text-sm text-slate-400 text-center py-6">No backfills have been run yet for this workspace.</p>
+          <p className="text-sm text-muted-foreground/75 text-center py-6">No backfills have been run yet for this workspace.</p>
         ) : (
           <div className="space-y-2">
             {history.map((row) => {
               const badge = STATUS_BADGES[row.status] || STATUS_BADGES.failed;
               const Icon = badge.Icon;
               return (
-                <div key={row.id} className="border border-slate-200 rounded-lg p-3 hover:border-slate-300 transition-colors">
+                <div key={row.id} className="border border-border rounded-lg p-3 hover:border-input transition-colors">
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1 flex-wrap">
@@ -552,30 +552,30 @@ export default function BackfillPanel() {
                           <Icon className={`w-2.5 h-2.5 ${row.status === 'running' ? 'animate-spin' : ''}`} />
                           {badge.label}
                         </span>
-                        <span className="text-xs text-slate-600 font-mono">#{row.id}</span>
-                        <span className="text-xs text-slate-500">{row.startDate} → {row.endDate}</span>
-                        {row.skipExisting && <span className="text-[10px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">skip existing</span>}
+                        <span className="text-xs text-muted-foreground font-mono">#{row.id}</span>
+                        <span className="text-xs text-muted-foreground">{row.startDate} → {row.endDate}</span>
+                        {row.skipExisting && <span className="text-[10px] text-muted-foreground/75 bg-muted px-1.5 py-0.5 rounded">skip existing</span>}
                       </div>
-                      <div className="flex items-center gap-3 text-[11px] text-slate-500 flex-wrap">
+                      <div className="flex items-center gap-3 text-[11px] text-muted-foreground flex-wrap">
                         <span>Started {formatDateTime(row.startedAt)}</span>
                         {row.completedAt && <span>·  Duration {formatElapsedMs(row.elapsedMs)}</span>}
                         {row.triggeredByEmail && <span>·  by {row.triggeredByEmail}</span>}
                       </div>
                       {row.status === 'completed' && (
-                        <div className="text-xs text-slate-600 mt-1">
+                        <div className="text-xs text-muted-foreground mt-1">
                           {row.ticketsSynced ?? 0} synced
                           {row.activitiesAnalyzed != null && `, ${row.activitiesAnalyzed} activities analyzed`}
                           {row.skippedCount != null && row.skippedCount > 0 && `, ${row.skippedCount} skipped`}
                         </div>
                       )}
                       {row.status === 'failed' && row.errorMessage && (
-                        <div className="text-xs text-red-600 mt-1 truncate" title={row.errorMessage}>{row.errorMessage}</div>
+                        <div className="text-xs text-red-600 dark:text-red-300 mt-1 truncate" title={row.errorMessage}>{row.errorMessage}</div>
                       )}
                       {row.status === 'cancelled' && row.cancelledByEmail && (
-                        <div className="text-xs text-amber-600 mt-1">Cancelled by {row.cancelledByEmail}</div>
+                        <div className="text-xs text-amber-600 dark:text-amber-300 mt-1">Cancelled by {row.cancelledByEmail}</div>
                       )}
                       {row.status === 'running' && (
-                        <div className="text-xs text-indigo-600 mt-1">{row.progressStep || 'In progress'} ({row.progressPct}%)</div>
+                        <div className="text-xs text-indigo-600 dark:text-indigo-300 mt-1">{row.progressStep || 'In progress'} ({row.progressPct}%)</div>
                       )}
                     </div>
                   </div>

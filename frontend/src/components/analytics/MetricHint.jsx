@@ -72,7 +72,7 @@ export function MetricHint({ metric, title, info, className = '' }) {
         onFocus={() => setOpen(true)}
         onBlur={() => setOpen(false)}
         onKeyDown={(e) => { if (e.key === 'Escape') setOpen(false); }}
-        className="tp-focus-ring -m-1 rounded-full p-1 text-slate-400 transition-colors hover:text-slate-600"
+        className="tp-focus-ring -m-1 rounded-full p-1 text-muted-foreground/75 transition-colors hover:text-muted-foreground"
       >
         <Info className="h-3.5 w-3.5" aria-hidden="true" />
       </button>
@@ -82,15 +82,15 @@ export function MetricHint({ metric, title, info, className = '' }) {
           id={popoverId}
           role="tooltip"
           style={pos ? { top: pos.top, left: pos.left } : { visibility: 'hidden', top: 0, left: 0 }}
-          className="animate-fadeIn fixed z-50 w-60 whitespace-normal rounded-lg border border-slate-200 bg-white p-2.5 text-left font-normal shadow-lg"
+          className="animate-fadeIn fixed z-50 w-60 whitespace-normal rounded-lg border border-border bg-card p-2.5 text-left font-normal shadow-lg"
         >
-          <p className="text-[10px] font-semibold uppercase tracking-normal text-slate-400">{heading}</p>
-          <p className="mt-1 text-xs font-normal normal-case leading-relaxed tracking-normal text-slate-600">{definition}</p>
+          <p className="text-[10px] font-semibold uppercase tracking-normal text-muted-foreground/75">{heading}</p>
+          <p className="mt-1 text-xs font-normal normal-case leading-relaxed tracking-normal text-muted-foreground">{definition}</p>
           {formula && (
-            <p className="mt-1.5 rounded bg-slate-50 px-1.5 py-1 font-mono text-[10px] normal-case leading-snug tracking-normal text-slate-500">{formula}</p>
+            <p className="mt-1.5 rounded bg-muted/50 px-1.5 py-1 font-mono text-[10px] normal-case leading-snug tracking-normal text-muted-foreground">{formula}</p>
           )}
           {caveats && (
-            <p className="mt-1.5 text-[11px] font-normal normal-case leading-relaxed tracking-normal text-slate-400">{caveats}</p>
+            <p className="mt-1.5 text-[11px] font-normal normal-case leading-relaxed tracking-normal text-muted-foreground/75">{caveats}</p>
           )}
         </div>
       )}

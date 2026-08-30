@@ -129,19 +129,19 @@ export default function FilterDropdown({
         aria-controls={popoverId}
         className={`inline-flex max-w-[calc(100vw-2rem)] items-center gap-1.5 rounded-full border px-2.5 py-1.5 sm:py-1 text-[11px] font-medium transition-colors touch-manipulation ${
           isAtDefault
-            ? 'border-transparent bg-slate-100/70 text-slate-600 hover:bg-slate-200/70 hover:text-slate-900'
-            : 'border-blue-200 bg-blue-50 text-blue-800 hover:bg-blue-100'
+            ? 'border-transparent bg-muted/70 text-muted-foreground hover:bg-secondary/70 hover:text-foreground'
+            : 'border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 text-blue-800 dark:text-blue-200 hover:bg-blue-100 dark:hover:bg-blue-500/20'
         } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
       >
         {Icon && <Icon className="h-3 w-3 shrink-0" />}
-        <span className="text-slate-500">{label}:</span>
+        <span className="text-muted-foreground">{label}:</span>
         <span className="max-w-[8rem] truncate font-semibold">{summary}</span>
         {multi && Array.isArray(value) && value.length > 0 && (
           <span className="ml-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-600 px-1 text-[9px] font-bold text-white tabular-nums">
             {value.length}
           </span>
         )}
-        <ChevronDown className={`h-3 w-3 shrink-0 text-slate-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+        <ChevronDown className={`h-3 w-3 shrink-0 text-muted-foreground/75 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
       </button>
 
       {isOpen && (
@@ -149,21 +149,21 @@ export default function FilterDropdown({
           id={popoverId}
           role="listbox"
           aria-multiselectable={multi}
-          className={`absolute top-full z-[60] mt-1 w-64 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl ring-1 ring-slate-900/5 ${
+          className={`absolute top-full z-[60] mt-1 w-64 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-border bg-card shadow-xl ring-1 ring-slate-900/5 ${
             align === 'right' ? 'right-0' : 'left-0'
           }`}
         >
           {showSearch && (
-            <div className="border-b border-slate-100 p-2">
+            <div className="border-b border-border/60 p-2">
               <div className="relative">
-                <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-slate-400" />
+                <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground/75" />
                 <input
                   ref={searchInputRef}
                   type="text"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder={`Search ${label.toLowerCase()}...`}
-                  className="w-full rounded border border-slate-200 bg-slate-50 py-1 pl-7 pr-2 text-[11px] focus:border-blue-400 focus:bg-white focus:outline-none"
+                  className="w-full rounded border border-border bg-muted/50 py-1 pl-7 pr-2 text-[11px] focus:border-blue-400 focus:bg-card focus:outline-none"
                 />
               </div>
             </div>
@@ -171,7 +171,7 @@ export default function FilterDropdown({
 
           <div className="max-h-72 overflow-y-auto py-1">
             {filteredOptions.length === 0 ? (
-              <div className="px-3 py-4 text-center text-[11px] text-slate-400">No matches</div>
+              <div className="px-3 py-4 text-center text-[11px] text-muted-foreground/75">No matches</div>
             ) : (
               filteredOptions.map((opt) => {
                 const checked = selectedSet.has(String(opt.id));
@@ -183,13 +183,13 @@ export default function FilterDropdown({
                     aria-selected={checked}
                     onClick={() => handleSelect(opt.id)}
                     className={`flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[11px] transition-colors ${
-                      checked ? 'bg-blue-50' : 'hover:bg-slate-50'
+                      checked ? 'bg-blue-50 dark:bg-blue-500/15' : 'hover:bg-muted/50'
                     }`}
                   >
                     <span
                       className={`flex h-4 w-4 shrink-0 items-center justify-center rounded ${
                         multi ? 'border' : 'rounded-full border'
-                      } ${checked ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-300 bg-white'}`}
+                      } ${checked ? 'border-blue-600 bg-blue-600 text-white' : 'border-input bg-card'}`}
                     >
                       {checked && (multi ? <Check className="h-3 w-3" /> : <span className="h-1.5 w-1.5 rounded-full bg-white" />)}
                     </span>
@@ -198,18 +198,18 @@ export default function FilterDropdown({
                       <img
                         src={opt.avatarUrl}
                         alt=""
-                        className="h-5 w-5 shrink-0 rounded-full object-cover ring-1 ring-slate-200"
+                        className="h-5 w-5 shrink-0 rounded-full object-cover ring-1 ring-border"
                       />
                     ) : opt.dotClass ? (
                       <span className={`h-2 w-2 shrink-0 rounded-full ${opt.dotClass}`} />
                     ) : null}
 
-                    <span className={`flex-1 truncate ${checked ? 'font-semibold text-slate-900' : 'text-slate-700'}`}>
+                    <span className={`flex-1 truncate ${checked ? 'font-semibold text-foreground' : 'text-foreground/85'}`}>
                       {opt.label}
                     </span>
 
                     {opt.count != null && (
-                      <span className="shrink-0 text-[10px] tabular-nums text-slate-400">{opt.count}</span>
+                      <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/75">{opt.count}</span>
                     )}
                   </button>
                 );
@@ -218,11 +218,11 @@ export default function FilterDropdown({
           </div>
 
           {!isAtDefault && (
-            <div className="border-t border-slate-100 p-1.5">
+            <div className="border-t border-border/60 p-1.5">
               <button
                 type="button"
                 onClick={handleClear}
-                className="flex w-full items-center justify-center gap-1 rounded px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-slate-50 hover:text-slate-700"
+                className="flex w-full items-center justify-center gap-1 rounded px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-muted/50 hover:text-foreground/85"
               >
                 <X className="h-3 w-3" />
                 Clear selection

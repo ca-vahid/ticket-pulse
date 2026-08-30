@@ -54,19 +54,19 @@ export default function FilterBar({
           Wider (w-64 sm:w-80), slightly taller, with a clear focus ring. */}
       {onSearchChange && (
         <div className="relative min-w-0 basis-full sm:basis-auto sm:shrink-0">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/75" />
           <input
             type="text"
             value={localSearch}
             onChange={(e) => handleSearch(e.target.value)}
             placeholder={searchPlaceholder}
-            className="w-full sm:w-80 rounded-lg border border-slate-200 bg-white py-2 sm:py-1.5 pl-8 pr-7 text-[12px] shadow-sm placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100 transition-shadow"
+            className="w-full sm:w-80 rounded-lg border border-border bg-card py-2 sm:py-1.5 pl-8 pr-7 text-[12px] shadow-sm placeholder:text-muted-foreground/75 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30 transition-shadow"
           />
           {localSearch && (
             <button
               type="button"
               onClick={() => handleSearch('')}
-              className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-full p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-full p-0.5 text-muted-foreground/75 hover:bg-muted hover:text-muted-foreground"
               title="Clear search"
             >
               <X className="h-3 w-3" />
@@ -80,7 +80,7 @@ export default function FilterBar({
           status cue, with no border or shadow competing with the dropdowns. */}
       <span
         className={`inline-flex shrink-0 items-center gap-1 text-[11px] font-medium ${
-          activeCount > 0 ? 'text-blue-700' : 'text-slate-400'
+          activeCount > 0 ? 'text-blue-700 dark:text-blue-200' : 'text-muted-foreground/75'
         }`}
         title={activeCount > 0 ? `${activeCount} filter${activeCount === 1 ? '' : 's'} active` : 'No filters applied'}
       >
@@ -98,7 +98,7 @@ export default function FilterBar({
         <button
           type="button"
           onClick={onClearAll}
-          className="shrink-0 rounded-full px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+          className="shrink-0 rounded-full px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
         >
           Clear all
         </button>

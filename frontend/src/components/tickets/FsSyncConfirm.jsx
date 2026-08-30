@@ -19,7 +19,7 @@ export default function FsSyncConfirm({ fsRef, changes = [], busy = false, error
       <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-[2px]" onClick={busy ? undefined : onCancel} aria-hidden="true" />
       <div className="relative w-full max-w-md tp-card rounded-2xl overflow-hidden shadow-soft animate-scaleIn">
         {/* FS-branded header — visually distinct from TP-native edits */}
-        <div className="bg-slate-800 px-5 py-4 flex items-start gap-3">
+        <div className="bg-slate-800 px-5 py-4 flex items-start gap-3 dark:border-b dark:border-white/10 dark:bg-slate-950">
           <span className="h-9 w-9 rounded-xl bg-sky-500/20 text-sky-300 flex items-center justify-center flex-shrink-0">
             <Cloud className="w-5 h-5" aria-hidden="true" />
           </span>
@@ -44,16 +44,16 @@ export default function FsSyncConfirm({ fsRef, changes = [], busy = false, error
           <ul className="space-y-2">
             {changes.map((c) => (
               <li key={c.field} className="flex items-center gap-2 text-sm">
-                <span className="w-20 flex-shrink-0 text-[11px] font-semibold uppercase tracking-wide text-slate-400">{c.field}</span>
-                <span className="text-slate-500 truncate">{c.from ?? '—'}</span>
-                <ArrowRight className="w-3.5 h-3.5 text-slate-300 flex-shrink-0" aria-hidden="true" />
-                <span className="font-semibold text-slate-800 truncate">{c.to ?? '—'}</span>
+                <span className="w-20 flex-shrink-0 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/75">{c.field}</span>
+                <span className="text-muted-foreground truncate">{c.from ?? '—'}</span>
+                <ArrowRight className="w-3.5 h-3.5 text-muted-foreground/50 flex-shrink-0" aria-hidden="true" />
+                <span className="font-semibold text-foreground truncate">{c.to ?? '—'}</span>
               </li>
             ))}
           </ul>
 
           {error && (
-            <div className="mt-3 p-2.5 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700" role="alert">
+            <div className="mt-3 p-2.5 rounded-lg bg-red-50 dark:bg-red-500/15 border border-red-200 dark:border-red-500/30 text-xs text-red-700 dark:text-red-200" role="alert">
               {error} — Ticket Pulse was not changed.
             </div>
           )}
@@ -62,14 +62,14 @@ export default function FsSyncConfirm({ fsRef, changes = [], busy = false, error
             <button
               onClick={onCancel}
               disabled={busy}
-              className="tp-focus-ring px-3.5 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50"
+              className="tp-focus-ring px-3.5 py-2 text-sm font-medium text-muted-foreground bg-card border border-border rounded-lg hover:bg-muted/50"
             >
               Cancel
             </button>
             <button
               onClick={onConfirm}
               disabled={busy}
-              className="tp-focus-ring inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg bg-slate-800 text-white hover:bg-slate-700 disabled:opacity-60"
+              className="tp-focus-ring inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg bg-slate-800 text-white hover:bg-slate-700 disabled:opacity-60 dark:bg-slate-700 dark:ring-1 dark:ring-white/10 dark:hover:bg-slate-600"
             >
               {busy ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Cloud className="w-4 h-4 text-sky-300" aria-hidden="true" />}
               {busy ? 'Writing to FreshService…' : 'Write to FreshService'}

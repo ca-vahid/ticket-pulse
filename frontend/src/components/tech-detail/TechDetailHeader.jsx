@@ -92,19 +92,19 @@ export default function TechDetailHeader({
   const hasSchedule = technician.workStartTime || technician.workEndTime;
 
   return (
-    <header className="bg-white border-b border-slate-200 sticky top-0 z-10 shadow-sm">
+    <header className="bg-card border-b border-border sticky top-0 z-10 shadow-sm">
       <div className="max-w-7xl mx-auto px-3 py-3 sm:px-6">
         <div className="flex flex-wrap items-center gap-3 lg:flex-nowrap lg:gap-4">
           {/* Back button */}
           <button
             onClick={onBack}
-            className="flex min-h-[40px] flex-shrink-0 items-center gap-1.5 text-sm font-medium text-slate-500 transition-colors hover:text-slate-800"
+            className="flex min-h-[40px] flex-shrink-0 items-center gap-1.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
           >
             <ArrowLeft className="w-4 h-4" />
             Back
           </button>
 
-          <div className="hidden h-6 w-px flex-shrink-0 bg-slate-200 sm:block" />
+          <div className="hidden h-6 w-px flex-shrink-0 bg-secondary sm:block" />
 
           {/* Identity */}
           <div className="flex min-w-0 flex-1 items-center gap-3">
@@ -112,7 +112,7 @@ export default function TechDetailHeader({
               <img
                 src={technician.photoUrl}
                 alt={technician.name}
-                className="w-10 h-10 rounded-full object-cover border border-slate-200 flex-shrink-0"
+                className="w-10 h-10 rounded-full object-cover border border-border flex-shrink-0"
               />
             ) : (
               <div className="flex items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-blue-700 w-10 h-10 flex-shrink-0">
@@ -120,8 +120,8 @@ export default function TechDetailHeader({
               </div>
             )}
             <div className="min-w-0">
-              <h1 className="truncate text-base font-bold leading-tight text-slate-900">{technician.name}</h1>
-              <div className="flex items-center gap-2 text-xs text-slate-400 mt-0.5 flex-wrap">
+              <h1 className="truncate text-base font-bold leading-tight text-foreground">{technician.name}</h1>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground/75 mt-0.5 flex-wrap">
                 {location && (
                   <span className="flex min-w-0 items-center gap-1">
                     <MapPin className="w-3 h-3" />
@@ -149,7 +149,7 @@ export default function TechDetailHeader({
             {/* Daily / Weekly / Monthly toggle — fixed-width segments with the
                 icon ALWAYS rendered, so switching modes never shifts layout
                 (the old text-only pills jittered when styling changed). */}
-            <div className="flex flex-shrink-0 bg-slate-100 rounded-lg p-0.5 text-xs font-semibold">
+            <div className="flex flex-shrink-0 bg-muted rounded-lg p-0.5 text-xs font-semibold">
               {[
                 { key: 'daily', label: 'Daily', Icon: Clock3, onClick: handleSwitchToDaily },
                 { key: 'weekly', label: 'Weekly', Icon: CalendarRange, onClick: handleSwitchToWeekly },
@@ -160,7 +160,7 @@ export default function TechDetailHeader({
                   onClick={onClick}
                   aria-pressed={viewMode === key}
                   className={`tp-focus-ring flex w-[92px] items-center justify-center gap-1.5 rounded-md py-1.5 transition-colors ${
-                    viewMode === key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+                    viewMode === key ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
                   }`}
                 >
                   <Icon className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
@@ -169,21 +169,21 @@ export default function TechDetailHeader({
               ))}
             </div>
 
-            <div className="h-5 w-px flex-shrink-0 bg-slate-200" />
+            <div className="h-5 w-px flex-shrink-0 bg-secondary" />
 
             {/* Date / week / month navigation — fixed-width area so layout never shifts */}
             <button
               onClick={onPrevious}
-              className="p-1.5 hover:bg-slate-100 rounded-md transition-colors flex-shrink-0"
+              className="p-1.5 hover:bg-muted rounded-md transition-colors flex-shrink-0"
               title={viewMode === 'weekly' ? 'Previous week' : viewMode === 'monthly' ? 'Previous month' : 'Previous day'}
             >
-              <ChevronLeft className="w-4 h-4 text-slate-500" />
+              <ChevronLeft className="w-4 h-4 text-muted-foreground" />
             </button>
 
             {/* Fixed-width date display: all three modes share the same 216px slot */}
             <div className="flex w-[160px] flex-shrink-0 items-center justify-center sm:w-[216px]">
               {viewMode === 'weekly' ? (
-                <span className="text-sm font-medium text-slate-700 text-center w-full text-center">
+                <span className="text-sm font-medium text-foreground/85 text-center w-full text-center">
                   {weekDisplayLabel}
                 </span>
               ) : viewMode === 'monthly' ? (
@@ -192,7 +192,7 @@ export default function TechDetailHeader({
                   value={monthInputValue}
                   max={maxMonthValue}
                   onChange={handleMonthChange}
-                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent text-slate-700"
+                  className="w-full px-2.5 py-1.5 border border-input rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent text-foreground/85"
                 />
               ) : (
                 <input
@@ -200,7 +200,7 @@ export default function TechDetailHeader({
                   value={selectedDate || formatDateLocal(new Date())}
                   max={formatDateLocal(new Date())}
                   onChange={onDateChange}
-                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent text-slate-700"
+                  className="w-full px-2.5 py-1.5 border border-input rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent text-foreground/85"
                 />
               )}
             </div>
@@ -211,11 +211,11 @@ export default function TechDetailHeader({
               return (
                 <button
                   onClick={atEnd ? undefined : onNext}
-                  className={`p-1.5 rounded-md transition-colors flex-shrink-0 ${atEnd ? 'invisible' : 'hover:bg-slate-100'}`}
+                  className={`p-1.5 rounded-md transition-colors flex-shrink-0 ${atEnd ? 'invisible' : 'hover:bg-muted'}`}
                   title={viewMode === 'weekly' ? 'Next week' : viewMode === 'monthly' ? 'Next month' : 'Next day'}
                   tabIndex={atEnd ? -1 : 0}
                 >
-                  <ChevronRight className="w-4 h-4 text-slate-500" />
+                  <ChevronRight className="w-4 h-4 text-muted-foreground" />
                 </button>
               );
             })()}
@@ -235,7 +235,7 @@ export default function TechDetailHeader({
               );
             })()}
 
-            <div className="h-5 w-px flex-shrink-0 bg-slate-200" />
+            <div className="h-5 w-px flex-shrink-0 bg-secondary" />
 
             <ExportButton
               tickets={allTickets}

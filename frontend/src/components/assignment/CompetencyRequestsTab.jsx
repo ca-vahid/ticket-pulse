@@ -17,10 +17,10 @@ function levelLabel(level) {
 }
 
 function statusClasses(status) {
-  if (status === 'approved') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
-  if (status === 'rejected') return 'bg-red-50 text-red-700 border-red-200';
-  if (status === 'auto_applied') return 'bg-blue-50 text-blue-700 border-blue-200';
-  return 'bg-amber-50 text-amber-700 border-amber-200';
+  if (status === 'approved') return 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 border-emerald-200 dark:border-emerald-500/30';
+  if (status === 'rejected') return 'bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200 border-red-200 dark:border-red-500/30';
+  if (status === 'auto_applied') return 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 border-blue-200 dark:border-blue-500/30';
+  return 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200 border-amber-200 dark:border-amber-500/30';
 }
 
 export default function CompetencyRequestsTab({ onPendingCountChange }) {
@@ -111,24 +111,24 @@ export default function CompetencyRequestsTab({ onPendingCountChange }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-3 rounded-xl border border-border bg-muted/50 p-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-950">
-            <ShieldCheck className="h-5 w-5 text-blue-600" />
+          <h2 className="flex items-center gap-2 text-lg font-semibold text-foreground">
+            <ShieldCheck className="h-5 w-5 text-blue-600 dark:text-blue-300" />
             Competency Requests
           </h2>
-          <p className="mt-1 text-sm text-slate-500">
+          <p className="mt-1 text-sm text-muted-foreground">
             Agent-submitted increases and new skills wait here. Decreases and removals are auto-applied and kept in history.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <span className="rounded-full bg-amber-100 px-3 py-1 text-sm font-semibold text-amber-800">
+          <span className="rounded-full bg-amber-100 dark:bg-amber-500/20 px-3 py-1 text-sm font-semibold text-amber-800 dark:text-amber-200">
             {pendingCount} pending
           </span>
           <select
             value={status}
             onChange={(event) => setStatus(event.target.value)}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700"
+            className="rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium text-foreground/85"
           >
             <option value="pending">Pending</option>
             <option value="all">All history</option>
@@ -139,7 +139,7 @@ export default function CompetencyRequestsTab({ onPendingCountChange }) {
           <button
             type="button"
             onClick={fetchData}
-            className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            className="flex items-center gap-1 rounded-lg border border-border bg-card px-3 py-2 text-sm font-semibold text-foreground/85 hover:bg-muted/50"
           >
             <RefreshCw className="h-4 w-4" />
             Refresh
@@ -148,20 +148,20 @@ export default function CompetencyRequestsTab({ onPendingCountChange }) {
       </div>
 
       {message && (
-        <div className={`rounded-lg px-3 py-2 text-sm ${message.type === 'error' ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'}`}>
+        <div className={`rounded-lg px-3 py-2 text-sm ${message.type === 'error' ? 'bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200' : 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200'}`}>
           {message.text}
         </div>
       )}
 
-      <div className="overflow-hidden rounded-xl border border-slate-200">
+      <div className="overflow-hidden rounded-xl border border-border">
         {loading ? (
           <div className="flex items-center justify-center p-10">
-            <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
+            <Loader2 className="h-6 w-6 animate-spin text-blue-600 dark:text-blue-300" />
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
-              <thead className="bg-slate-50 text-left text-xs font-semibold uppercase text-slate-500">
+              <thead className="bg-muted/50 text-left text-xs font-semibold uppercase text-muted-foreground">
                 <tr>
                   <th className="px-4 py-3">Agent</th>
                   <th className="px-4 py-3">Skill</th>
@@ -175,14 +175,14 @@ export default function CompetencyRequestsTab({ onPendingCountChange }) {
                 {displayGroups.map((group) => (
                   <Fragment key={group.key}>
                     {group.isBatch && (
-                      <tr className="border-t border-blue-100 bg-blue-50/70">
+                      <tr className="border-t border-blue-100 dark:border-blue-500/20 bg-blue-50/70 dark:bg-blue-500/10">
                         <td colSpan={6} className="px-4 py-3">
                           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                             <div>
-                              <div className="font-semibold text-blue-950">
+                              <div className="font-semibold text-blue-950 dark:text-blue-200">
                                 Request bundle: {group.items.length} skills from {group.items[0]?.technician?.name}
                               </div>
-                              <div className="mt-0.5 text-xs text-blue-700">
+                              <div className="mt-0.5 text-xs text-blue-700 dark:text-blue-200">
                                 {group.note || 'No shared note provided.'}
                               </div>
                             </div>
@@ -192,7 +192,7 @@ export default function CompetencyRequestsTab({ onPendingCountChange }) {
                                   type="button"
                                   onClick={() => decideGroup(group, 'rejected')}
                                   disabled={actingGroupId === group.key}
-                                  className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+                                  className="rounded-lg border border-red-200 dark:border-red-500/30 bg-card px-3 py-1.5 text-xs font-semibold text-red-700 dark:text-red-200 hover:bg-red-50 dark:hover:bg-red-500/15 disabled:opacity-50"
                                 >
                                   Reject all
                                 </button>
@@ -211,24 +211,24 @@ export default function CompetencyRequestsTab({ onPendingCountChange }) {
                       </tr>
                     )}
                     {group.items.map((request) => (
-                      <tr key={request.id} className={`border-t border-slate-100 hover:bg-slate-50 ${group.isBatch ? 'bg-blue-50/20' : ''}`}>
+                      <tr key={request.id} className={`border-t border-border/60 hover:bg-muted/50 ${group.isBatch ? 'bg-blue-50/20 dark:bg-blue-500/10' : ''}`}>
                         <td className="px-4 py-3">
-                          <div className="font-semibold text-slate-900">{request.technician?.name}</div>
-                          <div className="text-xs text-slate-500">{request.technician?.email}</div>
+                          <div className="font-semibold text-foreground">{request.technician?.name}</div>
+                          <div className="text-xs text-muted-foreground">{request.technician?.email}</div>
                         </td>
                         <td className="px-4 py-3">
-                          <div className="font-semibold text-slate-900">{request.competencyCategory?.name}</div>
+                          <div className="font-semibold text-foreground">{request.competencyCategory?.name}</div>
                           {request.competencyCategory?.parent?.name && (
-                            <div className="text-xs text-slate-500">{request.competencyCategory.parent.name}</div>
+                            <div className="text-xs text-muted-foreground">{request.competencyCategory.parent.name}</div>
                           )}
                         </td>
                         <td className="px-4 py-3">
-                          <div className="font-medium text-slate-800">
+                          <div className="font-medium text-foreground">
                             {levelLabel(request.currentLevel)} to {levelLabel(request.requestedLevel)}
                           </div>
-                          <div className="text-xs text-slate-500">{request.requestType}</div>
+                          <div className="text-xs text-muted-foreground">{request.requestType}</div>
                         </td>
-                        <td className="max-w-xs px-4 py-3 text-slate-600">
+                        <td className="max-w-xs px-4 py-3 text-muted-foreground">
                           <div className="line-clamp-3">{request.note || '-'}</div>
                         </td>
                         <td className="px-4 py-3">
@@ -244,7 +244,7 @@ export default function CompetencyRequestsTab({ onPendingCountChange }) {
                                 type="button"
                                 onClick={() => decide(request, 'rejected')}
                                 disabled={actingId === request.id || actingGroupId === group.key}
-                                className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100 disabled:opacity-50"
+                                className="rounded-lg border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 px-3 py-1.5 text-xs font-semibold text-red-700 dark:text-red-200 hover:bg-red-100 dark:hover:bg-red-500/20 disabled:opacity-50"
                               >
                                 Reject
                               </button>
@@ -258,7 +258,7 @@ export default function CompetencyRequestsTab({ onPendingCountChange }) {
                               </button>
                             </div>
                           ) : (
-                            <div className="text-right text-xs text-slate-400">
+                            <div className="text-right text-xs text-muted-foreground/75">
                               {request.reviewedAt ? new Date(request.reviewedAt).toLocaleString() : '-'}
                             </div>
                           )}
@@ -269,7 +269,7 @@ export default function CompetencyRequestsTab({ onPendingCountChange }) {
                 ))}
                 {items.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-4 py-10 text-center text-sm text-slate-400">
+                    <td colSpan={6} className="px-4 py-10 text-center text-sm text-muted-foreground/75">
                       No competency requests in this view.
                     </td>
                   </tr>

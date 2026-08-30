@@ -133,8 +133,8 @@ export default function AutoResponseSettings() {
 
   if (isLoading) {
     return (
-      <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
-        <p className="text-gray-600">Loading auto-response settings...</p>
+      <div className="bg-card rounded-lg shadow-sm p-6 border border-border">
+        <p className="text-muted-foreground">Loading auto-response settings...</p>
       </div>
     );
   }
@@ -143,20 +143,20 @@ export default function AutoResponseSettings() {
     <div className="space-y-6">
       {/* Status Banner */}
       {availability && (
-        <div className={`p-4 rounded-lg ${availability.isBusinessHours ? 'bg-green-50' : 'bg-yellow-50'}`}>
+        <div className={`p-4 rounded-lg ${availability.isBusinessHours ? 'bg-green-50 dark:bg-green-500/15' : 'bg-yellow-50 dark:bg-yellow-500/15'}`}>
           <div className="flex items-center gap-2">
             {availability.isBusinessHours ? (
-              <CheckCircle className="w-5 h-5 text-green-600" />
+              <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-300" />
             ) : (
-              <XCircle className="w-5 h-5 text-yellow-600" />
+              <XCircle className="w-5 h-5 text-yellow-600 dark:text-yellow-300" />
             )}
             <div>
-              <p className={`font-semibold ${availability.isBusinessHours ? 'text-green-800' : 'text-yellow-800'}`}>
+              <p className={`font-semibold ${availability.isBusinessHours ? 'text-green-800 dark:text-green-200' : 'text-yellow-800 dark:text-yellow-200'}`}>
                 {availability.isBusinessHours ? 'Currently In Business Hours' : 'Currently Outside Business Hours'}
               </p>
-              <p className="text-sm text-gray-700">{availability.reason}</p>
+              <p className="text-sm text-foreground/85">{availability.reason}</p>
               {availability.isHoliday && (
-                <p className="text-sm text-gray-700">Holiday: {availability.holidayName}</p>
+                <p className="text-sm text-foreground/85">Holiday: {availability.holidayName}</p>
               )}
             </div>
           </div>
@@ -164,7 +164,7 @@ export default function AutoResponseSettings() {
       )}
 
       {/* Business Hours Section */}
-      <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
+      <div className="bg-card rounded-lg shadow-sm p-6 border border-border">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold flex items-center gap-2">
             <Clock className="w-5 h-5" />
@@ -181,14 +181,14 @@ export default function AutoResponseSettings() {
 
         <div className="space-y-3">
           {businessHours.length === 0 ? (
-            <p className="text-gray-500 text-sm">No business hours configured. Add hours to enable auto-responses.</p>
+            <p className="text-muted-foreground text-sm">No business hours configured. Add hours to enable auto-responses.</p>
           ) : (
             businessHours.map((hour, index) => (
-              <div key={index} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+              <div key={index} className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg">
                 <select
                   value={hour.dayOfWeek}
                   onChange={(e) => handleBusinessHoursChange(index, 'dayOfWeek', parseInt(e.target.value))}
-                  className="px-3 py-2 border border-gray-300 rounded text-sm"
+                  className="px-3 py-2 border border-input rounded text-sm"
                 >
                   {daysOfWeek.map((day, i) => (
                     <option key={i} value={i}>{day}</option>
@@ -199,16 +199,16 @@ export default function AutoResponseSettings() {
                   type="time"
                   value={hour.startTime}
                   onChange={(e) => handleBusinessHoursChange(index, 'startTime', e.target.value)}
-                  className="px-3 py-2 border border-gray-300 rounded text-sm"
+                  className="px-3 py-2 border border-input rounded text-sm"
                 />
 
-                <span className="text-gray-500">to</span>
+                <span className="text-muted-foreground">to</span>
 
                 <input
                   type="time"
                   value={hour.endTime}
                   onChange={(e) => handleBusinessHoursChange(index, 'endTime', e.target.value)}
-                  className="px-3 py-2 border border-gray-300 rounded text-sm"
+                  className="px-3 py-2 border border-input rounded text-sm"
                 />
 
                 <label className="flex items-center gap-2">
@@ -223,7 +223,7 @@ export default function AutoResponseSettings() {
 
                 <button
                   onClick={() => handleRemoveBusinessHour(index)}
-                  className="ml-auto text-red-600 hover:text-red-700 p-1"
+                  className="ml-auto text-red-600 dark:text-red-300 hover:text-red-700 dark:hover:text-red-200 p-1"
                 >
                   <Trash2 className="w-4 h-4" />
                 </button>
@@ -241,14 +241,14 @@ export default function AutoResponseSettings() {
       </div>
 
       {/* Holidays Section */}
-      <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
+      <div className="bg-card rounded-lg shadow-sm p-6 border border-border">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold flex items-center gap-2">
             <Calendar className="w-5 h-5" />
             Holidays
           </h2>
           <div className="flex items-center gap-2">
-            <label className="flex items-center gap-1 text-xs text-gray-600" title="First year to load; the following year is loaded too">
+            <label className="flex items-center gap-1 text-xs text-muted-foreground" title="First year to load; the following year is loaded too">
               <span>From</span>
               <input
                 type="number"
@@ -261,7 +261,7 @@ export default function AutoResponseSettings() {
                 }}
                 onBlur={() => { if (!Number.isInteger(loadStartYear)) setLoadStartYear(CURRENT_YEAR); }}
                 aria-label="First year of Canadian holidays to load"
-                className="w-[4.5rem] px-2 py-1 border border-gray-300 rounded text-sm tp-focus-ring"
+                className="w-[4.5rem] px-2 py-1 border border-input rounded text-sm tp-focus-ring"
               />
             </label>
             <button
@@ -285,14 +285,14 @@ export default function AutoResponseSettings() {
 
         <div className="space-y-2">
           {holidays.length === 0 ? (
-            <p className="text-gray-500 text-sm">No holidays configured.</p>
+            <p className="text-muted-foreground text-sm">No holidays configured.</p>
           ) : (
             <div className="max-h-64 overflow-y-auto">
               {holidays.map((holiday) => (
-                <div key={holiday.id} className="flex items-center justify-between p-2 hover:bg-gray-50 rounded">
+                <div key={holiday.id} className="flex items-center justify-between p-2 hover:bg-muted/50 rounded">
                   <div className="flex-1">
                     <p className="font-medium text-sm">{holiday.name}</p>
-                    <p className="text-xs text-gray-500">
+                    <p className="text-xs text-muted-foreground">
                       {/* UTC-safe: the DATE column serializes as UTC midnight —
                           `new Date(...).toLocaleDateString()` showed the previous
                           day west of UTC ("Labour Day 8/31", QA 08-25 #3). */}
@@ -303,7 +303,7 @@ export default function AutoResponseSettings() {
                   </div>
                   <button
                     onClick={() => handleDeleteHoliday(holiday.id)}
-                    className="text-red-600 hover:text-red-700 p-1"
+                    className="text-red-600 dark:text-red-300 hover:text-red-700 dark:hover:text-red-200 p-1"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -316,7 +316,7 @@ export default function AutoResponseSettings() {
 
       {/* Status Messages */}
       {saveStatus && (
-        <div className={`flex items-center gap-2 p-4 rounded-lg ${saveStatus.success ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
+        <div className={`flex items-center gap-2 p-4 rounded-lg ${saveStatus.success ? 'bg-green-50 dark:bg-green-500/15 text-green-800 dark:text-green-200' : 'bg-red-50 dark:bg-red-500/15 text-red-800 dark:text-red-200'}`}>
           {saveStatus.success ? <CheckCircle className="w-5 h-5" /> : <XCircle className="w-5 h-5" />}
           <span>{saveStatus.message}</span>
         </div>

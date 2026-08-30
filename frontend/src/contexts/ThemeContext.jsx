@@ -27,6 +27,8 @@ export const DARK_MEDIA_QUERY = '(prefers-color-scheme: dark)';
 // Mirrors index.html: the light value is the existing meta (unchanged), the
 // dark value is the dark --background.
 export const THEME_COLOR = { light: '#0f172a', dark: '#090e1a' };
+/** window event fired after the resolved theme is stamped on <html>. */
+export const THEME_CHANGED_EVENT = 'tp:theme-changed';
 const SAVE_DEBOUNCE_MS = 600;
 const WORKSPACE_EVENT = 'tp:workspace-selected';
 
@@ -73,6 +75,13 @@ export function applyResolvedTheme(resolved) {
   root.classList.toggle('dark', resolved === 'dark');
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.setAttribute('content', THEME_COLOR[resolved] || THEME_COLOR.light);
+  // Non-React consumers (Highcharts theme, Leaflet tiles) re-read the CSS
+  // tokens on this event; it fires after the class is stamped.
+  if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+    try {
+      window.dispatchEvent(new CustomEvent(THEME_CHANGED_EVENT, { detail: { resolved } }));
+    } catch { /* CustomEvent unavailable (very old runtime) */ }
+  }
 }
 
 const ThemeContext = createContext(null);

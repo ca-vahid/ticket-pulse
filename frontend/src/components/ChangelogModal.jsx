@@ -6,45 +6,50 @@ const TYPE_CONFIG = {
   new: {
     label: 'New',
     icon: Sparkles,
-    badgeBg: 'bg-emerald-50',
-    badgeText: 'text-emerald-700',
-    badgeBorder: 'border-emerald-200',
+    badgeBg: 'bg-emerald-50 dark:bg-emerald-500/15',
+    badgeText: 'text-emerald-700 dark:text-emerald-200',
+    badgeBorder: 'border-emerald-200 dark:border-emerald-500/30',
+    ring: 'ring-emerald-300 dark:ring-emerald-500/40',
     pillBg: 'bg-emerald-500',
     dotColor: 'bg-emerald-500',
   },
   improved: {
     label: 'Improved',
     icon: RefreshCw,
-    badgeBg: 'bg-blue-50',
-    badgeText: 'text-blue-700',
-    badgeBorder: 'border-blue-200',
+    badgeBg: 'bg-blue-50 dark:bg-blue-500/15',
+    badgeText: 'text-blue-700 dark:text-blue-200',
+    badgeBorder: 'border-blue-200 dark:border-blue-500/30',
+    ring: 'ring-blue-300 dark:ring-blue-500/40',
     pillBg: 'bg-blue-500',
     dotColor: 'bg-blue-500',
   },
   fixed: {
     label: 'Fixed',
     icon: Bug,
-    badgeBg: 'bg-red-50',
-    badgeText: 'text-red-700',
-    badgeBorder: 'border-red-200',
+    badgeBg: 'bg-red-50 dark:bg-red-500/15',
+    badgeText: 'text-red-700 dark:text-red-200',
+    badgeBorder: 'border-red-200 dark:border-red-500/30',
+    ring: 'ring-red-300 dark:ring-red-500/40',
     pillBg: 'bg-red-500',
     dotColor: 'bg-red-500',
   },
   security: {
     label: 'Security',
     icon: Shield,
-    badgeBg: 'bg-amber-50',
-    badgeText: 'text-amber-700',
-    badgeBorder: 'border-amber-200',
+    badgeBg: 'bg-amber-50 dark:bg-amber-500/15',
+    badgeText: 'text-amber-700 dark:text-amber-200',
+    badgeBorder: 'border-amber-200 dark:border-amber-500/30',
+    ring: 'ring-amber-300 dark:ring-amber-500/40',
     pillBg: 'bg-amber-500',
     dotColor: 'bg-amber-500',
   },
   database: {
     label: 'Database',
     icon: Database,
-    badgeBg: 'bg-violet-50',
-    badgeText: 'text-violet-700',
-    badgeBorder: 'border-violet-200',
+    badgeBg: 'bg-violet-50 dark:bg-violet-500/15',
+    badgeText: 'text-violet-700 dark:text-violet-200',
+    badgeBorder: 'border-violet-200 dark:border-violet-500/30',
+    ring: 'ring-violet-300 dark:ring-violet-500/40',
     pillBg: 'bg-violet-500',
     dotColor: 'bg-violet-500',
   },
@@ -53,9 +58,10 @@ const TYPE_CONFIG = {
 const FALLBACK_CONFIG = {
   label: 'Other',
   icon: Info,
-  badgeBg: 'bg-gray-50',
-  badgeText: 'text-gray-700',
-  badgeBorder: 'border-gray-200',
+  badgeBg: 'bg-muted/50',
+  badgeText: 'text-foreground/85',
+  badgeBorder: 'border-border',
+  ring: 'ring-border',
   pillBg: 'bg-gray-500',
   dotColor: 'bg-gray-500',
 };
@@ -110,7 +116,7 @@ export default function ChangelogModal({ isOpen, onClose }) {
     >
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
 
-      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden mx-4">
+      <div className="relative bg-card rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden mx-4">
         {/* Header */}
         <div className="bg-gradient-to-r from-blue-600 to-indigo-700 px-6 py-5 text-white">
           <div className="flex items-start justify-between">
@@ -135,13 +141,13 @@ export default function ChangelogModal({ isOpen, onClose }) {
         {/* Search */}
         <div className="px-6 pt-4 pb-3">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground/75" />
             <input
               type="text"
               placeholder="Search changelog..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400"
+              className="w-full pl-10 pr-4 py-2.5 bg-muted/50 border border-border rounded-xl text-sm text-foreground placeholder:text-muted-foreground/75 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400"
             />
           </div>
         </div>
@@ -157,8 +163,8 @@ export default function ChangelogModal({ isOpen, onClose }) {
                 onClick={() => toggleFilter(type)}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all border ${
                   isActive
-                    ? `${config.badgeBg} ${config.badgeText} ${config.badgeBorder} ring-2 ring-offset-1 ring-${type === 'new' ? 'emerald' : type === 'improved' ? 'blue' : type === 'fixed' ? 'red' : 'amber'}-300`
-                    : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                    ? `${config.badgeBg} ${config.badgeText} ${config.badgeBorder} ring-2 ring-offset-1 ring-offset-card ${config.ring}`
+                    : 'bg-card text-muted-foreground border-border hover:bg-muted/50'
                 }`}
               >
                 <Icon className="w-3 h-3" />
@@ -169,7 +175,7 @@ export default function ChangelogModal({ isOpen, onClose }) {
         </div>
 
         {/* Divider */}
-        <div className="border-t border-gray-100" />
+        <div className="border-t border-border/60" />
 
         {/* Changelog Entries */}
         <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
@@ -186,10 +192,10 @@ export default function ChangelogModal({ isOpen, onClose }) {
                       v{release.version}
                     </span>
                     {release.version === APP_VERSION && (
-                      <span className="text-xs text-gray-400 font-medium">Latest</span>
+                      <span className="text-xs text-muted-foreground/75 font-medium">Latest</span>
                     )}
                   </div>
-                  <span className="text-sm text-gray-400">{release.date}</span>
+                  <span className="text-sm text-muted-foreground/75">{release.date}</span>
                 </div>
 
                 {/* Entries */}
@@ -204,11 +210,11 @@ export default function ChangelogModal({ isOpen, onClose }) {
                         </span>
                         {entry.html ? (
                           <p
-                            className="text-sm text-gray-700 leading-relaxed [&_strong]:font-semibold [&_strong]:text-gray-900 [&_mark]:rounded [&_mark]:bg-amber-100 [&_mark]:px-1 [&_mark]:py-0.5 [&_mark]:text-amber-900"
+                            className="text-sm text-foreground/85 leading-relaxed [&_strong]:font-semibold [&_strong]:text-foreground [&_mark]:rounded [&_mark]:bg-amber-100 dark:[&_mark]:bg-amber-500/20 [&_mark]:px-1 [&_mark]:py-0.5 [&_mark]:text-amber-900 dark:[&_mark]:text-amber-200"
                             dangerouslySetInnerHTML={{ __html: entry.html }}
                           />
                         ) : (
-                          <p className="text-sm text-gray-700 leading-relaxed">{entry.text}</p>
+                          <p className="text-sm text-foreground/85 leading-relaxed">{entry.text}</p>
                         )}
                       </div>
                     );
@@ -220,7 +226,7 @@ export default function ChangelogModal({ isOpen, onClose }) {
 
           {/* Empty State */}
           {changelog.every(r => filterEntries(r.entries).length === 0) && (
-            <div className="text-center py-8 text-gray-400">
+            <div className="text-center py-8 text-muted-foreground/75">
               <Search className="w-8 h-8 mx-auto mb-2 opacity-50" />
               <p className="text-sm">No entries match your search</p>
             </div>

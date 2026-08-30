@@ -12,16 +12,16 @@ const SECTIONS = [
     id: 'working',
     title: 'Working Well',
     shortTitle: 'Working',
-    iconClass: 'bg-emerald-100 text-emerald-700',
-    borderClass: 'border-emerald-200',
+    iconClass: 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-200',
+    borderClass: 'border-emerald-200 dark:border-emerald-500/30',
     buttonClass: 'bg-emerald-600 hover:bg-emerald-700',
   },
   {
     id: 'attention',
     title: 'Needs Attention',
     shortTitle: 'Attention',
-    iconClass: 'bg-amber-100 text-amber-700',
-    borderClass: 'border-amber-200',
+    iconClass: 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-200',
+    borderClass: 'border-amber-200 dark:border-amber-500/30',
     buttonClass: 'bg-amber-600 hover:bg-amber-700',
   },
 ];
@@ -107,17 +107,17 @@ function buildFeedbackAnalytics(feedback) {
 
 function Toast({ toast, onClose }) {
   return (
-    <div className="animate-[summitFeedbackToast_.18s_ease-out] overflow-hidden rounded-xl border border-blue-200 bg-white shadow-2xl">
+    <div className="animate-[summitFeedbackToast_.18s_ease-out] overflow-hidden rounded-xl border border-blue-200 dark:border-blue-500/30 bg-card shadow-2xl">
       <div className="h-1 bg-blue-500" />
       <div className="flex gap-3 p-3">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-300">
           <Sparkles className="h-4 w-4" />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-semibold text-slate-950">{toast.title}</div>
-          <div className="mt-0.5 text-sm text-slate-600">{toast.message}</div>
+          <div className="text-sm font-semibold text-foreground">{toast.title}</div>
+          <div className="mt-0.5 text-sm text-muted-foreground">{toast.message}</div>
         </div>
-        <button type="button" onClick={() => onClose(toast.id)} className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700">
+        <button type="button" onClick={() => onClose(toast.id)} className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground/75 transition hover:bg-muted hover:text-foreground/85">
           <X className="h-4 w-4" />
         </button>
       </div>
@@ -127,37 +127,37 @@ function Toast({ toast, onClose }) {
 
 function SummaryMetric({ icon: Icon, label, item, emptyText, tone = 'blue' }) {
   const toneClasses = {
-    emerald: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-    amber: 'border-amber-200 bg-amber-50 text-amber-700',
-    blue: 'border-blue-200 bg-blue-50 text-blue-700',
-    violet: 'border-violet-200 bg-violet-50 text-violet-700',
+    emerald: 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200',
+    amber: 'border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200',
+    blue: 'border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200',
+    violet: 'border-violet-200 dark:border-violet-500/30 bg-violet-50 dark:bg-violet-500/15 text-violet-700 dark:text-violet-200',
   }[tone];
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+    <div className="rounded-xl border border-border bg-card p-3 shadow-sm">
       <div className="flex items-center gap-2">
         <span className={`flex h-8 w-8 items-center justify-center rounded-lg border ${toneClasses}`}>
           <Icon className="h-4 w-4" />
         </span>
-        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</div>
+        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{label}</div>
       </div>
       {item ? (
         <div className="mt-3">
-          <div className="line-clamp-2 text-sm font-bold text-slate-950">{item.title}</div>
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+          <div className="line-clamp-2 text-sm font-bold text-foreground">{item.title}</div>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <span>by {item.participantName || 'Unknown'}</span>
-            <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-700">
+            <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 font-semibold text-foreground/85">
               <ThumbsUp className="h-3 w-3" />
               {item.supportCount || 0}
             </span>
-            <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-700">
+            <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 font-semibold text-foreground/85">
               <MessageCircle className="h-3 w-3" />
               {item.commentCount || 0}
             </span>
           </div>
         </div>
       ) : (
-        <div className="mt-3 text-sm font-medium text-slate-400">{emptyText}</div>
+        <div className="mt-3 text-sm font-medium text-muted-foreground/75">{emptyText}</div>
       )}
     </div>
   );
@@ -169,20 +169,20 @@ function FeedbackSummary({ feedback }) {
   const workingPercent = totalItems ? Math.round((feedback.counts.working / totalItems) * 100) : 0;
 
   return (
-    <section className="mb-4 rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-sm">
+    <section className="mb-4 rounded-2xl border border-border bg-card/95 p-4 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <div className="flex items-center gap-2 text-lg font-bold text-slate-950">
-            <BarChart3 className="h-5 w-5 text-blue-600" />
+          <div className="flex items-center gap-2 text-lg font-bold text-foreground">
+            <BarChart3 className="h-5 w-5 text-blue-600 dark:text-blue-300" />
             Summit Feedback Summary
           </div>
-          <p className="mt-1 text-sm text-slate-500">Top selections, discussion hotspots, and participation from the live Working Well / Needs Attention board.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Top selections, discussion hotspots, and participation from the live Working Well / Needs Attention board.</p>
         </div>
         <div className="flex flex-wrap gap-2 text-xs font-semibold">
-          <span className="rounded-full bg-emerald-50 px-3 py-1 text-emerald-700">{feedback.counts.working} working</span>
-          <span className="rounded-full bg-amber-50 px-3 py-1 text-amber-700">{feedback.counts.attention} attention</span>
-          <span className="rounded-full bg-blue-50 px-3 py-1 text-blue-700">{feedback.counts.votes} votes</span>
-          <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">{feedback.counts.comments} comments</span>
+          <span className="rounded-full bg-emerald-50 dark:bg-emerald-500/15 px-3 py-1 text-emerald-700 dark:text-emerald-200">{feedback.counts.working} working</span>
+          <span className="rounded-full bg-amber-50 dark:bg-amber-500/15 px-3 py-1 text-amber-700 dark:text-amber-200">{feedback.counts.attention} attention</span>
+          <span className="rounded-full bg-blue-50 dark:bg-blue-500/15 px-3 py-1 text-blue-700 dark:text-blue-200">{feedback.counts.votes} votes</span>
+          <span className="rounded-full bg-muted px-3 py-1 text-foreground/85">{feedback.counts.comments} comments</span>
         </div>
       </div>
 
@@ -190,48 +190,48 @@ function FeedbackSummary({ feedback }) {
         <SummaryMetric icon={Trophy} label="Top Working Well" item={analytics.topWorking} emptyText="No working items yet" tone="emerald" />
         <SummaryMetric icon={Trophy} label="Top Needs Attention" item={analytics.topAttention} emptyText="No attention items yet" tone="amber" />
         <SummaryMetric icon={MessageCircle} label="Most Discussed" item={analytics.mostDiscussed} emptyText="No comments yet" tone="blue" />
-        <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+        <div className="rounded-xl border border-border bg-card p-3 shadow-sm">
           <div className="flex items-center gap-2">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-violet-200 bg-violet-50 text-violet-700">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-violet-200 dark:border-violet-500/30 bg-violet-50 dark:bg-violet-500/15 text-violet-700 dark:text-violet-200">
               <UsersRound className="h-4 w-4" />
             </span>
-            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Top Contributors</div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Top Contributors</div>
           </div>
           <div className="mt-3 space-y-2">
             {analytics.submitters.length ? analytics.submitters.slice(0, 3).map((person) => (
               <div key={person.name} className="flex items-center justify-between gap-2 text-sm">
-                <span className="min-w-0 truncate font-semibold text-slate-800">{person.name}</span>
-                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-600">{person.items} items</span>
+                <span className="min-w-0 truncate font-semibold text-foreground">{person.name}</span>
+                <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-bold text-muted-foreground">{person.items} items</span>
               </div>
-            )) : <div className="text-sm font-medium text-slate-400">No contributors yet</div>}
+            )) : <div className="text-sm font-medium text-muted-foreground/75">No contributors yet</div>}
           </div>
         </div>
       </div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div>
-          <div className="mb-2 flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-slate-500">
+          <div className="mb-2 flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             <span>Working vs Attention Split</span>
             <span>{totalItems || 0} total items</span>
           </div>
-          <div className="h-3 overflow-hidden rounded-full bg-amber-100">
+          <div className="h-3 overflow-hidden rounded-full bg-amber-100 dark:bg-amber-500/20">
             <div className="h-full rounded-full bg-emerald-500 transition-all duration-700" style={{ width: `${workingPercent}%` }} />
           </div>
-          <div className="mt-2 flex justify-between text-xs text-slate-500">
+          <div className="mt-2 flex justify-between text-xs text-muted-foreground">
             <span>{workingPercent}% working</span>
             <span>{100 - workingPercent}% attention</span>
           </div>
         </div>
         <div>
-          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Top Selections</div>
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Top Selections</div>
           <div className="space-y-1.5">
             {analytics.topOverall.length ? analytics.topOverall.slice(0, 4).map((item, index) => (
-              <div key={item.itemId} className="flex items-center gap-2 rounded-lg bg-slate-50 px-2.5 py-2 text-sm">
-                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white text-xs font-bold text-slate-600 shadow-sm">{index + 1}</span>
-                <span className="min-w-0 flex-1 truncate font-semibold text-slate-800">{item.title}</span>
-                <span className="shrink-0 rounded-full bg-blue-50 px-2 py-0.5 text-xs font-bold text-blue-700">{item.supportCount || 0}</span>
+              <div key={item.itemId} className="flex items-center gap-2 rounded-lg bg-muted/50 px-2.5 py-2 text-sm">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-card text-xs font-bold text-muted-foreground shadow-sm">{index + 1}</span>
+                <span className="min-w-0 flex-1 truncate font-semibold text-foreground">{item.title}</span>
+                <span className="shrink-0 rounded-full bg-blue-50 dark:bg-blue-500/15 px-2 py-0.5 text-xs font-bold text-blue-700 dark:text-blue-200">{item.supportCount || 0}</span>
               </div>
-            )) : <div className="rounded-lg bg-slate-50 px-3 py-3 text-sm text-slate-400">No selections yet.</div>}
+            )) : <div className="rounded-lg bg-muted/50 px-3 py-3 text-sm text-muted-foreground/75">No selections yet.</div>}
           </div>
         </div>
       </div>
@@ -271,22 +271,22 @@ function FeedbackCard({
 
   return (
     <div className={`group rounded-xl border p-4 transition-all duration-500 ease-out hover:-translate-y-0.5 ${
-      dark ? 'bg-slate-900/95 text-white shadow-xl shadow-black/20 hover:border-cyan-300/40 hover:bg-slate-900' : 'bg-white shadow-sm hover:shadow-md'
+      dark ? 'bg-slate-900/95 text-white shadow-xl shadow-black/20 hover:border-cyan-300/40 hover:bg-slate-900' : 'bg-card shadow-sm hover:shadow-md'
     } ${
       highlighted
         ? dark
           ? 'animate-[summitFeedbackPulse_1.3s_ease-out] border-cyan-300 ring-2 ring-cyan-400/20'
-          : 'animate-[summitFeedbackPulse_1.3s_ease-out] border-blue-300 ring-2 ring-blue-100'
-        : dark ? 'border-white/10' : 'border-slate-200'
+          : 'animate-[summitFeedbackPulse_1.3s_ease-out] border-blue-300 dark:border-blue-500/40 ring-2 ring-blue-100 dark:ring-blue-500/30'
+        : dark ? 'border-white/10' : 'border-border'
     }`}>
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className={`break-words text-base font-semibold ${dark ? 'text-white' : 'text-slate-950'}`}>{item.title}</h3>
-            <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${dark ? 'bg-white/10 text-slate-200' : 'bg-slate-100 text-slate-500'}`}>by {item.participantName}</span>
+            <h3 className={`break-words text-base font-semibold ${dark ? 'text-white' : 'text-foreground'}`}>{item.title}</h3>
+            <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${dark ? 'bg-white/10 text-slate-200' : 'bg-muted text-muted-foreground'}`}>by {item.participantName}</span>
           </div>
-          {item.note && <p className={`mt-2 whitespace-pre-wrap text-sm leading-6 ${dark ? 'text-slate-300' : 'text-slate-600'}`}>{item.note}</p>}
-          <div className={`mt-3 flex flex-wrap items-center gap-2 text-xs ${dark ? 'text-slate-400' : 'text-slate-500'}`}>
+          {item.note && <p className={`mt-2 whitespace-pre-wrap text-sm leading-6 ${dark ? 'text-slate-300' : 'text-muted-foreground'}`}>{item.note}</p>}
+          <div className={`mt-3 flex flex-wrap items-center gap-2 text-xs ${dark ? 'text-slate-400' : 'text-muted-foreground'}`}>
             <span>{new Date(item.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
             <span>•</span>
             <span>{item.commentCount} comment{item.commentCount === 1 ? '' : 's'}</span>
@@ -296,7 +296,7 @@ function FeedbackCard({
                 <button
                   type="button"
                   onClick={() => onEdit(item)}
-                  className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 font-semibold text-blue-600 transition hover:bg-blue-50"
+                  className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 font-semibold text-blue-600 dark:text-blue-300 transition hover:bg-blue-50 dark:hover:bg-blue-500/15"
                 >
                   <Edit3 className="h-3.5 w-3.5" />
                   Rename
@@ -304,7 +304,7 @@ function FeedbackCard({
                 <button
                   type="button"
                   onClick={() => onDelete(item)}
-                  className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 font-semibold text-red-600 transition hover:bg-red-50"
+                  className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 font-semibold text-red-600 dark:text-red-300 transition hover:bg-red-50 dark:hover:bg-red-500/15"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                   Delete
@@ -319,8 +319,8 @@ function FeedbackCard({
           onClick={() => onVote(item)}
           className={`flex min-w-[78px] shrink-0 items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-bold transition duration-200 hover:-translate-y-0.5 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 ${
             item.isSupportedByMe
-              ? dark ? 'border-cyan-300 bg-cyan-400 text-slate-950 shadow-md shadow-cyan-950/30' : 'border-blue-200 bg-blue-600 text-white shadow-md shadow-blue-100'
-              : dark ? 'border-white/10 bg-slate-950 text-slate-200 hover:bg-slate-800' : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-white'
+              ? dark ? 'border-cyan-300 bg-cyan-400 text-slate-900 shadow-md shadow-cyan-950/30' : 'border-blue-200 dark:border-blue-500/30 bg-blue-600 text-white shadow-md shadow-blue-100 dark:shadow-blue-500/20'
+              : dark ? 'border-white/10 bg-slate-950 text-slate-200 hover:bg-slate-800' : 'border-border bg-muted/50 text-foreground/85 hover:bg-card'
           }`}
           aria-pressed={!!item.isSupportedByMe}
         >
@@ -329,11 +329,11 @@ function FeedbackCard({
         </button>
       </div>
 
-      <div className={`mt-3 border-t pt-3 ${dark ? 'border-white/10' : 'border-slate-100'}`}>
+      <div className={`mt-3 border-t pt-3 ${dark ? 'border-white/10' : 'border-border/60'}`}>
         <button
           type="button"
           onClick={() => setExpanded((value) => !value)}
-          className={`inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-semibold transition ${dark ? 'text-slate-300 hover:bg-white/10 hover:text-white' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'}`}
+          className={`inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-semibold transition ${dark ? 'text-slate-300 hover:bg-white/10 hover:text-white' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
         >
           {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
           {expanded ? 'Hide details' : 'Show details'}
@@ -342,21 +342,21 @@ function FeedbackCard({
           <div className="overflow-hidden">
             <div className="mt-3 space-y-2">
               {(item.comments || []).map((entry) => (
-                <div key={entry.id} className={`animate-[summitFeedbackIn_.22s_ease-out] rounded-lg px-3 py-2 text-sm ${dark ? 'bg-slate-950/70' : 'bg-slate-50'}`}>
+                <div key={entry.id} className={`animate-[summitFeedbackIn_.22s_ease-out] rounded-lg px-3 py-2 text-sm ${dark ? 'bg-slate-950/70' : 'bg-muted/50'}`}>
                   <div className="flex items-start justify-between gap-2">
-                    <div className={`font-semibold ${dark ? 'text-white' : 'text-slate-800'}`}>{entry.participantName}</div>
+                    <div className={`font-semibold ${dark ? 'text-white' : 'text-foreground'}`}>{entry.participantName}</div>
                     {canManage && (
                       <button
                         type="button"
                         onClick={() => onDeleteComment(entry)}
-                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-red-50 hover:text-red-600"
+                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/75 transition hover:bg-red-50 dark:hover:bg-red-500/15 hover:text-red-600 dark:hover:text-red-300"
                         title="Delete comment"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     )}
                   </div>
-                  <div className={`mt-0.5 whitespace-pre-wrap ${dark ? 'text-slate-300' : 'text-slate-600'}`}>{entry.text}</div>
+                  <div className={`mt-0.5 whitespace-pre-wrap ${dark ? 'text-slate-300' : 'text-muted-foreground'}`}>{entry.text}</div>
                 </div>
               ))}
               {canInteract && (
@@ -368,13 +368,13 @@ function FeedbackCard({
                     className={`min-h-10 min-w-0 flex-1 rounded-lg border px-3 text-sm outline-none transition ${
                       dark
                         ? 'border-white/10 bg-slate-950 text-white placeholder:text-slate-500 focus:border-cyan-300 focus:ring-2 focus:ring-cyan-400/20'
-                        : 'border-slate-200 bg-white text-slate-950 placeholder:text-slate-400 focus:border-blue-300 focus:ring-2 focus:ring-blue-100'
+                        : 'border-border bg-card text-foreground placeholder:text-muted-foreground/75 focus:border-blue-300 dark:focus:border-blue-500/40 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30'
                     }`}
                   />
                   <button
                     type="submit"
                     disabled={savingComment || !comment.trim()}
-                    className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50 ${dark ? 'bg-cyan-400 text-slate-950 hover:bg-cyan-300' : 'bg-slate-950 text-white hover:bg-slate-800'}`}
+                    className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50 ${dark ? 'bg-cyan-400 text-slate-900 hover:bg-cyan-300' : 'bg-foreground text-background hover:bg-foreground/90'}`}
                     title="Add comment"
                   >
                     {savingComment ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
@@ -686,8 +686,8 @@ export default function ItSummitFeedbackPanel({ mode = 'participant', initialFee
     if (darkMode) {
       if (active) {
         return section.id === 'working'
-          ? 'border-emerald-300 bg-emerald-300 text-slate-950 shadow-lg shadow-emerald-950/30'
-          : 'border-amber-300 bg-amber-300 text-slate-950 shadow-lg shadow-amber-950/30';
+          ? 'border-emerald-300 bg-emerald-300 text-slate-900 shadow-lg shadow-emerald-950/30'
+          : 'border-amber-300 bg-amber-300 text-slate-900 shadow-lg shadow-amber-950/30';
       }
       return tone === 'large'
         ? 'border-white/10 bg-slate-950/80 text-slate-300 hover:border-white/20 hover:bg-white/10 hover:text-white'
@@ -695,12 +695,12 @@ export default function ItSummitFeedbackPanel({ mode = 'participant', initialFee
     }
     return active
       ? `${section.borderClass} ${section.iconClass}`
-      : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50';
+      : 'border-border bg-card text-muted-foreground hover:bg-muted/50';
   };
 
   const fieldClass = darkMode
     ? 'border-white/10 bg-slate-950 px-3 text-white placeholder:text-slate-500 outline-none transition focus:border-cyan-300 focus:ring-2 focus:ring-cyan-400/20'
-    : 'border-slate-200 bg-slate-50 px-3 text-slate-950 placeholder:text-slate-400 outline-none transition focus:border-blue-300 focus:bg-white focus:ring-2 focus:ring-blue-100';
+    : 'border-border bg-muted/50 px-3 text-foreground placeholder:text-muted-foreground/75 outline-none transition focus:border-blue-300 dark:focus:border-blue-500/40 focus:bg-card focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30';
 
   return (
     <div className="it-summit-feedback relative">
@@ -719,26 +719,26 @@ export default function ItSummitFeedbackPanel({ mode = 'participant', initialFee
 
       {editItem && (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/35 px-4 backdrop-blur-sm">
-          <form onSubmit={saveEditItem} className="w-full max-w-lg animate-[summitFeedbackIn_.18s_ease-out] rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl">
+          <form onSubmit={saveEditItem} className="w-full max-w-lg animate-[summitFeedbackIn_.18s_ease-out] rounded-2xl border border-border bg-card p-5 shadow-2xl">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <div className="flex items-center gap-2 text-lg font-semibold text-slate-950">
-                  <Edit3 className="h-5 w-5 text-blue-600" />
+                <div className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                  <Edit3 className="h-5 w-5 text-blue-600 dark:text-blue-300" />
                   Edit submitted idea
                 </div>
-                <p className="mt-1 text-sm text-slate-500">Rename, move, or clean up the note while preserving votes and comments.</p>
+                <p className="mt-1 text-sm text-muted-foreground">Rename, move, or clean up the note while preserving votes and comments.</p>
               </div>
-              <button type="button" onClick={() => setEditItem(null)} className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700">
+              <button type="button" onClick={() => setEditItem(null)} className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground/75 transition hover:bg-muted hover:text-foreground/85">
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <label className="mt-5 block text-xs font-semibold uppercase text-slate-500">Title</label>
+            <label className="mt-5 block text-xs font-semibold uppercase text-muted-foreground">Title</label>
             <input
               value={editForm.title}
               onChange={(event) => setEditForm((current) => ({ ...current, title: event.target.value }))}
-              className="mt-1 h-11 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-semibold outline-none transition focus:border-blue-300 focus:bg-white focus:ring-2 focus:ring-blue-100"
+              className="mt-1 h-11 w-full rounded-lg border border-border bg-muted/50 px-3 text-sm font-semibold outline-none transition focus:border-blue-300 dark:focus:border-blue-500/40 focus:bg-card focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
             />
-            <label className="mt-4 block text-xs font-semibold uppercase text-slate-500">Section</label>
+            <label className="mt-4 block text-xs font-semibold uppercase text-muted-foreground">Section</label>
             <div className="mt-2 grid grid-cols-2 gap-2">
               {SECTIONS.map((section) => (
                 <button
@@ -746,21 +746,21 @@ export default function ItSummitFeedbackPanel({ mode = 'participant', initialFee
                   type="button"
                   onClick={() => setEditForm((current) => ({ ...current, section: section.id }))}
                   className={`rounded-lg border px-3 py-3 text-sm font-semibold transition hover:-translate-y-0.5 ${
-                    editForm.section === section.id ? `${section.borderClass} ${section.iconClass} ring-2 ring-blue-100` : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-white'
+                    editForm.section === section.id ? `${section.borderClass} ${section.iconClass} ring-2 ring-blue-100 dark:ring-blue-500/30` : 'border-border bg-muted/50 text-foreground/85 hover:bg-card'
                   }`}
                 >
                   {section.title}
                 </button>
               ))}
             </div>
-            <label className="mt-4 block text-xs font-semibold uppercase text-slate-500">Note</label>
+            <label className="mt-4 block text-xs font-semibold uppercase text-muted-foreground">Note</label>
             <textarea
               value={editForm.note}
               onChange={(event) => setEditForm((current) => ({ ...current, note: event.target.value }))}
-              className="mt-1 min-h-[90px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none transition focus:border-blue-300 focus:bg-white focus:ring-2 focus:ring-blue-100"
+              className="mt-1 min-h-[90px] w-full rounded-lg border border-border bg-muted/50 px-3 py-2 text-sm outline-none transition focus:border-blue-300 dark:focus:border-blue-500/40 focus:bg-card focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
             />
             <div className="mt-5 flex justify-end gap-2">
-              <button type="button" onClick={() => setEditItem(null)} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50">
+              <button type="button" onClick={() => setEditItem(null)} className="rounded-lg border border-border px-4 py-2 text-sm font-semibold text-muted-foreground transition hover:bg-muted/50">
                 Cancel
               </button>
               <button type="submit" disabled={adminSaving || !editForm.title.trim()} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60">
@@ -774,18 +774,18 @@ export default function ItSummitFeedbackPanel({ mode = 'participant', initialFee
 
       {confirmResetOpen && (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/35 px-4 backdrop-blur-sm">
-          <div className="w-full max-w-md animate-[summitFeedbackIn_.18s_ease-out] rounded-2xl border border-red-200 bg-white p-5 shadow-2xl">
+          <div className="w-full max-w-md animate-[summitFeedbackIn_.18s_ease-out] rounded-2xl border border-red-200 dark:border-red-500/30 bg-card p-5 shadow-2xl">
             <div className="flex items-start gap-3">
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-red-50 text-red-600">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-red-50 dark:bg-red-500/15 text-red-600 dark:text-red-300">
                 <RotateCcw className="h-5 w-5" />
               </span>
               <div>
-                <h2 className="text-lg font-semibold text-slate-950">Reset summit feedback?</h2>
-                <p className="mt-1 text-sm leading-6 text-slate-600">This clears all submitted working-well items, needs-attention items, votes, and comments for this section. Category voting is not affected.</p>
+                <h2 className="text-lg font-semibold text-foreground">Reset summit feedback?</h2>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">This clears all submitted working-well items, needs-attention items, votes, and comments for this section. Category voting is not affected.</p>
               </div>
             </div>
             <div className="mt-5 flex justify-end gap-2">
-              <button type="button" onClick={() => setConfirmResetOpen(false)} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50">
+              <button type="button" onClick={() => setConfirmResetOpen(false)} className="rounded-lg border border-border px-4 py-2 text-sm font-semibold text-muted-foreground transition hover:bg-muted/50">
                 Cancel
               </button>
               <button type="button" disabled={adminSaving} onClick={resetAllFeedback} className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-red-700 disabled:cursor-wait disabled:opacity-60">
@@ -799,21 +799,21 @@ export default function ItSummitFeedbackPanel({ mode = 'participant', initialFee
 
       <div className="mb-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className={`rounded-xl border p-4 shadow-sm ${
-          darkMode ? 'border-white/10 bg-slate-900/95 text-white shadow-xl shadow-black/20' : 'border-slate-200 bg-white'
+          darkMode ? 'border-white/10 bg-slate-900/95 text-white shadow-xl shadow-black/20' : 'border-border bg-card'
         }`}>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <div className={`flex items-center gap-2 text-xl font-semibold ${darkMode ? 'text-white' : 'text-slate-950'}`}>
-                <Sparkles className={`h-5 w-5 ${darkMode ? 'text-cyan-300' : 'text-blue-600'}`} />
+              <div className={`flex items-center gap-2 text-xl font-semibold ${darkMode ? 'text-white' : 'text-foreground'}`}>
+                <Sparkles className={`h-5 w-5 ${darkMode ? 'text-cyan-300' : 'text-blue-600 dark:text-blue-300'}`} />
                 IT Summit 2026
               </div>
-              <p className={`mt-1 text-sm ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
+              <p className={`mt-1 text-sm ${darkMode ? 'text-slate-300' : 'text-muted-foreground'}`}>
                 {readOnly ? 'Archived read-only record of what worked well and what needed attention.' : 'Share what is working well and what needs attention. Vote once per item and add context when useful.'}
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
               {readOnly && (
-                <span className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-600">
+                <span className="inline-flex items-center gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2 text-sm font-semibold text-muted-foreground">
                   <Lock className="h-4 w-4" />
                   Read-only
                 </span>
@@ -833,7 +833,7 @@ export default function ItSummitFeedbackPanel({ mode = 'participant', initialFee
                   type="button"
                   onClick={() => setConfirmResetOpen(true)}
                   disabled={adminSaving || !feedback.items.length}
-                  className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 transition hover:-translate-y-0.5 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex items-center gap-2 rounded-lg border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 px-3 py-2 text-sm font-semibold text-red-700 dark:text-red-200 transition hover:-translate-y-0.5 hover:bg-red-100 dark:hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <RotateCcw className="h-4 w-4" />
                   Reset
@@ -843,28 +843,28 @@ export default function ItSummitFeedbackPanel({ mode = 'participant', initialFee
           </div>
         </div>
         <div className="grid grid-cols-4 gap-2">
-          <div className={`rounded-xl border p-3 shadow-sm ${darkMode ? 'border-emerald-300/30 bg-emerald-950/30' : 'border-emerald-200 bg-white'}`}>
-            <div className={`text-xs font-semibold uppercase ${darkMode ? 'text-emerald-200' : 'text-slate-500'}`}>Working</div>
-            <div className={`mt-2 text-2xl font-bold ${darkMode ? 'text-emerald-300' : 'text-emerald-700'}`}>{feedback.counts.working}</div>
+          <div className={`rounded-xl border p-3 shadow-sm ${darkMode ? 'border-emerald-300/30 bg-emerald-950/30' : 'border-emerald-200 dark:border-emerald-500/30 bg-card'}`}>
+            <div className={`text-xs font-semibold uppercase ${darkMode ? 'text-emerald-200' : 'text-muted-foreground'}`}>Working</div>
+            <div className={`mt-2 text-2xl font-bold ${darkMode ? 'text-emerald-300' : 'text-emerald-700 dark:text-emerald-200'}`}>{feedback.counts.working}</div>
           </div>
-          <div className={`rounded-xl border p-3 shadow-sm ${darkMode ? 'border-amber-300/30 bg-amber-950/30' : 'border-amber-200 bg-white'}`}>
-            <div className={`text-xs font-semibold uppercase ${darkMode ? 'text-amber-200' : 'text-slate-500'}`}>Attention</div>
-            <div className={`mt-2 text-2xl font-bold ${darkMode ? 'text-amber-300' : 'text-amber-700'}`}>{feedback.counts.attention}</div>
+          <div className={`rounded-xl border p-3 shadow-sm ${darkMode ? 'border-amber-300/30 bg-amber-950/30' : 'border-amber-200 dark:border-amber-500/30 bg-card'}`}>
+            <div className={`text-xs font-semibold uppercase ${darkMode ? 'text-amber-200' : 'text-muted-foreground'}`}>Attention</div>
+            <div className={`mt-2 text-2xl font-bold ${darkMode ? 'text-amber-300' : 'text-amber-700 dark:text-amber-200'}`}>{feedback.counts.attention}</div>
           </div>
-          <div className={`rounded-xl border p-3 shadow-sm ${darkMode ? 'border-cyan-300/30 bg-cyan-950/30' : 'border-blue-200 bg-white'}`}>
-            <div className={`text-xs font-semibold uppercase ${darkMode ? 'text-cyan-200' : 'text-slate-500'}`}>Votes</div>
-            <div className={`mt-2 text-2xl font-bold ${darkMode ? 'text-cyan-300' : 'text-blue-700'}`}>{feedback.counts.votes}</div>
+          <div className={`rounded-xl border p-3 shadow-sm ${darkMode ? 'border-cyan-300/30 bg-cyan-950/30' : 'border-blue-200 dark:border-blue-500/30 bg-card'}`}>
+            <div className={`text-xs font-semibold uppercase ${darkMode ? 'text-cyan-200' : 'text-muted-foreground'}`}>Votes</div>
+            <div className={`mt-2 text-2xl font-bold ${darkMode ? 'text-cyan-300' : 'text-blue-700 dark:text-blue-200'}`}>{feedback.counts.votes}</div>
           </div>
-          <div className={`rounded-xl border p-3 shadow-sm ${darkMode ? 'border-white/10 bg-slate-900/95' : 'border-slate-200 bg-white'}`}>
-            <div className={`text-xs font-semibold uppercase ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>Comments</div>
-            <div className={`mt-2 text-2xl font-bold ${darkMode ? 'text-white' : 'text-slate-950'}`}>{feedback.counts.comments}</div>
+          <div className={`rounded-xl border p-3 shadow-sm ${darkMode ? 'border-white/10 bg-slate-900/95' : 'border-border bg-card'}`}>
+            <div className={`text-xs font-semibold uppercase ${darkMode ? 'text-slate-300' : 'text-muted-foreground'}`}>Comments</div>
+            <div className={`mt-2 text-2xl font-bold ${darkMode ? 'text-white' : 'text-foreground'}`}>{feedback.counts.comments}</div>
           </div>
         </div>
       </div>
 
       {!isFacilitator && !readOnly && (
         <form onSubmit={submitItem} className={`mb-4 rounded-xl border p-4 shadow-sm ${
-          darkMode ? 'border-white/10 bg-slate-900/95 shadow-xl shadow-black/20' : 'border-slate-200 bg-white'
+          darkMode ? 'border-white/10 bg-slate-900/95 shadow-xl shadow-black/20' : 'border-border bg-card'
         }`}>
           <div className="grid gap-3 lg:grid-cols-[180px_minmax(0,1fr)]">
             <div className="grid grid-cols-2 gap-2 lg:grid-cols-1">
@@ -897,7 +897,7 @@ export default function ItSummitFeedbackPanel({ mode = 'participant', initialFee
                   type="submit"
                   disabled={saving || !title.trim()}
                   className={`inline-flex h-10 items-center gap-2 rounded-lg px-4 text-sm font-semibold transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50 ${
-                    darkMode ? 'bg-cyan-400 text-slate-950 hover:bg-cyan-300' : 'bg-blue-600 text-white hover:bg-blue-700'
+                    darkMode ? 'bg-cyan-400 text-slate-900 hover:bg-cyan-300' : 'bg-blue-600 text-white hover:bg-blue-700'
                   }`}
                 >
                   {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
@@ -911,7 +911,7 @@ export default function ItSummitFeedbackPanel({ mode = 'participant', initialFee
 
       {error && (
         <div className={`mb-4 flex items-center gap-2 rounded-xl border px-4 py-3 text-sm font-semibold ${
-          darkMode ? 'border-red-400/40 bg-red-950/60 text-red-100' : 'border-red-200 bg-red-50 text-red-800'
+          darkMode ? 'border-red-400/40 bg-red-950/60 text-red-100' : 'border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 text-red-800 dark:text-red-200'
         }`}>
           <AlertCircle className="h-4 w-4" />
           {error}
@@ -922,9 +922,9 @@ export default function ItSummitFeedbackPanel({ mode = 'participant', initialFee
 
       {loading ? (
         <div className={`flex min-h-48 items-center justify-center rounded-xl border ${
-          darkMode ? 'border-white/10 bg-slate-900/95' : 'border-slate-200 bg-white'
+          darkMode ? 'border-white/10 bg-slate-900/95' : 'border-border bg-card'
         }`}>
-          <Loader2 className={`h-8 w-8 animate-spin ${darkMode ? 'text-cyan-300' : 'text-blue-600'}`} />
+          <Loader2 className={`h-8 w-8 animate-spin ${darkMode ? 'text-cyan-300' : 'text-blue-600 dark:text-blue-300'}`} />
         </div>
       ) : (
         <div className="grid gap-4 lg:grid-cols-2">
@@ -935,28 +935,28 @@ export default function ItSummitFeedbackPanel({ mode = 'participant', initialFee
                 highlightIds[`section-${section.id}`]
                   ? darkMode
                     ? 'animate-[summitFeedbackPulse_1.3s_ease-out] ring-2 ring-cyan-400/25'
-                    : 'animate-[summitFeedbackPulse_1.3s_ease-out] ring-2 ring-blue-100'
+                    : 'animate-[summitFeedbackPulse_1.3s_ease-out] ring-2 ring-blue-100 dark:ring-blue-500/30'
                   : ''
               } ${
                 darkMode
                   ? section.id === 'working'
                     ? 'border-emerald-300/30 bg-emerald-950/20 shadow-xl shadow-black/20'
                     : 'border-amber-300/30 bg-amber-950/20 shadow-xl shadow-black/20'
-                  : `bg-white/90 ${section.borderClass}`
+                  : `bg-card/90 ${section.borderClass}`
               }`}
             >
               <div className="mb-3 flex items-center justify-between">
-                <h2 className={`flex items-center gap-2 text-lg font-semibold ${darkMode ? 'text-white' : 'text-slate-950'}`}>
+                <h2 className={`flex items-center gap-2 text-lg font-semibold ${darkMode ? 'text-white' : 'text-foreground'}`}>
                   <span className={`flex h-9 w-9 items-center justify-center rounded-lg ${
                     darkMode
-                      ? section.id === 'working' ? 'bg-emerald-300 text-slate-950' : 'bg-amber-300 text-slate-950'
+                      ? section.id === 'working' ? 'bg-emerald-300 text-slate-900' : 'bg-amber-300 text-slate-900'
                       : section.iconClass
                   }`}>
                     {section.id === 'working' ? <CheckCircle2 className="h-5 w-5" /> : <MessageSquare className="h-5 w-5" />}
                   </span>
                   {section.title}
                 </h2>
-                <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${darkMode ? 'bg-white/10 text-slate-200' : 'bg-slate-100 text-slate-600'}`}>{itemsBySection[section.id].length}</span>
+                <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${darkMode ? 'bg-white/10 text-slate-200' : 'bg-muted text-muted-foreground'}`}>{itemsBySection[section.id].length}</span>
               </div>
               <div className="space-y-3">
                 {itemsBySection[section.id].map((item) => (
@@ -978,7 +978,7 @@ export default function ItSummitFeedbackPanel({ mode = 'participant', initialFee
                 ))}
                 {!itemsBySection[section.id].length && (
                   <div className={`rounded-xl border border-dashed px-4 py-8 text-center text-sm ${
-                    darkMode ? 'border-white/10 bg-slate-950/50 text-slate-400' : 'border-slate-200 bg-slate-50 text-slate-500'
+                    darkMode ? 'border-white/10 bg-slate-950/50 text-slate-400' : 'border-border bg-muted/50 text-muted-foreground'
                   }`}>
                     No items yet.
                   </div>

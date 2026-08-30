@@ -32,12 +32,12 @@ export function FilterFlyout({ label, activeCount = 0, onClear, children, width 
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         className={`tp-focus-ring relative inline-flex items-center gap-1 text-sm rounded-lg px-2.5 py-2 border transition-colors ${
-          active ? 'bg-blue-50 text-blue-700 border-blue-200 font-medium' : 'bg-white text-slate-700 border-input hover:border-blue-300'
+          active ? 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 border-blue-200 dark:border-blue-500/30 font-medium' : 'bg-card text-foreground/85 border-input hover:border-blue-300 dark:hover:border-blue-500/40'
         }`}
       >
         {label}
         {active && <span className="text-xs font-semibold">· {activeCount}</span>}
-        <ChevronDown className={`w-3.5 h-3.5 ${active ? 'text-blue-500' : 'text-slate-400'}`} aria-hidden="true" />
+        <ChevronDown className={`w-3.5 h-3.5 ${active ? 'text-blue-500' : 'text-muted-foreground/75'}`} aria-hidden="true" />
         {active && <span aria-hidden="true" className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-blue-500" />}
       </button>
       {open && (
@@ -50,7 +50,7 @@ export function FilterFlyout({ label, activeCount = 0, onClear, children, width 
           {onClear && active && (
             <button
               onClick={() => { onClear(); setOpen(false); }}
-              className="tp-focus-ring mt-1.5 w-full text-center px-2 py-1.5 text-xs font-semibold text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-md border-t border-slate-100"
+              className="tp-focus-ring mt-1.5 w-full text-center px-2 py-1.5 text-xs font-semibold text-muted-foreground hover:text-red-600 dark:hover:text-red-300 hover:bg-red-50 dark:hover:bg-red-500/15 rounded-md border-t border-border/60"
             >
               Clear {label.toLowerCase()}
             </button>
@@ -70,33 +70,33 @@ export function CheckList({ options, selected, onToggle, searchable = false, emp
     <div>
       {searchable && (
         <div className="relative mb-1.5">
-          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2" aria-hidden="true" />
+          <Search className="w-3.5 h-3.5 text-muted-foreground/75 absolute left-2 top-1/2 -translate-y-1/2" aria-hidden="true" />
           <input
             type="search"
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search…"
             aria-label="Search options"
-            className="tp-focus-ring w-full pl-7 pr-2 py-1.5 text-xs bg-white border border-input rounded-md placeholder:text-slate-400"
+            className="tp-focus-ring w-full pl-7 pr-2 py-1.5 text-xs bg-card border border-input rounded-md placeholder:text-muted-foreground/75"
           />
         </div>
       )}
       <ul className="max-h-56 overflow-y-auto settings-scrollbar -mx-0.5">
         {filtered.map((o) => (
           <li key={o.value}>
-            <label className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-blue-50 cursor-pointer text-sm text-slate-700">
+            <label className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-blue-50 dark:hover:bg-blue-500/15 cursor-pointer text-sm text-foreground/85">
               <input
                 type="checkbox"
                 checked={selected.includes(String(o.value))}
                 onChange={() => onToggle(String(o.value))}
-                className="tp-focus-ring rounded border-slate-300 text-blue-600"
+                className="tp-focus-ring rounded border-input text-blue-600 dark:text-blue-300"
               />
               <span className="truncate flex-1">{o.label}</span>
-              {o.count != null && <span className="text-[10px] text-slate-400 tabular-nums">{o.count}</span>}
+              {o.count != null && <span className="text-[10px] text-muted-foreground/75 tabular-nums">{o.count}</span>}
             </label>
           </li>
         ))}
-        {filtered.length === 0 && <li className="px-2 py-2 text-xs text-slate-400">{emptyLabel}</li>}
+        {filtered.length === 0 && <li className="px-2 py-2 text-xs text-muted-foreground/75">{emptyLabel}</li>}
       </ul>
     </div>
   );

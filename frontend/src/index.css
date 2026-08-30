@@ -92,6 +92,37 @@
     }
   }
 
+  /* Light-only surfaces (Phase DM-B): Login, WorkspacePicker and the public
+     token pages paint their own full-height light surface and are excluded
+     from dark mode by design. `.tp-light` on their root re-pins the light
+     tokens so shared components (SafeHtml, RichTextEditor, feedback panel)
+     rendered inside them stay light under a dark choice. */
+  .tp-light {
+    color-scheme: light;
+    --background: 210 40% 98%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --primary: 221 83% 53%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 214 32% 91%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 215 20% 93%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 214 95% 94%;
+    --accent-foreground: 222 47% 11%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214 32% 88%;
+    --input: 214 32% 88%;
+    --ring: 221 83% 53%;
+    --success: 158 64% 40%;
+    --warning: 38 92% 50%;
+    --danger: 0 72% 51%;
+    --surface: 0 0% 100%;
+    --surface-muted: 210 40% 96%;
+  }
+
   /* ≤1536px (laptops): tighten name/heatmap minimums and metric columns. */
   @media (max-width: 1536px) {
     :root {
@@ -346,6 +377,20 @@ code {
     overflow-x: auto;
     white-space: pre-wrap;
   }
+  /* Dark mode: user-supplied email/note HTML carries its own inline colours
+     (mail-client convention) — it renders in a WHITE content well inside the
+     dark shell, never inverted. Light mode is unchanged (no well needed on a
+     white card). */
+  .dark .tp-rich-body {
+    background: #fff;
+    color: #0f172a;
+    color-scheme: light;
+    border-radius: 0.5rem;
+    padding: 0.625rem 0.875rem;
+    border: 1px solid hsl(0 0% 100% / 0.08);
+  }
+  .dark .tp-rich-body a { color: #1d4ed8; }
+  .dark .tp-rich-body blockquote { border-color: #e2e8f0; color: #64748b; }
 
   /* Data tables born from a clipboard paste (Excel/Word ranges): the composer
      stamps them `tp-data-table` at paste time (QA 08-17 #1), so the RENDERED
@@ -382,17 +427,14 @@ code {
     max-width: 100%;
     margin: 0.375rem 0;
   }
-  /* Table chrome reads the legacy-net bridge vars (see "Early-access
-     readability net" below): light originals by day and inside any still-
-     white composer; the dark border/muted tokens once the composer itself
-     converts (DM-B). */
+  /* Table chrome is token-driven (DM-B): the composer follows the theme. */
   .tp-rich-editor td,
   .tp-rich-editor th {
-    border: 1px solid var(--tp-lg-border, hsl(215 25% 84%));
+    border: 1px solid hsl(var(--border));
     padding: 0.25rem 0.5rem;
   }
   .tp-rich-editor th {
-    background: var(--tp-lg-tint-soft, hsl(210 40% 97%));
+    background: hsl(var(--muted) / 0.55);
     font-weight: 600;
     text-align: left;
   }
@@ -424,6 +466,13 @@ code {
   .tp-img-ref:focus-visible {
     outline: none;
     box-shadow: 0 0 0 2px rgb(59 130 246 / 0.55);
+  }
+  /* Inside the white email well the light chip stays; elsewhere (composer,
+     previews) it takes the dark accent tint. */
+  .dark :not(.tp-rich-body) > .tp-img-ref {
+    color: #bfdbfe;
+    background: rgb(59 130 246 / 0.15);
+    border-color: rgb(59 130 246 / 0.35);
   }
 
   /* Print view (gap plan P2.5): chrome (nav, composer, actions) hides via
@@ -473,7 +522,9 @@ code {
 
   /* react-day-picker sized for the 248px ticket filter rail */
   .tp-rail-calendar .rdp-root {
-    --rdp-accent-color: hsl(221 83% 53%);
+    --rdp-accent-color: hsl(var(--primary));
+    --rdp-accent-background-color: hsl(var(--accent));
+    color: hsl(var(--foreground));
     --rdp-day-width: 28px;
     --rdp-day-height: 28px;
     --rdp-day_button-width: 26px;
@@ -488,7 +539,41 @@ code {
   .tp-rail-calendar .rdp-month_caption {
     font-size: 12px;
     font-weight: 600;
-    color: rgb(51 65 85);
+    color: hsl(var(--foreground) / 0.85);
+  }
+  .tp-rail-calendar .rdp-weekday {
+    color: hsl(var(--muted-foreground));
+  }
+  .tp-rail-calendar .rdp-day.rdp-outside {
+    color: hsl(var(--muted-foreground) / 0.5);
+  }
+
+  /* Leaflet (Visuals map): dark tiles come from the TileLayer swap in
+     Visuals.jsx; the popups/controls/attribution chrome follows the tokens. */
+  .dark .leaflet-container {
+    background: hsl(var(--background));
+  }
+  .dark .leaflet-popup-content-wrapper,
+  .dark .leaflet-popup-tip {
+    background: hsl(var(--card));
+    color: hsl(var(--card-foreground));
+    box-shadow: 0 3px 14px rgb(0 0 0 / 0.5);
+  }
+  .dark .leaflet-bar a,
+  .dark .leaflet-bar a:hover,
+  .dark .leaflet-control-attribution {
+    background: hsl(var(--card) / 0.92);
+    color: hsl(var(--foreground));
+    border-bottom-color: hsl(var(--border));
+  }
+  .dark .leaflet-bar a.leaflet-disabled {
+    color: hsl(var(--muted-foreground) / 0.5);
+  }
+  .dark .leaflet-control-attribution a {
+    color: hsl(var(--accent-foreground));
+  }
+  .dark .leaflet-popup-close-button {
+    color: hsl(var(--muted-foreground));
   }
 }
 
@@ -503,87 +588,10 @@ code {
   }
 }
 
-/* ---- Early-access readability net (Phase DM-A; DELETE when DM-B lands) ----
-   The chrome is token-driven, but ~5,000 sites in not-yet-swept pages still
-   hardcode slate/gray utilities. Because the token-driven panels (.tp-card,
-   .tp-glass, the page grounds) now turn dark, a `text-slate-900` heading
-   inside one would be black-on-slate. This net makes those legacy utilities
-   READ THE TOKENS whenever they sit inside a dark container, and fall back to
-   their original light values inside any still-white container (`bg-white`).
-   It works by custom-property inheritance — nearest container wins — so
-   nesting in either direction stays readable. It is a scoped bridge, not an
-   inversion: converted chrome uses tokens and never touches these vars, and
-   `frontend/scripts/check-dark-tokens.mjs` stops NEW legacy classes landing
-   in swept files. Deleted once the sweep finishes (DM-B/DM10). */
-.dark :is(.tp-app-backdrop, .tp-page-backdrop, .tp-tickets-backdrop, .tp-card, .tp-surface, .tp-glass, .tp-glass-strong) {
-  --tp-lg-900: hsl(var(--foreground));
-  --tp-lg-800: hsl(var(--foreground) / 0.94);
-  --tp-lg-700: hsl(215 20% 84%);
-  --tp-lg-600: hsl(215 20% 76%);
-  --tp-lg-500: hsl(var(--muted-foreground));
-  --tp-lg-400: hsl(215 16% 56%);
-  --tp-lg-300: hsl(215 16% 42%);
-  --tp-lg-border: hsl(var(--border));
-  --tp-lg-border-soft: hsl(var(--border) / 0.6);
-  --tp-lg-border-strong: hsl(var(--input));
-  --tp-lg-tint: hsl(var(--muted));
-  --tp-lg-tint-soft: hsl(var(--muted) / 0.55);
-}
-/* Still-white containers (opaque or translucent bg-white) restore the light
-   originals for everything inside them. `initial` = guaranteed-invalid, so
-   every var() below drops to its fallback. Listed AFTER the dark containers so
-   an element carrying both (`tp-card bg-white`) reads as white. */
-.dark :is([class~="bg-white"], [class*=" bg-white/"], [class^="bg-white/"]),
-/* A white gradient wash (from-/via-/to-white) is a light surface too — on the
-   element itself, or on its parent when the wash is an absolutely positioned
-   overlay child (the Tickets hero card: text sits beside the overlay, so the
-   parent is what the text inherits from). */
-.dark :is([class~="from-white"], [class*=" from-white/"], [class^="from-white/"], [class~="via-white"], [class*=" via-white/"]),
-.dark :has(> [class*="bg-gradient-to"][class*="from-white"]) {
-  --tp-lg-900: initial;
-  --tp-lg-800: initial;
-  --tp-lg-700: initial;
-  --tp-lg-600: initial;
-  --tp-lg-500: initial;
-  --tp-lg-400: initial;
-  --tp-lg-300: initial;
-  --tp-lg-border: initial;
-  --tp-lg-border-soft: initial;
-  --tp-lg-border-strong: initial;
-  --tp-lg-tint: initial;
-  --tp-lg-tint-soft: initial;
-}
-.dark .text-slate-950 { color: var(--tp-lg-900, #020617); }
-.dark .text-slate-900 { color: var(--tp-lg-900, #0f172a); }
-.dark .text-gray-900 { color: var(--tp-lg-900, #111827); }
-.dark .text-slate-800 { color: var(--tp-lg-800, #1e293b); }
-.dark .text-gray-800 { color: var(--tp-lg-800, #1f2937); }
-.dark .text-slate-700 { color: var(--tp-lg-700, #334155); }
-.dark .text-gray-700 { color: var(--tp-lg-700, #374151); }
-.dark .text-slate-600 { color: var(--tp-lg-600, #475569); }
-.dark .text-gray-600 { color: var(--tp-lg-600, #4b5563); }
-.dark .text-slate-500 { color: var(--tp-lg-500, #64748b); }
-.dark .text-gray-500 { color: var(--tp-lg-500, #6b7280); }
-.dark .text-slate-400 { color: var(--tp-lg-400, #94a3b8); }
-.dark .text-gray-400 { color: var(--tp-lg-400, #9ca3af); }
-.dark .text-slate-300 { color: var(--tp-lg-300, #cbd5e1); }
-.dark .text-gray-300 { color: var(--tp-lg-300, #d1d5db); }
-.dark .border-slate-100 { border-color: var(--tp-lg-border-soft, #f1f5f9); }
-.dark .border-gray-100 { border-color: var(--tp-lg-border-soft, #f3f4f6); }
-.dark .border-slate-200 { border-color: var(--tp-lg-border, #e2e8f0); }
-.dark .border-gray-200 { border-color: var(--tp-lg-border, #e5e7eb); }
-.dark .border-slate-300 { border-color: var(--tp-lg-border-strong, #cbd5e1); }
-.dark .border-gray-300 { border-color: var(--tp-lg-border-strong, #d1d5db); }
-.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]) { border-color: var(--tp-lg-border-soft, #f1f5f9); }
-.dark .divide-slate-200 > :not([hidden]) ~ :not([hidden]) { border-color: var(--tp-lg-border, #e2e8f0); }
-.dark .bg-slate-50 { background-color: var(--tp-lg-tint-soft, #f8fafc); }
-.dark .bg-gray-50 { background-color: var(--tp-lg-tint-soft, #f9fafb); }
-.dark .bg-slate-100 { background-color: var(--tp-lg-tint, #f1f5f9); }
-.dark .bg-gray-100 { background-color: var(--tp-lg-tint, #f3f4f6); }
-.dark .hover\:bg-slate-50:hover { background-color: var(--tp-lg-tint-soft, #f8fafc); }
-.dark .hover\:bg-slate-100:hover { background-color: var(--tp-lg-tint, #f1f5f9); }
-.dark .hover\:bg-gray-50:hover { background-color: var(--tp-lg-tint-soft, #f9fafb); }
-.dark .hover\:bg-gray-100:hover { background-color: var(--tp-lg-tint, #f3f4f6); }
+/* The Phase DM-A "Early-access readability net" (legacy slate/gray utilities
+   reading token vars inside dark containers) was deleted in DM-B: every
+   in-app surface is token-migrated (scripts/dark-migrate.mjs + hand passes)
+   and scripts/check-dark-tokens.mjs keeps it that way. */
 
 /* Smooth view transition animations */
 @keyframes fadeIn {
@@ -749,6 +757,11 @@ code {
   background-size: 220% 100%;
   animation: tpAiThink 1.5s linear infinite;
 }
+.dark .tp-ai-think {
+  border-color: rgb(139 92 246 / 0.55);
+  background: linear-gradient(100deg, rgb(139 92 246 / 0.12) 30%, rgb(139 92 246 / 0.32) 50%, rgb(139 92 246 / 0.12) 70%);
+  background-size: 220% 100%;
+}
 @keyframes tpAiThink {
   from { background-position: 130% 0; }
   to { background-position: -130% 0; }
@@ -882,7 +895,11 @@ code {
 }
 
 /* Attachment preview modal — mammoth (Word) and SheetJS (Excel) emit bare
-   HTML; give it readable document/table styling (QA 07-08). */
+   HTML; give it readable document/table styling (QA 07-08). The Word preview
+   is a "paper" surface: it stays a white well in dark mode (like the email
+   well — the document carries its own inline colours); the sheet preview is
+   UI chrome and follows the tokens. */
+.tp-doc-preview { background: #fff; color: #0f172a; color-scheme: light; }
 .tp-doc-preview h1, .tp-doc-preview h2, .tp-doc-preview h3 { font-weight: 700; margin: 0.9em 0 0.4em; color: #1e293b; }
 .tp-doc-preview h1 { font-size: 1.35rem; } .tp-doc-preview h2 { font-size: 1.15rem; } .tp-doc-preview h3 { font-size: 1.02rem; }
 .tp-doc-preview p { margin: 0.45em 0; }
@@ -892,5 +909,5 @@ code {
 .tp-doc-preview img { max-width: 100%; height: auto; }
 .tp-doc-preview a { color: #2563eb; text-decoration: underline; }
 .tp-sheet-preview table { border-collapse: collapse; width: max-content; min-width: 100%; font-variant-numeric: tabular-nums; }
-.tp-sheet-preview td { border: 1px solid #e2e8f0; padding: 3px 8px; white-space: nowrap; }
-.tp-sheet-preview tr:first-child td { background: #f8fafc; font-weight: 600; position: sticky; top: 0; }
+.tp-sheet-preview td { border: 1px solid hsl(var(--border)); padding: 3px 8px; white-space: nowrap; }
+.tp-sheet-preview tr:first-child td { background: hsl(var(--muted)); font-weight: 600; position: sticky; top: 0; }

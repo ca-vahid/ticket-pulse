@@ -28,6 +28,8 @@ import {
   normalizeTheme,
   THEME_STORAGE_KEY,
   THEME_COLOR,
+  THEME_CHANGED_EVENT,
+  applyResolvedTheme,
 } from './ThemeContext';
 
 // One controllable matchMedia: `mq.set(true)` flips the OS preference and
@@ -244,6 +246,21 @@ describe('ThemeProvider', () => {
   });
 });
 
+describe('tp:theme-changed (DM-B: charts + map tiles re-read the tokens)', () => {
+  test('applyResolvedTheme stamps the class first, then fires the window event with the resolved theme', () => {
+    const seen = [];
+    const onChange = (e) => seen.push({ resolved: e.detail.resolved, hasClass: document.documentElement.classList.contains('dark') });
+    window.addEventListener(THEME_CHANGED_EVENT, onChange);
+    try {
+      applyResolvedTheme('dark');
+      applyResolvedTheme('light');
+    } finally {
+      window.removeEventListener(THEME_CHANGED_EVENT, onChange);
+    }
+    expect(THEME_CHANGED_EVENT).toBe('tp:theme-changed');
+    expect(seen).toEqual([{ resolved: 'dark', hasClass: true }, { resolved: 'light', hasClass: false }]);
+  });
+});
 describe('index.html pre-paint script (no-flash smoke)', () => {
   const htmlSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../index.html'), 'utf8');
 

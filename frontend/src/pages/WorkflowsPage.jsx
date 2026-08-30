@@ -8,10 +8,10 @@ import { useWorkspace } from '../contexts/WorkspaceContext';
 
 // Tab ids MUST match NotificationWorkflowsPanel's internal `globalTabs` ids.
 const WORKFLOW_TABS = [
-  { id: 'workflows', label: 'Notification Workflows', Icon: Send, accentText: 'text-blue-600', accentBorder: 'border-blue-500' },
-  { id: 'llm-context', label: 'LLM Context', Icon: Bot, accentText: 'text-violet-600', accentBorder: 'border-violet-500' },
-  { id: 'signature', label: 'Email Branding', Icon: Mail, accentText: 'text-emerald-600', accentBorder: 'border-emerald-500' },
-  { id: 'mock-audit', label: 'Workflow Audit', Icon: FlaskConical, accentText: 'text-sky-600', accentBorder: 'border-sky-500' },
+  { id: 'workflows', label: 'Notification Workflows', Icon: Send, accentText: 'text-blue-600 dark:text-blue-300', accentBorder: 'border-blue-500' },
+  { id: 'llm-context', label: 'LLM Context', Icon: Bot, accentText: 'text-violet-600 dark:text-violet-300', accentBorder: 'border-violet-500' },
+  { id: 'signature', label: 'Email Branding', Icon: Mail, accentText: 'text-emerald-600 dark:text-emerald-300', accentBorder: 'border-emerald-500' },
+  { id: 'mock-audit', label: 'Workflow Audit', Icon: FlaskConical, accentText: 'text-sky-600 dark:text-sky-300', accentBorder: 'border-sky-500' },
 ];
 const TAB_IDS = WORKFLOW_TABS.map((t) => t.id);
 
@@ -77,7 +77,7 @@ export default function WorkflowsPage() {
                   aria-current={isActive ? 'page' : undefined}
                   className={`group flex flex-1 touch-manipulation items-center justify-center gap-2 whitespace-nowrap rounded-lg border-b-[3px] px-4 py-2.5 text-sm font-semibold transition-all ${
                     isActive
-                      ? `bg-white text-slate-900 shadow-sm ${t.accentBorder}`
+                      ? `bg-card text-foreground shadow-sm ${t.accentBorder}`
                       : 'border-transparent bg-white/10 text-white/80 hover:bg-white/20 hover:text-white'
                   }`}
                 >
@@ -112,7 +112,7 @@ export default function WorkflowsPage() {
         onTabChange={handleTabChange}
         hideTabBar
         onHealthChange={setHealth}
-        rootClassName="tp-glass-strong flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-white/70"
+        rootClassName="tp-glass-strong flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-card/70 dark:border-white/10"
       />
     </AppShell>
   );

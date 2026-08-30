@@ -12,12 +12,12 @@ const asNumberArray = (values = []) => values.map(Number).filter(Number.isFinite
 
 function SelectedChip({ label, onRemove }) {
   return (
-    <span className="inline-flex max-w-full items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 shadow-sm">
+    <span className="inline-flex max-w-full items-center gap-1 rounded-full border border-border bg-card px-2 py-1 text-[11px] font-semibold text-foreground/85 shadow-sm">
       <span className="truncate">{label}</span>
       <button
         type="button"
         onClick={onRemove}
-        className="rounded-full p-0.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-800"
+        className="rounded-full p-0.5 text-muted-foreground/75 transition-colors hover:bg-muted hover:text-foreground"
         title={`Remove ${label}`}
       >
         <X className="h-3 w-3" />
@@ -32,7 +32,7 @@ function CheckboxMark({ checked, partial = false }) {
       className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors ${
         checked || partial
           ? 'border-blue-600 bg-blue-600 text-white'
-          : 'border-slate-300 bg-white text-transparent group-hover:border-blue-400'
+          : 'border-input bg-card text-transparent group-hover:border-blue-400'
       }`}
     >
       {partial ? <span className="h-0.5 w-2 rounded-full bg-white" /> : <Check className="h-3 w-3" />}
@@ -213,12 +213,12 @@ export default function CanonicalCategoryFilter({
         onClick={toggleOpen}
         className={`group flex h-9 w-full items-center justify-center gap-2 rounded-xl border px-3 text-sm font-semibold shadow-sm transition-all sm:w-auto ${
           selectedCount
-            ? 'border-blue-300 bg-blue-600 text-white shadow-blue-100 hover:bg-blue-700'
-            : 'border-slate-200 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700'
-        } ${open ? 'ring-2 ring-blue-200' : ''}`}
+            ? 'border-blue-300 dark:border-blue-500/40 bg-blue-600 text-white shadow-blue-100 hover:bg-blue-700'
+            : 'border-border bg-card text-foreground/85 hover:border-blue-300 dark:hover:border-blue-500/40 hover:bg-blue-50 dark:hover:bg-blue-500/15 hover:text-blue-700 dark:hover:text-blue-200'
+        } ${open ? 'ring-2 ring-blue-200 dark:ring-blue-500/30' : ''}`}
         title={selectedCount ? `${selectedCount} category filter${selectedCount === 1 ? '' : 's'} selected` : 'Filter by category or subcategory'}
       >
-        <span className={`flex h-6 w-6 items-center justify-center rounded-lg ${selectedCount ? 'bg-white/20' : 'bg-blue-50 text-blue-600 group-hover:bg-blue-100'}`}>
+        <span className={`flex h-6 w-6 items-center justify-center rounded-lg ${selectedCount ? 'bg-white/20' : 'bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-300 group-hover:bg-blue-100 dark:group-hover:bg-blue-500/20'}`}>
           <Filter className="h-4 w-4" />
         </span>
         <span>Categories</span>
@@ -231,22 +231,22 @@ export default function CanonicalCategoryFilter({
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-2 flex max-h-[min(70vh,34rem)] w-[min(28rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/15">
-          <div className="shrink-0 border-b border-slate-200 bg-slate-50/90 p-3">
+        <div className="absolute right-0 top-full z-50 mt-2 flex max-h-[min(70vh,34rem)] w-[min(28rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl shadow-slate-900/15">
+          <div className="shrink-0 border-b border-border bg-muted/45 p-3">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <div className="flex items-center gap-2 text-sm font-extrabold text-slate-900">
-                  <Filter className="h-4 w-4 text-blue-600" />
+                <div className="flex items-center gap-2 text-sm font-extrabold text-foreground">
+                  <Filter className="h-4 w-4 text-blue-600 dark:text-blue-300" />
                   Categories
                   {draftCount > 0 && (
-                    <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-extrabold text-blue-700">{draftCount}</span>
+                    <span className="rounded-full bg-blue-100 dark:bg-blue-500/20 px-2 py-0.5 text-[11px] font-extrabold text-blue-700 dark:text-blue-200">{draftCount}</span>
                   )}
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setOpen(false)}
-                className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-white hover:text-slate-700"
+                className="rounded-lg p-1.5 text-muted-foreground/75 transition-colors hover:bg-card hover:text-foreground/85"
                 title="Close category filters"
               >
                 <X className="h-4 w-4" />
@@ -254,18 +254,18 @@ export default function CanonicalCategoryFilter({
             </div>
 
             <label className="relative mt-3 block">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/75" />
               <input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="Search categories or subcategories"
-                className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-9 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                className="h-10 w-full rounded-xl border border-border bg-card pl-9 pr-9 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/75 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
               />
               {search && (
                 <button
                   type="button"
                   onClick={() => setSearch('')}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground/75 hover:bg-muted hover:text-foreground/85"
                   title="Clear category search"
                 >
                   <X className="h-3.5 w-3.5" />
@@ -279,7 +279,7 @@ export default function CanonicalCategoryFilter({
                   <SelectedChip key={item.id} label={item.label} onRemove={() => removeDraftSelected(item)} />
                 ))}
                 {draftLabels.length > 2 && (
-                  <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-bold text-slate-600">
+                  <span className="rounded-full bg-muted px-2 py-1 text-[11px] font-bold text-muted-foreground">
                     +{draftLabels.length - 2} more
                   </span>
                 )}
@@ -289,9 +289,9 @@ export default function CanonicalCategoryFilter({
 
           <div className="min-h-0 flex-1 overflow-auto p-2">
             {filteredTree.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-slate-200 px-4 py-8 text-center">
-                <div className="text-sm font-semibold text-slate-700">No category matches</div>
-                <div className="mt-1 text-xs text-slate-500">Try a broader search term.</div>
+              <div className="rounded-xl border border-dashed border-border px-4 py-8 text-center">
+                <div className="text-sm font-semibold text-foreground/85">No category matches</div>
+                <div className="mt-1 text-xs text-muted-foreground">Try a broader search term.</div>
               </div>
             ) : filteredTree.map((category) => {
               const categoryId = Number(category.id);
@@ -308,15 +308,15 @@ export default function CanonicalCategoryFilter({
                   key={category.id}
                   className={`rounded-xl border transition-colors ${
                     categoryChecked || categoryPartial
-                      ? 'border-blue-100 bg-blue-50/70'
-                      : 'border-transparent hover:border-slate-200 hover:bg-slate-50'
+                      ? 'border-blue-100 dark:border-blue-500/20 bg-blue-50/70 dark:bg-blue-500/10'
+                      : 'border-transparent hover:border-border hover:bg-muted/50'
                   }`}
                 >
                   <div className="group flex items-center gap-2 px-2 py-1.5">
                     <button
                       type="button"
                       onClick={() => toggleExpanded(categoryId)}
-                      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-white hover:text-slate-700"
+                      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground/75 transition-colors hover:bg-card hover:text-foreground/85"
                       title={expanded ? 'Collapse category' : 'Expand category'}
                     >
                       {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
@@ -324,19 +324,19 @@ export default function CanonicalCategoryFilter({
                     <button
                       type="button"
                       onClick={() => toggleCategory(categoryId)}
-                      className="group flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1.5 py-1 text-left transition-colors hover:bg-white"
+                      className="group flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1.5 py-1 text-left transition-colors hover:bg-card"
                     >
                       <CheckboxMark checked={categoryChecked} partial={categoryPartial} />
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-bold text-slate-900">{category.name}</span>
-                        <span className="block truncate text-[11px] font-medium text-slate-500">
+                        <span className="block truncate text-sm font-bold text-foreground">{category.name}</span>
+                        <span className="block truncate text-[11px] font-medium text-muted-foreground">
                           {categoryChecked ? `${subcategories.length} subcategories included` : selectedSubcategoryCount > 0 ? `${selectedSubcategoryCount} exact subcategory selected` : `${subcategories.length} subcategories`}
                         </span>
                       </span>
                       <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${
                         categoryChecked || selectedSubcategoryCount > 0
-                          ? 'bg-blue-100 text-blue-700'
-                          : 'bg-slate-100 text-slate-500'
+                          ? 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200'
+                          : 'bg-muted text-muted-foreground'
                       }`}>
                         {categoryChecked ? 'All' : selectedSubcategoryCount || subcategories.length}
                       </span>
@@ -344,7 +344,7 @@ export default function CanonicalCategoryFilter({
                   </div>
 
                   {showSubcategories && (
-                    <div className="mb-1 ml-11 space-y-0.5 border-l border-slate-200 pl-2 pr-2">
+                    <div className="mb-1 ml-11 space-y-0.5 border-l border-border pl-2 pr-2">
                       {subcategories.map((subcategory) => {
                         const subcategoryId = Number(subcategory.id);
                         const checked = draftSubcategoryIds.includes(subcategoryId);
@@ -355,17 +355,17 @@ export default function CanonicalCategoryFilter({
                             onClick={() => chooseSubcategory(subcategoryId, categoryId)}
                             className={`group flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors ${
                               checked
-                                ? 'bg-white text-blue-800 shadow-sm'
+                                ? 'bg-card text-blue-800 dark:text-blue-200 shadow-sm'
                                 : categoryChecked
-                                  ? 'text-slate-600 hover:bg-white hover:text-slate-900'
-                                  : 'text-slate-700 hover:bg-white'
+                                  ? 'text-muted-foreground hover:bg-card hover:text-foreground'
+                                  : 'text-foreground/85 hover:bg-card'
                             }`}
                             title={categoryChecked ? 'Click to narrow this category filter to this exact subcategory' : undefined}
                           >
-                            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${checked ? 'bg-blue-600' : categoryChecked ? 'bg-blue-200' : 'bg-slate-300 group-hover:bg-blue-400'}`} />
+                            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${checked ? 'bg-blue-600' : categoryChecked ? 'bg-blue-200 dark:bg-blue-500/30' : 'bg-muted-foreground/40 group-hover:bg-blue-400'}`} />
                             <span className="min-w-0 flex-1 truncate text-sm font-medium">{subcategory.name}</span>
                             {checked && (
-                              <Check className="h-3.5 w-3.5 shrink-0 text-blue-600" />
+                              <Check className="h-3.5 w-3.5 shrink-0 text-blue-600 dark:text-blue-300" />
                             )}
                           </button>
                         );
@@ -378,15 +378,15 @@ export default function CanonicalCategoryFilter({
             })}
           </div>
 
-          <div className="flex shrink-0 items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 p-3">
-            <span className="text-xs font-medium text-slate-500">
+          <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border bg-muted/50 p-3">
+            <span className="text-xs font-medium text-muted-foreground">
               {draftCount > 0 ? `${draftCount} active filter${draftCount === 1 ? '' : 's'}` : 'No category filters'}
             </span>
             <button
               type="button"
               onClick={clearDraft}
               disabled={draftCount === 0}
-              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 shadow-sm transition-colors hover:border-blue-200 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
+              className="rounded-xl border border-border bg-card px-3 py-2 text-sm font-bold text-foreground/85 shadow-sm transition-colors hover:border-blue-200 dark:hover:border-blue-500/30 hover:text-blue-700 dark:hover:text-blue-200 disabled:cursor-not-allowed disabled:opacity-40"
             >
               Clear all
             </button>

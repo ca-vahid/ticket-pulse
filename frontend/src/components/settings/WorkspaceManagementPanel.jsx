@@ -7,9 +7,9 @@ import {
 } from 'lucide-react';
 
 const STATUS_BADGE = {
-  active: 'bg-emerald-100 text-emerald-800 border-emerald-300',
-  inactive: 'bg-slate-100 text-slate-600 border-slate-300',
-  new: 'bg-blue-100 text-blue-800 border-blue-300',
+  active: 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-200 border-emerald-300 dark:border-emerald-500/40',
+  inactive: 'bg-muted text-muted-foreground border-input',
+  new: 'bg-blue-100 dark:bg-blue-500/20 text-blue-800 dark:text-blue-200 border-blue-300 dark:border-blue-500/40',
 };
 
 const STATUS_LABEL = {
@@ -105,12 +105,12 @@ export default function WorkspaceManagementPanel() {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3 mb-2">
-        <div className="p-2 bg-purple-100 rounded-lg">
-          <Globe className="w-5 h-5 text-purple-600" />
+        <div className="p-2 bg-purple-100 dark:bg-purple-500/20 rounded-lg">
+          <Globe className="w-5 h-5 text-purple-600 dark:text-purple-300" />
         </div>
         <div>
-          <h3 className="text-lg font-semibold text-gray-900">Workspace Management</h3>
-          <p className="text-sm text-gray-500">
+          <h3 className="text-lg font-semibold text-foreground">Workspace Management</h3>
+          <p className="text-sm text-muted-foreground">
             Discover, activate, and manage FreshService workspaces. New workspaces are auto-detected from your FreshService account.
           </p>
         </div>
@@ -127,27 +127,27 @@ export default function WorkspaceManagementPanel() {
       </button>
 
       {error && (
-        <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg">
-          <XCircle className="w-4 h-4 text-red-600 mt-0.5 flex-shrink-0" />
-          <span className="text-sm text-red-800">{error}</span>
+        <div className="flex items-start gap-2 p-3 bg-red-50 dark:bg-red-500/15 border border-red-200 dark:border-red-500/30 rounded-lg">
+          <XCircle className="w-4 h-4 text-red-600 dark:text-red-300 mt-0.5 flex-shrink-0" />
+          <span className="text-sm text-red-800 dark:text-red-200">{error}</span>
         </div>
       )}
 
       {successMsg && (
-        <div className="flex items-start gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-lg">
-          <CheckCircle className="w-4 h-4 text-emerald-600 mt-0.5 flex-shrink-0" />
-          <span className="text-sm text-emerald-800">{successMsg}</span>
+        <div className="flex items-start gap-2 p-3 bg-emerald-50 dark:bg-emerald-500/15 border border-emerald-200 dark:border-emerald-500/30 rounded-lg">
+          <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-300 mt-0.5 flex-shrink-0" />
+          <span className="text-sm text-emerald-800 dark:text-emerald-200">{successMsg}</span>
         </div>
       )}
 
       {/* Workspace list */}
       {workspaces && (
-        <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-          <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
-            <span className="text-sm font-medium text-gray-700">
+        <div className="bg-card border border-border rounded-lg overflow-hidden">
+          <div className="px-4 py-3 bg-muted/50 border-b border-border flex items-center justify-between">
+            <span className="text-sm font-medium text-foreground/85">
               {workspaces.length} workspace{workspaces.length !== 1 ? 's' : ''} found in FreshService
             </span>
-            <div className="flex items-center gap-3 text-xs text-gray-500">
+            <div className="flex items-center gap-3 text-xs text-muted-foreground">
               <span className="flex items-center gap-1">
                 <div className="w-2 h-2 rounded-full bg-emerald-500" /> Active: {workspaces.filter(w => w.status === 'active').length}
               </span>
@@ -155,12 +155,12 @@ export default function WorkspaceManagementPanel() {
                 <div className="w-2 h-2 rounded-full bg-blue-500" /> New: {workspaces.filter(w => w.status === 'new').length}
               </span>
               <span className="flex items-center gap-1">
-                <div className="w-2 h-2 rounded-full bg-slate-400" /> Inactive: {workspaces.filter(w => w.status === 'inactive').length}
+                <div className="w-2 h-2 rounded-full bg-muted-foreground/60" /> Inactive: {workspaces.filter(w => w.status === 'inactive').length}
               </span>
             </div>
           </div>
 
-          <div className="divide-y divide-gray-100">
+          <div className="divide-y divide-border/60">
             {workspaces.map((ws) => (
               <div key={ws.freshserviceId} className="px-4 py-3 flex items-center gap-4">
                 {/* Status icon */}
@@ -170,16 +170,16 @@ export default function WorkspaceManagementPanel() {
                   ) : ws.status === 'new' ? (
                     <Plus className="w-5 h-5 text-blue-500" />
                   ) : (
-                    <PowerOff className="w-5 h-5 text-slate-400" />
+                    <PowerOff className="w-5 h-5 text-muted-foreground/75" />
                   )}
                 </div>
 
                 {/* Workspace info */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="font-medium text-gray-900">{ws.name}</span>
+                    <span className="font-medium text-foreground">{ws.name}</span>
                     {ws.primary && (
-                      <span className="px-1.5 py-0.5 text-[10px] font-medium bg-amber-100 text-amber-700 border border-amber-300 rounded">
+                      <span className="px-1.5 py-0.5 text-[10px] font-medium bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-200 border border-amber-300 dark:border-amber-500/40 rounded">
                         Primary
                       </span>
                     )}
@@ -187,7 +187,7 @@ export default function WorkspaceManagementPanel() {
                       {STATUS_LABEL[ws.status]}
                     </span>
                   </div>
-                  <div className="text-xs text-gray-500 mt-0.5 flex items-center gap-3">
+                  <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-3">
                     <span>FS ID: {String(ws.freshserviceId)}</span>
                     {ws.dbWorkspace && (
                       <>
@@ -213,8 +213,8 @@ export default function WorkspaceManagementPanel() {
                         : 'Native ticketing is OFF — tickets only sync in from FreshService. Click to enable.'}
                       className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
                         ws.dbWorkspace.nativeTicketingEnabled
-                          ? 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'
-                          : 'bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200'
+                          ? 'bg-indigo-50 dark:bg-indigo-500/15 text-indigo-700 dark:text-indigo-200 border-indigo-200 dark:border-indigo-500/30 hover:bg-indigo-100 dark:hover:bg-indigo-500/20'
+                          : 'bg-muted text-muted-foreground border-border hover:bg-secondary'
                       }`}
                     >
                       {togglingTicketing === ws.dbWorkspace.id ? (
@@ -257,7 +257,7 @@ export default function WorkspaceManagementPanel() {
                     <button
                       onClick={() => deactivate(ws)}
                       disabled={deactivating === ws.dbWorkspace?.id}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-red-50 text-slate-600 hover:text-red-600 text-xs font-medium rounded-lg border border-slate-200 hover:border-red-200 transition-colors"
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-muted hover:bg-red-50 dark:hover:bg-red-500/15 text-muted-foreground hover:text-red-600 dark:hover:text-red-300 text-xs font-medium rounded-lg border border-border hover:border-red-200 dark:hover:border-red-500/30 transition-colors"
                     >
                       {deactivating === ws.dbWorkspace?.id ? (
                         <Loader className="w-3 h-3 animate-spin" />
@@ -275,10 +275,10 @@ export default function WorkspaceManagementPanel() {
       )}
 
       {!workspaces && !isDiscovering && (
-        <div className="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center">
-          <Globe className="w-10 h-10 text-gray-300 mx-auto mb-3" />
-          <p className="text-gray-500 text-sm">Click &quot;Discover Workspaces&quot; to fetch all workspaces from your FreshService account.</p>
-          <p className="text-gray-400 text-xs mt-1">New workspaces can be activated with one click. Use the Backfill tab to import historical data.</p>
+        <div className="bg-muted/50 border border-border rounded-lg p-8 text-center">
+          <Globe className="w-10 h-10 text-muted-foreground/50 mx-auto mb-3" />
+          <p className="text-muted-foreground text-sm">Click &quot;Discover Workspaces&quot; to fetch all workspaces from your FreshService account.</p>
+          <p className="text-muted-foreground/75 text-xs mt-1">New workspaces can be activated with one click. Use the Backfill tab to import historical data.</p>
         </div>
       )}
     </div>

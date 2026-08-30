@@ -45,7 +45,7 @@ export default function DashboardLoadingProgress({ workspaceName }) {
 
   return (
     <div
-      className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white/85 px-6 py-6 text-center shadow-sm backdrop-blur-sm"
+      className="w-full max-w-sm rounded-2xl border border-border bg-card/85 px-6 py-6 text-center shadow-sm backdrop-blur-sm"
       role="status"
       aria-live="polite"
       aria-busy="true"
@@ -55,20 +55,20 @@ export default function DashboardLoadingProgress({ workspaceName }) {
         alt=""
         className="mx-auto mb-3 h-12 w-12 animate-pulse"
       />
-      <p className="text-sm font-semibold text-slate-800">
+      <p className="text-sm font-semibold text-foreground">
         Loading {workspaceName ? `${workspaceName} ` : ''}dashboard…
       </p>
-      <p className="mt-1 text-xs text-slate-500">{phase.label}</p>
+      <p className="mt-1 text-xs text-muted-foreground">{phase.label}</p>
 
-      <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+      <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-muted">
         <div
           className="h-full rounded-full bg-blue-600 transition-[width] duration-300 ease-out"
           style={{ width: `${Math.max(4, rounded)}%` }}
         />
       </div>
-      <div className="mt-2 flex items-center justify-between text-[11px] font-medium text-slate-400">
+      <div className="mt-2 flex items-center justify-between text-[11px] font-medium text-muted-foreground/75">
         <span>Fetching latest tickets</span>
-        <span className="tabular-nums text-slate-600">{rounded}%</span>
+        <span className="tabular-nums text-muted-foreground">{rounded}%</span>
       </div>
     </div>
   );

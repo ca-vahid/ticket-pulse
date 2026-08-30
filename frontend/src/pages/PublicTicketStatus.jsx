@@ -173,7 +173,7 @@ function AgentAvatar({ agent, enabled = true }) {
 
 function ErrorPage({ title, message, onRefresh }) {
   return (
-    <main className="min-h-screen bg-gradient-to-br from-rose-50 via-white to-amber-50 px-4 py-10 text-slate-900">
+    <main className="tp-light min-h-screen bg-gradient-to-br from-rose-50 via-white to-amber-50 px-4 py-10 text-slate-900">
       <div className="mx-auto max-w-2xl rounded-lg border border-red-200 bg-white p-8 shadow-sm">
         <div className="flex items-start gap-4">
           <span className="inline-flex h-11 w-11 items-center justify-center rounded-lg bg-red-50 text-red-600">
@@ -266,7 +266,7 @@ export default function PublicTicketStatus() {
 
   if (loading && !data) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-gradient-to-br from-cyan-50 via-white to-amber-50 text-slate-700">
+      <main className="tp-light flex min-h-screen items-center justify-center bg-gradient-to-br from-cyan-50 via-white to-amber-50 text-slate-700">
         <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-5 py-4 shadow-sm">
           <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
           Loading ticket status
@@ -287,7 +287,7 @@ export default function PublicTicketStatus() {
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-cyan-50 via-white to-orange-50 text-slate-900">
+    <main className="tp-light min-h-screen bg-gradient-to-br from-cyan-50 via-white to-orange-50 text-slate-900">
       <header className="border-b border-white/70 bg-white/85 shadow-sm backdrop-blur">
         <div className="mx-auto flex max-w-7xl flex-col gap-5 px-4 py-6 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-5">

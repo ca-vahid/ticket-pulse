@@ -76,7 +76,7 @@ function HighlightText({ text, query, className = '' }) {
     return (
       <span className={className}>
         {value.slice(0, index)}
-        <mark className="rounded bg-yellow-200 px-0.5 text-slate-950">{value.slice(index, index + needle.length)}</mark>
+        <mark className="rounded bg-yellow-200 dark:bg-yellow-500/30 px-0.5 text-foreground">{value.slice(index, index + needle.length)}</mark>
         {value.slice(index + needle.length)}
       </span>
     );
@@ -93,7 +93,7 @@ function HighlightText({ text, query, className = '' }) {
   }
   for (let i = 0; i < value.length; i += 1) {
     chars.push(matched.has(i)
-      ? <mark key={i} className="rounded bg-yellow-100 px-0.5 text-slate-950">{value[i]}</mark>
+      ? <mark key={i} className="rounded bg-yellow-100 dark:bg-yellow-500/20 px-0.5 text-foreground">{value[i]}</mark>
       : <span key={i}>{value[i]}</span>);
   }
   return <span className={className}>{chars}</span>;
@@ -253,32 +253,32 @@ function pluralize(count, singular, plural = `${singular}s`) {
 
 function toastToneClasses(tone) {
   if (tone === 'amber') return {
-    border: 'border-amber-200',
-    icon: 'bg-amber-100 text-amber-700',
+    border: 'border-amber-200 dark:border-amber-500/30',
+    icon: 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-200',
     bar: 'bg-amber-400',
   };
   if (tone === 'emerald') return {
-    border: 'border-emerald-200',
-    icon: 'bg-emerald-100 text-emerald-700',
+    border: 'border-emerald-200 dark:border-emerald-500/30',
+    icon: 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-200',
     bar: 'bg-emerald-400',
   };
   if (tone === 'red') return {
-    border: 'border-red-200',
-    icon: 'bg-red-100 text-red-700',
+    border: 'border-red-200 dark:border-red-500/30',
+    icon: 'bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-200',
     bar: 'bg-red-400',
   };
   return {
-    border: 'border-cyan-200',
-    icon: 'bg-cyan-100 text-cyan-700',
+    border: 'border-cyan-200 dark:border-cyan-500/30',
+    icon: 'bg-cyan-100 dark:bg-cyan-500/20 text-cyan-700 dark:text-cyan-200',
     bar: 'bg-cyan-400',
   };
 }
 
 function activityToneClasses(tone) {
-  if (tone === 'amber') return 'bg-amber-100 text-amber-700';
-  if (tone === 'emerald') return 'bg-emerald-100 text-emerald-700';
-  if (tone === 'violet') return 'bg-violet-100 text-violet-700';
-  return 'bg-cyan-100 text-cyan-700';
+  if (tone === 'amber') return 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-200';
+  if (tone === 'emerald') return 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-200';
+  if (tone === 'violet') return 'bg-violet-100 dark:bg-violet-500/20 text-violet-700 dark:text-violet-200';
+  return 'bg-cyan-100 dark:bg-cyan-500/20 text-cyan-700 dark:text-cyan-200';
 }
 
 function formatCountdown(ms) {
@@ -321,17 +321,17 @@ function CardActionsMenu({
         type="button"
         onClick={disabled ? undefined : onToggle}
         disabled={disabled}
-        className={`${compact ? 'h-8 w-8 rounded-md' : 'h-10 w-10 rounded-lg shadow-sm'} flex items-center justify-center border border-slate-200 bg-white text-slate-500 transition hover:-translate-y-0.5 hover:border-slate-300 hover:text-slate-900 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:translate-y-0 disabled:hover:shadow-none`}
+        className={`${compact ? 'h-8 w-8 rounded-md' : 'h-10 w-10 rounded-lg shadow-sm'} flex items-center justify-center border border-border bg-card text-muted-foreground transition hover:-translate-y-0.5 hover:border-input hover:text-foreground hover:shadow-md disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:translate-y-0 disabled:hover:shadow-none`}
         title={disabled ? 'Results are read-only' : label}
         aria-label={disabled ? 'Results are read-only' : label}
       >
         <Icons.EllipsisVertical className={compact ? 'h-4 w-4' : 'h-5 w-5'} />
       </button>
       {isOpen && !disabled && (
-        <div className={`absolute right-0 z-[120] w-72 rounded-lg border border-slate-200 bg-white p-3 shadow-2xl ${compact ? 'top-10' : 'top-12'}`}>
+        <div className={`absolute right-0 z-[120] w-72 rounded-lg border border-border bg-card p-3 shadow-2xl ${compact ? 'top-10' : 'top-12'}`}>
           <div className="mb-2 flex items-center justify-between gap-2">
-            <div className="text-xs font-semibold uppercase text-slate-500">{label}</div>
-            <button type="button" onClick={onToggle} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
+            <div className="text-xs font-semibold uppercase text-muted-foreground">{label}</div>
+            <button type="button" onClick={onToggle} className="rounded p-1 text-muted-foreground/75 hover:bg-muted hover:text-foreground/85">
               <Icons.X className="h-4 w-4" />
             </button>
           </div>
@@ -342,14 +342,14 @@ function CardActionsMenu({
                 onToggle();
                 onRename?.();
               }}
-              className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-left text-sm font-semibold text-slate-800 transition hover:bg-white hover:shadow-sm"
+              className="flex items-center gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2 text-left text-sm font-semibold text-foreground transition hover:bg-card hover:shadow-sm"
             >
-              <Icons.Pencil className="h-4 w-4 text-slate-500" />
+              <Icons.Pencil className="h-4 w-4 text-muted-foreground" />
               Rename
             </button>
             {extraActions}
           </div>
-          <div className="mb-2 text-xs font-semibold uppercase text-slate-500">Icon</div>
+          <div className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Icon</div>
           <div className="grid max-h-64 grid-cols-7 gap-1 overflow-auto pr-1">
             {ICONS.map((iconName) => (
               <button
@@ -357,7 +357,7 @@ function CardActionsMenu({
                 type="button"
                 onClick={() => onIconSelect(iconName)}
                 className={`flex h-9 w-9 items-center justify-center rounded-lg border transition hover:-translate-y-0.5 hover:shadow-sm ${
-                  iconName === value ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-white'
+                  iconName === value ? 'border-foreground bg-foreground text-background' : 'border-border bg-muted/50 text-muted-foreground hover:bg-card'
                 }`}
                 title={iconName}
               >
@@ -367,19 +367,19 @@ function CardActionsMenu({
           </div>
           {onColorSelect && (
             <>
-              <div className="mb-2 mt-3 text-xs font-semibold uppercase text-slate-500">Color</div>
+              <div className="mb-2 mt-3 text-xs font-semibold uppercase text-muted-foreground">Color</div>
               <div className="grid grid-cols-8 gap-1">
                 {COLORS.map((swatch) => (
                   <button
                     key={swatch}
                     type="button"
                     onClick={() => onColorSelect(swatch)}
-                    className={`h-8 rounded-lg border transition hover:-translate-y-0.5 hover:shadow-sm ${swatch === color ? 'border-slate-900 ring-2 ring-slate-200' : 'border-slate-200'}`}
+                    className={`h-8 rounded-lg border transition hover:-translate-y-0.5 hover:shadow-sm ${swatch === color ? 'border-foreground ring-2 ring-border' : 'border-border'}`}
                     style={{ backgroundColor: swatch }}
                     title={swatch}
                   />
                 ))}
-                <label className="flex h-8 cursor-pointer items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-slate-500 transition hover:bg-white hover:text-slate-900">
+                <label className="flex h-8 cursor-pointer items-center justify-center rounded-lg border border-border bg-muted/50 text-muted-foreground transition hover:bg-card hover:text-foreground">
                   <Icons.Palette className="h-4 w-4" />
                   <input type="color" value={color} onChange={(event) => onColorSelect(event.target.value)} className="sr-only" />
                 </label>
@@ -393,7 +393,7 @@ function CardActionsMenu({
                 onToggle();
                 onRemove();
               }}
-              className="mt-3 flex w-full items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-left text-sm font-semibold text-red-700 transition hover:bg-red-100"
+              className="mt-3 flex w-full items-center gap-2 rounded-lg border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 px-3 py-2 text-left text-sm font-semibold text-red-700 dark:text-red-200 transition hover:bg-red-100 dark:hover:bg-red-500/20"
             >
               <Icons.Trash2 className="h-4 w-4" />
               Remove
@@ -1345,8 +1345,8 @@ export default function SummitTaxonomyWorkshop() {
   };
 
   const renderMoveSubcategoryAction = (category, subcat) => (
-    <div className="rounded-lg border border-cyan-100 bg-cyan-50/70 p-2">
-      <label className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase text-cyan-900">
+    <div className="rounded-lg border border-cyan-100 dark:border-cyan-500/20 bg-cyan-50/70 dark:bg-cyan-500/10 p-2">
+      <label className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase text-cyan-900 dark:text-cyan-200">
         <Icons.MoveRight className="h-3.5 w-3.5" />
         Move to category
       </label>
@@ -1367,7 +1367,7 @@ export default function SummitTaxonomyWorkshop() {
             tone: 'cyan',
           });
         }}
-        className="w-full rounded-md border border-cyan-200 bg-white px-2 py-1.5 text-sm font-medium text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
+        className="w-full rounded-md border border-cyan-200 dark:border-cyan-500/30 bg-card px-2 py-1.5 text-sm font-medium text-foreground outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100 dark:focus:ring-cyan-500/30"
       >
         {activeCategories.map(candidate => (
           <option key={candidate.id} value={candidate.id}>{candidate.name}</option>
@@ -1395,15 +1395,15 @@ export default function SummitTaxonomyWorkshop() {
           }
         }}
         onDrop={(event) => dropIntoCategory(event, category)}
-        className={`rounded-lg border bg-white p-4 shadow-sm transition-all duration-300 ${
+        className={`rounded-lg border bg-card p-4 shadow-sm transition-all duration-300 ${
           dragOverTarget?.type === 'selected-category' && category.id === dragOverTarget.id
-            ? 'border-cyan-300 ring-2 ring-cyan-100'
+            ? 'border-cyan-300 dark:border-cyan-500/40 ring-2 ring-cyan-100 dark:ring-cyan-500/30'
             : highlightIds[`move-category-${category.id}`]
-              ? 'summit-drop-land border-cyan-300 ring-2 ring-cyan-100'
-              : 'border-slate-200'
+              ? 'summit-drop-land border-cyan-300 dark:border-cyan-500/40 ring-2 ring-cyan-100 dark:ring-cyan-500/30'
+              : 'border-border'
         }`}
       >
-        <div className="flex flex-col gap-3 border-b border-slate-200 pb-4 md:flex-row md:items-start md:justify-between">
+        <div className="flex flex-col gap-3 border-b border-border pb-4 md:flex-row md:items-start md:justify-between">
           <div className="flex min-w-0 flex-1 gap-3">
             <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg text-white shadow-sm" style={{ backgroundColor: category.color }}>
               <Icon name={category.icon} className="h-6 w-6" />
@@ -1416,16 +1416,16 @@ export default function SummitTaxonomyWorkshop() {
                     value={category.name}
                     onChange={(e) => updateCategory(category.id, { name: e.target.value })}
                     readOnly={categoryResultsLocked}
-                    className="min-w-0 flex-1 rounded border border-transparent px-1 text-xl font-semibold text-slate-950 outline-none focus:border-slate-300 read-only:cursor-default read-only:bg-transparent read-only:focus:border-transparent"
+                    className="min-w-0 flex-1 rounded border border-transparent px-1 text-xl font-semibold text-foreground outline-none focus:border-input read-only:cursor-default read-only:bg-transparent read-only:focus:border-transparent"
                   />
                 ) : (
-                  <h2 className="min-w-0 flex-1 break-words text-xl font-semibold text-slate-950">
+                  <h2 className="min-w-0 flex-1 break-words text-xl font-semibold text-foreground">
                     <HighlightText text={category.name} query={searchNeedle} />
                   </h2>
                 )}
                 <span className={`w-fit rounded-lg px-2.5 py-1 text-xs font-bold transition-all duration-300 ${
-                  linkedVoteCount(votes, category) > 0 ? 'bg-cyan-600 text-white shadow-sm' : 'bg-slate-100 text-slate-500'
-                } ${highlightIds[`vote-${category.id}`] ? 'scale-110 ring-2 ring-cyan-200' : ''}`}>
+                  linkedVoteCount(votes, category) > 0 ? 'bg-cyan-600 text-white shadow-sm' : 'bg-muted text-muted-foreground'
+                } ${highlightIds[`vote-${category.id}`] ? 'scale-110 ring-2 ring-cyan-200 dark:ring-cyan-500/30' : ''}`}>
                   <Icons.ThumbsUp className="mr-1 inline h-3.5 w-3.5" />
                   {linkedVoteCount(votes, category)} votes
                 </span>
@@ -1436,11 +1436,11 @@ export default function SummitTaxonomyWorkshop() {
                   onChange={(e) => updateCategory(category.id, { description: e.target.value })}
                   readOnly={categoryResultsLocked}
                   rows={2}
-                  className="mt-1 w-full resize-none rounded border border-slate-200 px-2 py-1 text-sm text-slate-600 outline-none focus:border-slate-400 read-only:cursor-default read-only:bg-slate-50"
+                  className="mt-1 w-full resize-none rounded border border-border px-2 py-1 text-sm text-muted-foreground outline-none focus:border-ring read-only:cursor-default read-only:bg-muted/50"
                   placeholder="Describe the category boundary"
                 />
               ) : (
-                <p className="mt-1 text-sm leading-6 text-slate-600">
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">
                   <HighlightText text={category.description || 'No category description yet.'} query={searchNeedle} />
                 </p>
               )}
@@ -1451,13 +1451,13 @@ export default function SummitTaxonomyWorkshop() {
               <button
                 type="button"
                 onClick={() => openCategoryForEdit(category.id)}
-                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-sm"
+                className="rounded-lg border border-border bg-card px-3 py-2 text-sm font-semibold text-foreground/85 transition hover:-translate-y-0.5 hover:border-input hover:shadow-sm"
               >
                 <Icons.Pencil className="mr-1 inline h-4 w-4" />
                 {categoryResultsLocked ? 'Open' : 'Open/edit'}
               </button>
             ) : (
-              <button onClick={() => addSubcategory(category.id)} disabled={categoryResultsLocked} className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 hover:shadow-md disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500 disabled:hover:translate-y-0 disabled:hover:shadow-none"><Icons.Tag className="mr-1 inline h-4 w-4" />Add sub</button>
+              <button onClick={() => addSubcategory(category.id)} disabled={categoryResultsLocked} className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 hover:shadow-md disabled:cursor-not-allowed disabled:bg-secondary disabled:text-muted-foreground disabled:hover:translate-y-0 disabled:hover:shadow-none"><Icons.Tag className="mr-1 inline h-4 w-4" />Add sub</button>
             )}
             <CardActionsMenu
               value={category.icon}
@@ -1498,18 +1498,18 @@ export default function SummitTaxonomyWorkshop() {
                 setDropTarget(event, { type: 'sub', id: subcat.id, label: `place before ${subcat.name}` });
               }}
               onDrop={(event) => dropSubcategory(event, subcat, category)}
-              className={`group relative rounded-lg border p-3 transition-all duration-300 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white hover:shadow-sm ${
+              className={`group relative rounded-lg border p-3 transition-all duration-300 hover:-translate-y-0.5 hover:border-input hover:bg-card hover:shadow-sm ${
                 iconPickerTarget?.type === 'subcategory' && iconPickerTarget.id === subcat.id
-                  ? 'z-50 border-slate-300 bg-white shadow-xl'
+                  ? 'z-50 border-input bg-card shadow-xl'
                   : dragOverTarget?.type === 'sub' && dragOverTarget.id === subcat.id
-                    ? 'z-30 scale-[1.015] border-cyan-400 bg-cyan-50 shadow-lg ring-2 ring-cyan-200'
+                    ? 'z-30 scale-[1.015] border-cyan-400 bg-cyan-50 dark:bg-cyan-500/15 shadow-lg ring-2 ring-cyan-200 dark:ring-cyan-500/30'
                     : dragItem?.type === 'sub' && dragItem.id === subcat.id
-                      ? 'scale-[0.98] border-dashed border-cyan-300 bg-slate-50 opacity-45'
+                      ? 'scale-[0.98] border-dashed border-cyan-300 dark:border-cyan-500/40 bg-muted/50 opacity-45'
                       : highlightIds[`move-sub-${subcat.id}`]
-                        ? 'summit-drop-land border-cyan-300 bg-cyan-50 shadow-md ring-2 ring-cyan-100'
+                        ? 'summit-drop-land border-cyan-300 dark:border-cyan-500/40 bg-cyan-50 dark:bg-cyan-500/15 shadow-md ring-2 ring-cyan-100 dark:ring-cyan-500/30'
                         : highlightIds[`sub-${subcat.id}`] || highlightIds[`vote-${subcat.id}`]
-                          ? 'border-cyan-300 bg-cyan-50 shadow-md ring-2 ring-cyan-100'
-                          : 'border-slate-200 bg-slate-50'
+                          ? 'border-cyan-300 dark:border-cyan-500/40 bg-cyan-50 dark:bg-cyan-500/15 shadow-md ring-2 ring-cyan-100 dark:ring-cyan-500/30'
+                          : 'border-border bg-muted/50'
               }`}
             >
               <div className="flex items-start gap-2">
@@ -1520,12 +1520,12 @@ export default function SummitTaxonomyWorkshop() {
                   onDragStart={(event) => startDrag(event, { type: 'sub', categoryId: category.id, id: subcat.id, name: subcat.name, icon: subcat.icon || 'Tag', color: category.color })}
                   onDrag={(event) => updateDragPosition(event)}
                   onDragEnd={finishDrag}
-                  className="mt-0.5 flex h-8 w-6 shrink-0 cursor-grab items-center justify-center rounded text-slate-400 transition hover:bg-white hover:text-slate-700 active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-40"
+                  className="mt-0.5 flex h-8 w-6 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground/75 transition hover:bg-card hover:text-foreground/85 active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-40"
                   title={categoryResultsLocked ? 'Results are read-only' : 'Drag subcategory'}
                 >
                   <Icons.GripVertical className="h-4 w-4" />
                 </button>
-                <span className="mt-1 text-slate-500"><Icon name={subcat.icon || 'Tag'} /></span>
+                <span className="mt-1 text-muted-foreground"><Icon name={subcat.icon || 'Tag'} /></span>
                 <div className="min-w-0 flex-1">
                   {isFocusedEditor ? (
                     <input
@@ -1536,23 +1536,23 @@ export default function SummitTaxonomyWorkshop() {
                       value={subcat.name}
                       onChange={(e) => updateSubcategory(category.id, subcat.id, { name: e.target.value })}
                       readOnly={categoryResultsLocked}
-                      className="w-full rounded border border-transparent bg-transparent text-sm font-semibold text-slate-900 outline-none focus:border-slate-300 focus:bg-white read-only:cursor-default read-only:focus:border-transparent read-only:focus:bg-transparent"
+                      className="w-full rounded border border-transparent bg-transparent text-sm font-semibold text-foreground outline-none focus:border-input focus:bg-card read-only:cursor-default read-only:focus:border-transparent read-only:focus:bg-transparent"
                     />
                   ) : (
-                    <div className="break-words text-sm font-semibold text-slate-900">
+                    <div className="break-words text-sm font-semibold text-foreground">
                       <HighlightText text={subcat.name} query={searchNeedle} />
                     </div>
                   )}
                   {isFocusedEditor ? (
-                    <input value={subcat.evidence || ''} onChange={(e) => updateSubcategory(category.id, subcat.id, { evidence: e.target.value })} readOnly={categoryResultsLocked} className="mt-1 w-full rounded border border-transparent bg-transparent text-xs text-slate-500 outline-none focus:border-slate-300 focus:bg-white read-only:cursor-default read-only:focus:border-transparent read-only:focus:bg-transparent" placeholder="Evidence or discussion note" />
+                    <input value={subcat.evidence || ''} onChange={(e) => updateSubcategory(category.id, subcat.id, { evidence: e.target.value })} readOnly={categoryResultsLocked} className="mt-1 w-full rounded border border-transparent bg-transparent text-xs text-muted-foreground outline-none focus:border-input focus:bg-card read-only:cursor-default read-only:focus:border-transparent read-only:focus:bg-transparent" placeholder="Evidence or discussion note" />
                   ) : (
-                    <div className="mt-1 break-words text-xs text-slate-500">
+                    <div className="mt-1 break-words text-xs text-muted-foreground">
                       <HighlightText text={subcat.evidence || 'Evidence or discussion note'} query={searchNeedle} />
                     </div>
                   )}
                 </div>
                 <span className={`rounded-lg px-2 py-1 text-xs font-bold transition-all duration-300 ${
-                  linkedVoteCount(votes, subcat) > 0 ? 'bg-cyan-600 text-white shadow-sm' : 'bg-white text-slate-500'
+                  linkedVoteCount(votes, subcat) > 0 ? 'bg-cyan-600 text-white shadow-sm' : 'bg-card text-muted-foreground'
                 }`}>
                   <Icons.ThumbsUp className="mr-1 inline h-3.5 w-3.5" />
                   {linkedVoteCount(votes, subcat)}
@@ -1576,20 +1576,20 @@ export default function SummitTaxonomyWorkshop() {
             </div>
           ))}
           {!categorySubcategories.length && (
-            <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-500 md:col-span-2">
+            <div className="rounded-lg border border-dashed border-input bg-muted/50 p-4 text-sm text-muted-foreground md:col-span-2">
               No subcategories match this search in {category.name}.
             </div>
           )}
         </div>
 
         {!!categorySuggestions.length && (
-          <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50/80 p-3">
+          <div className="mt-5 rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50/80 dark:bg-amber-500/10 p-3">
             <div className="mb-3 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                <Icons.Lightbulb className="h-4 w-4 text-amber-700" />
+              <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                <Icons.Lightbulb className="h-4 w-4 text-amber-700 dark:text-amber-200" />
                 Suggested subcategories
               </div>
-              <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-amber-800">{categorySuggestions.length}</span>
+              <span className="rounded-full bg-card px-2 py-0.5 text-xs font-semibold text-amber-800 dark:text-amber-200">{categorySuggestions.length}</span>
             </div>
             <div className="grid gap-2 md:grid-cols-2">
               {categorySuggestions.map((suggestion) => {
@@ -1599,32 +1599,32 @@ export default function SummitTaxonomyWorkshop() {
                     key={suggestion.id}
                     className={`rounded-lg border p-3 text-xs transition-all duration-500 ${
                       highlightIds[`idea-${suggestion.id}`]
-                        ? 'border-amber-300 bg-white shadow-md ring-2 ring-amber-200'
-                        : 'border-amber-100 bg-white/90'
+                        ? 'border-amber-300 dark:border-amber-500/40 bg-card shadow-md ring-2 ring-amber-200 dark:ring-amber-500/30'
+                        : 'border-amber-100 dark:border-amber-500/20 bg-card/90'
                     }`}
                   >
                     <div className="flex items-start gap-2">
-                      <Icons.Tag className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
+                      <Icons.Tag className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-200" />
                       <div className="min-w-0 flex-1">
-                        <div className="break-words text-sm font-semibold text-slate-900">
+                        <div className="break-words text-sm font-semibold text-foreground">
                           <HighlightText text={suggestion.itemLabel} query={searchNeedle} />
                         </div>
-                        <div className="mt-0.5 text-slate-500">Suggested by {suggestion.participantName}</div>
+                        <div className="mt-0.5 text-muted-foreground">Suggested by {suggestion.participantName}</div>
                       </div>
-                      <span className={`rounded-lg px-2 py-1 text-xs font-bold ${voteCount(votes, suggestion.itemId) > 0 ? 'bg-amber-500 text-white' : 'bg-amber-100 text-amber-800'}`}>
+                      <span className={`rounded-lg px-2 py-1 text-xs font-bold ${voteCount(votes, suggestion.itemId) > 0 ? 'bg-amber-500 text-white' : 'bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-200'}`}>
                         <Icons.ThumbsUp className="mr-1 inline h-3.5 w-3.5" />
                         {voteCount(votes, suggestion.itemId)}
                       </span>
                     </div>
                     {suggestion.value?.reason && (
-                      <div className="mt-2 rounded-md bg-amber-50 px-2 py-1 text-slate-600">
+                      <div className="mt-2 rounded-md bg-amber-50 dark:bg-amber-500/15 px-2 py-1 text-muted-foreground">
                         <HighlightText text={suggestion.value.reason} query={searchNeedle} />
                       </div>
                     )}
                     <button
                       onClick={() => addSuggestedCategory(suggestion)}
                       disabled={categoryResultsLocked || alreadyAdded}
-                      className="mt-3 rounded-md bg-slate-950 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
+                      className="mt-3 rounded-md bg-slate-950 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-secondary disabled:text-muted-foreground"
                     >
                       <Icons.Plus className="mr-1 inline h-3.5 w-3.5" />
                       {categoryResultsLocked ? 'Read-only' : alreadyAdded ? 'Already added' : 'Add subcategory'}
@@ -1637,22 +1637,22 @@ export default function SummitTaxonomyWorkshop() {
         )}
 
         {isFocusedEditor && !categoryResultsLocked && (
-          <form onSubmit={submitSubcategory} className="mt-5 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-3 transition-all duration-300 focus-within:border-cyan-300 focus-within:bg-cyan-50/50 focus-within:ring-2 focus-within:ring-cyan-100">
+          <form onSubmit={submitSubcategory} className="mt-5 rounded-lg border border-dashed border-input bg-muted/50 p-3 transition-all duration-300 focus-within:border-cyan-300 dark:focus-within:border-cyan-500/40 focus-within:bg-cyan-50/50 dark:focus-within:bg-cyan-500/10 focus-within:ring-2 focus-within:ring-cyan-100 dark:focus-within:ring-cyan-500/30">
             <div className="flex flex-col gap-2 md:flex-row md:items-center">
-              <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
-                <Icons.Tag className="h-4 w-4 shrink-0 text-slate-500" />
+              <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-border bg-card px-3 py-2">
+                <Icons.Tag className="h-4 w-4 shrink-0 text-muted-foreground" />
                 <input
                   ref={subcategoryNameInputRef}
                   value={newSubcategoryName}
                   onChange={(e) => setNewSubcategoryName(e.target.value)}
-                  className="min-w-0 flex-1 border-0 bg-transparent text-sm font-semibold text-slate-900 outline-none"
+                  className="min-w-0 flex-1 border-0 bg-transparent text-sm font-semibold text-foreground outline-none"
                   placeholder={`Add subcategory under ${category.name}`}
                 />
               </div>
               <button
                 type="submit"
                 disabled={!newSubcategoryName.trim()}
-                className="rounded-lg bg-slate-950 px-3 py-2 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
+                className="rounded-lg bg-slate-950 px-3 py-2 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-secondary disabled:text-muted-foreground"
               >
                 <Icons.Plus className="mr-1 inline h-4 w-4" />
                 Add sub
@@ -1661,7 +1661,7 @@ export default function SummitTaxonomyWorkshop() {
             <input
               value={newSubcategoryEvidence}
               onChange={(e) => setNewSubcategoryEvidence(e.target.value)}
-              className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 outline-none focus:border-cyan-300"
+              className="mt-2 w-full rounded-lg border border-border bg-card px-3 py-2 text-xs text-muted-foreground outline-none focus:border-cyan-300 dark:focus:border-cyan-500/40"
               placeholder="Evidence or discussion note"
             />
           </form>
@@ -1673,7 +1673,7 @@ export default function SummitTaxonomyWorkshop() {
   if (!isItWorkspace) {
     return (
       <AppShell activePage="dashboard">
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-6 text-amber-900">
+        <div className="rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 p-6 text-amber-900 dark:text-amber-200">
           This workshop is currently visible only in the IT workspace.
         </div>
       </AppShell>
@@ -1681,16 +1681,16 @@ export default function SummitTaxonomyWorkshop() {
   }
 
   if (error) {
-    return <AppShell activePage="dashboard"><div className="rounded-lg border border-red-200 bg-red-50 p-6 text-red-800">{error}</div></AppShell>;
+    return <AppShell activePage="dashboard"><div className="rounded-lg border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 p-6 text-red-800 dark:text-red-200">{error}</div></AppShell>;
   }
 
   if (!state) {
     return (
       <AppShell activePage="dashboard">
         <div className="flex min-h-[60vh] items-center justify-center">
-          <div className="rounded-lg border border-slate-200 bg-white px-6 py-5 shadow-sm">
-            <Icons.Loader2 className="mx-auto h-8 w-8 animate-spin text-blue-700" />
-            <p className="mt-3 text-sm text-slate-600">Loading summit workshop...</p>
+          <div className="rounded-lg border border-border bg-card px-6 py-5 shadow-sm">
+            <Icons.Loader2 className="mx-auto h-8 w-8 animate-spin text-blue-700 dark:text-blue-200" />
+            <p className="mt-3 text-sm text-muted-foreground">Loading summit workshop...</p>
           </div>
         </div>
       </AppShell>
@@ -1731,7 +1731,7 @@ export default function SummitTaxonomyWorkshop() {
           return (
             <div
               key={toast.id}
-              className={`summit-toast overflow-hidden rounded-lg border bg-white shadow-lg transition-all duration-300 ${tone.border}`}
+              className={`summit-toast overflow-hidden rounded-lg border bg-card shadow-lg transition-all duration-300 ${tone.border}`}
             >
               <div className={`h-0.5 ${tone.bar}`} />
               <div className="p-2.5">
@@ -1742,13 +1742,13 @@ export default function SummitTaxonomyWorkshop() {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <div className="text-xs font-semibold text-slate-950">{toast.title}</div>
-                        <div className="mt-0.5 break-words text-xs leading-snug text-slate-700">{toast.message}</div>
+                        <div className="text-xs font-semibold text-foreground">{toast.title}</div>
+                        <div className="mt-0.5 break-words text-xs leading-snug text-foreground/85">{toast.message}</div>
                       </div>
                       <button
                         type="button"
                         onClick={() => dismissToast(toast.id)}
-                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 active:scale-95"
+                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/75 transition hover:bg-muted hover:text-foreground/85 active:scale-95"
                         aria-label={`Dismiss ${toast.title}`}
                         title="Dismiss"
                       >
@@ -1758,7 +1758,7 @@ export default function SummitTaxonomyWorkshop() {
                     {!!toast.details?.filter(Boolean).length && (
                       <div className="mt-1.5 grid gap-1">
                         {toast.details.filter(Boolean).slice(0, 2).map((detail) => (
-                          <div key={detail} className="rounded-md bg-slate-50 px-2 py-0.5 text-[11px] text-slate-600">
+                          <div key={detail} className="rounded-md bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground">
                             {detail}
                           </div>
                         ))}
@@ -1773,13 +1773,13 @@ export default function SummitTaxonomyWorkshop() {
       </div>
 
       {dragPreview && (
-        <div className="pointer-events-none fixed bottom-5 left-1/2 z-[75] flex max-w-[min(760px,calc(100vw-2rem))] -translate-x-1/2 items-center gap-2 rounded-full border border-cyan-200 bg-white/95 px-4 py-2 text-sm shadow-2xl backdrop-blur transition-all duration-150">
+        <div className="pointer-events-none fixed bottom-5 left-1/2 z-[75] flex max-w-[min(760px,calc(100vw-2rem))] -translate-x-1/2 items-center gap-2 rounded-full border border-cyan-200 dark:border-cyan-500/30 bg-card/95 px-4 py-2 text-sm shadow-2xl backdrop-blur transition-all duration-150">
           <span className="flex h-6 w-6 items-center justify-center rounded-full bg-cyan-600 text-white">
             <Icons.Move className="h-3.5 w-3.5" />
           </span>
-          <span className="max-w-56 truncate font-semibold text-slate-950">Dragging {dragPreview.name}</span>
-          <Icons.CornerDownRight className="h-4 w-4 text-slate-400" />
-          <span className={`truncate font-medium ${dragOverTarget?.label ? 'text-cyan-800' : 'text-slate-500'}`}>
+          <span className="max-w-56 truncate font-semibold text-foreground">Dragging {dragPreview.name}</span>
+          <Icons.CornerDownRight className="h-4 w-4 text-muted-foreground/75" />
+          <span className={`truncate font-medium ${dragOverTarget?.label ? 'text-cyan-800 dark:text-cyan-200' : 'text-muted-foreground'}`}>
             {dragOverTarget?.label || 'choose a highlighted target'}
           </span>
         </div>
@@ -1787,7 +1787,7 @@ export default function SummitTaxonomyWorkshop() {
 
       {dragPreview && dragPosition && (
         <div
-          className="pointer-events-none fixed z-[80] w-72 -rotate-1 rounded-lg border border-cyan-200 bg-white/80 p-3 text-slate-900 shadow-2xl ring-4 ring-cyan-100/70 backdrop-blur transition-all duration-150 ease-out"
+          className="pointer-events-none fixed z-[80] w-72 -rotate-1 rounded-lg border border-cyan-200 dark:border-cyan-500/30 bg-card/80 p-3 text-foreground shadow-2xl ring-4 ring-cyan-100/70 backdrop-blur transition-all duration-150 ease-out"
           style={{ left: dragPosition.x + 16, top: dragPosition.y + 16 }}
         >
           <div className="flex items-center gap-3">
@@ -1796,17 +1796,17 @@ export default function SummitTaxonomyWorkshop() {
             </span>
             <div className="min-w-0">
               <div className="truncate text-sm font-semibold">{dragPreview.name}</div>
-              <div className="text-xs capitalize text-slate-500">{dragPreview.type === 'sub' ? 'Subcategory' : 'Top category'}</div>
+              <div className="text-xs capitalize text-muted-foreground">{dragPreview.type === 'sub' ? 'Subcategory' : 'Top category'}</div>
             </div>
           </div>
         </div>
       )}
 
-      <div className="mb-3 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-        <div className="flex flex-col gap-3 border-b border-slate-200 bg-slate-950 px-4 py-3 text-white xl:flex-row xl:items-center xl:justify-between">
+      <div className="mb-3 overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+        <div className="flex flex-col gap-3 border-b border-border bg-slate-950 px-4 py-3 text-white xl:flex-row xl:items-center xl:justify-between">
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
             <div className="flex min-w-0 items-center gap-2">
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-cyan-400 text-slate-950">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-cyan-400 text-foreground">
                 <Icons.Sparkles className="h-5 w-5" />
               </span>
               <div className="min-w-0">
@@ -1817,9 +1817,9 @@ export default function SummitTaxonomyWorkshop() {
             <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs">
               <span title="Top categories" className="rounded-lg bg-white/10 px-2 py-1 font-semibold"><Icons.Folders className="mr-1 inline h-3.5 w-3.5" />{activeCategories.length}</span>
               <span title="Subcategories" className="rounded-lg bg-white/10 px-2 py-1 font-semibold"><Icons.Tags className="mr-1 inline h-3.5 w-3.5" />{activeCategories.reduce((sum, c) => sum + (c.subcategories || []).filter(s => !s.deleted).length, 0)}</span>
-              <span title="Participants" className={`rounded-lg px-2 py-1 font-semibold transition ${highlightIds.participants ? 'bg-cyan-400 text-slate-950' : 'bg-white/10'}`}><Icons.UsersRound className="mr-1 inline h-3.5 w-3.5" />{votes.participantCount || 0}</span>
-              <span title="Votes" className={`rounded-lg px-2 py-1 font-semibold transition ${highlightIds.votes ? 'bg-cyan-400 text-slate-950' : 'bg-white/10'}`}><Icons.ThumbsUp className="mr-1 inline h-3.5 w-3.5" />{totalVoteCount(votes)}</span>
-              <span title={`${pendingSubcategorySuggestionCount} subcategory ideas`} className={`rounded-lg px-2 py-1 font-semibold transition ${highlightIds.ideas ? 'bg-amber-300 text-slate-950' : 'bg-white/10'}`}><Icons.Lightbulb className="mr-1 inline h-3.5 w-3.5" />{(votes.categorySuggestions || []).length}</span>
+              <span title="Participants" className={`rounded-lg px-2 py-1 font-semibold transition ${highlightIds.participants ? 'bg-cyan-400 text-foreground' : 'bg-white/10'}`}><Icons.UsersRound className="mr-1 inline h-3.5 w-3.5" />{votes.participantCount || 0}</span>
+              <span title="Votes" className={`rounded-lg px-2 py-1 font-semibold transition ${highlightIds.votes ? 'bg-cyan-400 text-foreground' : 'bg-white/10'}`}><Icons.ThumbsUp className="mr-1 inline h-3.5 w-3.5" />{totalVoteCount(votes)}</span>
+              <span title={`${pendingSubcategorySuggestionCount} subcategory ideas`} className={`rounded-lg px-2 py-1 font-semibold transition ${highlightIds.ideas ? 'bg-amber-300 text-foreground' : 'bg-white/10'}`}><Icons.Lightbulb className="mr-1 inline h-3.5 w-3.5" />{(votes.categorySuggestions || []).length}</span>
               <span title="Save state" className="rounded-lg bg-white/10 px-2 py-1 font-semibold"><Icons.DatabaseZap className="mr-1 inline h-3.5 w-3.5" />{saveStatus}</span>
             </div>
           </div>
@@ -1827,8 +1827,8 @@ export default function SummitTaxonomyWorkshop() {
             <button onClick={() => navigate('/dashboard')} className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/20 transition hover:bg-white/10" title="Dashboard"><Icons.LayoutDashboard className="h-4 w-4" /></button>
             <button onClick={undo} disabled={!history.length || categoryResultsLocked} className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/20 transition disabled:opacity-40 hover:bg-white/10" title={categoryResultsLocked ? 'Read-only' : 'Undo'}><Icons.Undo2 className="h-4 w-4" /></button>
             <button onClick={redo} disabled={!future.length || categoryResultsLocked} className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/20 transition disabled:opacity-40 hover:bg-white/10" title={categoryResultsLocked ? 'Read-only' : 'Redo'}><Icons.Redo2 className="h-4 w-4" /></button>
-            <button onClick={manualSave} className="flex h-9 w-9 items-center justify-center rounded-lg bg-cyan-400 font-semibold text-slate-950 transition hover:bg-cyan-300" title={categoryResultsLocked ? 'Read-only' : 'Save'}><Icons.Save className="h-4 w-4" /></button>
-            <button onClick={exportExcel} className="flex h-9 w-9 items-center justify-center rounded-lg bg-white font-semibold text-slate-900 transition hover:bg-slate-100" title="Export Excel"><Icons.FileSpreadsheet className="h-4 w-4" /></button>
+            <button onClick={manualSave} className="flex h-9 w-9 items-center justify-center rounded-lg bg-cyan-400 font-semibold text-foreground transition hover:bg-cyan-300" title={categoryResultsLocked ? 'Read-only' : 'Save'}><Icons.Save className="h-4 w-4" /></button>
+            <button onClick={exportExcel} className="flex h-9 w-9 items-center justify-center rounded-lg bg-card font-semibold text-foreground transition hover:bg-muted" title="Export Excel"><Icons.FileSpreadsheet className="h-4 w-4" /></button>
             <button
               type="button"
               onClick={() => {
@@ -1860,15 +1860,15 @@ export default function SummitTaxonomyWorkshop() {
                 <button
                   type="button"
                   onClick={() => setShowVotingDetails(true)}
-                  className={`flex h-9 items-center rounded-lg px-2.5 text-xs font-semibold transition hover:-translate-y-0.5 hover:shadow-md ${isVotingExpired ? 'bg-red-100 text-red-800 hover:bg-red-50' : 'bg-emerald-300 text-slate-950 hover:bg-emerald-200'}`}
+                  className={`flex h-9 items-center rounded-lg px-2.5 text-xs font-semibold transition hover:-translate-y-0.5 hover:shadow-md ${isVotingExpired ? 'bg-red-100 dark:bg-red-500/20 text-red-800 dark:text-red-200 hover:bg-red-50 dark:hover:bg-red-500/15' : 'bg-emerald-300 text-foreground hover:bg-emerald-200 dark:hover:bg-emerald-500/30'}`}
                   title={`Voting details. Ends ${new Date(session.voteExpiresAt).toLocaleTimeString()}`}
                 >
                   <Icons.Clock3 className="mr-1 h-4 w-4" />
                   {formatCountdown(effectiveCountdownMs)}
                 </button>
                 <button onClick={() => navigator.clipboard.writeText(voteUrl)} className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-600 font-semibold text-white transition hover:-translate-y-0.5 hover:bg-emerald-500 hover:shadow-md" title="Copy public fallback link"><Icons.Link className="h-4 w-4" /></button>
-                <button onClick={() => setShowVotingShare(true)} className="flex h-9 w-9 items-center justify-center rounded-lg bg-white font-semibold text-slate-950 transition hover:-translate-y-0.5 hover:bg-slate-100 hover:shadow-md" title="Fullscreen QR"><Icons.QrCode className="h-4 w-4" /></button>
-                <button onClick={() => setShowRegenerateLinkConfirm(true)} className="flex h-9 w-9 items-center justify-center rounded-lg border border-amber-300 bg-amber-100 font-semibold text-amber-900 transition hover:-translate-y-0.5 hover:bg-amber-50 hover:shadow-md" title="Reset stats and regenerate link"><Icons.RefreshCcw className="h-4 w-4" /></button>
+                <button onClick={() => setShowVotingShare(true)} className="flex h-9 w-9 items-center justify-center rounded-lg bg-card font-semibold text-foreground transition hover:-translate-y-0.5 hover:bg-muted hover:shadow-md" title="Fullscreen QR"><Icons.QrCode className="h-4 w-4" /></button>
+                <button onClick={() => setShowRegenerateLinkConfirm(true)} className="flex h-9 w-9 items-center justify-center rounded-lg border border-amber-300 dark:border-amber-500/40 bg-amber-100 dark:bg-amber-500/20 font-semibold text-amber-900 dark:text-amber-200 transition hover:-translate-y-0.5 hover:bg-amber-50 dark:hover:bg-amber-500/15 hover:shadow-md" title="Reset stats and regenerate link"><Icons.RefreshCcw className="h-4 w-4" /></button>
               </>
             ) : (
               <button onClick={() => enableVoting(false)} className="flex h-9 items-center gap-1 rounded-lg bg-emerald-500 px-2.5 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-emerald-400 hover:shadow-md"><Icons.Radio className="h-4 w-4" /><span>Open vote</span></button>
@@ -1876,57 +1876,57 @@ export default function SummitTaxonomyWorkshop() {
           </div>
         </div>
 
-        <div className="grid gap-2 border-b border-slate-200 px-4 py-2 xl:grid-cols-[minmax(0,1.35fr)_minmax(280px,.65fr)]">
-          <div className="flex min-w-0 items-center gap-2 overflow-hidden rounded-lg border border-cyan-100 bg-cyan-50/70 px-2 py-2">
-            <div className="flex shrink-0 items-center gap-1.5 text-xs font-semibold text-cyan-900">
-              <Icons.Activity className="h-4 w-4 text-cyan-700" />
+        <div className="grid gap-2 border-b border-border px-4 py-2 xl:grid-cols-[minmax(0,1.35fr)_minmax(280px,.65fr)]">
+          <div className="flex min-w-0 items-center gap-2 overflow-hidden rounded-lg border border-cyan-100 dark:border-cyan-500/20 bg-cyan-50/70 dark:bg-cyan-500/10 px-2 py-2">
+            <div className="flex shrink-0 items-center gap-1.5 text-xs font-semibold text-cyan-900 dark:text-cyan-200">
+              <Icons.Activity className="h-4 w-4 text-cyan-700 dark:text-cyan-200" />
               Live
             </div>
             <div className="flex min-w-0 flex-1 gap-2 overflow-x-auto pb-0.5">
               {liveVoteLeaders.slice(0, 4).map((vote) => (
                 <div
                   key={`${vote.itemId}-${vote.voteType}`}
-                  className={`flex min-w-[170px] items-center gap-2 rounded-lg border bg-white px-2 py-1.5 transition-all duration-300 ${
-                    highlightIds[`vote-${vote.itemId}`] ? 'summit-soft-pulse border-cyan-300 ring-2 ring-cyan-100' : 'border-cyan-100'
+                  className={`flex min-w-[170px] items-center gap-2 rounded-lg border bg-card px-2 py-1.5 transition-all duration-300 ${
+                    highlightIds[`vote-${vote.itemId}`] ? 'summit-soft-pulse border-cyan-300 dark:border-cyan-500/40 ring-2 ring-cyan-100 dark:ring-cyan-500/30' : 'border-cyan-100 dark:border-cyan-500/20'
                   }`}
                 >
                   <span className="rounded-md bg-cyan-600 px-1.5 py-1 text-xs font-bold text-white">{vote.count}</span>
-                  <span className="min-w-0 truncate text-xs font-semibold text-slate-900">{vote.itemLabel}</span>
+                  <span className="min-w-0 truncate text-xs font-semibold text-foreground">{vote.itemLabel}</span>
                 </div>
               ))}
-              {!liveVoteLeaders.length && <span className="text-xs text-slate-500">Vote leaders appear here as people vote.</span>}
+              {!liveVoteLeaders.length && <span className="text-xs text-muted-foreground">Vote leaders appear here as people vote.</span>}
             </div>
           </div>
-          <div className={`flex min-w-0 items-center gap-2 overflow-hidden rounded-lg border bg-amber-50/80 px-2 py-2 transition-all duration-300 ${
-            highlightIds.ideas ? 'border-amber-300 shadow-md ring-2 ring-amber-100' : 'border-amber-100'
+          <div className={`flex min-w-0 items-center gap-2 overflow-hidden rounded-lg border bg-amber-50/80 dark:bg-amber-500/10 px-2 py-2 transition-all duration-300 ${
+            highlightIds.ideas ? 'border-amber-300 dark:border-amber-500/40 shadow-md ring-2 ring-amber-100 dark:ring-amber-500/30' : 'border-amber-100 dark:border-amber-500/20'
           }`}>
-            <div className="flex shrink-0 items-center gap-1.5 text-xs font-semibold text-amber-900">
-              <Icons.Flame className="h-4 w-4 text-amber-700" />
+            <div className="flex shrink-0 items-center gap-1.5 text-xs font-semibold text-amber-900 dark:text-amber-200">
+              <Icons.Flame className="h-4 w-4 text-amber-700 dark:text-amber-200" />
               Rising
             </div>
             <div className="flex min-w-0 flex-1 gap-2 overflow-x-auto pb-0.5">
               {risingIdeas.slice(0, 2).map((idea) => (
                 <div
                   key={idea.id}
-                  className={`flex min-w-[180px] items-center gap-2 rounded-lg border bg-white px-2 py-1.5 transition-all duration-300 ${
-                    highlightIds[`idea-${idea.id}`] || highlightIds[`vote-${idea.itemId}`] ? 'summit-soft-pulse border-amber-300 ring-2 ring-amber-100' : 'border-amber-100'
+                  className={`flex min-w-[180px] items-center gap-2 rounded-lg border bg-card px-2 py-1.5 transition-all duration-300 ${
+                    highlightIds[`idea-${idea.id}`] || highlightIds[`vote-${idea.itemId}`] ? 'summit-soft-pulse border-amber-300 dark:border-amber-500/40 ring-2 ring-amber-100 dark:ring-amber-500/30' : 'border-amber-100 dark:border-amber-500/20'
                   }`}
                 >
-                  <span className="rounded-md bg-amber-100 px-1.5 py-1 text-xs font-bold text-amber-800">{idea.support}</span>
-                  <span className="min-w-0 truncate text-xs font-semibold text-slate-900">{idea.itemLabel}</span>
+                  <span className="rounded-md bg-amber-100 dark:bg-amber-500/20 px-1.5 py-1 text-xs font-bold text-amber-800 dark:text-amber-200">{idea.support}</span>
+                  <span className="min-w-0 truncate text-xs font-semibold text-foreground">{idea.itemLabel}</span>
                 </div>
               ))}
-              {!risingIdeas.length && <span className="text-xs text-amber-900">Ideas appear here during voting.</span>}
+              {!risingIdeas.length && <span className="text-xs text-amber-900 dark:text-amber-200">Ideas appear here during voting.</span>}
             </div>
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2 border-b border-slate-200 px-4 py-2">
+        <div className="flex flex-wrap gap-2 border-b border-border px-4 py-2">
           <button
             type="button"
             onClick={() => setWorkshopTab('working')}
             className={`inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition hover:-translate-y-0.5 ${
-              workshopTab === 'working' ? 'bg-slate-950 text-white shadow-sm shadow-slate-200' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+              workshopTab === 'working' ? 'bg-slate-950 text-white shadow-sm shadow-slate-200' : 'bg-muted/50 text-muted-foreground hover:bg-muted'
             }`}
           >
             <Icons.Sparkles className="h-4 w-4" />
@@ -1936,7 +1936,7 @@ export default function SummitTaxonomyWorkshop() {
             type="button"
             onClick={() => setWorkshopTab('categories')}
             className={`inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition hover:-translate-y-0.5 ${
-              workshopTab === 'categories' ? 'bg-cyan-600 text-white shadow-sm shadow-cyan-100' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+              workshopTab === 'categories' ? 'bg-cyan-600 text-white shadow-sm shadow-cyan-100' : 'bg-muted/50 text-muted-foreground hover:bg-muted'
             }`}
           >
             <Icons.Tags className="h-4 w-4" />
@@ -1948,44 +1948,44 @@ export default function SummitTaxonomyWorkshop() {
           <div className="flex flex-col gap-2 px-4 py-2 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex min-w-0 flex-1 flex-col gap-2 md:flex-row md:items-center">
               <div className="relative min-w-0 flex-1">
-                <Icons.Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                <Icons.Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground/75" />
                 <input
                   value={taxonomySearch}
                   onChange={(event) => setTaxonomySearch(event.target.value)}
-                  className="min-h-9 w-full rounded-lg border border-slate-200 bg-slate-50 px-9 py-1.5 text-sm text-slate-900 outline-none transition focus:border-cyan-300 focus:bg-white focus:ring-2 focus:ring-cyan-100"
+                  className="min-h-9 w-full rounded-lg border border-border bg-muted/50 px-9 py-1.5 text-sm text-foreground outline-none transition focus:border-cyan-300 dark:focus:border-cyan-500/40 focus:bg-card focus:ring-2 focus:ring-cyan-100 dark:focus:ring-cyan-500/30"
                   placeholder="Search categories, subcategories, evidence, notes"
                 />
                 {taxonomySearch && (
                   <button
                     type="button"
                     onClick={() => setTaxonomySearch('')}
-                    className="absolute right-2 top-1.5 flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+                    className="absolute right-2 top-1.5 flex h-6 w-6 items-center justify-center rounded text-muted-foreground/75 hover:bg-secondary hover:text-foreground/85"
                     title="Clear search"
                   >
                     <Icons.X className="h-4 w-4" />
                   </button>
                 )}
               </div>
-              <span className="rounded-lg bg-slate-50 px-2.5 py-2 text-xs font-medium text-slate-600">
+              <span className="rounded-lg bg-muted/50 px-2.5 py-2 text-xs font-medium text-muted-foreground">
                 {searchNeedle ? `${visibleCategories.length} cat / ${searchVisibleSubcategoryCount} sub` : 'Ready'}
               </span>
             </div>
             <div className="flex flex-wrap items-center gap-1.5 text-sm">
-              <button onClick={addCategory} disabled={categoryResultsLocked} className="flex h-9 items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-45" title={categoryResultsLocked ? 'Results are read-only' : 'Add top category'}><Icons.FolderPlus className="h-4 w-4" /><span className="hidden sm:inline">Add</span></button>
-              <button onClick={() => setShowDeleted(!showDeleted)} className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 transition hover:bg-slate-50" title="Removed items"><Icons.ArchiveRestore className="h-4 w-4" /></button>
-              <button onClick={mergeSelectedCategories} disabled={categoryResultsLocked || selectedForMerge.length < 2} className="flex h-9 items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 font-semibold text-slate-700 transition disabled:opacity-40 hover:bg-slate-50" title={categoryResultsLocked ? 'Results are read-only' : 'Combine selected categories'}><Icons.Merge className="h-4 w-4" /><span>{selectedForMerge.length || ''}</span></button>
-              <label className={`flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 transition ${categoryResultsLocked ? 'pointer-events-none opacity-45' : 'cursor-pointer hover:bg-slate-50'}`} title={categoryResultsLocked ? 'Results are read-only' : 'Restore JSON'}>
+              <button onClick={addCategory} disabled={categoryResultsLocked} className="flex h-9 items-center gap-1 rounded-lg border border-input bg-card px-2.5 font-semibold text-foreground/85 transition hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-45" title={categoryResultsLocked ? 'Results are read-only' : 'Add top category'}><Icons.FolderPlus className="h-4 w-4" /><span className="hidden sm:inline">Add</span></button>
+              <button onClick={() => setShowDeleted(!showDeleted)} className="flex h-9 w-9 items-center justify-center rounded-lg border border-input bg-card text-foreground/85 transition hover:bg-muted/50" title="Removed items"><Icons.ArchiveRestore className="h-4 w-4" /></button>
+              <button onClick={mergeSelectedCategories} disabled={categoryResultsLocked || selectedForMerge.length < 2} className="flex h-9 items-center gap-1 rounded-lg border border-input bg-card px-2.5 font-semibold text-foreground/85 transition disabled:opacity-40 hover:bg-muted/50" title={categoryResultsLocked ? 'Results are read-only' : 'Combine selected categories'}><Icons.Merge className="h-4 w-4" /><span>{selectedForMerge.length || ''}</span></button>
+              <label className={`flex h-9 w-9 items-center justify-center rounded-lg border border-input bg-card text-foreground/85 transition ${categoryResultsLocked ? 'pointer-events-none opacity-45' : 'cursor-pointer hover:bg-muted/50'}`} title={categoryResultsLocked ? 'Results are read-only' : 'Restore JSON'}>
                 <Icons.Upload className="h-4 w-4" />
                 <input type="file" accept="application/json" onChange={importJson} disabled={categoryResultsLocked} className="hidden" />
               </label>
-              <button onClick={() => navigator.clipboard.writeText(JSON.stringify(state, null, 2))} className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 transition hover:bg-slate-50" title="Copy JSON"><Icons.Copy className="h-4 w-4" /></button>
+              <button onClick={() => navigator.clipboard.writeText(JSON.stringify(state, null, 2))} className="flex h-9 w-9 items-center justify-center rounded-lg border border-input bg-card text-foreground/85 transition hover:bg-muted/50" title="Copy JSON"><Icons.Copy className="h-4 w-4" /></button>
               <button
                 type="button"
                 onClick={toggleCategoryResultsLock}
                 className={`flex h-9 items-center gap-1 rounded-lg border px-2.5 font-semibold transition ${
                   categoryResultsLocked
-                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                    : 'border-cyan-200 bg-cyan-50 text-cyan-800 hover:bg-cyan-100'
+                    ? 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 hover:bg-emerald-100 dark:hover:bg-emerald-500/20'
+                    : 'border-cyan-200 dark:border-cyan-500/30 bg-cyan-50 dark:bg-cyan-500/15 text-cyan-800 dark:text-cyan-200 hover:bg-cyan-100 dark:hover:bg-cyan-500/20'
                 }`}
                 title={categoryResultsLocked ? 'Reopen facilitator editing and voting' : 'Lock Categories & Skills'}
               >
@@ -1998,9 +1998,9 @@ export default function SummitTaxonomyWorkshop() {
       </div>
 
       {workshopTab === 'categories' && categoryResultsLocked && (
-        <div className="rounded-lg border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm text-cyan-950 shadow-sm">
+        <div className="rounded-lg border border-cyan-200 dark:border-cyan-500/30 bg-cyan-50 dark:bg-cyan-500/15 px-4 py-3 text-sm text-cyan-950 dark:text-cyan-200 shadow-sm">
           <div className="flex items-start gap-3">
-            <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-cyan-700">
+            <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-card text-cyan-700 dark:text-cyan-200">
               <Icons.Lock className="h-4 w-4" />
             </span>
             <div className="min-w-0 flex-1">
@@ -2010,7 +2010,7 @@ export default function SummitTaxonomyWorkshop() {
             <button
               type="button"
               onClick={toggleCategoryResultsLock}
-              className="rounded-lg border border-emerald-200 bg-white px-3 py-2 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-50"
+              className="rounded-lg border border-emerald-200 dark:border-emerald-500/30 bg-card px-3 py-2 text-xs font-semibold text-emerald-700 dark:text-emerald-200 transition hover:bg-emerald-50 dark:hover:bg-emerald-500/15"
             >
               <Icons.Unlock className="mr-1 inline h-3.5 w-3.5" />
               Enable edits
@@ -2029,23 +2029,23 @@ export default function SummitTaxonomyWorkshop() {
           className="grid gap-4 transition-[grid-template-columns] duration-300 ease-out lg:grid-cols-[var(--summit-workshop-grid)]"
           style={{ '--summit-workshop-grid': topCategoriesCollapsed ? '72px minmax(0,1fr) 320px' : '390px minmax(0,1fr) 320px' }}
         >
-          <aside className={`relative overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm transition-all duration-300 ease-out ${topCategoriesCollapsed ? 'p-2' : 'p-3'}`}>
+          <aside className={`relative overflow-hidden rounded-lg border border-border bg-card shadow-sm transition-all duration-300 ease-out ${topCategoriesCollapsed ? 'p-2' : 'p-3'}`}>
             <div className={`transition-all duration-300 ease-out ${
               topCategoriesCollapsed ? 'pointer-events-none absolute inset-0 -translate-x-4 opacity-0' : 'relative translate-x-0 opacity-100'
             }`}>
               <div className="mb-2 flex items-center justify-between gap-2">
-                <h2 className="truncate text-base font-semibold text-slate-950">Top Categories</h2>
+                <h2 className="truncate text-base font-semibold text-foreground">Top Categories</h2>
                 <div className="flex shrink-0 items-center gap-1.5">
                   {selectedForMerge.length > 0 && (
-                    <span className="rounded-full bg-cyan-100 px-2 py-0.5 text-xs font-semibold text-cyan-800">
+                    <span className="rounded-full bg-cyan-100 dark:bg-cyan-500/20 px-2 py-0.5 text-xs font-semibold text-cyan-800 dark:text-cyan-200">
                       {selectedForMerge.length} selected
                     </span>
                   )}
-                  <span className="whitespace-nowrap text-xs text-slate-500">Grip to reorder</span>
+                  <span className="whitespace-nowrap text-xs text-muted-foreground">Grip to reorder</span>
                   <button
                     type="button"
                     onClick={() => setTopCategoriesCollapsed(true)}
-                    className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition hover:-translate-y-0.5 hover:border-slate-300 hover:text-slate-900 hover:shadow-sm"
+                    className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground transition hover:-translate-y-0.5 hover:border-input hover:text-foreground hover:shadow-sm"
                     title="Collapse top categories"
                     aria-label="Collapse top categories"
                   >
@@ -2073,16 +2073,16 @@ export default function SummitTaxonomyWorkshop() {
                     onClick={() => setSelectedCategoryId(cat.id)}
                     className={`relative min-h-[72px] w-full rounded-lg border px-2.5 py-2.5 text-left transition-all duration-300 hover:-translate-y-0.5 hover:shadow-sm ${
                       dragOverTarget?.type === 'category' && dragOverTarget.id === cat.id
-                        ? 'scale-[1.015] border-cyan-400 bg-cyan-50 shadow-lg ring-2 ring-cyan-200'
+                        ? 'scale-[1.015] border-cyan-400 bg-cyan-50 dark:bg-cyan-500/15 shadow-lg ring-2 ring-cyan-200 dark:ring-cyan-500/30'
                         : dragItem?.type === 'category' && dragItem.id === cat.id
-                          ? 'scale-[0.98] border-dashed border-cyan-300 bg-slate-50 opacity-45'
+                          ? 'scale-[0.98] border-dashed border-cyan-300 dark:border-cyan-500/40 bg-muted/50 opacity-45'
                           : highlightIds[`move-category-${cat.id}`]
-                            ? 'summit-drop-land border-cyan-400 bg-cyan-50 shadow-md ring-2 ring-cyan-100'
+                            ? 'summit-drop-land border-cyan-400 bg-cyan-50 dark:bg-cyan-500/15 shadow-md ring-2 ring-cyan-100 dark:ring-cyan-500/30'
                             : highlightIds[`vote-${cat.id}`]
-                              ? 'border-cyan-300 bg-cyan-50 shadow-md ring-2 ring-cyan-100'
+                              ? 'border-cyan-300 dark:border-cyan-500/40 bg-cyan-50 dark:bg-cyan-500/15 shadow-md ring-2 ring-cyan-100 dark:ring-cyan-500/30'
                               : selectedCategory?.id === cat.id
-                                ? 'border-slate-900 bg-slate-50 shadow-sm'
-                                : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                                ? 'border-foreground bg-muted/50 shadow-sm'
+                                : 'border-border hover:border-input hover:bg-muted/50'
                     }`}
                   >
                     <div className="flex items-start gap-2">
@@ -2094,7 +2094,7 @@ export default function SummitTaxonomyWorkshop() {
                         onDrag={(event) => updateDragPosition(event)}
                         onDragEnd={finishDrag}
                         onClick={(event) => event.stopPropagation()}
-                        className="flex h-10 w-5 shrink-0 cursor-grab items-center justify-center rounded text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-40"
+                        className="flex h-10 w-5 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground/75 transition hover:bg-muted hover:text-foreground/85 active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-40"
                         title={categoryResultsLocked ? 'Results are read-only' : 'Drag to reorder'}
                       >
                         <Icons.GripVertical className="h-4 w-4" />
@@ -2103,12 +2103,12 @@ export default function SummitTaxonomyWorkshop() {
                         <Icon name={cat.icon} className="h-5 w-5" />
                       </span>
                       <span className="min-w-0 flex-1 pr-1">
-                        <span className="block break-words pr-1 text-[15px] font-semibold leading-tight text-slate-950">
+                        <span className="block break-words pr-1 text-[15px] font-semibold leading-tight text-foreground">
                           <HighlightText text={cat.name} query={searchNeedle} />
                         </span>
-                        <span className="mt-0.5 block whitespace-nowrap text-xs font-medium text-slate-500">{(cat.subcategories || []).filter(s => !s.deleted).length} subcategories</span>
+                        <span className="mt-0.5 block whitespace-nowrap text-xs font-medium text-muted-foreground">{(cat.subcategories || []).filter(s => !s.deleted).length} subcategories</span>
                         {!!(subcategorySuggestionsByParent.get(cat.id)?.length || 0) && (
-                          <span className="mt-0.5 inline-flex rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
+                          <span className="mt-0.5 inline-flex rounded-full bg-amber-100 dark:bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:text-amber-200">
                             {subcategorySuggestionsByParent.get(cat.id).length} ideas
                           </span>
                         )}
@@ -2123,15 +2123,15 @@ export default function SummitTaxonomyWorkshop() {
                           }}
                           className={`flex h-8 w-8 items-center justify-center rounded-md border transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-40 ${
                             selectedForMerge.includes(cat.id)
-                              ? 'border-cyan-300 bg-cyan-600 text-white shadow-sm ring-2 ring-cyan-100'
-                              : 'border-slate-200 bg-white text-slate-400 hover:border-cyan-200 hover:bg-cyan-50 hover:text-cyan-700'
+                              ? 'border-cyan-300 dark:border-cyan-500/40 bg-cyan-600 text-white shadow-sm ring-2 ring-cyan-100 dark:ring-cyan-500/30'
+                              : 'border-border bg-card text-muted-foreground/75 hover:border-cyan-200 dark:hover:border-cyan-500/30 hover:bg-cyan-50 dark:hover:bg-cyan-500/15 hover:text-cyan-700 dark:hover:text-cyan-200'
                           }`}
                           title={categoryResultsLocked ? 'Results are read-only' : selectedForMerge.includes(cat.id) ? 'Selected for combine' : 'Select for combine'}
                         >
                           {selectedForMerge.includes(cat.id) ? <Icons.Check className="h-3.5 w-3.5" /> : <Icons.Square className="h-3.5 w-3.5" />}
                         </button>
                         <span className={`flex h-8 items-center rounded-md px-2 text-xs font-bold transition-all duration-300 ${
-                          linkedVoteCount(votes, cat) > 0 ? 'bg-cyan-600 text-white shadow-sm' : 'bg-slate-100 text-slate-500'
+                          linkedVoteCount(votes, cat) > 0 ? 'bg-cyan-600 text-white shadow-sm' : 'bg-muted text-muted-foreground'
                         }`}>
                           <Icons.ThumbsUp className="mr-1 h-3.5 w-3.5" />
                           {linkedVoteCount(votes, cat)}
@@ -2166,7 +2166,7 @@ export default function SummitTaxonomyWorkshop() {
                   </div>
                 ))}
                 {!visibleCategories.length && (
-                  <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-center text-sm text-slate-500">
+                  <div className="rounded-lg border border-dashed border-input bg-muted/50 p-4 text-center text-sm text-muted-foreground">
                 No categories match this search.
                   </div>
                 )}
@@ -2179,22 +2179,22 @@ export default function SummitTaxonomyWorkshop() {
               <button
                 type="button"
                 onClick={() => setTopCategoriesCollapsed(false)}
-                className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-slate-950 text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-800 hover:shadow-md"
+                className="flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-slate-950 text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-800 hover:shadow-md"
                 title="Expand top categories"
                 aria-label="Expand top categories"
               >
                 <Icons.ChevronsRight className="h-4 w-4" />
               </button>
-              <div className="flex w-full flex-col items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-1.5 py-2 text-slate-700">
-                <Icons.Folders className="h-4 w-4 text-slate-500" />
-                <span className="text-sm font-bold text-slate-950">{activeCategories.length}</span>
+              <div className="flex w-full flex-col items-center gap-2 rounded-lg border border-border bg-muted/50 px-1.5 py-2 text-foreground/85">
+                <Icons.Folders className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm font-bold text-foreground">{activeCategories.length}</span>
               </div>
-              <div className="flex w-full flex-col items-center gap-2 rounded-lg border border-cyan-100 bg-cyan-50 px-1.5 py-2 text-cyan-800">
+              <div className="flex w-full flex-col items-center gap-2 rounded-lg border border-cyan-100 dark:border-cyan-500/20 bg-cyan-50 dark:bg-cyan-500/15 px-1.5 py-2 text-cyan-800 dark:text-cyan-200">
                 <Icons.Check className="h-4 w-4" />
                 <span className="text-sm font-bold">{selectedForMerge.length}</span>
               </div>
-              <div className="flex w-full flex-col items-center gap-2 rounded-lg border border-slate-200 bg-white px-1.5 py-2 text-slate-600">
-                <Icons.ThumbsUp className="h-4 w-4 text-slate-500" />
+              <div className="flex w-full flex-col items-center gap-2 rounded-lg border border-border bg-card px-1.5 py-2 text-muted-foreground">
+                <Icons.ThumbsUp className="h-4 w-4 text-muted-foreground" />
                 <span className="text-sm font-bold">{activeCategories.reduce((sum, category) => sum + linkedVoteCount(votes, category), 0)}</span>
               </div>
             </div>
@@ -2204,7 +2204,7 @@ export default function SummitTaxonomyWorkshop() {
             <section className="space-y-4">
               {mainCategories.map(renderCategoryPanel)}
               {!mainCategories.length && (
-                <div className="rounded-lg border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500 shadow-sm">
+                <div className="rounded-lg border border-dashed border-input bg-card p-8 text-center text-sm text-muted-foreground shadow-sm">
                 No category or subcategory matches this search.
                 </div>
               )}
@@ -2219,17 +2219,17 @@ export default function SummitTaxonomyWorkshop() {
                 }
               }}
               onDrop={(event) => dropIntoCategory(event, selectedCategory)}
-              className={`rounded-lg border bg-white p-4 shadow-sm transition-all duration-300 ${
+              className={`rounded-lg border bg-card p-4 shadow-sm transition-all duration-300 ${
                 dragOverTarget?.type === 'selected-category' && selectedCategory?.id === dragOverTarget.id
-                  ? 'border-cyan-300 ring-2 ring-cyan-100'
+                  ? 'border-cyan-300 dark:border-cyan-500/40 ring-2 ring-cyan-100 dark:ring-cyan-500/30'
                   : selectedCategory && highlightIds[`move-category-${selectedCategory.id}`]
-                    ? 'summit-drop-land border-cyan-300 ring-2 ring-cyan-100'
-                    : 'border-slate-200'
+                    ? 'summit-drop-land border-cyan-300 dark:border-cyan-500/40 ring-2 ring-cyan-100 dark:ring-cyan-500/30'
+                    : 'border-border'
               }`}
             >
               {selectedCategory && (
                 <>
-                  <div className="flex flex-col gap-3 border-b border-slate-200 pb-4 md:flex-row md:items-start md:justify-between">
+                  <div className="flex flex-col gap-3 border-b border-border pb-4 md:flex-row md:items-start md:justify-between">
                     <div className="flex min-w-0 flex-1 gap-3">
                       <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg text-white shadow-sm" style={{ backgroundColor: selectedCategory.color }}>
                         <Icon name={selectedCategory.icon} className="h-6 w-6" />
@@ -2241,11 +2241,11 @@ export default function SummitTaxonomyWorkshop() {
                             value={selectedCategory.name}
                             onChange={(e) => updateCategory(selectedCategory.id, { name: e.target.value })}
                             readOnly={categoryResultsLocked}
-                            className="min-w-0 flex-1 rounded border border-transparent px-1 text-xl font-semibold text-slate-950 outline-none focus:border-slate-300 read-only:cursor-default read-only:bg-transparent read-only:focus:border-transparent"
+                            className="min-w-0 flex-1 rounded border border-transparent px-1 text-xl font-semibold text-foreground outline-none focus:border-input read-only:cursor-default read-only:bg-transparent read-only:focus:border-transparent"
                           />
                           <span className={`w-fit rounded-lg px-2.5 py-1 text-xs font-bold transition-all duration-300 ${
-                            linkedVoteCount(votes, selectedCategory) > 0 ? 'bg-cyan-600 text-white shadow-sm' : 'bg-slate-100 text-slate-500'
-                          } ${highlightIds[`vote-${selectedCategory.id}`] ? 'scale-110 ring-2 ring-cyan-200' : ''}`}>
+                            linkedVoteCount(votes, selectedCategory) > 0 ? 'bg-cyan-600 text-white shadow-sm' : 'bg-muted text-muted-foreground'
+                          } ${highlightIds[`vote-${selectedCategory.id}`] ? 'scale-110 ring-2 ring-cyan-200 dark:ring-cyan-500/30' : ''}`}>
                             <Icons.ThumbsUp className="mr-1 inline h-3.5 w-3.5" />
                             {linkedVoteCount(votes, selectedCategory)} votes
                           </span>
@@ -2255,13 +2255,13 @@ export default function SummitTaxonomyWorkshop() {
                           onChange={(e) => updateCategory(selectedCategory.id, { description: e.target.value })}
                           readOnly={categoryResultsLocked}
                           rows={2}
-                          className="mt-1 w-full resize-none rounded border border-slate-200 px-2 py-1 text-sm text-slate-600 outline-none focus:border-slate-400 read-only:cursor-default read-only:bg-slate-50"
+                          className="mt-1 w-full resize-none rounded border border-border px-2 py-1 text-sm text-muted-foreground outline-none focus:border-ring read-only:cursor-default read-only:bg-muted/50"
                           placeholder="Describe the category boundary"
                         />
                       </div>
                     </div>
                     <div className="flex flex-wrap items-start gap-2">
-                      <button onClick={() => addSubcategory(selectedCategory.id)} disabled={categoryResultsLocked} className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 hover:shadow-md disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500 disabled:hover:translate-y-0 disabled:hover:shadow-none"><Icons.Tag className="mr-1 inline h-4 w-4" />Add sub</button>
+                      <button onClick={() => addSubcategory(selectedCategory.id)} disabled={categoryResultsLocked} className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 hover:shadow-md disabled:cursor-not-allowed disabled:bg-secondary disabled:text-muted-foreground disabled:hover:translate-y-0 disabled:hover:shadow-none"><Icons.Tag className="mr-1 inline h-4 w-4" />Add sub</button>
                       <CardActionsMenu
                         value={selectedCategory.icon}
                         color={selectedCategory.color}
@@ -2301,18 +2301,18 @@ export default function SummitTaxonomyWorkshop() {
                           setDropTarget(event, { type: 'sub', id: subcat.id, label: `place before ${subcat.name}` });
                         }}
                         onDrop={(event) => dropSubcategory(event, subcat)}
-                        className={`group relative rounded-lg border p-3 transition-all duration-300 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white hover:shadow-sm ${
+                        className={`group relative rounded-lg border p-3 transition-all duration-300 hover:-translate-y-0.5 hover:border-input hover:bg-card hover:shadow-sm ${
                           iconPickerTarget?.type === 'subcategory' && iconPickerTarget.id === subcat.id
-                            ? 'z-50 border-slate-300 bg-white shadow-xl'
+                            ? 'z-50 border-input bg-card shadow-xl'
                             : dragOverTarget?.type === 'sub' && dragOverTarget.id === subcat.id
-                              ? 'z-30 scale-[1.015] border-cyan-400 bg-cyan-50 shadow-lg ring-2 ring-cyan-200'
+                              ? 'z-30 scale-[1.015] border-cyan-400 bg-cyan-50 dark:bg-cyan-500/15 shadow-lg ring-2 ring-cyan-200 dark:ring-cyan-500/30'
                               : dragItem?.type === 'sub' && dragItem.id === subcat.id
-                                ? 'scale-[0.98] border-dashed border-cyan-300 bg-slate-50 opacity-45'
+                                ? 'scale-[0.98] border-dashed border-cyan-300 dark:border-cyan-500/40 bg-muted/50 opacity-45'
                                 : highlightIds[`move-sub-${subcat.id}`]
-                                  ? 'summit-drop-land border-cyan-300 bg-cyan-50 shadow-md ring-2 ring-cyan-100'
+                                  ? 'summit-drop-land border-cyan-300 dark:border-cyan-500/40 bg-cyan-50 dark:bg-cyan-500/15 shadow-md ring-2 ring-cyan-100 dark:ring-cyan-500/30'
                                   : highlightIds[`sub-${subcat.id}`] || highlightIds[`vote-${subcat.id}`]
-                                    ? 'border-cyan-300 bg-cyan-50 shadow-md ring-2 ring-cyan-100'
-                                    : 'border-slate-200 bg-slate-50'
+                                    ? 'border-cyan-300 dark:border-cyan-500/40 bg-cyan-50 dark:bg-cyan-500/15 shadow-md ring-2 ring-cyan-100 dark:ring-cyan-500/30'
+                                    : 'border-border bg-muted/50'
                         }`}
                       >
                         <div className="flex items-start gap-2">
@@ -2323,12 +2323,12 @@ export default function SummitTaxonomyWorkshop() {
                             onDragStart={(event) => startDrag(event, { type: 'sub', categoryId: selectedCategory.id, id: subcat.id, name: subcat.name, icon: subcat.icon || 'Tag', color: selectedCategory.color })}
                             onDrag={(event) => updateDragPosition(event)}
                             onDragEnd={finishDrag}
-                            className="mt-0.5 flex h-8 w-6 shrink-0 cursor-grab items-center justify-center rounded text-slate-400 transition hover:bg-white hover:text-slate-700 active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-40"
+                            className="mt-0.5 flex h-8 w-6 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground/75 transition hover:bg-card hover:text-foreground/85 active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-40"
                             title={categoryResultsLocked ? 'Results are read-only' : 'Drag subcategory'}
                           >
                             <Icons.GripVertical className="h-4 w-4" />
                           </button>
-                          <span className="mt-1 text-slate-500"><Icon name={subcat.icon || 'Tag'} /></span>
+                          <span className="mt-1 text-muted-foreground"><Icon name={subcat.icon || 'Tag'} /></span>
                           <div className="min-w-0 flex-1">
                             <input
                               ref={(node) => {
@@ -2338,12 +2338,12 @@ export default function SummitTaxonomyWorkshop() {
                               value={subcat.name}
                               onChange={(e) => updateSubcategory(selectedCategory.id, subcat.id, { name: e.target.value })}
                               readOnly={categoryResultsLocked}
-                              className="w-full rounded border border-transparent bg-transparent text-sm font-semibold text-slate-900 outline-none focus:border-slate-300 focus:bg-white read-only:cursor-default read-only:focus:border-transparent read-only:focus:bg-transparent"
+                              className="w-full rounded border border-transparent bg-transparent text-sm font-semibold text-foreground outline-none focus:border-input focus:bg-card read-only:cursor-default read-only:focus:border-transparent read-only:focus:bg-transparent"
                             />
-                            <input value={subcat.evidence || ''} onChange={(e) => updateSubcategory(selectedCategory.id, subcat.id, { evidence: e.target.value })} readOnly={categoryResultsLocked} className="mt-1 w-full rounded border border-transparent bg-transparent text-xs text-slate-500 outline-none focus:border-slate-300 focus:bg-white read-only:cursor-default read-only:focus:border-transparent read-only:focus:bg-transparent" placeholder="Evidence or discussion note" />
+                            <input value={subcat.evidence || ''} onChange={(e) => updateSubcategory(selectedCategory.id, subcat.id, { evidence: e.target.value })} readOnly={categoryResultsLocked} className="mt-1 w-full rounded border border-transparent bg-transparent text-xs text-muted-foreground outline-none focus:border-input focus:bg-card read-only:cursor-default read-only:focus:border-transparent read-only:focus:bg-transparent" placeholder="Evidence or discussion note" />
                           </div>
                           <span className={`rounded-lg px-2 py-1 text-xs font-bold transition-all duration-300 ${
-                            linkedVoteCount(votes, subcat) > 0 ? 'bg-cyan-600 text-white shadow-sm' : 'bg-white text-slate-500'
+                            linkedVoteCount(votes, subcat) > 0 ? 'bg-cyan-600 text-white shadow-sm' : 'bg-card text-muted-foreground'
                           }`}>
                             <Icons.ThumbsUp className="mr-1 inline h-3.5 w-3.5" />
                             {linkedVoteCount(votes, subcat)}
@@ -2367,20 +2367,20 @@ export default function SummitTaxonomyWorkshop() {
                       </div>
                     ))}
                     {!visibleSubcategories.length && (
-                      <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-500 md:col-span-2">
+                      <div className="rounded-lg border border-dashed border-input bg-muted/50 p-4 text-sm text-muted-foreground md:col-span-2">
                     No subcategories match this search in {selectedCategory.name}.
                       </div>
                     )}
                   </div>
 
                   {!!selectedCategorySuggestions.length && (
-                    <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50/80 p-3">
+                    <div className="mt-5 rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50/80 dark:bg-amber-500/10 p-3">
                       <div className="mb-3 flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                          <Icons.Lightbulb className="h-4 w-4 text-amber-700" />
+                        <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                          <Icons.Lightbulb className="h-4 w-4 text-amber-700 dark:text-amber-200" />
                       Suggested subcategories
                         </div>
-                        <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-amber-800">{selectedCategorySuggestions.length}</span>
+                        <span className="rounded-full bg-card px-2 py-0.5 text-xs font-semibold text-amber-800 dark:text-amber-200">{selectedCategorySuggestions.length}</span>
                       </div>
                       <div className="grid gap-2 md:grid-cols-2">
                         {selectedCategorySuggestions.map((suggestion) => {
@@ -2390,26 +2390,26 @@ export default function SummitTaxonomyWorkshop() {
                               key={suggestion.id}
                               className={`rounded-lg border p-3 text-xs transition-all duration-500 ${
                                 highlightIds[`idea-${suggestion.id}`]
-                                  ? 'border-amber-300 bg-white shadow-md ring-2 ring-amber-200'
-                                  : 'border-amber-100 bg-white/90'
+                                  ? 'border-amber-300 dark:border-amber-500/40 bg-card shadow-md ring-2 ring-amber-200 dark:ring-amber-500/30'
+                                  : 'border-amber-100 dark:border-amber-500/20 bg-card/90'
                               }`}
                             >
                               <div className="flex items-start gap-2">
-                                <Icons.Tag className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
+                                <Icons.Tag className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-200" />
                                 <div className="min-w-0 flex-1">
-                                  <div className="truncate text-sm font-semibold text-slate-900">{suggestion.itemLabel}</div>
-                                  <div className="mt-0.5 text-slate-500">Suggested by {suggestion.participantName}</div>
+                                  <div className="truncate text-sm font-semibold text-foreground">{suggestion.itemLabel}</div>
+                                  <div className="mt-0.5 text-muted-foreground">Suggested by {suggestion.participantName}</div>
                                 </div>
-                                <span className={`rounded-lg px-2 py-1 text-xs font-bold ${voteCount(votes, suggestion.itemId) > 0 ? 'bg-amber-500 text-white' : 'bg-amber-100 text-amber-800'}`}>
+                                <span className={`rounded-lg px-2 py-1 text-xs font-bold ${voteCount(votes, suggestion.itemId) > 0 ? 'bg-amber-500 text-white' : 'bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-200'}`}>
                                   <Icons.ThumbsUp className="mr-1 inline h-3.5 w-3.5" />
                                   {voteCount(votes, suggestion.itemId)}
                                 </span>
                               </div>
-                              {suggestion.value?.reason && <div className="mt-2 rounded-md bg-amber-50 px-2 py-1 text-slate-600">{suggestion.value.reason}</div>}
+                              {suggestion.value?.reason && <div className="mt-2 rounded-md bg-amber-50 dark:bg-amber-500/15 px-2 py-1 text-muted-foreground">{suggestion.value.reason}</div>}
                               <button
                                 onClick={() => addSuggestedCategory(suggestion)}
                                 disabled={categoryResultsLocked || alreadyAdded}
-                                className="mt-3 rounded-md bg-slate-950 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
+                                className="mt-3 rounded-md bg-slate-950 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-secondary disabled:text-muted-foreground"
                               >
                                 <Icons.Plus className="mr-1 inline h-3.5 w-3.5" />
                                 {categoryResultsLocked ? 'Read-only' : alreadyAdded ? 'Already added' : 'Add subcategory'}
@@ -2421,22 +2421,22 @@ export default function SummitTaxonomyWorkshop() {
                     </div>
                   )}
 
-                  {!categoryResultsLocked && <form onSubmit={submitSubcategory} className="mt-5 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-3 transition-all duration-300 focus-within:border-cyan-300 focus-within:bg-cyan-50/50 focus-within:ring-2 focus-within:ring-cyan-100">
+                  {!categoryResultsLocked && <form onSubmit={submitSubcategory} className="mt-5 rounded-lg border border-dashed border-input bg-muted/50 p-3 transition-all duration-300 focus-within:border-cyan-300 dark:focus-within:border-cyan-500/40 focus-within:bg-cyan-50/50 dark:focus-within:bg-cyan-500/10 focus-within:ring-2 focus-within:ring-cyan-100 dark:focus-within:ring-cyan-500/30">
                     <div className="flex flex-col gap-2 md:flex-row md:items-center">
-                      <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
-                        <Icons.Tag className="h-4 w-4 shrink-0 text-slate-500" />
+                      <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-border bg-card px-3 py-2">
+                        <Icons.Tag className="h-4 w-4 shrink-0 text-muted-foreground" />
                         <input
                           ref={subcategoryNameInputRef}
                           value={newSubcategoryName}
                           onChange={(e) => setNewSubcategoryName(e.target.value)}
-                          className="min-w-0 flex-1 border-0 bg-transparent text-sm font-semibold text-slate-900 outline-none"
+                          className="min-w-0 flex-1 border-0 bg-transparent text-sm font-semibold text-foreground outline-none"
                           placeholder={`Add subcategory under ${selectedCategory.name}`}
                         />
                       </div>
                       <button
                         type="submit"
                         disabled={!newSubcategoryName.trim()}
-                        className="rounded-lg bg-slate-950 px-3 py-2 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
+                        className="rounded-lg bg-slate-950 px-3 py-2 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-secondary disabled:text-muted-foreground"
                       >
                         <Icons.Plus className="mr-1 inline h-4 w-4" />
                     Add sub
@@ -2445,7 +2445,7 @@ export default function SummitTaxonomyWorkshop() {
                     <input
                       value={newSubcategoryEvidence}
                       onChange={(e) => setNewSubcategoryEvidence(e.target.value)}
-                      className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 outline-none focus:border-cyan-300"
+                      className="mt-2 w-full rounded-lg border border-border bg-card px-3 py-2 text-xs text-muted-foreground outline-none focus:border-cyan-300 dark:focus:border-cyan-500/40"
                       placeholder="Evidence or discussion note"
                     />
                   </form>}
@@ -2455,91 +2455,91 @@ export default function SummitTaxonomyWorkshop() {
           )}
 
           <aside className="space-y-4">
-            <div className="rounded-lg border border-cyan-100 bg-white p-4 shadow-sm transition-all duration-200 hover:shadow-md">
+            <div className="rounded-lg border border-cyan-100 dark:border-cyan-500/20 bg-card p-4 shadow-sm transition-all duration-200 hover:shadow-md">
               <div className="mb-3 flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <Icons.Radio className="h-4 w-4 text-cyan-700" />
-                  <h2 className="text-sm font-semibold text-slate-900">Recent Activity</h2>
+                  <Icons.Radio className="h-4 w-4 text-cyan-700 dark:text-cyan-200" />
+                  <h2 className="text-sm font-semibold text-foreground">Recent Activity</h2>
                 </div>
-                <span className="rounded-full bg-cyan-50 px-2 py-0.5 text-xs font-semibold text-cyan-800">live</span>
+                <span className="rounded-full bg-cyan-50 dark:bg-cyan-500/15 px-2 py-0.5 text-xs font-semibold text-cyan-800 dark:text-cyan-200">live</span>
               </div>
               <div className="max-h-80 space-y-2 overflow-auto pr-1">
                 {activityFeed.map(activity => (
-                  <div key={activity.id} className="summit-toast flex gap-3 rounded-lg border border-slate-100 bg-slate-50 p-2 text-xs">
+                  <div key={activity.id} className="summit-toast flex gap-3 rounded-lg border border-border/60 bg-muted/50 p-2 text-xs">
                     <span className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${activityToneClasses(activity.tone)}`}>
                       <Icon name={activity.icon} className="h-4 w-4" />
                     </span>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-2">
-                        <div className="truncate font-semibold text-slate-900">{activity.title}</div>
-                        <div className="shrink-0 text-[10px] text-slate-400">{new Date(activity.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' })}</div>
+                        <div className="truncate font-semibold text-foreground">{activity.title}</div>
+                        <div className="shrink-0 text-[10px] text-muted-foreground/75">{new Date(activity.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' })}</div>
                       </div>
-                      <div className="mt-0.5 break-words text-slate-600">{activity.detail}</div>
-                      {activity.actor && <div className="mt-1 text-[11px] font-medium text-slate-500">by {activity.actor}</div>}
+                      <div className="mt-0.5 break-words text-muted-foreground">{activity.detail}</div>
+                      {activity.actor && <div className="mt-1 text-[11px] font-medium text-muted-foreground">by {activity.actor}</div>}
                     </div>
                   </div>
                 ))}
                 {!activityFeed.length && (
-                  <p className="text-sm text-slate-500">Live participant joins, votes, category ideas, and merge suggestions will appear here.</p>
+                  <p className="text-sm text-muted-foreground">Live participant joins, votes, category ideas, and merge suggestions will appear here.</p>
                 )}
               </div>
             </div>
 
-            <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-all duration-200 hover:shadow-md">
+            <div className="rounded-lg border border-border bg-card p-4 shadow-sm transition-all duration-200 hover:shadow-md">
               <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-slate-900">Live Feedback</h2>
-                <button onClick={() => setShowVotes(!showVotes)} className="text-xs text-slate-500 hover:text-slate-900">{showVotes ? 'Hide' : 'Show'}</button>
+                <h2 className="text-sm font-semibold text-foreground">Live Feedback</h2>
+                <button onClick={() => setShowVotes(!showVotes)} className="text-xs text-muted-foreground hover:text-foreground">{showVotes ? 'Hide' : 'Show'}</button>
               </div>
               {showVotes && (
                 <div className="space-y-3">
                   {(votes.totals || []).slice(0, 8).map(v => (
                     <div key={`${v.itemId}-${v.voteType}`}>
                       <div className="flex justify-between text-xs">
-                        <span className="truncate font-medium text-slate-700">{v.itemLabel}</span>
-                        <span className="text-slate-500">{v.count}</span>
+                        <span className="truncate font-medium text-foreground/85">{v.itemLabel}</span>
+                        <span className="text-muted-foreground">{v.count}</span>
                       </div>
-                      <div className="mt-1 h-2 rounded bg-slate-100">
+                      <div className="mt-1 h-2 rounded bg-muted">
                         <div className="h-2 rounded bg-cyan-500 transition-all" style={{ width: `${Math.min(100, v.count * 12)}%` }} />
                       </div>
                     </div>
                   ))}
-                  {!(votes.totals || []).length && <p className="text-sm text-slate-500">Votes will appear here once participants join.</p>}
+                  {!(votes.totals || []).length && <p className="text-sm text-muted-foreground">Votes will appear here once participants join.</p>}
                 </div>
               )}
             </div>
 
-            <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-all duration-200 hover:shadow-md">
+            <div className="rounded-lg border border-border bg-card p-4 shadow-sm transition-all duration-200 hover:shadow-md">
               <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-slate-900">Voter Stats</h2>
+                <h2 className="text-sm font-semibold text-foreground">Voter Stats</h2>
                 <div className="flex items-center gap-1.5">
                   <button
                     type="button"
                     onClick={resetStaleParticipants}
-                    className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 transition hover:border-amber-200 hover:bg-amber-50 hover:text-amber-700"
+                    className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-2 py-1 text-[11px] font-semibold text-muted-foreground transition hover:border-amber-200 dark:hover:border-amber-500/30 hover:bg-amber-50 dark:hover:bg-amber-500/15 hover:text-amber-700 dark:hover:text-amber-200"
                     title="Remove inactive public sessions. Logged-in users stay connected."
                   >
                     <Icons.UserX className="h-3.5 w-3.5" />
                     Stale
                   </button>
-                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">{(votes.participantStats || []).length}</span>
+                  <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-semibold text-muted-foreground">{(votes.participantStats || []).length}</span>
                 </div>
               </div>
               <div className="max-h-72 space-y-2 overflow-auto">
                 {(votes.participantStats || []).map(participant => (
-                  <div key={participant.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs">
+                  <div key={participant.id} className="rounded-lg border border-border bg-muted/50 p-3 text-xs">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold text-slate-900">{participant.displayName}</div>
-                        <div className="mt-0.5 text-slate-500">
+                        <div className="truncate text-sm font-semibold text-foreground">{participant.displayName}</div>
+                        <div className="mt-0.5 text-muted-foreground">
                         Last activity {participant.lastActivityAt ? new Date(participant.lastActivityAt).toLocaleTimeString() : 'none yet'}
                         </div>
                       </div>
                       <div className="flex shrink-0 items-center gap-1">
-                        <span className="rounded-lg bg-white px-2 py-1 font-semibold text-slate-800">{participant.totalCount || 0} total</span>
+                        <span className="rounded-lg bg-card px-2 py-1 font-semibold text-foreground">{participant.totalCount || 0} total</span>
                         <button
                           type="button"
                           onClick={() => setParticipantResetTarget(participant)}
-                          className="rounded-lg border border-red-100 bg-white px-2 py-1 font-semibold text-red-600 transition hover:bg-red-50"
+                          className="rounded-lg border border-red-100 dark:border-red-500/20 bg-card px-2 py-1 font-semibold text-red-600 dark:text-red-300 transition hover:bg-red-50 dark:hover:bg-red-500/15"
                           title="Reset this voter"
                         >
                           <Icons.UserX className="h-3.5 w-3.5" />
@@ -2547,23 +2547,23 @@ export default function SummitTaxonomyWorkshop() {
                       </div>
                     </div>
                     <div className="mt-2 grid grid-cols-3 gap-1 text-center">
-                      <div className="rounded-md bg-white px-2 py-1">
-                        <div className="font-semibold text-cyan-700">{participant.supportCount || 0}</div>
-                        <div className="text-[10px] uppercase text-slate-400">Votes</div>
+                      <div className="rounded-md bg-card px-2 py-1">
+                        <div className="font-semibold text-cyan-700 dark:text-cyan-200">{participant.supportCount || 0}</div>
+                        <div className="text-[10px] uppercase text-muted-foreground/75">Votes</div>
                       </div>
-                      <div className="rounded-md bg-white px-2 py-1">
-                        <div className="font-semibold text-amber-700">{participant.categorySuggestionCount || 0}</div>
-                        <div className="text-[10px] uppercase text-slate-400">Ideas</div>
+                      <div className="rounded-md bg-card px-2 py-1">
+                        <div className="font-semibold text-amber-700 dark:text-amber-200">{participant.categorySuggestionCount || 0}</div>
+                        <div className="text-[10px] uppercase text-muted-foreground/75">Ideas</div>
                       </div>
-                      <div className="rounded-md bg-white px-2 py-1">
-                        <div className="font-semibold text-violet-700">{participant.mergeSuggestionCount || 0}</div>
-                        <div className="text-[10px] uppercase text-slate-400">Merges</div>
+                      <div className="rounded-md bg-card px-2 py-1">
+                        <div className="font-semibold text-violet-700 dark:text-violet-200">{participant.mergeSuggestionCount || 0}</div>
+                        <div className="text-[10px] uppercase text-muted-foreground/75">Merges</div>
                       </div>
                     </div>
                     {!!participant.recentItems?.length && (
                       <div className="mt-2 space-y-1">
                         {participant.recentItems.slice(0, 2).map(item => (
-                          <div key={`${participant.id}-${item.itemId}-${item.voteType}-${item.createdAt}`} className="truncate text-[11px] text-slate-500">
+                          <div key={`${participant.id}-${item.itemId}-${item.voteType}-${item.createdAt}`} className="truncate text-[11px] text-muted-foreground">
                             {item.voteType === 'support' ? 'Voted for' : item.voteType === 'merge_suggestion' ? 'Merge idea' : 'New idea'}: {item.itemLabel}
                           </div>
                         ))}
@@ -2571,14 +2571,14 @@ export default function SummitTaxonomyWorkshop() {
                     )}
                   </div>
                 ))}
-                {!(votes.participantStats || []).length && <p className="text-sm text-slate-500">Per-voter stats will appear after people join.</p>}
+                {!(votes.participantStats || []).length && <p className="text-sm text-muted-foreground">Per-voter stats will appear after people join.</p>}
               </div>
             </div>
 
-            <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-all duration-200 hover:shadow-md">
+            <div className="rounded-lg border border-border bg-card p-4 shadow-sm transition-all duration-200 hover:shadow-md">
               <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-slate-900">Top-Level Ideas</h2>
-                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">{topCategorySuggestions.length}</span>
+                <h2 className="text-sm font-semibold text-foreground">Top-Level Ideas</h2>
+                <span className="rounded-full bg-amber-100 dark:bg-amber-500/20 px-2 py-0.5 text-xs font-semibold text-amber-800 dark:text-amber-200">{topCategorySuggestions.length}</span>
               </div>
               <div className="max-h-72 space-y-2 overflow-auto">
                 {topCategorySuggestions.map(suggestion => (
@@ -2586,66 +2586,66 @@ export default function SummitTaxonomyWorkshop() {
                     key={suggestion.id}
                     className={`rounded-lg border p-3 text-xs transition-all duration-500 ${
                       highlightIds[`idea-${suggestion.id}`]
-                        ? 'border-amber-300 bg-amber-50 shadow-md ring-2 ring-amber-200'
-                        : 'border-amber-100 bg-amber-50/60'
+                        ? 'border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/15 shadow-md ring-2 ring-amber-200 dark:ring-amber-500/30'
+                        : 'border-amber-100 dark:border-amber-500/20 bg-amber-50/60 dark:bg-amber-500/10'
                     }`}
                   >
                     <div className="flex items-start gap-2">
-                      <Icons.Lightbulb className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                      <Icons.Lightbulb className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-300" />
                       <div className="min-w-0 flex-1">
-                        <div className="font-semibold text-slate-900">{suggestion.itemLabel}</div>
-                        <div className="mt-0.5 text-slate-500">Suggested by {suggestion.participantName}</div>
+                        <div className="font-semibold text-foreground">{suggestion.itemLabel}</div>
+                        <div className="mt-0.5 text-muted-foreground">Suggested by {suggestion.participantName}</div>
                       </div>
-                      <span className="rounded-full bg-white px-2 py-0.5 font-semibold text-slate-700">
+                      <span className="rounded-full bg-card px-2 py-0.5 font-semibold text-foreground/85">
                         {voteCount(votes, suggestion.itemId)}
                       </span>
                     </div>
-                    {suggestion.value?.reason && <div className="mt-2 text-slate-600">{suggestion.value.reason}</div>}
+                    {suggestion.value?.reason && <div className="mt-2 text-muted-foreground">{suggestion.value.reason}</div>}
                     <button
                       onClick={() => addSuggestedCategory(suggestion)}
                       disabled={categoryResultsLocked}
-                      className="mt-3 rounded-md bg-slate-950 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
+                      className="mt-3 rounded-md bg-slate-950 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-secondary disabled:text-muted-foreground"
                     >
                       <Icons.Plus className="mr-1 inline h-3.5 w-3.5" />{categoryResultsLocked ? 'Read-only' : 'Add to categories'}
                     </button>
                   </div>
                 ))}
-                {!topCategorySuggestions.length && <p className="text-sm text-slate-500">Top-level suggestions will appear here. Subcategory suggestions show inside their parent category.</p>}
+                {!topCategorySuggestions.length && <p className="text-sm text-muted-foreground">Top-level suggestions will appear here. Subcategory suggestions show inside their parent category.</p>}
               </div>
             </div>
 
-            <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-all duration-200 hover:shadow-md">
-              <h2 className="mb-3 text-sm font-semibold text-slate-900">Merge Suggestions</h2>
+            <div className="rounded-lg border border-border bg-card p-4 shadow-sm transition-all duration-200 hover:shadow-md">
+              <h2 className="mb-3 text-sm font-semibold text-foreground">Merge Suggestions</h2>
               <div className="max-h-64 space-y-2 overflow-auto">
                 {(votes.mergeSuggestions || []).map(s => (
                   <div
                     key={s.id}
                     className={`rounded-lg border p-2 text-xs transition-all duration-500 ${
                       highlightIds[`merge-${s.id}`]
-                        ? 'border-cyan-300 bg-cyan-50 shadow-md ring-2 ring-cyan-200'
-                        : 'border-slate-100 bg-slate-50'
+                        ? 'border-cyan-300 dark:border-cyan-500/40 bg-cyan-50 dark:bg-cyan-500/15 shadow-md ring-2 ring-cyan-200 dark:ring-cyan-500/30'
+                        : 'border-border/60 bg-muted/50'
                     }`}
                   >
-                    <div className="font-semibold text-slate-800">{s.participantName}</div>
-                    <div className="mt-1 text-slate-600">{s.value?.from} + {s.value?.to}</div>
-                    {s.value?.reason && <div className="mt-1 text-slate-500">{s.value.reason}</div>}
+                    <div className="font-semibold text-foreground">{s.participantName}</div>
+                    <div className="mt-1 text-muted-foreground">{s.value?.from} + {s.value?.to}</div>
+                    {s.value?.reason && <div className="mt-1 text-muted-foreground">{s.value.reason}</div>}
                   </div>
                 ))}
-                {!(votes.mergeSuggestions || []).length && <p className="text-sm text-slate-500">No merge suggestions yet.</p>}
+                {!(votes.mergeSuggestions || []).length && <p className="text-sm text-muted-foreground">No merge suggestions yet.</p>}
               </div>
             </div>
 
-            <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-all duration-200 hover:shadow-md">
-              <h2 className="mb-3 text-sm font-semibold text-slate-900">Backups</h2>
+            <div className="rounded-lg border border-border bg-card p-4 shadow-sm transition-all duration-200 hover:shadow-md">
+              <h2 className="mb-3 text-sm font-semibold text-foreground">Backups</h2>
               <div className="max-h-64 space-y-2 overflow-auto">
                 {snapshots.map(snapshot => (
-                  <div key={snapshot.id} className="rounded-lg border border-slate-200 p-2">
-                    <div className="text-xs font-semibold text-slate-800">v{snapshot.version} / {snapshot.label}</div>
-                    <div className="text-[11px] text-slate-500">{new Date(snapshot.createdAt).toLocaleString()}</div>
+                  <div key={snapshot.id} className="rounded-lg border border-border p-2">
+                    <div className="text-xs font-semibold text-foreground">v{snapshot.version} / {snapshot.label}</div>
+                    <div className="text-[11px] text-muted-foreground">{new Date(snapshot.createdAt).toLocaleString()}</div>
                     <button
                       onClick={() => summitAPI.restoreSnapshot(snapshot.id).then(res => { setSession(res.session); setState(res.session.state); setSnapshots(res.snapshots || []); })}
                       disabled={categoryResultsLocked}
-                      className="mt-2 text-xs font-semibold text-blue-700 hover:text-blue-900 disabled:cursor-not-allowed disabled:text-slate-400"
+                      className="mt-2 text-xs font-semibold text-blue-700 dark:text-blue-200 hover:text-blue-900 dark:hover:text-blue-200 disabled:cursor-not-allowed disabled:text-muted-foreground/75"
                     >
                       {categoryResultsLocked ? 'Read-only' : 'Restore'}
                     </button>
@@ -2659,22 +2659,22 @@ export default function SummitTaxonomyWorkshop() {
 
       {showDeleted && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
-          <div className="max-h-[80vh] w-full max-w-2xl overflow-auto rounded-lg bg-white p-5 shadow-xl">
+          <div className="max-h-[80vh] w-full max-w-2xl overflow-auto rounded-lg bg-card p-5 shadow-xl">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-lg font-semibold">Removed Items</h2>
               <button onClick={() => setShowDeleted(false)}><Icons.X className="h-5 w-5" /></button>
             </div>
             <div className="space-y-2">
               {deletedItems.map(item => (
-                <div key={`${item.type}-${item.id}`} className="flex items-center justify-between rounded-lg border border-slate-200 p-3">
+                <div key={`${item.type}-${item.id}`} className="flex items-center justify-between rounded-lg border border-border p-3">
                   <div>
-                    <div className="font-medium text-slate-900">{item.name}</div>
-                    <div className="text-xs text-slate-500">{item.type}{item.parentName ? ` from ${item.parentName}` : ''}</div>
+                    <div className="font-medium text-foreground">{item.name}</div>
+                    <div className="text-xs text-muted-foreground">{item.type}{item.parentName ? ` from ${item.parentName}` : ''}</div>
                   </div>
-                  <button onClick={() => restoreDeleted(item)} disabled={categoryResultsLocked} className="rounded-lg bg-slate-900 px-3 py-2 text-sm text-white disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500">{categoryResultsLocked ? 'Read-only' : 'Restore'}</button>
+                  <button onClick={() => restoreDeleted(item)} disabled={categoryResultsLocked} className="rounded-lg bg-slate-900 px-3 py-2 text-sm text-white disabled:cursor-not-allowed disabled:bg-secondary disabled:text-muted-foreground">{categoryResultsLocked ? 'Read-only' : 'Restore'}</button>
                 </div>
               ))}
-              {!deletedItems.length && <p className="text-sm text-slate-500">Nothing removed yet.</p>}
+              {!deletedItems.length && <p className="text-sm text-muted-foreground">Nothing removed yet.</p>}
             </div>
           </div>
         </div>
@@ -2682,16 +2682,16 @@ export default function SummitTaxonomyWorkshop() {
 
       {showVotingDetails && voteUrl && (
         <div className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-950/60 p-4">
-          <div className="w-full max-w-2xl overflow-hidden rounded-lg bg-white shadow-2xl">
-            <div className={`border-b px-5 py-4 ${isVotingExpired ? 'border-red-200 bg-red-50' : 'border-emerald-200 bg-emerald-50'}`}>
+          <div className="w-full max-w-2xl overflow-hidden rounded-lg bg-card shadow-2xl">
+            <div className={`border-b px-5 py-4 ${isVotingExpired ? 'border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15' : 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15'}`}>
               <div className="flex items-start justify-between gap-4">
                 <div className="flex items-center gap-3">
                   <span className={`flex h-11 w-11 items-center justify-center rounded-lg text-white ${isVotingExpired ? 'bg-red-600' : 'bg-emerald-600'}`}>
                     <Icons.Clock3 className="h-5 w-5" />
                   </span>
                   <div>
-                    <h2 className="text-lg font-semibold text-slate-950">Voting window</h2>
-                    <p className={`text-sm ${isVotingExpired ? 'text-red-800' : 'text-emerald-800'}`}>
+                    <h2 className="text-lg font-semibold text-foreground">Voting window</h2>
+                    <p className={`text-sm ${isVotingExpired ? 'text-red-800 dark:text-red-200' : 'text-emerald-800 dark:text-emerald-200'}`}>
                       {isVotingExpired ? 'Expired' : `${formatCountdown(effectiveCountdownMs)} remaining`}
                     </p>
                   </div>
@@ -2699,7 +2699,7 @@ export default function SummitTaxonomyWorkshop() {
                 <button
                   type="button"
                   onClick={() => setShowVotingDetails(false)}
-                  className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition hover:bg-white/70 hover:text-slate-900"
+                  className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-card/70 hover:text-foreground"
                   aria-label="Close voting details"
                 >
                   <Icons.X className="h-5 w-5" />
@@ -2708,89 +2708,89 @@ export default function SummitTaxonomyWorkshop() {
             </div>
             <div className="space-y-4 px-5 py-4">
               <div className="grid gap-3 sm:grid-cols-4">
-                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <div className="flex items-center gap-2 text-xs font-semibold uppercase text-slate-500">
+                <div className="rounded-lg border border-border bg-muted/50 p-3">
+                  <div className="flex items-center gap-2 text-xs font-semibold uppercase text-muted-foreground">
                     <Icons.UsersRound className="h-3.5 w-3.5" />
                     Joined
                   </div>
-                  <div className="mt-2 text-2xl font-semibold text-slate-950">{votes.participantCount || 0}</div>
-                  <div className="mt-1 text-xs text-slate-500">{pluralize(activeVoterCount, 'active voter')}</div>
+                  <div className="mt-2 text-2xl font-semibold text-foreground">{votes.participantCount || 0}</div>
+                  <div className="mt-1 text-xs text-muted-foreground">{pluralize(activeVoterCount, 'active voter')}</div>
                 </div>
-                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <div className="flex items-center gap-2 text-xs font-semibold uppercase text-slate-500">
+                <div className="rounded-lg border border-border bg-muted/50 p-3">
+                  <div className="flex items-center gap-2 text-xs font-semibold uppercase text-muted-foreground">
                     <Icons.ThumbsUp className="h-3.5 w-3.5" />
                     Votes
                   </div>
-                  <div className="mt-2 text-2xl font-semibold text-slate-950">{supportVoteTotal}</div>
-                  <div className="mt-1 text-xs text-slate-500">{pluralize(totalVoteCount(votes), 'total action')}</div>
+                  <div className="mt-2 text-2xl font-semibold text-foreground">{supportVoteTotal}</div>
+                  <div className="mt-1 text-xs text-muted-foreground">{pluralize(totalVoteCount(votes), 'total action')}</div>
                 </div>
-                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <div className="flex items-center gap-2 text-xs font-semibold uppercase text-slate-500">
+                <div className="rounded-lg border border-border bg-muted/50 p-3">
+                  <div className="flex items-center gap-2 text-xs font-semibold uppercase text-muted-foreground">
                     <Icons.Lightbulb className="h-3.5 w-3.5" />
                     Ideas
                   </div>
-                  <div className="mt-2 text-2xl font-semibold text-slate-950">{votes.categorySuggestions.length}</div>
-                  <div className="mt-1 text-xs text-slate-500">{pluralize(votes.mergeSuggestions.length, 'merge idea')}</div>
+                  <div className="mt-2 text-2xl font-semibold text-foreground">{votes.categorySuggestions.length}</div>
+                  <div className="mt-1 text-xs text-muted-foreground">{pluralize(votes.mergeSuggestions.length, 'merge idea')}</div>
                 </div>
-                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <div className="flex items-center gap-2 text-xs font-semibold uppercase text-slate-500">
+                <div className="rounded-lg border border-border bg-muted/50 p-3">
+                  <div className="flex items-center gap-2 text-xs font-semibold uppercase text-muted-foreground">
                     <Icons.Plus className="h-3.5 w-3.5" />
                     Extended
                   </div>
-                  <div className="mt-2 text-2xl font-semibold text-slate-950">{Number(votingMeta.extendedByMinutes || 0)}m</div>
-                  <div className="mt-1 text-xs text-slate-500">added time</div>
+                  <div className="mt-2 text-2xl font-semibold text-foreground">{Number(votingMeta.extendedByMinutes || 0)}m</div>
+                  <div className="mt-1 text-xs text-muted-foreground">added time</div>
                 </div>
               </div>
 
-              <div className="grid gap-3 rounded-lg border border-slate-200 p-4 text-sm sm:grid-cols-2">
+              <div className="grid gap-3 rounded-lg border border-border p-4 text-sm sm:grid-cols-2">
                 <div>
-                  <div className="text-xs font-semibold uppercase text-slate-500">Started</div>
-                  <div className="mt-1 font-medium text-slate-900">
+                  <div className="text-xs font-semibold uppercase text-muted-foreground">Started</div>
+                  <div className="mt-1 font-medium text-foreground">
                     {votingStartedAt ? new Date(votingStartedAt).toLocaleString() : 'Not available'}
                   </div>
-                  <div className="mt-1 text-xs text-slate-500">{formatDuration(votingElapsedMs)} elapsed</div>
+                  <div className="mt-1 text-xs text-muted-foreground">{formatDuration(votingElapsedMs)} elapsed</div>
                 </div>
                 <div>
-                  <div className="text-xs font-semibold uppercase text-slate-500">Ends</div>
-                  <div className="mt-1 font-medium text-slate-900">{new Date(session.voteExpiresAt).toLocaleString()}</div>
-                  <div className={`mt-1 text-xs font-semibold ${isVotingExpired ? 'text-red-700' : 'text-emerald-700'}`}>
+                  <div className="text-xs font-semibold uppercase text-muted-foreground">Ends</div>
+                  <div className="mt-1 font-medium text-foreground">{new Date(session.voteExpiresAt).toLocaleString()}</div>
+                  <div className={`mt-1 text-xs font-semibold ${isVotingExpired ? 'text-red-700 dark:text-red-200' : 'text-emerald-700 dark:text-emerald-200'}`}>
                     {isVotingExpired ? 'Voting is currently closed by time limit' : `${formatCountdown(effectiveCountdownMs)} left`}
                   </div>
                 </div>
                 <div>
-                  <div className="text-xs font-semibold uppercase text-slate-500">Original window</div>
-                  <div className="mt-1 font-medium text-slate-900">{Number(votingMeta.originalDurationMinutes || DEFAULT_VOTE_DURATION_MINUTES)} minutes</div>
+                  <div className="text-xs font-semibold uppercase text-muted-foreground">Original window</div>
+                  <div className="mt-1 font-medium text-foreground">{Number(votingMeta.originalDurationMinutes || DEFAULT_VOTE_DURATION_MINUTES)} minutes</div>
                 </div>
                 <div>
-                  <div className="text-xs font-semibold uppercase text-slate-500">Latest join</div>
-                  <div className="mt-1 font-medium text-slate-900">{latestParticipant?.displayName || 'No participants yet'}</div>
-                  <div className="mt-1 text-xs text-slate-500">
+                  <div className="text-xs font-semibold uppercase text-muted-foreground">Latest join</div>
+                  <div className="mt-1 font-medium text-foreground">{latestParticipant?.displayName || 'No participants yet'}</div>
+                  <div className="mt-1 text-xs text-muted-foreground">
                     {latestParticipant?.joinedAt ? new Date(latestParticipant.joinedAt).toLocaleTimeString() : 'Share the link to start voting'}
                   </div>
                 </div>
               </div>
 
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <div className="rounded-lg border border-border bg-muted/50 p-3">
                 <div className="mb-2 flex items-center justify-between gap-2">
-                  <div className="text-xs font-semibold uppercase text-slate-500">Public fallback link</div>
+                  <div className="text-xs font-semibold uppercase text-muted-foreground">Public fallback link</div>
                   <button
                     type="button"
                     onClick={() => navigator.clipboard.writeText(voteUrl)}
-                    className="flex items-center gap-1 rounded-md bg-white px-2 py-1 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-100"
+                    className="flex items-center gap-1 rounded-md bg-card px-2 py-1 text-xs font-semibold text-foreground/85 shadow-sm transition hover:bg-muted"
                   >
                     <Icons.Copy className="h-3.5 w-3.5" />
                     Copy
                   </button>
                 </div>
-                <div className="break-all text-sm font-medium text-slate-700">{voteUrl}</div>
+                <div className="break-all text-sm font-medium text-foreground/85">{voteUrl}</div>
               </div>
             </div>
-            <div className="flex flex-col gap-2 border-t border-slate-200 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="text-xs text-slate-500">
+            <div className="flex flex-col gap-2 border-t border-border px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="text-xs text-muted-foreground">
                 Extending keeps the same public fallback link, current votes, and Working / Attention feedback.
               </div>
               <div className="flex justify-end gap-2">
-                <button onClick={() => setShowVotingDetails(false)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">
+                <button onClick={() => setShowVotingDetails(false)} className="rounded-lg border border-input px-4 py-2 text-sm font-semibold text-foreground/85 transition hover:bg-muted/50">
                   Close
                 </button>
                 <button
@@ -2835,11 +2835,11 @@ export default function SummitTaxonomyWorkshop() {
                 BGC Engineering IT Summit
               </div>
               <h2 className="mt-5 text-5xl font-semibold leading-tight lg:text-7xl">Join the category vote</h2>
-              <p className="mt-5 max-w-3xl text-xl leading-relaxed text-slate-300">
+              <p className="mt-5 max-w-3xl text-xl leading-relaxed text-muted-foreground/50">
                 Scan the QR code, enter your name or continue anonymously, then vote on categories and the Working / Attention session.
               </p>
               <div className="mt-8 flex flex-wrap items-center gap-3 text-base">
-                <span className={`rounded-lg px-4 py-3 font-semibold ${isVotingExpired ? 'bg-red-500/15 text-red-100' : 'bg-emerald-400 text-slate-950'}`}>
+                <span className={`rounded-lg px-4 py-3 font-semibold ${isVotingExpired ? 'bg-red-500/15 text-red-100' : 'bg-emerald-400 text-foreground'}`}>
                   <Icons.Clock3 className="mr-2 inline h-5 w-5" />
                   {formatCountdown(effectiveCountdownMs)} {isVotingExpired ? '' : 'left'}
                 </span>
@@ -2854,7 +2854,7 @@ export default function SummitTaxonomyWorkshop() {
                 {voteUrl}
               </div>
             </div>
-            <div className="summit-qr-pulse rounded-3xl border border-white/10 bg-white p-5 shadow-2xl">
+            <div className="summit-qr-pulse rounded-3xl border border-white/10 bg-card p-5 shadow-2xl">
               <QRCodeSVG value={voteUrl} size={420} marginSize={3} className="aspect-square h-auto w-full rounded-2xl" title="Category workshop voting link" />
               <div className="mt-4 rounded-2xl bg-slate-950 px-4 py-3 text-center text-lg font-semibold text-white">
                 Scan to vote
@@ -2866,23 +2866,23 @@ export default function SummitTaxonomyWorkshop() {
 
       {showRegenerateLinkConfirm && (
         <div className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-950/60 p-4">
-          <div className="w-full max-w-lg overflow-hidden rounded-lg bg-white shadow-2xl">
-            <div className="border-b border-amber-200 bg-amber-50 px-5 py-4">
+          <div className="w-full max-w-lg overflow-hidden rounded-lg bg-card shadow-2xl">
+            <div className="border-b border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-5 py-4">
               <div className="flex items-center gap-3">
                 <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-500 text-white">
                   <Icons.RefreshCcw className="h-5 w-5" />
                 </span>
                 <div>
-                  <h2 className="text-lg font-semibold text-slate-950">Regenerate voting link?</h2>
-                  <p className="text-sm text-amber-800">The current public voting URL will stop working.</p>
+                  <h2 className="text-lg font-semibold text-foreground">Regenerate voting link?</h2>
+                  <p className="text-sm text-amber-800 dark:text-amber-200">The current public voting URL will stop working.</p>
                 </div>
               </div>
             </div>
-            <div className="px-5 py-4 text-sm text-slate-600">
+            <div className="px-5 py-4 text-sm text-muted-foreground">
               Participants already on the old link will see that the link expired and will need the new link. Participant count, votes, merge suggestions, and category ideas will reset. Category edits and backups stay.
             </div>
-            <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
-              <button onClick={() => setShowRegenerateLinkConfirm(false)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+            <div className="flex justify-end gap-2 border-t border-border px-5 py-4">
+              <button onClick={() => setShowRegenerateLinkConfirm(false)} className="rounded-lg border border-input px-4 py-2 text-sm font-semibold text-foreground/85 hover:bg-muted/50">
                 Cancel
               </button>
               <button onClick={() => enableVoting(true)} className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-600">
@@ -2895,23 +2895,23 @@ export default function SummitTaxonomyWorkshop() {
 
       {participantResetTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
-          <div className="w-full max-w-md overflow-hidden rounded-lg bg-white shadow-2xl">
-            <div className="border-b border-red-200 bg-red-50 px-5 py-4">
+          <div className="w-full max-w-md overflow-hidden rounded-lg bg-card shadow-2xl">
+            <div className="border-b border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 px-5 py-4">
               <div className="flex items-center gap-3">
                 <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-red-600 text-white">
                   <Icons.UserX className="h-5 w-5" />
                 </span>
                 <div>
-                  <h2 className="text-lg font-semibold text-slate-950">Reset voter?</h2>
-                  <p className="text-sm text-red-800">{participantResetTarget.displayName}</p>
+                  <h2 className="text-lg font-semibold text-foreground">Reset voter?</h2>
+                  <p className="text-sm text-red-800 dark:text-red-200">{participantResetTarget.displayName}</p>
                 </div>
               </div>
             </div>
-            <div className="px-5 py-4 text-sm text-slate-600">
+            <div className="px-5 py-4 text-sm text-muted-foreground">
               This removes the voter from live stats, clears their category votes, ideas, merge suggestions, and related comments, then forces their voting page to rejoin with a name.
             </div>
-            <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
-              <button onClick={() => setParticipantResetTarget(null)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+            <div className="flex justify-end gap-2 border-t border-border px-5 py-4">
+              <button onClick={() => setParticipantResetTarget(null)} className="rounded-lg border border-input px-4 py-2 text-sm font-semibold text-foreground/85 hover:bg-muted/50">
                 Cancel
               </button>
               <button onClick={resetParticipantVotes} className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700">
@@ -2922,7 +2922,7 @@ export default function SummitTaxonomyWorkshop() {
         </div>
       )}
 
-      <div className="mt-3 text-xs text-slate-500">Last saved: {lastSavedAt ? new Date(lastSavedAt).toLocaleString() : 'not yet saved'}</div>
+      <div className="mt-3 text-xs text-muted-foreground">Last saved: {lastSavedAt ? new Date(lastSavedAt).toLocaleString() : 'not yet saved'}</div>
     </AppShell>
   );
 }

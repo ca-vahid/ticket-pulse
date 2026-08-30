@@ -70,7 +70,7 @@ export default function TicketTagEditor({ ticketId, tags = [], allTags = [], can
 
   return (
     <div>
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-1 flex items-center gap-1">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/75 mb-1 flex items-center gap-1">
         <TagGlyph className="w-3 h-3" aria-hidden="true" /> Tags
       </p>
       <div className="flex flex-wrap items-center gap-1">
@@ -85,7 +85,7 @@ export default function TicketTagEditor({ ticketId, tags = [], allTags = [], can
               disabled={busy}
               aria-expanded={open}
               aria-label="Add tag"
-              className="tp-focus-ring inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full border border-dashed border-slate-300 text-[11px] text-slate-400 hover:text-blue-600 hover:border-blue-300"
+              className="tp-focus-ring inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full border border-dashed border-input text-[11px] text-muted-foreground/75 hover:text-blue-600 dark:hover:text-blue-300 hover:border-blue-300 dark:hover:border-blue-500/40"
             >
               {busy ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" /> : <Plus className="w-3 h-3" aria-hidden="true" />}
               Tag
@@ -106,7 +106,7 @@ export default function TicketTagEditor({ ticketId, tags = [], allTags = [], can
                   }}
                   placeholder="Search tags…"
                   aria-label="Search tags"
-                  className="tp-focus-ring w-full text-xs bg-white border border-input rounded-md px-2 py-1.5 mb-1 placeholder:text-slate-400"
+                  className="tp-focus-ring w-full text-xs bg-card border border-input rounded-md px-2 py-1.5 mb-1 placeholder:text-muted-foreground/75"
                 />
                 <span className="max-h-44 overflow-y-auto settings-scrollbar flex flex-col">
                   {options.map((tag) => (
@@ -114,13 +114,13 @@ export default function TicketTagEditor({ ticketId, tags = [], allTags = [], can
                       key={tag.id}
                       type="button"
                       onClick={() => addTag(tag)}
-                      className="tp-focus-ring text-left px-1.5 py-1 rounded-md hover:bg-slate-50"
+                      className="tp-focus-ring text-left px-1.5 py-1 rounded-md hover:bg-muted/50"
                     >
                       <TagChip tag={tag} size="xs" />
                     </button>
                   ))}
                   {options.length === 0 && (!isAdmin || !q || exactExists) && (
-                    <span className="px-2 py-1.5 text-xs text-slate-400">
+                    <span className="px-2 py-1.5 text-xs text-muted-foreground/75">
                       {q ? 'No matching tags.' : 'No more tags — admins manage them under Settings → Ticket Ops.'}
                     </span>
                   )}
@@ -128,7 +128,7 @@ export default function TicketTagEditor({ ticketId, tags = [], allTags = [], can
                     <button
                       type="button"
                       onClick={createAndAdd}
-                      className="tp-focus-ring text-left px-2 py-1.5 rounded-md text-xs font-medium text-blue-600 hover:bg-blue-50"
+                      className="tp-focus-ring text-left px-2 py-1.5 rounded-md text-xs font-medium text-blue-600 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-500/15"
                     >
                       Create “{query.trim()}”
                     </button>

@@ -52,10 +52,10 @@ const RECIPIENT_BUCKET_HELP = {
 };
 
 function readinessTone(readiness) {
-  if (readiness?.pausedByWorkspace) return 'border-gray-200 bg-gray-100 text-gray-400 line-through decoration-gray-400/60';
-  if (readiness?.ready) return 'border-emerald-200 bg-emerald-50 text-emerald-700';
-  if (readiness?.enabled) return 'border-amber-200 bg-amber-50 text-amber-700';
-  return 'border-gray-200 bg-gray-50 text-gray-500';
+  if (readiness?.pausedByWorkspace) return 'border-border bg-muted text-muted-foreground/75 line-through decoration-gray-400/60';
+  if (readiness?.ready) return 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200';
+  if (readiness?.enabled) return 'border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200';
+  return 'border-border bg-muted/50 text-muted-foreground';
 }
 
 function ChannelChip({ readiness }) {
@@ -86,15 +86,15 @@ function ToggleCard({ enabled, title, description, onClick }) {
       className={cn(
         'rounded-2xl border p-4 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
         enabled
-          ? 'border-emerald-300 bg-emerald-50/90 text-slate-950 shadow-sm ring-1 ring-emerald-100'
-          : 'border-slate-200 bg-white/85 text-slate-700 hover:border-slate-300 hover:bg-slate-50',
+          ? 'border-emerald-300 dark:border-emerald-500/40 bg-emerald-50/90 dark:bg-emerald-500/10 text-foreground shadow-sm ring-1 ring-emerald-100 dark:ring-emerald-500/30'
+          : 'border-border bg-card/85 text-foreground/85 hover:border-input hover:bg-muted/50',
       )}
     >
       <div className="flex items-start gap-3">
         <span
           className={cn(
             'mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border',
-            enabled ? 'border-emerald-400 bg-emerald-600 text-white' : 'border-slate-300 bg-slate-100 text-slate-400',
+            enabled ? 'border-emerald-400 bg-emerald-600 text-white' : 'border-input bg-muted text-muted-foreground/75',
           )}
         >
           {enabled ? <CheckCircle2 className="h-4 w-4" /> : <span className="h-2 w-2 rounded-full bg-current" />}
@@ -105,13 +105,13 @@ function ToggleCard({ enabled, title, description, onClick }) {
             <span
               className={cn(
                 'rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
-                enabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500',
+                enabled ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-200' : 'bg-muted text-muted-foreground',
               )}
             >
               {enabled ? 'Enabled' : 'Off'}
             </span>
           </span>
-          <span className="mt-1 block text-xs leading-5 text-gray-600">{description}</span>
+          <span className="mt-1 block text-xs leading-5 text-muted-foreground">{description}</span>
         </span>
       </div>
     </button>
@@ -120,19 +120,19 @@ function ToggleCard({ enabled, title, description, onClick }) {
 
 function SystemDefaultCard({ title, description }) {
   return (
-    <div className="rounded-2xl border border-blue-200 bg-blue-50/80 p-4 text-left shadow-sm ring-1 ring-blue-100">
+    <div className="rounded-2xl border border-blue-200 dark:border-blue-500/30 bg-blue-50/80 dark:bg-blue-500/10 p-4 text-left shadow-sm ring-1 ring-blue-100 dark:ring-blue-500/30">
       <div className="flex items-start gap-3">
-        <span className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border border-blue-300 bg-white text-blue-700">
+        <span className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border border-blue-300 dark:border-blue-500/40 bg-card text-blue-700 dark:text-blue-200">
           <CheckCircle2 className="h-4 w-4" />
         </span>
         <span className="min-w-0 flex-1">
           <span className="flex items-center justify-between gap-2">
-            <span className="block text-sm font-semibold text-slate-950">{title}</span>
-            <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-blue-700">
+            <span className="block text-sm font-semibold text-foreground">{title}</span>
+            <span className="rounded-full bg-blue-100 dark:bg-blue-500/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-blue-700 dark:text-blue-200">
               System default
             </span>
           </span>
-          <span className="mt-1 block text-xs leading-5 text-slate-600">{description}</span>
+          <span className="mt-1 block text-xs leading-5 text-muted-foreground">{description}</span>
         </span>
       </div>
     </div>
@@ -141,16 +141,16 @@ function SystemDefaultCard({ title, description }) {
 
 function IntegratedStatusCard({ tone = 'blue', label, status, detail }) {
   const tones = {
-    blue: 'border-blue-200 bg-blue-50 text-blue-700',
-    amber: 'border-amber-200 bg-amber-50 text-amber-700',
-    emerald: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-    gray: 'border-gray-200 bg-gray-50 text-gray-600',
+    blue: 'border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200',
+    amber: 'border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200',
+    emerald: 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200',
+    gray: 'border-border bg-muted/50 text-muted-foreground',
   };
   return (
     <div className={`rounded-lg border px-3 py-2 ${tones[tone] || tones.blue}`}>
       <div className="text-xs font-semibold uppercase">{label}</div>
-      <div className="mt-1 text-sm font-semibold text-gray-950">{status}</div>
-      {detail && <div className="mt-1 text-xs leading-5 text-gray-600">{detail}</div>}
+      <div className="mt-1 text-sm font-semibold text-foreground">{status}</div>
+      {detail && <div className="mt-1 text-xs leading-5 text-muted-foreground">{detail}</div>}
     </div>
   );
 }
@@ -166,17 +166,17 @@ function CandidateRow({
 }) {
   const channels = Object.values(candidate.channels || {});
   return (
-    <div className="grid grid-cols-[minmax(220px,1.1fr)_minmax(260px,1.2fr)_auto_auto_auto] items-center gap-3 border-b border-gray-100 px-4 py-3 last:border-b-0">
+    <div className="grid grid-cols-[minmax(220px,1.1fr)_minmax(260px,1.2fr)_auto_auto_auto] items-center gap-3 border-b border-border/60 px-4 py-3 last:border-b-0">
       <div className="min-w-0">
         <div className="flex items-center gap-2">
-          <div className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-blue-50 text-sm font-semibold text-blue-700">
+          <div className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-blue-50 dark:bg-blue-500/15 text-sm font-semibold text-blue-700 dark:text-blue-200">
             {candidate.photoUrl
               ? <img src={candidate.photoUrl} alt="" className="h-full w-full object-cover" />
               : (candidate.name || '?').slice(0, 1)}
           </div>
           <div className="min-w-0">
-            <div className="truncate text-sm font-semibold text-gray-900">{candidate.name}</div>
-            <div className="truncate text-xs text-gray-500">{candidate.email || 'No email on technician record'}</div>
+            <div className="truncate text-sm font-semibold text-foreground">{candidate.name}</div>
+            <div className="truncate text-xs text-muted-foreground">{candidate.email || 'No email on technician record'}</div>
           </div>
         </div>
       </div>
@@ -185,7 +185,7 @@ function CandidateRow({
           <ChannelChip key={readiness.channel} readiness={readiness} />
         ))}
         {candidate.readyChannelCount === 0 && (
-          <span className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-semibold text-red-700">
+          <span className="inline-flex items-center gap-1 rounded-full border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 px-2 py-1 text-[11px] font-semibold text-red-700 dark:text-red-200">
             <AlertTriangle className="h-3 w-3" />
             No ready channel
           </span>
@@ -196,7 +196,7 @@ function CandidateRow({
         onClick={() => onToggleBase(candidate.id)}
         title={RECIPIENT_BUCKET_HELP.roster}
         className={`rounded-lg border px-3 py-2 text-xs font-semibold transition ${
-          selectedBase ? 'border-blue-300 bg-blue-600 text-white' : 'border-gray-200 bg-white text-gray-700 hover:border-blue-300'
+          selectedBase ? 'border-blue-300 dark:border-blue-500/40 bg-blue-600 text-white' : 'border-border bg-card text-foreground/85 hover:border-blue-300 dark:hover:border-blue-500/40'
         }`}
       >
         {selectedBase ? 'Roster' : 'Add roster'}
@@ -206,7 +206,7 @@ function CandidateRow({
         onClick={() => onToggleSelfExtra(candidate.id)}
         title={RECIPIENT_BUCKET_HELP.self}
         className={`rounded-lg border px-3 py-2 text-xs font-semibold transition ${
-          selectedSelfExtra ? 'border-purple-300 bg-purple-600 text-white' : 'border-gray-200 bg-white text-gray-700 hover:border-purple-300'
+          selectedSelfExtra ? 'border-purple-300 dark:border-purple-500/40 bg-purple-600 text-white' : 'border-border bg-card text-foreground/85 hover:border-purple-300 dark:hover:border-purple-500/40'
         }`}
       >
         {selectedSelfExtra ? 'Self extra' : 'Add self'}
@@ -216,7 +216,7 @@ function CandidateRow({
         onClick={() => onToggleBusinessSupervisor(candidate.id)}
         title={RECIPIENT_BUCKET_HELP.supervisor}
         className={`rounded-lg border px-3 py-2 text-xs font-semibold transition ${
-          selectedBusinessSupervisor ? 'border-orange-300 bg-orange-600 text-white' : 'border-gray-200 bg-white text-gray-700 hover:border-orange-300'
+          selectedBusinessSupervisor ? 'border-orange-300 dark:border-orange-500/40 bg-orange-600 text-white' : 'border-border bg-card text-foreground/85 hover:border-orange-300 dark:hover:border-orange-500/40'
         }`}
       >
         {selectedBusinessSupervisor ? 'Supervisor' : 'Add supervisor'}
@@ -438,8 +438,8 @@ export default function UrgentEscalationPanel() {
   if (loading && !draft) {
     return (
       <div className="p-6">
-        <div className="tp-glass rounded-2xl border border-white/70 p-8 text-center text-slate-500">
-          <RefreshCw className="mx-auto mb-3 h-6 w-6 animate-spin text-blue-600" />
+        <div className="tp-glass rounded-2xl border border-card/70 dark:border-white/10 p-8 text-center text-muted-foreground">
+          <RefreshCw className="mx-auto mb-3 h-6 w-6 animate-spin text-blue-600 dark:text-blue-300" />
           Loading urgent escalation settings...
         </div>
       </div>
@@ -527,9 +527,9 @@ export default function UrgentEscalationPanel() {
           description="Let the requester use a public after-hours page to request immediate support and alert the escalation roster."
           onClick={() => updateDraft({ selfServiceEnabled: !draft?.selfServiceEnabled })}
         />
-        <div className="rounded-lg border border-gray-200 bg-white p-4">
-          <label className="flex items-center gap-2 text-sm font-semibold text-gray-900">
-            <Clock3 className="h-4 w-4 text-blue-600" />
+        <div className="rounded-lg border border-border bg-card p-4">
+          <label className="flex items-center gap-2 text-sm font-semibold text-foreground">
+            <Clock3 className="h-4 w-4 text-blue-600 dark:text-blue-300" />
             Repeat-click cooldown
           </label>
           <div className="mt-3 flex items-center gap-2">
@@ -539,11 +539,11 @@ export default function UrgentEscalationPanel() {
               max="1440"
               value={draft?.cooldownMinutes || 60}
               onChange={(event) => updateDraft({ cooldownMinutes: event.target.value })}
-              className="w-28 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              className="w-28 rounded-lg border border-input px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
             />
-            <span className="text-sm text-gray-600">minutes</span>
+            <span className="text-sm text-muted-foreground">minutes</span>
           </div>
-          <p className="mt-2 text-xs text-gray-500">Default is 60 minutes. Repeated requester clicks within this window will not alert again.</p>
+          <p className="mt-2 text-xs text-muted-foreground">Default is 60 minutes. Repeated requester clicks within this window will not alert again.</p>
         </div>
       </div>
 
@@ -569,17 +569,17 @@ export default function UrgentEscalationPanel() {
       </div>
 
       {providerWarnings.length > 0 && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+        <div className="rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 p-4">
           <div className="flex items-start gap-2">
-            <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-600" />
+            <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-600 dark:text-amber-300" />
             <div>
-              <div className="text-sm font-semibold text-amber-900">Provider readiness warnings</div>
-              <ul className="mt-1 list-disc space-y-0.5 pl-4 text-sm text-amber-800">
+              <div className="text-sm font-semibold text-amber-900 dark:text-amber-200">Provider readiness warnings</div>
+              <ul className="mt-1 list-disc space-y-0.5 pl-4 text-sm text-amber-800 dark:text-amber-200">
                 {providerWarnings.map((warning) => (
                   <li key={warning}>{warning}</li>
                 ))}
               </ul>
-              <div className="mt-2 text-xs text-amber-700">
+              <div className="mt-2 text-xs text-amber-700 dark:text-amber-200">
                 Provider credentials and WhatsApp templates are managed under Settings &gt; Notifications (global admin). If a channel is not used in this workspace, pause it below to silence its warnings.
               </div>
             </div>
@@ -587,17 +587,17 @@ export default function UrgentEscalationPanel() {
         </div>
       )}
 
-      <div className="rounded-xl border border-gray-200 bg-white p-4">
+      <div className="rounded-xl border border-border bg-card p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h3 className="text-base font-semibold text-gray-950">Escalation channels</h3>
-            <p className="mt-1 text-sm text-gray-600">
+            <h3 className="text-base font-semibold text-foreground">Escalation channels</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
               Paused channels are skipped for every escalation send and excluded from readiness warnings. Email is always on.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <span
-              className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 px-3 py-2 text-xs font-semibold text-emerald-700 dark:text-emerald-200"
               title="Email is the baseline escalation channel and cannot be paused."
             >
               <Mail className="h-3.5 w-3.5" />
@@ -618,13 +618,13 @@ export default function UrgentEscalationPanel() {
                     : `${meta.label} is active - click to pause it for this workspace (remember to save)`}
                   className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-semibold transition ${
                     paused
-                      ? 'border-gray-200 bg-gray-100 text-gray-400 hover:border-gray-300'
-                      : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300'
+                      ? 'border-border bg-muted text-muted-foreground/75 hover:border-input'
+                      : 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 hover:border-emerald-300 dark:hover:border-emerald-500/40'
                   }`}
                 >
                   <Icon className="h-3.5 w-3.5" />
                   {meta.label}
-                  <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase ${paused ? 'bg-gray-200 text-gray-500' : 'bg-emerald-100 text-emerald-700'}`}>
+                  <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase ${paused ? 'bg-secondary text-muted-foreground' : 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-200'}`}>
                     {paused ? 'Paused' : 'On'}
                   </span>
                 </button>
@@ -634,45 +634,45 @@ export default function UrgentEscalationPanel() {
         </div>
       </div>
 
-      <div className="rounded-xl border border-gray-200 bg-white">
-        <div className="border-b border-gray-200 p-4">
+      <div className="rounded-xl border border-border bg-card">
+        <div className="border-b border-border p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h3 className="text-base font-semibold text-gray-950">Escalation recipients</h3>
-              <p className="mt-1 text-sm text-gray-600">
+              <h3 className="text-base font-semibold text-foreground">Escalation recipients</h3>
+              <p className="mt-1 text-sm text-muted-foreground">
                 Roster users receive automatic and after-hours immediate-support alerts. Extra self-escalation users are added only for after-hours requester clicks. Supervisors are only used for business-hours urgency raises when that toggle is on.
               </p>
             </div>
             <div className="relative min-w-[280px]">
-              <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+              <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground/75" />
               <input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="Search users"
-                className="w-full rounded-lg border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                className="w-full rounded-lg border border-input py-2 pl-9 pr-3 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
               />
             </div>
           </div>
-          <div className="mt-2 text-xs text-gray-500">
+          <div className="mt-2 text-xs text-muted-foreground">
             Showing {filteredCandidates.length} of {candidates.length} workspace users.
           </div>
 
           <div className="mt-4 grid gap-3 lg:grid-cols-3">
-            <div className="rounded-lg border border-blue-200 bg-blue-50 p-3" title={RECIPIENT_BUCKET_HELP.roster}>
-              <div className="flex items-center gap-1 text-xs font-semibold uppercase text-blue-700">
+            <div className="rounded-lg border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 p-3" title={RECIPIENT_BUCKET_HELP.roster}>
+              <div className="flex items-center gap-1 text-xs font-semibold uppercase text-blue-700 dark:text-blue-200">
                 Escalation roster
-                <span className="cursor-help rounded-full bg-blue-100 px-1.5 text-[10px] font-bold normal-case text-blue-600">?</span>
+                <span className="cursor-help rounded-full bg-blue-100 dark:bg-blue-500/20 px-1.5 text-[10px] font-bold normal-case text-blue-600 dark:text-blue-300">?</span>
               </div>
               <div className="mt-0.5 text-[11px] leading-4 text-blue-700/80">Automatic after-hours alerts + requester immediate-support clicks</div>
-              <div className="mt-1 text-sm font-semibold text-gray-900">{selectedBaseUsers.length} selected</div>
+              <div className="mt-1 text-sm font-semibold text-foreground">{selectedBaseUsers.length} selected</div>
               <div className="mt-2 flex flex-wrap gap-1.5">
-                {selectedBaseUsers.length === 0 && <span className="text-xs text-blue-700">No users selected yet.</span>}
+                {selectedBaseUsers.length === 0 && <span className="text-xs text-blue-700 dark:text-blue-200">No users selected yet.</span>}
                 {selectedBaseUsers.map((candidate) => (
                   <button
                     key={candidate.id}
                     type="button"
                     onClick={() => toggleId('baseRecipientIds', candidate.id)}
-                    className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-1 text-xs font-semibold text-blue-800 ring-1 ring-blue-200"
+                    className="inline-flex items-center gap-1 rounded-full bg-card px-2 py-1 text-xs font-semibold text-blue-800 dark:text-blue-200 ring-1 ring-blue-200 dark:ring-blue-500/30"
                   >
                     {candidate.name}
                     <X className="h-3 w-3" />
@@ -680,21 +680,21 @@ export default function UrgentEscalationPanel() {
                 ))}
               </div>
             </div>
-            <div className="rounded-lg border border-purple-200 bg-purple-50 p-3" title={RECIPIENT_BUCKET_HELP.self}>
-              <div className="flex items-center gap-1 text-xs font-semibold uppercase text-purple-700">
+            <div className="rounded-lg border border-purple-200 dark:border-purple-500/30 bg-purple-50 dark:bg-purple-500/15 p-3" title={RECIPIENT_BUCKET_HELP.self}>
+              <div className="flex items-center gap-1 text-xs font-semibold uppercase text-purple-700 dark:text-purple-200">
                 Extra self-escalation recipients
-                <span className="cursor-help rounded-full bg-purple-100 px-1.5 text-[10px] font-bold normal-case text-purple-600">?</span>
+                <span className="cursor-help rounded-full bg-purple-100 dark:bg-purple-500/20 px-1.5 text-[10px] font-bold normal-case text-purple-600 dark:text-purple-300">?</span>
               </div>
               <div className="mt-0.5 text-[11px] leading-4 text-purple-700/80">Only when a requester clicks the after-hours support button</div>
-              <div className="mt-1 text-sm font-semibold text-gray-900">{selectedSelfUsers.length} selected</div>
+              <div className="mt-1 text-sm font-semibold text-foreground">{selectedSelfUsers.length} selected</div>
               <div className="mt-2 flex flex-wrap gap-1.5">
-                {selectedSelfUsers.length === 0 && <span className="text-xs text-purple-700">No extra users selected.</span>}
+                {selectedSelfUsers.length === 0 && <span className="text-xs text-purple-700 dark:text-purple-200">No extra users selected.</span>}
                 {selectedSelfUsers.map((candidate) => (
                   <button
                     key={candidate.id}
                     type="button"
                     onClick={() => toggleId('selfExtraRecipientIds', candidate.id)}
-                    className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-1 text-xs font-semibold text-purple-800 ring-1 ring-purple-200"
+                    className="inline-flex items-center gap-1 rounded-full bg-card px-2 py-1 text-xs font-semibold text-purple-800 dark:text-purple-200 ring-1 ring-purple-200 dark:ring-purple-500/30"
                   >
                     {candidate.name}
                     <X className="h-3 w-3" />
@@ -702,21 +702,21 @@ export default function UrgentEscalationPanel() {
                 ))}
               </div>
             </div>
-            <div className="rounded-lg border border-orange-200 bg-orange-50 p-3" title={RECIPIENT_BUCKET_HELP.supervisor}>
-              <div className="flex items-center gap-1 text-xs font-semibold uppercase text-orange-700">
+            <div className="rounded-lg border border-orange-200 dark:border-orange-500/30 bg-orange-50 dark:bg-orange-500/15 p-3" title={RECIPIENT_BUCKET_HELP.supervisor}>
+              <div className="flex items-center gap-1 text-xs font-semibold uppercase text-orange-700 dark:text-orange-200">
                 Business-hours supervisors
-                <span className="cursor-help rounded-full bg-orange-100 px-1.5 text-[10px] font-bold normal-case text-orange-600">?</span>
+                <span className="cursor-help rounded-full bg-orange-100 dark:bg-orange-500/20 px-1.5 text-[10px] font-bold normal-case text-orange-600 dark:text-orange-300">?</span>
               </div>
               <div className="mt-0.5 text-[11px] leading-4 text-orange-700/80">Only for requester urgency raises during business hours</div>
-              <div className="mt-1 text-sm font-semibold text-gray-900">{selectedBusinessSupervisorUsers.length} selected</div>
+              <div className="mt-1 text-sm font-semibold text-foreground">{selectedBusinessSupervisorUsers.length} selected</div>
               <div className="mt-2 flex flex-wrap gap-1.5">
-                {selectedBusinessSupervisorUsers.length === 0 && <span className="text-xs text-orange-700">No supervisors selected.</span>}
+                {selectedBusinessSupervisorUsers.length === 0 && <span className="text-xs text-orange-700 dark:text-orange-200">No supervisors selected.</span>}
                 {selectedBusinessSupervisorUsers.map((candidate) => (
                   <button
                     key={candidate.id}
                     type="button"
                     onClick={() => toggleId('businessSupervisorRecipientIds', candidate.id)}
-                    className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-1 text-xs font-semibold text-orange-800 ring-1 ring-orange-200"
+                    className="inline-flex items-center gap-1 rounded-full bg-card px-2 py-1 text-xs font-semibold text-orange-800 dark:text-orange-200 ring-1 ring-orange-200 dark:ring-orange-500/30"
                   >
                     {candidate.name}
                     <X className="h-3 w-3" />
@@ -742,8 +742,8 @@ export default function UrgentEscalationPanel() {
               />
             ))}
             {filteredCandidates.length === 0 && (
-              <div className="p-8 text-center text-sm text-gray-500">
-                <UserPlus className="mx-auto mb-2 h-5 w-5 text-gray-400" />
+              <div className="p-8 text-center text-sm text-muted-foreground">
+                <UserPlus className="mx-auto mb-2 h-5 w-5 text-muted-foreground/75" />
                 {candidates.length === 0
                   ? 'No workspace users loaded. Click Refresh to try again.'
                   : 'No users match this search.'}
@@ -753,22 +753,22 @@ export default function UrgentEscalationPanel() {
         </div>
       </div>
 
-      <div className="rounded-xl border border-gray-200 bg-white p-4">
+      <div className="rounded-xl border border-border bg-card p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h3 className="text-base font-semibold text-gray-950">After-hours contact shown in emails</h3>
-            <p className="mt-1 text-sm text-gray-600">
+            <h3 className="text-base font-semibold text-foreground">After-hours contact shown in emails</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
               The immediate-support action block uses this contact phone. Phone numbers are shown only when verified in the selected user&apos;s notification preferences.
             </p>
           </div>
-          <span className="rounded-full border border-red-200 bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">
+          <span className="rounded-full border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 px-3 py-1 text-xs font-semibold text-red-700 dark:text-red-200">
             Requester-facing
           </span>
         </div>
 
         <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.55fr)]">
           <div className="space-y-3">
-            <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1">
+            <div className="inline-flex rounded-lg border border-border bg-muted/50 p-1">
               {[
                 ['manual', 'Manual contact'],
                 ['weekly_rotation', 'Weekly rotation'],
@@ -780,8 +780,8 @@ export default function UrgentEscalationPanel() {
                   className={cn(
                     'rounded-md px-3 py-1.5 text-xs font-semibold transition',
                     draft?.afterHoursContactMode === mode
-                      ? 'bg-white text-gray-950 shadow-sm ring-1 ring-gray-200'
-                      : 'text-gray-500 hover:text-gray-800',
+                      ? 'bg-card text-foreground shadow-sm ring-1 ring-border'
+                      : 'text-muted-foreground hover:text-foreground',
                   )}
                 >
                   {label}
@@ -789,26 +789,26 @@ export default function UrgentEscalationPanel() {
               ))}
             </div>
 
-            <label className="flex items-start gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
+            <label className="flex items-start gap-3 rounded-lg border border-border bg-muted/50 p-3">
               <input
                 type="checkbox"
                 checked={draft?.showAfterHoursPhoneInEmail !== false}
                 onChange={(event) => updateDraft({ showAfterHoursPhoneInEmail: event.target.checked })}
-                className="mt-1 h-4 w-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
+                className="mt-1 h-4 w-4 rounded border-input text-red-600 dark:text-red-300 focus:ring-red-500"
               />
               <span>
-                <span className="block text-sm font-semibold text-gray-900">Show active phone number in requester emails</span>
-                <span className="mt-0.5 block text-xs leading-5 text-gray-600">When off, the immediate-support button can still appear, but no phone number is printed in email.</span>
+                <span className="block text-sm font-semibold text-foreground">Show active phone number in requester emails</span>
+                <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">When off, the immediate-support button can still appear, but no phone number is printed in email.</span>
               </span>
             </label>
 
             {draft?.afterHoursContactMode === 'manual' ? (
-              <div className="rounded-lg border border-gray-200 p-3">
-                <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">Current after-hours contact</label>
+              <div className="rounded-lg border border-border p-3">
+                <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Current after-hours contact</label>
                 <select
                   value={draft?.afterHoursManualTechnicianId || ''}
                   onChange={(event) => updateDraft({ afterHoursManualTechnicianId: event.target.value ? Number(event.target.value) : '' })}
-                  className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  className="mt-2 w-full rounded-lg border border-input px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
                 >
                   <option value="">Use first ready roster phone</option>
                   {selectedBaseUsers.map((candidate) => (
@@ -817,43 +817,43 @@ export default function UrgentEscalationPanel() {
                     </option>
                   ))}
                 </select>
-                <p className="mt-2 text-xs text-gray-500">
+                <p className="mt-2 text-xs text-muted-foreground">
                   Select from the escalation roster. If the selected user has no verified phone, Ticket Pulse falls back to the first roster user with a verified phone.
                 </p>
               </div>
             ) : (
-              <div className="rounded-lg border border-gray-200 p-3">
+              <div className="rounded-lg border border-border p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
-                    <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Weekly rotation order</div>
-                    <p className="mt-1 text-xs text-gray-500">Rotation starts Monday at 00:00 in the workspace timezone.</p>
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Weekly rotation order</div>
+                    <p className="mt-1 text-xs text-muted-foreground">Rotation starts Monday at 00:00 in the workspace timezone.</p>
                   </div>
                   <button
                     type="button"
                     onClick={setRosterOrder}
-                    className="rounded-md border border-gray-200 px-2.5 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                    className="rounded-md border border-border px-2.5 py-1.5 text-xs font-semibold text-foreground/85 hover:bg-muted/50"
                   >
                     Use roster order
                   </button>
                 </div>
                 <div className="mt-3 space-y-2">
                   {rotationOrderUsers.length === 0 && (
-                    <div className="rounded-md border border-dashed border-gray-300 px-3 py-4 text-center text-xs text-gray-500">
+                    <div className="rounded-md border border-dashed border-input px-3 py-4 text-center text-xs text-muted-foreground">
                       Add roster users, then click Use roster order.
                     </div>
                   )}
                   {rotationOrderUsers.map((candidate, index) => (
-                    <div key={candidate.id} className="flex items-center justify-between gap-3 rounded-md border border-gray-200 bg-gray-50 px-3 py-2">
+                    <div key={candidate.id} className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/50 px-3 py-2">
                       <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold text-gray-900">{index + 1}. {candidate.name}</div>
-                        <div className="truncate text-xs text-gray-500">{verifiedPhoneForCandidate(candidate) || 'No verified phone'}</div>
+                        <div className="truncate text-sm font-semibold text-foreground">{index + 1}. {candidate.name}</div>
+                        <div className="truncate text-xs text-muted-foreground">{verifiedPhoneForCandidate(candidate) || 'No verified phone'}</div>
                       </div>
                       <div className="flex gap-1">
                         <button
                           type="button"
                           onClick={() => moveRotationUser(candidate.id, -1)}
                           disabled={index === 0}
-                          className="rounded border border-gray-200 px-2 py-1 text-xs font-semibold text-gray-600 disabled:opacity-40"
+                          className="rounded border border-border px-2 py-1 text-xs font-semibold text-muted-foreground disabled:opacity-40"
                         >
                           Up
                         </button>
@@ -861,7 +861,7 @@ export default function UrgentEscalationPanel() {
                           type="button"
                           onClick={() => moveRotationUser(candidate.id, 1)}
                           disabled={index === rotationOrderUsers.length - 1}
-                          className="rounded border border-gray-200 px-2 py-1 text-xs font-semibold text-gray-600 disabled:opacity-40"
+                          className="rounded border border-border px-2 py-1 text-xs font-semibold text-muted-foreground disabled:opacity-40"
                         >
                           Down
                         </button>
@@ -870,34 +870,34 @@ export default function UrgentEscalationPanel() {
                   ))}
                 </div>
                 <label className="mt-3 block">
-                  <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Rotation anchor date</span>
+                  <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Rotation anchor date</span>
                   <input
                     type="date"
                     value={draft?.afterHoursRotationAnchorDate ? String(draft.afterHoursRotationAnchorDate).slice(0, 10) : ''}
                     onChange={(event) => updateDraft({ afterHoursRotationAnchorDate: event.target.value })}
-                    className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    className="mt-1 w-full rounded-lg border border-input px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
                   />
                 </label>
               </div>
             )}
           </div>
 
-          <div className="rounded-lg border border-red-200 bg-red-50 p-4">
-            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-red-700">
+          <div className="rounded-lg border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 p-4">
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-red-700 dark:text-red-200">
               <PhoneCall className="h-4 w-4" />
               Current resolved contact
             </div>
-            <div className="mt-3 text-lg font-semibold text-gray-950">
+            <div className="mt-3 text-lg font-semibold text-foreground">
               {policy?.afterHoursActiveContact?.name || 'No contact selected'}
             </div>
-            <div className="mt-1 text-sm font-semibold text-red-800">
+            <div className="mt-1 text-sm font-semibold text-red-800 dark:text-red-200">
               {policy?.afterHoursActiveContact?.phone || 'No verified phone resolved'}
             </div>
-            <div className="mt-2 text-xs leading-5 text-gray-600">
+            <div className="mt-2 text-xs leading-5 text-muted-foreground">
               {policy?.afterHoursActiveContact?.rotationLabel || 'Save settings to refresh the resolved contact.'}
             </div>
             {(policy?.afterHoursActiveContact?.warnings || []).length > 0 && (
-              <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              <div className="mt-3 rounded-md border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
                 {policy.afterHoursActiveContact.warnings.join(', ')}
               </div>
             )}
@@ -906,34 +906,34 @@ export default function UrgentEscalationPanel() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-xl border border-gray-200 bg-white p-4">
-          <label className="text-sm font-semibold uppercase tracking-wide text-gray-600">Confirmation title</label>
+        <div className="rounded-xl border border-border bg-card p-4">
+          <label className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Confirmation title</label>
           <input
             value={draft?.confirmationTitle || ''}
             onChange={(event) => updateDraft({ confirmationTitle: event.target.value })}
-            className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+            className="mt-2 w-full rounded-lg border border-input px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
           />
         </div>
-        <div className="rounded-xl border border-gray-200 bg-white p-4">
-          <label className="text-sm font-semibold uppercase tracking-wide text-gray-600">Requester confirmation copy</label>
+        <div className="rounded-xl border border-border bg-card p-4">
+          <label className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Requester confirmation copy</label>
           <textarea
             value={draft?.confirmationBody || ''}
             onChange={(event) => updateDraft({ confirmationBody: event.target.value })}
             rows={4}
-            className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+            className="mt-2 w-full rounded-lg border border-input px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
           />
         </div>
       </div>
 
-      <div className="rounded-xl border border-gray-200 bg-white p-4">
+      <div className="rounded-xl border border-border bg-card p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h3 className="text-base font-semibold text-gray-950">After-hours response page copy</h3>
-            <p className="mt-1 text-sm text-gray-600">
+            <h3 className="text-base font-semibold text-foreground">After-hours response page copy</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
               This is shown on the public immediate-support page before the requester confirms escalation. Edit it per workspace.
             </p>
           </div>
-          <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">
+          <span className="rounded-full border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-3 py-1 text-xs font-semibold text-amber-700 dark:text-amber-200">
             Workspace-specific
           </span>
         </div>
@@ -944,35 +944,35 @@ export default function UrgentEscalationPanel() {
             ['lateNight', 'During Late Night Hours'],
           ].map(([field, label]) => (
             <label key={field} className="block">
-              <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">{label}</span>
+              <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{label}</span>
               <textarea
                 value={draft?.afterHoursResponseCopy?.[field] || ''}
                 onChange={(event) => updateResponseCopy(field, event.target.value)}
                 rows={5}
-                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm leading-6 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                className="mt-1 w-full rounded-lg border border-input px-3 py-2 text-sm leading-6 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
               />
             </label>
           ))}
         </div>
-        <div className="mt-5 overflow-hidden rounded-lg border border-gray-200">
+        <div className="mt-5 overflow-hidden rounded-lg border border-border">
           <table className="w-full border-collapse text-sm">
-            <thead className="bg-gray-50 text-gray-700">
+            <thead className="bg-muted/50 text-foreground/85">
               <tr>
-                <th className="border-b border-gray-200 px-3 py-2 text-left font-semibold">Window</th>
-                <th className="border-b border-gray-200 px-3 py-2 text-left font-semibold">Business Hours</th>
-                <th className="border-b border-gray-200 px-3 py-2 text-left font-semibold">After-hours</th>
-                <th className="border-b border-gray-200 px-3 py-2 text-left font-semibold">Late Night</th>
+                <th className="border-b border-border px-3 py-2 text-left font-semibold">Window</th>
+                <th className="border-b border-border px-3 py-2 text-left font-semibold">Business Hours</th>
+                <th className="border-b border-border px-3 py-2 text-left font-semibold">After-hours</th>
+                <th className="border-b border-border px-3 py-2 text-left font-semibold">Late Night</th>
               </tr>
             </thead>
             <tbody>
               {(draft?.afterHoursResponseTable?.rows || DEFAULT_RESPONSE_TABLE.rows).map((row, index) => (
-                <tr key={`${row.label}-${index}`} className="odd:bg-white even:bg-gray-50/60">
+                <tr key={`${row.label}-${index}`} className="odd:bg-card even:bg-muted/30">
                   {['label', 'businessHours', 'afterHours', 'lateNight'].map((field) => (
-                    <td key={field} className="border-b border-gray-100 px-3 py-2">
+                    <td key={field} className="border-b border-border/60 px-3 py-2">
                       <input
                         value={row?.[field] || ''}
                         onChange={(event) => updateResponseTableRow(index, field, event.target.value)}
-                        className="w-full rounded-md border border-gray-200 px-2 py-1.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                        className="w-full rounded-md border border-border px-2 py-1.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
                       />
                     </td>
                   ))}
@@ -984,11 +984,11 @@ export default function UrgentEscalationPanel() {
       </div>
 
       {(policy?.legacyEmails?.length > 0 || policy?.legacyPhones?.length > 0) && (
-        <details className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-          <summary className="cursor-pointer text-sm font-semibold text-amber-900">
+        <details className="rounded-xl border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 p-4">
+          <summary className="cursor-pointer text-sm font-semibold text-amber-900 dark:text-amber-200">
             Legacy external recipients preserved from Assignment configuration
           </summary>
-          <div className="mt-3 space-y-2 text-sm text-amber-900">
+          <div className="mt-3 space-y-2 text-sm text-amber-900 dark:text-amber-200">
             <p>Replace these with selected users when possible. Legacy recipients do not have per-user readiness or channel preferences.</p>
             {policy.legacyEmails?.length > 0 && <p><strong>Email:</strong> {policy.legacyEmails.join(', ')}</p>}
             {policy.legacyPhones?.length > 0 && <p><strong>Phone:</strong> {policy.legacyPhones.join(', ')}</p>}
@@ -998,7 +998,7 @@ export default function UrgentEscalationPanel() {
                 type="checkbox"
                 checked={draft?.clearLegacy === true}
                 onChange={(event) => updateDraft({ clearLegacy: event.target.checked })}
-                className="h-4 w-4 rounded border-amber-300 text-amber-700"
+                className="h-4 w-4 rounded border-amber-300 dark:border-amber-500/40 text-amber-700 dark:text-amber-200"
               />
               Clear legacy recipients on next save
             </label>

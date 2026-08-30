@@ -137,7 +137,7 @@ function getTicketTypeMeta(ticket, recommendation = null) {
     label,
     title,
     isIncident,
-    pill: isIncident ? 'bg-rose-50 text-rose-700' : 'bg-indigo-50 text-indigo-700',
+    pill: isIncident ? 'bg-rose-50 dark:bg-rose-500/15 text-rose-700 dark:text-rose-200' : 'bg-indigo-50 dark:bg-indigo-500/15 text-indigo-700 dark:text-indigo-200',
   };
 }
 
@@ -209,18 +209,18 @@ function ManualTriggerPanel({ isAdmin = false }) {
   const PRIORITY_LABELS = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Urgent' };
 
   return (
-    <div className="border rounded-lg bg-gray-50 mt-4 overflow-hidden">
+    <div className="border rounded-lg bg-muted/50 mt-4 overflow-hidden">
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="w-full flex items-center justify-between p-3 sm:p-4 touch-manipulation text-left hover:bg-gray-100/60 transition-colors"
+        className="w-full flex items-center justify-between p-3 sm:p-4 touch-manipulation text-left hover:bg-muted/60 transition-colors"
         aria-expanded={expanded}
       >
-        <h4 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5">
+        <h4 className="text-sm font-semibold text-foreground/85 flex items-center gap-1.5">
           <Zap className="w-4 h-4" /> Manual Trigger
         </h4>
         <ChevronDown
-          className={`w-4 h-4 text-gray-400 transition-transform duration-300 ${expanded ? 'rotate-0' : '-rotate-90'}`}
+          className={`w-4 h-4 text-muted-foreground/75 transition-transform duration-300 ${expanded ? 'rotate-0' : '-rotate-90'}`}
         />
       </button>
 
@@ -232,40 +232,40 @@ function ManualTriggerPanel({ isAdmin = false }) {
         <div className="overflow-hidden">
           <div className="px-3 pb-3 sm:px-4 sm:pb-4">
             <div className="flex items-center justify-end gap-2 mb-3">
-              <label className="flex items-center gap-1 text-xs text-gray-500 touch-manipulation">
+              <label className="flex items-center gap-1 text-xs text-muted-foreground touch-manipulation">
                 <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} className="rounded w-4 h-4" />
                 Assigned
               </label>
-              <button onClick={fetchTickets} className="text-xs text-blue-600 hover:underline p-1 touch-manipulation">Refresh</button>
+              <button onClick={fetchTickets} className="text-xs text-blue-600 dark:text-blue-300 hover:underline p-1 touch-manipulation">Refresh</button>
             </div>
 
             <div className="relative mb-3">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground/75" />
               <input
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 placeholder="Search tickets..."
-                className="w-full pl-9 pr-3 py-2.5 sm:py-2 border rounded-lg text-sm bg-white"
+                className="w-full pl-9 pr-3 py-2.5 sm:py-2 border rounded-lg text-sm bg-card"
               />
             </div>
 
             {loading ? (
-              <div className="flex justify-center p-4"><Loader2 className="w-5 h-5 animate-spin text-blue-600" /></div>
+              <div className="flex justify-center p-4"><Loader2 className="w-5 h-5 animate-spin text-blue-600 dark:text-blue-300" /></div>
             ) : filtered.length === 0 ? (
-              <p className="text-gray-400 text-sm text-center py-4">No tickets found.</p>
+              <p className="text-muted-foreground/75 text-sm text-center py-4">No tickets found.</p>
             ) : (
               <div className="space-y-1.5 max-h-72 overflow-y-auto">
                 {filtered.map((ticket) => {
                   const hasPipeline = ticket.pipelineRuns?.length > 0;
                   return (
-                    <div key={ticket.id} className="flex flex-col gap-2 bg-white border rounded-lg px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:py-2">
+                    <div key={ticket.id} className="flex flex-col gap-2 bg-card border rounded-lg px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:py-2">
                       <div className="flex-1 min-w-0">
                         <p className="text-sm truncate">
-                          <span className="text-gray-400 font-mono text-xs">#{ticket.freshserviceTicketId}</span>{' '}
+                          <span className="text-muted-foreground/75 font-mono text-xs">#{ticket.freshserviceTicketId}</span>{' '}
                           {ticket.subject || 'No subject'}
                         </p>
-                        <p className="text-xs text-gray-400 truncate">
+                        <p className="text-xs text-muted-foreground/75 truncate">
                           {ticket.requester?.name || 'Unknown'}
                           {ticket.assignedTech ? ` · ${ticket.assignedTech.name}` : ''}
                           {' · '}{PRIORITY_LABELS[ticket.priority] || `P${ticket.priority}`}
@@ -275,7 +275,7 @@ function ManualTriggerPanel({ isAdmin = false }) {
                         onClick={() => handleTrigger(ticket.id)}
                         className={`w-full justify-center px-3 py-2 sm:w-auto sm:py-1 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors touch-manipulation min-h-[36px] flex-shrink-0 ${
                           hasPipeline
-                            ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                            ? 'bg-muted text-muted-foreground hover:bg-secondary'
                             : 'bg-blue-600 text-white hover:bg-blue-700'
                         }`}
                       >
@@ -326,7 +326,7 @@ function QuickApproveInner({ run, recs, note, onNoteChange, selectedTechId, onTe
   return (
     <>
       <div className="px-3 pt-3 pb-1.5 sm:px-3">
-        <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-2">Assign to</p>
+        <p className="text-[10px] font-semibold text-muted-foreground/75 uppercase tracking-wide mb-2">Assign to</p>
         <div className="space-y-1 max-h-52 overflow-y-auto">
           {recs.map((r, i) => {
             const isActive = selectedTechId === r.techId;
@@ -338,29 +338,29 @@ function QuickApproveInner({ run, recs, note, onNoteChange, selectedTechId, onTe
                 key={r.techId}
                 type="button"
                 onClick={() => onTechSelect(r.techId)}
-                className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 sm:py-1.5 text-left transition-all touch-manipulation ${isActive ? 'bg-blue-50 ring-1 ring-blue-300' : 'hover:bg-slate-50 active:bg-slate-100'}`}
+                className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 sm:py-1.5 text-left transition-all touch-manipulation ${isActive ? 'bg-blue-50 dark:bg-blue-500/15 ring-1 ring-blue-300' : 'hover:bg-muted/50 active:bg-muted'}`}
               >
                 {tech?.photoUrl ? (
                   <img src={tech.photoUrl} alt="" className={`w-8 h-8 sm:w-6 sm:h-6 rounded-full object-cover flex-shrink-0 ${isActive ? 'ring-2 ring-blue-400' : ''}`} />
                 ) : (
-                  <span className={`w-8 h-8 sm:w-6 sm:h-6 rounded-full text-[10px] sm:text-[9px] font-bold flex items-center justify-center flex-shrink-0 ${isActive ? 'bg-blue-100 text-blue-700 ring-2 ring-blue-400' : 'bg-slate-100 text-slate-500'}`}>{initials}</span>
+                  <span className={`w-8 h-8 sm:w-6 sm:h-6 rounded-full text-[10px] sm:text-[9px] font-bold flex items-center justify-center flex-shrink-0 ${isActive ? 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200 ring-2 ring-blue-400' : 'bg-muted text-muted-foreground'}`}>{initials}</span>
                 )}
-                <span className={`text-sm sm:text-xs font-medium truncate flex-1 ${isActive ? 'text-blue-900' : 'text-slate-800'}`}>{r.techName}</span>
-                {pct !== null && <span className="text-xs sm:text-[10px] tabular-nums text-slate-400">{pct}%</span>}
-                {i === 0 && <span className="text-[9px] sm:text-[8px] font-bold uppercase tracking-wider bg-amber-100 text-amber-700 px-1.5 sm:px-1 rounded flex-shrink-0">AI</span>}
+                <span className={`text-sm sm:text-xs font-medium truncate flex-1 ${isActive ? 'text-blue-900 dark:text-blue-200' : 'text-foreground'}`}>{r.techName}</span>
+                {pct !== null && <span className="text-xs sm:text-[10px] tabular-nums text-muted-foreground/75">{pct}%</span>}
+                {i === 0 && <span className="text-[9px] sm:text-[8px] font-bold uppercase tracking-wider bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-200 px-1.5 sm:px-1 rounded flex-shrink-0">AI</span>}
               </button>
             );
           })}
 
           {isOverride && overrideTech && (
-            <div className="w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 sm:py-1.5 bg-blue-50 ring-1 ring-blue-300">
+            <div className="w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 sm:py-1.5 bg-blue-50 dark:bg-blue-500/15 ring-1 ring-blue-300">
               {overrideTech.photoUrl ? (
                 <img src={overrideTech.photoUrl} alt="" className="w-8 h-8 sm:w-6 sm:h-6 rounded-full object-cover flex-shrink-0 ring-2 ring-blue-400" />
               ) : (
-                <span className="w-8 h-8 sm:w-6 sm:h-6 rounded-full bg-blue-100 text-blue-700 ring-2 ring-blue-400 text-[10px] sm:text-[9px] font-bold flex items-center justify-center flex-shrink-0">{overrideInitials}</span>
+                <span className="w-8 h-8 sm:w-6 sm:h-6 rounded-full bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200 ring-2 ring-blue-400 text-[10px] sm:text-[9px] font-bold flex items-center justify-center flex-shrink-0">{overrideInitials}</span>
               )}
-              <span className="text-sm sm:text-xs font-medium truncate flex-1 text-blue-900">{overrideTech.name}</span>
-              <span className="text-[9px] sm:text-[8px] font-bold uppercase tracking-wider bg-blue-100 text-blue-700 px-1.5 sm:px-1 rounded flex-shrink-0">Override</span>
+              <span className="text-sm sm:text-xs font-medium truncate flex-1 text-blue-900 dark:text-blue-200">{overrideTech.name}</span>
+              <span className="text-[9px] sm:text-[8px] font-bold uppercase tracking-wider bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200 px-1.5 sm:px-1 rounded flex-shrink-0">Override</span>
             </div>
           )}
         </div>
@@ -369,21 +369,21 @@ function QuickApproveInner({ run, recs, note, onNoteChange, selectedTechId, onTe
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); setShowOtherPicker(true); }}
-            className="mt-2 w-full text-left text-[11px] sm:text-[10px] font-medium text-blue-600 hover:text-blue-700 px-2 py-1.5 sm:py-1 rounded hover:bg-blue-50 transition-colors"
+            className="mt-2 w-full text-left text-[11px] sm:text-[10px] font-medium text-blue-600 dark:text-blue-300 hover:text-blue-700 dark:hover:text-blue-200 px-2 py-1.5 sm:py-1 rounded hover:bg-blue-50 dark:hover:bg-blue-500/15 transition-colors"
           >
             + Assign to someone else
           </button>
         ) : (
-          <div className="mt-2 border border-slate-200 rounded-lg bg-white overflow-hidden shadow-sm">
-            <div className="px-2 py-1.5 bg-slate-50 border-b border-slate-200">
+          <div className="mt-2 border border-border rounded-lg bg-card overflow-hidden shadow-sm">
+            <div className="px-2 py-1.5 bg-muted/50 border-b border-border">
               <div className="relative">
-                <Search className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
+                <Search className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground/75" />
                 <input
                   type="text"
                   value={otherSearch}
                   onChange={(e) => setOtherSearch(e.target.value)}
                   placeholder="Search by name or location..."
-                  className="w-full pl-6 pr-2 py-1 text-xs border border-slate-200 rounded bg-white focus:ring-1 focus:ring-blue-200 focus:border-blue-300"
+                  className="w-full pl-6 pr-2 py-1 text-xs border border-border rounded bg-card focus:ring-1 focus:ring-blue-200 dark:focus:ring-blue-500/30 focus:border-blue-300 dark:focus:border-blue-500/40"
                   onClick={(e) => e.stopPropagation()}
                   onKeyDown={(e) => e.stopPropagation()}
                   autoFocus
@@ -404,26 +404,26 @@ function QuickApproveInner({ run, recs, note, onNoteChange, selectedTechId, onTe
                       setShowOtherPicker(false);
                       setOtherSearch('');
                     }}
-                    className={`w-full flex items-center gap-2 px-2 py-1.5 text-left text-xs border-b border-slate-100 last:border-0 transition-colors ${isActive ? 'bg-blue-50' : 'hover:bg-slate-50'}`}
+                    className={`w-full flex items-center gap-2 px-2 py-1.5 text-left text-xs border-b border-border/60 last:border-0 transition-colors ${isActive ? 'bg-blue-50 dark:bg-blue-500/15' : 'hover:bg-muted/50'}`}
                   >
                     {t.photoUrl ? (
                       <img src={t.photoUrl} alt="" className="w-5 h-5 rounded-full object-cover flex-shrink-0" />
                     ) : (
-                      <span className="w-5 h-5 rounded-full bg-slate-100 text-slate-500 text-[9px] font-bold flex items-center justify-center flex-shrink-0">{initials}</span>
+                      <span className="w-5 h-5 rounded-full bg-muted text-muted-foreground text-[9px] font-bold flex items-center justify-center flex-shrink-0">{initials}</span>
                     )}
-                    <span className="font-medium text-slate-800 truncate flex-1">{t.name}</span>
-                    {t.location && <span className="text-[10px] text-slate-400 truncate flex-shrink-0">{t.location}</span>}
+                    <span className="font-medium text-foreground truncate flex-1">{t.name}</span>
+                    {t.location && <span className="text-[10px] text-muted-foreground/75 truncate flex-shrink-0">{t.location}</span>}
                   </button>
                 );
               })}
               {filteredOthers.length === 0 && (
-                <div className="px-3 py-3 text-center text-[11px] text-slate-400">No technicians found</div>
+                <div className="px-3 py-3 text-center text-[11px] text-muted-foreground/75">No technicians found</div>
               )}
             </div>
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); setShowOtherPicker(false); setOtherSearch(''); }}
-              className="w-full text-[10px] font-medium text-slate-500 hover:text-slate-700 py-1 border-t border-slate-100"
+              className="w-full text-[10px] font-medium text-muted-foreground hover:text-foreground/85 py-1 border-t border-border/60"
             >
               Cancel
             </button>
@@ -436,16 +436,16 @@ function QuickApproveInner({ run, recs, note, onNoteChange, selectedTechId, onTe
           value={note}
           onChange={(e) => onNoteChange(e.target.value)}
           placeholder={isOverride ? 'Why this technician? (required)' : 'Note (optional)'}
-          className={`w-full border rounded-lg px-3 py-2.5 sm:py-1.5 text-sm sm:text-xs focus:ring-2 focus:border-blue-300 bg-slate-50 ${isOverride && !note.trim() ? 'border-amber-300 focus:ring-amber-200' : 'border-slate-200 focus:ring-blue-200'}`}
+          className={`w-full border rounded-lg px-3 py-2.5 sm:py-1.5 text-sm sm:text-xs focus:ring-2 focus:border-blue-300 dark:focus:border-blue-500/40 bg-muted/50 ${isOverride && !note.trim() ? 'border-amber-300 dark:border-amber-500/40 focus:ring-amber-200 dark:focus:ring-amber-500/30' : 'border-border focus:ring-blue-200 dark:focus:ring-blue-500/30'}`}
           onClick={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
         />
       </div>
-      <div className="border-t border-slate-100 px-3 py-2.5 sm:py-2 flex items-center justify-end gap-2">
+      <div className="border-t border-border/60 px-3 py-2.5 sm:py-2 flex items-center justify-end gap-2">
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); onCancel(); }}
-          className="px-3 py-2 sm:py-1.5 text-sm sm:text-[11px] font-medium text-slate-500 hover:text-slate-700 rounded-md hover:bg-slate-50 touch-manipulation"
+          className="px-3 py-2 sm:py-1.5 text-sm sm:text-[11px] font-medium text-muted-foreground hover:text-foreground/85 rounded-md hover:bg-muted/50 touch-manipulation"
         >
           Cancel
         </button>
@@ -471,7 +471,7 @@ function QuickApprovePopover({ run, align = 'right', quickApproveId, popoverRef,
       ref={popoverRef}
       onClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => e.stopPropagation()}
-      className={`hidden md:block absolute z-50 mt-1 w-72 rounded-lg border border-slate-200 bg-white shadow-xl ${align === 'right' ? 'right-0' : 'left-0'}`}
+      className={`hidden md:block absolute z-50 mt-1 w-72 rounded-lg border border-border bg-card shadow-xl ${align === 'right' ? 'right-0' : 'left-0'}`}
       style={{ top: '100%' }}
     >
       <QuickApproveInner run={run} recs={recs} {...innerProps} />
@@ -497,11 +497,11 @@ function QuickApprovePopover({ run, align = 'right', quickApproveId, popoverRef,
  */
 function StatTile({ icon: Icon, label, value, sublabel, tone = 'slate', onClick }) {
   const TONE_CLASSES = {
-    blue:    { iconBg: 'bg-blue-50',    iconColor: 'text-blue-600',    accent: 'border-l-blue-500' },
-    emerald: { iconBg: 'bg-emerald-50', iconColor: 'text-emerald-600', accent: 'border-l-emerald-500' },
-    amber:   { iconBg: 'bg-amber-50',   iconColor: 'text-amber-600',   accent: 'border-l-amber-500' },
-    slate:   { iconBg: 'bg-slate-100',  iconColor: 'text-slate-500',   accent: 'border-l-slate-400' },
-    rose:    { iconBg: 'bg-rose-50',    iconColor: 'text-rose-600',    accent: 'border-l-rose-500' },
+    blue:    { iconBg: 'bg-blue-50 dark:bg-blue-500/15',    iconColor: 'text-blue-600 dark:text-blue-300',    accent: 'border-l-blue-500' },
+    emerald: { iconBg: 'bg-emerald-50 dark:bg-emerald-500/15', iconColor: 'text-emerald-600 dark:text-emerald-300', accent: 'border-l-emerald-500' },
+    amber:   { iconBg: 'bg-amber-50 dark:bg-amber-500/15',   iconColor: 'text-amber-600 dark:text-amber-300',   accent: 'border-l-amber-500' },
+    slate:   { iconBg: 'bg-muted',  iconColor: 'text-muted-foreground',   accent: 'border-l-muted-foreground/60' },
+    rose:    { iconBg: 'bg-rose-50 dark:bg-rose-500/15',    iconColor: 'text-rose-600 dark:text-rose-300',    accent: 'border-l-rose-500' },
   };
   const t = TONE_CLASSES[tone] || TONE_CLASSES.slate;
   const Comp = onClick ? 'button' : 'div';
@@ -511,17 +511,17 @@ function StatTile({ icon: Icon, label, value, sublabel, tone = 'slate', onClick 
   return (
     <Comp
       onClick={onClick}
-      className={`group bg-white border border-slate-200/80 border-l-4 ${t.accent} rounded-2xl p-4 sm:p-5 shadow-sm flex flex-col gap-2 ${interactive}`}
+      className={`group bg-card border border-border/80 border-l-4 ${t.accent} rounded-2xl p-4 sm:p-5 shadow-sm flex flex-col gap-2 ${interactive}`}
     >
       <div className="flex items-center gap-2">
         <span className={`inline-flex items-center justify-center w-7 h-7 rounded-lg ${t.iconBg}`}>
           <Icon className={`w-3.5 h-3.5 ${t.iconColor}`} />
         </span>
-        <span className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider text-slate-500">{label}</span>
-        {onClick && <ChevronRight className="ml-auto w-3.5 h-3.5 text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" />}
+        <span className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</span>
+        {onClick && <ChevronRight className="ml-auto w-3.5 h-3.5 text-muted-foreground/50 opacity-0 group-hover:opacity-100 transition-opacity" />}
       </div>
-      <div className="text-3xl sm:text-4xl font-bold tabular-nums leading-none text-slate-900">{value ?? 0}</div>
-      {sublabel && <div className="text-[11px] text-slate-500 leading-snug">{sublabel}</div>}
+      <div className="text-3xl sm:text-4xl font-bold tabular-nums leading-none text-foreground">{value ?? 0}</div>
+      {sublabel && <div className="text-[11px] text-muted-foreground leading-snug">{sublabel}</div>}
     </Comp>
   );
 }
@@ -629,17 +629,17 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
       {/* Header — auto-assign is on, page intentionally empty.
           Serif headline + generous spacing per UX redesign. */}
       <div className="text-center max-w-2xl mx-auto mb-6 sm:mb-8">
-        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold mb-4">
+        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-50 dark:bg-emerald-500/15 border border-emerald-200 dark:border-emerald-500/30 text-emerald-800 dark:text-emerald-200 text-xs font-semibold mb-4">
           <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500" />
           <span>Auto-Assign is ON</span>
-          {dryRun && <span className="ml-1.5 px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 text-[10px] font-semibold">DRY-RUN</span>}
+          {dryRun && <span className="ml-1.5 px-1.5 py-0.5 rounded bg-orange-100 dark:bg-orange-500/20 text-orange-700 dark:text-orange-200 text-[10px] font-semibold">DRY-RUN</span>}
         </div>
-        <h3 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight leading-tight">
+        <h3 className="text-2xl sm:text-3xl font-bold text-foreground tracking-tight leading-tight">
           No tickets are waiting for you right now.
         </h3>
-        <p className="text-sm text-slate-500 mt-3 leading-relaxed">
+        <p className="text-sm text-muted-foreground mt-3 leading-relaxed">
           The pipeline is processing tickets in the background. Items only land here when they genuinely need a human decision — like tickets in {' '}
-          <span className="font-semibold text-slate-700">excluded groups</span>
+          <span className="font-semibold text-foreground/85">excluded groups</span>
           {excludedGroupCount > 0 ? ` (${excludedGroupCount} configured)` : ''}, rebound exhaustion, or LLM uncertainty.
         </p>
       </div>
@@ -667,7 +667,7 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
             { key: 'auto', value: stats.autoAssigned, cls: 'bg-emerald-500', label: 'Auto-assigned by AI' },
             { key: 'approved', value: stats.approved, cls: 'bg-blue-500', label: 'Approved by you' },
             { key: 'fs', value: stats.handledInFs, cls: 'bg-amber-500', label: 'Picked up in FreshService' },
-            { key: 'noise', value: stats.noiseDismissed, cls: 'bg-slate-400', label: 'Dismissed as noise' },
+            { key: 'noise', value: stats.noiseDismissed, cls: 'bg-muted-foreground/60', label: 'Dismissed as noise' },
           ].filter((seg) => seg.value > 0);
           const lastAssign = recent[0] || null;
           const afterHours = queueStatus?.isBusinessHours === false;
@@ -679,8 +679,8 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
               <div className="absolute -bottom-24 -left-16 w-72 h-72 rounded-full bg-violet-200/30 blur-3xl pointer-events-none" aria-hidden />
 
               <div className="relative flex flex-col items-center text-center">
-                <div className="mb-1 text-sm font-bold text-slate-800">Pipeline activity — {dayLabel}</div>
-                <div className="mb-4 text-[11px] font-medium uppercase tracking-wide text-slate-400" title={`Counts reset at midnight ${tzLabel}; the drill-down tiles below use the same window.`}>
+                <div className="mb-1 text-sm font-bold text-foreground">Pipeline activity — {dayLabel}</div>
+                <div className="mb-4 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/75" title={`Counts reset at midnight ${tzLabel}; the drill-down tiles below use the same window.`}>
                   {tzLabel} · since midnight
                 </div>
 
@@ -688,16 +688,16 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
                   <div className="flex items-center gap-3">
                     <Bot className="hidden sm:block w-7 h-7 text-emerald-500/70" aria-hidden />
                     <div>
-                      <div className="text-5xl font-bold tabular-nums leading-none text-slate-900">{stats.totalRuns}</div>
-                      <div className="mt-1 text-xs font-medium text-slate-500">tickets analyzed</div>
+                      <div className="text-5xl font-bold tabular-nums leading-none text-foreground">{stats.totalRuns}</div>
+                      <div className="mt-1 text-xs font-medium text-muted-foreground">tickets analyzed</div>
                     </div>
                   </div>
                   {autoRate !== null && (
                     <div className="flex items-center gap-3">
                       <Zap className="hidden sm:block w-7 h-7 text-amber-500/70" aria-hidden />
                       <div>
-                        <div className="text-5xl font-bold tabular-nums leading-none text-emerald-700">{autoRate}%</div>
-                        <div className="mt-1 text-xs font-medium text-slate-500" title="Share of today's decided tickets the pipeline routed with no human touch">fully automatic</div>
+                        <div className="text-5xl font-bold tabular-nums leading-none text-emerald-700 dark:text-emerald-200">{autoRate}%</div>
+                        <div className="mt-1 text-xs font-medium text-muted-foreground" title="Share of today's decided tickets the pipeline routed with no human touch">fully automatic</div>
                       </div>
                     </div>
                   )}
@@ -705,7 +705,7 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
 
                 {decided > 0 && (
                   <div className="mt-5 w-full max-w-md">
-                    <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-white/70 shadow-inner" role="img" aria-label="Outcome mix for today">
+                    <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-card/70 shadow-inner" role="img" aria-label="Outcome mix for today">
                       {mix.map((seg) => (
                         <div
                           key={seg.key}
@@ -715,19 +715,19 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
                         />
                       ))}
                     </div>
-                    <div className="mt-1.5 text-[10px] font-medium text-slate-400">outcome mix — colors match the tiles below</div>
+                    <div className="mt-1.5 text-[10px] font-medium text-muted-foreground/75">outcome mix — colors match the tiles below</div>
                   </div>
                 )}
 
                 <div className="mt-4 flex flex-wrap items-center justify-center gap-2 text-xs">
                   {lastAssign?.decidedAt && (
-                    <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-white/80 px-2.5 py-1 font-semibold text-emerald-800">
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 dark:border-emerald-500/30 bg-card/80 px-2.5 py-1 font-semibold text-emerald-800 dark:text-emerald-200">
                       <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden />
                       Last auto-assignment <RelativeTime iso={lastAssign.decidedAt} />{lastAssign.techName ? ` → ${lastAssign.techName}` : ''}
                     </span>
                   )}
                   {afterHours && queueStatus?.nextWindow?.label && (
-                    <span className="inline-flex items-center gap-1.5 rounded-full border border-indigo-200 bg-white/80 px-2.5 py-1 font-semibold text-indigo-800" title="Outside business hours the pipeline holds non-urgent tickets and releases them when the next window opens.">
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-indigo-200 dark:border-indigo-500/30 bg-card/80 px-2.5 py-1 font-semibold text-indigo-800 dark:text-indigo-200" title="Outside business hours the pipeline holds non-urgent tickets and releases them when the next window opens.">
                       After hours — resumes {queueStatus.nextWindow.label}
                       {queuedRunsTotal > 0 ? ` · ${queuedRunsTotal} queued` : ''}
                     </span>
@@ -837,15 +837,15 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
           detail page: small avatar, ticket id, subject, assignee, time. */}
       {recent.length > 0 && (
         <div className="max-w-4xl mx-auto">
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-2 text-center">
-            Recent auto-assignments {recent.length > 1 && <span className="text-slate-400 normal-case font-normal">· last {recent.length}</span>}
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2 text-center">
+            Recent auto-assignments {recent.length > 1 && <span className="text-muted-foreground/75 normal-case font-normal">· last {recent.length}</span>}
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
             {recent.map((r) => (
               <a
                 key={r.runId}
                 href={`/assignments/history/${r.runId}`}
-                className="group flex items-center gap-2.5 px-3 py-2 bg-white border border-slate-200/80 rounded-xl shadow-sm hover:shadow hover:border-slate-300 transition-all min-w-0"
+                className="group flex items-center gap-2.5 px-3 py-2 bg-card border border-border/80 rounded-xl shadow-sm hover:shadow hover:border-input transition-all min-w-0"
                 title={r.ticketSubject}
               >
                 <TechAvatar
@@ -853,20 +853,20 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
                   name={r.techName}
                   size="sm"
                   badge={<Check className="w-2.5 h-2.5 text-white" />}
-                  badgeClass="bg-emerald-500 ring-2 ring-white"
+                  badgeClass="bg-emerald-500 ring-2 ring-card"
                 />
                 <div className="flex-1 min-w-0">
-                  <div className="text-[13px] text-slate-900 truncate font-medium leading-tight">
-                    {r.freshserviceTicketId && <span className="text-slate-400 mr-1 font-normal">#{r.freshserviceTicketId}</span>}
+                  <div className="text-[13px] text-foreground truncate font-medium leading-tight">
+                    {r.freshserviceTicketId && <span className="text-muted-foreground/75 mr-1 font-normal">#{r.freshserviceTicketId}</span>}
                     {r.ticketSubject}
                   </div>
-                  <div className="text-[11px] text-slate-500 truncate leading-tight mt-0.5">
-                    to <span className="font-semibold text-slate-700">{r.techName || 'Unknown'}</span>
-                    <span className="text-slate-300 mx-1.5">·</span>
+                  <div className="text-[11px] text-muted-foreground truncate leading-tight mt-0.5">
+                    to <span className="font-semibold text-foreground/85">{r.techName || 'Unknown'}</span>
+                    <span className="text-muted-foreground/50 mx-1.5">·</span>
                     <RelativeTime iso={r.decidedAt} />
                   </div>
                 </div>
-                <ChevronRight className="flex-shrink-0 w-3.5 h-3.5 text-slate-300 group-hover:text-slate-500 transition-colors" />
+                <ChevronRight className="flex-shrink-0 w-3.5 h-3.5 text-muted-foreground/50 group-hover:text-muted-foreground transition-colors" />
               </a>
             ))}
           </div>
@@ -875,7 +875,7 @@ function AutoAssignActiveEmptyState({ queueStatus, inProgressCount, queuedRunsTo
 
       {/* Refresh */}
       <div className="text-center mt-5">
-        <button onClick={onRefresh} className="text-xs text-slate-400 hover:text-slate-600 inline-flex items-center gap-1.5 transition-colors">
+        <button onClick={onRefresh} className="text-xs text-muted-foreground/75 hover:text-muted-foreground inline-flex items-center gap-1.5 transition-colors">
           <RefreshCw className="w-3 h-3" /> Refresh stats
         </button>
       </div>
@@ -910,24 +910,24 @@ function PillDetailModal({ detail, onClose }) {
   const { title, description, items, kind } = detail;
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 dark:bg-black/70 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-2xl max-h-[80vh] flex flex-col bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden"
+        className="w-full max-w-2xl max-h-[80vh] flex flex-col bg-card rounded-2xl shadow-2xl border border-border overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-start justify-between gap-4 px-5 py-4 border-b border-slate-200 bg-slate-50/50">
+        <div className="flex items-start justify-between gap-4 px-5 py-4 border-b border-border bg-muted/25">
           <div className="min-w-0">
-            <h3 className="text-base font-semibold text-slate-900">{title}</h3>
+            <h3 className="text-base font-semibold text-foreground">{title}</h3>
             {description && (
-              <p className="text-xs text-slate-500 mt-1 leading-relaxed">{description}</p>
+              <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{description}</p>
             )}
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="flex-shrink-0 -mr-1 -mt-1 p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+            className="flex-shrink-0 -mr-1 -mt-1 p-1.5 rounded-lg text-muted-foreground/75 hover:text-foreground/85 hover:bg-muted transition-colors"
             aria-label="Close"
           >
             <X className="w-4 h-4" />
@@ -935,13 +935,13 @@ function PillDetailModal({ detail, onClose }) {
         </div>
         <div className="flex-1 overflow-y-auto">
           {items.length === 0 ? (
-            <div className="px-5 py-12 text-center text-sm text-slate-500">
+            <div className="px-5 py-12 text-center text-sm text-muted-foreground">
               Nothing to show here right now.
             </div>
           ) : (
-            <ul className="divide-y divide-slate-100">
+            <ul className="divide-y divide-border/60">
               {items.map((item, i) => (
-                <li key={item.runId || item.ticketId || i} className="px-5 py-3 hover:bg-slate-50/60 transition-colors">
+                <li key={item.runId || item.ticketId || i} className="px-5 py-3 hover:bg-muted/30 transition-colors">
                   <PillDetailRow item={item} kind={kind} />
                 </li>
               ))}
@@ -958,22 +958,22 @@ function PillDetailModal({ detail, onClose }) {
  */
 function PillDetailRow({ item, kind }) {
   const ticketLabel = (
-    <span className="text-sm text-slate-900 font-medium leading-tight">
-      {item.freshserviceTicketId && <span className="text-slate-400 mr-1.5 font-normal">#{item.freshserviceTicketId}</span>}
+    <span className="text-sm text-foreground font-medium leading-tight">
+      {item.freshserviceTicketId && <span className="text-muted-foreground/75 mr-1.5 font-normal">#{item.freshserviceTicketId}</span>}
       {item.ticketSubject}
     </span>
   );
   const time = (
-    <span className="text-[11px] text-slate-500 inline-flex items-center gap-1">
-      <Clock className="w-3 h-3 text-slate-400" />
+    <span className="text-[11px] text-muted-foreground inline-flex items-center gap-1">
+      <Clock className="w-3 h-3 text-muted-foreground/75" />
       <RelativeTime iso={item.createdAt || item.decidedAt} />
     </span>
   );
 
   if (kind === 'rebound') {
     const trigger = item.triggerSource === 'rebound_exhausted'
-      ? <span className="text-rose-700 bg-rose-100 px-1.5 py-0.5 rounded text-[10px] font-semibold">REBOUND EXHAUSTED</span>
-      : <span className="text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded text-[10px] font-semibold">REBOUND</span>;
+      ? <span className="text-rose-700 dark:text-rose-200 bg-rose-100 dark:bg-rose-500/20 px-1.5 py-0.5 rounded text-[10px] font-semibold">REBOUND EXHAUSTED</span>
+      : <span className="text-amber-700 dark:text-amber-200 bg-amber-100 dark:bg-amber-500/20 px-1.5 py-0.5 rounded text-[10px] font-semibold">REBOUND</span>;
     return (
       <a href={`/assignments/history/${item.runId}`} className="block group">
         <div className="flex items-center gap-3 min-w-0">
@@ -982,12 +982,12 @@ function PillDetailRow({ item, kind }) {
             <div className="truncate">{ticketLabel}</div>
             <div className="flex items-center gap-2 mt-0.5 flex-wrap">
               {trigger}
-              {item.techName && <span className="text-[11px] text-slate-500">re-routed to <span className="font-semibold text-slate-700">{item.techName}</span></span>}
-              <span className="text-slate-300 text-[11px]">·</span>
+              {item.techName && <span className="text-[11px] text-muted-foreground">re-routed to <span className="font-semibold text-foreground/85">{item.techName}</span></span>}
+              <span className="text-muted-foreground/50 text-[11px]">·</span>
               {time}
             </div>
           </div>
-          <ChevronRight className="flex-shrink-0 w-4 h-4 text-slate-300 group-hover:text-slate-500" />
+          <ChevronRight className="flex-shrink-0 w-4 h-4 text-muted-foreground/50 group-hover:text-muted-foreground" />
         </div>
       </a>
     );
@@ -999,9 +999,9 @@ function PillDetailRow({ item, kind }) {
         <TechAvatar photoUrl={item.techPhotoUrl} name={item.techName} size="sm" />
         <div className="flex-1 min-w-0">
           <div className="truncate">{ticketLabel}</div>
-          <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
-            <span>grabbed in FS by <span className="font-semibold text-slate-700">{item.techName || 'Unknown'}</span></span>
-            <span className="text-slate-300">·</span>
+          <div className="text-[11px] text-muted-foreground mt-0.5 flex items-center gap-1.5 flex-wrap">
+            <span>grabbed in FS by <span className="font-semibold text-foreground/85">{item.techName || 'Unknown'}</span></span>
+            <span className="text-muted-foreground/50">·</span>
             {time}
           </div>
         </div>
@@ -1012,20 +1012,20 @@ function PillDetailRow({ item, kind }) {
   // kind === 'noise'
   return (
     <div className="flex items-center gap-3 min-w-0">
-      <span className="flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full bg-slate-100 text-slate-500">
+      <span className="flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full bg-muted text-muted-foreground">
         <XCircle className="w-4 h-4" />
       </span>
       <div className="flex-1 min-w-0">
         <div className="truncate">{ticketLabel}</div>
-        <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
-          {item.requesterName && <span>from <span className="font-semibold text-slate-700">{item.requesterName}</span></span>}
+        <div className="text-[11px] text-muted-foreground mt-0.5 flex items-center gap-1.5 flex-wrap">
+          {item.requesterName && <span>from <span className="font-semibold text-foreground/85">{item.requesterName}</span></span>}
           {item.noiseRuleMatched && (
             <>
-              {item.requesterName && <span className="text-slate-300">·</span>}
-              <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px] font-mono">{item.noiseRuleMatched}</span>
+              {item.requesterName && <span className="text-muted-foreground/50">·</span>}
+              <span className="px-1.5 py-0.5 rounded bg-muted text-foreground/85 text-[10px] font-mono">{item.noiseRuleMatched}</span>
             </>
           )}
-          <span className="text-slate-300">·</span>
+          <span className="text-muted-foreground/50">·</span>
           {time}
         </div>
       </div>
@@ -1044,24 +1044,24 @@ function PillDetailRow({ item, kind }) {
  */
 function SmallStatPill({ icon: Icon, label, value, tone = 'slate', title, onClick }) {
   const TONE_CLASSES = {
-    blue:    { iconBg: 'bg-blue-100',    iconText: 'text-blue-700',    text: 'text-blue-900',    border: 'border-blue-200/70',    hover: 'hover:bg-blue-50/60 hover:border-blue-300' },
-    emerald: { iconBg: 'bg-emerald-100', iconText: 'text-emerald-700', text: 'text-emerald-900', border: 'border-emerald-200/70', hover: 'hover:bg-emerald-50/60 hover:border-emerald-300' },
-    amber:   { iconBg: 'bg-amber-100',   iconText: 'text-amber-700',   text: 'text-amber-900',   border: 'border-amber-200/70',   hover: 'hover:bg-amber-50/60 hover:border-amber-300' },
-    rose:    { iconBg: 'bg-rose-100',    iconText: 'text-rose-700',    text: 'text-rose-900',    border: 'border-rose-200/70',    hover: 'hover:bg-rose-50/60 hover:border-rose-300' },
-    slate:   { iconBg: 'bg-slate-200',   iconText: 'text-slate-600',   text: 'text-slate-700',   border: 'border-slate-200',      hover: 'hover:bg-slate-50 hover:border-slate-300' },
+    blue:    { iconBg: 'bg-blue-100 dark:bg-blue-500/20',    iconText: 'text-blue-700 dark:text-blue-200',    text: 'text-blue-900 dark:text-blue-200',    border: 'border-blue-200/70',    hover: 'hover:bg-blue-50/60 dark:hover:bg-blue-500/10 hover:border-blue-300 dark:hover:border-blue-500/40' },
+    emerald: { iconBg: 'bg-emerald-100 dark:bg-emerald-500/20', iconText: 'text-emerald-700 dark:text-emerald-200', text: 'text-emerald-900 dark:text-emerald-200', border: 'border-emerald-200/70', hover: 'hover:bg-emerald-50/60 dark:hover:bg-emerald-500/10 hover:border-emerald-300 dark:hover:border-emerald-500/40' },
+    amber:   { iconBg: 'bg-amber-100 dark:bg-amber-500/20',   iconText: 'text-amber-700 dark:text-amber-200',   text: 'text-amber-900 dark:text-amber-200',   border: 'border-amber-200/70',   hover: 'hover:bg-amber-50/60 dark:hover:bg-amber-500/10 hover:border-amber-300 dark:hover:border-amber-500/40' },
+    rose:    { iconBg: 'bg-rose-100 dark:bg-rose-500/20',    iconText: 'text-rose-700 dark:text-rose-200',    text: 'text-rose-900 dark:text-rose-200',    border: 'border-rose-200/70',    hover: 'hover:bg-rose-50/60 dark:hover:bg-rose-500/10 hover:border-rose-300 dark:hover:border-rose-500/40' },
+    slate:   { iconBg: 'bg-secondary',   iconText: 'text-muted-foreground',   text: 'text-foreground/85',   border: 'border-border',      hover: 'hover:bg-muted/50 hover:border-input' },
   };
   const tc = TONE_CLASSES[tone] || TONE_CLASSES.slate;
   // Render as button when onClick is provided so the pill behaves as an
   // affordance (cursor-pointer, hover, keyboard-accessible). Non-clickable
   // pills stay as <div> so they don't show a misleading hover state.
-  const sharedClass = `inline-flex items-center gap-2 pl-1 pr-3 py-1 rounded-full bg-white border ${tc.border} shadow-sm text-xs ${tc.text}`;
+  const sharedClass = `inline-flex items-center gap-2 pl-1 pr-3 py-1 rounded-full bg-card border ${tc.border} shadow-sm text-xs ${tc.text}`;
   const inner = (
     <>
       <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full ${tc.iconBg}`}>
         <Icon className={`w-3 h-3 ${tc.iconText}`} />
       </span>
       <span className="font-semibold tabular-nums">{value}</span>
-      <span className="text-slate-600">{label}</span>
+      <span className="text-muted-foreground">{label}</span>
       {onClick && <ChevronRight className={`w-3 h-3 -ml-0.5 ${tc.iconText} opacity-60`} />}
     </>
   );
@@ -1143,7 +1143,7 @@ function TechAvatar({ photoUrl, name, size = 'md', badge = null, badgeClass = 'b
         <img
           src={photoUrl}
           alt={name || ''}
-          className={`${s.wrap} rounded-full object-cover border border-slate-200 shadow-sm`}
+          className={`${s.wrap} rounded-full object-cover border border-border shadow-sm`}
           onError={() => setBroken(true)}
         />
       ) : (
@@ -1173,10 +1173,10 @@ function MobileQuickApproveSheet({ activeItems, quickApproveId, guardRef, onClos
         ref={sheetRef}
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => e.stopPropagation()}
-        className="absolute bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-2xl pb-safe max-h-[70vh] overflow-y-auto"
+        className="absolute bottom-0 left-0 right-0 bg-card rounded-t-2xl shadow-2xl pb-safe max-h-[70vh] overflow-y-auto"
       >
-        <div className="flex justify-center pt-2 pb-1"><div className="w-10 h-1 rounded-full bg-slate-300" /></div>
-        <p className="px-4 pt-1 pb-0 text-xs font-medium text-slate-500 truncate">
+        <div className="flex justify-center pt-2 pb-1"><div className="w-10 h-1 rounded-full bg-muted-foreground/40" /></div>
+        <p className="px-4 pt-1 pb-0 text-xs font-medium text-muted-foreground truncate">
           #{run.ticket?.freshserviceTicketId} — {run.ticket?.subject}
         </p>
         <QuickApproveInner run={run} recs={recs} {...innerProps} />
@@ -1191,14 +1191,14 @@ function MobileQuickApproveSheet({ activeItems, quickApproveId, guardRef, onClos
 const STATUS_OPTIONS = [
   { id: 'in_progress', label: 'In Progress', dotClass: 'bg-emerald-500' },
   { id: 'pending', label: 'Pending', dotClass: 'bg-amber-400' },
-  { id: 'closed_resolved', label: 'Closed / Resolved', dotClass: 'bg-slate-400' },
+  { id: 'closed_resolved', label: 'Closed / Resolved', dotClass: 'bg-muted-foreground/60' },
 ];
 
 const PRIORITY_OPTIONS = [
   { id: 4, label: 'Urgent', dotClass: 'bg-red-500' },
   { id: 3, label: 'High', dotClass: 'bg-orange-500' },
   { id: 2, label: 'Medium', dotClass: 'bg-amber-400' },
-  { id: 1, label: 'Low', dotClass: 'bg-slate-400' },
+  { id: 1, label: 'Low', dotClass: 'bg-muted-foreground/60' },
 ];
 
 const PRIORITY_SOURCE_OPTIONS = [
@@ -1208,7 +1208,7 @@ const PRIORITY_SOURCE_OPTIONS = [
 
 const INGEST_SOURCE_OPTIONS = [
   { id: 'webhook', label: 'Webhook', dotClass: 'bg-cyan-500' },
-  { id: 'poll', label: 'Polling', dotClass: 'bg-slate-400' },
+  { id: 'poll', label: 'Polling', dotClass: 'bg-muted-foreground/60' },
   { id: 'manual', label: 'Manual', dotClass: 'bg-blue-500' },
   { id: 'rebound', label: 'Returned', dotClass: 'bg-rose-500' },
 ];
@@ -1226,7 +1226,7 @@ const DECISION_OPTIONS = [
 ];
 
 const DISMISSED_DECISION_OPTIONS = [
-  { id: 'noise_dismissed', label: 'Noise', dotClass: 'bg-slate-400' },
+  { id: 'noise_dismissed', label: 'Noise', dotClass: 'bg-muted-foreground/60' },
 ];
 
 const REJECTED_DECISION_OPTIONS = [
@@ -1589,7 +1589,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
         type="button"
         onClick={handleSmartRefresh}
         disabled={refreshing}
-        className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center gap-1.5 rounded-lg border border-gray-300 p-0 text-xs font-semibold text-slate-700 transition-colors hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 lg:h-auto lg:w-auto lg:px-2.5 lg:py-1.5"
+        className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center gap-1.5 rounded-lg border border-input p-0 text-xs font-semibold text-foreground/85 transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50 lg:h-auto lg:w-auto lg:px-2.5 lg:py-1.5"
         title="Sync assignment queue with FreshService and refresh"
       >
         <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
@@ -1890,7 +1890,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
   if (loading) {
     return (
       <div className="flex items-center justify-center p-12">
-        <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
+        <Loader2 className="w-6 h-6 animate-spin text-blue-600 dark:text-blue-300" />
       </div>
     );
   }
@@ -1932,25 +1932,25 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
 
   const PRIORITY_LABELS = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Urgent' };
   const PRIORITY_PILL = {
-    1: 'bg-slate-100 text-slate-600',
-    2: 'bg-yellow-100 text-yellow-800',
-    3: 'bg-orange-100 text-orange-800',
-    4: 'bg-red-100 text-red-800',
+    1: 'bg-muted text-muted-foreground',
+    2: 'bg-yellow-100 dark:bg-yellow-500/20 text-yellow-800 dark:text-yellow-200',
+    3: 'bg-orange-100 dark:bg-orange-500/20 text-orange-800 dark:text-orange-200',
+    4: 'bg-red-100 dark:bg-red-500/20 text-red-800 dark:text-red-200',
   };
   // Smart highlight: priority is encoded as a colored left border on each row
   // (replaces the dedicated Pri column in the compact grid). Low/none are
   // intentionally invisible so only High and Urgent actually attract attention.
   const PRIORITY_BORDER = {
     1: 'border-l-transparent',
-    2: 'border-l-slate-200',
+    2: 'border-l-border',
     3: 'border-l-orange-400',
     4: 'border-l-red-500',
   };
   const PRIORITY_ICON_CLASS = {
-    1: 'border-slate-200 bg-slate-50 text-slate-400',
-    2: 'border-amber-200 bg-amber-50 text-amber-600',
-    3: 'border-orange-200 bg-orange-50 text-orange-600',
-    4: 'border-red-200 bg-red-50 text-red-600',
+    1: 'border-border bg-muted/50 text-muted-foreground/75',
+    2: 'border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 text-amber-600 dark:text-amber-300',
+    3: 'border-orange-200 dark:border-orange-500/30 bg-orange-50 dark:bg-orange-500/15 text-orange-600 dark:text-orange-300',
+    4: 'border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 text-red-600 dark:text-red-300',
   };
   const PRIORITY_ID_BY_LABEL = {
     Low: 1,
@@ -1975,7 +1975,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
       id: displayId,
       label: displayLabel,
       source: assessedId ? 'Ticket Pulse' : 'FreshService',
-      pill: PRIORITY_PILL[displayId] || 'bg-slate-100 text-slate-500',
+      pill: PRIORITY_PILL[displayId] || 'bg-muted text-muted-foreground',
       border: PRIORITY_BORDER[displayId] || 'border-l-transparent',
       rationale: ticket?.priorityRationale || null,
       confidence: ticket?.priorityConfidence || null,
@@ -1996,7 +1996,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
       return {
         label: 'Webhook',
         Icon: Webhook,
-        className: 'border-cyan-200 bg-cyan-50 text-cyan-700',
+        className: 'border-cyan-200 dark:border-cyan-500/30 bg-cyan-50 dark:bg-cyan-500/15 text-cyan-700 dark:text-cyan-200',
         tooltip: `Ingested by FreshService webhook${webhookAt ? ` at ${formatDateTimeInTimezone(webhookAt, workspaceTimezone)}` : ''}${ticket.webhookIngestCount ? ` (${ticket.webhookIngestCount} accepted webhook ingest${ticket.webhookIngestCount === 1 ? '' : 's'})` : ''}`,
       };
     }
@@ -2004,7 +2004,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
       return {
         label: 'Manual',
         Icon: Play,
-        className: 'border-blue-200 bg-blue-50 text-blue-700',
+        className: 'border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200',
         tooltip: 'Pipeline run was triggered manually.',
       };
     }
@@ -2013,8 +2013,8 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
         label: verifiedRebound ? 'Returned' : 'Needs review',
         Icon: RotateCcw,
         className: verifiedRebound
-          ? 'border-rose-200 bg-rose-50 text-rose-700'
-          : 'border-amber-200 bg-amber-50 text-amber-700',
+          ? 'border-rose-200 dark:border-rose-500/30 bg-rose-50 dark:bg-rose-500/15 text-rose-700 dark:text-rose-200'
+          : 'border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200',
         tooltip: verifiedRebound
           ? 'Pipeline run was triggered after a FreshService-confirmed returned ticket.'
           : 'Pipeline run has older rebound metadata without FreshService return evidence.',
@@ -2023,7 +2023,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     return {
       label: 'Polling',
       Icon: RefreshCw,
-      className: 'border-slate-200 bg-slate-50 text-slate-500',
+      className: 'border-border bg-muted/50 text-muted-foreground',
       tooltip: `Pipeline run source: ${triggerSource || ticket.lastIngestSource || 'scheduled polling'}.`,
     };
   };
@@ -2044,7 +2044,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     return (
       <div className="flex items-center gap-1">
         <span
-          className={`inline-flex h-5 min-w-[2rem] items-center justify-center rounded border px-1 text-[9px] font-bold leading-none ${PRIORITY_ICON_CLASS[priorityMeta.id] || 'border-slate-200 bg-slate-50 text-slate-400'}`}
+          className={`inline-flex h-5 min-w-[2rem] items-center justify-center rounded border px-1 text-[9px] font-bold leading-none ${PRIORITY_ICON_CLASS[priorityMeta.id] || 'border-border bg-muted/50 text-muted-foreground/75'}`}
           title={priorityTitle}
           aria-label={priorityTitle}
         >
@@ -2059,7 +2059,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
         </span>
         {isVerifiedReboundContext(ctx) && (
           <span
-            className="inline-flex h-5 w-5 items-center justify-center rounded border border-rose-200 bg-white text-rose-700"
+            className="inline-flex h-5 w-5 items-center justify-center rounded border border-rose-200 dark:border-rose-500/30 bg-card text-rose-700 dark:text-rose-200"
             title={returnedTooltip(ctx)}
             aria-label="Returned ticket"
             onClick={(e) => e.stopPropagation()}
@@ -2088,8 +2088,8 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
   };
 
   const SortIcon = ({ field }) => {
-    if (sortField !== field) return <ArrowUpDown className="w-3 h-3 text-slate-400" />;
-    return sortDir === 'asc' ? <ArrowUp className="w-3 h-3 text-blue-600" /> : <ArrowDown className="w-3 h-3 text-blue-600" />;
+    if (sortField !== field) return <ArrowUpDown className="w-3 h-3 text-muted-foreground/75" />;
+    return sortDir === 'asc' ? <ArrowUp className="w-3 h-3 text-blue-600 dark:text-blue-300" /> : <ArrowDown className="w-3 h-3 text-blue-600 dark:text-blue-300" />;
   };
 
   // Inline "Per page: 25" dropdown rendered inside both pagination footers.
@@ -2097,12 +2097,12 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
   // and native mobile pickers all just work). Styled to blend with the
   // existing Prev/Next chrome on the same row.
   const PageSizeSelector = ({ value, options, onChange }) => (
-    <label className="inline-flex items-center gap-1.5 text-[11px] text-slate-500 select-none">
+    <label className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground select-none">
       <span>Per page</span>
       <select
         value={value}
         onChange={(e) => onChange(parseInt(e.target.value, 10))}
-        className="px-1.5 py-0.5 text-[11px] font-medium rounded border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 cursor-pointer focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-colors"
+        className="px-1.5 py-0.5 text-[11px] font-medium rounded border border-border bg-card text-foreground/85 hover:bg-muted/50 cursor-pointer focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30 transition-colors"
         aria-label="Rows per page"
       >
         {options.map((n) => (
@@ -2137,7 +2137,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     });
 
   const DECISION_LABELS = { approved: 'Approved', modified: 'Override', auto_assigned: 'Auto', noise_dismissed: 'Noise', duplicate_dismissed: 'Duplicate', rejected: 'Rejected', pending_review: 'Pending' };
-  const DECISION_PILL = { approved: 'bg-green-100 text-green-800', modified: 'bg-blue-100 text-blue-800', auto_assigned: 'bg-purple-100 text-purple-800', noise_dismissed: 'bg-slate-100 text-slate-500', duplicate_dismissed: 'bg-cyan-50 text-cyan-700', rejected: 'bg-red-100 text-red-800' };
+  const DECISION_PILL = { approved: 'bg-green-100 dark:bg-green-500/20 text-green-800 dark:text-green-200', modified: 'bg-blue-100 dark:bg-blue-500/20 text-blue-800 dark:text-blue-200', auto_assigned: 'bg-purple-100 dark:bg-purple-500/20 text-purple-800 dark:text-purple-200', noise_dismissed: 'bg-muted text-muted-foreground', duplicate_dismissed: 'bg-cyan-50 dark:bg-cyan-500/15 text-cyan-700 dark:text-cyan-200', rejected: 'bg-red-100 dark:bg-red-500/20 text-red-800 dark:text-red-200' };
 
   // Contextual decision label. A run's `decision` may be 'pending_review'
   // even though no human action is needed in our app — the ticket has
@@ -2150,7 +2150,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
       const currentTech = run.ticket?.assignedTech?.name || 'the current FreshService assignee';
       return {
         label: 'Rerouted in FS',
-        pillClass: 'bg-amber-100 text-amber-800',
+        pillClass: 'bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-200',
         tooltip: `Originally routed by the pipeline to ${originalTech}; FreshService now has ${currentTech}. Treating as handled outside the pipeline.`,
       };
     }
@@ -2167,19 +2167,19 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     if (externallyAssigned) {
       return {
         label: 'Handled in FS',
-        pillClass: 'bg-amber-100 text-amber-800',
+        pillClass: 'bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-200',
         tooltip: `Assigned in FreshService outside the pipeline${run.ticket?.assignedTech?.name ? ' — ' + run.ticket.assignedTech.name : ''}. AI suggestion left unresolved.`,
       };
     }
     return {
       label: DECISION_LABELS[run.decision] || run.decision,
-      pillClass: DECISION_PILL[run.decision] || 'bg-slate-100 text-slate-500',
+      pillClass: DECISION_PILL[run.decision] || 'bg-muted text-muted-foreground',
       tooltip: null,
     };
   };
-  const _FLAG_PILL = { open: { label: 'Unassigned', style: 'bg-green-100 text-green-700' }, assigned: { label: 'Assigned', style: 'bg-amber-100 text-amber-700' }, closed: { label: 'Closed', style: 'bg-slate-100 text-slate-500' }, deleted: { label: 'Deleted', style: 'bg-red-100 text-red-600' } };
-  const STATUS_PILL_STYLE = { Open: 'bg-green-100 text-green-700', Pending: 'bg-yellow-100 text-yellow-700', Closed: 'bg-slate-100 text-slate-500', Resolved: 'bg-slate-100 text-slate-500', Deleted: 'bg-red-100 text-red-600', Spam: 'bg-red-100 text-red-600', 'Waiting on Customer': 'bg-blue-100 text-blue-600', 'Waiting on Third Party': 'bg-blue-100 text-blue-600' };
-  const getStatusPillStyle = (status) => STATUS_PILL_STYLE[status] || 'bg-slate-100 text-slate-500';
+  const _FLAG_PILL = { open: { label: 'Unassigned', style: 'bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-200' }, assigned: { label: 'Assigned', style: 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-200' }, closed: { label: 'Closed', style: 'bg-muted text-muted-foreground' }, deleted: { label: 'Deleted', style: 'bg-red-100 dark:bg-red-500/20 text-red-600 dark:text-red-300' } };
+  const STATUS_PILL_STYLE = { Open: 'bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-200', Pending: 'bg-yellow-100 dark:bg-yellow-500/20 text-yellow-700 dark:text-yellow-200', Closed: 'bg-muted text-muted-foreground', Resolved: 'bg-muted text-muted-foreground', Deleted: 'bg-red-100 dark:bg-red-500/20 text-red-600 dark:text-red-300', Spam: 'bg-red-100 dark:bg-red-500/20 text-red-600 dark:text-red-300', 'Waiting on Customer': 'bg-blue-100 dark:bg-blue-500/20 text-blue-600 dark:text-blue-300', 'Waiting on Third Party': 'bg-blue-100 dark:bg-blue-500/20 text-blue-600 dark:text-blue-300' };
+  const getStatusPillStyle = (status) => STATUS_PILL_STYLE[status] || 'bg-muted text-muted-foreground';
   const getStatusLabel = (status) => {
     if (!status) return 'Unknown';
     if (status === '2' || status === 'open') return 'Open';
@@ -2308,7 +2308,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     return tech?.photoUrl ? (
       <img src={tech.photoUrl} alt="" className={`${sz} rounded-full object-cover flex-shrink-0 ${ring}`} />
     ) : (
-      <span className={`${sz} rounded-full bg-slate-200 text-slate-500 ${textSz} font-bold flex items-center justify-center flex-shrink-0 ${ring}`}>{initials}</span>
+      <span className={`${sz} rounded-full bg-secondary text-muted-foreground ${textSz} font-bold flex items-center justify-center flex-shrink-0 ${ring}`}>{initials}</span>
     );
   };
 
@@ -2337,7 +2337,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
 
     return (
       <span className="relative inline-flex items-center gap-1.5">
-        <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 text-blue-700 px-1.5 py-0.5 text-[10px] font-semibold">
+        <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 px-1.5 py-0.5 text-[10px] font-semibold">
           <span className="uppercase tracking-wide">AI</span>
           <TechAvatar techId={top.techId} name={top.techName} size="xs" />
           <span className="max-w-[58px] truncate">{top.techName?.split(' ')[0]}</span>
@@ -2351,13 +2351,13 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
               e.stopPropagation();
               setOpen((v) => !v);
             }}
-            className="inline-flex items-center gap-1 rounded-full bg-slate-100 text-slate-600 px-1.5 py-0.5 text-[10px] font-medium hover:bg-slate-200 touch-manipulation"
+            className="inline-flex items-center gap-1 rounded-full bg-muted text-muted-foreground px-1.5 py-0.5 text-[10px] font-medium hover:bg-secondary touch-manipulation"
             aria-label={`Show ${rest.length} more AI recommendations`}
           >
             <span>+{rest.length}</span>
             <span className="inline-flex -space-x-1">
               {rest.slice(0, 2).map((r) => (
-                <TechAvatar key={r.techId} techId={r.techId} name={r.techName} size="xs" ring="ring-1 ring-white" />
+                <TechAvatar key={r.techId} techId={r.techId} name={r.techName} size="xs" ring="ring-1 ring-card" />
               ))}
             </span>
           </button>
@@ -2366,14 +2366,14 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
           <div
             onMouseEnter={showPopover}
             onMouseLeave={hidePopover}
-            className="absolute left-0 top-full mt-1 z-50 min-w-[190px] max-w-[240px] bg-slate-900 text-white text-[10px] rounded-lg py-1.5 px-2 shadow-lg"
+            className="absolute left-0 top-full mt-1 z-50 min-w-[190px] max-w-[240px] bg-foreground text-background text-[10px] rounded-lg py-1.5 px-2 shadow-lg"
           >
             {recommendations.map((r, i) => (
               <div key={r.techId} className="flex items-center gap-2 py-1">
-                <span className="w-4 text-slate-400">{i + 1}.</span>
+                <span className="w-4 text-background/70">{i + 1}.</span>
                 <TechAvatar techId={r.techId} name={r.techName} size="xs" />
                 <span className="truncate flex-1">{r.techName}</span>
-                <span className="text-slate-300">{typeof r.score === 'number' ? `${(r.score * 100).toFixed(0)}%` : ''}</span>
+                <span className="text-muted-foreground/50">{typeof r.score === 'number' ? `${(r.score * 100).toFixed(0)}%` : ''}</span>
               </div>
             ))}
           </div>
@@ -2434,11 +2434,11 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
     const categoryNeedsReview = needsCategoryReview(run.ticket, run.recommendation);
     const ticketTypeMeta = getTicketTypeMeta(run.ticket, run.recommendation);
     const ctx = run.reboundFrom || run.ticket?.lastReboundContext;
-    const rowBg = flag === 'deleted' ? 'opacity-40 bg-red-50/30' : flag === 'closed' ? 'opacity-50 bg-slate-50' : flag === 'assigned' ? 'bg-amber-50/30' : '';
+    const rowBg = flag === 'deleted' ? 'opacity-40 bg-red-50/30 dark:bg-red-500/10' : flag === 'closed' ? 'opacity-50 bg-muted/50' : flag === 'assigned' ? 'bg-amber-50/30 dark:bg-amber-500/10' : '';
     const isNew = newIds.has(run.id);
     const cardBorder = isNew
-      ? 'border-emerald-300'
-      : flag === 'deleted' ? 'border-red-200' : flag === 'closed' ? 'border-slate-200' : flag === 'assigned' ? 'border-amber-200' : 'border-slate-300';
+      ? 'border-emerald-300 dark:border-emerald-500/40'
+      : flag === 'deleted' ? 'border-red-200 dark:border-red-500/30' : flag === 'closed' ? 'border-border' : flag === 'assigned' ? 'border-amber-200 dark:border-amber-500/30' : 'border-input';
     const statusLabel = getStatusLabel(run.ticket?.status);
     const assignee = run.ticket?.assignedTech
       || (subView !== 'pending' ? run.assignedTech : null);
@@ -2447,12 +2447,12 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
       <div
         key={run.id}
         onClick={() => handleSelectRun(run.id)}
-        className={`min-w-0 px-3.5 py-3 active:bg-blue-50/60 touch-manipulation cursor-pointer border ${cardBorder} rounded-xl bg-white shadow-sm ${rowBg} transition-[border-color,box-shadow] duration-[2000ms] ${isNew ? 'shadow-emerald-100 shadow-md' : ''}`}
+        className={`min-w-0 px-3.5 py-3 active:bg-blue-50/60 dark:active:bg-blue-500/10 touch-manipulation cursor-pointer border ${cardBorder} rounded-xl bg-card shadow-sm ${rowBg} transition-[border-color,box-shadow] duration-[2000ms] ${isNew ? 'shadow-emerald-100 shadow-md' : ''}`}
       >
         {/* Row 1: signal icons + ticket ID + decision (non-pending) + chevron */}
         <div className="flex min-w-0 items-center gap-1.5 flex-wrap">
           {renderSignalIcons(run, priorityMeta, ctx)}
-          <span className="text-slate-400 font-mono text-[11px]">#{run.ticket?.freshserviceTicketId}</span>
+          <span className="text-muted-foreground/75 font-mono text-[11px]">#{run.ticket?.freshserviceTicketId}</span>
           <span className="ml-auto" />
           {subView !== 'pending' && run.decision && (() => {
             const dd = getDisplayDecision(run);
@@ -2462,33 +2462,33 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
               </span>
             );
           })()}
-          <ChevronRight className="w-4 h-4 text-slate-300 shrink-0" />
+          <ChevronRight className="w-4 h-4 text-muted-foreground/50 shrink-0" />
         </div>
 
         {/* Row 2: subject */}
-        <p className="text-sm font-semibold text-slate-800 leading-snug mt-1.5 break-words">
+        <p className="text-sm font-semibold text-foreground leading-snug mt-1.5 break-words">
           {run.ticket?.subject || 'No subject'}
         </p>
         {priorityMeta.rationale && (
-          <p className="mt-1 line-clamp-2 text-[11px] leading-snug text-slate-500">
-            <span className="font-semibold text-slate-600">{priorityMeta.source} priority:</span> {priorityMeta.rationale}
+          <p className="mt-1 line-clamp-2 text-[11px] leading-snug text-muted-foreground">
+            <span className="font-semibold text-muted-foreground">{priorityMeta.source} priority:</span> {priorityMeta.rationale}
           </p>
         )}
         {(categoryLabel || categoryNeedsReview || ticketTypeMeta?.isIncident) && (
           <div className="mt-1.5 flex items-center gap-1.5 text-[10px] leading-none">
             {ticketTypeMeta?.isIncident && (
-              <span className="shrink-0 rounded bg-rose-50 px-1 py-0.5 font-bold uppercase tracking-wide text-rose-700" title={ticketTypeMeta.title}>
+              <span className="shrink-0 rounded bg-rose-50 dark:bg-rose-500/15 px-1 py-0.5 font-bold uppercase tracking-wide text-rose-700 dark:text-rose-200" title={ticketTypeMeta.title}>
                 INC
               </span>
             )}
             {categoryLabel && (
-              <span className="min-w-0 truncate rounded bg-blue-50 px-1.5 py-0.5 font-semibold text-blue-700" title={categoryLabel}>
+              <span className="min-w-0 truncate rounded bg-blue-50 dark:bg-blue-500/15 px-1.5 py-0.5 font-semibold text-blue-700 dark:text-blue-200" title={categoryLabel}>
                 {categoryLabel}
               </span>
             )}
             {categoryNeedsReview && (
               <span
-                className="h-2 w-2 shrink-0 rounded-full bg-amber-400 ring-2 ring-amber-100"
+                className="h-2 w-2 shrink-0 rounded-full bg-amber-400 ring-2 ring-amber-100 dark:ring-amber-500/30"
                 role="img"
                 aria-label="Category fit needs review"
                 title={suggestedCategoryLabel
@@ -2501,12 +2501,12 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
 
         {/* Row 3: requester + date */}
         <div className="flex items-center gap-1.5 mt-1.5 text-[11px] leading-none flex-wrap">
-          <span className="text-slate-500 font-medium">{run.ticket?.requester?.name || '—'}</span>
+          <span className="text-muted-foreground font-medium">{run.ticket?.requester?.name || '—'}</span>
           {run.ticket?.requester?.department && (
-            <><span className="text-slate-300">·</span><span className="text-slate-400">{run.ticket.requester.department}</span></>
+            <><span className="text-muted-foreground/50">·</span><span className="text-muted-foreground/75">{run.ticket.requester.department}</span></>
           )}
-          <span className="text-slate-300">·</span>
-          <span className="text-slate-400">{fmtDate(run.decidedAt || run.updatedAt || run.createdAt)}</span>
+          <span className="text-muted-foreground/50">·</span>
+          <span className="text-muted-foreground/75">{fmtDate(run.decidedAt || run.updatedAt || run.createdAt)}</span>
         </div>
 
         {/* Row 4: Status + AI Suggestion side by side */}
@@ -2518,15 +2518,15 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
               avatarView ? (
                 <span className="inline-flex items-center gap-1">
                   <TechAvatar techId={assignee.id} name={assignee.name} size="xs" ring="ring-1 ring-amber-300" />
-                  <span className="text-[10px] text-slate-600">{assignee.name?.split(' ')[0]}</span>
+                  <span className="text-[10px] text-muted-foreground">{assignee.name?.split(' ')[0]}</span>
                 </span>
               ) : (
-                <span className="truncate text-[10px] text-amber-700 font-medium">{assignee.name?.split(' ')[0]}</span>
+                <span className="truncate text-[10px] text-amber-700 dark:text-amber-200 font-medium">{assignee.name?.split(' ')[0]}</span>
               )
             ) : run.ticket?.assignedTechId ? (
-              <span className="text-[10px] text-slate-400 italic">External</span>
+              <span className="text-[10px] text-muted-foreground/75 italic">External</span>
             ) : (
-              <span className="text-[10px] text-slate-300">Unassigned</span>
+              <span className="text-[10px] text-muted-foreground/50">Unassigned</span>
             )}
           </div>
 
@@ -2536,8 +2536,8 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
               {avatarView ? (
                 <AiPicks recommendations={recs} />
               ) : (
-                <span className="inline-flex items-center gap-1 text-[10px] text-blue-700 font-medium">
-                  <span className="text-[9px] font-bold uppercase tracking-wider bg-blue-50 text-blue-600 px-1 rounded">AI</span>
+                <span className="inline-flex items-center gap-1 text-[10px] text-blue-700 dark:text-blue-200 font-medium">
+                  <span className="text-[9px] font-bold uppercase tracking-wider bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-300 px-1 rounded">AI</span>
                   {topRec.techName?.split(' ')[0]}
                   {recs.length > 1 && <span className="text-blue-400">+{recs.length - 1}</span>}
                 </span>
@@ -2549,18 +2549,18 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
         {/* Row 5: Quick actions (pending only) */}
         {showActions && recs.length > 0 && flag !== 'deleted' && (
           <div className="flex items-center justify-end gap-0 mt-1.5 relative">
-            <button onClick={(e) => openQuickApprove(e, run)} className={`p-1.5 rounded-md touch-manipulation min-w-[32px] min-h-[32px] flex items-center justify-center transition-colors ${quickApproveId === run.id ? 'bg-green-100 text-green-700' : 'text-green-500 active:bg-green-50'}`} aria-label="Quick approve">
+            <button onClick={(e) => openQuickApprove(e, run)} className={`p-1.5 rounded-md touch-manipulation min-w-[32px] min-h-[32px] flex items-center justify-center transition-colors ${quickApproveId === run.id ? 'bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-200' : 'text-green-500 active:bg-green-50 dark:active:bg-green-500/15'}`} aria-label="Quick approve">
               <Check className="w-4 h-4" />
             </button>
             {isAdmin && (
               <>
-                <button onClick={(e) => handleDismiss(e, run.id)} className="p-1.5 text-yellow-500 active:bg-yellow-50 rounded-md touch-manipulation min-w-[32px] min-h-[32px] flex items-center justify-center" aria-label="Dismiss">
+                <button onClick={(e) => handleDismiss(e, run.id)} className="p-1.5 text-yellow-500 active:bg-yellow-50 dark:active:bg-yellow-500/15 rounded-md touch-manipulation min-w-[32px] min-h-[32px] flex items-center justify-center" aria-label="Dismiss">
                   <XCircle className="w-4 h-4" />
                 </button>
                 {confirmDeleteId === run.id ? (
                   <button onClick={(e) => handleDeleteConfirm(e, run.id)} className="px-2 py-1 bg-red-500 text-white rounded text-[10px] font-semibold touch-manipulation min-h-[32px]">Delete?</button>
                 ) : (
-                  <button onClick={(e) => handleDeleteClick(e, run.id)} className="p-1.5 text-red-400 active:bg-red-50 rounded-md touch-manipulation min-w-[32px] min-h-[32px] flex items-center justify-center" aria-label="Delete">
+                  <button onClick={(e) => handleDeleteClick(e, run.id)} className="p-1.5 text-red-400 active:bg-red-50 dark:active:bg-red-500/15 rounded-md touch-manipulation min-w-[32px] min-h-[32px] flex items-center justify-center" aria-label="Delete">
                     <Trash2 className="w-4 h-4" />
                   </button>
                 )}
@@ -2573,13 +2573,13 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
         {/* Pending with no recs or deleted — still show admin actions */}
         {showActions && (recs.length === 0 || flag === 'deleted') && isAdmin && (
           <div className="flex items-center justify-end gap-0 mt-1.5 relative">
-            <button onClick={(e) => handleDismiss(e, run.id)} className="p-1.5 text-yellow-500 active:bg-yellow-50 rounded-md touch-manipulation min-w-[32px] min-h-[32px] flex items-center justify-center" aria-label="Dismiss">
+            <button onClick={(e) => handleDismiss(e, run.id)} className="p-1.5 text-yellow-500 active:bg-yellow-50 dark:active:bg-yellow-500/15 rounded-md touch-manipulation min-w-[32px] min-h-[32px] flex items-center justify-center" aria-label="Dismiss">
               <XCircle className="w-4 h-4" />
             </button>
             {confirmDeleteId === run.id ? (
               <button onClick={(e) => handleDeleteConfirm(e, run.id)} className="px-2 py-1 bg-red-500 text-white rounded text-[10px] font-semibold touch-manipulation min-h-[32px]">Delete?</button>
             ) : (
-              <button onClick={(e) => handleDeleteClick(e, run.id)} className="p-1.5 text-red-400 active:bg-red-50 rounded-md touch-manipulation min-w-[32px] min-h-[32px] flex items-center justify-center" aria-label="Delete">
+              <button onClick={(e) => handleDeleteClick(e, run.id)} className="p-1.5 text-red-400 active:bg-red-50 dark:active:bg-red-500/15 rounded-md touch-manipulation min-w-[32px] min-h-[32px] flex items-center justify-center" aria-label="Delete">
                 <Trash2 className="w-4 h-4" />
               </button>
             )}
@@ -2594,7 +2594,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
       {/* Action toast -- fixed position so it doesn't shift content */}
       {actionMsg && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[200] animate-in fade-in slide-in-from-top-2 duration-200">
-          <div className={`text-sm rounded-lg px-4 py-2.5 border shadow-lg backdrop-blur-sm ${actionMsg.startsWith('Failed:') ? 'text-red-700 bg-red-50/95 border-red-200' : 'text-green-700 bg-green-50/95 border-green-200'}`}>{actionMsg}</div>
+          <div className={`text-sm rounded-lg px-4 py-2.5 border shadow-lg backdrop-blur-sm ${actionMsg.startsWith('Failed:') ? 'text-red-700 dark:text-red-200 bg-red-50/95 dark:bg-red-500/10 border-red-200 dark:border-red-500/30' : 'text-green-700 dark:text-green-200 bg-green-50/95 dark:bg-green-500/10 border-green-200 dark:border-green-500/30'}`}>{actionMsg}</div>
         </div>
       )}
 
@@ -2603,25 +2603,25 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
         <button
           type="button"
           onClick={scrollToQueuedSection}
-          className="group flex w-full flex-wrap items-center gap-2 text-left px-3 py-2 rounded-lg border border-amber-200 bg-amber-50/70 hover:bg-amber-50 hover:border-amber-300 transition-colors"
+          className="group flex w-full flex-wrap items-center gap-2 text-left px-3 py-2 rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50/70 dark:bg-amber-500/10 hover:bg-amber-50 dark:hover:bg-amber-500/15 hover:border-amber-300 dark:hover:border-amber-500/40 transition-colors"
           title="Jump to queued tickets"
         >
           <AlertCircle className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
-          <span className="text-[12px] font-semibold text-amber-800">
+          <span className="text-[12px] font-semibold text-amber-800 dark:text-amber-200">
             {queuedRunsMeta.totalCount} ticket{queuedRunsMeta.totalCount !== 1 ? 's' : ''} queued for next business hours
           </span>
           {queuedRunsMeta.truncated && (
-            <span className="text-[10px] text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">
+            <span className="text-[10px] text-amber-700 dark:text-amber-200 bg-amber-100 dark:bg-amber-500/20 px-1.5 py-0.5 rounded">
               showing first {queuedRuns.length}
             </span>
           )}
           {queueStatus && !queueStatus.isBusinessHours && queueStatus.nextWindow && (
-            <span className="text-[11px] text-amber-600">· starts {queueStatus.nextWindow.label}</span>
+            <span className="text-[11px] text-amber-600 dark:text-amber-300">· starts {queueStatus.nextWindow.label}</span>
           )}
           {queueStatus?.isBusinessHours && (
-            <span className="text-[11px] text-emerald-600 font-medium">· active — processing on next sync</span>
+            <span className="text-[11px] text-emerald-600 dark:text-emerald-300 font-medium">· active — processing on next sync</span>
           )}
-          <span className="ml-auto hidden text-[11px] font-medium text-amber-700 opacity-0 transition-opacity group-hover:opacity-100 sm:inline">View ↓</span>
+          <span className="ml-auto hidden text-[11px] font-medium text-amber-700 dark:text-amber-200 opacity-0 transition-opacity group-hover:opacity-100 sm:inline">View ↓</span>
         </button>
       )}
 
@@ -2631,8 +2631,8 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
           Both rows live in the same bordered card. The FilterBar itself wraps on
           narrow widths (no horizontal scroll), so the layout breathes without
           chopping content off-screen. */}
-      <div className="border border-slate-200 rounded-lg">
-        <div className="bg-slate-50 border-b border-slate-200 px-3 sm:px-4 py-2 rounded-t-lg space-y-2">
+      <div className="border border-border rounded-lg">
+        <div className="bg-muted/50 border-b border-border px-3 sm:px-4 py-2 rounded-t-lg space-y-2">
           {/* Row 1 — primary tabs.
               Rejected runs are intentionally NOT a top-level tab (low traffic, user
               didn't recognize the term); they still appear in the All view and remain
@@ -2640,12 +2640,12 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
               visually separated by a divider so it reads as the catch-all rather
               than just another sibling. */}
           <div className="overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-            <div className="inline-flex shrink-0 items-center gap-0.5 rounded-xl bg-slate-100 p-1 ring-1 ring-slate-200/60">
+            <div className="inline-flex shrink-0 items-center gap-0.5 rounded-xl bg-muted p-1 ring-1 ring-border/60">
               {[
-                { id: 'pending', label: 'Awaiting Decision', count: queue.totals?.unassigned ?? 0, dot: 'bg-amber-400', activeRing: 'ring-amber-200' },
-                { id: 'assigned', label: 'Decided', count: assignedTotal, dot: 'bg-emerald-400', activeRing: 'ring-emerald-200' },
-                { id: 'dismissed', label: 'Dismissed', count: dismissedRuns.total, dot: 'bg-slate-400', activeRing: 'ring-slate-200' },
-                { id: 'deleted', label: 'Deleted', count: deletedRuns.total, dot: 'bg-red-500', activeRing: 'ring-red-200' },
+                { id: 'pending', label: 'Awaiting Decision', count: queue.totals?.unassigned ?? 0, dot: 'bg-amber-400', activeRing: 'ring-amber-200 dark:ring-amber-500/30' },
+                { id: 'assigned', label: 'Decided', count: assignedTotal, dot: 'bg-emerald-400', activeRing: 'ring-emerald-200 dark:ring-emerald-500/30' },
+                { id: 'dismissed', label: 'Dismissed', count: dismissedRuns.total, dot: 'bg-muted-foreground/60', activeRing: 'ring-border' },
+                { id: 'deleted', label: 'Deleted', count: deletedRuns.total, dot: 'bg-red-500', activeRing: 'ring-red-200 dark:ring-red-500/30' },
                 {
                   id: 'all',
                   label: 'All',
@@ -2658,7 +2658,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                     + (rejectedRuns.total || 0)
                     + (deletedRuns.total || 0),
                   dot: null,
-                  activeRing: 'ring-blue-200',
+                  activeRing: 'ring-blue-200 dark:ring-blue-500/30',
                   separated: true,
                 },
               ].map((tab) => {
@@ -2669,20 +2669,20 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                     {tab.separated && (
                       // Vertical divider that visually breaks "All" out of the segment group.
                       // Subtle on its own but enough cue that "All" isn't just one more sibling.
-                      <span className="mx-1 h-4 w-px bg-slate-300/80" aria-hidden="true" />
+                      <span className="mx-1 h-4 w-px bg-muted-foreground/80" aria-hidden="true" />
                     )}
                     <button
                       onClick={() => setSubView(tab.id)}
                       className={`group relative rounded-lg px-2.5 py-1.5 text-[11px] font-semibold transition-all duration-200 touch-manipulation flex items-center gap-1.5 sm:px-3 ${
                         isActive
-                          ? `bg-white text-slate-900 shadow-sm ring-1 ${tab.activeRing}`
-                          : `${isZero ? 'text-slate-400' : tab.id === 'all' ? 'text-blue-700' : 'text-slate-600'} hover:text-slate-900 hover:bg-white/70`
+                          ? `bg-card text-foreground shadow-sm ring-1 ${tab.activeRing}`
+                          : `${isZero ? 'text-muted-foreground/75' : tab.id === 'all' ? 'text-blue-700 dark:text-blue-200' : 'text-muted-foreground'} hover:text-foreground hover:bg-card/70`
                       }`}
                     >
                       {tab.dot && <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tab.dot} ${isZero && !isActive ? 'opacity-40' : ''}`} />}
                       <span>{tab.label}</span>
                       {tab.count != null && (
-                        <span className={`tabular-nums text-[10px] font-bold ${isActive ? 'text-slate-500' : isZero ? 'text-slate-300' : 'text-slate-400'}`}>
+                        <span className={`tabular-nums text-[10px] font-bold ${isActive ? 'text-muted-foreground' : isZero ? 'text-muted-foreground/50' : 'text-muted-foreground/75'}`}>
                           {tab.count}
                         </span>
                       )}
@@ -2703,19 +2703,19 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
               trailing={
                 <>
                   {subView === 'pending' && (queue.totals?.all ?? queue.total) > 0 && isAdmin && (
-                    <button type="button" onClick={() => setShowClearConfirm(true)} className="flex touch-manipulation items-center gap-1 rounded border border-red-200 px-2 py-1 text-[10px] text-red-600 hover:bg-red-50 hover:text-red-700">
+                    <button type="button" onClick={() => setShowClearConfirm(true)} className="flex touch-manipulation items-center gap-1 rounded border border-red-200 dark:border-red-500/30 px-2 py-1 text-[10px] text-red-600 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-500/15 hover:text-red-700 dark:hover:text-red-200">
                       <Trash2 className="h-3 w-3" /> Delete all ({queue.totals?.all ?? queue.total})
                     </button>
                   )}
                   <button
                     type="button"
                     onClick={() => setAvatarView((v) => !v)}
-                    className={`touch-manipulation rounded border px-2 py-1 text-[10px] font-medium transition-colors ${avatarView ? 'border-slate-700 bg-slate-700 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-400'}`}
+                    className={`touch-manipulation rounded border px-2 py-1 text-[10px] font-medium transition-colors ${avatarView ? 'border-foreground bg-foreground text-background' : 'border-border bg-card text-muted-foreground hover:border-muted-foreground/60'}`}
                     title={avatarView ? 'Switch to text view' : 'Switch to avatar view'}
                   >
                     {avatarView ? '≡ Text' : '⊙ Avatars'}
                   </button>
-                  <span className="hidden sm:flex items-center gap-1 text-[10px] font-medium text-emerald-600 select-none" title="Auto-refreshes every 30 seconds">
+                  <span className="hidden sm:flex items-center gap-1 text-[10px] font-medium text-emerald-600 dark:text-emerald-300 select-none" title="Auto-refreshes every 30 seconds">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                     Live
                   </span>
@@ -2817,13 +2817,13 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                     : 'Show only runs where the AI top pick was overridden'}
                   className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium shadow-sm transition-colors touch-manipulation ${
                     differentAgentOnly
-                      ? 'border-blue-300 bg-blue-50 text-blue-800 hover:bg-blue-100'
-                      : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900'
+                      ? 'border-blue-300 dark:border-blue-500/40 bg-blue-50 dark:bg-blue-500/15 text-blue-800 dark:text-blue-200 hover:bg-blue-100 dark:hover:bg-blue-500/20'
+                      : 'border-border bg-card text-muted-foreground hover:border-input hover:text-foreground'
                   }`}
                 >
-                  <span className={`h-1.5 w-1.5 rounded-full ${differentAgentOnly ? 'bg-blue-500' : 'bg-slate-300'}`} />
+                  <span className={`h-1.5 w-1.5 rounded-full ${differentAgentOnly ? 'bg-blue-500' : 'bg-muted-foreground/40'}`} />
                   Different agent only
-                  <span className={`tabular-nums text-[10px] ${differentAgentOnly ? 'text-blue-700' : 'text-slate-400'}`}>
+                  <span className={`tabular-nums text-[10px] ${differentAgentOnly ? 'text-blue-700 dark:text-blue-200' : 'text-muted-foreground/75'}`}>
                     {differentAgentCount}
                   </span>
                 </button>
@@ -2836,24 +2836,24 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
             banner read as no safeguard at all; this cannot be missed). */}
         {showClearConfirm && (
           <div
-            className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/40 p-4"
+            className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/40 dark:bg-black/70 p-4"
             role="dialog"
             aria-modal="true"
             aria-label="Confirm delete all pending reviews"
             onClick={() => !clearing && setShowClearConfirm(false)}
           >
             <div
-              className="w-full max-w-md rounded-2xl border border-red-200 bg-white p-5 shadow-2xl"
+              className="w-full max-w-md rounded-2xl border border-red-200 dark:border-red-500/30 bg-card p-5 shadow-2xl"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-start gap-3">
-                <span className="mt-0.5 inline-flex h-9 w-9 flex-none items-center justify-center rounded-full bg-red-100">
-                  <Trash2 className="h-4 w-4 text-red-600" />
+                <span className="mt-0.5 inline-flex h-9 w-9 flex-none items-center justify-center rounded-full bg-red-100 dark:bg-red-500/20">
+                  <Trash2 className="h-4 w-4 text-red-600 dark:text-red-300" />
                 </span>
                 <div className="min-w-0">
-                  <h3 className="text-sm font-bold text-slate-900">Delete all pending reviews?</h3>
-                  <p className="mt-1.5 text-sm text-slate-600">
-                    This permanently removes <strong className="text-red-700">{queue.totals?.all ?? queue.total} pending review{(queue.totals?.all ?? queue.total) === 1 ? '' : 's'}</strong> (including those on tickets assigned outside Ticket Pulse) from the queue.
+                  <h3 className="text-sm font-bold text-foreground">Delete all pending reviews?</h3>
+                  <p className="mt-1.5 text-sm text-muted-foreground">
+                    This permanently removes <strong className="text-red-700 dark:text-red-200">{queue.totals?.all ?? queue.total} pending review{(queue.totals?.all ?? queue.total) === 1 ? '' : 's'}</strong> (including those on tickets assigned outside Ticket Pulse) from the queue.
                     The FreshService tickets themselves are not changed, and this cannot be undone.
                   </p>
                 </div>
@@ -2862,7 +2862,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                 <button
                   onClick={() => setShowClearConfirm(false)}
                   disabled={clearing}
-                  className="tp-focus-ring rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-50"
+                  className="tp-focus-ring rounded-lg border border-border bg-card px-3.5 py-2 text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted/50"
                 >
                   Cancel
                 </button>
@@ -2882,7 +2882,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
         {/* Refreshing indicator - floating, doesn't reflow content */}
         {refreshing && (
           <div className="pointer-events-none fixed top-4 right-4 z-[150] animate-in fade-in slide-in-from-top-2 duration-200">
-            <div className="pointer-events-auto bg-blue-50/95 border border-blue-200 rounded-full px-3 py-1.5 flex items-center gap-2 text-[11px] text-blue-700 font-medium shadow-lg backdrop-blur-sm">
+            <div className="pointer-events-auto bg-blue-50/95 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/30 rounded-full px-3 py-1.5 flex items-center gap-2 text-[11px] text-blue-700 dark:text-blue-200 font-medium shadow-lg backdrop-blur-sm">
               <Loader2 className="w-3 h-3 animate-spin flex-shrink-0" />
               Syncing with FreshService…
             </div>
@@ -2892,7 +2892,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
         {/* New arrivals toast -- fixed position so it doesn't shift ticket list */}
         {newIds.size > 0 && subView === 'pending' && (
           <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[200] animate-in fade-in slide-in-from-bottom-2 duration-200">
-            <div className="bg-emerald-50/95 border border-emerald-300 rounded-full px-4 py-2 flex items-center gap-2 text-[11px] text-emerald-700 font-semibold shadow-lg backdrop-blur-sm">
+            <div className="bg-emerald-50/95 dark:bg-emerald-500/10 border border-emerald-300 dark:border-emerald-500/40 rounded-full px-4 py-2 flex items-center gap-2 text-[11px] text-emerald-700 dark:text-emerald-200 font-semibold shadow-lg backdrop-blur-sm">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse flex-shrink-0" />
               {newIds.size} new ticket{newIds.size > 1 ? 's' : ''} arrived
             </div>
@@ -2905,13 +2905,13 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
             this section the user wouldn't know the system is working — the queue
             looks empty even though analysis is underway. */}
         {subView === 'pending' && queue.inProgress && queue.inProgress.length > 0 && (
-          <div className="border border-blue-200 bg-blue-50/40 rounded-lg overflow-hidden">
-            <div className="px-3 py-2 border-b border-blue-100 bg-blue-50/60 flex flex-wrap items-center gap-x-2 gap-y-1">
-              <Loader2 className="w-3.5 h-3.5 text-blue-600 animate-spin flex-shrink-0" />
-              <span className="text-[12px] font-semibold text-blue-800">
+          <div className="border border-blue-200 dark:border-blue-500/30 bg-blue-50/40 dark:bg-blue-500/10 rounded-lg overflow-hidden">
+            <div className="px-3 py-2 border-b border-blue-100 dark:border-blue-500/20 bg-blue-50/60 dark:bg-blue-500/10 flex flex-wrap items-center gap-x-2 gap-y-1">
+              <Loader2 className="w-3.5 h-3.5 text-blue-600 dark:text-blue-300 animate-spin flex-shrink-0" />
+              <span className="text-[12px] font-semibold text-blue-800 dark:text-blue-200">
                 Analyzing {queue.inProgress.length} ticket{queue.inProgress.length !== 1 ? 's' : ''}…
               </span>
-              <span className="basis-full text-[10px] text-blue-600 sm:basis-auto">
+              <span className="basis-full text-[10px] text-blue-600 dark:text-blue-300 sm:basis-auto">
                 AI is ranking candidates — usually 5–30s per ticket
               </span>
             </div>
@@ -2919,10 +2919,10 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
               {queue.inProgress.map((run) => (
                 <div key={`ip-${run.id}`} className="px-3 py-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs">
                   <Loader2 className="w-3 h-3 text-blue-500 animate-spin flex-shrink-0 opacity-60" />
-                  <span className="text-[10px] text-slate-400 font-mono">#{run.ticket?.freshserviceTicketId}</span>
-                  <span className="min-w-0 flex-1 truncate text-slate-700 font-medium">{run.ticket?.subject || 'No subject'}</span>
-                  <span className="text-[10px] text-slate-400 hidden sm:inline">{run.ticket?.requester?.name || ''}</span>
-                  <span className="text-[10px] text-blue-600 italic">analyzing…</span>
+                  <span className="text-[10px] text-muted-foreground/75 font-mono">#{run.ticket?.freshserviceTicketId}</span>
+                  <span className="min-w-0 flex-1 truncate text-foreground/85 font-medium">{run.ticket?.subject || 'No subject'}</span>
+                  <span className="text-[10px] text-muted-foreground/75 hidden sm:inline">{run.ticket?.requester?.name || ''}</span>
+                  <span className="text-[10px] text-blue-600 dark:text-blue-300 italic">analyzing…</span>
                 </div>
               ))}
             </div>
@@ -2992,8 +2992,8 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
               />
             ) : (
               <div className="text-center py-10">
-                <Inbox className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-                <p className="text-slate-500 text-sm font-medium">
+                <Inbox className="w-10 h-10 text-muted-foreground/50 mx-auto mb-2" />
+                <p className="text-muted-foreground text-sm font-medium">
                   {subView === 'pending'
                     ? (queue.inProgress?.length > 0
                       ? 'No tickets awaiting decision yet — AI is still analyzing'
@@ -3008,7 +3008,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                             ? 'No deleted tickets in this period'
                             : 'No runs found'}
                 </p>
-                <button onClick={handleSmartRefresh} className="mt-2 text-xs text-blue-600 hover:underline inline-flex items-center gap-1"><RefreshCw className="w-3.5 h-3.5" /> Refresh</button>
+                <button onClick={handleSmartRefresh} className="mt-2 text-xs text-blue-600 dark:text-blue-300 hover:underline inline-flex items-center gap-1"><RefreshCw className="w-3.5 h-3.5" /> Refresh</button>
               </div>
             )
           ) : (
@@ -3062,17 +3062,17 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                       {/* Header row — light, sticky-feeling; sortable headers
                           render as buttons so keyboard users can sort too. */}
                       <div
-                        className="grid items-center bg-slate-50/80 border-y border-slate-200 text-[10px] font-semibold uppercase tracking-wider text-slate-500"
+                        className="grid items-center bg-muted/40 border-y border-border text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
                         style={{ gridTemplateColumns: cols }}
                       >
-                        <button type="button" onClick={() => toggleSort('createdAt')} className="flex items-center gap-1 px-3 py-2 hover:text-slate-700 text-left">
+                        <button type="button" onClick={() => toggleSort('createdAt')} className="flex items-center gap-1 px-3 py-2 hover:text-foreground/85 text-left">
                           {subView === 'pending' ? 'Analyzed' : 'Decided'} <SortIcon field="createdAt" />
                         </button>
-                        <button type="button" onClick={() => toggleSort('subject')} className="flex items-center gap-1 px-3 py-2 hover:text-slate-700 text-left">
+                        <button type="button" onClick={() => toggleSort('subject')} className="flex items-center gap-1 px-3 py-2 hover:text-foreground/85 text-left">
                           Ticket <SortIcon field="subject" />
                         </button>
                         <span className="px-3 py-2">Category</span>
-                        <button type="button" onClick={() => toggleSort('requester')} className="flex items-center gap-1 px-3 py-2 hover:text-slate-700 text-left">
+                        <button type="button" onClick={() => toggleSort('requester')} className="flex items-center gap-1 px-3 py-2 hover:text-foreground/85 text-left">
                           Requester <SortIcon field="requester" />
                         </button>
                         <span className="px-3 py-2">Assignee</span>
@@ -3100,15 +3100,15 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                           // rose tint so they stand out without shouting. State-flag
                           // backgrounds (deleted/closed/assigned) take precedence.
                           const bgClass = subView === 'pending' && flag === 'deleted'
-                            ? 'bg-red-50/30'
+                            ? 'bg-red-50/30 dark:bg-red-500/10'
                             : subView === 'pending' && flag === 'closed'
-                              ? 'bg-slate-50'
+                              ? 'bg-muted/50'
                               : subView === 'pending' && flag === 'assigned'
-                                ? 'bg-amber-50/30'
+                                ? 'bg-amber-50/30 dark:bg-amber-500/10'
                                 : isReturned
-                                  ? 'bg-rose-50/40'
+                                  ? 'bg-rose-50/40 dark:bg-rose-500/10'
                                   : newIds.has(run.id)
-                                    ? 'bg-emerald-50/60'
+                                    ? 'bg-emerald-50/60 dark:bg-emerald-500/10'
                                     : '';
                           const priorityMeta = getPriorityMeta(run.ticket);
                           const priClass = priorityMeta.border;
@@ -3149,12 +3149,12 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                                   handleSelectRun(run.id);
                                 }
                               }}
-                              className={`relative grid items-center border-b border-slate-100 border-l-[3px] ${priClass} ${bgClass} hover:bg-blue-50/60 cursor-pointer group transition-[opacity,background-color] duration-[240ms] ${removingIds.has(run.id) ? 'opacity-0' : ''} focus:outline-none focus-visible:bg-blue-50`}
+                              className={`relative grid items-center border-b border-border/60 border-l-[3px] ${priClass} ${bgClass} hover:bg-blue-50/60 dark:hover:bg-blue-500/10 cursor-pointer group transition-[opacity,background-color] duration-[240ms] ${removingIds.has(run.id) ? 'opacity-0' : ''} focus:outline-none focus-visible:bg-blue-50 dark:focus-visible:bg-blue-500/15`}
                               style={{ gridTemplateColumns: cols, minHeight: '52px' }}
                             >
                               {/* Signal: compact timestamp + icon-only priority/source/return indicators */}
                               <div className={`min-w-0 px-3 py-2 ${rowDim}`}>
-                                <div className="text-[11px] font-medium leading-tight text-slate-600">
+                                <div className="text-[11px] font-medium leading-tight text-muted-foreground">
                                   {fmtDate(getRunTimestamp(run))}
                                 </div>
                                 <div className="mt-1">{renderSignalIcons(run, priorityMeta, ctx)}</div>
@@ -3166,7 +3166,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                               <div className={`min-w-0 px-3 py-2 ${rowDim}`}>
                                 <div className="flex items-start gap-1.5 min-w-0">
                                   <span
-                                    className="font-semibold text-slate-800 text-[13px] leading-snug line-clamp-2 break-words"
+                                    className="font-semibold text-foreground text-[13px] leading-snug line-clamp-2 break-words"
                                     title={run.ticket?.subject || 'No subject'}
                                   >
                                     {run.ticket?.subject || 'No subject'}
@@ -3175,11 +3175,11 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                                     <Trash2 className="w-3.5 h-3.5 mt-0.5 text-red-400 flex-shrink-0" title="Deleted in FreshService" />
                                   )}
                                 </div>
-                                <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[10px] text-slate-400 leading-none">
+                                <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[10px] text-muted-foreground/75 leading-none">
                                   <span className="shrink-0 font-mono">#{run.ticket?.freshserviceTicketId}</span>
                                   {priorityMeta.rationale && (
                                     <>
-                                      <span className="shrink-0 text-slate-300">·</span>
+                                      <span className="shrink-0 text-muted-foreground/50">·</span>
                                       <span className="min-w-0 truncate" title={priorityMeta.rationale}>
                                         {priorityMeta.rationale}
                                       </span>
@@ -3187,7 +3187,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                                   )}
                                   {run._siblingCount > 0 && (
                                     <span
-                                      className="shrink-0 text-slate-400"
+                                      className="shrink-0 text-muted-foreground/75"
                                       title={`${run._siblingCount} earlier run${run._siblingCount > 1 ? 's' : ''} for this ticket — switch to a sub-filter to see all`}
                                     >
                                       · +{run._siblingCount} earlier
@@ -3204,22 +3204,22 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                                 <div className="flex items-center gap-1.5 min-w-0">
                                   {ticketTypeMeta?.isIncident && (
                                     <span
-                                      className="shrink-0 rounded bg-rose-50 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide text-rose-700"
+                                      className="shrink-0 rounded bg-rose-50 dark:bg-rose-500/15 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide text-rose-700 dark:text-rose-200"
                                       title={ticketTypeMeta.title}
                                     >
                                       INC
                                     </span>
                                   )}
                                   {categoryLabel ? (
-                                    <span className="min-w-0 truncate text-[11px] font-semibold leading-snug text-blue-700" title={categoryLabel}>
+                                    <span className="min-w-0 truncate text-[11px] font-semibold leading-snug text-blue-700 dark:text-blue-200" title={categoryLabel}>
                                       {categoryLabel}
                                     </span>
                                   ) : (
-                                    <span className="text-slate-300 text-[12px]">—</span>
+                                    <span className="text-muted-foreground/50 text-[12px]">—</span>
                                   )}
                                   {categoryNeedsReview && (
                                     <span
-                                      className="h-2 w-2 shrink-0 rounded-full bg-amber-400 ring-2 ring-amber-100"
+                                      className="h-2 w-2 shrink-0 rounded-full bg-amber-400 ring-2 ring-amber-100 dark:ring-amber-500/30"
                                       role="img"
                                       aria-label="Category fit needs review"
                                       title={suggestedCategoryLabel
@@ -3235,16 +3235,16 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                               <div className={`min-w-0 px-3 py-2 ${rowDim}`}>
                                 <div className="flex items-center gap-2 min-w-0">
                                   {avatarView && run.ticket?.requester?.name && (
-                                    <span className="flex-shrink-0 w-6 h-6 rounded-full bg-slate-200 text-slate-600 text-[9px] font-bold flex items-center justify-center">
+                                    <span className="flex-shrink-0 w-6 h-6 rounded-full bg-secondary text-muted-foreground text-[9px] font-bold flex items-center justify-center">
                                       {run.ticket.requester.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
                                     </span>
                                   )}
                                   <div className="min-w-0">
-                                    <div className="text-[12px] text-slate-700 truncate">
+                                    <div className="text-[12px] text-foreground/85 truncate">
                                       {run.ticket?.requester?.name || '—'}
                                     </div>
                                     {(run.ticket?.requester?.department || run.ticket?.requester?.email) && (
-                                      <div className="text-[10px] text-slate-400 truncate">
+                                      <div className="text-[10px] text-muted-foreground/75 truncate">
                                         {run.ticket?.requester?.department || run.ticket?.requester?.email}
                                       </div>
                                     )}
@@ -3261,15 +3261,15 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                                   avatarView ? (
                                     <span className="inline-flex items-center gap-1.5 min-w-0" title={assignee.name}>
                                       <TechAvatar techId={assignee.id} name={assignee.name} size="xs" ring="ring-1 ring-amber-300" />
-                                      <span className="text-[11px] text-slate-700 truncate max-w-[110px]">{assignee.name}</span>
+                                      <span className="text-[11px] text-foreground/85 truncate max-w-[110px]">{assignee.name}</span>
                                     </span>
                                   ) : (
-                                    <span className="block truncate text-[12px] font-medium text-amber-700" title={`Assigned to ${assignee.name}`}>
+                                    <span className="block truncate text-[12px] font-medium text-amber-700 dark:text-amber-200" title={`Assigned to ${assignee.name}`}>
                                       {assignee.name}
                                     </span>
                                   )
                                 ) : run.ticket?.assignedTechId ? (
-                                  <span className="text-[11px] text-slate-400 italic">External</span>
+                                  <span className="text-[11px] text-muted-foreground/75 italic">External</span>
                                 ) : recs.length > 0 ? (
                                   avatarView ? (
                                     <AiPicks recommendations={recs} />
@@ -3278,7 +3278,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                                       className="flex items-center gap-1.5 min-w-0 text-[12px] leading-snug"
                                       title={`AI suggestion: ${recs.map((r) => r.techName).filter(Boolean).join(', ')}`}
                                     >
-                                      <span className="text-blue-700 font-medium truncate">{topRec?.techName}</span>
+                                      <span className="text-blue-700 dark:text-blue-200 font-medium truncate">{topRec?.techName}</span>
                                       {recs.length > 1 && (
                                         <span className="flex-shrink-0 text-[10px] text-blue-400 font-semibold">
                                           +{recs.length - 1}
@@ -3287,7 +3287,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                                     </div>
                                   )
                                 ) : (
-                                  <span className="text-[11px] text-slate-300">Unassigned</span>
+                                  <span className="text-[11px] text-muted-foreground/50">Unassigned</span>
                                 )}
                               </div>
 
@@ -3317,15 +3317,15 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                                 <div className="px-3 py-2 relative">
                                   <div className={`flex items-center justify-end gap-0.5 transition-opacity ${quickApproveId === run.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100'}`}>
                                     {recs.length > 0 && flag !== 'deleted' && (
-                                      <button onClick={(e) => openQuickApprove(e, run)} className={`p-1 rounded transition-colors ${quickApproveId === run.id ? 'bg-green-100 text-green-700' : 'text-green-500 hover:text-green-700 hover:bg-green-50'}`} title="Quick approve"><Check className="w-3.5 h-3.5" /></button>
+                                      <button onClick={(e) => openQuickApprove(e, run)} className={`p-1 rounded transition-colors ${quickApproveId === run.id ? 'bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-200' : 'text-green-500 hover:text-green-700 dark:hover:text-green-200 hover:bg-green-50 dark:hover:bg-green-500/15'}`} title="Quick approve"><Check className="w-3.5 h-3.5" /></button>
                                     )}
                                     {isAdmin && (
                                       <>
-                                        <button onClick={(e) => handleDismiss(e, run.id)} className="p-1 text-yellow-500 hover:text-yellow-700 hover:bg-yellow-50 rounded" title="Dismiss"><XCircle className="w-3.5 h-3.5" /></button>
+                                        <button onClick={(e) => handleDismiss(e, run.id)} className="p-1 text-yellow-500 hover:text-yellow-700 dark:hover:text-yellow-200 hover:bg-yellow-50 dark:hover:bg-yellow-500/15 rounded" title="Dismiss"><XCircle className="w-3.5 h-3.5" /></button>
                                         {confirmDeleteId === run.id ? (
                                           <button onClick={(e) => handleDeleteConfirm(e, run.id)} className="px-1.5 py-0.5 bg-red-500 text-white rounded text-[10px] font-semibold">Delete?</button>
                                         ) : (
-                                          <button onClick={(e) => handleDeleteClick(e, run.id)} className="p-1 text-red-400 hover:text-red-600 hover:bg-red-50 rounded" title="Delete"><Trash2 className="w-3.5 h-3.5" /></button>
+                                          <button onClick={(e) => handleDeleteClick(e, run.id)} className="p-1 text-red-400 hover:text-red-600 dark:hover:text-red-300 hover:bg-red-50 dark:hover:bg-red-500/15 rounded" title="Delete"><Trash2 className="w-3.5 h-3.5" /></button>
                                         )}
                                       </>
                                     )}
@@ -3352,8 +3352,8 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
         {subView === 'pending' && queue.total > PAGE_SIZE_OPTIONS[0] && (() => {
           const totalPages = Math.max(1, Math.ceil(queue.total / queuePageSize));
           return (
-            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-slate-50/50 px-4 py-2.5 animate-in fade-in duration-150">
-              <div className="flex items-center gap-3 text-[11px] text-slate-500">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border bg-muted/25 px-4 py-2.5 animate-in fade-in duration-150">
+              <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
                 <span>
                   Showing {queuePage * queuePageSize + 1}–{Math.min((queuePage + 1) * queuePageSize, queue.total)} of {queue.total}
                 </span>
@@ -3364,7 +3364,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                   <button
                     onClick={() => setQueuePage(p => Math.max(0, p - 1))}
                     disabled={queuePage === 0}
-                    className="px-2.5 py-1 text-[11px] font-medium rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    className="px-2.5 py-1 text-[11px] font-medium rounded border border-border bg-card text-muted-foreground hover:bg-muted/50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                   >
                     Previous
                   </button>
@@ -3372,7 +3372,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                     <button
                       key={i}
                       onClick={() => setQueuePage(i)}
-                      className={`w-7 h-7 text-[11px] font-medium rounded border transition-colors ${i === queuePage ? 'border-blue-500 bg-blue-500 text-white' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
+                      className={`w-7 h-7 text-[11px] font-medium rounded border transition-colors ${i === queuePage ? 'border-blue-500 bg-blue-500 text-white' : 'border-border bg-card text-muted-foreground hover:bg-muted/50'}`}
                     >
                       {i + 1}
                     </button>
@@ -3380,7 +3380,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                   <button
                     onClick={() => setQueuePage(p => Math.min(totalPages - 1, p + 1))}
                     disabled={queuePage >= totalPages - 1}
-                    className="px-2.5 py-1 text-[11px] font-medium rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    className="px-2.5 py-1 text-[11px] font-medium rounded border border-border bg-card text-muted-foreground hover:bg-muted/50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                   >
                     Next
                   </button>
@@ -3394,8 +3394,8 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
         {subView !== 'pending' && activeResultsTotal > PAGE_SIZE_OPTIONS[0] && (() => {
           const totalPages = Math.max(1, Math.ceil(activeResultsTotal / resultsPageSize));
           return (
-            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-slate-50/50 px-4 py-2.5 animate-in fade-in duration-150">
-              <div className="flex items-center gap-3 text-[11px] text-slate-500">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border bg-muted/25 px-4 py-2.5 animate-in fade-in duration-150">
+              <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
                 <span>
                   Showing {resultsPageStart + 1}–{Math.min(resultsPageEnd, activeResultsTotal)} of {activeResultsTotal}
                 </span>
@@ -3406,17 +3406,17 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                   <button
                     onClick={() => setResultsPage((p) => Math.max(0, p - 1))}
                     disabled={resultsPage === 0}
-                    className="px-2.5 py-1 text-[11px] font-medium rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    className="px-2.5 py-1 text-[11px] font-medium rounded border border-border bg-card text-muted-foreground hover:bg-muted/50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                   >
                     Previous
                   </button>
-                  <span className="text-[11px] text-slate-500 tabular-nums">
+                  <span className="text-[11px] text-muted-foreground tabular-nums">
                     Page {resultsPage + 1} of {totalPages}
                   </span>
                   <button
                     onClick={() => setResultsPage((p) => Math.min(totalPages - 1, p + 1))}
                     disabled={resultsPage >= totalPages - 1}
-                    className="px-2.5 py-1 text-[11px] font-medium rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    className="px-2.5 py-1 text-[11px] font-medium rounded border border-border bg-card text-muted-foreground hover:bg-muted/50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                   >
                     Next
                   </button>
@@ -3429,8 +3429,8 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
 
       {/* Queued for business hours — collapsible (collapsed by default) */}
       {queuedRunsMeta.totalCount > 0 && (
-        <div ref={queuedSectionRef} className="border border-amber-200 rounded-lg overflow-hidden scroll-mt-4">
-          <div className="w-full bg-amber-50/80 px-3 sm:px-4 py-1.5 border-b border-amber-100 flex items-center gap-2">
+        <div ref={queuedSectionRef} className="border border-amber-200 dark:border-amber-500/30 rounded-lg overflow-hidden scroll-mt-4">
+          <div className="w-full bg-amber-50/80 dark:bg-amber-500/10 px-3 sm:px-4 py-1.5 border-b border-amber-100 dark:border-amber-500/20 flex items-center gap-2">
             <button
               type="button"
               onClick={() => setQueuedExpanded((v) => !v)}
@@ -3438,13 +3438,13 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
               aria-expanded={queuedExpanded}
             >
               <ChevronDown
-                className={`w-3.5 h-3.5 text-amber-600 flex-shrink-0 transition-transform duration-300 ${queuedExpanded ? 'rotate-0' : '-rotate-90'}`}
+                className={`w-3.5 h-3.5 text-amber-600 dark:text-amber-300 flex-shrink-0 transition-transform duration-300 ${queuedExpanded ? 'rotate-0' : '-rotate-90'}`}
               />
               <AlertCircle className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
-              <span className="text-[12px] font-semibold text-amber-800">Queued for Business Hours</span>
+              <span className="text-[12px] font-semibold text-amber-800 dark:text-amber-200">Queued for Business Hours</span>
               <span className="bg-amber-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full tabular-nums">{queuedRunsMeta.totalCount}</span>
               {queuedRunsMeta.truncated && (
-                <span className="text-[10px] text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">
+                <span className="text-[10px] text-amber-700 dark:text-amber-200 bg-amber-100 dark:bg-amber-500/20 px-1.5 py-0.5 rounded">
                   showing first {queuedRuns.length}
                 </span>
               )}
@@ -3455,19 +3455,19 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                 type="button"
                 onClick={handlePruneQueue}
                 disabled={pruning}
-                className="text-[10px] font-semibold text-amber-700 hover:text-amber-900 hover:bg-amber-100 px-2 py-0.5 rounded transition-colors disabled:opacity-50"
+                className="text-[10px] font-semibold text-amber-700 dark:text-amber-200 hover:text-amber-900 dark:hover:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-500/20 px-2 py-0.5 rounded transition-colors disabled:opacity-50"
                 title="Mark stale queued tickets as skipped if they're no longer eligible (closed, deleted, assigned)"
               >
                 {pruning ? 'Pruning…' : 'Prune stale'}
               </button>
             )}
             {queueStatus && !queueStatus.isBusinessHours && queueStatus.nextWindow ? (
-              <span className="inline-flex items-center gap-1 text-[10px] text-amber-700">
+              <span className="inline-flex items-center gap-1 text-[10px] text-amber-700 dark:text-amber-200">
                 <span className="w-1 h-1 rounded-full bg-amber-500 animate-pulse" />
                 Starts {queueStatus.nextWindow.label}
               </span>
             ) : queueStatus?.isBusinessHours ? (
-              <span className="inline-flex items-center gap-1 text-[10px] text-emerald-700">
+              <span className="inline-flex items-center gap-1 text-[10px] text-emerald-700 dark:text-emerald-200">
                 <span className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />
                 Active — processing on next sync
               </span>
@@ -3479,11 +3479,11 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
             style={{ gridTemplateRows: queuedExpanded ? '1fr' : '0fr' }}
           >
             <div className="overflow-hidden">
-              <div className="md:hidden divide-y divide-amber-50 bg-white">
+              <div className="md:hidden divide-y divide-amber-50 bg-card">
                 {queuedRuns.map((run) => (
                   <div key={run.id} className="px-3 py-2 space-y-1.5">
                     <div>
-                      <span className="text-[10px] text-gray-400 font-mono">#{run.ticket?.freshserviceTicketId}</span>
+                      <span className="text-[10px] text-muted-foreground/75 font-mono">#{run.ticket?.freshserviceTicketId}</span>
                       {run.ticket?.assessedPriority && (
                         <span
                           className={`ml-1.5 inline-flex items-center gap-1 text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded leading-none ${getPriorityMeta(run.ticket).pill}`}
@@ -3498,15 +3498,15 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                       )}
                       {isVerifiedReboundContext(run.reboundFrom) && (
                         <span
-                          className="ml-1.5 inline-flex items-center gap-0.5 text-[9px] font-semibold uppercase tracking-wide text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded leading-none"
+                          className="ml-1.5 inline-flex items-center gap-0.5 text-[9px] font-semibold uppercase tracking-wide text-rose-700 dark:text-rose-200 bg-rose-50 dark:bg-rose-500/15 border border-rose-200 dark:border-rose-500/30 px-1.5 py-0.5 rounded leading-none"
                           title={formatReturnedContext(run.reboundFrom, workspaceTimezone)}
                         >
                           <RotateCcw className="w-2.5 h-2.5" />
                           Returned from {run.reboundFrom.previousTechName?.split(' ')[0]}
                         </span>
                       )}
-                      <p className="font-medium text-slate-800 text-[13px] leading-snug">{run.ticket?.subject || 'No subject'}</p>
-                      <p className="text-[10px] text-slate-500 mt-0.5">{run.queuedReason || 'Outside business hours'}</p>
+                      <p className="font-medium text-foreground text-[13px] leading-snug">{run.ticket?.subject || 'No subject'}</p>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">{run.queuedReason || 'Outside business hours'}</p>
                     </div>
                     {isAdmin && (
                       <div className="flex items-center gap-1.5">
@@ -3516,7 +3516,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                         {confirmDeleteId === run.id ? (
                           <button onClick={(e) => handleDeleteConfirm(e, run.id)} className="px-2 py-1.5 bg-red-500 text-white rounded text-[11px] font-semibold touch-manipulation">Delete?</button>
                         ) : (
-                          <button onClick={(e) => handleDeleteClick(e, run.id)} className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-100 rounded touch-manipulation" title="Delete">
+                          <button onClick={(e) => handleDeleteClick(e, run.id)} className="p-1.5 text-red-400 hover:text-red-600 dark:hover:text-red-300 hover:bg-red-100 dark:hover:bg-red-500/20 rounded touch-manipulation" title="Delete">
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         )}
@@ -3526,7 +3526,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                 ))}
               </div>
               <table className="hidden md:table w-full text-xs">
-                <thead><tr className="text-[10px] text-amber-600 border-b border-amber-100 bg-amber-50/40">
+                <thead><tr className="text-[10px] text-amber-600 dark:text-amber-300 border-b border-amber-100 dark:border-amber-500/20 bg-amber-50/40 dark:bg-amber-500/10">
                   <th className="text-left px-3 py-1 font-medium">Ticket</th>
                   <th className="text-left px-3 py-1 font-medium">Reason</th>
                   <th className="text-left px-3 py-1 font-medium">Queued At</th>
@@ -3534,9 +3534,9 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                 </tr></thead>
                 <tbody>
                   {queuedRuns.map((run) => (
-                    <tr key={run.id} className="border-t border-amber-50 hover:bg-amber-50/60 transition-colors">
+                    <tr key={run.id} className="border-t border-amber-50 hover:bg-amber-50/60 dark:hover:bg-amber-500/10 transition-colors">
                       <td className="px-3 py-1.5">
-                        <span className="text-[10px] text-gray-400 font-mono">#{run.ticket?.freshserviceTicketId}</span>
+                        <span className="text-[10px] text-muted-foreground/75 font-mono">#{run.ticket?.freshserviceTicketId}</span>
                         {run.ticket?.assessedPriority && (
                           <span
                             className={`ml-2 inline-flex items-center gap-1 text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded align-middle leading-none ${getPriorityMeta(run.ticket).pill}`}
@@ -3551,17 +3551,17 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                         )}
                         {isVerifiedReboundContext(run.reboundFrom) && (
                           <span
-                            className="ml-2 inline-flex items-center gap-0.5 text-[9px] font-semibold uppercase tracking-wide text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded align-middle leading-none"
+                            className="ml-2 inline-flex items-center gap-0.5 text-[9px] font-semibold uppercase tracking-wide text-rose-700 dark:text-rose-200 bg-rose-50 dark:bg-rose-500/15 border border-rose-200 dark:border-rose-500/30 px-1.5 py-0.5 rounded align-middle leading-none"
                             title={formatReturnedContext(run.reboundFrom, workspaceTimezone)}
                           >
                             <RotateCcw className="w-2.5 h-2.5" />
                             Returned from {run.reboundFrom.previousTechName}
                           </span>
                         )}
-                        <span className="ml-2 font-medium text-slate-800">{run.ticket?.subject || 'No subject'}</span>
+                        <span className="ml-2 font-medium text-foreground">{run.ticket?.subject || 'No subject'}</span>
                       </td>
-                      <td className="px-3 py-1.5 text-[11px] text-slate-500">{run.queuedReason || 'Outside business hours'} · via {run.triggerSource}</td>
-                      <td className="px-3 py-1.5 text-[11px] text-slate-400 whitespace-nowrap">{formatDateTimeInTimezone(run.queuedAt, workspaceTimezone)}</td>
+                      <td className="px-3 py-1.5 text-[11px] text-muted-foreground">{run.queuedReason || 'Outside business hours'} · via {run.triggerSource}</td>
+                      <td className="px-3 py-1.5 text-[11px] text-muted-foreground/75 whitespace-nowrap">{formatDateTimeInTimezone(run.queuedAt, workspaceTimezone)}</td>
                       {isAdmin && (
                         <td className="px-3 py-1.5 text-right whitespace-nowrap">
                           <div className="flex items-center justify-end gap-1.5">
@@ -3569,7 +3569,7 @@ function QueueTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/Los
                             {confirmDeleteId === run.id ? (
                               <button onClick={(e) => handleDeleteConfirm(e, run.id)} className="px-1.5 py-0.5 bg-red-500 text-white rounded text-[10px] font-semibold">Delete?</button>
                             ) : (
-                              <button onClick={(e) => handleDeleteClick(e, run.id)} className="p-1 text-red-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors" title="Delete"><Trash2 className="w-3.5 h-3.5" /></button>
+                              <button onClick={(e) => handleDeleteClick(e, run.id)} className="p-1 text-red-400 hover:text-red-600 dark:hover:text-red-300 hover:bg-red-50 dark:hover:bg-red-500/15 rounded transition-colors" title="Delete"><Trash2 className="w-3.5 h-3.5" /></button>
                             )}
                           </div>
                         </td>
@@ -3628,21 +3628,21 @@ function RunNowLiveOverlay({ info, onClose }) {
 
   return (
     <div className="fixed inset-0 z-[300] bg-black/40 backdrop-blur-sm flex items-stretch sm:items-center justify-center sm:p-4">
-      <div className="bg-white w-full sm:max-w-5xl sm:rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-screen sm:max-h-[90vh]">
-        <div className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 border-b bg-gradient-to-r from-blue-50 to-indigo-50">
+      <div className="bg-card w-full sm:max-w-5xl sm:rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-screen sm:max-h-[90vh]">
+        <div className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 border-b bg-gradient-to-r from-blue-50 dark:from-blue-500/15 to-indigo-50 dark:to-indigo-500/15">
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-blue-700">
+            <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-200">
               <Brain className="w-3.5 h-3.5" />
               Running queued ticket now
             </div>
-            <div className="mt-0.5 text-sm font-semibold text-slate-800 truncate" title={info.subject}>
-              <span className="text-slate-400 mr-1.5">{fsLabel}</span>
+            <div className="mt-0.5 text-sm font-semibold text-foreground truncate" title={info.subject}>
+              <span className="text-muted-foreground/75 mr-1.5">{fsLabel}</span>
               {info.subject}
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-white/70 transition-colors"
+            className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-card/70 transition-colors"
             title="Close (Esc) — analysis continues in the background"
           >
             <XCircle className="w-5 h-5" />
@@ -3659,17 +3659,17 @@ function RunNowLiveOverlay({ info, onClose }) {
               onComplete={onClose}
             />
           ) : (
-            <div className="p-6 text-center text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg">
+            <div className="p-6 text-center text-sm text-amber-700 dark:text-amber-200 bg-amber-50 dark:bg-amber-500/15 border border-amber-200 dark:border-amber-500/30 rounded-lg">
               Cannot stream this run — internal ticket ID is missing. The run is still executing in the background; check the History tab in a few seconds.
             </div>
           )}
         </div>
 
-        <div className="px-4 sm:px-5 py-2.5 border-t bg-slate-50 text-[11px] text-slate-500 flex items-center justify-between">
+        <div className="px-4 sm:px-5 py-2.5 border-t bg-muted/50 text-[11px] text-muted-foreground flex items-center justify-between">
           <span>Closing this window won&apos;t cancel the run — it continues server-side.</span>
           <button
             onClick={onClose}
-            className="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 transition-colors"
+            className="px-3 py-1.5 rounded-lg text-xs font-medium text-foreground/85 bg-card border border-input hover:bg-muted transition-colors"
           >
             Close
           </button>
@@ -3745,13 +3745,13 @@ function HistoryTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/L
           <button
             type="button"
             onClick={() => navigate(returnTo || '/assignments/history')}
-            className="tp-focus-ring flex min-h-[40px] items-center gap-1.5 rounded text-sm font-medium text-slate-600 transition-colors hover:text-slate-900"
+            className="tp-focus-ring flex min-h-[40px] items-center gap-1.5 rounded text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
           >
             <ArrowLeft className="w-4 h-4" /> {backLabel}
           </button>
-          <div className="w-px h-5 bg-slate-200" />
-          <Brain className="w-4 h-4 text-blue-600" />
-          <h1 className="text-sm font-bold text-slate-900">Run #{selectedRun.id}</h1>
+          <div className="w-px h-5 bg-secondary" />
+          <Brain className="w-4 h-4 text-blue-600 dark:text-blue-300" />
+          <h1 className="text-sm font-bold text-foreground">Run #{selectedRun.id}</h1>
         </div>
         <PipelineRunDetail run={selectedRun} workspaceTimezone={workspaceTimezone} onDecide={null} deciding={false} isAdmin={isAdmin} onSyncComplete={refreshSelectedRun} />
       </div>
@@ -3761,29 +3761,29 @@ function HistoryTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/L
   if (loading) {
     return (
       <div className="flex items-center justify-center p-12">
-        <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
+        <Loader2 className="w-6 h-6 animate-spin text-blue-600 dark:text-blue-300" />
       </div>
     );
   }
 
   const DECISION_BADGES = {
-    pending_review: 'bg-yellow-100 text-yellow-800',
-    approved: 'bg-green-100 text-green-800',
-    modified: 'bg-blue-100 text-blue-800',
-    rejected: 'bg-red-100 text-red-800',
-    auto_assigned: 'bg-purple-100 text-purple-800',
-    noise_dismissed: 'bg-gray-100 text-gray-600',
-    duplicate_dismissed: 'bg-cyan-50 text-cyan-700',
-    deferred: 'bg-orange-100 text-orange-800',
+    pending_review: 'bg-yellow-100 dark:bg-yellow-500/20 text-yellow-800 dark:text-yellow-200',
+    approved: 'bg-green-100 dark:bg-green-500/20 text-green-800 dark:text-green-200',
+    modified: 'bg-blue-100 dark:bg-blue-500/20 text-blue-800 dark:text-blue-200',
+    rejected: 'bg-red-100 dark:bg-red-500/20 text-red-800 dark:text-red-200',
+    auto_assigned: 'bg-purple-100 dark:bg-purple-500/20 text-purple-800 dark:text-purple-200',
+    noise_dismissed: 'bg-muted text-muted-foreground',
+    duplicate_dismissed: 'bg-cyan-50 dark:bg-cyan-500/15 text-cyan-700 dark:text-cyan-200',
+    deferred: 'bg-orange-100 dark:bg-orange-500/20 text-orange-800 dark:text-orange-200',
   };
   const STATUS_BADGES = {
-    queued: 'bg-orange-100 text-orange-800',
-    running: 'bg-blue-100 text-blue-800',
-    completed: 'bg-green-100 text-green-800',
-    failed: 'bg-red-100 text-red-800',
-    cancelled: 'bg-gray-100 text-gray-600',
-    superseded: 'bg-gray-100 text-gray-600',
-    skipped_stale: 'bg-gray-100 text-gray-600',
+    queued: 'bg-orange-100 dark:bg-orange-500/20 text-orange-800 dark:text-orange-200',
+    running: 'bg-blue-100 dark:bg-blue-500/20 text-blue-800 dark:text-blue-200',
+    completed: 'bg-green-100 dark:bg-green-500/20 text-green-800 dark:text-green-200',
+    failed: 'bg-red-100 dark:bg-red-500/20 text-red-800 dark:text-red-200',
+    cancelled: 'bg-muted text-muted-foreground',
+    superseded: 'bg-muted text-muted-foreground',
+    skipped_stale: 'bg-muted text-muted-foreground',
   };
 
   const toggleSort = (field) => {
@@ -3792,8 +3792,8 @@ function HistoryTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/L
   };
 
   const SortIcon = ({ field }) => {
-    if (sortField !== field) return <ArrowUpDown className="w-3 h-3 text-slate-400" />;
-    return sortDir === 'asc' ? <ArrowUp className="w-3 h-3 text-blue-600" /> : <ArrowDown className="w-3 h-3 text-blue-600" />;
+    if (sortField !== field) return <ArrowUpDown className="w-3 h-3 text-muted-foreground/75" />;
+    return sortDir === 'asc' ? <ArrowUp className="w-3 h-3 text-blue-600 dark:text-blue-300" /> : <ArrowDown className="w-3 h-3 text-blue-600 dark:text-blue-300" />;
   };
 
   const filteredRuns = [...runs.items]
@@ -3816,18 +3816,18 @@ function HistoryTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/L
     <div className="space-y-3">
       {runs.items.length === 0 ? (
         <div className="text-center py-12">
-          <History className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-          <p className="text-slate-500 font-medium">No pipeline runs yet</p>
+          <History className="w-12 h-12 text-muted-foreground/50 mx-auto mb-3" />
+          <p className="text-muted-foreground font-medium">No pipeline runs yet</p>
         </div>
       ) : (
-        <div className="border border-slate-200 rounded-lg overflow-hidden">
+        <div className="border border-border rounded-lg overflow-hidden">
           {/* Toolbar */}
-          <div className="bg-slate-50 border-b border-slate-200 px-4 py-2.5 flex items-center gap-3">
-            <span className="text-sm font-medium text-slate-700">{runs.total} run{runs.total !== 1 ? 's' : ''}</span>
+          <div className="bg-muted/50 border-b border-border px-4 py-2.5 flex items-center gap-3">
+            <span className="text-sm font-medium text-foreground/85">{runs.total} run{runs.total !== 1 ? 's' : ''}</span>
             <div className="flex-1" />
-            <div className="flex items-center gap-1.5 text-xs text-slate-500">
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <Filter className="w-3.5 h-3.5" />
-              <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="border border-slate-200 rounded px-2 py-1 text-xs bg-white">
+              <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="border border-border rounded px-2 py-1 text-xs bg-card">
                 <option value="all">All statuses</option>
                 <option value="completed">Completed</option>
                 <option value="failed">Failed</option>
@@ -3835,7 +3835,7 @@ function HistoryTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/L
                 <option value="queued">Queued</option>
                 <option value="cancelled">Cancelled</option>
               </select>
-              <select value={filterDecision} onChange={(e) => setFilterDecision(e.target.value)} className="border border-slate-200 rounded px-2 py-1 text-xs bg-white">
+              <select value={filterDecision} onChange={(e) => setFilterDecision(e.target.value)} className="border border-border rounded px-2 py-1 text-xs bg-card">
                 <option value="all">All decisions</option>
                 <option value="pending_review">Pending review</option>
                 <option value="approved">Approved</option>
@@ -3849,40 +3849,40 @@ function HistoryTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/L
           </div>
 
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 border-b border-slate-200">
+            <thead className="bg-muted/50 border-b border-border">
               <tr>
-                <th className="text-left px-4 py-2.5 font-medium text-slate-500 text-xs">Run</th>
-                <th className="text-left px-4 py-2.5 font-medium text-slate-500 text-xs cursor-pointer select-none" onClick={() => toggleSort('subject')}>
+                <th className="text-left px-4 py-2.5 font-medium text-muted-foreground text-xs">Run</th>
+                <th className="text-left px-4 py-2.5 font-medium text-muted-foreground text-xs cursor-pointer select-none" onClick={() => toggleSort('subject')}>
                   <span className="flex items-center gap-1">Ticket <SortIcon field="subject" /></span>
                 </th>
-                <th className="text-left px-4 py-2.5 font-medium text-slate-500 text-xs cursor-pointer select-none" onClick={() => toggleSort('trigger')}>
+                <th className="text-left px-4 py-2.5 font-medium text-muted-foreground text-xs cursor-pointer select-none" onClick={() => toggleSort('trigger')}>
                   <span className="flex items-center gap-1">Trigger <SortIcon field="trigger" /></span>
                 </th>
-                <th className="text-left px-4 py-2.5 font-medium text-slate-500 text-xs cursor-pointer select-none" onClick={() => toggleSort('status')}>
+                <th className="text-left px-4 py-2.5 font-medium text-muted-foreground text-xs cursor-pointer select-none" onClick={() => toggleSort('status')}>
                   <span className="flex items-center gap-1">Status <SortIcon field="status" /></span>
                 </th>
-                <th className="text-left px-4 py-2.5 font-medium text-slate-500 text-xs cursor-pointer select-none" onClick={() => toggleSort('createdAt')}>
+                <th className="text-left px-4 py-2.5 font-medium text-muted-foreground text-xs cursor-pointer select-none" onClick={() => toggleSort('createdAt')}>
                   <span className="flex items-center gap-1">Date <SortIcon field="createdAt" /></span>
                 </th>
-                <th className="px-4 py-2.5 text-xs text-right font-medium text-slate-500">View</th>
+                <th className="px-4 py-2.5 text-xs text-right font-medium text-muted-foreground">View</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-border/60">
               {filteredRuns.map((run) => (
-                <tr key={run.id} className="hover:bg-slate-50 cursor-pointer group" onClick={() => handleSelectRun(run.id)}>
-                  <td className="px-4 py-3 text-xs font-mono text-slate-400">#{run.id}</td>
+                <tr key={run.id} className="hover:bg-muted/50 cursor-pointer group" onClick={() => handleSelectRun(run.id)}>
+                  <td className="px-4 py-3 text-xs font-mono text-muted-foreground/75">#{run.id}</td>
                   <td className="px-4 py-3 max-w-xs">
-                    <p className="font-medium text-slate-800 truncate">#{run.ticket?.freshserviceTicketId} — {run.ticket?.subject || 'No subject'}</p>
-                    {run.assignedTech && <p className="text-xs text-slate-400 mt-0.5">→ {run.assignedTech.name}</p>}
+                    <p className="font-medium text-foreground truncate">#{run.ticket?.freshserviceTicketId} — {run.ticket?.subject || 'No subject'}</p>
+                    {run.assignedTech && <p className="text-xs text-muted-foreground/75 mt-0.5">→ {run.assignedTech.name}</p>}
                   </td>
-                  <td className="px-4 py-3 text-xs text-slate-500 capitalize">{run.triggerSource}</td>
+                  <td className="px-4 py-3 text-xs text-muted-foreground capitalize">{run.triggerSource}</td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap gap-1">
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_BADGES[run.status] || 'bg-slate-100 text-slate-600'}`}>
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_BADGES[run.status] || 'bg-muted text-muted-foreground'}`}>
                         {(run.status || 'unknown').replace(/_/g, ' ')}
                       </span>
                       {run.status === 'completed' && run.decision && (
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${DECISION_BADGES[run.decision] || 'bg-slate-100 text-slate-600'}`}>
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${DECISION_BADGES[run.decision] || 'bg-muted text-muted-foreground'}`}>
                           {run.decision.replace(/_/g, ' ')}
                         </span>
                       )}
@@ -3896,9 +3896,9 @@ function HistoryTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/L
                       })()}
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-xs text-slate-400 whitespace-nowrap">{formatDateTimeInTimezone(run.createdAt, workspaceTimezone)}</td>
+                  <td className="px-4 py-3 text-xs text-muted-foreground/75 whitespace-nowrap">{formatDateTimeInTimezone(run.createdAt, workspaceTimezone)}</td>
                   <td className="px-4 py-3 text-right">
-                    <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-blue-500 ml-auto transition-colors" />
+                    <ChevronRight className="w-4 h-4 text-muted-foreground/75 group-hover:text-blue-500 ml-auto transition-colors" />
                   </td>
                 </tr>
               ))}
@@ -3906,13 +3906,13 @@ function HistoryTab({ deepRunId, isAdmin = false, workspaceTimezone = 'America/L
           </table>
 
           {totalPages > 1 && (
-            <div className="border-t border-slate-200 bg-slate-50 px-4 py-2.5 flex items-center justify-between">
-              <span className="text-xs text-slate-500">Page {page + 1} of {totalPages}</span>
+            <div className="border-t border-border bg-muted/50 px-4 py-2.5 flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">Page {page + 1} of {totalPages}</span>
               <div className="flex gap-1">
-                <button onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page === 0} className="px-3 py-1 border border-slate-200 rounded text-xs hover:bg-white disabled:opacity-40 flex items-center gap-1">
+                <button onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page === 0} className="px-3 py-1 border border-border rounded text-xs hover:bg-card disabled:opacity-40 flex items-center gap-1">
                   <ChevronLeft className="w-3.5 h-3.5" /> Prev
                 </button>
-                <button onClick={() => setPage((p) => p + 1)} disabled={page >= totalPages - 1} className="px-3 py-1 border border-slate-200 rounded text-xs hover:bg-white disabled:opacity-40 flex items-center gap-1">
+                <button onClick={() => setPage((p) => p + 1)} disabled={page >= totalPages - 1} className="px-3 py-1 border border-border rounded text-xs hover:bg-card disabled:opacity-40 flex items-center gap-1">
                   Next <ChevronRight className="w-3.5 h-3.5" />
                 </button>
               </div>
@@ -3944,28 +3944,28 @@ function isHandledInFreshServiceRun(run) {
 
 function getSyncPillMeta(run) {
   if (isHandledInFreshServiceRun(run)) {
-    return { label: '↷ handled in FS', className: 'bg-amber-100 text-amber-800' };
+    return { label: '↷ handled in FS', className: 'bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-200' };
   }
   if (isReadOnlyFreshServiceRun(run)) {
-    return { label: '– FS read-only', className: 'bg-slate-100 text-slate-600' };
+    return { label: '– FS read-only', className: 'bg-muted text-muted-foreground' };
   }
-  if (run.syncStatus === 'synced') return { label: '✓ synced', className: 'bg-green-100 text-green-700' };
-  if (run.syncStatus === 'dry_run') return { label: '◑ dry run', className: 'bg-yellow-100 text-yellow-700' };
-  if (run.syncStatus === 'failed') return { label: '✗ sync failed', className: 'bg-red-100 text-red-700' };
-  return { label: run.syncStatus, className: 'bg-slate-100 text-slate-500' };
+  if (run.syncStatus === 'synced') return { label: '✓ synced', className: 'bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-200' };
+  if (run.syncStatus === 'dry_run') return { label: '◑ dry run', className: 'bg-yellow-100 dark:bg-yellow-500/20 text-yellow-700 dark:text-yellow-200' };
+  if (run.syncStatus === 'failed') return { label: '✗ sync failed', className: 'bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-200' };
+  return { label: run.syncStatus, className: 'bg-muted text-muted-foreground' };
 }
 
-function ConfigToggle({ label, description, checked, onChange, color = 'text-blue-600' }) {
+function ConfigToggle({ label, description, checked, onChange, color = 'text-blue-600 dark:text-blue-300' }) {
   return (
     <div className="flex items-center justify-between py-3">
       <div className="mr-4">
-        <h4 className="font-medium text-sm text-slate-800">{label}</h4>
-        <p className="text-xs text-slate-500 mt-0.5">{description}</p>
+        <h4 className="font-medium text-sm text-foreground">{label}</h4>
+        <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
       </div>
       <button onClick={onChange} className="flex-shrink-0">
         {checked
           ? <ToggleRight className={`w-8 h-8 ${color}`} />
-          : <ToggleLeft className="w-8 h-8 text-slate-300" />
+          : <ToggleLeft className="w-8 h-8 text-muted-foreground/50" />
         }
       </button>
     </div>
@@ -3975,13 +3975,13 @@ function ConfigToggle({ label, description, checked, onChange, color = 'text-blu
 function ConfigSection({ icon: Icon, title, children, defaultOpen = true }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="border border-slate-200 rounded-xl overflow-hidden">
-      <button onClick={() => setOpen(!open)} className="w-full flex items-center gap-2.5 px-4 py-3 bg-slate-50 hover:bg-slate-100 transition-colors text-left">
-        <Icon className="w-4 h-4 text-slate-500 flex-shrink-0" />
-        <span className="text-sm font-semibold text-slate-700 flex-1">{title}</span>
-        {open ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />}
+    <div className="border border-border rounded-xl overflow-hidden">
+      <button onClick={() => setOpen(!open)} className="w-full flex items-center gap-2.5 px-4 py-3 bg-muted/50 hover:bg-muted transition-colors text-left">
+        <Icon className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+        <span className="text-sm font-semibold text-foreground/85 flex-1">{title}</span>
+        {open ? <ChevronDown className="w-4 h-4 text-muted-foreground/75" /> : <ChevronRight className="w-4 h-4 text-muted-foreground/75" />}
       </button>
-      {open && <div className="px-4 pb-4 divide-y divide-slate-100">{children}</div>}
+      {open && <div className="px-4 pb-4 divide-y divide-border/60">{children}</div>}
     </div>
   );
 }
@@ -4056,7 +4056,7 @@ function WebhookConfigCard({ workspaceTimezone = 'America/Los_Angeles' }) {
   if (loading) {
     return (
       <div className="py-3">
-        <div className="flex items-center gap-2 text-xs text-slate-500">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading webhook configuration
         </div>
       </div>
@@ -4066,7 +4066,7 @@ function WebhookConfigCard({ workspaceTimezone = 'America/Los_Angeles' }) {
   if (!config) {
     return (
       <div className="py-3">
-        <div className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-700">
+        <div className="rounded-lg border border-red-100 dark:border-red-500/20 bg-red-50 dark:bg-red-500/15 px-3 py-2 text-xs text-red-700 dark:text-red-200">
           Webhook configuration is unavailable.
         </div>
       </div>
@@ -4074,7 +4074,7 @@ function WebhookConfigCard({ workspaceTimezone = 'America/Los_Angeles' }) {
   }
 
   const enabled = Boolean(config.enabled);
-  const statusClass = enabled ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500';
+  const statusClass = enabled ? 'bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-200' : 'bg-muted text-muted-foreground';
   const requestBody = '{"ticket_id":"{{ticket.id_numeric}}"}';
   const counters = [
     ['Received', config.receivedCount || 0, config.lastReceivedAt],
@@ -4087,34 +4087,34 @@ function WebhookConfigCard({ workspaceTimezone = 'America/Los_Angeles' }) {
     <div className="py-3 space-y-3">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <h4 className="font-medium text-sm text-slate-800">FreshService Ticket Webhook</h4>
-          <p className="text-xs text-slate-500 mt-0.5">Low-latency ticket ingest for this workspace; scheduled polling remains the safety net.</p>
+          <h4 className="font-medium text-sm text-foreground">FreshService Ticket Webhook</h4>
+          <p className="text-xs text-muted-foreground mt-0.5">Low-latency ticket ingest for this workspace; scheduled polling remains the safety net.</p>
         </div>
         <button onClick={() => updateEnabled(!enabled)} disabled={saving} className="flex-shrink-0">
           {enabled
-            ? <ToggleRight className="w-8 h-8 text-blue-600" />
-            : <ToggleLeft className="w-8 h-8 text-slate-300" />
+            ? <ToggleRight className="w-8 h-8 text-blue-600 dark:text-blue-300" />
+            : <ToggleLeft className="w-8 h-8 text-muted-foreground/50" />
           }
         </button>
       </div>
 
-      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-3">
+      <div className="rounded-lg border border-border bg-muted/50 p-3 space-y-3">
         <div className="flex flex-wrap items-center gap-2">
           <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-semibold ${statusClass}`}>
-            <span className={`h-1.5 w-1.5 rounded-full ${enabled ? 'bg-green-500' : 'bg-slate-400'}`} />
+            <span className={`h-1.5 w-1.5 rounded-full ${enabled ? 'bg-green-500' : 'bg-muted-foreground/60'}`} />
             {enabled ? 'Enabled' : 'Disabled'}
           </span>
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2 py-1 text-xs font-medium text-slate-600 border border-slate-200">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-card px-2 py-1 text-xs font-medium text-muted-foreground border border-border">
             <KeyRound className="w-3 h-3" />
             {config.hasSecret ? `Secret ends ${config.secretLast4 || 'set'}` : 'No secret'}
           </span>
         </div>
 
         <div>
-          <label className="block text-xs font-medium text-slate-500 mb-1">FreshService Action URL</label>
+          <label className="block text-xs font-medium text-muted-foreground mb-1">FreshService Action URL</label>
           <div className="flex gap-2">
-            <input readOnly value={config.webhookUrl || ''} className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 font-mono" />
-            <button type="button" onClick={() => copyText('url', config.webhookUrl)} disabled={!config.webhookUrl} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50">
+            <input readOnly value={config.webhookUrl || ''} className="min-w-0 flex-1 rounded-lg border border-border bg-card px-3 py-2 text-xs text-foreground/85 font-mono" />
+            <button type="button" onClick={() => copyText('url', config.webhookUrl)} disabled={!config.webhookUrl} className="inline-flex items-center gap-1 rounded-lg border border-border bg-card px-2.5 py-2 text-xs font-medium text-muted-foreground hover:bg-muted/50 disabled:opacity-50">
               {copied === 'url' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
               URL
             </button>
@@ -4123,24 +4123,24 @@ function WebhookConfigCard({ workspaceTimezone = 'America/Los_Angeles' }) {
 
         <div className="grid gap-2 sm:grid-cols-3">
           <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">Method</label>
-            <input readOnly value="POST" className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700" />
+            <label className="block text-xs font-medium text-muted-foreground mb-1">Method</label>
+            <input readOnly value="POST" className="w-full rounded-lg border border-border bg-card px-3 py-2 text-xs font-semibold text-foreground/85" />
           </div>
           <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">Workspace Slug</label>
-            <input readOnly value={config.workspaceSlug || ''} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-mono text-slate-700" />
+            <label className="block text-xs font-medium text-muted-foreground mb-1">Workspace Slug</label>
+            <input readOnly value={config.workspaceSlug || ''} className="w-full rounded-lg border border-border bg-card px-3 py-2 text-xs font-mono text-foreground/85" />
           </div>
           <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">Secret Header</label>
-            <input readOnly value={config.headerName || 'X-Ticket-Pulse-Webhook-Secret'} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700" />
+            <label className="block text-xs font-medium text-muted-foreground mb-1">Secret Header</label>
+            <input readOnly value={config.headerName || 'X-Ticket-Pulse-Webhook-Secret'} className="w-full rounded-lg border border-border bg-card px-3 py-2 text-xs text-foreground/85" />
           </div>
         </div>
 
         <div>
-          <label className="block text-xs font-medium text-slate-500 mb-1">JSON Body</label>
+          <label className="block text-xs font-medium text-muted-foreground mb-1">JSON Body</label>
           <div className="flex gap-2">
-            <input readOnly value={requestBody} className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-mono text-slate-700" />
-            <button type="button" onClick={() => copyText('body', requestBody)} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50">
+            <input readOnly value={requestBody} className="min-w-0 flex-1 rounded-lg border border-border bg-card px-3 py-2 text-xs font-mono text-foreground/85" />
+            <button type="button" onClick={() => copyText('body', requestBody)} className="inline-flex items-center gap-1 rounded-lg border border-border bg-card px-2.5 py-2 text-xs font-medium text-muted-foreground hover:bg-muted/50">
               {copied === 'body' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
               Body
             </button>
@@ -4148,11 +4148,11 @@ function WebhookConfigCard({ workspaceTimezone = 'America/Los_Angeles' }) {
         </div>
 
         {secret && (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
-            <label className="block text-xs font-semibold text-amber-800 mb-1">New Secret</label>
+          <div className="rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 p-3">
+            <label className="block text-xs font-semibold text-amber-800 dark:text-amber-200 mb-1">New Secret</label>
             <div className="flex gap-2">
-              <input readOnly value={secret} className="min-w-0 flex-1 rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs font-mono text-slate-800" />
-              <button type="button" onClick={() => copyText('secret', secret)} className="inline-flex items-center gap-1 rounded-lg border border-amber-200 bg-white px-2.5 py-2 text-xs font-medium text-amber-700 hover:bg-amber-100">
+              <input readOnly value={secret} className="min-w-0 flex-1 rounded-lg border border-amber-200 dark:border-amber-500/30 bg-card px-3 py-2 text-xs font-mono text-foreground" />
+              <button type="button" onClick={() => copyText('secret', secret)} className="inline-flex items-center gap-1 rounded-lg border border-amber-200 dark:border-amber-500/30 bg-card px-2.5 py-2 text-xs font-medium text-amber-700 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-500/20">
                 {copied === 'secret' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
                 Secret
               </button>
@@ -4162,27 +4162,27 @@ function WebhookConfigCard({ workspaceTimezone = 'America/Los_Angeles' }) {
 
         <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
           {counters.map(([label, count, at]) => (
-            <div key={label} className="rounded-lg border border-slate-200 bg-white px-2.5 py-2">
-              <span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-400">{label}</span>
-              <span className="mt-0.5 block text-base font-bold text-slate-800">{count}</span>
-              <span className="mt-0.5 block truncate text-[10px] text-slate-500" title={timestamp(at)}>{timestamp(at)}</span>
+            <div key={label} className="rounded-lg border border-border bg-card px-2.5 py-2">
+              <span className="block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/75">{label}</span>
+              <span className="mt-0.5 block text-base font-bold text-foreground">{count}</span>
+              <span className="mt-0.5 block truncate text-[10px] text-muted-foreground" title={timestamp(at)}>{timestamp(at)}</span>
             </div>
           ))}
         </div>
 
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={rotate} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+          <button type="button" onClick={rotate} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-xs font-medium text-foreground/85 hover:bg-muted/50 disabled:opacity-50">
             {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
             Rotate Secret
           </button>
-          <button type="button" onClick={runTest} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+          <button type="button" onClick={runTest} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-xs font-medium text-foreground/85 hover:bg-muted/50 disabled:opacity-50">
             <ShieldCheck className="w-3.5 h-3.5" />
             Check Setup
           </button>
         </div>
 
         {testResult && (
-          <div className={`rounded-lg border px-3 py-2 text-xs ${testResult.ok ? 'border-green-200 bg-green-50 text-green-700' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
+          <div className={`rounded-lg border px-3 py-2 text-xs ${testResult.ok ? 'border-green-200 dark:border-green-500/30 bg-green-50 dark:bg-green-500/15 text-green-700 dark:text-green-200' : 'border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 text-amber-800 dark:text-amber-200'}`}>
             {testResult.ok ? 'Webhook setup is ready.' : `Setup needs attention: ${(testResult.issues || []).join(', ')}`}
           </div>
         )}
@@ -4237,29 +4237,29 @@ function GroupsMultiPicker({ selectedIds, onChange, description, note, countNoun
 
   return (
     <div className="py-3 space-y-3">
-      <p className="text-xs text-slate-500 leading-relaxed">{description}</p>
+      <p className="text-xs text-muted-foreground leading-relaxed">{description}</p>
 
       {note && (
-        <div className="flex items-start gap-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-600">
-          <AlertCircle className="w-4 h-4 text-slate-400 flex-shrink-0 mt-0.5" />
+        <div className="flex items-start gap-2 px-3 py-2 bg-muted/50 border border-border rounded-lg text-xs text-muted-foreground">
+          <AlertCircle className="w-4 h-4 text-muted-foreground/75 flex-shrink-0 mt-0.5" />
           <span>{note}</span>
         </div>
       )}
 
       {loading && (
-        <div className="flex items-center gap-2 text-xs text-slate-400">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground/75">
           <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading groups from FreshService...
         </div>
       )}
 
       {error && (
-        <div className="flex items-start gap-2 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">
+        <div className="flex items-start gap-2 px-3 py-2 bg-red-50 dark:bg-red-500/15 border border-red-200 dark:border-red-500/30 rounded-lg text-xs text-red-700 dark:text-red-200">
           <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
           <div className="flex-1">
             <p className="font-semibold">Could not load FreshService groups</p>
             <p className="mt-0.5">{error}</p>
             {selectedSet.size > 0 && (
-              <p className="mt-1.5 text-red-800">
+              <p className="mt-1.5 text-red-800 dark:text-red-200">
                 Currently selected (by ID): {[...selectedSet].join(', ')}
               </p>
             )}
@@ -4271,33 +4271,33 @@ function GroupsMultiPicker({ selectedIds, onChange, description, note, countNoun
         <>
           {groups.length > 8 && (
             <div className="relative">
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+              <Search className="w-3.5 h-3.5 text-muted-foreground/75 absolute left-2.5 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
                 placeholder="Filter groups..."
-                className="w-full pl-8 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg bg-white"
+                className="w-full pl-8 pr-3 py-1.5 text-xs border border-border rounded-lg bg-card"
               />
             </div>
           )}
 
           {selectedSet.size > 0 && (
-            <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
-              <Check className="w-3 h-3 text-emerald-600" />
+            <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+              <Check className="w-3 h-3 text-emerald-600 dark:text-emerald-300" />
               <span>{selectedSet.size} group{selectedSet.size === 1 ? '' : 's'} {countNoun}</span>
               <button
                 onClick={() => onChange([])}
-                className="ml-auto text-blue-600 hover:text-blue-800 hover:underline"
+                className="ml-auto text-blue-600 dark:text-blue-300 hover:text-blue-800 dark:hover:text-blue-200 hover:underline"
               >
                 Clear all
               </button>
             </div>
           )}
 
-          <div className="max-h-72 overflow-y-auto border border-slate-200 rounded-lg divide-y divide-slate-100">
+          <div className="max-h-72 overflow-y-auto border border-border rounded-lg divide-y divide-border/60">
             {visibleGroups.length === 0 && (
-              <div className="px-3 py-4 text-center text-xs text-slate-400">
+              <div className="px-3 py-4 text-center text-xs text-muted-foreground/75">
                 {filter ? 'No groups match the filter.' : 'No FreshService groups in this workspace.'}
               </div>
             )}
@@ -4306,20 +4306,20 @@ function GroupsMultiPicker({ selectedIds, onChange, description, note, countNoun
               return (
                 <label
                   key={g.id}
-                  className={`flex items-center gap-2.5 px-3 py-2 cursor-pointer hover:bg-slate-50 ${checked ? 'bg-blue-50/40' : ''}`}
+                  className={`flex items-center gap-2.5 px-3 py-2 cursor-pointer hover:bg-muted/50 ${checked ? 'bg-blue-50/40 dark:bg-blue-500/10' : ''}`}
                 >
                   <input
                     type="checkbox"
                     checked={checked}
                     onChange={() => toggle(g.id)}
-                    className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500 flex-shrink-0"
+                    className="w-4 h-4 text-blue-600 dark:text-blue-300 rounded border-input focus:ring-blue-500 flex-shrink-0"
                   />
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm text-slate-800 truncate">{g.name}</div>
-                    <div className="text-[10px] text-slate-400 flex items-center gap-1.5 mt-0.5">
+                    <div className="text-sm text-foreground truncate">{g.name}</div>
+                    <div className="text-[10px] text-muted-foreground/75 flex items-center gap-1.5 mt-0.5">
                       <Users className="w-2.5 h-2.5" />
                       {g.agentCount} agent{g.agentCount === 1 ? '' : 's'}
-                      <span className="text-slate-300">·</span>
+                      <span className="text-muted-foreground/50">·</span>
                       <span className="font-mono">#{g.id}</span>
                     </div>
                   </div>
@@ -4457,7 +4457,7 @@ export function AiProviderSettingsPanel({ onAssignmentModelChange }) {
           const firstModel = modelOptions(provider)[0]?.model || (provider === 'openai' ? 'gpt-5.6-sol' : 'claude-sonnet-5');
           updateSelected({ [field]: provider, [field === 'primaryProvider' ? 'primaryModel' : 'fallbackModel']: firstModel });
         }}
-        className={`px-3 py-1.5 text-xs font-semibold border transition-colors ${checked ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+        className={`px-3 py-1.5 text-xs font-semibold border transition-colors ${checked ? 'bg-blue-50 dark:bg-blue-500/15 border-blue-200 dark:border-blue-500/30 text-blue-700 dark:text-blue-200' : 'bg-card border-border text-muted-foreground hover:bg-muted/50'}`}
       >
         {provider === 'openai' ? 'OpenAI' : 'Anthropic'}
       </button>
@@ -4467,10 +4467,10 @@ export function AiProviderSettingsPanel({ onAssignmentModelChange }) {
   const healthPill = (provider) => {
     const status = health?.[provider]?.status || 'unknown';
     const styles = {
-      healthy: 'bg-green-50 text-green-700 border-green-200',
-      degraded: 'bg-yellow-50 text-yellow-700 border-yellow-200',
-      down: 'bg-red-50 text-red-700 border-red-200',
-      unknown: 'bg-slate-50 text-slate-600 border-slate-200',
+      healthy: 'bg-green-50 dark:bg-green-500/15 text-green-700 dark:text-green-200 border-green-200 dark:border-green-500/30',
+      degraded: 'bg-yellow-50 dark:bg-yellow-500/15 text-yellow-700 dark:text-yellow-200 border-yellow-200 dark:border-yellow-500/30',
+      down: 'bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200 border-red-200 dark:border-red-500/30',
+      unknown: 'bg-muted/50 text-muted-foreground border-border',
     };
     return (
       <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${styles[status] || styles.unknown}`}>
@@ -4481,7 +4481,7 @@ export function AiProviderSettingsPanel({ onAssignmentModelChange }) {
 
   if (loading) {
     return (
-      <div className="py-4 flex items-center gap-2 text-sm text-slate-500">
+      <div className="py-4 flex items-center gap-2 text-sm text-muted-foreground">
         <Loader2 className="w-4 h-4 animate-spin" />
         Loading provider settings...
       </div>
@@ -4491,11 +4491,11 @@ export function AiProviderSettingsPanel({ onAssignmentModelChange }) {
   return (
     <div className="py-3 space-y-4">
       <div>
-        <h4 className="font-medium text-sm text-slate-800 mb-1.5">Operation</h4>
+        <h4 className="font-medium text-sm text-foreground mb-1.5">Operation</h4>
         <select
           value={operation}
           onChange={(event) => setOperation(event.target.value)}
-          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white"
+          className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-card"
         >
           {AI_OPERATION_OPTIONS.map((option) => (
             <option key={option.value} value={option.value}>{option.label}</option>
@@ -4506,7 +4506,7 @@ export function AiProviderSettingsPanel({ onAssignmentModelChange }) {
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <h4 className="font-medium text-sm text-slate-800">Primary</h4>
+            <h4 className="font-medium text-sm text-foreground">Primary</h4>
             {healthPill(selected.primaryProvider)}
           </div>
           <div className="inline-flex overflow-hidden rounded-lg">
@@ -4516,7 +4516,7 @@ export function AiProviderSettingsPanel({ onAssignmentModelChange }) {
           <select
             value={selected.primaryModel || ''}
             onChange={(event) => updateSelected({ primaryModel: event.target.value })}
-            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white"
+            className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-card"
           >
             {modelOptions(selected.primaryProvider).map((model) => (
               <option key={model.model} value={model.model}>{model.label}</option>
@@ -4526,7 +4526,7 @@ export function AiProviderSettingsPanel({ onAssignmentModelChange }) {
             type="button"
             onClick={() => test(selected.primaryProvider, selected.primaryModel)}
             disabled={testingProvider === selected.primaryProvider}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-muted/50 disabled:opacity-50"
           >
             {testingProvider === selected.primaryProvider ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
             Test
@@ -4535,7 +4535,7 @@ export function AiProviderSettingsPanel({ onAssignmentModelChange }) {
 
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <h4 className="font-medium text-sm text-slate-800">Fallback</h4>
+            <h4 className="font-medium text-sm text-foreground">Fallback</h4>
             {healthPill(selected.fallbackProvider)}
           </div>
           <div className="inline-flex overflow-hidden rounded-lg">
@@ -4545,7 +4545,7 @@ export function AiProviderSettingsPanel({ onAssignmentModelChange }) {
           <select
             value={selected.fallbackModel || ''}
             onChange={(event) => updateSelected({ fallbackModel: event.target.value })}
-            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white"
+            className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-card"
           >
             {modelOptions(selected.fallbackProvider).map((model) => (
               <option key={model.model} value={model.model}>{model.label}</option>
@@ -4555,7 +4555,7 @@ export function AiProviderSettingsPanel({ onAssignmentModelChange }) {
             type="button"
             onClick={() => test(selected.fallbackProvider, selected.fallbackModel)}
             disabled={testingProvider === selected.fallbackProvider}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-muted/50 disabled:opacity-50"
           >
             {testingProvider === selected.fallbackProvider ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
             Test
@@ -4571,19 +4571,19 @@ export function AiProviderSettingsPanel({ onAssignmentModelChange }) {
       />
 
       <div className="flex items-center justify-between gap-3 pt-3">
-        <p className="text-xs text-slate-500">Provider API keys are configured server-side through environment variables or Key Vault.</p>
+        <p className="text-xs text-muted-foreground">Provider API keys are configured server-side through environment variables or Key Vault.</p>
         <button
           type="button"
           onClick={save}
           disabled={saving}
-          className="inline-flex items-center gap-2 bg-slate-900 text-white px-3 py-2 rounded-lg text-sm font-medium hover:bg-slate-800 disabled:opacity-50"
+          className="inline-flex items-center gap-2 bg-foreground text-background px-3 py-2 rounded-lg text-sm font-medium hover:bg-foreground/90 disabled:opacity-50"
         >
           {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
           Save Provider
         </button>
       </div>
       {testResult && (
-        <div className={`rounded-lg border px-3 py-2 text-xs ${testResult.ok ? 'border-green-200 bg-green-50 text-green-700' : 'border-red-200 bg-red-50 text-red-700'}`}>
+        <div className={`rounded-lg border px-3 py-2 text-xs ${testResult.ok ? 'border-green-200 dark:border-green-500/30 bg-green-50 dark:bg-green-500/15 text-green-700 dark:text-green-200' : 'border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200'}`}>
           {testResult.message}
         </div>
       )}
@@ -4632,16 +4632,16 @@ export function AssignmentConfigPanel({ workspaceTimezone = 'America/Los_Angeles
     finally { setSaving(false); }
   };
 
-  if (loading || !config) return <div className="flex items-center justify-center p-12"><Loader2 className="w-6 h-6 animate-spin text-blue-600" /></div>;
+  if (loading || !config) return <div className="flex items-center justify-center p-12"><Loader2 className="w-6 h-6 animate-spin text-blue-600 dark:text-blue-300" /></div>;
 
   return (
     <div className="space-y-4 max-w-2xl">
       {/* Section 1: Pipeline */}
       <ConfigSection icon={Brain} title="Pipeline">
         <ConfigToggle label="Enable Assignment Pipeline" description="When enabled, incoming tickets will be analyzed for technician assignment" checked={config.isEnabled} onChange={() => setConfig({ ...config, isEnabled: !config.isEnabled })} />
-        <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-3 text-sm text-blue-800">
+        <div className="rounded-lg border border-blue-100 dark:border-blue-500/20 bg-blue-50 dark:bg-blue-500/15 px-3 py-3 text-sm text-blue-800 dark:text-blue-200">
           <div className="font-medium">AI provider fallback moved to Settings.</div>
-          <p className="mt-1 text-xs text-blue-700">Model and fallback routing now applies to assignment, review, auto-response, calendar, and mail workflow generation.</p>
+          <p className="mt-1 text-xs text-blue-700 dark:text-blue-200">Model and fallback routing now applies to assignment, review, auto-response, calendar, and mail workflow generation.</p>
           <button
             type="button"
             onClick={() => { window.location.href = '/settings#ai-providers'; }}
@@ -4660,10 +4660,10 @@ export function AssignmentConfigPanel({ workspaceTimezone = 'America/Los_Angeles
           description="Write the AI's category to the ticket and FreshService even while assignment waits for human approval — and on after-hours priority runs, which classify anyway. Observe-only groups are always exempt (unless their category carve-out is on)."
           checked={!!config.autoCategorizeEnabled}
           onChange={() => setConfig({ ...config, autoCategorizeEnabled: !config.autoCategorizeEnabled })}
-          color="text-emerald-600"
+          color="text-emerald-600 dark:text-emerald-300"
         />
         {!!config.autoCategorizeEnabled && !config.priorityAssessmentAfterHoursEnabled && (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          <div className="rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
             <span className="font-semibold">Nights &amp; weekends are not covered yet:</span> Auto-Categorize rides the AI runs,
             and no runs execute outside business hours while after-hours priority assessment is off — tickets arriving overnight
             or on weekends stay uncategorized until the next business morning&apos;s queue drain. To categorize around the clock,
@@ -4677,19 +4677,19 @@ export function AssignmentConfigPanel({ workspaceTimezone = 'America/Los_Angeles
           description="Same requester + identical subject within 15 minutes: later copies get linked as duplicates, Ticket-Pulse-born copies auto-resolve, and the AI run is skipped. Turn off for teams whose legitimate requests share subjects (e.g. Power App submissions that differ only in the body)."
           checked={config.duplicateBurstEnabled !== false}
           onChange={() => setConfig({ ...config, duplicateBurstEnabled: config.duplicateBurstEnabled === false })}
-          color="text-sky-600"
+          color="text-sky-600 dark:text-sky-300"
         />
         <ConfigToggle
           label="Learn Competencies From Assignments"
           description="Approved and reassigned tickets strengthen — or auto-create — the assigned technician's competency in the ticket's category (marked with an amber dot in the matrix). Turn off if people outside the team temporarily handle tickets here, so one reassignment can't add them to the skills matrix."
           checked={config.competencyFeedbackEnabled !== false}
           onChange={() => setConfig({ ...config, competencyFeedbackEnabled: config.competencyFeedbackEnabled === false })}
-          color="text-amber-600"
+          color="text-amber-600 dark:text-amber-300"
         />
         <div className="py-3">
-          <h4 className="font-medium text-sm text-slate-800 mb-1.5">Max Recommendations</h4>
-          <p className="text-xs text-slate-500 mb-2">Number of technician recommendations the LLM should provide</p>
-          <input type="number" min="1" max="10" value={config.maxRecommendations || 3} onChange={(e) => setConfig({ ...config, maxRecommendations: parseInt(e.target.value) || 3 })} className="w-24 border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+          <h4 className="font-medium text-sm text-foreground mb-1.5">Max Recommendations</h4>
+          <p className="text-xs text-muted-foreground mb-2">Number of technician recommendations the LLM should provide</p>
+          <input type="number" min="1" max="10" value={config.maxRecommendations || 3} onChange={(e) => setConfig({ ...config, maxRecommendations: parseInt(e.target.value) || 3 })} className="w-24 border border-border rounded-lg px-3 py-2 text-sm" />
         </div>
       </ConfigSection>
 
@@ -4699,17 +4699,17 @@ export function AssignmentConfigPanel({ workspaceTimezone = 'America/Los_Angeles
           description="Persist Ticket Pulse assessed priority and allow priority-only runs. Turn off to stop workspace priority detection while assignment routing continues."
           checked={config.priorityAssessmentEnabled !== false}
           onChange={() => setConfig({ ...config, priorityAssessmentEnabled: !(config.priorityAssessmentEnabled !== false) })}
-          color="text-red-600"
+          color="text-red-600 dark:text-red-300"
         />
         <ConfigToggle
           label="FreshService Priority Writeback"
           description="Write assessed priority to FreshService native priority. Turn off to keep priority assessment local to Ticket Pulse."
           checked={config.priorityWritebackEnabled !== false}
           onChange={() => setConfig({ ...config, priorityWritebackEnabled: !(config.priorityWritebackEnabled !== false) })}
-          color="text-amber-600"
+          color="text-amber-600 dark:text-amber-300"
         />
         {config.priorityAssessmentEnabled === false && (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          <div className="rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
             After-hours priority-only runs, priority backfills, local assessed-priority persistence, and FreshService priority writeback are disabled for this workspace.
           </div>
         )}
@@ -4718,7 +4718,7 @@ export function AssignmentConfigPanel({ workspaceTimezone = 'America/Los_Angeles
           description="Write the AI's assessed ticket type (from Settings → Ticket Ops → Ticket types) to FreshService. Only types mapped to an FS choice are ever sent; Ticket Pulse–native types stay local."
           checked={!!config.typeWritebackEnabled}
           onChange={() => setConfig({ ...config, typeWritebackEnabled: !config.typeWritebackEnabled })}
-          color="text-violet-600"
+          color="text-violet-600 dark:text-violet-300"
         />
       </ConfigSection>
 
@@ -4729,7 +4729,7 @@ export function AssignmentConfigPanel({ workspaceTimezone = 'America/Los_Angeles
           onChange={(ids) => setConfig({ ...config, excludedGroupIds: ids })}
           countNoun="excluded"
           description={(
-            <>Tickets in any of the selected groups will <span className="font-semibold text-slate-700">always require manual approval</span> in the Ticket Queue, even when Auto-Assign is on. The LLM still produces a recommendation; an admin just has to click approve before it gets written back to FreshService.</>
+            <>Tickets in any of the selected groups will <span className="font-semibold text-foreground/85">always require manual approval</span> in the Ticket Queue, even when Auto-Assign is on. The LLM still produces a recommendation; an admin just has to click approve before it gets written back to FreshService.</>
           )}
           note={!config.autoAssign ? 'Auto-Assign is currently off, so this list has no effect right now. Selections are still saved.' : null}
         />
@@ -4742,7 +4742,7 @@ export function AssignmentConfigPanel({ workspaceTimezone = 'America/Los_Angeles
           onChange={(ids) => setConfig({ ...config, observeOnlyGroupIds: ids })}
           countNoun="observed"
           description={(
-            <>The AI still analyzes every ticket in the selected groups and records what it <span className="font-semibold text-slate-700">would have done</span> — category, priority, type, even &ldquo;this looks like noise&rdquo; — visible in the review queue. But it <span className="font-semibold text-slate-700">changes nothing on the ticket</span>: no assignment, no noise flag, no category or priority stamps, no FreshService write-back (unless the category carve-out below is on). Ideal while onboarding a new team or mailbox: watch what the AI would do before letting it act.</>
+            <>The AI still analyzes every ticket in the selected groups and records what it <span className="font-semibold text-foreground/85">would have done</span> — category, priority, type, even &ldquo;this looks like noise&rdquo; — visible in the review queue. But it <span className="font-semibold text-foreground/85">changes nothing on the ticket</span>: no assignment, no noise flag, no category or priority stamps, no FreshService write-back (unless the category carve-out below is on). Ideal while onboarding a new team or mailbox: watch what the AI would do before letting it act.</>
           )}
           note="Manual actions are unaffected — reviewers can still approve a recorded suggestion to apply it deliberately."
         />
@@ -4751,7 +4751,7 @@ export function AssignmentConfigPanel({ workspaceTimezone = 'America/Los_Angeles
           description="Carve-out: observed tickets still get the AI's category on the ticket (and in FreshService when Auto-Categorize is on) — assignment, noise, and priority stay recorded-only."
           checked={!!config.observeCategoryWritebackEnabled}
           onChange={() => setConfig({ ...config, observeCategoryWritebackEnabled: !config.observeCategoryWritebackEnabled })}
-          color="text-violet-600"
+          color="text-violet-600 dark:text-violet-300"
         />
       </ConfigSection>
 
@@ -4759,7 +4759,7 @@ export function AssignmentConfigPanel({ workspaceTimezone = 'America/Los_Angeles
       <ConfigSection icon={RefreshCw} title="FreshService Sync">
         <ConfigToggle label="Dry-Run Mode" description="Preview all FreshService changes without executing them. Turn off when ready to go live." checked={config.dryRunMode} onChange={() => setConfig({ ...config, dryRunMode: !config.dryRunMode })} color="text-orange-500" />
         <div className="py-3">
-          <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium ${config.dryRunMode ? 'bg-orange-100 text-orange-800' : 'bg-green-100 text-green-800'}`}>
+          <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium ${config.dryRunMode ? 'bg-orange-100 dark:bg-orange-500/20 text-orange-800 dark:text-orange-200' : 'bg-green-100 dark:bg-green-500/20 text-green-800 dark:text-green-200'}`}>
             <span className={`w-2 h-2 rounded-full ${config.dryRunMode ? 'bg-orange-500' : 'bg-green-500'}`} />
             {config.dryRunMode ? 'Dry-run active — FreshService will NOT be modified' : 'Live mode — changes will be written to FreshService'}
           </div>
@@ -4769,9 +4769,9 @@ export function AssignmentConfigPanel({ workspaceTimezone = 'America/Los_Angeles
       {/* Section 4: Ticket Detection */}
       <ConfigSection icon={Search} title="Ticket Detection">
         <ConfigToggle label="Poll for Unassigned Tickets" description="Safety net: check for unassigned tickets after each sync cycle" checked={config.pollForUnassigned} onChange={() => setConfig({ ...config, pollForUnassigned: !config.pollForUnassigned })} />
-        <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-3 text-sm text-blue-800">
+        <div className="rounded-lg border border-blue-100 dark:border-blue-500/20 bg-blue-50 dark:bg-blue-500/15 px-3 py-3 text-sm text-blue-800 dark:text-blue-200">
           <div className="font-medium">After-hours priority assessment is controlled in Settings &gt; Urgent Escalation.</div>
-          <p className="mt-1 text-xs text-blue-700">
+          <p className="mt-1 text-xs text-blue-700 dark:text-blue-200">
             Turn on Automatic urgent detection there to run priority-only assessment after hours and alert the escalation roster.
           </p>
           <button
@@ -4783,17 +4783,17 @@ export function AssignmentConfigPanel({ workspaceTimezone = 'America/Los_Angeles
           </button>
         </div>
         <div className="py-3">
-          <h4 className="font-medium text-sm text-slate-800 mb-1.5">Max Tickets Per Poll Cycle</h4>
-          <input type="number" min="1" max="20" value={config.pollMaxPerCycle || 5} onChange={(e) => setConfig({ ...config, pollMaxPerCycle: parseInt(e.target.value) || 5 })} className="w-24 border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+          <h4 className="font-medium text-sm text-foreground mb-1.5">Max Tickets Per Poll Cycle</h4>
+          <input type="number" min="1" max="20" value={config.pollMaxPerCycle || 5} onChange={(e) => setConfig({ ...config, pollMaxPerCycle: parseInt(e.target.value) || 5 })} className="w-24 border border-border rounded-lg px-3 py-2 text-sm" />
         </div>
         <WebhookConfigCard workspaceTimezone={workspaceTimezone} />
       </ConfigSection>
 
       {/* Section 5: Urgent escalation moved to workspace settings. */}
       <ConfigSection icon={AlertCircle} title="Urgent Escalation">
-        <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-3 text-sm text-blue-800">
+        <div className="rounded-lg border border-blue-100 dark:border-blue-500/20 bg-blue-50 dark:bg-blue-500/15 px-3 py-3 text-sm text-blue-800 dark:text-blue-200">
           <div className="font-medium">Moved to Settings &gt; Urgent Escalation.</div>
-          <p className="mt-1 text-xs text-blue-700">
+          <p className="mt-1 text-xs text-blue-700 dark:text-blue-200">
             Escalation recipients now use selected workspace users and their verified notification preferences.
           </p>
           <button
@@ -4809,10 +4809,10 @@ export function AssignmentConfigPanel({ workspaceTimezone = 'America/Los_Angeles
       {/* Section 6: Email Monitoring */}
       <ConfigSection icon={Mail} title="Email Monitoring (Office 365)" defaultOpen={false}>
         <div className="py-3">
-          <h4 className="font-medium text-sm text-slate-800 mb-1.5">Monitored Mailbox</h4>
-          <p className="text-xs text-slate-500 mb-2">Shared mailbox to monitor for incoming tickets</p>
+          <h4 className="font-medium text-sm text-foreground mb-1.5">Monitored Mailbox</h4>
+          <p className="text-xs text-muted-foreground mb-2">Shared mailbox to monitor for incoming tickets</p>
           <div className="flex gap-2">
-            <input type="email" value={config.monitoredMailbox || ''} onChange={(e) => setConfig({ ...config, monitoredMailbox: e.target.value })} placeholder="helpdesk@company.com" className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+            <input type="email" value={config.monitoredMailbox || ''} onChange={(e) => setConfig({ ...config, monitoredMailbox: e.target.value })} placeholder="helpdesk@company.com" className="flex-1 border border-border rounded-lg px-3 py-2 text-sm" />
             <button
               onClick={async () => {
                 if (!config.monitoredMailbox) return;
@@ -4822,21 +4822,21 @@ export function AssignmentConfigPanel({ workspaceTimezone = 'America/Los_Angeles
                 finally { setEmailTesting(false); }
               }}
               disabled={emailTesting || !config.monitoredMailbox}
-              className="px-3 py-2 border border-slate-200 rounded-lg text-sm font-medium hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1"
+              className="px-3 py-2 border border-border rounded-lg text-sm font-medium hover:bg-muted/50 disabled:opacity-50 flex items-center gap-1"
             >
               {emailTesting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />} Test
             </button>
           </div>
           {emailTestResult && (
-            <div className={`mt-2 p-2 rounded-lg text-xs ${emailTestResult.success ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+            <div className={`mt-2 p-2 rounded-lg text-xs ${emailTestResult.success ? 'bg-green-50 dark:bg-green-500/15 text-green-700 dark:text-green-200' : 'bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200'}`}>
               {emailTestResult.message}
             </div>
           )}
         </div>
         <ConfigToggle label="Enable Email Polling" description="Automatically check the mailbox for new emails and trigger assignment" checked={config.emailPollingEnabled} onChange={() => setConfig({ ...config, emailPollingEnabled: !config.emailPollingEnabled })} />
         <div className="py-3">
-          <h4 className="font-medium text-sm text-slate-800 mb-1.5">Polling Interval</h4>
-          <select value={config.emailPollingIntervalSec || 60} onChange={(e) => setConfig({ ...config, emailPollingIntervalSec: parseInt(e.target.value) })} className="border border-slate-200 rounded-lg px-3 py-2 text-sm">
+          <h4 className="font-medium text-sm text-foreground mb-1.5">Polling Interval</h4>
+          <select value={config.emailPollingIntervalSec || 60} onChange={(e) => setConfig({ ...config, emailPollingIntervalSec: parseInt(e.target.value) })} className="border border-border rounded-lg px-3 py-2 text-sm">
             <option value={30}>Every 30 seconds</option>
             <option value={60}>Every 60 seconds</option>
             <option value={120}>Every 2 minutes</option>
@@ -4845,15 +4845,15 @@ export function AssignmentConfigPanel({ workspaceTimezone = 'America/Los_Angeles
         </div>
         {emailStatus && (
           <div className="py-3">
-            <div className="flex items-center justify-between bg-slate-50 rounded-lg p-3">
+            <div className="flex items-center justify-between bg-muted/50 rounded-lg p-3">
               <div>
-                <span className={`inline-flex items-center gap-1 text-xs font-medium ${emailStatus.running ? 'text-green-600' : 'text-slate-400'}`}>
-                  <span className={`w-2 h-2 rounded-full ${emailStatus.running ? 'bg-green-500' : 'bg-slate-300'}`} />
+                <span className={`inline-flex items-center gap-1 text-xs font-medium ${emailStatus.running ? 'text-green-600 dark:text-green-300' : 'text-muted-foreground/75'}`}>
+                  <span className={`w-2 h-2 rounded-full ${emailStatus.running ? 'bg-green-500' : 'bg-muted-foreground/40'}`} />
                   {emailStatus.running ? 'Polling active' : 'Polling inactive'}
                 </span>
-                {emailStatus.lastCheck && <p className="text-[10px] text-slate-400 mt-0.5">Last: {formatDateTimeInTimezone(emailStatus.lastCheck, workspaceTimezone)}</p>}
+                {emailStatus.lastCheck && <p className="text-[10px] text-muted-foreground/75 mt-0.5">Last: {formatDateTimeInTimezone(emailStatus.lastCheck, workspaceTimezone)}</p>}
               </div>
-              <button onClick={async () => { setPolling(true); try { await assignmentAPI.emailPollNow(); const r = await assignmentAPI.emailStatus(); setEmailStatus(r?.data || null); } catch { /* ignore polling refresh errors */ } finally { setPolling(false); } }} disabled={polling} className="px-2.5 py-1 border border-slate-200 rounded text-xs font-medium hover:bg-white disabled:opacity-50 flex items-center gap-1">
+              <button onClick={async () => { setPolling(true); try { await assignmentAPI.emailPollNow(); const r = await assignmentAPI.emailStatus(); setEmailStatus(r?.data || null); } catch { /* ignore polling refresh errors */ } finally { setPolling(false); } }} disabled={polling} className="px-2.5 py-1 border border-border rounded text-xs font-medium hover:bg-card disabled:opacity-50 flex items-center gap-1">
                 {polling ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />} Poll Now
               </button>
             </div>
@@ -4871,43 +4871,43 @@ export function AssignmentConfigPanel({ workspaceTimezone = 'America/Los_Angeles
         />
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 py-3">
           <div>
-            <h4 className="font-medium text-sm text-slate-800 mb-1.5">Run Hour</h4>
+            <h4 className="font-medium text-sm text-foreground mb-1.5">Run Hour</h4>
             <input
               type="number"
               min="0"
               max="23"
               value={config.dailyReviewRunHour ?? 18}
               onChange={(e) => setConfig({ ...config, dailyReviewRunHour: Math.max(0, Math.min(23, parseInt(e.target.value, 10) || 0)) })}
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
+              className="w-full border border-border rounded-lg px-3 py-2 text-sm"
             />
           </div>
           <div>
-            <h4 className="font-medium text-sm text-slate-800 mb-1.5">Run Minute</h4>
+            <h4 className="font-medium text-sm text-foreground mb-1.5">Run Minute</h4>
             <input
               type="number"
               min="0"
               max="59"
               value={config.dailyReviewRunMinute ?? 5}
               onChange={(e) => setConfig({ ...config, dailyReviewRunMinute: Math.max(0, Math.min(59, parseInt(e.target.value, 10) || 0)) })}
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
+              className="w-full border border-border rounded-lg px-3 py-2 text-sm"
             />
           </div>
           <div>
-            <h4 className="font-medium text-sm text-slate-800 mb-1.5">Thread Backfill Window</h4>
+            <h4 className="font-medium text-sm text-foreground mb-1.5">Thread Backfill Window</h4>
             <input
               type="number"
               min="1"
               max="90"
               value={config.dailyReviewLookbackDays ?? 14}
               onChange={(e) => setConfig({ ...config, dailyReviewLookbackDays: Math.max(1, Math.min(90, parseInt(e.target.value, 10) || 14)) })}
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
+              className="w-full border border-border rounded-lg px-3 py-2 text-sm"
             />
           </div>
         </div>
-        <div className="text-xs text-slate-500">
+        <div className="text-xs text-muted-foreground">
           Runs are evaluated in the workspace timezone ({workspaceTimezone}). The thread backfill window controls how far back the system should be prepared to hydrate missing FreshService thread data for manual reviews.
         </div>
-        <div className="border-t border-slate-100 mt-4 pt-4">
+        <div className="border-t border-border/60 mt-4 pt-4">
           <ConfigToggle
             label="Preheat thread cache during regular sync"
             description={
@@ -4922,16 +4922,16 @@ export function AssignmentConfigPanel({ workspaceTimezone = 'America/Los_Angeles
       {/* Section 6: Advanced */}
       <ConfigSection icon={Settings2} title="Advanced" defaultOpen={false}>
         <div className="py-3">
-          <h4 className="font-medium text-sm text-slate-800 mb-1.5">Scoring Weights</h4>
-          <p className="text-xs text-slate-500 mb-3">Relative importance of each factor when ranking technicians. Values should sum to 1.0.</p>
+          <h4 className="font-medium text-sm text-foreground mb-1.5">Scoring Weights</h4>
+          <p className="text-xs text-muted-foreground mb-3">Relative importance of each factor when ranking technicians. Values should sum to 1.0.</p>
           <div className="grid grid-cols-2 gap-3">
             {['competency', 'workload', 'location', 'recency'].map((key) => (
               <div key={key}>
-                <label className="text-xs text-slate-500 capitalize font-medium">{key}</label>
+                <label className="text-xs text-muted-foreground capitalize font-medium">{key}</label>
                 <input type="number" min="0" max="1" step="0.05"
                   value={config.scoringWeights?.[key] ?? (key === 'competency' ? 0.35 : key === 'workload' ? 0.30 : key === 'location' ? 0.20 : 0.15)}
                   onChange={(e) => setConfig({ ...config, scoringWeights: { ...(config.scoringWeights || {}), [key]: parseFloat(e.target.value) || 0 } })}
-                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+                  className="w-full border border-border rounded-lg px-3 py-2 text-sm mt-1" />
               </div>
             ))}
           </div>
@@ -4944,7 +4944,7 @@ export function AssignmentConfigPanel({ workspaceTimezone = 'America/Los_Angeles
           {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
           Save Configuration
         </button>
-        {saveSuccess && <span className="text-sm text-green-600 font-medium">Saved successfully</span>}
+        {saveSuccess && <span className="text-sm text-green-600 dark:text-green-300 font-medium">Saved successfully</span>}
       </div>
     </div>
   );
@@ -5046,10 +5046,10 @@ export default function AssignmentReview() {
   if (!isReviewer) {
     return (
       <AppShell activePage="assignments" contentClassName="max-w-7xl mx-auto w-full px-2 sm:px-4 py-8">
-        <div className="mx-auto bg-white rounded-xl border border-slate-200 shadow-sm p-8 text-center max-w-sm">
-          <Brain className="w-10 h-10 text-slate-300 mx-auto mb-3" />
-          <h2 className="text-lg font-semibold text-slate-800 mb-1">Access Restricted</h2>
-          <p className="text-sm text-slate-500 mb-4">Ticket Assignment requires Reviewer or Admin access to this workspace.</p>
+        <div className="mx-auto bg-card rounded-xl border border-border shadow-sm p-8 text-center max-w-sm">
+          <Brain className="w-10 h-10 text-muted-foreground/50 mx-auto mb-3" />
+          <h2 className="text-lg font-semibold text-foreground mb-1">Access Restricted</h2>
+          <p className="text-sm text-muted-foreground mb-4">Ticket Assignment requires Reviewer or Admin access to this workspace.</p>
           <button onClick={() => navigate('/dashboard')} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
             Back to Dashboard
           </button>
@@ -5068,14 +5068,14 @@ export default function AssignmentReview() {
     return (
       <AppShell activePage="assignments">
         <div className="mb-3 flex items-center gap-3">
-          <button onClick={goBack} className="flex min-h-[40px] items-center gap-1.5 text-slate-600 hover:text-slate-900 transition-colors text-sm font-medium">
+          <button onClick={goBack} className="flex min-h-[40px] items-center gap-1.5 text-muted-foreground hover:text-foreground transition-colors text-sm font-medium">
             <ArrowLeft className="w-4 h-4" /> {backLabel}
           </button>
-          <div className="w-px h-5 bg-slate-200" />
-          <Brain className="w-4 h-4 text-blue-600" />
-          <h1 className="text-sm font-bold text-slate-900">Pipeline Analysis</h1>
+          <div className="w-px h-5 bg-secondary" />
+          <Brain className="w-4 h-4 text-blue-600 dark:text-blue-300" />
+          <h1 className="text-sm font-bold text-foreground">Pipeline Analysis</h1>
         </div>
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm px-3 py-3 sm:px-6 sm:py-5">
+        <div className="bg-card rounded-xl border border-border shadow-sm px-3 py-3 sm:px-6 sm:py-5">
           <LivePipelineView
             ticketId={liveTicketId}
             onComplete={goBack}
@@ -5104,14 +5104,14 @@ export default function AssignmentReview() {
                 onClick={() => setActiveTab(tab.id)}
                 className={`flex items-center gap-1.5 px-3 sm:px-4 py-2.5 sm:py-2 text-sm font-medium rounded-md transition-colors whitespace-nowrap touch-manipulation ${
                   isActive
-                    ? 'bg-white bg-opacity-25 text-white shadow-sm'
-                    : 'text-white opacity-70 hover:bg-white hover:bg-opacity-15 hover:opacity-100'
+                    ? 'bg-white/25 text-white shadow-sm'
+                    : 'text-white opacity-70 hover:bg-white/15 hover:opacity-100'
                 }`}
               >
                 <Icon className="w-5 h-5 sm:w-4 sm:h-4" />
                 <span className="hidden sm:inline">{tab.label}</span>
                 {badge > 0 && (
-                  <span className="ml-0.5 rounded-full bg-amber-300 px-1.5 py-0.5 text-[10px] font-bold leading-none text-amber-950">
+                  <span className="ml-0.5 rounded-full bg-amber-300 px-1.5 py-0.5 text-[10px] font-bold leading-none text-amber-950 dark:text-amber-200">
                     {badge}
                   </span>
                 )}
@@ -5132,7 +5132,7 @@ export default function AssignmentReview() {
                     title={range === '24h' ? 'Current Pacific day' : undefined}
                     className={`rounded px-2 py-1 text-[11px] font-semibold transition-all touch-manipulation ${
                       timeRange === range
-                        ? 'bg-white text-slate-900 shadow-sm'
+                        ? 'bg-card text-foreground shadow-sm'
                         : 'text-white/80 hover:text-white hover:bg-white/10'
                     }`}
                   >
@@ -5147,7 +5147,7 @@ export default function AssignmentReview() {
 
       {/* Content */}
       <div>
-        <div className="min-h-full bg-white rounded-xl border border-slate-200 shadow-sm">
+        <div className="min-h-full bg-card rounded-xl border border-border shadow-sm">
           <div className="px-2 py-3 sm:px-6 sm:py-5">
             {activeTab === 'queue' && <QueueTab deepRunId={deepRunId} isAdmin={isWsAdmin} workspaceTimezone={workspaceTimezone} timeRange={timeRange} onTimeRangeChange={setTimeRange} onHeaderActionChange={setAssignmentHeaderAction} />}
             {activeTab === 'history' && <HistoryTab deepRunId={historyRunId} isAdmin={isWsAdmin} workspaceTimezone={workspaceTimezone} />}

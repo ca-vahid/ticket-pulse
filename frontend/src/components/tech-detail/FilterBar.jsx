@@ -103,9 +103,9 @@ function CategoryDropdown({ mode, categories, selected, onToggle, onClear }) {
         className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-colors whitespace-nowrap ${
           count > 0
             ? isExclude
-              ? 'bg-red-50 text-red-700 border-red-300'
-              : 'bg-emerald-50 text-emerald-700 border-emerald-300'
-            : 'bg-white text-slate-500 border-slate-300 hover:bg-slate-50'
+              ? 'bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200 border-red-300 dark:border-red-500/40'
+              : 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 border-emerald-300 dark:border-emerald-500/40'
+            : 'bg-card text-muted-foreground border-input hover:bg-muted/50'
         }`}
       >
         <Filter className="w-3 h-3" />
@@ -123,25 +123,25 @@ function CategoryDropdown({ mode, categories, selected, onToggle, onClear }) {
 
       {open && (
         <div
-          className={`absolute top-full mt-1 z-[60] w-[min(16rem,calc(100vw-2rem))] bg-white border border-slate-200 rounded-xl shadow-xl p-2 ${
+          className={`absolute top-full mt-1 z-[60] w-[min(16rem,calc(100vw-2rem))] bg-card border border-border rounded-xl shadow-xl p-2 ${
             isExclude ? 'left-0' : 'right-0'
           }`}
         >
           <div className="flex items-center justify-between mb-1.5 px-1">
-            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+            <span className="text-[10px] font-semibold text-muted-foreground/75 uppercase tracking-wider">
               {isExclude ? 'Exclude categories' : 'Include only'}
             </span>
             {count > 0 && (
               <button
                 onClick={onClear}
-                className="text-[10px] text-slate-400 hover:text-red-500 font-medium"
+                className="text-[10px] text-muted-foreground/75 hover:text-red-500 font-medium"
               >
                 Clear
               </button>
             )}
           </div>
           {categories.length === 0 ? (
-            <p className="text-xs text-slate-300 text-center py-3">No categories</p>
+            <p className="text-xs text-muted-foreground/50 text-center py-3">No categories</p>
           ) : (
             <div className="max-h-56 overflow-y-auto space-y-0.5">
               {categories.map((cat) => {
@@ -153,9 +153,9 @@ function CategoryDropdown({ mode, categories, selected, onToggle, onClear }) {
                     className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs text-left transition-colors ${
                       isSel
                         ? isExclude
-                          ? 'bg-red-50 text-red-700'
-                          : 'bg-emerald-50 text-emerald-700'
-                        : 'text-slate-700 hover:bg-slate-50'
+                          ? 'bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200'
+                          : 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200'
+                        : 'text-foreground/85 hover:bg-muted/50'
                     }`}
                   >
                     <span
@@ -164,7 +164,7 @@ function CategoryDropdown({ mode, categories, selected, onToggle, onClear }) {
                           ? isExclude
                             ? 'bg-red-500 border-red-500'
                             : 'bg-emerald-500 border-emerald-500'
-                          : 'border-slate-300'
+                          : 'border-input'
                       }`}
                     >
                       {isSel && <Check className="w-2.5 h-2.5 text-white" />}
@@ -222,19 +222,19 @@ export default function FilterBar({
           value={excInput.localValue}
           onChange={excInput.handleChange}
           placeholder="Exclude keywords… (use | for OR)"
-          className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs placeholder-slate-300 focus:ring-1 focus:ring-red-300 focus:border-red-300"
+          className="w-full px-2.5 py-1.5 border border-input rounded-lg text-xs placeholder:text-muted-foreground/50 focus:ring-1 focus:ring-red-300 focus:border-red-300 dark:focus:border-red-500/40"
         />
         {excInput.localValue && (
           <button
             onClick={excInput.handleClear}
             className="absolute right-1.5 top-1/2 -translate-y-1/2"
           >
-            <X className="w-3 h-3 text-slate-400 hover:text-slate-600" />
+            <X className="w-3 h-3 text-muted-foreground/75 hover:text-muted-foreground" />
           </button>
         )}
       </div>
 
-      <div className="hidden h-5 w-px flex-shrink-0 bg-slate-200 sm:block" />
+      <div className="hidden h-5 w-px flex-shrink-0 bg-secondary sm:block" />
 
       {/* Include side */}
       <div className="relative min-w-[12rem] flex-1">
@@ -243,14 +243,14 @@ export default function FilterBar({
           value={incInput.localValue}
           onChange={incInput.handleChange}
           placeholder="Include only… (use | for OR)"
-          className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs placeholder-slate-300 focus:ring-1 focus:ring-emerald-300 focus:border-emerald-300"
+          className="w-full px-2.5 py-1.5 border border-input rounded-lg text-xs placeholder:text-muted-foreground/50 focus:ring-1 focus:ring-emerald-300 focus:border-emerald-300 dark:focus:border-emerald-500/40"
         />
         {incInput.localValue && (
           <button
             onClick={incInput.handleClear}
             className="absolute right-1.5 top-1/2 -translate-y-1/2"
           >
-            <X className="w-3 h-3 text-slate-400 hover:text-slate-600" />
+            <X className="w-3 h-3 text-muted-foreground/75 hover:text-muted-foreground" />
           </button>
         )}
       </div>
@@ -270,7 +270,7 @@ export default function FilterBar({
             setIncludeCats(new Set());
             setIncludeText('');
           }}
-          className="px-2 py-1.5 text-[10px] font-medium text-slate-400 hover:text-red-500 whitespace-nowrap hover:bg-red-50 rounded-lg transition-colors border border-transparent hover:border-red-200"
+          className="px-2 py-1.5 text-[10px] font-medium text-muted-foreground/75 hover:text-red-500 whitespace-nowrap hover:bg-red-50 dark:hover:bg-red-500/15 rounded-lg transition-colors border border-transparent hover:border-red-200 dark:hover:border-red-500/30"
         >
           Clear all
         </button>

@@ -778,9 +778,9 @@ export default function Dashboard() {
         className={`min-h-screen flex items-center justify-center ${APP_BACKGROUND_CLASS}`}
         style={APP_BACKGROUND_STYLE}
       >
-        <div className="bg-red-50 border border-red-200 rounded-lg p-6 max-w-md shadow-sm">
-          <XCircle className="w-12 h-12 text-red-600 mx-auto mb-4" />
-          <p className="text-red-800 text-center">{error}</p>
+        <div className="bg-red-50 dark:bg-red-500/15 border border-red-200 dark:border-red-500/30 rounded-lg p-6 max-w-md shadow-sm">
+          <XCircle className="w-12 h-12 text-red-600 dark:text-red-300 mx-auto mb-4" />
+          <p className="text-red-800 dark:text-red-200 text-center">{error}</p>
           <button
             onClick={handleRetryLoad}
             className="mt-4 w-full bg-red-600 hover:bg-red-700 text-white py-2 rounded-lg"
@@ -1341,19 +1341,19 @@ export default function Dashboard() {
           <div className="relative">
             {/* Outer ring - slow spin */}
             <div 
-              className="absolute inset-0 w-20 h-20 rounded-full border-4 border-transparent border-t-blue-500 border-r-blue-300 opacity-80"
+              className="absolute inset-0 w-20 h-20 rounded-full border-4 border-transparent border-t-blue-500 border-r-blue-300 dark:border-r-blue-500/40 opacity-80"
               style={{ animation: 'spin 1.5s linear infinite' }}
             />
             
             {/* Middle ring - medium spin, opposite direction */}
             <div 
-              className="absolute inset-2 w-16 h-16 rounded-full border-4 border-transparent border-b-purple-500 border-l-purple-300 opacity-70"
+              className="absolute inset-2 w-16 h-16 rounded-full border-4 border-transparent border-b-purple-500 border-l-purple-300 dark:border-l-purple-500/40 opacity-70"
               style={{ animation: 'spin 1s linear infinite reverse', marginLeft: '0.5rem', marginTop: '0.5rem' }}
             />
             
             {/* Inner ring - fast spin */}
             <div 
-              className="absolute inset-4 w-12 h-12 rounded-full border-4 border-transparent border-t-indigo-500 border-r-indigo-300 opacity-90"
+              className="absolute inset-4 w-12 h-12 rounded-full border-4 border-transparent border-t-indigo-500 border-r-indigo-300 dark:border-r-indigo-500/40 opacity-90"
               style={{ animation: 'spin 0.7s linear infinite', marginLeft: '1rem', marginTop: '1rem' }}
             />
             
@@ -1372,34 +1372,34 @@ export default function Dashboard() {
         <div className="max-w-7xl mx-auto px-4 pt-4">
           <div className={`
             rounded-lg p-4 flex items-center justify-between shadow-lg
-            ${syncStatus === 'syncing' ? 'bg-blue-50 border border-blue-200' : ''}
-            ${syncStatus === 'success' ? 'bg-green-50 border border-green-200' : ''}
-            ${syncStatus === 'error' ? 'bg-red-50 border border-red-200' : ''}
+            ${syncStatus === 'syncing' ? 'bg-blue-50 dark:bg-blue-500/15 border border-blue-200 dark:border-blue-500/30' : ''}
+            ${syncStatus === 'success' ? 'bg-green-50 dark:bg-green-500/15 border border-green-200 dark:border-green-500/30' : ''}
+            ${syncStatus === 'error' ? 'bg-red-50 dark:bg-red-500/15 border border-red-200 dark:border-red-500/30' : ''}
           `}>
             <div className="flex items-center gap-3">
               {syncStatus === 'syncing' && (
-                <RefreshCw className="w-5 h-5 text-blue-600 animate-spin" />
+                <RefreshCw className="w-5 h-5 text-blue-600 dark:text-blue-300 animate-spin" />
               )}
               {syncStatus === 'success' && (
-                <CheckCircle className="w-5 h-5 text-green-600" />
+                <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-300" />
               )}
               {syncStatus === 'error' && (
-                <XCircle className="w-5 h-5 text-red-600" />
+                <XCircle className="w-5 h-5 text-red-600 dark:text-red-300" />
               )}
               <div>
                 <p className={`font-semibold ${
-                  syncStatus === 'syncing' ? 'text-blue-900' :
-                    syncStatus === 'success' ? 'text-green-900' :
-                      'text-red-900'
+                  syncStatus === 'syncing' ? 'text-blue-900 dark:text-blue-200' :
+                    syncStatus === 'success' ? 'text-green-900 dark:text-green-200' :
+                      'text-red-900 dark:text-red-200'
                 }`}>
                   {syncStatus === 'syncing' ? 'Syncing...' :
                     syncStatus === 'success' ? 'Sync Successful' :
                       'Sync Failed'}
                 </p>
                 <p className={`text-sm ${
-                  syncStatus === 'syncing' ? 'text-blue-700' :
-                    syncStatus === 'success' ? 'text-green-700' :
-                      'text-red-700'
+                  syncStatus === 'syncing' ? 'text-blue-700 dark:text-blue-200' :
+                    syncStatus === 'success' ? 'text-green-700 dark:text-green-200' :
+                      'text-red-700 dark:text-red-200'
                 }`}>
                   {syncMessage}
                 </p>
@@ -1408,7 +1408,7 @@ export default function Dashboard() {
             {syncStatus !== 'syncing' && (
               <button
                 onClick={() => setSyncStatus(null)}
-                className="text-gray-400 hover:text-gray-600"
+                className="text-muted-foreground/75 hover:text-muted-foreground"
               >
                 <XCircle className="w-5 h-5" />
               </button>
@@ -1420,18 +1420,18 @@ export default function Dashboard() {
       {/* Sync Details Log Viewer */}
       {syncLogs.length > 0 && (
         <div className="max-w-7xl mx-auto px-4 pt-2">
-          <div className="bg-white rounded-lg border border-gray-300 shadow-md overflow-hidden">
+          <div className="bg-card rounded-lg border border-input shadow-md overflow-hidden">
             {/* Header */}
             <div
-              className="bg-gray-100 px-4 py-3 flex items-center justify-between cursor-pointer hover:bg-gray-150 transition-colors"
+              className="bg-muted px-4 py-3 flex items-center justify-between cursor-pointer hover:bg-muted/80 transition-colors"
               onClick={() => setShowSyncDetails(!showSyncDetails)}
             >
               <div className="flex items-center gap-2">
-                <Activity className="w-5 h-5 text-blue-600" />
-                <h3 className="font-semibold text-gray-800">Sync Details</h3>
-                <span className="text-sm text-gray-500">({syncLogs.length} events)</span>
+                <Activity className="w-5 h-5 text-blue-600 dark:text-blue-300" />
+                <h3 className="font-semibold text-foreground">Sync Details</h3>
+                <span className="text-sm text-muted-foreground">({syncLogs.length} events)</span>
               </div>
-              <button className="text-gray-500 hover:text-gray-700">
+              <button className="text-muted-foreground hover:text-foreground/85">
                 {showSyncDetails ? (
                   <ChevronUp className="w-5 h-5" />
                 ) : (
@@ -1442,24 +1442,24 @@ export default function Dashboard() {
 
             {/* Log Content */}
             {showSyncDetails && (
-              <div className="p-4 bg-gray-50 max-h-96 overflow-y-auto">
+              <div className="p-4 bg-muted/50 max-h-96 overflow-y-auto">
                 <div className="space-y-1 font-mono text-sm">
                   {syncLogs.map((log, index) => (
                     <div
                       key={index}
                       className={`flex items-start gap-3 py-1 px-2 rounded ${
-                        log.type === 'error' ? 'bg-red-50 text-red-800' :
-                          log.type === 'warn' ? 'bg-yellow-50 text-yellow-800' :
-                            log.type === 'success' ? 'bg-green-50 text-green-800' :
-                              'text-gray-700'
+                        log.type === 'error' ? 'bg-red-50 dark:bg-red-500/15 text-red-800 dark:text-red-200' :
+                          log.type === 'warn' ? 'bg-yellow-50 dark:bg-yellow-500/15 text-yellow-800 dark:text-yellow-200' :
+                            log.type === 'success' ? 'bg-green-50 dark:bg-green-500/15 text-green-800 dark:text-green-200' :
+                              'text-foreground/85'
                       }`}
                     >
-                      <span className="text-gray-500 text-xs whitespace-nowrap">{log.timestamp}</span>
+                      <span className="text-muted-foreground text-xs whitespace-nowrap">{log.timestamp}</span>
                       <span className={`font-semibold ${
-                        log.type === 'error' ? 'text-red-600' :
-                          log.type === 'warn' ? 'text-yellow-600' :
-                            log.type === 'success' ? 'text-green-600' :
-                              'text-blue-600'
+                        log.type === 'error' ? 'text-red-600 dark:text-red-300' :
+                          log.type === 'warn' ? 'text-yellow-600 dark:text-yellow-300' :
+                            log.type === 'success' ? 'text-green-600 dark:text-green-300' :
+                              'text-blue-600 dark:text-blue-300'
                       }`}>
                         {log.type === 'error' ? '[ERROR]' :
                           log.type === 'warn' ? '[WARN]' :
@@ -1691,25 +1691,25 @@ export default function Dashboard() {
               onClick={() => setStatsSheetOpen(false)}
               className="absolute inset-0 bg-slate-900/40 animate-in fade-in-0 motion-reduce:animate-none"
             />
-            <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border-t border-slate-200 bg-white pb-[calc(1rem+env(safe-area-inset-bottom))] text-slate-900 shadow-soft animate-in slide-in-from-bottom-4 fade-in-0 duration-200 motion-reduce:animate-none">
-              <div className="mx-auto mt-2 h-1 w-9 rounded-full bg-slate-200" />
+            <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border-t border-border bg-card pb-[calc(1rem+env(safe-area-inset-bottom))] text-foreground shadow-soft animate-in slide-in-from-bottom-4 fade-in-0 duration-200 motion-reduce:animate-none">
+              <div className="mx-auto mt-2 h-1 w-9 rounded-full bg-secondary" />
               <div className="flex items-center justify-between gap-2 px-4 pb-1 pt-2">
                 <h3 className="min-w-0 truncate text-sm font-bold">{bandRangeLabel}</h3>
                 <div className="flex flex-none items-center gap-2">
                   {viewMode === 'daily' && !isToday && (
-                    <button onClick={goToToday} className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-bold text-blue-700 touch-manipulation">Today</button>
+                    <button onClick={goToToday} className="rounded-full border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 px-2.5 py-1 text-[11px] font-bold text-blue-700 dark:text-blue-200 touch-manipulation">Today</button>
                   )}
                   {viewMode === 'weekly' && (
-                    <button onClick={goToCurrentWeek} className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-bold text-blue-700 touch-manipulation">This Week</button>
+                    <button onClick={goToCurrentWeek} className="rounded-full border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 px-2.5 py-1 text-[11px] font-bold text-blue-700 dark:text-blue-200 touch-manipulation">This Week</button>
                   )}
                   {viewMode === 'monthly' && (
-                    <button onClick={goToCurrentMonth} className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-bold text-blue-700 touch-manipulation">This Month</button>
+                    <button onClick={goToCurrentMonth} className="rounded-full border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 px-2.5 py-1 text-[11px] font-bold text-blue-700 dark:text-blue-200 touch-manipulation">This Month</button>
                   )}
                   <button
                     type="button"
                     onClick={() => setStatsSheetOpen(false)}
                     aria-label="Close"
-                    className="rounded-full p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
+                    className="rounded-full p-1 text-muted-foreground/75 transition-colors hover:bg-muted hover:text-foreground/85"
                   >
                     <ChevronDown className="h-5 w-5" />
                   </button>
@@ -1722,15 +1722,15 @@ export default function Dashboard() {
                     type="date"
                     value={formatDateLocal(selectedDate)}
                     onChange={(e) => setSelectedDate(new Date(e.target.value + 'T12:00:00'))}
-                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-semibold text-slate-700"
+                    className="w-full rounded-lg border border-border bg-muted/50 px-3 py-1.5 text-sm font-semibold text-foreground/85"
                   />
                 </div>
               )}
 
               <div className="grid grid-cols-3 gap-2 px-4 py-2">
                 {bandStats.map((s) => (
-                  <div key={s.key} className="rounded-xl border border-slate-100 px-2.5 py-2">
-                    <span className="flex items-center gap-1.5 text-[8.5px] font-bold uppercase tracking-wider text-slate-400">
+                  <div key={s.key} className="rounded-xl border border-border/60 px-2.5 py-2">
+                    <span className="flex items-center gap-1.5 text-[8.5px] font-bold uppercase tracking-wider text-muted-foreground/75">
                       <span className={`h-1.5 w-1.5 flex-none rounded-full ${s.dot}`} />
                       {s.label}
                     </span>
@@ -1751,8 +1751,8 @@ export default function Dashboard() {
                         d.isSelectedDay
                           ? 'border-blue-600 bg-blue-600 text-white'
                           : d.isWeekend
-                            ? 'border-slate-100 bg-slate-50 text-slate-400'
-                            : 'border-slate-200 bg-white text-slate-600'
+                            ? 'border-border/60 bg-muted/50 text-muted-foreground/75'
+                            : 'border-border bg-card text-muted-foreground'
                       }`}
                     >
                       {d.holidayInfo.isHoliday && (
@@ -1767,19 +1767,19 @@ export default function Dashboard() {
               )}
 
               <div className="px-4 py-2">
-                <div className="mb-1 flex items-baseline justify-between text-xs font-semibold text-slate-700">
+                <div className="mb-1 flex items-baseline justify-between text-xs font-semibold text-foreground/85">
                   <span>Team Self-Pick <span className="font-extrabold tabular-nums">{selfPickPercentage}%</span></span>
-                  <span className="font-medium text-slate-400">goal 70%</span>
+                  <span className="font-medium text-muted-foreground/75">goal 70%</span>
                 </div>
-                <div className="relative h-2 rounded-full bg-slate-100">
+                <div className="relative h-2 rounded-full bg-muted">
                   <div
                     className={`absolute inset-y-0 left-0 rounded-full ${selfPickSheetBarClass}`}
                     style={{ width: `${Math.min(100, selfPickPercentage)}%` }}
                   />
-                  <div className="absolute -bottom-[3px] -top-[3px] w-0.5 rounded-full bg-slate-400" style={{ left: '70%' }} />
+                  <div className="absolute -bottom-[3px] -top-[3px] w-0.5 rounded-full bg-muted-foreground/60" style={{ left: '70%' }} />
                 </div>
                 {isToday && (
-                  <div className="mt-1.5 flex items-center gap-3 text-[10px] font-semibold text-slate-500">
+                  <div className="mt-1.5 flex items-center gap-3 text-[10px] font-semibold text-muted-foreground">
                     <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-green-500" />{displayStats.lightLoad || 0} light</span>
                     <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-yellow-500" />{displayStats.mediumLoad || 0} medium</span>
                     <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-red-500" />{displayStats.heavyLoad || 0} heavy</span>
@@ -1788,10 +1788,10 @@ export default function Dashboard() {
               </div>
 
               <div className="px-4 pt-1">
-                <div className="grid grid-cols-3 gap-0.5 rounded-lg bg-slate-100 p-0.5">
-                  <button onClick={handleSwitchToDaily} className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors touch-manipulation ${viewMode === 'daily' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}>Daily</button>
-                  <button onClick={handleSwitchToWeekly} className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors touch-manipulation ${viewMode === 'weekly' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}>Weekly</button>
-                  <button onClick={handleSwitchToMonthly} className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors touch-manipulation ${viewMode === 'monthly' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}>Monthly</button>
+                <div className="grid grid-cols-3 gap-0.5 rounded-lg bg-muted p-0.5">
+                  <button onClick={handleSwitchToDaily} className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors touch-manipulation ${viewMode === 'daily' ? 'bg-card text-blue-700 dark:text-blue-200 shadow-sm' : 'text-muted-foreground'}`}>Daily</button>
+                  <button onClick={handleSwitchToWeekly} className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors touch-manipulation ${viewMode === 'weekly' ? 'bg-card text-blue-700 dark:text-blue-200 shadow-sm' : 'text-muted-foreground'}`}>Weekly</button>
+                  <button onClick={handleSwitchToMonthly} className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors touch-manipulation ${viewMode === 'monthly' ? 'bg-card text-blue-700 dark:text-blue-200 shadow-sm' : 'text-muted-foreground'}`}>Monthly</button>
                 </div>
               </div>
             </div>
@@ -1814,21 +1814,21 @@ export default function Dashboard() {
                   className="w-6 h-6 flex-shrink-0"
                 />
                 <h2 className="text-base sm:text-lg font-semibold">Team</h2>
-                <span className="text-xs text-gray-500">
+                <span className="text-xs text-muted-foreground">
                   ({searchTerm || hasActiveCategoryFilter ? `${techsWithRanks.length} of ${stats.totalTechnicians || 0}` : `${stats.totalTechnicians || 0} active`})
                 </span>
               </div>
-              <span className="rounded-full bg-white/80 px-2 py-1 text-[10px] font-semibold text-gray-500 shadow-sm sm:hidden">
+              <span className="rounded-full bg-card/80 px-2 py-1 text-[10px] font-semibold text-muted-foreground shadow-sm sm:hidden">
                 {isCompactView ? 'Compact on desktop' : 'Cards'}
               </span>
             </div>
 
             {/* View toggle — Card / Compact */}
-            <div className="hidden bg-gray-100 rounded-lg p-0.5 text-xs font-medium flex-shrink-0 sm:flex">
+            <div className="hidden bg-muted rounded-lg p-0.5 text-xs font-medium flex-shrink-0 sm:flex">
               <button
                 onClick={() => { if (isCompactView) toggleCompactView(); }}
                 className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md transition-all ${
-                  !isCompactView ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-800'
+                  !isCompactView ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
                 <LayoutGrid className="w-3.5 h-3.5" />
@@ -1837,7 +1837,7 @@ export default function Dashboard() {
               <button
                 onClick={() => { if (!isCompactView) toggleCompactView(); }}
                 className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md transition-all ${
-                  isCompactView ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-800'
+                  isCompactView ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
                 <List className="w-3.5 h-3.5" />
@@ -1846,13 +1846,13 @@ export default function Dashboard() {
             </div>
 
             {/* Style toggle — Detailed / Simple (QA 07-30 #8) */}
-            <div className="hidden bg-gray-100 rounded-lg p-0.5 text-xs font-medium flex-shrink-0 sm:flex">
+            <div className="hidden bg-muted rounded-lg p-0.5 text-xs font-medium flex-shrink-0 sm:flex">
               <button
                 onClick={() => handleDashStyle('detailed')}
                 aria-pressed={!simpleStyle}
                 title="Rich colors and icons"
                 className={`px-2.5 py-1 rounded-md transition-all ${
-                  !simpleStyle ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-800'
+                  !simpleStyle ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
                 Detailed
@@ -1862,7 +1862,7 @@ export default function Dashboard() {
                 aria-pressed={simpleStyle}
                 title="Plain numbers, full-word headers, fewer colors"
                 className={`px-2.5 py-1 rounded-md transition-all ${
-                  simpleStyle ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-800'
+                  simpleStyle ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
                 Simple
@@ -1873,8 +1873,8 @@ export default function Dashboard() {
               onClick={handleToggleNoise}
               className={`flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors sm:flex-shrink-0 ${
                 excludeNoise
-                  ? 'bg-amber-100 hover:bg-amber-200 text-amber-800 ring-1 ring-amber-300'
-                  : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
+                  ? 'bg-amber-100 dark:bg-amber-500/20 hover:bg-amber-200 dark:hover:bg-amber-500/30 text-amber-800 dark:text-amber-200 ring-1 ring-amber-300 dark:ring-amber-500/40'
+                  : 'bg-muted hover:bg-secondary text-muted-foreground'
               }`}
               title={excludeNoise ? 'Noise tickets are hidden. Click to show all tickets.' : 'Click to hide automated/noise tickets (alerts, backups, monitoring, spam)'}
             >
@@ -1885,7 +1885,7 @@ export default function Dashboard() {
             {hiddenTechnicians.length > 0 && (
               <button
                 onClick={() => setShowHidden(!showHidden)}
-                className="flex items-center gap-1.5 px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded-lg text-xs font-medium transition-colors flex-shrink-0"
+                className="flex items-center gap-1.5 px-3 py-1 bg-muted hover:bg-secondary rounded-lg text-xs font-medium transition-colors flex-shrink-0"
               >
                 {showHidden ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 <span>{hiddenTechnicians.length} Hidden</span>
@@ -1896,8 +1896,8 @@ export default function Dashboard() {
                 onClick={() => setExpandAllOverride(prev => prev === true ? null : true)}
                 className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium transition-colors flex-shrink-0 ${
                   expandAllOverride === true
-                    ? 'bg-blue-100 hover:bg-blue-200 text-blue-700'
-                    : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
+                    ? 'bg-blue-100 dark:bg-blue-500/20 hover:bg-blue-200 dark:hover:bg-blue-500/30 text-blue-700 dark:text-blue-200'
+                    : 'bg-muted hover:bg-secondary text-foreground/85'
                 }`}
                 title={expandAllOverride === true ? 'Collapse all ticket details' : 'Expand all ticket details'}
               >
@@ -1940,7 +1940,7 @@ export default function Dashboard() {
                   setSelectedCategories([]);
                   setSelectedCanonicalCategories({ categoryIds: [], subcategoryIds: [] });
                 }}
-                className="px-2.5 py-1 text-xs font-medium text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors whitespace-nowrap flex-shrink-0"
+                className="px-2.5 py-1 text-xs font-medium text-muted-foreground bg-card border border-input rounded-lg hover:bg-muted/50 transition-colors whitespace-nowrap flex-shrink-0"
                 title="Clear all filters"
               >
                 Clear
@@ -1951,12 +1951,12 @@ export default function Dashboard() {
 
           {/* Hidden Technicians Section */}
           {showHidden && hiddenTechnicians.length > 0 && (
-            <div className="mb-6 bg-gray-50 border border-gray-200 rounded-lg p-4">
+            <div className="mb-6 bg-muted/50 border border-border rounded-lg p-4">
               <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-semibold text-gray-700">Hidden Technicians</h3>
+                <h3 className="text-sm font-semibold text-foreground/85">Hidden Technicians</h3>
                 <button
                   onClick={handleClearAllHidden}
-                  className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                  className="text-xs text-blue-600 dark:text-blue-300 hover:text-blue-800 dark:hover:text-blue-200 font-medium"
                 >
                   Restore All
                 </button>
@@ -1965,12 +1965,12 @@ export default function Dashboard() {
                 {hiddenTechnicians.map((tech) => (
                   <div
                     key={tech.id}
-                    className="flex items-center justify-between bg-white p-3 rounded border border-gray-200"
+                    className="flex items-center justify-between bg-card p-3 rounded border border-border"
                   >
-                    <span className="text-sm text-gray-700">{tech.name}</span>
+                    <span className="text-sm text-foreground/85">{tech.name}</span>
                     <button
                       onClick={() => handleRestoreTechnician(tech.id)}
-                      className="flex items-center gap-1 px-3 py-1 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded text-xs font-medium transition-colors"
+                      className="flex items-center gap-1 px-3 py-1 bg-blue-50 dark:bg-blue-500/15 hover:bg-blue-100 dark:hover:bg-blue-500/20 text-blue-600 dark:text-blue-300 rounded text-xs font-medium transition-colors"
                     >
                       <Eye className="w-3 h-3" />
                       Restore
@@ -1999,7 +1999,7 @@ export default function Dashboard() {
             </div>
           ) : techsWithRanks.length === 0 ? (
             /* No technicians found (daily/weekly only) */
-            <div className="bg-white rounded-lg shadow-sm p-8 text-center border border-gray-200 overflow-hidden relative">
+            <div className="bg-card rounded-lg shadow-sm p-8 text-center border border-border overflow-hidden relative">
               <img
                 src="/brand/hero-welcome.webp"
                 alt=""
@@ -2012,10 +2012,10 @@ export default function Dashboard() {
                   alt=""
                   className="w-16 h-16 mx-auto mb-3 opacity-70"
                 />
-                <p className="text-gray-700 font-medium">
+                <p className="text-foreground/85 font-medium">
                   {searchTerm || hasActiveCategoryFilter ? 'No matching tickets found' : 'No technicians found'}
                 </p>
-                <p className="text-sm text-gray-500 mt-2">
+                <p className="text-sm text-muted-foreground mt-2">
                   {searchTerm || hasActiveCategoryFilter
                     ? hasActiveCategoryFilter && !searchTerm
                       ? 'This can be normal for exact subcategories that do not have tickets in the selected date range.'

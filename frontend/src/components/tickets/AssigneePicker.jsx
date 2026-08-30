@@ -211,24 +211,24 @@ export default function AssigneePicker({
         className={`tp-focus-ring group flex items-center gap-1.5 min-w-0 w-full border transition-colors text-left ${
           proposed || thinking ? 'rounded-full' : 'rounded-lg'
         } ${sm ? 'px-1.5 py-1' : 'px-2.5 py-1.5'} ${
-          open ? 'border-blue-300 bg-white'
-            : proposed ? 'border-dashed border-violet-300 bg-violet-50/60 hover:bg-violet-50'
+          open ? 'border-blue-300 dark:border-blue-500/40 bg-card'
+            : proposed ? 'border-dashed border-violet-300 dark:border-violet-500/40 bg-violet-50/60 dark:bg-violet-500/10 hover:bg-violet-50 dark:hover:bg-violet-500/15'
               : thinking ? 'tp-ai-think border-transparent'
-                : 'border-transparent hover:border-slate-200 hover:bg-white'
+                : 'border-transparent hover:border-border hover:bg-card'
         } disabled:cursor-not-allowed`}
       >
         {busy ? (
-          <Loader2 className={`${sm ? 'w-4 h-4' : 'w-5 h-5'} animate-spin text-slate-400 flex-shrink-0`} aria-hidden="true" />
+          <Loader2 className={`${sm ? 'w-4 h-4' : 'w-5 h-5'} animate-spin text-muted-foreground/75 flex-shrink-0`} aria-hidden="true" />
         ) : current ? (
           <>
             <PersonAvatar name={current.name} photoUrl={current.photoUrl} size={sm ? 'h-5 w-5' : 'h-7 w-7'} textSize={sm ? 'text-[8px]' : 'text-[10px]'} />
             {/* First-name-only below xl (tablet columns are narrow — QA 08-04);
                 the full name stays in the tooltip + aria-label. */}
-            <AgentFirstName name={current.name} className={`${sm ? 'text-xs' : 'text-sm'} text-slate-700`} />
+            <AgentFirstName name={current.name} className={`${sm ? 'text-xs' : 'text-sm'} text-foreground/85`} />
             {currentReadOnly && (
               <span
                 title="Assigned in FreshService — not an active Ticket Pulse member, so they can only be (re)assigned in FreshService."
-                className="flex-shrink-0 text-[8px] font-semibold uppercase tracking-wide px-1 py-0.5 rounded bg-amber-100 text-amber-700"
+                className="flex-shrink-0 text-[8px] font-semibold uppercase tracking-wide px-1 py-0.5 rounded bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-200"
               >
                 read-only
               </span>
@@ -237,14 +237,14 @@ export default function AssigneePicker({
         ) : thinking ? (
           <>
             <span
-              className={`${sm ? 'h-5 w-5' : 'h-7 w-7'} rounded-full bg-violet-100 inline-flex items-center justify-center flex-shrink-0`}
+              className={`${sm ? 'h-5 w-5' : 'h-7 w-7'} rounded-full bg-violet-100 dark:bg-violet-500/20 inline-flex items-center justify-center flex-shrink-0`}
               title="AI is choosing the best person for this ticket — assigning someone manually overrides the pick"
             >
-              <Sparkles className={`${sm ? 'w-2.5 h-2.5' : 'w-3.5 h-3.5'} text-violet-600 tp-ai-twinkle`} aria-hidden="true" />
+              <Sparkles className={`${sm ? 'w-2.5 h-2.5' : 'w-3.5 h-3.5'} text-violet-600 dark:text-violet-300 tp-ai-twinkle`} aria-hidden="true" />
             </span>
             <span className="flex flex-col min-w-0 leading-tight">
-              <span className={`${sm ? 'text-[8px]' : 'text-[9px]'} font-bold uppercase tracking-wider text-violet-600`}>AI choosing…</span>
-              <span className={`${sm ? 'text-xs' : 'text-sm'} italic text-slate-400 truncate`}>best person for this</span>
+              <span className={`${sm ? 'text-[8px]' : 'text-[9px]'} font-bold uppercase tracking-wider text-violet-600 dark:text-violet-300`}>AI choosing…</span>
+              <span className={`${sm ? 'text-xs' : 'text-sm'} italic text-muted-foreground/75 truncate`}>best person for this</span>
             </span>
           </>
         ) : proposed ? (
@@ -258,24 +258,24 @@ export default function AssigneePicker({
                 size={sm ? 'h-5 w-5' : 'h-7 w-7'}
                 textSize={sm ? 'text-[8px]' : 'text-[10px]'}
               />
-              <span className={`absolute -bottom-0.5 -right-0.5 ${sm ? 'h-2.5 w-2.5' : 'h-3 w-3'} rounded-full bg-violet-600 ring-2 ring-white inline-flex items-center justify-center`} aria-hidden="true">
+              <span className={`absolute -bottom-0.5 -right-0.5 ${sm ? 'h-2.5 w-2.5' : 'h-3 w-3'} rounded-full bg-violet-600 ring-2 ring-card inline-flex items-center justify-center`} aria-hidden="true">
                 <Sparkles className="w-[7px] h-[7px] text-white" />
               </span>
             </span>
             <span className="flex flex-col min-w-0 leading-tight">
-              <span className={`${sm ? 'text-[8px]' : 'text-[9px]'} font-bold uppercase tracking-wider text-violet-600`}>
+              <span className={`${sm ? 'text-[8px]' : 'text-[9px]'} font-bold uppercase tracking-wider text-violet-600 dark:text-violet-300`}>
                 Suggested{topPct !== null ? ` · ${topPct}%` : ''}
               </span>
               {aiSuggestion.techName
-                ? <AgentFirstName name={aiSuggestion.techName} className={`${sm ? 'text-xs' : 'text-sm'} font-semibold text-slate-800`} />
-                : <span className={`${sm ? 'text-xs' : 'text-sm'} font-semibold text-slate-800 truncate`}>AI pick</span>}
+                ? <AgentFirstName name={aiSuggestion.techName} className={`${sm ? 'text-xs' : 'text-sm'} font-semibold text-foreground`} />
+                : <span className={`${sm ? 'text-xs' : 'text-sm'} font-semibold text-foreground truncate`}>AI pick</span>}
             </span>
           </>
         ) : (
           <UnassignedBadge size={sm ? 'h-5 w-5' : 'h-7 w-7'} labelClass={sm ? 'text-xs' : 'text-sm'} variant={disabled ? 'muted' : 'interactive'} />
         )}
         {!disabled && (
-          <ChevronDown className={`w-3.5 h-3.5 text-slate-300 group-hover:text-slate-400 ml-auto flex-shrink-0 ${open ? 'rotate-180' : ''} transition-transform`} aria-hidden="true" />
+          <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground/50 group-hover:text-muted-foreground/75 ml-auto flex-shrink-0 ${open ? 'rotate-180' : ''} transition-transform`} aria-hidden="true" />
         )}
       </button>
 
@@ -290,11 +290,11 @@ export default function AssigneePicker({
           onDoubleClick={(e) => e.stopPropagation()}
         >
           {aiSuggestion?.state === 'suggested' && !value && (
-            <div className="mb-1.5 rounded-lg border border-violet-200 bg-gradient-to-r from-indigo-50 to-violet-50/60 p-2">
-              <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-violet-600 mb-1.5">
+            <div className="mb-1.5 rounded-lg border border-violet-200 dark:border-violet-500/30 bg-gradient-to-r from-indigo-50 dark:from-indigo-500/15 to-violet-50/60 p-2">
+              <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-violet-600 dark:text-violet-300 mb-1.5">
                 <Sparkles className="w-3 h-3 flex-shrink-0" aria-hidden="true" /> Awaiting your decision
                 {aiCandidates.length > 1 && (
-                  <span className="ml-auto text-[9px] font-semibold text-slate-400 normal-case tracking-normal">{aiCandidates.length} candidates</span>
+                  <span className="ml-auto text-[9px] font-semibold text-muted-foreground/75 normal-case tracking-normal">{aiCandidates.length} candidates</span>
                 )}
               </p>
               <div role="radiogroup" aria-label="AI candidates" className="space-y-0.5">
@@ -309,19 +309,19 @@ export default function AssigneePicker({
                       role="radio"
                       aria-checked={selected}
                       onClick={() => setSelectedAiTechId(c.techId)}
-                      className={`tp-focus-ring w-full flex items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors ${selected ? 'bg-white ring-1 ring-violet-300' : 'hover:bg-white/70'}`}
+                      className={`tp-focus-ring w-full flex items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors ${selected ? 'bg-card ring-1 ring-violet-300 dark:ring-violet-500/40' : 'hover:bg-card/70'}`}
                     >
-                      <span className={`flex-shrink-0 h-3.5 w-3.5 rounded-full border-[1.5px] inline-flex items-center justify-center ${selected ? 'border-violet-500' : 'border-slate-300'}`} aria-hidden="true">
+                      <span className={`flex-shrink-0 h-3.5 w-3.5 rounded-full border-[1.5px] inline-flex items-center justify-center ${selected ? 'border-violet-500' : 'border-input'}`} aria-hidden="true">
                         {selected && <span className="h-1.5 w-1.5 rounded-full bg-violet-500" />}
                       </span>
                       <PersonAvatar name={c.techName || '?'} photoUrl={photoUrl} size="h-6 w-6" textSize="text-[9px]" />
-                      <span className="text-sm font-medium text-slate-800 truncate flex-1 min-w-0">{c.techName || 'Unknown'}</span>
+                      <span className="text-sm font-medium text-foreground truncate flex-1 min-w-0">{c.techName || 'Unknown'}</span>
                       {pct !== null && (
                         <span className="flex items-center gap-1.5 flex-shrink-0">
-                          <span className="w-9 h-1.5 rounded-full bg-violet-100 overflow-hidden" aria-hidden="true">
+                          <span className="w-9 h-1.5 rounded-full bg-violet-100 dark:bg-violet-500/20 overflow-hidden" aria-hidden="true">
                             <span className="block h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-500" style={{ width: `${pct}%` }} />
                           </span>
-                          <span className="text-[10px] font-bold tabular-nums text-violet-600 w-7 text-right">{pct}%</span>
+                          <span className="text-[10px] font-bold tabular-nums text-violet-600 dark:text-violet-300 w-7 text-right">{pct}%</span>
                         </span>
                       )}
                     </button>
@@ -341,7 +341,7 @@ export default function AssigneePicker({
                     onClick={() => { setOpen(false); onAiAssign(); }}
                     title="View the full AI analysis"
                     aria-label="View the full AI analysis"
-                    className="tp-focus-ring h-8 w-8 inline-flex items-center justify-center rounded-md border border-indigo-200 text-indigo-600 hover:bg-indigo-100/60 flex-shrink-0"
+                    className="tp-focus-ring h-8 w-8 inline-flex items-center justify-center rounded-md border border-indigo-200 dark:border-indigo-500/30 text-indigo-600 dark:text-indigo-300 hover:bg-indigo-100/60 dark:hover:bg-indigo-500/15 flex-shrink-0"
                   >
                     <Sparkles className="w-4 h-4" aria-hidden="true" />
                   </button>
@@ -351,7 +351,7 @@ export default function AssigneePicker({
                   disabled={busy}
                   title="Dismiss this suggestion — leaves the ticket unassigned"
                   aria-label="Dismiss this suggestion"
-                  className="tp-focus-ring h-8 w-8 inline-flex items-center justify-center rounded-md border border-slate-200 text-slate-400 hover:text-slate-600 hover:bg-slate-50 disabled:opacity-60 flex-shrink-0"
+                  className="tp-focus-ring h-8 w-8 inline-flex items-center justify-center rounded-md border border-border text-muted-foreground/75 hover:text-muted-foreground hover:bg-muted/50 disabled:opacity-60 flex-shrink-0"
                 >
                   <X className="w-4 h-4" aria-hidden="true" />
                 </button>
@@ -361,18 +361,18 @@ export default function AssigneePicker({
           {(aiSuggestion?.state === 'analyzing' || aiSuggestion?.state === 'queued') && (
             <button
               onClick={onAiAssign ? () => { setOpen(false); onAiAssign(); } : undefined}
-              className={`mb-1.5 w-full flex items-center gap-2 rounded-lg border border-indigo-100 bg-indigo-50/60 px-2 py-1.5 text-left ${onAiAssign ? 'tp-focus-ring hover:bg-indigo-100/60' : 'cursor-default'}`}
+              className={`mb-1.5 w-full flex items-center gap-2 rounded-lg border border-indigo-100 dark:border-indigo-500/20 bg-indigo-50/60 dark:bg-indigo-500/10 px-2 py-1.5 text-left ${onAiAssign ? 'tp-focus-ring hover:bg-indigo-100/60 dark:hover:bg-indigo-500/15' : 'cursor-default'}`}
             >
               {aiSuggestion.state === 'analyzing'
                 ? <Loader2 className="w-3.5 h-3.5 text-indigo-500 animate-spin flex-shrink-0" aria-hidden="true" />
                 : <Sparkles className="w-3.5 h-3.5 text-indigo-400 flex-shrink-0" aria-hidden="true" />}
-              <span className="text-xs font-medium text-indigo-700">
+              <span className="text-xs font-medium text-indigo-700 dark:text-indigo-200">
                 {aiSuggestion.state === 'analyzing' ? 'AI is analyzing this ticket…' : 'AI run queued for business hours'}
               </span>
             </button>
           )}
           <div className="relative mb-1">
-            <Search className="w-3.5 h-3.5 text-slate-300 absolute left-2.5 top-1/2 -translate-y-1/2" aria-hidden="true" />
+            <Search className="w-3.5 h-3.5 text-muted-foreground/50 absolute left-2.5 top-1/2 -translate-y-1/2" aria-hidden="true" />
             <input
               ref={inputRef}
               type="search"
@@ -380,7 +380,7 @@ export default function AssigneePicker({
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Find member…"
               aria-label="Filter technicians"
-              className="tp-focus-ring w-full pl-8 pr-2 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg placeholder:text-slate-400"
+              className="tp-focus-ring w-full pl-8 pr-2 py-1.5 text-xs bg-muted/50 border border-border rounded-lg placeholder:text-muted-foreground/75"
             />
           </div>
 
@@ -389,13 +389,13 @@ export default function AssigneePicker({
               role="option"
               aria-selected={value === null}
               onClick={() => assign(null)}
-              className="tp-focus-ring w-full flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-50 text-left"
+              className="tp-focus-ring w-full flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-muted/50 text-left"
             >
-              <span className="h-6 w-6 rounded-full border-[1.5px] border-dashed border-slate-300 text-slate-400 inline-flex items-center justify-center flex-shrink-0">
+              <span className="h-6 w-6 rounded-full border-[1.5px] border-dashed border-input text-muted-foreground/75 inline-flex items-center justify-center flex-shrink-0">
                 <UserRound className="w-3 h-3" aria-hidden="true" />
               </span>
-              <span className="text-sm text-slate-600 italic">Unassigned</span>
-              {value === null && <Check className="w-3.5 h-3.5 text-blue-600 ml-auto" aria-hidden="true" />}
+              <span className="text-sm text-muted-foreground italic">Unassigned</span>
+              {value === null && <Check className="w-3.5 h-3.5 text-blue-600 dark:text-blue-300 ml-auto" aria-hidden="true" />}
             </button>
             {filtered.map((t) => (
               <button
@@ -403,35 +403,35 @@ export default function AssigneePicker({
                 role="option"
                 aria-selected={t.id === value}
                 onClick={() => assign(t.id)}
-                className={`tp-focus-ring w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left hover:bg-blue-50 ${t.id === value ? 'bg-blue-50/70' : ''}`}
+                className={`tp-focus-ring w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left hover:bg-blue-50 dark:hover:bg-blue-500/15 ${t.id === value ? 'bg-blue-50/70 dark:bg-blue-500/10' : ''}`}
               >
                 <PersonAvatar name={t.name} photoUrl={t.photoUrl} size="h-6 w-6" textSize="text-[9px]" />
-                <span className="text-sm text-slate-700 truncate">{t.name}</span>
+                <span className="text-sm text-foreground/85 truncate">{t.name}</span>
                 {t.origin === 'local' && (
-                  <span className="text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-blue-100 text-blue-600 flex-shrink-0">Local</span>
+                  <span className="text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-500/20 text-blue-600 dark:text-blue-300 flex-shrink-0">Local</span>
                 )}
-                {t.id === value && <Check className="w-3.5 h-3.5 text-blue-600 ml-auto flex-shrink-0" aria-hidden="true" />}
+                {t.id === value && <Check className="w-3.5 h-3.5 text-blue-600 dark:text-blue-300 ml-auto flex-shrink-0" aria-hidden="true" />}
               </button>
             ))}
-            {filtered.length === 0 && <p className="px-2 py-2 text-xs text-slate-400">No member matches “{query}”.</p>}
+            {filtered.length === 0 && <p className="px-2 py-2 text-xs text-muted-foreground/75">No member matches “{query}”.</p>}
           </div>
 
           {showAi && (
-            <div className="border-t border-slate-100 mt-1 pt-1">
+            <div className="border-t border-border/60 mt-1 pt-1">
               <button
                 onClick={aiAssign}
                 disabled={busy || aiState === 'queued'}
-                className="tp-focus-ring w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left hover:bg-indigo-50 disabled:opacity-70"
+                className="tp-focus-ring w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left hover:bg-indigo-50 dark:hover:bg-indigo-500/15 disabled:opacity-70"
               >
-                <span className="h-6 w-6 rounded-full bg-indigo-100 text-indigo-600 inline-flex items-center justify-center flex-shrink-0">
+                <span className="h-6 w-6 rounded-full bg-indigo-100 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-300 inline-flex items-center justify-center flex-shrink-0">
                   <Sparkles className="w-3 h-3" aria-hidden="true" />
                 </span>
                 {aiState === 'queued' ? (
-                  <span className="text-sm font-medium text-indigo-700">Queued — recommendation lands in Review</span>
+                  <span className="text-sm font-medium text-indigo-700 dark:text-indigo-200">Queued — recommendation lands in Review</span>
                 ) : (
                   <span className="min-w-0">
-                    <span className="block text-sm font-medium text-indigo-700">Let AI assign</span>
-                    <span className="block text-[10px] text-slate-400 truncate">
+                    <span className="block text-sm font-medium text-indigo-700 dark:text-indigo-200">Let AI assign</span>
+                    <span className="block text-[10px] text-muted-foreground/75 truncate">
                       {onAiAssign ? 'Watch the pipeline live & approve inline' : 'Runs the assignment pipeline for this ticket'}
                     </span>
                   </span>

@@ -185,24 +185,24 @@ function TechSelector({
               title={`${tech.name}${st ? ` — ${st.picked} picked · ${st.notPicked} not` : ''}`}
             >
               {tech.photoUrl ? (
-                <img src={tech.photoUrl} alt={tech.name} className="w-7 h-7 rounded-full object-cover border border-slate-200" />
+                <img src={tech.photoUrl} alt={tech.name} className="w-7 h-7 rounded-full object-cover border border-border" />
               ) : (
-                <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[8px] font-bold text-white ${accent?.bg || 'bg-slate-400'}`}>
+                <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[8px] font-bold text-white ${accent?.bg || 'bg-muted-foreground/60'}`}>
                   {getInitials(tech.name)}
                 </div>
               )}
               {st && (
                 <div className="flex items-center gap-0.5 leading-none">
-                  <span className="text-[7px] font-bold text-emerald-600">{st.picked}</span>
-                  <span className="text-[7px] text-slate-300">·</span>
-                  <span className="text-[7px] font-bold text-slate-400">{st.notPicked}</span>
+                  <span className="text-[7px] font-bold text-emerald-600 dark:text-emerald-300">{st.picked}</span>
+                  <span className="text-[7px] text-muted-foreground/50">·</span>
+                  <span className="text-[7px] font-bold text-muted-foreground/75">{st.notPicked}</span>
                 </div>
               )}
             </div>
           );
         })}
         {selectedTechs.length === 0 && (
-          <span className="text-slate-300 text-[9px] font-medium" style={{ writingMode: 'vertical-rl' }}>
+          <span className="text-muted-foreground/50 text-[9px] font-medium" style={{ writingMode: 'vertical-rl' }}>
             Select techs
           </span>
         )}
@@ -220,37 +220,37 @@ function TechSelector({
       <div
         key={tech.id}
         className={`flex items-center gap-2 px-3 py-2 transition-colors ${
-          selected ? 'bg-blue-50' : 'hover:bg-slate-50'
+          selected ? 'bg-blue-50 dark:bg-blue-500/15' : 'hover:bg-muted/50'
         }`}
       >
         <button onClick={() => toggle(tech.id)} className="flex items-center gap-2 flex-1 min-w-0 text-left">
-          <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${selected ? (accent?.bg || 'bg-emerald-500') : 'bg-slate-200'}`} />
+          <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${selected ? (accent?.bg || 'bg-emerald-500') : 'bg-secondary'}`} />
           {tech.photoUrl ? (
-            <img src={tech.photoUrl} alt={tech.name} className="w-8 h-8 rounded-full object-cover flex-shrink-0 border border-slate-200" />
+            <img src={tech.photoUrl} alt={tech.name} className="w-8 h-8 rounded-full object-cover flex-shrink-0 border border-border" />
           ) : (
-            <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-[10px] font-bold text-white ${selected ? (accent?.bg || 'bg-blue-500') : 'bg-slate-300'}`}>
+            <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-[10px] font-bold text-white ${selected ? (accent?.bg || 'bg-blue-500') : 'bg-muted-foreground/40'}`}>
               {getInitials(tech.name)}
             </div>
           )}
           <div className="flex-1 min-w-0">
-            <span className={`text-sm truncate block ${selected ? 'font-semibold text-slate-900' : 'text-slate-600'}`}>
+            <span className={`text-sm truncate block ${selected ? 'font-semibold text-foreground' : 'text-muted-foreground'}`}>
               {tech.name}
             </span>
             {/* Inline stats when selected */}
             {selected && st && (
-              <span className="text-[10px] text-slate-400 block">
-                <span className="text-emerald-600 font-semibold">{st.picked} picked</span>
+              <span className="text-[10px] text-muted-foreground/75 block">
+                <span className="text-emerald-600 dark:text-emerald-300 font-semibold">{st.picked} picked</span>
                 <span className="mx-1">·</span>
                 <span>{st.notPicked} not</span>
               </span>
             )}
           </div>
-          {selected && <Check className={`w-3.5 h-3.5 flex-shrink-0 ${accent ? accent.bg.replace('bg-', 'text-') : 'text-emerald-600'}`} />}
+          {selected && <Check className={`w-3.5 h-3.5 flex-shrink-0 ${accent ? accent.bg.replace('bg-', 'text-') : 'text-emerald-600 dark:text-emerald-300'}`} />}
         </button>
         {/* Hide / unhide button */}
         <button
           onClick={(e) => { e.stopPropagation(); onToggleHidden(tech.id); }}
-          className="p-1 hover:bg-slate-200 rounded transition-colors flex-shrink-0 text-slate-300 hover:text-slate-500"
+          className="p-1 hover:bg-secondary rounded transition-colors flex-shrink-0 text-muted-foreground/50 hover:text-muted-foreground"
           title={isHiddenSection ? 'Show agent' : 'Hide agent'}
         >
           {isHiddenSection ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
@@ -260,51 +260,51 @@ function TechSelector({
   };
 
   return (
-    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden flex-shrink-0">
-      <div className="px-3 py-2 border-b border-slate-100">
+    <div className="bg-card border border-border rounded-xl overflow-hidden flex-shrink-0">
+      <div className="px-3 py-2 border-b border-border/60">
         <div className="flex items-center justify-between mb-2">
-          <span className="text-xs font-semibold text-slate-600 uppercase tracking-wider flex items-center gap-1.5">
+          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
             <Users className="w-3.5 h-3.5" /> Technicians
           </span>
           <div className="flex items-center gap-1.5 text-[10px]">
-            <button onClick={selectAll} className="text-blue-600 hover:underline">All</button>
-            <span className="text-slate-300">·</span>
-            <button onClick={clearAll} className="text-slate-400 hover:text-red-500 hover:underline">None</button>
+            <button onClick={selectAll} className="text-blue-600 dark:text-blue-300 hover:underline">All</button>
+            <span className="text-muted-foreground/50">·</span>
+            <button onClick={clearAll} className="text-muted-foreground/75 hover:text-red-500 hover:underline">None</button>
           </div>
         </div>
         <div className="relative">
-          <Search className="w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-slate-300" />
+          <Search className="w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground/50" />
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Filter techs…"
-            className="w-full pl-7 pr-2 py-1.5 text-sm border border-slate-200 rounded-md focus:ring-1 focus:ring-blue-400 focus:border-blue-400"
+            className="w-full pl-7 pr-2 py-1.5 text-sm border border-border rounded-md focus:ring-1 focus:ring-blue-400 focus:border-blue-400"
           />
         </div>
       </div>
 
       {/* Visible techs */}
-      <div className="overflow-y-auto divide-y divide-slate-50" style={{ maxHeight: maxListHeight }}>
+      <div className="overflow-y-auto divide-y divide-border/60" style={{ maxHeight: maxListHeight }}>
         {filtered.map((tech) => renderRow(tech))}
         {filtered.length === 0 && (
-          <p className="text-xs text-slate-400 text-center py-4">No techs match</p>
+          <p className="text-xs text-muted-foreground/75 text-center py-4">No techs match</p>
         )}
       </div>
 
       {/* Hidden techs — collapsible section */}
       {hiddenTechs.length > 0 && (
-        <div className="border-t border-slate-200">
+        <div className="border-t border-border">
           <button
             onClick={() => setShowHidden((p) => !p)}
-            className="w-full flex items-center gap-1.5 px-3 py-1.5 text-[10px] text-slate-400 hover:text-slate-600 transition-colors"
+            className="w-full flex items-center gap-1.5 px-3 py-1.5 text-[10px] text-muted-foreground/75 hover:text-muted-foreground transition-colors"
           >
             <EyeOff className="w-3 h-3" />
             <span>{hiddenTechs.length} hidden</span>
             <ChevronDown className={`w-3 h-3 ml-auto transition-transform ${showHidden ? 'rotate-180' : ''}`} />
           </button>
           {showHidden && (
-            <div className="divide-y divide-slate-50 bg-slate-50/50">
+            <div className="divide-y divide-border/60 bg-muted/25">
               {hiddenTechs.map((tech) => renderRow(tech, { isHiddenSection: true }))}
             </div>
           )}
@@ -313,7 +313,7 @@ function TechSelector({
 
       {/* Footer count */}
       {selectedIds.size > 0 && (
-        <div className="px-3 py-1.5 border-t border-slate-100 bg-slate-50 text-[10px] text-slate-500">
+        <div className="px-3 py-1.5 border-t border-border/60 bg-muted/50 text-[10px] text-muted-foreground">
           {selectedIds.size} selected
         </div>
       )}
@@ -659,26 +659,26 @@ export default function TimelineExplorer() {
     <>
       {totals && (
         <div className="hidden items-center gap-3 text-xs flex-shrink-0 xl:flex">
-          <span className="flex items-center gap-1.5 text-emerald-600 font-semibold">
+          <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-300 font-semibold">
             <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />
             Picked {totals.picked}
           </span>
-          <span className="flex items-center gap-1.5 text-slate-400 font-semibold">
-            <span className="w-2 h-2 rounded-full bg-slate-400 inline-block" />
+          <span className="flex items-center gap-1.5 text-muted-foreground/75 font-semibold">
+            <span className="w-2 h-2 rounded-full bg-muted-foreground/60 inline-block" />
             Not picked {totals.notPicked}
           </span>
           {totals.hidden > 0 && (
-            <span className="text-slate-300 text-[10px]">({totals.hidden} hidden)</span>
+            <span className="text-muted-foreground/50 text-[10px]">({totals.hidden} hidden)</span>
           )}
         </div>
       )}
       <button
         onClick={fetchTimeline}
         disabled={isLoading}
-        className={`inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg transition-colors hover:bg-slate-100 ${isLoading ? 'opacity-50' : ''}`}
+        className={`inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg transition-colors hover:bg-muted ${isLoading ? 'opacity-50' : ''}`}
         title={selectedTechIds.size > 0 ? `Refresh timeline for ${selectedTechIds.size} tech${selectedTechIds.size > 1 ? 's' : ''}` : 'Refresh Timeline Explorer'}
       >
-        <RefreshCw className={`w-4 h-4 text-slate-500 ${isLoading ? 'animate-spin' : ''}`} />
+        <RefreshCw className={`w-4 h-4 text-muted-foreground ${isLoading ? 'animate-spin' : ''}`} />
       </button>
     </>
   );
@@ -697,15 +697,15 @@ export default function TimelineExplorer() {
           <div className="absolute inset-0 bg-gray-900/20 backdrop-blur-[1px]" />
           <div className="relative">
             <div
-              className="absolute inset-0 w-20 h-20 rounded-full border-4 border-transparent border-t-blue-500 border-r-blue-300 opacity-80"
+              className="absolute inset-0 w-20 h-20 rounded-full border-4 border-transparent border-t-blue-500 border-r-blue-300 dark:border-r-blue-500/40 opacity-80"
               style={{ animation: 'spin 1.5s linear infinite' }}
             />
             <div
-              className="absolute inset-2 w-16 h-16 rounded-full border-4 border-transparent border-b-purple-500 border-l-purple-300 opacity-70"
+              className="absolute inset-2 w-16 h-16 rounded-full border-4 border-transparent border-b-purple-500 border-l-purple-300 dark:border-l-purple-500/40 opacity-70"
               style={{ animation: 'spin 1s linear infinite reverse', marginLeft: '0.5rem', marginTop: '0.5rem' }}
             />
             <div
-              className="absolute inset-4 w-12 h-12 rounded-full border-4 border-transparent border-t-indigo-500 border-r-indigo-300 opacity-90"
+              className="absolute inset-4 w-12 h-12 rounded-full border-4 border-transparent border-t-indigo-500 border-r-indigo-300 dark:border-r-indigo-500/40 opacity-90"
               style={{ animation: 'spin 0.7s linear infinite', marginLeft: '1rem', marginTop: '1rem' }}
             />
             <div className="absolute w-20 h-20 flex items-center justify-center">
@@ -723,7 +723,7 @@ export default function TimelineExplorer() {
           <div className="flex w-full min-w-0 items-center gap-1.5 flex-shrink-0 lg:w-auto">
             <button
               onClick={handlePrevious}
-              className="p-1.5 hover:bg-white hover:bg-opacity-20 rounded transition-colors"
+              className="p-1.5 hover:bg-white/20 rounded transition-colors"
               title={viewMode === 'daily' ? 'Previous day' : viewMode === 'weekly' ? 'Previous week' : 'Previous month'}
             >
               <ChevronLeft className="w-4 h-4" />
@@ -741,7 +741,7 @@ export default function TimelineExplorer() {
                     const [y, mo] = e.target.value.split('-').map(Number);
                     setSelectedMonth(new Date(y, mo - 1, 1));
                   }}
-                  className="w-full px-2 py-0.5 bg-white bg-opacity-20 border border-white border-opacity-30 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-white"
+                  className="w-full px-2 py-0.5 bg-white/20 border border-white/30 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-white"
                 />
               ) : (
                 <input
@@ -749,14 +749,14 @@ export default function TimelineExplorer() {
                   value={selectedDate || formatDateLocal(new Date())}
                   max={formatDateLocal(new Date())}
                   onChange={(e) => setSelectedDate(e.target.value || null)}
-                  className="w-full px-2 py-0.5 bg-white bg-opacity-20 border border-white border-opacity-30 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-white"
+                  className="w-full px-2 py-0.5 bg-white/20 border border-white/30 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-white"
                 />
               )}
             </div>
 
             <button
               onClick={atCurrentPeriod ? undefined : handleNext}
-              className={`p-1.5 rounded transition-colors ${atCurrentPeriod ? 'opacity-30 cursor-default' : 'hover:bg-white hover:bg-opacity-20'}`}
+              className={`p-1.5 rounded transition-colors ${atCurrentPeriod ? 'opacity-30 cursor-default' : 'hover:bg-card hover:bg-opacity-20'}`}
               title={viewMode === 'daily' ? 'Next day' : viewMode === 'weekly' ? 'Next week' : 'Next month'}
             >
               <ChevronRight className="w-4 h-4" />
@@ -765,7 +765,7 @@ export default function TimelineExplorer() {
             {!atCurrentPeriod && (
               <button
                 onClick={handleToday}
-                className="px-2 py-0.5 bg-white bg-opacity-20 hover:bg-opacity-30 rounded text-xs font-semibold transition-colors whitespace-nowrap"
+                className="px-2 py-0.5 bg-white/20 hover:bg-white/30 rounded text-xs font-semibold transition-colors whitespace-nowrap"
               >
                 {viewMode === 'monthly' ? 'This Month' : viewMode === 'weekly' ? 'This Week' : 'Today'}
               </button>
@@ -779,31 +779,31 @@ export default function TimelineExplorer() {
             {/* Rolling/Combined toggle (only when multi-day) */}
             {isMultiDay && (
               <>
-                <div className="grid flex-1 grid-cols-2 items-center gap-0.5 rounded-lg bg-white bg-opacity-20 p-0.5 sm:flex-none">
+                <div className="grid flex-1 grid-cols-2 items-center gap-0.5 rounded-lg bg-white/20 p-0.5 sm:flex-none">
                   {['rolling', 'combined'].map((m) => (
                     <button
                       key={m}
                       onClick={() => setMergedViewMode(m)}
                       className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
-                        mergedViewMode === m ? 'bg-white text-blue-600 shadow-sm' : 'text-white hover:bg-white hover:bg-opacity-10'
+                        mergedViewMode === m ? 'bg-white text-blue-600 shadow-sm' : 'text-white hover:bg-white/10'
                       }`}
                     >
                       {m === 'rolling' ? 'Day by Day' : 'Combined'}
                     </button>
                   ))}
                 </div>
-                <div className="hidden h-6 w-px flex-none bg-white bg-opacity-20 sm:block" />
+                <div className="hidden h-6 w-px flex-none bg-white/25 sm:block" />
               </>
             )}
 
             {/* Period toggle — far right, matching Dashboard position */}
-            <div className="grid flex-1 grid-cols-3 items-center gap-0.5 rounded-lg bg-white bg-opacity-20 p-0.5 sm:flex-none">
+            <div className="grid flex-1 grid-cols-3 items-center gap-0.5 rounded-lg bg-white/20 p-0.5 sm:flex-none">
               {['daily', 'weekly', 'monthly'].map((m) => (
                 <button
                   key={m}
                   onClick={() => setViewMode(m)}
                   className={`px-3 py-1 rounded text-xs font-medium capitalize transition-colors ${
-                    viewMode === m ? 'bg-white text-blue-600 shadow-sm' : 'text-white hover:bg-white hover:bg-opacity-10'
+                    viewMode === m ? 'bg-white text-blue-600 shadow-sm' : 'text-white hover:bg-white/10'
                   }`}
                 >
                   {m}
@@ -815,19 +815,19 @@ export default function TimelineExplorer() {
       </div>
 
       {/* Mobile technician picker */}
-      <div className="mb-3 rounded-xl border border-slate-200 bg-white/95 shadow-sm lg:hidden">
+      <div className="mb-3 rounded-xl border border-border bg-card/95 shadow-sm lg:hidden">
         <button
           type="button"
           onClick={() => setMobileTechPanelOpen((open) => !open)}
           className="flex w-full items-center gap-3 px-3 py-2.5 text-left"
         >
-          <div className="flex h-9 w-9 flex-none items-center justify-center rounded-lg bg-blue-50 text-blue-700">
+          <div className="flex h-9 w-9 flex-none items-center justify-center rounded-lg bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200">
             <Users className="h-4 w-4" />
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold text-slate-900">Technicians</span>
-              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
+              <span className="text-sm font-semibold text-foreground">Technicians</span>
+              <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
                 {selectedTechIds.size || 0} selected
               </span>
             </div>
@@ -835,24 +835,24 @@ export default function TimelineExplorer() {
               {selectedTechs.length > 0 ? selectedTechs.slice(0, 5).map((tech) => {
                 const accent = accentMap.get(tech.id);
                 return tech.photoUrl ? (
-                  <img key={tech.id} src={tech.photoUrl} alt="" className="h-6 w-6 flex-none rounded-full border border-slate-200 object-cover" />
+                  <img key={tech.id} src={tech.photoUrl} alt="" className="h-6 w-6 flex-none rounded-full border border-border object-cover" />
                 ) : (
-                  <span key={tech.id} className={`flex h-6 w-6 flex-none items-center justify-center rounded-full text-[9px] font-bold text-white ${accent?.bg || 'bg-slate-400'}`}>
+                  <span key={tech.id} className={`flex h-6 w-6 flex-none items-center justify-center rounded-full text-[9px] font-bold text-white ${accent?.bg || 'bg-muted-foreground/60'}`}>
                     {getInitials(tech.name)}
                   </span>
                 );
               }) : (
-                <span className="truncate text-xs text-slate-400">Choose one or more agents to populate the timeline</span>
+                <span className="truncate text-xs text-muted-foreground/75">Choose one or more agents to populate the timeline</span>
               )}
               {selectedTechs.length > 5 && (
-                <span className="text-[10px] font-semibold text-slate-400">+{selectedTechs.length - 5}</span>
+                <span className="text-[10px] font-semibold text-muted-foreground/75">+{selectedTechs.length - 5}</span>
               )}
             </div>
           </div>
-          <ChevronDown className={`h-4 w-4 flex-none text-slate-400 transition-transform ${mobileTechPanelOpen ? 'rotate-180' : ''}`} />
+          <ChevronDown className={`h-4 w-4 flex-none text-muted-foreground/75 transition-transform ${mobileTechPanelOpen ? 'rotate-180' : ''}`} />
         </button>
         {mobileTechPanelOpen && (
-          <div className="border-t border-slate-100 p-2">
+          <div className="border-t border-border/60 p-2">
             <TechSelector
               techList={techList}
               selectedIds={selectedTechIds}
@@ -869,18 +869,18 @@ export default function TimelineExplorer() {
       </div>
 
       {/* ── Body ── */}
-      <div className="flex flex-1 flex-col overflow-visible rounded-xl border border-slate-200 bg-white/80 shadow-sm lg:min-h-0 lg:overflow-hidden lg:flex-row">
+      <div className="flex flex-1 flex-col overflow-visible rounded-xl border border-border bg-card/80 shadow-sm lg:min-h-0 lg:overflow-hidden lg:flex-row">
         {/* Left sidebar — animated collapse */}
         <div
-          className={`hidden flex-shrink-0 border-b border-slate-200 bg-white transition-all duration-300 ease-in-out lg:flex lg:flex-col lg:border-b-0 lg:border-r ${
+          className={`hidden flex-shrink-0 border-b border-border bg-card transition-all duration-300 ease-in-out lg:flex lg:flex-col lg:border-b-0 lg:border-r ${
             sidebarOpen ? 'max-h-[38vh] lg:max-h-none lg:w-64' : 'max-h-14 lg:max-h-none lg:w-12'
           }`}
         >
           {/* Toggle button row */}
-          <div className={`flex items-center flex-shrink-0 border-b border-slate-100 ${sidebarOpen ? 'justify-end px-3 py-1.5' : 'justify-center py-2'}`}>
+          <div className={`flex items-center flex-shrink-0 border-b border-border/60 ${sidebarOpen ? 'justify-end px-3 py-1.5' : 'justify-center py-2'}`}>
             <button
               onClick={() => setSidebarOpen((o) => !o)}
-              className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors text-slate-400 hover:text-slate-700"
+              className="p-1.5 hover:bg-muted rounded-lg transition-colors text-muted-foreground/75 hover:text-foreground/85"
               title={sidebarOpen ? 'Collapse panel' : 'Expand panel'}
             >
               {sidebarOpen ? <PanelLeftClose className="w-4 h-4" /> : <PanelLeftOpen className="w-4 h-4" />}
@@ -904,11 +904,11 @@ export default function TimelineExplorer() {
         {/* Right: filter bar + timeline */}
         <div className="flex-1 flex min-w-0 flex-col gap-3 overflow-visible px-2 py-3 sm:px-4 sm:py-4 lg:overflow-hidden lg:pl-0">
           {/* Filter bar */}
-          <div className="bg-white border border-slate-200 rounded-xl px-3 sm:px-4 py-2.5 flex-shrink-0 flex flex-wrap items-center gap-2 sm:gap-3">
+          <div className="bg-card border border-border rounded-xl px-3 sm:px-4 py-2.5 flex-shrink-0 flex flex-wrap items-center gap-2 sm:gap-3">
             <div className="flex w-full items-center justify-between sm:hidden">
-              <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Filters</span>
+              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Filters</span>
               {activeFilterCount > 0 && (
-                <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700">
+                <span className="rounded-full bg-blue-50 dark:bg-blue-500/15 px-2 py-0.5 text-[10px] font-semibold text-blue-700 dark:text-blue-200">
                   {activeFilterCount} active
                 </span>
               )}
@@ -928,8 +928,8 @@ export default function TimelineExplorer() {
               onClick={handleToggleNoise}
               className={`flex min-w-[8.5rem] flex-1 items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap sm:flex-none ${
                 excludeNoise
-                  ? 'bg-amber-100 hover:bg-amber-200 text-amber-800 ring-1 ring-amber-300'
-                  : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
+                  ? 'bg-amber-100 dark:bg-amber-500/20 hover:bg-amber-200 dark:hover:bg-amber-500/30 text-amber-800 dark:text-amber-200 ring-1 ring-amber-300 dark:ring-amber-500/40'
+                  : 'bg-muted hover:bg-secondary text-muted-foreground'
               }`}
               title={excludeNoise ? 'Noise tickets are hidden' : 'Hide automated/noise tickets'}
             >
@@ -940,8 +940,8 @@ export default function TimelineExplorer() {
               onClick={() => setHideNonPicked(v => !v)}
               className={`flex min-w-[8.5rem] flex-1 items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap sm:flex-none ${
                 hideNonPicked
-                  ? 'bg-emerald-100 hover:bg-emerald-200 text-emerald-800 ring-1 ring-emerald-300'
-                  : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
+                  ? 'bg-emerald-100 dark:bg-emerald-500/20 hover:bg-emerald-200 dark:hover:bg-emerald-500/30 text-emerald-800 dark:text-emerald-200 ring-1 ring-emerald-300 dark:ring-emerald-500/40'
+                  : 'bg-muted hover:bg-secondary text-muted-foreground'
               }`}
               title={hideNonPicked ? 'Showing only picked tickets. Click to show all.' : 'Hide tickets not picked by selected agent(s)'}
             >
@@ -952,8 +952,8 @@ export default function TimelineExplorer() {
               onClick={() => setShowHandoffEvents(v => !v)}
               className={`flex min-w-[8.5rem] flex-1 items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap sm:flex-none ${
                 showHandoffEvents
-                  ? 'bg-amber-100 hover:bg-amber-200 text-amber-800 ring-1 ring-amber-300'
-                  : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
+                  ? 'bg-amber-100 dark:bg-amber-500/20 hover:bg-amber-200 dark:hover:bg-amber-500/30 text-amber-800 dark:text-amber-200 ring-1 ring-amber-300 dark:ring-amber-500/40'
+                  : 'bg-muted hover:bg-secondary text-muted-foreground'
               }`}
               title={showHandoffEvents ? 'Handoff and rejection event rows are shown' : 'Show handoff and rejection event rows'}
             >
@@ -963,20 +963,20 @@ export default function TimelineExplorer() {
           </div>
 
           {/* Timeline */}
-          <div className="bg-white border border-slate-200 rounded-xl flex min-h-[60vh] flex-col overflow-hidden lg:min-h-0 lg:flex-1">
+          <div className="bg-card border border-border rounded-xl flex min-h-[60vh] flex-col overflow-hidden lg:min-h-0 lg:flex-1">
             {error && (
               <div className="p-6 text-center">
                 <p className="text-red-500 text-sm">{error}</p>
-                <button onClick={fetchTimeline} className="mt-2 text-xs text-blue-600 hover:underline">Retry</button>
+                <button onClick={fetchTimeline} className="mt-2 text-xs text-blue-600 dark:text-blue-300 hover:underline">Retry</button>
               </div>
             )}
 
             {!error && !isLoading && selectedTechIds.size === 0 && (
               <div className="flex min-h-[18rem] flex-1 items-center justify-center px-6">
                 <div className="text-center">
-                  <Layers className="w-10 h-10 text-slate-200 mx-auto mb-3" />
-                  <p className="text-slate-400 text-sm font-medium">Select technicians to view their timeline</p>
-                  <p className="text-slate-300 text-xs mt-1">Use the technician picker above to choose one or more agents</p>
+                  <Layers className="w-10 h-10 text-muted-foreground/40 mx-auto mb-3" />
+                  <p className="text-muted-foreground/75 text-sm font-medium">Select technicians to view their timeline</p>
+                  <p className="text-muted-foreground/50 text-xs mt-1">Use the technician picker above to choose one or more agents</p>
                 </div>
               </div>
             )}
@@ -994,7 +994,7 @@ export default function TimelineExplorer() {
 
             {/* Footer legend */}
             {techConfigs.length > 0 && (
-              <div className="px-3 sm:px-5 py-2.5 border-t border-slate-100 flex-shrink-0 overflow-x-auto">
+              <div className="px-3 sm:px-5 py-2.5 border-t border-border/60 flex-shrink-0 overflow-x-auto">
                 <TimelineLegend techConfigs={techConfigs} />
               </div>
             )}

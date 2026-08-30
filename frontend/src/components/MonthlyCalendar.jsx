@@ -239,17 +239,17 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
 
   return (
     <div className="relative flex flex-col gap-3 lg:flex-row lg:gap-4">
-      <div className="lg:hidden rounded-xl bg-white p-3 shadow">
+      <div className="lg:hidden rounded-xl bg-card p-3 shadow">
         <div className="mb-2 flex items-center justify-between">
           <div>
-            <h3 className="text-sm font-semibold text-gray-800">Technicians</h3>
-            <p className="text-[11px] text-gray-500">{monthName}</p>
+            <h3 className="text-sm font-semibold text-foreground">Technicians</h3>
+            <p className="text-[11px] text-muted-foreground">{monthName}</p>
           </div>
           {selectedTechnicianIds.length > 0 && (
             <button
               type="button"
               onClick={() => setSelectedTechnicianIds([])}
-              className="rounded-full bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700"
+              className="rounded-full bg-blue-50 dark:bg-blue-500/15 px-2 py-1 text-[11px] font-semibold text-blue-700 dark:text-blue-200"
             >
               Clear
             </button>
@@ -257,7 +257,7 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
         </div>
         <div className="flex gap-2 overflow-x-auto pb-1">
           {sortedTechnicians.length === 0 ? (
-            <span className="text-xs text-gray-500">No activity this month</span>
+            <span className="text-xs text-muted-foreground">No activity this month</span>
           ) : sortedTechnicians.map((tech) => {
             const isSelected = selectedSet.has(tech.id);
             return (
@@ -271,15 +271,15 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
                 }
                 className={`flex min-w-[76px] flex-col items-center rounded-lg border px-2 py-2 text-center transition-colors ${
                   isSelected
-                    ? 'border-blue-300 bg-blue-50 text-blue-800'
-                    : 'border-gray-200 bg-gray-50 text-gray-700'
+                    ? 'border-blue-300 dark:border-blue-500/40 bg-blue-50 dark:bg-blue-500/15 text-blue-800 dark:text-blue-200'
+                    : 'border-border bg-muted/50 text-foreground/85'
                 }`}
                 title={`${tech.name} • ${tech.monthlyTotal} tickets`}
               >
                 {tech.photoUrl ? (
                   <img src={tech.photoUrl} alt={tech.name} className="h-8 w-8 rounded-full object-cover" />
                 ) : (
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-200 text-[11px] font-semibold text-gray-600">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-secondary text-[11px] font-semibold text-muted-foreground">
                     {tech.name.charAt(0)}
                   </div>
                 )}
@@ -292,18 +292,18 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
       </div>
       {/* Technician Sidebar */}
       <div className={`${sidebarWidthClass} hidden flex-shrink-0 transition-all duration-300 lg:block`}>
-        <div className="bg-white rounded-2xl shadow h-full flex flex-col">
-          <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+        <div className="bg-card rounded-2xl shadow h-full flex flex-col">
+          <div className="p-4 border-b border-border flex items-center justify-between">
             {!isSidebarCollapsed && (
               <div>
-                <h3 className="font-semibold text-gray-800">Technicians</h3>
-                <p className="text-xs text-gray-500 mt-1">{monthName}</p>
+                <h3 className="font-semibold text-foreground">Technicians</h3>
+                <p className="text-xs text-muted-foreground mt-1">{monthName}</p>
               </div>
             )}
             <button
               type="button"
               onClick={() => setIsSidebarCollapsed((prev) => !prev)}
-              className="p-2 rounded-xl hover:bg-gray-100 transition-colors"
+              className="p-2 rounded-xl hover:bg-muted transition-colors"
               aria-label={isSidebarCollapsed ? 'Expand technician panel' : 'Collapse technician panel'}
             >
               {isSidebarCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
@@ -311,7 +311,7 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
           </div>
 
           {sortedTechnicians.length === 0 ? (
-            <div className="flex-1 flex items-center justify-center text-sm text-gray-500">
+            <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
               No activity this month
             </div>
           ) : isSidebarCollapsed ? (
@@ -339,7 +339,7 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
                         className="w-10 h-10 rounded-full object-cover"
                       />
                     ) : (
-                      <div className="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-sm font-semibold text-gray-600">
+                      <div className="w-10 h-10 rounded-full bg-muted-foreground/40 flex items-center justify-center text-sm font-semibold text-muted-foreground">
                         {tech.name.charAt(0)}
                       </div>
                     )}
@@ -362,24 +362,24 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
                     }
                     className={`w-full rounded-lg transition-colors duration-150 text-left px-2 py-1.5 flex items-center gap-2 ${
                       isSelected
-                        ? 'bg-blue-50 ring-1 ring-blue-200'
-                        : 'hover:bg-gray-50'
+                        ? 'bg-blue-50 dark:bg-blue-500/15 ring-1 ring-blue-200 dark:ring-blue-500/30'
+                        : 'hover:bg-muted/50'
                     }`}
                     title={`${tech.name} • ${tech.monthlyTotal} tickets`}
                   >
                     {tech.photoUrl ? (
                       <img src={tech.photoUrl} alt={tech.name} className="w-7 h-7 rounded-full object-cover flex-shrink-0" />
                     ) : (
-                      <div className="w-7 h-7 rounded-full bg-gray-200 flex items-center justify-center text-[11px] font-semibold text-gray-600 flex-shrink-0">
+                      <div className="w-7 h-7 rounded-full bg-secondary flex items-center justify-center text-[11px] font-semibold text-muted-foreground flex-shrink-0">
                         {tech.name.charAt(0)}
                       </div>
                     )}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-[13px] font-medium text-gray-800 truncate leading-tight">{tech.name}</span>
-                        <span className="text-[13px] font-semibold text-gray-900 flex-shrink-0 tabular-nums leading-tight">{tech.monthlyTotal}</span>
+                        <span className="text-[13px] font-medium text-foreground truncate leading-tight">{tech.name}</span>
+                        <span className="text-[13px] font-semibold text-foreground flex-shrink-0 tabular-nums leading-tight">{tech.monthlyTotal}</span>
                       </div>
-                      <div className="mt-0.5 flex items-center gap-2 text-[10px] text-gray-500 font-medium tabular-nums">
+                      <div className="mt-0.5 flex items-center gap-2 text-[10px] text-muted-foreground font-medium tabular-nums">
                         <span title="Self-picked">S:{tech.monthlySelfPicked}</span>
                         <span title="Assigned">A:{tech.monthlyAssigned}</span>
                         <span title="Closed">C:{tech.monthlyClosed}</span>
@@ -400,8 +400,8 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
           )}
 
           {!isSidebarCollapsed && (
-            <div className="border-t border-gray-200 px-4 py-3 text-xs text-gray-600">
-              <h4 className="font-semibold text-gray-700 mb-2">Legend</h4>
+            <div className="border-t border-border px-4 py-3 text-xs text-muted-foreground">
+              <h4 className="font-semibold text-foreground/85 mb-2">Legend</h4>
               <div className="space-y-1.5">
                 <div className="flex items-center gap-2">
                   <div className="w-3 h-3 rounded-full bg-blue-500/80" />
@@ -426,10 +426,10 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
               </div>
               
               {/* Weekend & Holiday Legend */}
-              <h4 className="font-semibold text-gray-700 mb-2 mt-4">Calendar</h4>
+              <h4 className="font-semibold text-foreground/85 mb-2 mt-4">Calendar</h4>
               <div className="space-y-1.5">
                 <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded bg-slate-200 border border-slate-300" />
+                  <div className="w-3 h-3 rounded bg-secondary border border-input" />
                   <span>Weekend</span>
                 </div>
                 <div className="flex items-center gap-2">
@@ -447,24 +447,24 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
       </div>
 
       {/* Calendar Section */}
-      <div className="flex-1 bg-white rounded-xl shadow p-2 flex flex-col sm:rounded-2xl sm:p-4">
+      <div className="flex-1 bg-card rounded-xl shadow p-2 flex flex-col sm:rounded-2xl sm:p-4">
         <div className="flex items-center justify-between px-0 pb-2 sm:px-2">
           <button
             type="button"
             onClick={handlePrevMonth}
-            className="p-2 rounded-xl hover:bg-gray-100 transition-colors"
+            className="p-2 rounded-xl hover:bg-muted transition-colors"
             title="Previous month"
           >
-            <ChevronLeft className="w-5 h-5 text-gray-600" />
+            <ChevronLeft className="w-5 h-5 text-muted-foreground" />
           </button>
-          <h2 className="text-lg font-semibold text-gray-800 sm:text-2xl">{monthName}</h2>
+          <h2 className="text-lg font-semibold text-foreground sm:text-2xl">{monthName}</h2>
           <button
             type="button"
             onClick={handleNextMonth}
-            className="p-2 rounded-xl hover:bg-gray-100 transition-colors"
+            className="p-2 rounded-xl hover:bg-muted transition-colors"
             title="Next month"
           >
-            <ChevronRight className="w-5 h-5 text-gray-600" />
+            <ChevronRight className="w-5 h-5 text-muted-foreground" />
           </button>
         </div>
 
@@ -474,7 +474,7 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
             return (
               <div
                 key={day}
-                className={`text-center ${isWeekendHeader ? 'text-slate-400' : 'text-gray-400'}`}
+                className={`text-center ${isWeekendHeader ? 'text-muted-foreground/75' : 'text-muted-foreground/75'}`}
               >
                 {day.toUpperCase()}
               </div>
@@ -487,7 +487,7 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
             <div key={weekIdx} className="grid grid-cols-7 gap-1 sm:gap-3">
               {week.map((day, dayIdx) => {
                 if (!day) {
-                  return <div key={dayIdx} className="h-20 rounded-xl border border-dashed border-gray-200 sm:h-40 sm:rounded-3xl" />;
+                  return <div key={dayIdx} className="h-20 rounded-xl border border-dashed border-border sm:h-40 sm:rounded-3xl" />;
                 }
 
                 const isToday = day.date === formatDateLocal(new Date());
@@ -535,28 +535,28 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
                 
                 // Determine background styling based on weekend/holiday
                 const getBackgroundClass = () => {
-                  if (isHovered) return 'bg-white';
+                  if (isHovered) return 'bg-card';
                   if (isHolidayDay) {
                     if (dateStyling.isCanadian) {
-                      return hasTickets ? 'bg-gradient-to-br from-rose-50/40 via-rose-50/60 to-rose-50/40' : 'bg-rose-50/30';
+                      return hasTickets ? 'bg-gradient-to-br from-rose-50/40 via-rose-50/60 to-rose-50/40 dark:from-rose-500/10 dark:via-rose-500/15 dark:to-rose-500/10' : 'bg-rose-50/30 dark:bg-rose-500/10';
                     }
-                    return hasTickets ? 'bg-gradient-to-br from-indigo-50/30 via-indigo-50/50 to-indigo-50/30' : 'bg-indigo-50/20';
+                    return hasTickets ? 'bg-gradient-to-br from-indigo-50/30 via-indigo-50/50 to-indigo-50/30 dark:from-indigo-500/10 dark:via-indigo-500/15 dark:to-indigo-500/10' : 'bg-indigo-50/20 dark:bg-indigo-500/10';
                   }
                   if (isWeekendDay) {
-                    return hasTickets ? 'bg-gradient-to-br from-slate-50/40 via-slate-100/50 to-slate-50/40' : 'bg-slate-50/30';
+                    return hasTickets ? 'bg-gradient-to-br from-muted/20 via-muted/50 to-muted/20' : 'bg-muted/15';
                   }
-                  return hasTickets ? 'bg-gradient-to-br from-white via-blue-50/30 to-white' : 'bg-white';
+                  return hasTickets ? 'bg-gradient-to-br from-card via-blue-50/30 to-card dark:via-blue-500/10' : 'bg-card';
                 };
                 
                 const getBorderClass = () => {
                   if (isHovered) return 'border-blue-400';
                   if (isHolidayDay) {
-                    if (dateStyling.isCanadian) return 'border-rose-200';
-                    return 'border-indigo-200';
+                    if (dateStyling.isCanadian) return 'border-rose-200 dark:border-rose-500/30';
+                    return 'border-indigo-200 dark:border-indigo-500/30';
                   }
-                  if (isWeekendDay) return 'border-slate-200';
-                  if (hasTickets) return 'border-gray-200 hover:border-blue-300';
-                  return 'border-dashed border-gray-200';
+                  if (isWeekendDay) return 'border-border';
+                  if (hasTickets) return 'border-border hover:border-blue-300 dark:hover:border-blue-500/40';
+                  return 'border-dashed border-border';
                 };
 
                 return (
@@ -574,10 +574,10 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
                       title={holidayTooltip || undefined}
                       className={`absolute rounded-xl border text-left transition-all duration-300 flex flex-col sm:rounded-3xl ${
                         isHovered
-                          ? `${getBorderClass()} shadow-2xl shadow-blue-200/50 z-50 ${getBackgroundClass()} ${hasFilter && dayTechnicians.length > 0 ? 'overflow-hidden' : 'overflow-y-auto'}`
+                          ? `${getBorderClass()} shadow-2xl shadow-blue-200/50 dark:shadow-blue-500/20 z-50 ${getBackgroundClass()} ${hasFilter && dayTechnicians.length > 0 ? 'overflow-hidden' : 'overflow-y-auto'}`
                           : hasTickets
                             ? `${getBorderClass()} hover:shadow-lg z-0 inset-0 overflow-hidden ${hasFilter ? 'px-1.5 pb-6 pt-2 sm:px-4 sm:pb-8 sm:pt-4' : 'p-1.5 sm:p-4'}`
-                            : `${getBorderClass()} text-gray-400 z-0 p-1.5 inset-0 overflow-hidden sm:p-4`
+                            : `${getBorderClass()} text-muted-foreground/75 z-0 p-1.5 inset-0 overflow-hidden sm:p-4`
                       } ${getBackgroundClass()}`}
                       style={isHovered ? { 
                         transform: 'translate(-50%, -50%) scale(1.5)',
@@ -607,34 +607,34 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
                         )}
                         {/* Weekend indicator (small dot) */}
                         {isWeekendDay && !isHolidayDay && (
-                          <div className={`${isHovered ? 'w-1.5 h-1.5' : 'w-1 h-1'} rounded-full bg-slate-400`} title="Weekend" />
+                          <div className={`${isHovered ? 'w-1.5 h-1.5' : 'w-1 h-1'} rounded-full bg-muted-foreground/60`} title="Weekend" />
                         )}
                         <div className={`flex items-center justify-center rounded ${
                           isToday 
                             ? 'bg-blue-500 text-white font-bold shadow-md' 
                             : isHolidayDay && dateStyling.isCanadian
-                              ? 'bg-rose-100 text-rose-700 font-medium'
+                              ? 'bg-rose-100 dark:bg-rose-500/20 text-rose-700 dark:text-rose-200 font-medium'
                               : isHolidayDay
-                                ? 'bg-indigo-100 text-indigo-700 font-medium'
+                                ? 'bg-indigo-100 dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-200 font-medium'
                                 : isWeekendDay
-                                  ? 'bg-slate-200/80 text-slate-600 font-medium'
-                                  : 'bg-gray-200/70 text-gray-500 font-medium'
+                                  ? 'bg-secondary/80 text-muted-foreground font-medium'
+                                  : 'bg-secondary/70 text-muted-foreground font-medium'
                         } ${isHovered ? 'px-1.5 py-0.5 text-sm' : 'px-1 py-0.5 text-[10px]'} border ${
                           isToday ? 'border-blue-600' : 
-                            isHolidayDay && dateStyling.isCanadian ? 'border-rose-300' :
-                              isHolidayDay ? 'border-indigo-300' :
-                                isWeekendDay ? 'border-slate-300' :
-                                  'border-gray-300/50'
+                            isHolidayDay && dateStyling.isCanadian ? 'border-rose-300 dark:border-rose-500/40' :
+                              isHolidayDay ? 'border-indigo-300 dark:border-indigo-500/40' :
+                                isWeekendDay ? 'border-input' :
+                                  'border-input/50'
                         }`}>
                           {day.dayOfMonth}
                         </div>
                       </div>
 
                       <div className={`flex items-baseline gap-1 sm:gap-2 ${isHovered ? (hasFilter && dayTechnicians.length > 0 ? 'mt-1' : 'mt-2') : 'mt-1'}`}>
-                        <span className={`font-semibold tabular-nums ${hasTickets ? 'text-gray-800' : 'text-gray-300'} ${isHovered ? (hasFilter && dayTechnicians.length > 0 ? 'text-3xl' : 'text-4xl') : 'text-xl sm:text-3xl'}`}>{stats.total}</span>
+                        <span className={`font-semibold tabular-nums ${hasTickets ? 'text-foreground' : 'text-muted-foreground/50 dark:text-muted-foreground/60'} ${isHovered ? (hasFilter && dayTechnicians.length > 0 ? 'text-3xl' : 'text-4xl') : 'text-xl sm:text-3xl'}`}>{stats.total}</span>
                         {/* Show "tickets" label only when hovered (cell is enlarged); the un-hovered grid stays scannable. */}
                         {isHovered && stats.total > 0 && (
-                          <span className={`text-gray-500 ${hasFilter && dayTechnicians.length > 0 ? 'text-xs' : 'text-sm'}`}>tickets</span>
+                          <span className={`text-muted-foreground ${hasFilter && dayTechnicians.length > 0 ? 'text-xs' : 'text-sm'}`}>tickets</span>
                         )}
                       </div>
 
@@ -645,12 +645,12 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
                             <div className={`${isHovered ? (hasFilter && dayTechnicians.length > 0 ? 'mb-2 space-y-1 flex-shrink-0' : 'mb-3 space-y-1.5 flex-shrink-0') : hasFilter ? 'pt-2 space-y-1' : 'mt-auto pt-3 space-y-1'}`}>
                               <div className="space-y-0.5">
                                 {isHovered && (
-                                  <div className="text-[10px] font-semibold text-purple-700 flex items-center justify-between">
+                                  <div className="text-[10px] font-semibold text-purple-700 dark:text-purple-200 flex items-center justify-between">
                                     <span>Self</span>
                                     <span>{stats.selfPicked}</span>
                                   </div>
                                 )}
-                                <div className={`rounded-full bg-gray-100 overflow-hidden ${isHovered ? (hasFilter && dayTechnicians.length > 0 ? 'h-1.5' : 'h-2') : 'h-1'}`} title={!isHovered ? `Self-picked: ${stats.selfPicked}` : undefined}>
+                                <div className={`rounded-full bg-muted overflow-hidden ${isHovered ? (hasFilter && dayTechnicians.length > 0 ? 'h-1.5' : 'h-2') : 'h-1'}`} title={!isHovered ? `Self-picked: ${stats.selfPicked}` : undefined}>
                                   <div
                                     className={isHovered ? 'h-full bg-purple-500/80' : 'h-full bg-purple-400/60'}
                                     style={{
@@ -662,12 +662,12 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
                               </div>
                               <div className="space-y-0.5">
                                 {isHovered && (
-                                  <div className="text-[10px] font-semibold text-orange-700 flex items-center justify-between">
+                                  <div className="text-[10px] font-semibold text-orange-700 dark:text-orange-200 flex items-center justify-between">
                                     <span>Asgn</span>
                                     <span>{stats.assigned}</span>
                                   </div>
                                 )}
-                                <div className={`rounded-full bg-gray-100 overflow-hidden ${isHovered ? (hasFilter && dayTechnicians.length > 0 ? 'h-1.5' : 'h-2') : 'h-1'}`} title={!isHovered ? `Assigned: ${stats.assigned}` : undefined}>
+                                <div className={`rounded-full bg-muted overflow-hidden ${isHovered ? (hasFilter && dayTechnicians.length > 0 ? 'h-1.5' : 'h-2') : 'h-1'}`} title={!isHovered ? `Assigned: ${stats.assigned}` : undefined}>
                                   <div
                                     className={isHovered ? 'h-full bg-orange-500/80' : 'h-full bg-orange-400/60'}
                                     style={{
@@ -679,12 +679,12 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
                               </div>
                               <div className="space-y-0.5">
                                 {isHovered && (
-                                  <div className="text-[10px] font-semibold text-green-700 flex items-center justify-between">
+                                  <div className="text-[10px] font-semibold text-green-700 dark:text-green-200 flex items-center justify-between">
                                     <span>Closed</span>
                                     <span>{stats.closed}</span>
                                   </div>
                                 )}
-                                <div className={`rounded-full bg-gray-100 overflow-hidden ${isHovered ? (hasFilter && dayTechnicians.length > 0 ? 'h-1.5' : 'h-2') : 'h-1'}`} title={!isHovered ? `Closed: ${stats.closed}` : undefined}>
+                                <div className={`rounded-full bg-muted overflow-hidden ${isHovered ? (hasFilter && dayTechnicians.length > 0 ? 'h-1.5' : 'h-2') : 'h-1'}`} title={!isHovered ? `Closed: ${stats.closed}` : undefined}>
                                   <div
                                     className={isHovered ? 'h-full bg-green-500/80' : 'h-full bg-green-500/70'}
                                     style={{
@@ -701,7 +701,7 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
                                   title={`CSAT responses: ${stats.csatCount}`}
                                 >
                                   <span>★</span>
-                                  <span className="text-amber-600">{stats.csatCount}</span>
+                                  <span className="text-amber-600 dark:text-amber-300">{stats.csatCount}</span>
                                 </div>
                               )}
                               {/* In filtered view, keep CSAT in the top-right corner so it doesn't collide with avatar row. */}
@@ -711,13 +711,13 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
                                   title={`CSAT responses: ${stats.csatCount}`}
                                 >
                                   <span>★</span>
-                                  <span className="text-amber-600">{stats.csatCount}</span>
+                                  <span className="text-amber-600 dark:text-amber-300">{stats.csatCount}</span>
                                 </div>
                               )}
                               {/* CSAT when hovered — keep the richer panel for context. */}
                               {stats.csatCount > 0 && isHovered && (
-                                <div className="mt-1.5 pt-1.5 border-t-2 border-yellow-300 bg-yellow-50/50 -mx-3 px-3 py-1 rounded flex-shrink-0">
-                                  <div className="text-[11px] font-bold text-yellow-700 flex items-center justify-between">
+                                <div className="mt-1.5 pt-1.5 border-t-2 border-yellow-300 dark:border-yellow-500/40 bg-yellow-50/50 dark:bg-yellow-500/10 -mx-3 px-3 py-1 rounded flex-shrink-0">
+                                  <div className="text-[11px] font-bold text-yellow-700 dark:text-yellow-200 flex items-center justify-between">
                                     <span>⭐ CSAT</span>
                                     <span className="text-sm">{stats.csatCount}</span>
                                   </div>
@@ -727,8 +727,8 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
 
                             {/* Technician Details - Only show in hover when filtering */}
                             {hasFilter && isHovered && dayTechnicians.length > 0 && (
-                              <div className="mt-1.5 pt-1.5 border-t border-gray-200 flex-shrink-0">
-                                <div className="text-[9px] font-semibold text-gray-600 mb-1">Techs ({dayTechnicians.length}):</div>
+                              <div className="mt-1.5 pt-1.5 border-t border-border flex-shrink-0">
+                                <div className="text-[9px] font-semibold text-muted-foreground mb-1">Techs ({dayTechnicians.length}):</div>
                                 <div className="space-y-1 overflow-hidden">
                                   {dayTechnicians
                                     .sort((a, b) => b.total - a.total)
@@ -744,9 +744,9 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
                                       return (
                                         <div
                                           key={tech.technicianId}
-                                          className="flex items-center gap-1.5 p-1 rounded bg-gray-50"
+                                          className="flex items-center gap-1.5 p-1 rounded bg-muted/50"
                                         >
-                                          <div className="w-5 h-5 rounded-full border border-white shadow-sm bg-gray-200 flex items-center justify-center text-[9px] font-semibold text-gray-700 overflow-hidden flex-shrink-0">
+                                          <div className="w-5 h-5 rounded-full border border-card shadow-sm bg-secondary flex items-center justify-center text-[9px] font-semibold text-foreground/85 overflow-hidden flex-shrink-0">
                                             {info?.photoUrl ? (
                                               <img
                                                 src={info.photoUrl}
@@ -758,24 +758,24 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
                                             )}
                                           </div>
                                           <div className="flex-1 min-w-0">
-                                            <div className="text-[10px] font-semibold text-gray-800 truncate">
+                                            <div className="text-[10px] font-semibold text-foreground truncate">
                                               {tech.technicianName}
                                             </div>
                                             <div className="flex items-center gap-1 mt-0.5">
-                                              <span className="text-[8px] text-purple-700">S:{tech.selfPicked}</span>
-                                              <span className="text-[8px] text-orange-700">A:{tech.assigned}</span>
-                                              <span className="text-[8px] text-green-700">C:{tech.closed}</span>
+                                              <span className="text-[8px] text-purple-700 dark:text-purple-200">S:{tech.selfPicked}</span>
+                                              <span className="text-[8px] text-orange-700 dark:text-orange-200">A:{tech.assigned}</span>
+                                              <span className="text-[8px] text-green-700 dark:text-green-200">C:{tech.closed}</span>
                                               {tech.csatCount > 0 && (
-                                                <span className="text-[8px] text-yellow-700">⭐{tech.csatCount}</span>
+                                                <span className="text-[8px] text-yellow-700 dark:text-yellow-200">⭐{tech.csatCount}</span>
                                               )}
-                                              <span className="text-[8px] text-gray-600">T:{tech.total}</span>
+                                              <span className="text-[8px] text-muted-foreground">T:{tech.total}</span>
                                             </div>
                                           </div>
                                         </div>
                                       );
                                     })}
                                   {dayTechnicians.length > 3 && (
-                                    <div className="text-[8px] text-gray-500 text-center pt-0.5">
+                                    <div className="text-[8px] text-muted-foreground text-center pt-0.5">
                                     +{dayTechnicians.length - 3} more
                                     </div>
                                   )}
@@ -801,10 +801,10 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
                           return (
                             <div className="flex items-center mt-1.5">
                               <span
-                                className="inline-flex items-center gap-1 px-1.5 py-0 rounded-full bg-gray-100 text-[9px] font-medium text-gray-600 leading-tight"
+                                className="inline-flex items-center gap-1 px-1.5 py-0 rounded-full bg-muted text-[9px] font-medium text-muted-foreground leading-tight"
                                 title={tooltip}
                               >
-                                <span className="w-1 h-1 rounded-full bg-gray-400" />
+                                <span className="w-1 h-1 rounded-full bg-muted-foreground/60" />
                                 {formatLeaveCount(totalLeave)} on leave
                               </span>
                             </div>
@@ -814,7 +814,7 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
                     
                       {/* Bottom Tech Indicator Line - Only in hover when filtering */}
                       {hasFilter && isHovered && dayTechnicians.length > 0 && (
-                        <div className="absolute bottom-0 left-0 right-0 h-5 bg-blue-50/60 border-t border-blue-200 flex items-center gap-1 px-2 rounded-b-3xl">
+                        <div className="absolute bottom-0 left-0 right-0 h-5 bg-blue-50/60 dark:bg-blue-500/10 border-t border-blue-200 dark:border-blue-500/30 flex items-center gap-1 px-2 rounded-b-3xl">
                           <div className="flex items-center -space-x-1 flex-1 justify-center">
                             {dayTechnicians
                               .sort((a, b) => b.total - a.total)
@@ -830,7 +830,7 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
                                 return (
                                   <div
                                     key={tech.technicianId}
-                                    className="rounded-full border border-blue-300 shadow-sm bg-white flex items-center justify-center text-[7px] font-semibold text-gray-700 overflow-hidden flex-shrink-0"
+                                    className="rounded-full border border-blue-300 dark:border-blue-500/40 shadow-sm bg-card flex items-center justify-center text-[7px] font-semibold text-foreground/85 overflow-hidden flex-shrink-0"
                                     style={{ 
                                       width: '14px', 
                                       height: '14px',
@@ -851,7 +851,7 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
                               })}
                           </div>
                           {dayTechnicians.length > 5 && (
-                            <span className="text-[7px] font-semibold text-blue-700 bg-blue-100 border border-blue-200 rounded-full px-1 py-0.5 whitespace-nowrap flex-shrink-0">
+                            <span className="text-[7px] font-semibold text-blue-700 dark:text-blue-200 bg-blue-100 dark:bg-blue-500/20 border border-blue-200 dark:border-blue-500/30 rounded-full px-1 py-0.5 whitespace-nowrap flex-shrink-0">
                             +{dayTechnicians.length - 5}
                             </span>
                           )}
@@ -860,7 +860,7 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
                     </button>
                     
                     {hasFilter && !isHovered && hasTickets && dayTechnicians.length > 0 && (
-                      <div className="absolute bottom-0 left-0 right-0 h-6 bg-blue-50/50 border-t border-blue-200 flex items-center gap-1 px-2">
+                      <div className="absolute bottom-0 left-0 right-0 h-6 bg-blue-50/50 dark:bg-blue-500/10 border-t border-blue-200 dark:border-blue-500/30 flex items-center gap-1 px-2">
                         <div className="flex items-center -space-x-1 flex-1 justify-center">
                           {dayTechnicians
                             .sort((a, b) => b.total - a.total)
@@ -876,7 +876,7 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
                               return (
                                 <div
                                   key={tech.technicianId}
-                                  className="rounded-full border border-blue-300 shadow-sm bg-white flex items-center justify-center text-[8px] font-semibold text-gray-700 overflow-hidden flex-shrink-0"
+                                  className="rounded-full border border-blue-300 dark:border-blue-500/40 shadow-sm bg-card flex items-center justify-center text-[8px] font-semibold text-foreground/85 overflow-hidden flex-shrink-0"
                                   style={{ 
                                     width: '16px', 
                                     height: '16px',
@@ -897,7 +897,7 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
                             })}
                         </div>
                         {dayTechnicians.length > 5 && (
-                          <span className="text-[8px] font-semibold text-blue-700 bg-blue-100 border border-blue-200 rounded-full px-1 py-0.5 whitespace-nowrap flex-shrink-0">
+                          <span className="text-[8px] font-semibold text-blue-700 dark:text-blue-200 bg-blue-100 dark:bg-blue-500/20 border border-blue-200 dark:border-blue-500/30 rounded-full px-1 py-0.5 whitespace-nowrap flex-shrink-0">
                             +{dayTechnicians.length - 5}
                           </span>
                         )}
@@ -931,14 +931,14 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setClickedDayDate(null)} />
-            <div className="relative w-full max-w-4xl bg-gradient-to-br from-white to-gray-50 rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in duration-200">
+            <div className="relative w-full max-w-4xl bg-gradient-to-br from-card to-muted/50 rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in duration-200">
               <button
                 type="button"
                 onClick={() => setClickedDayDate(null)}
-                className="absolute top-6 right-6 p-2 rounded-full bg-white/80 hover:bg-white shadow-sm transition-colors z-10"
+                className="absolute top-6 right-6 p-2 rounded-full bg-card/80 hover:bg-card shadow-sm transition-colors z-10"
                 aria-label="Close day details"
               >
-                <X className="w-5 h-5 text-gray-600" />
+                <X className="w-5 h-5 text-muted-foreground" />
               </button>
 
               {/* Header */}
@@ -977,7 +977,7 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
               <div className="p-8">
 
                 {overlayTechnicians.length === 0 ? (
-                  <div className="py-16 text-center text-gray-400">
+                  <div className="py-16 text-center text-muted-foreground/75">
                     <p className="text-lg">No technician activity for this selection</p>
                   </div>
                 ) : (
@@ -1002,22 +1002,22 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
                                 returnViewMode: 'monthly',
                               },
                             })}
-                            className="group rounded-3xl border border-gray-200 bg-white p-5 hover:border-blue-300 hover:shadow-lg transition-all duration-200 cursor-pointer"
+                            className="group rounded-3xl border border-border bg-card p-5 hover:border-blue-300 dark:hover:border-blue-500/40 hover:shadow-lg transition-all duration-200 cursor-pointer"
                           >
                             <div className="flex flex-col items-center text-center gap-3">
                               {info?.photoUrl ? (
                                 <img
                                   src={info.photoUrl}
                                   alt={tech.technicianName}
-                                  className="w-16 h-16 rounded-full object-cover border-4 border-white shadow-md"
+                                  className="w-16 h-16 rounded-full object-cover border-4 border-card shadow-md"
                                 />
                               ) : (
-                                <div className="w-16 h-16 rounded-full bg-gradient-to-br from-gray-200 to-gray-300 flex items-center justify-center text-xl font-bold text-gray-700 border-4 border-white shadow-md">
+                                <div className="w-16 h-16 rounded-full bg-gradient-to-br from-secondary to-muted-foreground/40 flex items-center justify-center text-xl font-bold text-foreground/85 border-4 border-card shadow-md">
                                   {initials}
                                 </div>
                               )}
                               <div className="w-full">
-                                <h4 className="font-bold text-gray-800 mb-1">{tech.technicianName}</h4>
+                                <h4 className="font-bold text-foreground mb-1">{tech.technicianName}</h4>
                                 {(() => {
                                   const leave = getLeaveForDate(info?.leaveInfo, clickedDayDate);
                                   if (!leave) return null;
@@ -1029,28 +1029,28 @@ export default function MonthlyCalendar({ monthlyData, selectedMonth, onMonthCha
                                     </div>
                                   );
                                 })()}
-                                <div className="text-2xl font-bold text-gray-900 mb-3">{tech.total}</div>
+                                <div className="text-2xl font-bold text-foreground mb-3">{tech.total}</div>
                                 <div className="flex flex-col gap-1.5 text-xs font-semibold">
                                   {tech.selfPicked > 0 && (
-                                    <div className="flex items-center justify-between px-3 py-1.5 rounded-full bg-purple-50 text-purple-700">
+                                    <div className="flex items-center justify-between px-3 py-1.5 rounded-full bg-purple-50 dark:bg-purple-500/15 text-purple-700 dark:text-purple-200">
                                       <span>Self-picked</span>
                                       <span className="font-bold">{tech.selfPicked}</span>
                                     </div>
                                   )}
                                   {tech.assigned > 0 && (
-                                    <div className="flex items-center justify-between px-3 py-1.5 rounded-full bg-orange-50 text-orange-700">
+                                    <div className="flex items-center justify-between px-3 py-1.5 rounded-full bg-orange-50 dark:bg-orange-500/15 text-orange-700 dark:text-orange-200">
                                       <span>Assigned</span>
                                       <span className="font-bold">{tech.assigned}</span>
                                     </div>
                                   )}
                                   {tech.closed > 0 && (
-                                    <div className="flex items-center justify-between px-3 py-1.5 rounded-full bg-green-50 text-green-700">
+                                    <div className="flex items-center justify-between px-3 py-1.5 rounded-full bg-green-50 dark:bg-green-500/15 text-green-700 dark:text-green-200">
                                       <span>Closed</span>
                                       <span className="font-bold">{tech.closed}</span>
                                     </div>
                                   )}
                                   {tech.csatCount > 0 && (
-                                    <div className="flex items-center justify-between px-3 py-1.5 rounded-full bg-yellow-50 text-yellow-700">
+                                    <div className="flex items-center justify-between px-3 py-1.5 rounded-full bg-yellow-50 dark:bg-yellow-500/15 text-yellow-700 dark:text-yellow-200">
                                       <span>⭐ CSAT</span>
                                       <span className="font-bold">{tech.csatCount}</span>
                                     </div>

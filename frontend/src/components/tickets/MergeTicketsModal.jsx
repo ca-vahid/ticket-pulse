@@ -144,27 +144,27 @@ export default function MergeTicketsModal({ ticket, onClose, onMerged, statusDef
   const row = (t, why = null) => {
     const checked = selected.has(t.id);
     return (
-      <li key={t.id} className="flex items-center gap-2.5 px-3 py-2 hover:bg-slate-50">
+      <li key={t.id} className="flex items-center gap-2.5 px-3 py-2 hover:bg-muted/50">
         <input
           type="checkbox"
           checked={checked}
           onChange={() => toggle(t)}
           aria-label={`Include ${refOf(t)} in the merge`}
-          className="tp-focus-ring h-4 w-4 rounded border-slate-300"
+          className="tp-focus-ring h-4 w-4 rounded border-input"
         />
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium text-slate-700">{t.subject || '(no subject)'}</span>
-          <span className="block text-xs text-slate-400">
+          <span className="block truncate text-sm font-medium text-foreground/85">{t.subject || '(no subject)'}</span>
+          <span className="block text-xs text-muted-foreground/75">
             {refOf(t)}
             {t.createdAt ? ` · ${formatDay(t.createdAt)}` : ''}
             {why && <span className="ml-1 inline-flex items-center gap-0.5 text-violet-500"><Sparkles className="h-3 w-3" aria-hidden="true" />{why}</span>}
             {isTerminal(t) && (
-              <span className="ml-1 text-slate-400" data-testid="merge-terminal-note">· {baseStatusOf(statusDefs, t.status) === 'Resolved' ? 'Resolved' : 'Closed'} — will be folded in as-is</span>
+              <span className="ml-1 text-muted-foreground/75" data-testid="merge-terminal-note">· {baseStatusOf(statusDefs, t.status) === 'Resolved' ? 'Resolved' : 'Closed'} — will be folded in as-is</span>
             )}
           </span>
         </span>
         {isFsBorn(t) && (
-          <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700" title="FreshService-born — can be folded in; it will be closed in FreshService with a pointer note">
+          <span className="inline-flex items-center rounded-full border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-200" title="FreshService-born — can be folded in; it will be closed in FreshService with a pointer note">
             FreshService
           </span>
         )}
@@ -181,16 +181,16 @@ export default function MergeTicketsModal({ ticket, onClose, onMerged, statusDef
       aria-label="Merge tickets"
       onClick={busy ? undefined : onClose}
     >
-      <div ref={dialogRef} tabIndex={-1} className="tp-focus-ring flex max-h-[85vh] w-full max-w-2xl flex-col rounded-2xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center gap-2.5 border-b border-slate-100 px-5 py-3.5">
-          <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-violet-100">
-            <GitMerge className="h-4 w-4 text-violet-600" aria-hidden="true" />
+      <div ref={dialogRef} tabIndex={-1} className="tp-focus-ring flex max-h-[85vh] w-full max-w-2xl flex-col rounded-2xl bg-card shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2.5 border-b border-border/60 px-5 py-3.5">
+          <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-violet-100 dark:bg-violet-500/20">
+            <GitMerge className="h-4 w-4 text-violet-600 dark:text-violet-300" aria-hidden="true" />
           </span>
           <div className="min-w-0 flex-1">
-            <h3 className="text-sm font-bold text-slate-900">Merge tickets</h3>
-            <p className="text-xs text-slate-400">Fold duplicate or related tickets into one — conversations are copied in, the rest are closed.</p>
+            <h3 className="text-sm font-bold text-foreground">Merge tickets</h3>
+            <p className="text-xs text-muted-foreground/75">Fold duplicate or related tickets into one — conversations are copied in, the rest are closed.</p>
           </div>
-          <button onClick={onClose} disabled={busy} aria-label="Close" className="tp-focus-ring rounded p-1 text-slate-400 hover:text-slate-600">
+          <button onClick={onClose} disabled={busy} aria-label="Close" className="tp-focus-ring rounded p-1 text-muted-foreground/75 hover:text-muted-foreground">
             <X className="h-4 w-4" aria-hidden="true" />
           </button>
         </div>
@@ -198,14 +198,14 @@ export default function MergeTicketsModal({ ticket, onClose, onMerged, statusDef
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 settings-scrollbar">
           {/* Candidates */}
           <div>
-            <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Suggested (open tickets from {ticket.requester?.name || 'this requester'} + look-alikes)</p>
-            <div className="rounded-xl border border-slate-200">
+            <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/75">Suggested (open tickets from {ticket.requester?.name || 'this requester'} + look-alikes)</p>
+            <div className="rounded-xl border border-border">
               {candidates === null ? (
-                <p className="flex items-center gap-2 px-3 py-3 text-sm text-slate-400"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Finding candidates…</p>
+                <p className="flex items-center gap-2 px-3 py-3 text-sm text-muted-foreground/75"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Finding candidates…</p>
               ) : candidates.length === 0 ? (
-                <p className="px-3 py-3 text-sm italic text-slate-400">No obvious candidates — search below.</p>
+                <p className="px-3 py-3 text-sm italic text-muted-foreground/75">No obvious candidates — search below.</p>
               ) : (
-                <ul className="divide-y divide-slate-100">{candidates.map((t) => row(t, t.why))}</ul>
+                <ul className="divide-y divide-border/60">{candidates.map((t) => row(t, t.why))}</ul>
               )}
             </div>
           </div>
@@ -213,26 +213,26 @@ export default function MergeTicketsModal({ ticket, onClose, onMerged, statusDef
           {/* Search */}
           <div>
             <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/75" aria-hidden="true" />
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Add another ticket — TP-1042 or subject…"
                 aria-label="Search tickets to merge"
-                className="tp-focus-ring w-full rounded-lg border border-slate-200 py-2 pl-8 pr-3 text-sm"
+                className="tp-focus-ring w-full rounded-lg border border-border bg-card py-2 pl-8 pr-3 text-sm"
               />
-              {searching && <Loader2 className="absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-slate-400" aria-hidden="true" />}
+              {searching && <Loader2 className="absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground/75" aria-hidden="true" />}
             </div>
             {searchResults.length > 0 && (
-              <ul className="mt-1 divide-y divide-slate-100 rounded-xl border border-slate-200">{searchResults.map((t) => row(t))}</ul>
+              <ul className="mt-1 divide-y divide-border/60 rounded-xl border border-border">{searchResults.map((t) => row(t))}</ul>
             )}
           </div>
 
           {/* Selection + primary choice */}
           {group.length >= 2 && (
             <div>
-              <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Which ticket survives? ({group.length} in this merge)</p>
-              <ul className="divide-y divide-slate-100 rounded-xl border border-violet-200 bg-violet-50/40">
+              <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/75">Which ticket survives? ({group.length} in this merge)</p>
+              <ul className="divide-y divide-border/60 rounded-xl border border-violet-200 dark:border-violet-500/30 bg-violet-50/40 dark:bg-violet-500/10">
                 {group.map((t) => (
                   <li key={t.id} className="flex items-center gap-2.5 px-3 py-2">
                     <input
@@ -246,8 +246,8 @@ export default function MergeTicketsModal({ ticket, onClose, onMerged, statusDef
                       className="tp-focus-ring h-4 w-4 disabled:opacity-40"
                     />
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium text-slate-700">{t.subject || '(no subject)'}</span>
-                      <span className="block text-xs text-slate-400">
+                      <span className="block truncate text-sm font-medium text-foreground/85">{t.subject || '(no subject)'}</span>
+                      <span className="block text-xs text-muted-foreground/75">
                         {refOf(t)}
                         {primaryId === t.id
                           ? ' · stays open, receives every conversation'
@@ -261,7 +261,7 @@ export default function MergeTicketsModal({ ticket, onClose, onMerged, statusDef
                   </li>
                 ))}
               </ul>
-              <label className="mt-2 flex items-start gap-2 text-xs text-slate-500">
+              <label className="mt-2 flex items-start gap-2 text-xs text-muted-foreground">
                 <input type="checkbox" checked={notifyRequester} onChange={(e) => setNotifyRequester(e.target.checked)} className="tp-focus-ring mt-0.5" />
                 Email each merged ticket&apos;s requester that their ticket was consolidated (public reply before closing)
               </label>
@@ -269,15 +269,15 @@ export default function MergeTicketsModal({ ticket, onClose, onMerged, statusDef
           )}
 
           {error && (
-            <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2" role="alert">
-              <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0 text-red-600" aria-hidden="true" />
-              <span className="text-xs text-red-700">{error}</span>
+            <div className="flex items-start gap-2 rounded-lg border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 px-3 py-2" role="alert">
+              <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0 text-red-600 dark:text-red-300" aria-hidden="true" />
+              <span className="text-xs text-red-700 dark:text-red-200">{error}</span>
             </div>
           )}
         </div>
 
-        <div className="flex items-center justify-between gap-2 border-t border-slate-100 px-5 py-3.5">
-          <p className="text-xs text-slate-400">
+        <div className="flex items-center justify-between gap-2 border-t border-border/60 px-5 py-3.5">
+          <p className="text-xs text-muted-foreground/75">
             {canMerge
               ? `${secondaries.length} ticket${secondaries.length === 1 ? '' : 's'} → ${refOf(primary || ticket)} · cannot be undone`
               : group.length >= 2 && primaryBlocked
@@ -285,7 +285,7 @@ export default function MergeTicketsModal({ ticket, onClose, onMerged, statusDef
                 : 'Select at least one other ticket'}
           </p>
           <div className="flex gap-2">
-            <button onClick={onClose} disabled={busy} className="tp-focus-ring rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50">
+            <button onClick={onClose} disabled={busy} className="tp-focus-ring rounded-lg border border-border bg-card px-3.5 py-2 text-xs font-semibold text-muted-foreground hover:bg-muted/50">
               Cancel
             </button>
             <button

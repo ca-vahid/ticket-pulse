@@ -302,16 +302,16 @@ export default function ImageMarkupModal({ file, onCancel, onSave }) {
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 animate-fadeIn" role="dialog" aria-modal="true" aria-label="Edit image">
       <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-[2px]" onClick={onCancel} aria-hidden="true" />
       <div className="relative tp-card rounded-2xl shadow-soft w-full max-w-5xl max-h-[94vh] flex flex-col animate-scaleIn">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
-          <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2"><Pencil className="w-4 h-4 text-blue-600" aria-hidden="true" /> Edit image</h2>
-          <button onClick={onCancel} aria-label="Close editor" className="tp-focus-ring p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border/60">
+          <h2 className="text-sm font-bold text-foreground flex items-center gap-2"><Pencil className="w-4 h-4 text-blue-600 dark:text-blue-300" aria-hidden="true" /> Edit image</h2>
+          <button onClick={onCancel} aria-label="Close editor" className="tp-focus-ring p-1.5 rounded-lg text-muted-foreground/75 hover:text-muted-foreground hover:bg-muted">
             <X className="w-4 h-4" aria-hidden="true" />
           </button>
         </div>
 
         {/* Toolbar */}
-        <div className="flex flex-wrap items-center gap-2 px-4 py-2.5 border-b border-slate-100 bg-slate-50/60">
-          <div className="flex items-center gap-0.5 bg-white rounded-lg border border-slate-200 p-0.5">
+        <div className="flex flex-wrap items-center gap-2 px-4 py-2.5 border-b border-border/60 bg-muted/30">
+          <div className="flex items-center gap-0.5 bg-card rounded-lg border border-border p-0.5">
             {tools.map((t) => (
               <button
                 key={t.key}
@@ -319,7 +319,7 @@ export default function ImageMarkupModal({ file, onCancel, onSave }) {
                 onClick={() => { setTool(t.key); if (t.key !== 'crop') setCropRect(null); }}
                 aria-pressed={tool === t.key}
                 title={t.label}
-                className={`tp-focus-ring p-1.5 rounded-md transition-colors ${tool === t.key ? 'bg-blue-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+                className={`tp-focus-ring p-1.5 rounded-md transition-colors ${tool === t.key ? 'bg-blue-600 text-white' : 'text-muted-foreground hover:bg-muted'}`}
               >
                 <t.icon className="w-4 h-4" aria-hidden="true" />
               </button>
@@ -333,13 +333,13 @@ export default function ImageMarkupModal({ file, onCancel, onSave }) {
                 type="button"
                 onClick={() => setColor(c)}
                 aria-label={`Colour ${c}`}
-                className={`tp-focus-ring h-5 w-5 rounded-full border transition-transform ${color === c ? 'ring-2 ring-offset-1 ring-blue-500 scale-110' : 'border-slate-300'}`}
+                className={`tp-focus-ring h-5 w-5 rounded-full border border-black/10 transition-transform dark:border-white/20 ${color === c ? 'ring-2 ring-offset-1 ring-offset-card ring-blue-500 scale-110' : ''}`}
                 style={{ backgroundColor: c }}
               />
             ))}
           </div>
 
-          <div className="flex items-center gap-0.5 bg-white rounded-lg border border-slate-200 p-0.5" role="group" aria-label="Stroke width">
+          <div className="flex items-center gap-0.5 bg-card rounded-lg border border-border p-0.5" role="group" aria-label="Stroke width">
             {WIDTHS.map((w) => (
               <button
                 key={w}
@@ -347,17 +347,17 @@ export default function ImageMarkupModal({ file, onCancel, onSave }) {
                 onClick={() => setWidth(w)}
                 aria-pressed={width === w}
                 title={`${w}px`}
-                className={`tp-focus-ring px-1.5 py-1 rounded-md ${width === w ? 'bg-slate-800 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+                className={`tp-focus-ring px-1.5 py-1 rounded-md ${width === w ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-muted'}`}
               >
                 <Minus className="w-4 h-4" style={{ strokeWidth: w / 2 }} aria-hidden="true" />
               </button>
             ))}
           </div>
 
-          <button type="button" onClick={rotate} title="Rotate 90°" className="tp-focus-ring p-1.5 rounded-lg text-slate-500 bg-white border border-slate-200 hover:bg-slate-100">
+          <button type="button" onClick={rotate} title="Rotate 90°" className="tp-focus-ring p-1.5 rounded-lg text-muted-foreground bg-card border border-border hover:bg-muted">
             <RotateCw className="w-4 h-4" aria-hidden="true" />
           </button>
-          <button type="button" onClick={undo} disabled={!canUndo} title="Undo (Ctrl+Z)" className="tp-focus-ring p-1.5 rounded-lg text-slate-500 bg-white border border-slate-200 hover:bg-slate-100 disabled:opacity-40">
+          <button type="button" onClick={undo} disabled={!canUndo} title="Undo (Ctrl+Z)" className="tp-focus-ring p-1.5 rounded-lg text-muted-foreground bg-card border border-border hover:bg-muted disabled:opacity-40">
             <Undo2 className="w-4 h-4" aria-hidden="true" />
           </button>
           {cropRect && (
@@ -368,9 +368,9 @@ export default function ImageMarkupModal({ file, onCancel, onSave }) {
         </div>
 
         {/* Canvas stage */}
-        <div className="flex-1 overflow-auto settings-scrollbar bg-slate-100/70 flex items-center justify-center p-4">
+        <div className="flex-1 overflow-auto settings-scrollbar bg-muted/70 flex items-center justify-center p-4">
           {!ready ? (
-            <Loader2 className="w-6 h-6 animate-spin text-slate-400" aria-hidden="true" />
+            <Loader2 className="w-6 h-6 animate-spin text-muted-foreground/75" aria-hidden="true" />
           ) : (
             <div className="relative" style={{ width: cssSize.w, height: cssSize.h }}>
               <canvas
@@ -380,7 +380,7 @@ export default function ImageMarkupModal({ file, onCancel, onSave }) {
                 onPointerDown={onPointerDown}
                 onPointerMove={onPointerMove}
                 onPointerUp={onPointerUp}
-                className="rounded-lg shadow-subtle bg-white touch-none"
+                className="rounded-lg shadow-subtle bg-card touch-none"
                 style={{ cursor: tool === 'text' ? 'text' : 'crosshair', width: cssSize.w, height: cssSize.h, imageRendering: 'auto' }}
               />
               {textPrompt && (
@@ -391,7 +391,7 @@ export default function ImageMarkupModal({ file, onCancel, onSave }) {
                   onKeyDown={(e) => { if (e.key === 'Enter') commitText(); }}
                   onBlur={commitText}
                   placeholder="Type, then Enter"
-                  className="absolute text-sm px-1.5 py-0.5 rounded border-2 border-blue-500 bg-white/95 shadow-soft outline-none"
+                  className="absolute text-sm px-1.5 py-0.5 rounded border-2 border-blue-500 bg-card/95 shadow-soft outline-none"
                   style={{ left: textPrompt.x * cssScale, top: textPrompt.y * cssScale, color, minWidth: 120 }}
                 />
               )}
@@ -399,10 +399,10 @@ export default function ImageMarkupModal({ file, onCancel, onSave }) {
           )}
         </div>
 
-        <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-slate-100 bg-slate-50/60">
-          <p className="text-[11px] text-slate-400 flex items-center gap-1"><MousePointer2 className="w-3.5 h-3.5" aria-hidden="true" /> Drag on the image to {tool === 'crop' ? 'select a crop area' : tool === 'text' ? 'place text' : `draw a ${tool}`}.</p>
+        <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-border/60 bg-muted/30">
+          <p className="text-[11px] text-muted-foreground/75 flex items-center gap-1"><MousePointer2 className="w-3.5 h-3.5" aria-hidden="true" /> Drag on the image to {tool === 'crop' ? 'select a crop area' : tool === 'text' ? 'place text' : `draw a ${tool}`}.</p>
           <div className="flex items-center gap-2">
-            <button type="button" onClick={onCancel} className="tp-focus-ring px-3 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50">Cancel</button>
+            <button type="button" onClick={onCancel} className="tp-focus-ring px-3 py-2 text-sm font-medium text-muted-foreground bg-card border border-border rounded-lg hover:bg-muted/50">Cancel</button>
             <button type="button" onClick={save} disabled={saving || !ready} className="tp-focus-ring inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-lg bg-primary text-primary-foreground hover:bg-blue-700 disabled:opacity-50">
               {saving ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Check className="w-4 h-4" aria-hidden="true" />}
               Save changes

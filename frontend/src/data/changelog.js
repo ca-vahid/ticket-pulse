@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.8.02-preview';
+export const APP_VERSION = '3.8.03-preview';
 
 export const changelog = [
+  {
+    version: '3.8.03-preview',
+    date: 'August 31, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>🌙 Dark mode, the rest of the app</strong> — Tickets (queue, board, peek, ticket page, composer, create form), Dashboard, Settings, Notifications, Approvals, Analytics charts, the Agent Map (dark tiles), and modals now follow your theme. Email bodies in ticket threads stay in a white reading well on purpose — the mail-client convention — so senders’ own colours never invert. Login and public ticket pages remain light by design. (QA 08-27 #5)' },
+    ],
+  },
   {
     version: '3.8.02-preview',
     date: 'August 30, 2026',

@@ -42,19 +42,19 @@ function buildBouncedUrl(techId, viewMode, selectedDate, selectedWeek, selectedM
 // Extremely subtle row background color based on relative load level
 const getRowBackgroundColor = (openCount, maxOpenCount) => {
   if (openCount === 0) {
-    return 'bg-white'; // No load - pure white
+    return 'bg-card'; // No load - pure white
   }
 
   // Calculate percentage relative to max
   const percentage = (openCount / maxOpenCount) * 100;
 
   if (percentage <= 33) {
-    return 'bg-green-50/30'; // Light load - extremely subtle green tint
+    return 'bg-green-50/30 dark:bg-green-500/10'; // Light load - extremely subtle green tint
   }
   if (percentage <= 66) {
-    return 'bg-yellow-50/40'; // Medium load - extremely subtle yellow tint
+    return 'bg-yellow-50/40 dark:bg-yellow-500/10'; // Medium load - extremely subtle yellow tint
   }
-  return 'bg-red-50/50'; // Heavy load - extremely subtle red tint
+  return 'bg-red-50/50 dark:bg-red-500/10'; // Heavy load - extremely subtle red tint
 };
 
 // Get initials from technician name (e.g., "Vahid Haeri" -> "VH")
@@ -83,7 +83,7 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
 
   // Get color gradient based on normalized ticket count
   const getTicketColor = (count, maxCount) => {
-    if (count === 0) return 'bg-white border-gray-200 text-gray-400';
+    if (count === 0) return 'bg-card border-border text-muted-foreground/75';
 
     const percentage = (count / maxCount) * 100;
 
@@ -91,9 +91,9 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
     if (percentage >= 66) {
       return 'bg-green-500 border-green-600 text-white';
     } else if (percentage >= 33) {
-      return 'bg-green-300 border-green-400 text-green-900';
+      return 'bg-green-300 dark:bg-green-500/40 border-green-400 dark:border-green-500/50 text-green-900 dark:text-green-100';
     } else {
-      return 'bg-green-100 border-green-200 text-green-800';
+      return 'bg-green-100 dark:bg-green-500/20 border-green-200 dark:border-green-500/30 text-green-800 dark:text-green-200';
     }
   };
 
@@ -208,11 +208,11 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
 
   // Color bands on the /5 scale (same cutoffs as the old /4 bands x 1.25).
   const getCSATColor = (avg5) => {
-    if (!avg5) return 'text-gray-400';
-    if (avg5 >= 4.4) return 'text-green-600';
-    if (avg5 >= 3.1) return 'text-yellow-600';
-    if (avg5 >= 1.9) return 'text-orange-600';
-    return 'text-red-600';
+    if (!avg5) return 'text-muted-foreground/75';
+    if (avg5 >= 4.4) return 'text-green-600 dark:text-green-300';
+    if (avg5 >= 3.1) return 'text-yellow-600 dark:text-yellow-300';
+    if (avg5 >= 1.9) return 'text-orange-600 dark:text-orange-300';
+    return 'text-red-600 dark:text-red-300';
   };
 
   const highSelfPickRate = selfPicked >= 3;
@@ -233,7 +233,7 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
 
   // Use "Open" status count for row background color. Simple style keeps rows
   // plain white — load is readable from the numbers (QA 07-30 #8: fewer colors).
-  const rowBgColor = simple ? 'bg-white' : getRowBackgroundColor(openOnlyCount, maxOpenCount);
+  const rowBgColor = simple ? 'bg-card' : getRowBackgroundColor(openOnlyCount, maxOpenCount);
 
   const gridTemplate = getCompactGridTemplate(viewMode, simple);
 
@@ -251,15 +251,15 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
       onClick={handleClick}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
-      className={`${rowBgColor} border border-gray-200 rounded-lg hover:shadow-md hover:border-gray-300 transition-all duration-200 cursor-pointer group relative`}
+      className={`${rowBgColor} border border-border rounded-lg hover:shadow-md hover:border-input transition-all duration-200 cursor-pointer group relative`}
     >
       {/* Hide Button */}
       <button
         onClick={handleHideToggle}
-        className="hide-button absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 p-1 hover:bg-gray-100 rounded transition-opacity z-10"
+        className="hide-button absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 p-1 hover:bg-muted rounded transition-opacity z-10"
         title="Hide technician"
       >
-        <EyeOff className="w-3 h-3 text-gray-400" />
+        <EyeOff className="w-3 h-3 text-muted-foreground/75" />
       </button>
 
       {/* Main row — CSS Grid template matches TechCompactHeader */}
@@ -271,16 +271,16 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
         <button
           onClick={hasExpandableTickets ? handleToggleExpand : undefined}
           className={`expand-toggle p-1 rounded transition-colors w-6 h-6 flex items-center justify-center ${
-            hasExpandableTickets ? 'hover:bg-gray-200 cursor-pointer' : 'cursor-default'
+            hasExpandableTickets ? 'hover:bg-secondary cursor-pointer' : 'cursor-default'
           }`}
           title={hasExpandableTickets ? (isExpanded ? 'Collapse tickets' : 'Expand tickets') : undefined}
           tabIndex={hasExpandableTickets ? 0 : -1}
         >
           {hasExpandableTickets ? (
             isExpanded ? (
-              <ChevronUp className="w-4 h-4 text-gray-500" />
+              <ChevronUp className="w-4 h-4 text-muted-foreground" />
             ) : (
-              <ChevronDown className="w-4 h-4 text-gray-400" />
+              <ChevronDown className="w-4 h-4 text-muted-foreground/75" />
             )
           ) : (
             <span className="w-4 h-4" />
@@ -300,7 +300,7 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
               <img
                 src={technician.photoUrl}
                 alt={technician.name}
-                className="w-9 h-9 rounded-full object-cover shadow-sm border border-gray-300 transition-all duration-300 ease-in-out hover:scale-150 hover:shadow-2xl hover:z-50"
+                className="w-9 h-9 rounded-full object-cover shadow-sm border border-input transition-all duration-300 ease-in-out hover:scale-150 hover:shadow-2xl hover:z-50"
                 onError={(e) => {
                   // If the image URL is broken (404, CORS, etc.), hide the broken
                   // image so the alt text doesn't leak the technician's name.
@@ -318,12 +318,12 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
 
           {isTopPerformer && (
             <div className={`flex items-center justify-center rounded-full w-5 h-5 flex-shrink-0 ${
-              rank === 1 ? 'bg-yellow-400' : rank === 2 ? 'bg-gray-300' : 'bg-orange-400'
+              rank === 1 ? 'bg-yellow-400' : rank === 2 ? 'bg-muted-foreground/40' : 'bg-orange-400'
             }`}>
               {rank === 1 ? (
-                <Trophy className="w-3 h-3 text-yellow-900" />
+                <Trophy className="w-3 h-3 text-yellow-900 dark:text-yellow-200" />
               ) : (
-                <Star className={`w-2.5 h-2.5 ${rank === 2 ? 'text-gray-700' : 'text-orange-900'}`} />
+                <Star className={`w-2.5 h-2.5 ${rank === 2 ? 'text-foreground/85' : 'text-orange-900 dark:text-orange-200'}`} />
               )}
             </div>
           )}
@@ -334,7 +334,7 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
                 type="button"
                 onClick={handleAgentLinkClick}
                 title="Open agent page"
-                className="no-row-nav tp-focus-ring self-start max-w-full truncate rounded text-left font-semibold text-sm text-gray-900 hover:underline hover:text-blue-700"
+                className="no-row-nav tp-focus-ring self-start max-w-full truncate rounded text-left font-semibold text-sm text-foreground hover:underline hover:text-blue-700 dark:hover:text-blue-200"
               >
                 {technician.name}
               </button>
@@ -345,16 +345,16 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
               type="button"
               onClick={handleAgentLinkClick}
               title="Open agent page"
-              className="no-row-nav tp-focus-ring min-w-0 truncate rounded text-left font-semibold text-sm text-gray-900 hover:underline hover:text-blue-700"
+              className="no-row-nav tp-focus-ring min-w-0 truncate rounded text-left font-semibold text-sm text-foreground hover:underline hover:text-blue-700 dark:hover:text-blue-200"
             >
               {technician.name}
             </button>
           )}
 
           {!simple && highSelfPickRate && (
-            <div className="flex items-center gap-0.5 px-1.5 py-0.5 bg-purple-100 rounded-full flex-shrink-0">
-              <Star className="w-2 h-2 text-purple-600 fill-purple-600" />
-              <span className="text-[8px] text-purple-700 font-semibold">SELF</span>
+            <div className="flex items-center gap-0.5 px-1.5 py-0.5 bg-purple-100 dark:bg-purple-500/20 rounded-full flex-shrink-0">
+              <Star className="w-2 h-2 text-purple-600 dark:text-purple-300 fill-purple-600" />
+              <span className="text-[8px] text-purple-700 dark:text-purple-200 font-semibold">SELF</span>
             </div>
           )}
 
@@ -407,15 +407,15 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
                 : 'ring-2 ring-emerald-700 ring-offset-1';
               const labelClass = isHolidayDay
                 ? dateStyling.isCanadian
-                  ? 'text-rose-600 font-bold'
+                  ? 'text-rose-600 dark:text-rose-300 font-bold'
                   : 'text-indigo-500 font-bold'
                 : isTodayDay
                   ? simple
-                    ? 'text-violet-700 font-bold'
-                    : 'text-emerald-700 font-bold'
+                    ? 'text-violet-700 dark:text-violet-200 font-bold'
+                    : 'text-emerald-700 dark:text-emerald-200 font-bold'
                   : isWeekendDay
-                    ? 'text-slate-500 font-semibold'
-                    : 'text-gray-500 font-semibold';
+                    ? 'text-muted-foreground font-semibold'
+                    : 'text-muted-foreground font-semibold';
 
               const leaveStyle = dayLeave ? getLeaveStyle(dayLeave.category) : null;
               const dayLeaveIsHalf = isHalfDayLeave(dayLeave);
@@ -425,10 +425,10 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
                 ? `${leaveStyle.bgClass} rounded p-0.5`
                 : isHolidayDay
                   ? dateStyling.isCanadian
-                    ? 'bg-rose-50/50 rounded p-0.5'
-                    : 'bg-indigo-50/40 rounded p-0.5'
+                    ? 'bg-rose-50/50 dark:bg-rose-500/10 rounded p-0.5'
+                    : 'bg-indigo-50/40 dark:bg-indigo-500/10 rounded p-0.5'
                   : isWeekendDay
-                    ? 'bg-slate-50/50 rounded p-0.5'
+                    ? 'bg-muted/25 rounded p-0.5'
                     : '';
 
               const getBoxClasses = () => {
@@ -438,23 +438,23 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
                 }
                 if (isHolidayDay) {
                   if (dateStyling.isCanadian) {
-                    if (day.total === 0) return 'border-rose-300 bg-rose-50 text-rose-400';
-                    return 'border-rose-400 bg-rose-100 text-rose-800';
+                    if (day.total === 0) return 'border-rose-300 dark:border-rose-500/40 bg-rose-50 dark:bg-rose-500/15 text-rose-400';
+                    return 'border-rose-400 bg-rose-100 dark:bg-rose-500/20 text-rose-800 dark:text-rose-200';
                   }
-                  if (day.total === 0) return 'border-indigo-200 bg-indigo-50 text-indigo-400';
-                  return 'border-indigo-300 bg-indigo-100 text-indigo-800';
+                  if (day.total === 0) return 'border-indigo-200 dark:border-indigo-500/30 bg-indigo-50 dark:bg-indigo-500/15 text-indigo-400';
+                  return 'border-indigo-300 dark:border-indigo-500/40 bg-indigo-100 dark:bg-indigo-500/20 text-indigo-800 dark:text-indigo-200';
                 }
                 if (isWeekendDay) {
-                  if (day.total === 0) return 'border-slate-300 bg-slate-50 text-slate-400';
-                  return 'border-slate-400 bg-slate-200 text-slate-800';
+                  if (day.total === 0) return 'border-input bg-muted/50 text-muted-foreground/75';
+                  return 'border-muted-foreground/40 bg-secondary text-foreground';
                 }
                 // Simple style: one calm violet tint for activity, white for
                 // zero — leave/holiday/weekend colors above stay (QA: keep
                 // availability colors).
                 if (simple) {
                   return day.total === 0
-                    ? 'border-slate-200 bg-white text-slate-300'
-                    : 'border-violet-200 bg-violet-100 text-violet-900';
+                    ? 'border-border bg-card text-muted-foreground/50'
+                    : 'border-violet-200 dark:border-violet-500/30 bg-violet-100 dark:bg-violet-500/20 text-violet-900 dark:text-violet-200';
                 }
                 return colorClass;
               };
@@ -506,27 +506,27 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
         ) : (
           /* Daily: Open count */
           <div className="flex flex-col items-center justify-center" title={`${openOnlyCount} open${pendingCount > 0 ? ` · ${pendingCount} pending` : ''}`}>
-            <div className="text-2xl font-bold text-gray-900 leading-none">{openOnlyCount}</div>
+            <div className="text-2xl font-bold text-foreground leading-none">{openOnlyCount}</div>
             {pendingCount > 0 && (
-              <div className="text-[9px] text-gray-500 mt-0.5">+{pendingCount}p</div>
+              <div className="text-[9px] text-muted-foreground mt-0.5">+{pendingCount}p</div>
             )}
           </div>
         )}
 
         {/* Col 4: Total / Today */}
         <div className="flex items-center justify-center">
-          <span className="text-2xl font-bold text-indigo-600 leading-none">{totalTickets}</span>
+          <span className="text-2xl font-bold text-indigo-600 dark:text-indigo-300 leading-none">{totalTickets}</span>
         </div>
 
         {/* Col 5: Self */}
         <div className="flex items-center justify-center">
           {simple ? (
-            <span className={`text-base font-semibold ${selfPicked > 0 ? 'text-slate-800' : 'text-slate-300'}`} title="Picked up themselves">{selfPicked}</span>
+            <span className={`text-base font-semibold ${selfPicked > 0 ? 'text-foreground' : 'text-muted-foreground/50'}`} title="Picked up themselves">{selfPicked}</span>
           ) : (
-            <div className="flex items-center justify-center w-11 h-11 rounded-md bg-purple-50 border border-purple-200">
+            <div className="flex items-center justify-center w-11 h-11 rounded-md bg-purple-50 dark:bg-purple-500/15 border border-purple-200 dark:border-purple-500/30">
               <div className="flex flex-col items-center leading-none">
-                <Hand className="w-3.5 h-3.5 text-purple-600 mb-0.5" />
-                <span className="text-base font-bold text-purple-800">{selfPicked}</span>
+                <Hand className="w-3.5 h-3.5 text-purple-600 dark:text-purple-300 mb-0.5" />
+                <span className="text-base font-bold text-purple-800 dark:text-purple-200">{selfPicked}</span>
               </div>
             </div>
           )}
@@ -535,19 +535,19 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
         {/* Col 6: App */}
         <div className="flex items-center justify-center">
           {simple ? (
-            <span className={`text-base font-semibold ${appAssigned > 0 ? 'text-slate-800' : 'text-slate-300'}`} title="Assigned by the app (AI)">{appAssigned}</span>
+            <span className={`text-base font-semibold ${appAssigned > 0 ? 'text-foreground' : 'text-muted-foreground/50'}`} title="Assigned by the app (AI)">{appAssigned}</span>
           ) : (
             <div
               className={`flex items-center justify-center w-11 h-11 rounded-md border ${
                 appAssigned > 0
-                  ? 'bg-sky-50 border-sky-200'
-                  : 'bg-slate-50/50 border-slate-100 opacity-50'
+                  ? 'bg-sky-50 dark:bg-sky-500/15 border-sky-200 dark:border-sky-500/30'
+                  : 'bg-muted/25 border-border/60 opacity-50'
               }`}
               title={appAssigned > 0 ? 'App-assigned tickets' : 'No app-assigned tickets'}
             >
               <div className="flex flex-col items-center leading-none">
-                <Bot className={`w-3.5 h-3.5 mb-0.5 ${appAssigned > 0 ? 'text-sky-600' : 'text-slate-300'}`} />
-                <span className={`text-base font-bold ${appAssigned > 0 ? 'text-sky-800' : 'text-slate-300'}`}>{appAssigned}</span>
+                <Bot className={`w-3.5 h-3.5 mb-0.5 ${appAssigned > 0 ? 'text-sky-600 dark:text-sky-300' : 'text-muted-foreground/50'}`} />
+                <span className={`text-base font-bold ${appAssigned > 0 ? 'text-sky-800 dark:text-sky-200' : 'text-muted-foreground/50'}`}>{appAssigned}</span>
               </div>
             </div>
           )}
@@ -556,11 +556,11 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
         {/* Col 7: Asgn */}
         <div className="flex items-center justify-center">
           {simple ? (
-            <span className={`text-base font-semibold ${assigned > 0 ? 'text-slate-800' : 'text-slate-300'}`} title="Assigned by a coordinator">{assigned}</span>
+            <span className={`text-base font-semibold ${assigned > 0 ? 'text-foreground' : 'text-muted-foreground/50'}`} title="Assigned by a coordinator">{assigned}</span>
           ) : (
             <div className="flex items-center gap-1" title={`Coordinator-assigned: ${assigned}`}>
-              <Send className="w-4 h-4 text-orange-600" />
-              <span className="text-base font-bold text-orange-800">{assigned}</span>
+              <Send className="w-4 h-4 text-orange-600 dark:text-orange-300" />
+              <span className="text-base font-bold text-orange-800 dark:text-orange-200">{assigned}</span>
             </div>
           )}
         </div>
@@ -568,11 +568,11 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
         {/* Col 8: Done */}
         <div className="flex items-center justify-center">
           {simple ? (
-            <span className={`text-base font-semibold ${closed > 0 ? 'text-green-700' : 'text-slate-300'}`} title="Resolved">{closed}</span>
+            <span className={`text-base font-semibold ${closed > 0 ? 'text-green-700 dark:text-green-200' : 'text-muted-foreground/50'}`} title="Resolved">{closed}</span>
           ) : (
             <div className="flex items-center gap-1" title={`Closed: ${closed}`}>
-              <CheckSquare className="w-4 h-4 text-green-600" />
-              <span className="text-base font-bold text-green-800">{closed}</span>
+              <CheckSquare className="w-4 h-4 text-green-600 dark:text-green-300" />
+              <span className="text-base font-bold text-green-800 dark:text-green-200">{closed}</span>
             </div>
           )}
         </div>
@@ -586,7 +586,7 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
                 e.stopPropagation();
                 navigate(buildBouncedUrl(technician.id, viewMode, selectedDate, selectedWeek, selectedMonth));
               }}
-              className="no-row-nav flex items-center gap-1 px-1.5 py-1 rounded hover:bg-red-100 transition-colors cursor-pointer"
+              className="no-row-nav flex items-center gap-1 px-1.5 py-1 rounded hover:bg-red-100 dark:hover:bg-red-500/20 transition-colors cursor-pointer"
               title={
                 'Rejected tickets — picked up then put back in queue\n' +
                 `Selected ${periodLabel}: ${rejectedDisplay}\n` +
@@ -595,7 +595,7 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
               }
             >
               {!simple && <RotateCcw className="w-4 h-4 text-red-500" />}
-              <span className={`text-base ${simple ? 'font-semibold text-red-600' : 'font-bold text-red-700'}`}>{rejectedDisplay}</span>
+              <span className={`text-base ${simple ? 'font-semibold text-red-600 dark:text-red-300' : 'font-bold text-red-700 dark:text-red-200'}`}>{rejectedDisplay}</span>
             </button>
           ) : (
             <div
@@ -605,8 +605,8 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
                 `Last 7d: ${technician.rejected7d || 0}  ·  Last 30d: ${technician.rejected30d || 0}  ·  Lifetime: ${technician.rejectedLifetime || 0}`
               }
             >
-              {!simple && <RotateCcw className="w-4 h-4 text-slate-400" />}
-              <span className={`text-base ${simple ? 'font-semibold text-slate-300' : 'font-bold text-slate-400'}`}>0</span>
+              {!simple && <RotateCcw className="w-4 h-4 text-muted-foreground/75" />}
+              <span className={`text-base ${simple ? 'font-semibold text-muted-foreground/50' : 'font-bold text-muted-foreground/75'}`}>0</span>
             </div>
           )}
         </div>
@@ -618,12 +618,12 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
             <div className="flex items-center gap-1" title={csatTooltip}>
               {!simple && <Star className={`w-4 h-4 ${getCSATColor(csatOutOf5)}`} />}
               <span className={`text-base font-bold ${getCSATColor(csatOutOf5)}`}>{csatOutOf5?.toFixed(1)}</span>
-              {simple && <span className="text-[10px] text-slate-400 font-medium">/ 5</span>}
+              {simple && <span className="text-[10px] text-muted-foreground/75 font-medium">/ 5</span>}
             </div>
           ) : (
             <div className={`flex items-center gap-1 ${simple ? '' : 'opacity-40'}`} title="No CSAT responses in this period">
-              {!simple && <Star className="w-4 h-4 text-slate-400" />}
-              <span className={`text-base font-bold ${simple ? 'text-slate-300' : 'text-slate-400'}`}>—</span>
+              {!simple && <Star className="w-4 h-4 text-muted-foreground/75" />}
+              <span className={`text-base font-bold ${simple ? 'text-muted-foreground/50' : 'text-muted-foreground/75'}`}>—</span>
             </div>
           )}
         </div>
@@ -632,8 +632,8 @@ export default function TechCardCompact({ technician, onHide, rank, selectedDate
       {/* Expandable ticket details — includes the assigned-by summary that
           used to be its own column (QA 07-30 #4). */}
       {isExpanded && technician.assigners?.length > 0 && (
-        <div className="px-3 pt-1.5 pb-0.5 text-[11px] text-slate-500 border-t border-slate-100">
-          <span className="font-semibold text-slate-600">Assigned by:</span>{' '}
+        <div className="px-3 pt-1.5 pb-0.5 text-[11px] text-muted-foreground border-t border-border/60">
+          <span className="font-semibold text-muted-foreground">Assigned by:</span>{' '}
           {technician.assigners.map((a) => `${a.name} (${a.count})`).join(' · ')}
         </div>
       )}

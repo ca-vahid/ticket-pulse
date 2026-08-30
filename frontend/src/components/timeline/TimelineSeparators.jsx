@@ -17,7 +17,7 @@ export function TimelineSeparator({ label, color }) {
     content = (
       <>
         <span className={`${textColor}`}>{nameAction}</span>
-        <span className={`ml-1.5 px-1.5 py-0.5 rounded border ${borderColor} ${textColor} bg-white/60`}>
+        <span className={`ml-1.5 px-1.5 py-0.5 rounded border ${borderColor} ${textColor} bg-card/60`}>
           {timeTz}
         </span>
       </>
@@ -69,20 +69,20 @@ export function MergedSeparator({ markers }) {
 
   return (
     <div className="flex items-center gap-2 py-1 my-0.5">
-      <div className="flex-1 h-px bg-slate-200" />
+      <div className="flex-1 h-px bg-secondary" />
       <div className="flex min-w-0 flex-shrink flex-wrap items-center justify-center gap-0">
         {groups.map((g, i) => {
           const textColor = g.color.replace('bg-', 'text-');
           const borderColor = g.color.replace('bg-', 'border-');
           return (
             <span key={i} className="flex items-center">
-              {i > 0 && <span className="text-slate-300 mx-2 text-[10px]">·</span>}
+              {i > 0 && <span className="text-muted-foreground/50 mx-2 text-[10px]">·</span>}
               <span className={`flex flex-wrap items-center justify-center text-center text-[9px] font-bold uppercase tracking-wider ${textColor}`}>
                 {g.names
                   ? (
                     <>
                       <span>{g.names.join(', ')} {g.action}</span>
-                      <span className={`ml-1.5 px-1.5 py-0.5 rounded border ${borderColor} ${textColor} bg-white/60`}>
+                      <span className={`ml-1.5 px-1.5 py-0.5 rounded border ${borderColor} ${textColor} bg-card/60`}>
                         {g.suffix}
                       </span>
                     </>
@@ -93,7 +93,7 @@ export function MergedSeparator({ markers }) {
           );
         })}
       </div>
-      <div className="flex-1 h-px bg-slate-200" />
+      <div className="flex-1 h-px bg-secondary" />
     </div>
   );
 }
@@ -109,28 +109,28 @@ export function DayHeader({ dateStr, dayPicked, dayNotPicked, dayTotal, techStat
     <div
       className={`flex flex-wrap items-center gap-2 sm:gap-3 py-2 mt-3 mb-1 border-b-2 first:mt-0 ${
         hInfo.isCanadian
-          ? 'border-rose-400 bg-rose-50/50'
+          ? 'border-rose-400 bg-rose-50/50 dark:bg-rose-500/10'
           : hInfo.isUS
-            ? 'border-indigo-400 bg-indigo-50/50'
-            : 'border-slate-300'
+            ? 'border-indigo-400 bg-indigo-50/50 dark:bg-indigo-500/10'
+            : 'border-input'
       }`}
       title={hTip || undefined}
     >
-      <CalendarDays className={`w-4 h-4 flex-shrink-0 ${hInfo.isCanadian ? 'text-rose-600' : 'text-indigo-600'}`} />
-      <span className={`text-sm font-bold ${hInfo.isCanadian ? 'text-rose-900' : 'text-slate-800'}`}>{label}</span>
+      <CalendarDays className={`w-4 h-4 flex-shrink-0 ${hInfo.isCanadian ? 'text-rose-600 dark:text-rose-300' : 'text-indigo-600 dark:text-indigo-300'}`} />
+      <span className={`text-sm font-bold ${hInfo.isCanadian ? 'text-rose-900 dark:text-rose-200' : 'text-foreground'}`}>{label}</span>
       {hInfo.isHoliday && (
         <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
           hInfo.isCanadian
-            ? 'bg-rose-100 text-rose-700 border border-rose-300'
-            : 'bg-indigo-100 text-indigo-700 border border-indigo-300'
+            ? 'bg-rose-100 dark:bg-rose-500/20 text-rose-700 dark:text-rose-200 border border-rose-300 dark:border-rose-500/40'
+            : 'bg-indigo-100 dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-200 border border-indigo-300 dark:border-indigo-500/40'
         }`}>
           {hInfo.isCanadian ? `🍁 ${hInfo.canadianName}` : `🇺🇸 ${hInfo.usName}`}
         </span>
       )}
       <div className="flex w-full flex-wrap items-center gap-2 text-[10px] sm:ml-auto sm:w-auto">
-        <span className="text-slate-400">{dayTotal} eligible</span>
-        <span className="text-emerald-600 font-semibold">{dayPicked} picked</span>
-        <span className="text-amber-600 font-semibold">{dayNotPicked} not</span>
+        <span className="text-muted-foreground/75">{dayTotal} eligible</span>
+        <span className="text-emerald-600 dark:text-emerald-300 font-semibold">{dayPicked} picked</span>
+        <span className="text-amber-600 dark:text-amber-300 font-semibold">{dayNotPicked} not</span>
         {/* Per-tech breakdown in multi-tech mode */}
         {techStats && techStats.length > 1 && (
           <span className="flex items-center gap-1 ml-1">
@@ -158,15 +158,15 @@ export function EmptyDayGap({ startDate, endDate, count }) {
 
   return (
     <div className="flex items-center gap-2 sm:gap-3 py-2 my-1">
-      <div className="flex-1 border-t border-dashed border-slate-200" />
-      <div className="flex min-w-0 items-center gap-1.5 text-center text-slate-300">
+      <div className="flex-1 border-t border-dashed border-border" />
+      <div className="flex min-w-0 items-center gap-1.5 text-center text-muted-foreground/50">
         <MoreHorizontal className="w-3.5 h-3.5" />
         <span className="text-[10px] font-medium">
           {count} day{count > 1 ? 's' : ''} · {rangeLabel} · no matching tickets
         </span>
         <MoreHorizontal className="w-3.5 h-3.5" />
       </div>
-      <div className="flex-1 border-t border-dashed border-slate-200" />
+      <div className="flex-1 border-t border-dashed border-border" />
     </div>
   );
 }

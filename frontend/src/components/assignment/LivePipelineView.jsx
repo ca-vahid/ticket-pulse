@@ -43,16 +43,16 @@ function AgentBriefingPreview({ recommendation, decision }) {
 
   if (!briefing) {
     return (
-      <div className="mt-4 bg-amber-50 border border-amber-200 rounded-xl p-4">
+      <div className="mt-4 bg-amber-50 dark:bg-amber-500/15 border border-amber-200 dark:border-amber-500/30 rounded-xl p-4">
         <div className="flex items-center gap-2 mb-2">
-          <div className="w-6 h-6 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
-            <MessageSquare className="w-3.5 h-3.5 text-amber-700" />
+          <div className="w-6 h-6 rounded-full bg-amber-100 dark:bg-amber-500/20 flex items-center justify-center flex-shrink-0">
+            <MessageSquare className="w-3.5 h-3.5 text-amber-700 dark:text-amber-200" />
           </div>
-          <h4 className="text-xs font-semibold text-amber-800 uppercase tracking-wide">What the agent will see</h4>
+          <h4 className="text-xs font-semibold text-amber-800 dark:text-amber-200 uppercase tracking-wide">What the agent will see</h4>
           <span className="ml-auto text-[10px] font-medium text-amber-700/80 uppercase tracking-wider">Public note</span>
         </div>
         <p className="text-xs text-amber-800/90">
-          The LLM did not produce a <code className="font-mono bg-amber-100 px-1 rounded">{fieldName}</code> for this run.
+          The LLM did not produce a <code className="font-mono bg-amber-100 dark:bg-amber-500/20 px-1 rounded">{fieldName}</code> for this run.
           On sync, the FreshService note will fall back to {isNoise ? 'a generic closure message' : 'the internal reasoning above'} — which may leak routing logic.
         </p>
       </div>
@@ -62,18 +62,18 @@ function AgentBriefingPreview({ recommendation, decision }) {
   const safeHtml = sanitizeBriefingHtml(briefing);
 
   return (
-    <div className="mt-4 bg-gradient-to-br from-emerald-50 via-teal-50 to-slate-50 border border-emerald-100 rounded-xl p-4">
+    <div className="mt-4 bg-gradient-to-br from-emerald-50 dark:from-emerald-500/15 via-teal-50 dark:via-teal-500/15 to-muted/50 border border-emerald-100 dark:border-emerald-500/20 rounded-xl p-4">
       <div className="flex items-center gap-2 mb-3">
-        <div className="w-6 h-6 rounded-full bg-emerald-100 flex items-center justify-center flex-shrink-0">
-          <MessageSquare className="w-3.5 h-3.5 text-emerald-700" />
+        <div className="w-6 h-6 rounded-full bg-emerald-100 dark:bg-emerald-500/20 flex items-center justify-center flex-shrink-0">
+          <MessageSquare className="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-200" />
         </div>
-        <h4 className="text-xs font-semibold text-emerald-800 uppercase tracking-wide">
+        <h4 className="text-xs font-semibold text-emerald-800 dark:text-emerald-200 uppercase tracking-wide">
           {isNoise ? 'Closure notice (what the agent will see)' : 'What the agent will see'}
         </h4>
         <span className="ml-auto text-[10px] font-medium text-emerald-700/80 uppercase tracking-wider">Public note</span>
       </div>
       <div
-        className="text-sm text-slate-700 leading-relaxed prose prose-sm max-w-none prose-p:my-2 prose-a:text-emerald-700"
+        className="text-sm text-foreground/85 leading-relaxed prose prose-sm max-w-none prose-p:my-2 prose-a:text-emerald-700 dark:prose-a:text-emerald-200"
         dangerouslySetInnerHTML={{ __html: safeHtml }}
       />
     </div>
@@ -86,12 +86,11 @@ function ScoreRing({ pct, selected = false, size = 52 }) {
   const r = (size - 8) / 2;
   const circ = 2 * Math.PI * r;
   const offset = circ * (1 - pct / 100);
-  const trackColor = '#e2e8f0';
   const fillColor = selected ? '#3b82f6' : pct >= 80 ? '#10b981' : pct >= 60 ? '#6366f1' : pct >= 40 ? '#f59e0b' : '#94a3b8';
   return (
     <div className="relative flex-shrink-0" style={{ width: size, height: size }}>
       <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={trackColor} strokeWidth="5" />
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" style={{ stroke: 'hsl(var(--muted-foreground) / 0.25)' }} strokeWidth="5" />
         <circle
           cx={size / 2} cy={size / 2} r={r} fill="none"
           stroke={fillColor} strokeWidth="5"
@@ -102,7 +101,7 @@ function ScoreRing({ pct, selected = false, size = 52 }) {
         />
       </svg>
       <div className="absolute inset-0 flex items-center justify-center">
-        <span className={`text-[11px] font-bold tabular-nums leading-none ${selected ? 'text-blue-600' : 'text-slate-600'}`}>{pct}%</span>
+        <span className={`text-[11px] font-bold tabular-nums leading-none ${selected ? 'text-blue-600 dark:text-blue-300' : 'text-muted-foreground'}`}>{pct}%</span>
       </div>
     </div>
   );
@@ -143,30 +142,30 @@ export function RecommendationCards({
   if (!recommendations.length) {
     return (
       <div className="mt-4 border-t pt-4 space-y-3">
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-          <h4 className="text-sm font-semibold text-yellow-800 mb-1 text-center">No Assignment Needed</h4>
+        <div className="bg-yellow-50 dark:bg-yellow-500/15 border border-yellow-200 dark:border-yellow-500/30 rounded-lg p-4">
+          <h4 className="text-sm font-semibold text-yellow-800 dark:text-yellow-200 mb-1 text-center">No Assignment Needed</h4>
           {data?.overallReasoning ? (
-            <div className="text-sm text-yellow-800 prose prose-sm max-w-none prose-p:my-1.5 prose-headings:text-yellow-900 prose-strong:text-yellow-900">
+            <div className="text-sm text-yellow-800 dark:text-yellow-200 prose prose-sm max-w-none prose-p:my-1.5 prose-headings:text-yellow-900 dark:prose-headings:text-yellow-200 prose-strong:text-yellow-900 dark:prose-strong:text-yellow-200">
               <Markdown remarkPlugins={[remarkGfm]} components={mdComponents}>{data.overallReasoning}</Markdown>
             </div>
           ) : (
-            <p className="text-sm text-yellow-700 text-center">This ticket was classified as noise or non-actionable.</p>
+            <p className="text-sm text-yellow-700 dark:text-yellow-200 text-center">This ticket was classified as noise or non-actionable.</p>
           )}
           {data?.ticketClassification && (
-            <p className="text-xs text-yellow-600 mt-2 text-center">Classification: {data.ticketClassification}</p>
+            <p className="text-xs text-yellow-600 dark:text-yellow-300 mt-2 text-center">Classification: {data.ticketClassification}</p>
           )}
           {ticketType && (
-            <p className="text-xs text-yellow-700 mt-2 text-center" title={data?.ticketTypeRationale || undefined}>
+            <p className="text-xs text-yellow-700 dark:text-yellow-200 mt-2 text-center" title={data?.ticketTypeRationale || undefined}>
               Type: {ticketType}{data?.ticketTypeConfidence ? ` (${data.ticketTypeConfidence})` : ''}
             </p>
           )}
           {(data?.categoryFit || data?.subcategoryFit || data?.taxonomyReviewNeeded) && (
-            <p className={`text-xs mt-1 text-center ${data?.taxonomyReviewNeeded ? 'text-amber-700' : 'text-slate-500'}`}>
+            <p className={`text-xs mt-1 text-center ${data?.taxonomyReviewNeeded ? 'text-amber-700 dark:text-amber-200' : 'text-muted-foreground'}`}>
               {[data?.categoryFit ? `Category ${data.categoryFit}` : null, data?.subcategoryFit ? `Subcategory ${data.subcategoryFit}` : null].filter(Boolean).join(' · ')}
               {data?.taxonomyReviewNeeded ? ' · category review suggested' : ''}
             </p>
           )}
-          <p className="text-xs text-gray-400 mt-2 text-center">No technician recommendations were produced for this run.</p>
+          <p className="text-xs text-muted-foreground/75 mt-2 text-center">No technician recommendations were produced for this run.</p>
         </div>
         {!hideAgentBriefing && <AgentBriefingPreview recommendation={data} decision={decision || 'noise_dismissed'} />}
       </div>
@@ -193,7 +192,7 @@ export function RecommendationCards({
     <div className="mt-3 sm:mt-4 border-t pt-3 sm:pt-4">
       {ticketType && (
         <div
-          className="mb-3 inline-flex max-w-full items-center gap-1.5 rounded-full border border-indigo-100 bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700"
+          className="mb-3 inline-flex max-w-full items-center gap-1.5 rounded-full border border-indigo-100 dark:border-indigo-500/20 bg-indigo-50 dark:bg-indigo-500/15 px-2.5 py-1 text-xs font-medium text-indigo-700 dark:text-indigo-200"
           title={data?.ticketTypeRationale || undefined}
         >
           <FileText className="h-3.5 w-3.5 flex-shrink-0" />
@@ -204,7 +203,7 @@ export function RecommendationCards({
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-3 sm:gap-4">
         {/* LEFT: Candidates (3/5 width) */}
         <div className="lg:col-span-3 space-y-2 sm:space-y-2.5">
-          <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Recommendations</h4>
+          <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">Recommendations</h4>
           {recommendations.map((rec, i) => {
             const isSelected = (onDecide ? effectiveTechId : displayAssignedTechId) === rec.techId && !isOverride;
             const isTopPick = i === 0;
@@ -214,19 +213,19 @@ export function RecommendationCards({
             const tech = techMap[rec.techId];
             const initials = rec.techName?.split(' ').map((n) => n[0]).join('').slice(0, 2) || '?';
             const pct = scorePercent(rec.score);
-            const rankColors = ['bg-amber-400', 'bg-slate-400', 'bg-slate-300'];
+            const rankColors = ['bg-amber-400', 'bg-muted-foreground/60', 'bg-muted-foreground/40'];
             return (
               <div
                 key={rec.techId || i}
                 onClick={onDecide ? () => { setSelectedTechId(rec.techId); setSelectedOverrideTech(null); setShowTechPicker(false); } : undefined}
                 className={`relative rounded-xl transition-all touch-manipulation overflow-hidden ${
                   isSelected
-                    ? 'border-2 border-blue-500 bg-blue-50/60 shadow-md'
+                    ? 'border-2 border-blue-500 bg-blue-50/60 dark:bg-blue-500/10 shadow-md'
                     : isSuperseded
-                      ? 'border border-slate-200 bg-slate-50 opacity-80'
+                      ? 'border border-border bg-muted/50 opacity-80'
                       : isTopPick
-                        ? 'border border-amber-200 bg-gradient-to-br from-amber-50/40 to-white hover:border-amber-300 hover:shadow-sm'
-                        : 'border border-slate-200 hover:border-slate-300 hover:shadow-sm bg-white'
+                        ? 'border border-amber-200 dark:border-amber-500/30 bg-gradient-to-br from-amber-50/40 to-card hover:border-amber-300 dark:hover:border-amber-500/40 hover:shadow-sm'
+                        : 'border border-border hover:border-input hover:shadow-sm bg-card'
                 } ${onDecide ? 'cursor-pointer' : 'cursor-default'}`}
               >
                 {/* Selected indicator stripe */}
@@ -238,11 +237,11 @@ export function RecommendationCards({
                   {/* Avatar with rank badge */}
                   <div className="relative flex-shrink-0">
                     {tech?.photoUrl ? (
-                      <img src={tech.photoUrl} alt="" className={`w-12 h-12 rounded-full object-cover ${isSelected ? 'ring-2 ring-blue-400' : isTopPick ? 'ring-2 ring-amber-300' : 'ring-1 ring-slate-200'}`} />
+                      <img src={tech.photoUrl} alt="" className={`w-12 h-12 rounded-full object-cover ${isSelected ? 'ring-2 ring-blue-400' : isTopPick ? 'ring-2 ring-amber-300' : 'ring-1 ring-border'}`} />
                     ) : (
-                      <span className={`w-12 h-12 rounded-full text-sm font-bold flex items-center justify-center ${isSelected ? 'bg-blue-100 text-blue-700' : isTopPick ? 'bg-amber-50 text-amber-700' : 'bg-slate-100 text-slate-500'}`}>{initials}</span>
+                      <span className={`w-12 h-12 rounded-full text-sm font-bold flex items-center justify-center ${isSelected ? 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200' : isTopPick ? 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200' : 'bg-muted text-muted-foreground'}`}>{initials}</span>
                     )}
-                    <span className={`absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full text-[9px] font-bold flex items-center justify-center ring-2 ring-white ${rankColors[i] || 'bg-slate-200 text-slate-600'} text-white`}>
+                    <span className={`absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full text-[9px] font-bold flex items-center justify-center ring-2 ring-card ${rankColors[i] || 'bg-secondary text-muted-foreground'} text-white`}>
                       {i + 1}
                     </span>
                   </div>
@@ -250,30 +249,30 @@ export function RecommendationCards({
                   {/* Info */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
-                      <span className={`font-semibold text-sm truncate ${isSelected ? 'text-blue-900' : 'text-slate-900'}`}>{rec.techName}</span>
+                      <span className={`font-semibold text-sm truncate ${isSelected ? 'text-blue-900 dark:text-blue-200' : 'text-foreground'}`}>{rec.techName}</span>
                       {isCurrentAssignee && (
-                        <span className="inline-flex items-center gap-0.5 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full flex-shrink-0 bg-green-100 text-green-700">
+                        <span className="inline-flex items-center gap-0.5 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full flex-shrink-0 bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-200">
                           <CheckCircle className="w-2.5 h-2.5" /> Current Assignee
                         </span>
                       )}
                       {isTopPick && (
-                        <span className={`inline-flex items-center gap-0.5 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full flex-shrink-0 ${isSelected ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>
+                        <span className={`inline-flex items-center gap-0.5 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full flex-shrink-0 ${isSelected ? 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200' : 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-200'}`}>
                           <Star className="w-2.5 h-2.5" /> Top Pick
                         </span>
                       )}
                       {isSuperseded && (
-                        <span className="inline-flex items-center text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full flex-shrink-0 bg-slate-200 text-slate-600">
+                        <span className="inline-flex items-center text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full flex-shrink-0 bg-secondary text-muted-foreground">
                           Superseded
                         </span>
                       )}
                     </div>
                     {tech?.location && (
-                      <p className="text-[11px] text-slate-400 flex items-center gap-1 mb-1">
+                      <p className="text-[11px] text-muted-foreground/75 flex items-center gap-1 mb-1">
                         <MapPin className="w-3 h-3 flex-shrink-0" /> {tech.location}
                       </p>
                     )}
                     {rec.reasoning && (
-                      <p className="text-xs text-slate-500 leading-relaxed">{rec.reasoning}</p>
+                      <p className="text-xs text-muted-foreground leading-relaxed">{rec.reasoning}</p>
                     )}
                   </div>
 
@@ -288,13 +287,13 @@ export function RecommendationCards({
         {/* RIGHT: Decision Panel (2/5 width) */}
         {onDecide && (
           <div className="lg:col-span-2">
-            <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-3 sm:p-4 space-y-2.5 sm:space-y-3 lg:sticky lg:top-4">
+            <div className="bg-card border border-border rounded-xl shadow-sm p-3 sm:p-4 space-y-2.5 sm:space-y-3 lg:sticky lg:top-4">
               <div className="flex items-center justify-between">
-                <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Decision</h4>
+                <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Decision</h4>
                 <button
                   onClick={async () => { await loadTechs(); setShowTechPicker(!showTechPicker); }}
                   className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors flex items-center gap-1 ${
-                    showTechPicker ? 'bg-slate-200 text-slate-700' : 'text-blue-600 hover:bg-blue-50'
+                    showTechPicker ? 'bg-secondary text-foreground/85' : 'text-blue-600 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-500/15'
                   }`}
                 >
                   <Users className="w-3 h-3" />
@@ -304,16 +303,16 @@ export function RecommendationCards({
 
               {/* Tech picker */}
               {showTechPicker && (
-                <div className="border border-slate-200 rounded-lg bg-white overflow-hidden shadow-sm">
-                  <div className="px-3 py-2 bg-slate-50 border-b">
+                <div className="border border-border rounded-lg bg-card overflow-hidden shadow-sm">
+                  <div className="px-3 py-2 bg-muted/50 border-b">
                     <div className="relative">
-                      <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/75" />
                       <input
                         type="text"
                         value={techSearch}
                         onChange={(e) => setTechSearch(e.target.value)}
                         placeholder="Search by name or location..."
-                        className="w-full pl-8 pr-3 py-1.5 border border-slate-200 rounded-md text-sm bg-white focus:ring-2 focus:ring-blue-200 focus:border-blue-300"
+                        className="w-full pl-8 pr-3 py-1.5 border border-border rounded-md text-sm bg-card focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-500/30 focus:border-blue-300 dark:focus:border-blue-500/40"
                         autoFocus
                       />
                     </div>
@@ -328,27 +327,27 @@ export function RecommendationCards({
                           <button
                             key={t.id}
                             onClick={() => { setSelectedTechId(t.id); setSelectedOverrideTech(t); setShowTechPicker(false); setTechSearch(''); }}
-                            className={`w-full text-left px-3 py-2 flex items-center gap-2.5 transition-colors border-b border-slate-100 last:border-0 ${
-                              isActive ? 'bg-blue-50' : 'hover:bg-slate-50'
+                            className={`w-full text-left px-3 py-2 flex items-center gap-2.5 transition-colors border-b border-border/60 last:border-0 ${
+                              isActive ? 'bg-blue-50 dark:bg-blue-500/15' : 'hover:bg-muted/50'
                             }`}
                           >
                             {t.photoUrl ? (
                               <img src={t.photoUrl} alt="" className="w-7 h-7 rounded-full object-cover flex-shrink-0" />
                             ) : (
-                              <span className="w-7 h-7 rounded-full bg-slate-100 text-slate-500 text-[10px] font-bold flex items-center justify-center flex-shrink-0">
+                              <span className="w-7 h-7 rounded-full bg-muted text-muted-foreground text-[10px] font-bold flex items-center justify-center flex-shrink-0">
                                 {t.name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
                               </span>
                             )}
                             <div className="flex-1 min-w-0">
-                              <p className="text-xs font-medium text-slate-900 truncate">{t.name}</p>
-                              {t.location && <p className="text-[10px] text-slate-400">{t.location}</p>}
+                              <p className="text-xs font-medium text-foreground truncate">{t.name}</p>
+                              {t.location && <p className="text-[10px] text-muted-foreground/75">{t.location}</p>}
                             </div>
-                            {isRecommended && <span className="text-[9px] font-medium bg-blue-100 text-blue-700 px-1 py-0.5 rounded flex-shrink-0">rec</span>}
+                            {isRecommended && <span className="text-[9px] font-medium bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200 px-1 py-0.5 rounded flex-shrink-0">rec</span>}
                           </button>
                         );
                       })}
                     {allTechs.length === 0 && (
-                      <div className="px-3 py-4 text-center text-xs text-slate-400">
+                      <div className="px-3 py-4 text-center text-xs text-muted-foreground/75">
                         <Loader2 className="w-3 h-3 animate-spin mx-auto mb-1" /> Loading...
                       </div>
                     )}
@@ -358,29 +357,29 @@ export function RecommendationCards({
 
               {/* Selected tech banner (override) */}
               {isOverride && !showTechPicker && (
-                <div className="flex items-center gap-2.5 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+                <div className="flex items-center gap-2.5 bg-blue-50 dark:bg-blue-500/15 border border-blue-200 dark:border-blue-500/30 rounded-lg px-3 py-2">
                   {selectedOverrideTech.photoUrl ? (
                     <img src={selectedOverrideTech.photoUrl} alt="" className="w-8 h-8 rounded-full object-cover ring-2 ring-blue-400" />
                   ) : (
-                    <span className="w-8 h-8 rounded-full bg-blue-200 text-blue-700 text-xs font-bold flex items-center justify-center ring-2 ring-blue-400">
+                    <span className="w-8 h-8 rounded-full bg-blue-200 dark:bg-blue-500/30 text-blue-700 dark:text-blue-200 text-xs font-bold flex items-center justify-center ring-2 ring-blue-400">
                       {selectedOverrideTech.name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
                     </span>
                   )}
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-blue-900">{selectedOverrideTech.name}</p>
-                    {selectedOverrideTech.location && <p className="text-xs text-blue-600 flex items-center gap-0.5"><MapPin className="w-3 h-3" />{selectedOverrideTech.location}</p>}
+                    <p className="text-sm font-semibold text-blue-900 dark:text-blue-200">{selectedOverrideTech.name}</p>
+                    {selectedOverrideTech.location && <p className="text-xs text-blue-600 dark:text-blue-300 flex items-center gap-0.5"><MapPin className="w-3 h-3" />{selectedOverrideTech.location}</p>}
                   </div>
-                  <button onClick={() => { setSelectedTechId(null); setSelectedOverrideTech(null); }} className="p-1 hover:bg-blue-100 rounded-full"><X className="w-3.5 h-3.5 text-blue-400" /></button>
+                  <button onClick={() => { setSelectedTechId(null); setSelectedOverrideTech(null); }} className="p-1 hover:bg-blue-100 dark:hover:bg-blue-500/20 rounded-full"><X className="w-3.5 h-3.5 text-blue-400" /></button>
                 </div>
               )}
 
               {/* Triage note */}
               <div>
-                <label className="text-xs text-slate-500 mb-1 block">Triage Note <span className="text-slate-400">(optional — helps future AI decisions)</span></label>
+                <label className="text-xs text-muted-foreground mb-1 block">Triage Note <span className="text-muted-foreground/75">(optional — helps future AI decisions)</span></label>
                 <textarea
                   value={decisionNote}
                   onChange={(e) => setDecisionNote(e.target.value)}
-                  className="w-full border border-slate-200 rounded-lg p-2 sm:p-2.5 text-sm resize-none h-12 sm:h-16 focus:ring-2 focus:ring-blue-200 focus:border-blue-300 transition-all bg-white"
+                  className="w-full border border-border rounded-lg p-2 sm:p-2.5 text-sm resize-none h-12 sm:h-16 focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-500/30 focus:border-blue-300 dark:focus:border-blue-500/40 transition-all bg-card"
                   placeholder={isOverride ? 'Why this technician?' : 'Add triage context...'}
                 />
               </div>
@@ -417,7 +416,7 @@ export function RecommendationCards({
                 <button
                   onClick={() => onDecide({ decision: 'rejected', decisionNote })}
                   disabled={deciding}
-                  className="w-full px-4 py-2 bg-white text-red-600 border border-red-200 rounded-lg text-sm font-medium hover:bg-red-50 disabled:opacity-50 transition-colors touch-manipulation min-h-[44px]"
+                  className="w-full px-4 py-2 bg-card text-red-600 dark:text-red-300 border border-red-200 dark:border-red-500/30 rounded-lg text-sm font-medium hover:bg-red-50 dark:hover:bg-red-500/15 disabled:opacity-50 transition-colors touch-manipulation min-h-[44px]"
                 >
                   Reject
                 </button>
@@ -432,17 +431,17 @@ export function RecommendationCards({
         <div className="mt-4">
           <button
             onClick={() => setShowReasoning(!showReasoning)}
-            className="w-full flex items-center justify-between px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors text-left"
+            className="w-full flex items-center justify-between px-4 py-2.5 bg-muted/50 border border-border rounded-lg hover:bg-muted transition-colors text-left"
           >
-            <span className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+            <span className="flex items-center gap-2 text-sm font-semibold text-foreground/85">
               <Sparkles className="w-4 h-4 text-blue-500" />
               AI Reasoning
             </span>
-            {showReasoning ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />}
+            {showReasoning ? <ChevronDown className="w-4 h-4 text-muted-foreground/75" /> : <ChevronRight className="w-4 h-4 text-muted-foreground/75" />}
           </button>
           {showReasoning && (
-            <div className="border border-t-0 border-slate-200 rounded-b-lg px-4 py-3 bg-white">
-              <div className="text-sm text-slate-700 leading-relaxed prose prose-sm max-w-none prose-p:my-2 prose-headings:text-slate-800 prose-strong:text-slate-900">
+            <div className="border border-t-0 border-border rounded-b-lg px-4 py-3 bg-card">
+              <div className="text-sm text-foreground/85 leading-relaxed prose prose-sm max-w-none prose-p:my-2 prose-headings:text-foreground prose-strong:text-foreground">
                 <Markdown remarkPlugins={[remarkGfm]} components={mdComponents}>{data.overallReasoning}</Markdown>
               </div>
             </div>
@@ -477,15 +476,15 @@ export function RecommendationCards({
 function ReasoningCard({ reasoning }) {
   if (!reasoning) return null;
   return (
-    <div className="bg-gradient-to-br from-indigo-50 via-blue-50 to-slate-50 border border-indigo-100 rounded-xl p-4">
+    <div className="bg-gradient-to-br from-indigo-50 dark:from-indigo-500/15 via-blue-50 dark:via-blue-500/15 to-muted/50 border border-indigo-100 dark:border-indigo-500/20 rounded-xl p-4">
       <div className="flex items-center gap-2 mb-3">
-        <div className="w-6 h-6 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0">
-          <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+        <div className="w-6 h-6 rounded-full bg-indigo-100 dark:bg-indigo-500/20 flex items-center justify-center flex-shrink-0">
+          <Sparkles className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-300" />
         </div>
-        <h4 className="text-xs font-semibold text-indigo-700 uppercase tracking-wide">Overall Reasoning</h4>
+        <h4 className="text-xs font-semibold text-indigo-700 dark:text-indigo-200 uppercase tracking-wide">Overall Reasoning</h4>
         <span className="ml-auto text-[10px] font-medium text-indigo-500/80 uppercase tracking-wider">Internal</span>
       </div>
-      <div className="text-sm text-slate-700 leading-relaxed prose prose-sm max-w-none prose-p:my-2 prose-headings:text-slate-800 prose-strong:text-slate-900 prose-ul:my-2 prose-li:my-0.5">
+      <div className="text-sm text-foreground/85 leading-relaxed prose prose-sm max-w-none prose-p:my-2 prose-headings:text-foreground prose-strong:text-foreground prose-ul:my-2 prose-li:my-0.5">
         <Markdown remarkPlugins={[remarkGfm]} components={mdComponents}>{reasoning}</Markdown>
       </div>
     </div>
@@ -666,13 +665,13 @@ export default function LivePipelineView({ ticketId, onComplete, onBack, streamP
       : 'AI is analyzing...';
 
   const STATUS_INDICATORS = {
-    loading: { icon: Loader2, text: 'Loading...', color: 'text-gray-500', spin: true },
-    connecting: { icon: Loader2, text: 'Connecting...', color: 'text-gray-500', spin: true },
-    running: { icon: Brain, text: runningText, color: 'text-blue-600', spin: true },
-    completed: { icon: CheckCircle, text: 'Analysis complete', color: 'text-green-600', spin: false },
-    error: { icon: XCircle, text: 'Pipeline failed', color: 'text-red-600', spin: false },
-    queued: { icon: AlertTriangle, text: 'Queued for business hours', color: 'text-orange-600', spin: false },
-    running_elsewhere: { icon: Brain, text: 'Analysis running...', color: 'text-blue-600', spin: true },
+    loading: { icon: Loader2, text: 'Loading...', color: 'text-muted-foreground', spin: true },
+    connecting: { icon: Loader2, text: 'Connecting...', color: 'text-muted-foreground', spin: true },
+    running: { icon: Brain, text: runningText, color: 'text-blue-600 dark:text-blue-300', spin: true },
+    completed: { icon: CheckCircle, text: 'Analysis complete', color: 'text-green-600 dark:text-green-300', spin: false },
+    error: { icon: XCircle, text: 'Pipeline failed', color: 'text-red-600 dark:text-red-300', spin: false },
+    queued: { icon: AlertTriangle, text: 'Queued for business hours', color: 'text-orange-600 dark:text-orange-300', spin: false },
+    running_elsewhere: { icon: Brain, text: 'Analysis running...', color: 'text-blue-600 dark:text-blue-300', spin: true },
   };
 
   const statusInfo = STATUS_INDICATORS[status] || STATUS_INDICATORS.loading;
@@ -698,7 +697,7 @@ export default function LivePipelineView({ ticketId, onComplete, onBack, streamP
             </button>
           )}
           {onBack && (
-            <button onClick={onBack} className="text-sm text-blue-600 hover:underline">
+            <button onClick={onBack} className="text-sm text-blue-600 dark:text-blue-300 hover:underline">
               Back to queue
             </button>
           )}
@@ -713,12 +712,12 @@ export default function LivePipelineView({ ticketId, onComplete, onBack, streamP
             <div>
               <button
                 onClick={() => setShowLog((v) => !v)}
-                className="text-xs font-medium text-slate-500 hover:text-slate-700 inline-flex items-center gap-1"
+                className="text-xs font-medium text-muted-foreground hover:text-foreground/85 inline-flex items-center gap-1"
               >
                 <FileText className="w-3.5 h-3.5" /> {showLog ? 'Hide' : 'View'} full analysis log
               </button>
               {showLog && (
-                <div className="mt-2 overflow-y-auto border rounded-lg bg-white p-3 max-h-[420px] text-sm text-gray-700 prose prose-sm max-w-none">
+                <div className="mt-2 overflow-y-auto border rounded-lg bg-card p-3 max-h-[420px] text-sm text-foreground/85 prose prose-sm max-w-none">
                   {events.length > 0 ? (
                     <StreamContent events={events} toolCalls={toolCalls} thinkingKb={thinkingKb} status={status} accentColor="blue" />
                   ) : (
@@ -732,58 +731,58 @@ export default function LivePipelineView({ ticketId, onComplete, onBack, streamP
       ) : (
         <div
           ref={scrollRef}
-          className="flex-1 overflow-y-auto border rounded-lg bg-white p-2.5 sm:p-4 min-h-[200px] sm:min-h-[300px] max-h-[60vh] sm:max-h-[600px]"
+          className="flex-1 overflow-y-auto border rounded-lg bg-card p-2.5 sm:p-4 min-h-[200px] sm:min-h-[300px] max-h-[60vh] sm:max-h-[600px]"
         >
           {status === 'loading' && (
-            <div className="flex items-center justify-center h-full text-gray-400">
+            <div className="flex items-center justify-center h-full text-muted-foreground/75">
               <Loader2 className="w-6 h-6 animate-spin" />
             </div>
           )}
           {events.length === 0 && status === 'connecting' && (
-            <div className="flex items-center justify-center h-full text-gray-400">
+            <div className="flex items-center justify-center h-full text-muted-foreground/75">
               <Loader2 className="w-6 h-6 animate-spin" />
             </div>
           )}
           {status === 'running_elsewhere' && (
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center">
+            <div className="bg-blue-50 dark:bg-blue-500/15 border border-blue-200 dark:border-blue-500/30 rounded-lg p-4 text-center">
               <Brain className="w-8 h-8 text-blue-500 mx-auto mb-2" />
-              <h4 className="text-sm font-semibold text-blue-800 mb-1">Analysis in progress</h4>
-              <p className="text-sm text-blue-700">The pipeline is analyzing this ticket in the background — results appear here the moment it finishes.</p>
+              <h4 className="text-sm font-semibold text-blue-800 dark:text-blue-200 mb-1">Analysis in progress</h4>
+              <p className="text-sm text-blue-700 dark:text-blue-200">The pipeline is analyzing this ticket in the background — results appear here the moment it finishes.</p>
               <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-blue-500">
                 <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> watching for the result…
               </p>
             </div>
           )}
           {status === 'queued' && !streaming && existingRun && (
-            <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 text-center">
+            <div className="bg-orange-50 dark:bg-orange-500/15 border border-orange-200 dark:border-orange-500/30 rounded-lg p-4 text-center">
               <AlertTriangle className="w-8 h-8 text-orange-500 mx-auto mb-2" />
-              <h4 className="text-sm font-semibold text-orange-800 mb-1">Queued Until Next Business Window</h4>
-              <p className="text-sm text-orange-700">{existingRun.queuedReason || 'Currently outside business hours.'}</p>
-              <p className="text-xs text-gray-500 mt-2">This ticket will be processed automatically when business hours resume.</p>
+              <h4 className="text-sm font-semibold text-orange-800 dark:text-orange-200 mb-1">Queued Until Next Business Window</h4>
+              <p className="text-sm text-orange-700 dark:text-orange-200">{existingRun.queuedReason || 'Currently outside business hours.'}</p>
+              <p className="text-xs text-muted-foreground mt-2">This ticket will be processed automatically when business hours resume.</p>
             </div>
           )}
           {status === 'queued' && streaming && (
-            <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 text-center">
+            <div className="bg-orange-50 dark:bg-orange-500/15 border border-orange-200 dark:border-orange-500/30 rounded-lg p-4 text-center">
               <AlertTriangle className="w-8 h-8 text-orange-500 mx-auto mb-2" />
-              <h4 className="text-sm font-semibold text-orange-800 mb-1">Queued Until Next Business Window</h4>
-              <p className="text-sm text-orange-700">
+              <h4 className="text-sm font-semibold text-orange-800 dark:text-orange-200 mb-1">Queued Until Next Business Window</h4>
+              <p className="text-sm text-orange-700 dark:text-orange-200">
                 {events.find((e) => e.type === 'queued')?.reason || 'Currently outside business hours.'}
               </p>
-              <p className="text-xs text-gray-500 mt-2">This ticket will be processed automatically when business hours resume.</p>
+              <p className="text-xs text-muted-foreground mt-2">This ticket will be processed automatically when business hours resume.</p>
             </div>
           )}
           {events.length > 0 && (
             <StreamContent events={events} toolCalls={toolCalls} thinkingKb={thinkingKb} status={status} accentColor="blue" />
           )}
           {events.length === 0 && showExistingRun && existingRun.fullTranscript && (
-            <div className="text-sm text-gray-800 leading-relaxed prose prose-sm max-w-none">
+            <div className="text-sm text-foreground leading-relaxed prose prose-sm max-w-none">
               <Markdown remarkPlugins={[remarkGfm]} components={mdComponents}>
                 {cleanTranscript(existingRun.fullTranscript)}
               </Markdown>
             </div>
           )}
           {events.length === 0 && showExistingRun && !existingRun.fullTranscript && existingRun.status === 'completed' && (
-            <div className="text-sm text-gray-500 italic py-4 text-center">
+            <div className="text-sm text-muted-foreground italic py-4 text-center">
               Analysis completed — transcript not available. Click &quot;Re-run Analysis&quot; to run again.
             </div>
           )}
@@ -791,7 +790,7 @@ export default function LivePipelineView({ ticketId, onComplete, onBack, streamP
       )}
 
       {error && (
-        <div className="mt-3 bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700 flex items-start gap-2">
+        <div className="mt-3 bg-red-50 dark:bg-red-500/15 border border-red-200 dark:border-red-500/30 rounded-lg p-3 text-sm text-red-700 dark:text-red-200 flex items-start gap-2">
           <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
           {error}
         </div>

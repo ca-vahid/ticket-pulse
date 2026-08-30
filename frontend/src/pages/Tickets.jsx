@@ -33,6 +33,7 @@ import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useWorkspaceRole } from '../components/nav/navDestinations';
 import { useSSE } from '../hooks/useSSE';
 import ticketsHeroArt from '../assets/tickets-hero.png';
+import ticketsHeroArtDark from '../assets/tickets-hero-dark.png';
 
 // Status vocabulary comes from the workspace registry in the queue meta
 // (Phase 8b, statusDefs.js) — canonical 4 until meta loads.
@@ -117,13 +118,13 @@ function Pagination({ page, totalPages, total, pageSize, onPage, compact = false
     if (Number.isInteger(n) && n >= 1) go(n);
     setJump('');
   };
-  const navBtn = 'tp-focus-ring inline-flex items-center gap-0.5 px-2 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-700 disabled:opacity-35 disabled:hover:border-slate-200 disabled:hover:text-slate-600 transition-colors';
+  const navBtn = 'tp-focus-ring inline-flex items-center gap-0.5 px-2 py-1.5 text-xs font-semibold rounded-lg border border-border bg-card text-muted-foreground hover:border-blue-300 dark:hover:border-blue-500/40 hover:text-blue-700 dark:hover:text-blue-200 disabled:opacity-35 disabled:hover:border-border disabled:hover:text-muted-foreground transition-colors';
   const rangeText = total === 0
     ? '0 tickets'
     : `${((page - 1) * pageSize + 1).toLocaleString()}–${Math.min(page * pageSize, total).toLocaleString()} of ${total.toLocaleString()}`;
 
   const jumpBox = (
-    <span className="inline-flex items-center gap-1 text-xs text-slate-400">
+    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground/75">
       Page
       <input
         type="number"
@@ -135,7 +136,7 @@ function Pagination({ page, totalPages, total, pageSize, onPage, compact = false
         onBlur={() => jump && commitJump()}
         placeholder={String(page)}
         aria-label="Jump to page"
-        className="tp-focus-ring w-14 text-center text-xs bg-white border border-slate-200 rounded-lg px-1 py-1.5 text-slate-700 placeholder:text-slate-300 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+        className="tp-focus-ring w-14 text-center text-xs bg-card border border-border rounded-lg px-1 py-1.5 text-foreground/85 placeholder:text-muted-foreground/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
       />
       of {totalPages.toLocaleString()}
     </span>
@@ -143,7 +144,7 @@ function Pagination({ page, totalPages, total, pageSize, onPage, compact = false
 
   return (
     <div className={`flex flex-wrap items-center gap-2 ${compact ? '' : 'justify-between'}`}>
-      <span className="text-xs text-slate-500 whitespace-nowrap">{rangeText}</span>
+      <span className="text-xs text-muted-foreground whitespace-nowrap">{rangeText}</span>
       <div className="flex items-center gap-1">
         <button onClick={() => go(1)} disabled={page <= 1} aria-label="First page" title="First page" className={navBtn}>
           <ChevronsLeft className="w-4 h-4" aria-hidden="true" />
@@ -158,13 +159,13 @@ function Pagination({ page, totalPages, total, pageSize, onPage, compact = false
             onClick={() => go(p)}
             aria-current={p === page ? 'page' : undefined}
             className={`tp-focus-ring min-w-[34px] px-2 py-1.5 text-xs font-semibold rounded-lg border transition-colors ${
-              p === page ? 'bg-blue-600 text-white border-blue-600 shadow-subtle' : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300 hover:text-blue-700'
+              p === page ? 'bg-blue-600 text-white border-blue-600 shadow-subtle' : 'bg-card text-muted-foreground border-border hover:border-blue-300 dark:hover:border-blue-500/40 hover:text-blue-700 dark:hover:text-blue-200'
             }`}
           >
             {p.toLocaleString()}
           </button>
         ) : (
-          <span key={`gap-${i}`} className="px-0.5 text-xs text-slate-400" aria-hidden="true">…</span>
+          <span key={`gap-${i}`} className="px-0.5 text-xs text-muted-foreground/75" aria-hidden="true">…</span>
         )))}
         <button onClick={() => go(page + 1)} disabled={page >= totalPages} aria-label="Next page" className={`${navBtn} pr-1.5`}>
           Next
@@ -1244,7 +1245,7 @@ export default function Tickets() {
         <button
           onClick={() => headerSort(col.sortField)}
           title={col.headerTitle}
-          className={`tp-focus-ring uppercase tracking-wide hover:text-blue-600 rounded ${col.headerClass === 'justify-end' ? 'text-right' : ''}`}
+          className={`tp-focus-ring uppercase tracking-wide hover:text-blue-600 dark:hover:text-blue-300 rounded ${col.headerClass === 'justify-end' ? 'text-right' : ''}`}
         >
           {col.label}{sortIndicator(col.sortField)}
         </button>
@@ -1276,15 +1277,24 @@ export default function Tickets() {
 
       {/* pb clears the mobile bottom tab bar (QA 07-06 #11) */}
       <main className="max-w-[2200px] mx-auto px-4 sm:px-6 py-6 pb-20 md:pb-6 animate-fadeIn">
-        {/* Hero band: gpt-image-2 artwork, content sits on the white fade */}
-        <div className="relative overflow-hidden rounded-2xl border border-white/70 shadow-subtle mb-4">
-          <img src={ticketsHeroArt} alt="" aria-hidden="true" className="absolute inset-0 h-full w-full object-cover object-right" />
-          <div aria-hidden="true" className="absolute inset-0 bg-gradient-to-r from-white/95 via-white/75 to-white/25" />
+        {/* Hero band: gpt-image-2 artwork, content sits on the card-coloured
+            fade. Two arts (DM-B): the light wallpaper is a light image that
+            cannot be inverted, so the night twin swaps in under `.dark` via
+            class visibility (no JS, no flash). The veil is lighter in dark —
+            the night art is already deep on its left half, so it only needs
+            a thin wash to keep the title crisp. */}
+        <div className="relative overflow-hidden rounded-2xl border border-card/70 dark:border-border shadow-subtle mb-4">
+          <img src={ticketsHeroArt} alt="" aria-hidden="true" className="absolute inset-0 h-full w-full object-cover object-right dark:hidden" />
+          {/* object-[right_62%]: the night art's glow band sits below its
+              vertical middle — the short desktop band would otherwise crop to
+              its darkest strip and read as a plain dark rectangle. */}
+          <img src={ticketsHeroArtDark} alt="" aria-hidden="true" className="absolute inset-0 hidden h-full w-full object-cover object-[right_62%] dark:block" />
+          <div aria-hidden="true" className="absolute inset-0 bg-gradient-to-r from-card/95 via-card/75 to-white/25 dark:from-card/60 dark:via-card/25 dark:to-transparent" />
           <div className="relative px-4 sm:px-5 py-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h1 className="text-xl font-bold text-slate-900">Tickets</h1>
-                <p className="text-sm text-slate-500">
+                <h1 className="text-xl font-bold text-foreground">Tickets</h1>
+                <p className="text-sm text-muted-foreground">
                   {currentWorkspace?.name ? `${currentWorkspace.name} workspace` : 'Workspace'} · tickets born here and synced from FreshService
                 </p>
               </div>
@@ -1292,7 +1302,7 @@ export default function Tickets() {
                 <button
                   onClick={exportCsv}
                   disabled={isExporting || isLoading}
-                  className="tp-focus-ring inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-slate-600 bg-white/90 border border-slate-200 rounded-lg hover:border-blue-300 hover:text-blue-700 disabled:opacity-50"
+                  className="tp-focus-ring inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-muted-foreground bg-card/90 border border-border rounded-lg hover:border-blue-300 dark:hover:border-blue-500/40 hover:text-blue-700 dark:hover:text-blue-200 disabled:opacity-50"
                   title="Export the current filtered list as CSV (up to 5000 rows)"
                 >
                   <Download className="w-4 h-4" aria-hidden="true" />
@@ -1314,11 +1324,11 @@ export default function Tickets() {
 
         {metaError && (
           <div className="tp-card rounded-xl p-8 text-center">
-            <ShieldCheck className="w-10 h-10 text-slate-300 mx-auto mb-3" aria-hidden="true" />
-            <p className="text-slate-700 font-medium">{metaError}</p>
+            <ShieldCheck className="w-10 h-10 text-muted-foreground/50 mx-auto mb-3" aria-hidden="true" />
+            <p className="text-foreground/85 font-medium">{metaError}</p>
             {isAgent && (
-              <p className="text-sm text-slate-500 mt-2">
-                You can still manage your skills on <Link to="/my-competencies" className="text-blue-600 hover:underline">My Competencies</Link>.
+              <p className="text-sm text-muted-foreground mt-2">
+                You can still manage your skills on <Link to="/my-competencies" className="text-blue-600 dark:text-blue-300 hover:underline">My Competencies</Link>.
               </p>
             )}
           </div>
@@ -1326,9 +1336,9 @@ export default function Tickets() {
 
         {!metaError && meta && !ticketingOn && (
           <div className="tp-card rounded-xl p-8 text-center mb-5">
-            <Inbox className="w-10 h-10 text-slate-300 mx-auto mb-3" aria-hidden="true" />
-            <p className="text-slate-800 font-semibold">Native ticketing is off for this workspace</p>
-            <p className="text-sm text-slate-500 mt-1 max-w-md mx-auto">
+            <Inbox className="w-10 h-10 text-muted-foreground/50 mx-auto mb-3" aria-hidden="true" />
+            <p className="text-foreground font-semibold">Native ticketing is off for this workspace</p>
+            <p className="text-sm text-muted-foreground mt-1 max-w-md mx-auto">
               Tickets still sync in from FreshService below. An admin can enable ticket creation in
               Settings → Workspace Management.
             </p>
@@ -1355,8 +1365,8 @@ export default function Tickets() {
                     // (QA 08-04 #1). Other cards carry their own segment scope.
                     onClick={() => setParams({ segment: key === 'all' ? null : key, status: key === 'all' ? 'any' : null })}
                     aria-pressed={active}
-                    className={`tp-focus-ring flex items-center gap-3 text-left px-3.5 py-3 rounded-xl bg-white border transition-all ${
-                      active ? 'border-blue-300 ring-2 ring-blue-400/40 shadow-soft' : 'border-slate-100 shadow-subtle hover:border-slate-200 hover:shadow-soft'
+                    className={`tp-focus-ring flex items-center gap-3 text-left px-3.5 py-3 rounded-xl bg-card border transition-all ${
+                      active ? 'border-blue-300 dark:border-blue-500/40 ring-2 ring-blue-400/40 shadow-soft' : 'border-border/60 shadow-subtle hover:border-border hover:shadow-soft'
                     }`}
                   >
                     <span className={`h-10 w-10 rounded-lg inline-flex items-center justify-center flex-shrink-0 ${seg.tile}`}>
@@ -1366,7 +1376,7 @@ export default function Tickets() {
                       <span className={`block text-2xl font-bold leading-none tabular-nums ${seg.num}`}>
                         {count == null ? '–' : count.toLocaleString()}
                       </span>
-                      <span className="block text-[11px] font-medium text-slate-500 truncate mt-1">{seg.label}</span>
+                      <span className="block text-[11px] font-medium text-muted-foreground truncate mt-1">{seg.label}</span>
                     </span>
                   </button>
                 );
@@ -1376,7 +1386,7 @@ export default function Tickets() {
                   to="/settings#ticket-ops"
                   aria-label="Customize quick filter cards"
                   title="Customize which six cards show here (Settings → Ticket Ops)"
-                  className="tp-focus-ring absolute -top-2 -right-2 z-10 p-1.5 rounded-full bg-white border border-slate-200 shadow-subtle text-slate-400 hover:text-blue-600 hover:border-blue-200 opacity-0 group-hover/cards:opacity-100 focus:opacity-100 transition-opacity"
+                  className="tp-focus-ring absolute -top-2 -right-2 z-10 p-1.5 rounded-full bg-card border border-border shadow-subtle text-muted-foreground/75 hover:text-blue-600 dark:hover:text-blue-300 hover:border-blue-200 dark:hover:border-blue-500/30 opacity-0 group-hover/cards:opacity-100 focus:opacity-100 transition-opacity"
                 >
                   <Settings2 className="w-3.5 h-3.5" aria-hidden="true" />
                 </Link>
@@ -1390,14 +1400,14 @@ export default function Tickets() {
 
               <div className="min-w-0">
                 {requesterId && (
-                  <div className="mb-3 flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-50 border border-blue-200 text-sm text-blue-800">
+                  <div className="mb-3 flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-50 dark:bg-blue-500/15 border border-blue-200 dark:border-blue-500/30 text-sm text-blue-800 dark:text-blue-200">
                     <UserRound className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
                     <span className="min-w-0 truncate">
                       Showing tickets from <span className="font-semibold">{requesterName || 'this requester'}</span>
                     </span>
                     <button
                       onClick={() => setParams({ requesterId: null, requesterName: null })}
-                      className="tp-focus-ring ml-auto inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-blue-700 hover:bg-blue-100"
+                      className="tp-focus-ring ml-auto inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-blue-700 dark:text-blue-200 hover:bg-blue-100 dark:hover:bg-blue-500/20"
                     >
                       <X className="w-3.5 h-3.5" aria-hidden="true" /> Clear
                     </button>
@@ -1408,7 +1418,7 @@ export default function Tickets() {
                 <div className="flex flex-wrap items-center gap-2 mb-3">
                   <button
                     onClick={() => setMobileFilters(true)}
-                    className="tp-focus-ring lg:hidden relative inline-flex items-center gap-1.5 px-3 min-h-[44px] py-2 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-lg order-1"
+                    className="tp-focus-ring lg:hidden relative inline-flex items-center gap-1.5 px-3 min-h-[44px] py-2 text-sm font-medium text-muted-foreground bg-card border border-border rounded-lg order-1"
                   >
                     <ListFilter className="w-4 h-4" aria-hidden="true" />
                     Filters
@@ -1419,20 +1429,20 @@ export default function Tickets() {
                     )}
                   </button>
                   <div className="relative order-3 basis-full min-w-0 sm:order-2 sm:basis-auto sm:flex-1 sm:min-w-[200px]">
-                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
+                    <Search className="w-4 h-4 text-muted-foreground/75 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
                     <input
                       type="search"
                       value={search}
                       onChange={(e) => setSearch(e.target.value)}
                       placeholder="Search subject, requester, TP-1042 or #12345… · Ctrl-K for everything"
                       aria-label="Search tickets"
-                      className="tp-focus-ring w-full pl-9 pr-8 min-h-[44px] py-2 text-sm bg-white border border-input rounded-lg placeholder:text-slate-400"
+                      className="tp-focus-ring w-full pl-9 pr-8 min-h-[44px] py-2 text-sm bg-card border border-input rounded-lg placeholder:text-muted-foreground/75"
                     />
                     {search && (
                       <button
                         onClick={() => setSearch('')}
                         aria-label="Clear search"
-                        className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-600 rounded"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-muted-foreground/75 hover:text-muted-foreground rounded"
                       >
                         <X className="w-3.5 h-3.5" aria-hidden="true" />
                       </button>
@@ -1445,7 +1455,7 @@ export default function Tickets() {
                     disabled={manualRefreshing}
                     aria-label="Refresh tickets now"
                     title="Refresh now"
-                    className="tp-focus-ring order-2 sm:order-3 inline-flex items-center justify-center bg-white border border-input rounded-lg px-2.5 min-h-[44px] py-2 text-slate-500 hover:text-blue-600 hover:border-blue-300 disabled:opacity-60"
+                    className="tp-focus-ring order-2 sm:order-3 inline-flex items-center justify-center bg-card border border-input rounded-lg px-2.5 min-h-[44px] py-2 text-muted-foreground hover:text-blue-600 dark:hover:text-blue-300 hover:border-blue-300 dark:hover:border-blue-500/40 disabled:opacity-60"
                   >
                     <RefreshCw className={`w-4 h-4 ${manualRefreshing ? 'animate-spin' : ''}`} aria-hidden="true" />
                   </button>
@@ -1453,11 +1463,11 @@ export default function Tickets() {
                     <button
                       onClick={() => setSortMenuOpen((v) => !v)}
                       aria-expanded={sortMenuOpen}
-                      className="tp-focus-ring inline-flex items-center gap-1.5 text-sm bg-white border border-input rounded-lg px-2.5 min-h-[44px] py-2 text-slate-700 hover:border-blue-300"
+                      className="tp-focus-ring inline-flex items-center gap-1.5 text-sm bg-card border border-input rounded-lg px-2.5 min-h-[44px] py-2 text-foreground/85 hover:border-blue-300 dark:hover:border-blue-500/40"
                     >
                       {dir === 'desc'
-                        ? <ArrowDownWideNarrow className="w-4 h-4 text-slate-400" aria-hidden="true" />
-                        : <ArrowUpNarrowWide className="w-4 h-4 text-slate-400" aria-hidden="true" />}
+                        ? <ArrowDownWideNarrow className="w-4 h-4 text-muted-foreground/75" aria-hidden="true" />
+                        : <ArrowUpNarrowWide className="w-4 h-4 text-muted-foreground/75" aria-hidden="true" />}
                       {sortLabel}
                     </button>
                     {sortMenuOpen && (
@@ -1466,16 +1476,16 @@ export default function Tickets() {
                           <button
                             key={o.value}
                             onClick={() => setSort(o.value, sort === o.value ? dir : (ASC_FIRST_SORTS.has(o.value) ? 'asc' : 'desc'))}
-                            className={`tp-focus-ring w-full text-left px-2.5 py-1.5 text-sm rounded-md hover:bg-blue-50 ${sort === o.value ? 'font-semibold text-blue-700' : 'text-slate-600'}`}
+                            className={`tp-focus-ring w-full text-left px-2.5 py-1.5 text-sm rounded-md hover:bg-blue-50 dark:hover:bg-blue-500/15 ${sort === o.value ? 'font-semibold text-blue-700 dark:text-blue-200' : 'text-muted-foreground'}`}
                             role="menuitem"
                           >
                             {o.label}{sort === o.value ? (dir === 'desc' ? ' ↓' : ' ↑') : ''}
                           </button>
                         ))}
-                        <div className="border-t border-slate-100 my-1" />
+                        <div className="border-t border-border/60 my-1" />
                         <button
                           onClick={() => setSort(sort, dir === 'desc' ? 'asc' : 'desc')}
-                          className="tp-focus-ring w-full text-left px-2.5 py-1.5 text-sm rounded-md hover:bg-blue-50 text-slate-600"
+                          className="tp-focus-ring w-full text-left px-2.5 py-1.5 text-sm rounded-md hover:bg-blue-50 dark:hover:bg-blue-500/15 text-muted-foreground"
                           role="menuitem"
                         >
                           Switch to {dir === 'desc' ? 'ascending' : 'descending'}
@@ -1485,7 +1495,7 @@ export default function Tickets() {
                   </div>
                   {/* View — two list densities plus the drag-drop board
                       (Open / Pending / Closed columns, QA 07-27 #3). */}
-                  <div className="hidden md:inline-flex items-center rounded-lg border border-input bg-white overflow-hidden" role="group" aria-label="View layout">
+                  <div className="hidden md:inline-flex items-center rounded-lg border border-input bg-card overflow-hidden" role="group" aria-label="View layout">
                     {[
                       { key: 'compact', Icon: Rows4, label: 'Compact', hint: 'Type folds into the title — one tight line per ticket. Best for scanning.' },
                       { key: 'roomy', Icon: Rows2, label: 'Roomy', hint: 'The title gets its own line, everything else beneath. Best for reading.' },
@@ -1496,7 +1506,7 @@ export default function Tickets() {
                         onClick={() => setLayout(key)}
                         aria-pressed={layout === key}
                         title={hint}
-                        className={`tp-focus-ring inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold transition-colors ${layout === key ? 'bg-blue-50 text-blue-600' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'}`}
+                        className={`tp-focus-ring inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold transition-colors ${layout === key ? 'bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-300' : 'text-muted-foreground/75 hover:text-muted-foreground hover:bg-muted/50'}`}
                       >
                         <Icon className="w-4 h-4" aria-hidden="true" />
                         {label}
@@ -1522,8 +1532,8 @@ export default function Tickets() {
                         aria-pressed={aiState === 'suggested'}
                         className={`tp-focus-ring inline-flex items-center gap-1.5 pl-2 pr-2.5 py-1 rounded-full border text-xs font-semibold shadow-subtle transition-colors ${
                           aiState === 'suggested'
-                            ? 'border-indigo-400 bg-indigo-100 text-indigo-800'
-                            : 'border-indigo-200 bg-indigo-50/80 text-indigo-700 hover:bg-indigo-100'
+                            ? 'border-indigo-400 bg-indigo-100 dark:bg-indigo-500/20 text-indigo-800 dark:text-indigo-200'
+                            : 'border-indigo-200 dark:border-indigo-500/30 bg-indigo-50/80 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-200 hover:bg-indigo-100 dark:hover:bg-indigo-500/20'
                         }`}
                         title={aiState === 'suggested'
                           ? 'Showing tickets awaiting your AI-suggestion approval — click to clear'
@@ -1554,21 +1564,21 @@ export default function Tickets() {
                     <ScheduledTicketsPanel ticketingOn={ticketingOn} />
                   ) : isLoading ? (
                     <div className="tp-card rounded-xl p-16 flex items-center justify-center">
-                      <Activity className="w-8 h-8 animate-spin text-blue-600" aria-label="Loading tickets" />
+                      <Activity className="w-8 h-8 animate-spin text-blue-600 dark:text-blue-300" aria-label="Loading tickets" />
                     </div>
                   ) : loadError ? (
                     <div className="tp-card rounded-xl p-8 text-center">
                       <AlertCircle className="w-8 h-8 text-red-400 mx-auto mb-2" aria-hidden="true" />
-                      <p className="text-slate-700">{loadError}</p>
-                      <button onClick={() => fetchTickets()} className="tp-focus-ring mt-3 px-3 py-1.5 text-sm font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100">
+                      <p className="text-foreground/85">{loadError}</p>
+                      <button onClick={() => fetchTickets()} className="tp-focus-ring mt-3 px-3 py-1.5 text-sm font-medium text-blue-700 dark:text-blue-200 bg-blue-50 dark:bg-blue-500/15 border border-blue-200 dark:border-blue-500/30 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-500/20">
                         Try again
                       </button>
                     </div>
                   ) : tickets.length === 0 ? (
                     <div className="tp-card rounded-xl p-12 text-center">
-                      <Inbox className="w-10 h-10 text-slate-300 mx-auto mb-3" aria-hidden="true" />
-                      <p className="text-slate-700 font-medium">No tickets match these filters</p>
-                      <p className="text-sm text-slate-500 mt-1">Try a different segment or clear the filters in the rail.</p>
+                      <Inbox className="w-10 h-10 text-muted-foreground/50 mx-auto mb-3" aria-hidden="true" />
+                      <p className="text-foreground/85 font-medium">No tickets match these filters</p>
+                      <p className="text-sm text-muted-foreground mt-1">Try a different segment or clear the filters in the rail.</p>
                     </div>
                   ) : boardMode ? (
                     <>
@@ -1612,7 +1622,7 @@ export default function Tickets() {
                       <div className={widthsPinned ? 'xl:overflow-x-auto settings-scrollbar' : ''}>
                         <div className={widthsPinned ? 'xl:min-w-[var(--tp-q-minw)]' : ''}>
                           {/* Header */}
-                          <div className="hidden md:flex items-stretch border-b border-slate-200 bg-slate-50/80">
+                          <div className="hidden md:flex items-stretch border-b border-border bg-muted/40">
                             <span className="flex items-center justify-center w-9 flex-shrink-0">
                               <input
                                 type="checkbox"
@@ -1620,7 +1630,7 @@ export default function Tickets() {
                                 onChange={toggleSelectAll}
                                 aria-label="Select all tickets on this page"
                                 title="Select page"
-                                className="tp-focus-ring rounded border-slate-300 text-blue-600"
+                                className="tp-focus-ring rounded border-input text-blue-600 dark:text-blue-300"
                               />
                             </span>
                             {roomy ? (
@@ -1631,20 +1641,20 @@ export default function Tickets() {
                                  tracks; at xl it sits on the slim type slot and every
                                  chosen column gets its own label (the columns are
                                  user-ordered now, so no fixed span can cover them). */
-                              <div className={`flex-1 ${GRID_ROOMY} text-[11px] font-semibold uppercase tracking-wide text-slate-400`}>
+                              <div className={`flex-1 ${GRID_ROOMY} text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/75`}>
                                 <span aria-hidden="true" />
                                 <span className={`${CELL} py-2 [grid-column:2/4] xl:[grid-column:2/3] xl:row-start-1 xl:!px-1.5`}>
-                                  <button onClick={() => headerSort('subject')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 rounded whitespace-nowrap">
+                                  <button onClick={() => headerSort('subject')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 dark:hover:text-blue-300 rounded whitespace-nowrap">
                                     Ticket{sortIndicator('subject')}
                                   </button>
                                 </span>
                                 {headerColumns.map(headerCell)}
                               </div>
                             ) : (
-                              <div className={`flex-1 ${GRID_COMPACT} text-[11px] font-semibold uppercase tracking-wide text-slate-400`}>
+                              <div className={`flex-1 ${GRID_COMPACT} text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/75`}>
                                 <span aria-hidden="true" />
                                 <span className={`${CELL} relative ${cellPad} xl:col-start-2 xl:row-start-1`}>
-                                  <button onClick={() => headerSort('subject')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 rounded">
+                                  <button onClick={() => headerSort('subject')} className="tp-focus-ring uppercase tracking-wide hover:text-blue-600 dark:hover:text-blue-300 rounded">
                                     Subject{sortIndicator('subject')}
                                   </button>
                                   {/* Subject is resizable in compact only — roomy's
@@ -1718,7 +1728,7 @@ export default function Tickets() {
                                   state={linkState}
                                   onClick={(e) => { e.stopPropagation(); if (isModifiedClick(e)) return; e.preventDefault(); onRowClick(ticket.id); }}
                                   onDoubleClick={(e) => { e.stopPropagation(); e.preventDefault(); onRowDoubleClick(ticket.id); }}
-                                  className={`tp-focus-ring rounded text-left font-medium text-slate-800 truncate min-w-0 ${roomy ? 'text-[15px]' : 'text-sm'} ${
+                                  className={`tp-focus-ring rounded text-left font-medium text-foreground truncate min-w-0 ${roomy ? 'text-[15px]' : 'text-sm'} ${
                                     fx === 'new' ? 'tp-subject-flash-new' : fx === 'updated' ? 'tp-subject-flash-updated' : ''
                                   }`}
                                 >
@@ -1736,7 +1746,7 @@ export default function Tickets() {
                                   <StateChip state={ticket.stateChip} />
                                   {ticket.hasProposedReply && (
                                     <span
-                                      className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-indigo-50 border border-indigo-200 text-[9px] font-bold text-indigo-600 uppercase tracking-wide"
+                                      className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-500/15 border border-indigo-200 dark:border-indigo-500/30 text-[9px] font-bold text-indigo-600 dark:text-indigo-300 uppercase tracking-wide"
                                       title="A workflow-drafted reply is waiting for approval on this ticket"
                                     >
                                       <Sparkles className="w-2.5 h-2.5" aria-hidden="true" /> Draft
@@ -1744,7 +1754,7 @@ export default function Tickets() {
                                   )}
                                   {presenceMap[ticket.id]?.length > 0 && (
                                     <span
-                                      className="shrink-0 w-2 h-2 rounded-full bg-violet-500 ring-2 ring-violet-200"
+                                      className="shrink-0 w-2 h-2 rounded-full bg-violet-500 ring-2 ring-violet-200 dark:ring-violet-500/30"
                                       title={`Viewing now: ${presenceMap[ticket.id].map((v) => v.name).join(', ')}`}
                                       role="img"
                                       aria-label={`Being viewed by ${presenceMap[ticket.id].map((v) => v.name).join(', ')}`}
@@ -1754,7 +1764,7 @@ export default function Tickets() {
                                     <TagChip key={tag.id} tag={tag} size="xs" className="shrink-0" />
                                   ))}
                                   {(ticket.tags || []).length > 3 && (
-                                    <span className="shrink-0 text-[10px] text-slate-400" title={ticket.tags.slice(3).map((t) => t.name).join(', ')}>
+                                    <span className="shrink-0 text-[10px] text-muted-foreground/75" title={ticket.tags.slice(3).map((t) => t.name).join(', ')}>
                                       +{ticket.tags.length - 3}
                                     </span>
                                   )}
@@ -1763,14 +1773,14 @@ export default function Tickets() {
                                 </>
                               );
                               const subjectMeta = (
-                                <span className="block w-full text-[11px] text-slate-400 truncate pl-4">
+                                <span className="block w-full text-[11px] text-muted-foreground/75 truncate pl-4">
                                   {/* Ref is an anchor too (QA 08-07 #7) — same
                                       modifier-aware behavior as the subject. */}
                                   <Link
                                     to={ticketHref}
                                     state={linkState}
                                     onClick={(e) => { e.stopPropagation(); if (isModifiedClick(e)) return; e.preventDefault(); onRowClick(ticket.id); }}
-                                    className="tp-focus-ring rounded font-mono hover:text-blue-600"
+                                    className="tp-focus-ring rounded font-mono hover:text-blue-600 dark:hover:text-blue-300"
                                   >
                                     {ticket.displayRef}
                                   </Link>
@@ -1786,7 +1796,7 @@ export default function Tickets() {
                                   {ticket.groupId && groupNames.get(String(ticket.groupId)) && (
                                     <span className="ml-1.5 text-indigo-500 font-medium">· {groupNames.get(String(ticket.groupId))}</span>
                                   )}
-                                  {ticket.origin === 'ticketpulse' && <span className="ml-1.5 text-sky-600 font-medium">· TP-born</span>}
+                                  {ticket.origin === 'ticketpulse' && <span className="ml-1.5 text-sky-600 dark:text-sky-300 font-medium">· TP-born</span>}
                                   {/* Below xl the Updated column is dropped (tablet band) —
                                       its relative time folds into this meta line instead. */}
                                   <span className="xl:hidden">{` · updated ${timeAgo(ticket.lastActivityAt || ticket.updatedAt)}`}</span>
@@ -1835,8 +1845,8 @@ export default function Tickets() {
                                   transition={{ type: 'spring', stiffness: 420, damping: 34 }}
                                   className={`group flex items-stretch transition-colors cursor-pointer ${
                                     aiLive ? 'tp-ai-live'
-                                      : previewing ? 'bg-blue-50/50'
-                                        : selectedIds.has(ticket.id) ? 'bg-blue-50/40' : 'hover:bg-slate-100/70'
+                                      : previewing ? 'bg-blue-50/50 dark:bg-blue-500/10'
+                                        : selectedIds.has(ticket.id) ? 'bg-blue-50/40 dark:bg-blue-500/10' : 'hover:bg-muted/70'
                                   }`}
                                   onClick={() => onRowClick(ticket.id)}
                                   onDoubleClick={() => onRowDoubleClick(ticket.id)}
@@ -1852,7 +1862,7 @@ export default function Tickets() {
                                       checked={selectedIds.has(ticket.id)}
                                       onChange={() => toggleSelect(ticket.id)}
                                       aria-label={`Select ${ticket.displayRef}`}
-                                      className="tp-focus-ring rounded border-slate-300 text-blue-600"
+                                      className="tp-focus-ring rounded border-input text-blue-600 dark:text-blue-300"
                                     />
                                   </span>
                                   <div className="flex-1 min-w-0">
@@ -1913,7 +1923,7 @@ export default function Tickets() {
                                     <div className="md:hidden relative px-4 py-3">
                                       <div className="flex items-center gap-2 mb-1">
                                         <PriorityDot priority={ticket.priority} />
-                                        <span className="font-mono text-[11px] font-semibold text-slate-500">{ticket.displayRef}</span>
+                                        <span className="font-mono text-[11px] font-semibold text-muted-foreground">{ticket.displayRef}</span>
                                         <StateChip state={ticket.stateChip} />
                                         {fx === 'new' && (
                                           <span className="tp-new-chip shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full bg-blue-600 text-white text-[9px] font-extrabold tracking-widest uppercase" aria-hidden="true">
@@ -1949,7 +1959,7 @@ export default function Tickets() {
                                         to={ticketHref}
                                         state={linkState}
                                         onClick={(e) => { e.stopPropagation(); if (isModifiedClick(e)) return; e.preventDefault(); onRowClick(ticket.id); }}
-                                        className={`text-sm font-medium text-slate-800 line-clamp-2 ${
+                                        className={`text-sm font-medium text-foreground line-clamp-2 ${
                                           fx === 'new' ? 'tp-subject-flash-new' : fx === 'updated' ? 'tp-subject-flash-updated' : ''
                                         }`}
                                       >
@@ -1959,9 +1969,9 @@ export default function Tickets() {
                                         const { category: catLabel, subcategory: subLabel } = ticketCategoryLabels(ticket);
                                         const label = subLabel || catLabel;
                                         return (
-                                          <div className="mt-1 flex items-center gap-1.5 text-[11px] text-slate-400 min-w-0">
+                                          <div className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground/75 min-w-0">
                                             <span className="truncate">{ticket.requester?.name || 'Unknown requester'}</span>
-                                            {label && (<><span aria-hidden="true">·</span><span className="truncate text-slate-500">{label}</span></>)}
+                                            {label && (<><span aria-hidden="true">·</span><span className="truncate text-muted-foreground">{label}</span></>)}
                                           </div>
                                         );
                                       })()}
@@ -1969,7 +1979,7 @@ export default function Tickets() {
                                         <div className="mt-1 flex flex-wrap items-center gap-1">
                                           {ticket.tags.slice(0, 3).map((tag) => <TagChip key={tag.id} tag={tag} size="xs" />)}
                                           {ticket.tags.length > 3 && (
-                                            <span className="text-[10px] text-slate-400" title={ticket.tags.slice(3).map((t) => t.name).join(', ')}>+{ticket.tags.length - 3}</span>
+                                            <span className="text-[10px] text-muted-foreground/75" title={ticket.tags.slice(3).map((t) => t.name).join(', ')}>+{ticket.tags.length - 3}</span>
                                           )}
                                         </div>
                                       )}
@@ -1978,47 +1988,47 @@ export default function Tickets() {
                                           <button
                                             onClick={(e) => { e.stopPropagation(); setAssignSheetTicket(ticket); }}
                                             aria-label={ticket.assignedTech ? `Assignee ${ticket.assignedTech.name} — tap to change` : 'Assign this ticket'}
-                                            className="tp-focus-ring flex items-center gap-1.5 min-w-0 max-w-[70%] min-h-[36px] pl-1 pr-2 rounded-lg border border-slate-200 bg-white active:bg-slate-100 transition-colors"
+                                            className="tp-focus-ring flex items-center gap-1.5 min-w-0 max-w-[70%] min-h-[36px] pl-1 pr-2 rounded-lg border border-border bg-card active:bg-muted transition-colors"
                                           >
                                             {ticket.assignedTech ? (
                                               <>
                                                 <PersonAvatar name={ticket.assignedTech.name} photoUrl={ticket.assignedTech.photoUrl} size="h-6 w-6" textSize="text-[9px]" />
-                                                <span className="text-xs font-medium text-slate-700 truncate">{ticket.assignedTech.name}</span>
+                                                <span className="text-xs font-medium text-foreground/85 truncate">{ticket.assignedTech.name}</span>
                                                 {assigneeReadOnly && (
-                                                  <span className="flex-shrink-0 text-[8px] font-semibold uppercase tracking-wide px-1 py-0.5 rounded bg-amber-100 text-amber-700">read-only</span>
+                                                  <span className="flex-shrink-0 text-[8px] font-semibold uppercase tracking-wide px-1 py-0.5 rounded bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-200">read-only</span>
                                                 )}
                                               </>
                                             ) : canSeeAi && ticket.ai?.state === 'suggested' ? (
                                               /* Visible to every member; the sheet it opens keeps
                                                  approve reviewer-only (read/act split, QA 08-19 #2). */
                                               <>
-                                                <span className="h-6 w-6 rounded-full border-[1.5px] border-dashed border-indigo-300 bg-indigo-50 text-indigo-500 inline-flex items-center justify-center flex-shrink-0">
+                                                <span className="h-6 w-6 rounded-full border-[1.5px] border-dashed border-indigo-300 dark:border-indigo-500/40 bg-indigo-50 dark:bg-indigo-500/15 text-indigo-500 inline-flex items-center justify-center flex-shrink-0">
                                                   <Sparkles className="w-3 h-3" aria-hidden="true" />
                                                 </span>
-                                                <span className="text-xs font-semibold text-indigo-700 truncate">AI: {ticket.ai.techName || 'suggestion'}</span>
+                                                <span className="text-xs font-semibold text-indigo-700 dark:text-indigo-200 truncate">AI: {ticket.ai.techName || 'suggestion'}</span>
                                               </>
                                             ) : (
                                               <>
-                                                <span className="h-6 w-6 rounded-full border-[1.5px] border-dashed border-slate-300 text-slate-400 inline-flex items-center justify-center flex-shrink-0">
+                                                <span className="h-6 w-6 rounded-full border-[1.5px] border-dashed border-input text-muted-foreground/75 inline-flex items-center justify-center flex-shrink-0">
                                                   <UserRound className="w-3 h-3" aria-hidden="true" />
                                                 </span>
-                                                <span className="text-xs font-medium text-slate-500">Assign</span>
+                                                <span className="text-xs font-medium text-muted-foreground">Assign</span>
                                               </>
                                             )}
-                                            <ChevronDown className="w-3.5 h-3.5 text-slate-300 flex-shrink-0" aria-hidden="true" />
+                                            <ChevronDown className="w-3.5 h-3.5 text-muted-foreground/50 flex-shrink-0" aria-hidden="true" />
                                           </button>
                                         ) : (
-                                          <span className="flex items-center gap-1.5 min-w-0 max-w-[70%] text-xs text-slate-500">
+                                          <span className="flex items-center gap-1.5 min-w-0 max-w-[70%] text-xs text-muted-foreground">
                                             {ticket.assignedTech ? (
                                               <>
                                                 <PersonAvatar name={ticket.assignedTech.name} photoUrl={ticket.assignedTech.photoUrl} size="h-6 w-6" textSize="text-[9px]" />
                                                 <span className="truncate">{ticket.assignedTech.name}</span>
                                               </>
-                                            ) : <span className="text-slate-400">Unassigned</span>}
+                                            ) : <span className="text-muted-foreground/75">Unassigned</span>}
                                           </span>
                                         )}
                                         {ticket.aiBypass && <BypassBadge bypass={ticket.aiBypass} />}
-                                        <span className="ml-auto whitespace-nowrap text-[11px] text-slate-400">{timeAgo(ticket.lastActivityAt || ticket.updatedAt)}</span>
+                                        <span className="ml-auto whitespace-nowrap text-[11px] text-muted-foreground/75">{timeAgo(ticket.lastActivityAt || ticket.updatedAt)}</span>
                                       </div>
                                     </div>
                                   </div>
@@ -2030,14 +2040,14 @@ export default function Tickets() {
                       </div>
 
                       {/* Full pagination */}
-                      <div className="px-4 py-3 border-t border-slate-100 bg-slate-50/50">
+                      <div className="px-4 py-3 border-t border-border/60 bg-muted/25">
                         <Pagination page={page} totalPages={totalPages} total={total} pageSize={effectivePageSize} onPage={goPage} />
                         {/* Keyboard hint (gap plan 2 P4.2) — desktop only, keys are pointless on touch */}
-                        <p className="hidden lg:flex items-center justify-center gap-3 mt-2 text-[10px] text-slate-400">
-                          <span><kbd className="font-mono border border-slate-200 rounded px-1 bg-white">j</kbd>/<kbd className="font-mono border border-slate-200 rounded px-1 bg-white">k</kbd> move</span>
-                          <span><kbd className="font-mono border border-slate-200 rounded px-1 bg-white">↵</kbd> open</span>
-                          <span><kbd className="font-mono border border-slate-200 rounded px-1 bg-white">x</kbd> select</span>
-                          <span><kbd className="font-mono border border-slate-200 rounded px-1 bg-white">Ctrl K</kbd> commands</span>
+                        <p className="hidden lg:flex items-center justify-center gap-3 mt-2 text-[10px] text-muted-foreground/75">
+                          <span><kbd className="font-mono border border-border rounded px-1 bg-card">j</kbd>/<kbd className="font-mono border border-border rounded px-1 bg-card">k</kbd> move</span>
+                          <span><kbd className="font-mono border border-border rounded px-1 bg-card">↵</kbd> open</span>
+                          <span><kbd className="font-mono border border-border rounded px-1 bg-card">x</kbd> select</span>
+                          <span><kbd className="font-mono border border-border rounded px-1 bg-card">Ctrl K</kbd> commands</span>
                         </p>
                       </div>
                     </div>
@@ -2139,36 +2149,36 @@ export default function Tickets() {
 
       {/* Bulk action bar */}
       {(selectedIds.size > 0 || bulkResult || queryScope) && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 tp-card rounded-xl shadow-soft px-4 py-3 flex flex-wrap items-center gap-3 max-w-[94vw] animate-fadeIn border border-slate-200">
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 tp-card rounded-xl shadow-soft px-4 py-3 flex flex-wrap items-center gap-3 max-w-[94vw] animate-fadeIn border border-border">
           {bulkResult ? (
             <>
-              <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-800">
+              <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-foreground">
                 {bulkResult.failed.length === 0
-                  ? <Check className="w-4 h-4 text-emerald-600" aria-hidden="true" />
+                  ? <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-300" aria-hidden="true" />
                   : <AlertCircle className="w-4 h-4 text-amber-500" aria-hidden="true" />}
                 {bulkResult.ok} updated ({bulkResult.label})
               </span>
               {bulkResult.skipped > 0 && (
-                <span className="text-xs text-slate-500">{bulkResult.skipped} FS-born skipped (read-only)</span>
+                <span className="text-xs text-muted-foreground">{bulkResult.skipped} FS-born skipped (read-only)</span>
               )}
               {bulkResult.failed.length > 0 && (
-                <span className="text-xs text-red-600 max-w-xs truncate" title={bulkResult.failed.map((f) => `${f.ref}: ${f.message}`).join('\n')}>
+                <span className="text-xs text-red-600 dark:text-red-300 max-w-xs truncate" title={bulkResult.failed.map((f) => `${f.ref}: ${f.message}`).join('\n')}>
                   {bulkResult.failed.length} failed — {bulkResult.failed.slice(0, 3).map((f) => f.ref).join(', ')}{bulkResult.failed.length > 3 ? '…' : ''}
                 </span>
               )}
               <button
                 onClick={() => setBulkResult(null)}
                 aria-label="Dismiss result"
-                className="tp-focus-ring p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+                className="tp-focus-ring p-1 rounded-lg text-muted-foreground/75 hover:text-muted-foreground hover:bg-muted"
               >
                 <X className="w-4 h-4" aria-hidden="true" />
               </button>
             </>
           ) : bulkAction ? (
             <>
-              <span className="text-sm text-slate-700">
+              <span className="text-sm text-foreground/85">
                 {bulkAction.type === 'assign' ? 'Assign' : 'Set'} <strong>{queryScope ? queryScope.editable : editableSelected.length}</strong> ticket{(queryScope ? queryScope.editable : editableSelected.length) === 1 ? '' : 's'}{queryScope ? ' (everything matching this filter)' : ''} to <strong>{bulkAction.label}</strong>?
-                {(queryScope ? queryScope.skippedFsBorn : bulkSkipCount) > 0 && <span className="text-xs text-slate-400"> ({queryScope ? queryScope.skippedFsBorn : bulkSkipCount} FS-born skipped)</span>}
+                {(queryScope ? queryScope.skippedFsBorn : bulkSkipCount) > 0 && <span className="text-xs text-muted-foreground/75"> ({queryScope ? queryScope.skippedFsBorn : bulkSkipCount} FS-born skipped)</span>}
               </span>
               <button
                 onClick={runBulk}
@@ -2181,25 +2191,25 @@ export default function Tickets() {
               <button
                 onClick={() => setBulkAction(null)}
                 disabled={bulkBusy}
-                className="tp-focus-ring px-3 py-1.5 text-sm font-medium rounded-lg text-slate-600 bg-white border border-slate-200 hover:border-slate-300"
+                className="tp-focus-ring px-3 py-1.5 text-sm font-medium rounded-lg text-muted-foreground bg-card border border-border hover:border-input"
               >
                 Cancel
               </button>
             </>
           ) : (
             <>
-              <span className="text-sm font-semibold text-slate-800">
+              <span className="text-sm font-semibold text-foreground">
                 {queryScope ? `All ${queryScope.total} matching selected` : `${selectedIds.size} selected`}
               </span>
               {!queryScope && bulkSkipCount > 0 && (
-                <span className="text-xs text-slate-400" title="FreshService-born tickets are mirrors and stay read-only here">
+                <span className="text-xs text-muted-foreground/75" title="FreshService-born tickets are mirrors and stay read-only here">
                   {bulkSkipCount} FS-born read-only
                 </span>
               )}
               {!queryScope && allSelected && total > pageIds.length && (
                 <button
                   onClick={selectAllMatching}
-                  className="tp-focus-ring text-xs font-semibold text-blue-600 hover:text-blue-700 px-1.5 py-0.5 rounded"
+                  className="tp-focus-ring text-xs font-semibold text-blue-600 dark:text-blue-300 hover:text-blue-700 dark:hover:text-blue-200 px-1.5 py-0.5 rounded"
                 >
                   Select all {total} matching
                 </button>
@@ -2207,7 +2217,7 @@ export default function Tickets() {
               {queryScope && (
                 <button
                   onClick={() => setQueryScope(null)}
-                  className="tp-focus-ring text-xs font-medium text-slate-500 hover:text-slate-700 px-1.5 py-0.5 rounded"
+                  className="tp-focus-ring text-xs font-medium text-muted-foreground hover:text-foreground/85 px-1.5 py-0.5 rounded"
                 >
                   Back to page selection
                 </button>
@@ -2224,7 +2234,7 @@ export default function Tickets() {
                   });
                 }}
                 aria-label="Bulk assign"
-                className="tp-focus-ring text-sm bg-white border border-input rounded-lg px-2.5 py-1.5 text-slate-700"
+                className="tp-focus-ring text-sm bg-card border border-input rounded-lg px-2.5 py-1.5 text-foreground/85"
               >
                 <option value="">Bulk assign…</option>
                 <option value="unassign">Unassigned</option>
@@ -2234,7 +2244,7 @@ export default function Tickets() {
                 value=""
                 onChange={(e) => { if (e.target.value) setBulkAction({ type: 'status', value: e.target.value, label: e.target.value }); }}
                 aria-label="Bulk status"
-                className="tp-focus-ring text-sm bg-white border border-input rounded-lg px-2.5 py-1.5 text-slate-700"
+                className="tp-focus-ring text-sm bg-card border border-input rounded-lg px-2.5 py-1.5 text-foreground/85"
               >
                 {/* Bulk edits are TP-born-only, so the workspace registry
                     (custom statuses included) is the right vocabulary here. */}
@@ -2255,7 +2265,7 @@ export default function Tickets() {
                     });
                   }}
                   aria-label="Bulk tag"
-                  className="tp-focus-ring text-sm bg-white border border-input rounded-lg px-2.5 py-1.5 text-slate-700"
+                  className="tp-focus-ring text-sm bg-card border border-input rounded-lg px-2.5 py-1.5 text-foreground/85"
                 >
                   <option value="">Bulk tag…</option>
                   <optgroup label="Add tag">
@@ -2276,7 +2286,7 @@ export default function Tickets() {
                     setBulkAction({ type: 'set_category', value: id, label: `category → ${name}` });
                   }}
                   aria-label="Bulk category"
-                  className="tp-focus-ring text-sm bg-white border border-input rounded-lg px-2.5 py-1.5 text-slate-700"
+                  className="tp-focus-ring text-sm bg-card border border-input rounded-lg px-2.5 py-1.5 text-foreground/85"
                 >
                   <option value="">Bulk category…</option>
                   <option value="none">Uncategorized</option>
@@ -2286,7 +2296,7 @@ export default function Tickets() {
               <button
                 onClick={() => { setSelectedIds(new Set()); setQueryScope(null); }}
                 aria-label="Clear selection"
-                className="tp-focus-ring p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+                className="tp-focus-ring p-1 rounded-lg text-muted-foreground/75 hover:text-muted-foreground hover:bg-muted"
               >
                 <X className="w-4 h-4" aria-hidden="true" />
               </button>

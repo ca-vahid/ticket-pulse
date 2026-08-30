@@ -107,10 +107,10 @@ export default function StatusPicker({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={`Status: ${value} — change`}
-        className="tp-focus-ring group inline-flex max-w-full min-w-0 items-center gap-1 rounded-lg px-1 py-0.5 border border-transparent hover:border-slate-200 hover:bg-white transition-colors disabled:cursor-not-allowed"
+        className="tp-focus-ring group inline-flex max-w-full min-w-0 items-center gap-1 rounded-lg px-1 py-0.5 border border-transparent hover:border-border hover:bg-card transition-colors disabled:cursor-not-allowed"
       >
-        {busy ? <Loader2 className="w-4 h-4 animate-spin text-slate-400" aria-hidden="true" /> : <StatusPill status={value} size="sm" tone={toneOf(value)} />}
-        {!disabled && <ChevronDown className={`w-3 h-3 text-slate-300 group-hover:text-slate-400 ${open ? 'rotate-180' : ''} transition-transform`} aria-hidden="true" />}
+        {busy ? <Loader2 className="w-4 h-4 animate-spin text-muted-foreground/75" aria-hidden="true" /> : <StatusPill status={value} size="sm" tone={toneOf(value)} />}
+        {!disabled && <ChevronDown className={`w-3 h-3 text-muted-foreground/50 group-hover:text-muted-foreground/75 ${open ? 'rotate-180' : ''} transition-transform`} aria-hidden="true" />}
       </button>
 
       {open && panelPos && createPortal(
@@ -124,7 +124,7 @@ export default function StatusPicker({
         >
           {confirming ? (
             <div className="p-1">
-              <p className="text-xs text-slate-600 mb-2">Change status to <strong className="text-slate-800">{confirming}</strong>?</p>
+              <p className="text-xs text-muted-foreground mb-2">Change status to <strong className="text-foreground">{confirming}</strong>?</p>
               <div className="flex items-center gap-1.5">
                 <button
                   onClick={() => apply(confirming)}
@@ -135,7 +135,7 @@ export default function StatusPicker({
                 </button>
                 <button
                   onClick={() => setConfirming(null)}
-                  className="tp-focus-ring px-2 py-1.5 rounded-md text-slate-500 text-xs font-medium hover:bg-slate-50"
+                  className="tp-focus-ring px-2 py-1.5 rounded-md text-muted-foreground text-xs font-medium hover:bg-muted/50"
                 >
                   Cancel
                 </button>
@@ -148,10 +148,10 @@ export default function StatusPicker({
                 role="option"
                 aria-selected={status === value}
                 onClick={() => pick(status)}
-                className={`tp-focus-ring w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left hover:bg-slate-50 ${status === value ? 'bg-blue-50/70' : ''}`}
+                className={`tp-focus-ring w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left hover:bg-muted/50 ${status === value ? 'bg-blue-50/70 dark:bg-blue-500/10' : ''}`}
               >
                 <StatusPill status={status} size="sm" tone={toneOf(status)} />
-                {status === value && <Check className="w-3.5 h-3.5 text-blue-600 ml-auto" aria-hidden="true" />}
+                {status === value && <Check className="w-3.5 h-3.5 text-blue-600 dark:text-blue-300 ml-auto" aria-hidden="true" />}
               </button>
             ))
           )}

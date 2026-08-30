@@ -7,23 +7,23 @@ import { settingsAPI } from '../../services/api';
 const STATUS_META = {
   healthy: {
     label: 'Healthy', Icon: CheckCircle2,
-    badge: 'bg-emerald-100 text-emerald-700',
+    badge: 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-200',
     dot: 'bg-emerald-500',
   },
   degraded: {
     label: 'Degraded', Icon: AlertTriangle,
-    badge: 'bg-amber-100 text-amber-700',
+    badge: 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-200',
     dot: 'bg-amber-500',
   },
   down: {
     label: 'Delivery failing', Icon: MailWarning,
-    badge: 'bg-red-100 text-red-700',
+    badge: 'bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-200',
     dot: 'bg-red-500',
   },
   unknown: {
     label: 'No recent sends', Icon: HelpCircle,
-    badge: 'bg-slate-200 text-slate-600',
-    dot: 'bg-slate-400',
+    badge: 'bg-secondary text-muted-foreground',
+    dot: 'bg-muted-foreground/60',
   },
 };
 
@@ -81,21 +81,21 @@ export default function EmailHealthCard() {
   // asserting "No recent sends" (the unknown-state label) before we actually know.
   const checking = loading && !health;
   const meta = checking
-    ? { label: 'Checking…', badge: 'bg-slate-100 text-slate-500', dot: 'bg-slate-300' }
+    ? { label: 'Checking…', badge: 'bg-muted text-muted-foreground', dot: 'bg-muted-foreground/40' }
     : (STATUS_META[status] || STATUS_META.unknown);
   const failures = health?.recentFailures || [];
   const unhealthy = status === 'down' || status === 'degraded';
 
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-4">
+    <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border/60 pb-4">
         <div className="flex items-center gap-2">
-          <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-blue-100 text-blue-700">
+          <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200">
             <Activity className="h-4 w-4" />
           </span>
           <div>
-            <h3 className="text-sm font-semibold text-slate-950">Email delivery health</h3>
-            <p className="text-xs text-slate-500">
+            <h3 className="text-sm font-semibold text-foreground">Email delivery health</h3>
+            <p className="text-xs text-muted-foreground">
               Every outbound email is checked — failures show up here instead of being silently dropped.
             </p>
           </div>
@@ -109,7 +109,7 @@ export default function EmailHealthCard() {
             type="button"
             onClick={load}
             disabled={loading}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-50"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border text-muted-foreground hover:bg-muted/50 disabled:opacity-50"
             title="Refresh"
             aria-label="Refresh email health"
           >
@@ -119,28 +119,28 @@ export default function EmailHealthCard() {
       </div>
 
       {error ? (
-        <p className="mt-4 text-sm text-red-600">{error}</p>
+        <p className="mt-4 text-sm text-red-600 dark:text-red-300">{error}</p>
       ) : (
         <>
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
-            <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
-              <div className="text-xs font-medium text-slate-500">Last successful send</div>
-              <div className="mt-0.5 text-sm font-semibold text-slate-900">
+            <div className="rounded-lg border border-border bg-muted/30 p-3">
+              <div className="text-xs font-medium text-muted-foreground">Last successful send</div>
+              <div className="mt-0.5 text-sm font-semibold text-foreground">
                 {relativeTime(health?.lastSuccessAt)}
               </div>
             </div>
-            <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
-              <div className="text-xs font-medium text-slate-500">Last failure</div>
-              <div className="mt-0.5 text-sm font-semibold text-slate-900">
+            <div className="rounded-lg border border-border bg-muted/30 p-3">
+              <div className="text-xs font-medium text-muted-foreground">Last failure</div>
+              <div className="mt-0.5 text-sm font-semibold text-foreground">
                 {relativeTime(health?.lastFailureAt)}
               </div>
             </div>
-            <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
-              <div className="text-xs font-medium text-slate-500">Last 24 hours</div>
-              <div className="mt-0.5 text-sm font-semibold text-slate-900">
-                <span className="text-emerald-600">{health?.successCount24h ?? 0} sent</span>
+            <div className="rounded-lg border border-border bg-muted/30 p-3">
+              <div className="text-xs font-medium text-muted-foreground">Last 24 hours</div>
+              <div className="mt-0.5 text-sm font-semibold text-foreground">
+                <span className="text-emerald-600 dark:text-emerald-300">{health?.successCount24h ?? 0} sent</span>
                 {' · '}
-                <span className={health?.failureCount24h ? 'text-red-600' : 'text-slate-500'}>
+                <span className={health?.failureCount24h ? 'text-red-600 dark:text-red-300' : 'text-muted-foreground'}>
                   {health?.failureCount24h ?? 0} failed
                 </span>
               </div>
@@ -148,20 +148,20 @@ export default function EmailHealthCard() {
           </div>
 
           {unhealthy && health?.hint && (
-            <div className="mt-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-              <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-600" />
+            <div className="mt-4 flex items-start gap-2 rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 p-3 text-sm text-amber-900 dark:text-amber-200">
+              <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-600 dark:text-amber-300" />
               <span>{health.hint}</span>
             </div>
           )}
 
           {failures.length > 0 && (
             <div className="mt-4">
-              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 Recent failures
               </div>
-              <div className="overflow-x-auto rounded-lg border border-slate-200">
+              <div className="overflow-x-auto rounded-lg border border-border">
                 <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50 text-slate-500">
+                  <thead className="bg-muted/50 text-muted-foreground">
                     <tr>
                       <th className="px-3 py-2 font-medium">When</th>
                       <th className="px-3 py-2 font-medium">Type</th>
@@ -171,17 +171,17 @@ export default function EmailHealthCard() {
                       <th className="px-3 py-2 font-medium">Error</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100">
+                  <tbody className="divide-y divide-border/60">
                     {failures.map((f) => (
-                      <tr key={f.id} className="text-slate-700">
-                        <td className="whitespace-nowrap px-3 py-2 text-slate-500">{fmtTime(f.createdAt)}</td>
+                      <tr key={f.id} className="text-foreground/85">
+                        <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">{fmtTime(f.createdAt)}</td>
                         <td className="px-3 py-2">{f.context || '—'}</td>
                         <td className="px-3 py-2">{f.provider || '—'}</td>
                         <td className="whitespace-nowrap px-3 py-2">
-                          <span className="font-medium text-red-600">{f.statusCode || f.errorClass || 'error'}</span>
+                          <span className="font-medium text-red-600 dark:text-red-300">{f.statusCode || f.errorClass || 'error'}</span>
                         </td>
-                        <td className="px-3 py-2 text-slate-500">{f.recipientDomain || '—'}</td>
-                        <td className="max-w-[22rem] px-3 py-2 text-slate-500">
+                        <td className="px-3 py-2 text-muted-foreground">{f.recipientDomain || '—'}</td>
+                        <td className="max-w-[22rem] px-3 py-2 text-muted-foreground">
                           <span className="line-clamp-2">{f.sanitizedMessage || '—'}</span>
                         </td>
                       </tr>
@@ -193,7 +193,7 @@ export default function EmailHealthCard() {
           )}
 
           {!loading && status === 'unknown' && (
-            <p className="mt-4 text-xs text-slate-500">
+            <p className="mt-4 text-xs text-muted-foreground">
               No email sends recorded yet. Send a test below and this will populate.
             </p>
           )}

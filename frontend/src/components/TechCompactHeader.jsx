@@ -41,7 +41,7 @@ export default function TechCompactHeader({ viewMode, sortField, sortDirection, 
   return (
     <div className="sticky top-[52px] md:top-[57px] z-30 mb-2 -mx-1 px-1">
       <div
-        className="grid items-center gap-3 px-3 py-2 bg-white/95 backdrop-blur-md border border-gray-200 rounded-lg shadow-md"
+        className="grid items-center gap-3 px-3 py-2 bg-card/95 backdrop-blur-md border border-border rounded-lg shadow-md"
         style={{ gridTemplateColumns: gridTemplate }}
       >
         {columns.map((col) => {
@@ -53,7 +53,7 @@ export default function TechCompactHeader({ viewMode, sortField, sortDirection, 
             return (
               <div
                 key={col.key}
-                className={`flex items-center ${alignClass} ${labelClass} text-gray-500 select-none`}
+                className={`flex items-center ${alignClass} ${labelClass} text-muted-foreground select-none`}
               >
                 {col.label}
               </div>
@@ -65,8 +65,8 @@ export default function TechCompactHeader({ viewMode, sortField, sortDirection, 
               key={col.key}
               type="button"
               onClick={() => handleClick(col)}
-              className={`flex items-center gap-1 ${alignClass} ${labelClass} rounded px-1 py-0.5 hover:bg-gray-100 transition-colors select-none ${
-                isActive ? 'text-blue-600' : 'text-gray-500'
+              className={`flex items-center gap-1 ${alignClass} ${labelClass} rounded px-1 py-0.5 hover:bg-muted transition-colors select-none ${
+                isActive ? 'text-blue-600 dark:text-blue-300' : 'text-muted-foreground'
               }`}
               title={`Sort by ${col.label}${isActive ? ` (${sortDirection === 'desc' ? 'high → low' : 'low → high'})` : ''}`}
             >

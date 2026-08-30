@@ -46,22 +46,22 @@ function suggestionSupportItem(suggestion) {
 
 function Toast({ toast, onClose }) {
   const tone = toast.tone === 'amber'
-    ? 'border-amber-300 bg-amber-50 text-amber-950'
+    ? 'border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/15 text-amber-950 dark:text-amber-200'
     : toast.tone === 'emerald'
-      ? 'border-emerald-300 bg-emerald-50 text-emerald-950'
-      : 'border-cyan-300 bg-cyan-50 text-cyan-950';
+      ? 'border-emerald-300 dark:border-emerald-500/40 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-950 dark:text-emerald-200'
+      : 'border-cyan-300 dark:border-cyan-500/40 bg-cyan-50 dark:bg-cyan-500/15 text-cyan-950 dark:text-cyan-200';
   const LucideIcon = Icons[toast.icon] || Icons.Sparkles;
   return (
     <div className={`animate-[summitCategoriesToast_.18s_ease-out] rounded-xl border ${tone} p-3 shadow-2xl`}>
       <div className="flex gap-3">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/70">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-card/70">
           <LucideIcon className="h-5 w-5" />
         </span>
         <div className="min-w-0 flex-1">
           <div className="font-semibold">{toast.title}</div>
           <div className="mt-0.5 text-sm opacity-80">{toast.message}</div>
         </div>
-        <button type="button" onClick={onClose} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg opacity-60 transition hover:bg-white/60 hover:opacity-100" aria-label="Close notification">
+        <button type="button" onClick={onClose} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg opacity-60 transition hover:bg-card/60 hover:opacity-100" aria-label="Close notification">
           <Icons.X className="h-4 w-4" />
         </button>
       </div>
@@ -295,16 +295,16 @@ export default function ItSummitCategoriesPanel() {
 
   if (loading) {
     return (
-      <section className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
-        <Icons.Loader2 className="mx-auto h-7 w-7 animate-spin text-blue-600" />
-        <p className="mt-3 text-sm text-slate-500">Loading category voting...</p>
+      <section className="rounded-2xl border border-border bg-card p-8 text-center shadow-sm">
+        <Icons.Loader2 className="mx-auto h-7 w-7 animate-spin text-blue-600 dark:text-blue-300" />
+        <p className="mt-3 text-sm text-muted-foreground">Loading category voting...</p>
       </section>
     );
   }
 
   if (error) {
     return (
-      <section className="rounded-2xl border border-red-200 bg-red-50 p-5 text-red-800 shadow-sm">
+      <section className="rounded-2xl border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 p-5 text-red-800 dark:text-red-200 shadow-sm">
         <div className="flex items-center gap-2 font-semibold"><Icons.AlertCircle className="h-5 w-5" />{error}</div>
       </section>
     );
@@ -328,14 +328,14 @@ export default function ItSummitCategoriesPanel() {
       </div>
 
       <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
           <div className="flex items-start gap-3">
-            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-cyan-100 text-cyan-700">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-cyan-100 dark:bg-cyan-500/20 text-cyan-700 dark:text-cyan-200">
               <Icons.Tags className="h-5 w-5" />
             </span>
             <div className="min-w-0">
-              <h2 className="text-2xl font-semibold text-slate-950">Categories & Skills</h2>
-              <p className="mt-1 text-sm text-slate-600">
+              <h2 className="text-2xl font-semibold text-foreground">Categories & Skills</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
                 {categoryResultsLocked
                   ? 'Review the finalized category and skill results. This section is complete and read-only.'
                   : 'Vote on the proposed category list and suggest missing categories or subcategories.'}
@@ -344,25 +344,25 @@ export default function ItSummitCategoriesPanel() {
           </div>
         </div>
         <div className="grid grid-cols-3 gap-2">
-          <div className="rounded-xl border border-cyan-200 bg-white p-3 shadow-sm">
-            <div className="text-xs font-semibold uppercase text-slate-500">People</div>
-            <div className="mt-2 text-2xl font-bold text-cyan-700">{votes.participantCount}</div>
+          <div className="rounded-xl border border-cyan-200 dark:border-cyan-500/30 bg-card p-3 shadow-sm">
+            <div className="text-xs font-semibold uppercase text-muted-foreground">People</div>
+            <div className="mt-2 text-2xl font-bold text-cyan-700 dark:text-cyan-200">{votes.participantCount}</div>
           </div>
-          <div className="rounded-xl border border-blue-200 bg-white p-3 shadow-sm">
-            <div className="text-xs font-semibold uppercase text-slate-500">Votes</div>
-            <div className="mt-2 text-2xl font-bold text-blue-700">{totalVoteCount(votes)}</div>
+          <div className="rounded-xl border border-blue-200 dark:border-blue-500/30 bg-card p-3 shadow-sm">
+            <div className="text-xs font-semibold uppercase text-muted-foreground">Votes</div>
+            <div className="mt-2 text-2xl font-bold text-blue-700 dark:text-blue-200">{totalVoteCount(votes)}</div>
           </div>
-          <div className={`rounded-xl border border-amber-200 bg-white p-3 shadow-sm transition ${highlightIds.ideas ? 'summit-categories-pulse' : ''}`}>
-            <div className="text-xs font-semibold uppercase text-slate-500">Ideas</div>
-            <div className="mt-2 text-2xl font-bold text-amber-700">{votes.categorySuggestions.length}</div>
+          <div className={`rounded-xl border border-amber-200 dark:border-amber-500/30 bg-card p-3 shadow-sm transition ${highlightIds.ideas ? 'summit-categories-pulse' : ''}`}>
+            <div className="text-xs font-semibold uppercase text-muted-foreground">Ideas</div>
+            <div className="mt-2 text-2xl font-bold text-amber-700 dark:text-amber-200">{votes.categorySuggestions.length}</div>
           </div>
         </div>
       </div>
 
       {categoryResultsLocked && (
-        <div className="rounded-2xl border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm text-cyan-950 shadow-sm">
+        <div className="rounded-2xl border border-cyan-200 dark:border-cyan-500/30 bg-cyan-50 dark:bg-cyan-500/15 px-4 py-3 text-sm text-cyan-950 dark:text-cyan-200 shadow-sm">
           <div className="flex items-start gap-3">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-cyan-700">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-card text-cyan-700 dark:text-cyan-200">
               <Icons.Lock className="h-4 w-4" />
             </span>
             <div>
@@ -375,14 +375,14 @@ export default function ItSummitCategoriesPanel() {
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="space-y-3">
-          <div className="sticky top-20 z-20 rounded-xl border border-slate-200 bg-white/95 p-3 shadow-sm backdrop-blur">
+          <div className="sticky top-20 z-20 rounded-xl border border-border bg-card/95 p-3 shadow-sm backdrop-blur">
             <div className="relative">
-              <Icons.Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
+              <Icons.Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground/75" />
               <input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="Search categories or subcategories"
-                className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-cyan-300 focus:bg-white focus:ring-2 focus:ring-cyan-100"
+                className="h-10 w-full rounded-lg border border-border bg-muted/50 pl-9 pr-3 text-sm text-foreground outline-none transition placeholder:text-muted-foreground/75 focus:border-cyan-300 dark:focus:border-cyan-500/40 focus:bg-card focus:ring-2 focus:ring-cyan-100 dark:focus:ring-cyan-500/30"
               />
             </div>
           </div>
@@ -392,8 +392,8 @@ export default function ItSummitCategoriesPanel() {
             return (
               <article
                 key={category.id}
-                className={`rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-cyan-200 hover:shadow-md ${
-                  highlightIds[`category-${category.id}`] || highlightIds[`vote-${category.id}`] ? 'summit-categories-pulse ring-2 ring-cyan-100' : ''
+                className={`rounded-2xl border border-border bg-card p-4 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-cyan-200 dark:hover:border-cyan-500/30 hover:shadow-md ${
+                  highlightIds[`category-${category.id}`] || highlightIds[`vote-${category.id}`] ? 'summit-categories-pulse ring-2 ring-cyan-100 dark:ring-cyan-500/30' : ''
                 }`}
               >
                 <div className="flex items-start gap-3">
@@ -402,11 +402,11 @@ export default function ItSummitCategoriesPanel() {
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="text-lg font-semibold leading-tight text-slate-950">{category.name}</h3>
-                      <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-500">{category.subcategories.length} subcategories</span>
-                      {!!suggestions.length && <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">{suggestions.length} ideas</span>}
+                      <h3 className="text-lg font-semibold leading-tight text-foreground">{category.name}</h3>
+                      <span className="rounded-full bg-muted px-2 py-1 text-xs font-semibold text-muted-foreground">{category.subcategories.length} subcategories</span>
+                      {!!suggestions.length && <span className="rounded-full bg-amber-100 dark:bg-amber-500/20 px-2 py-1 text-xs font-semibold text-amber-800 dark:text-amber-200">{suggestions.length} ideas</span>}
                     </div>
-                    <p className="mt-1 text-sm leading-5 text-slate-600">{category.description}</p>
+                    <p className="mt-1 text-sm leading-5 text-muted-foreground">{category.description}</p>
                   </div>
                   <button
                     type="button"
@@ -415,7 +415,7 @@ export default function ItSummitCategoriesPanel() {
                     onClick={() => toggleVote(category, 'category')}
                     title={categoryResultsLocked ? 'Results are read-only' : 'Vote for this category'}
                     className={`flex min-h-10 shrink-0 items-center gap-1.5 rounded-lg px-3 text-sm font-semibold transition active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-80 ${
-                      myVotes[category.id] ? 'bg-cyan-100 text-cyan-900 ring-2 ring-cyan-200' : 'bg-slate-100 text-slate-600 hover:bg-cyan-50 hover:text-cyan-800'
+                      myVotes[category.id] ? 'bg-cyan-100 dark:bg-cyan-500/20 text-cyan-900 dark:text-cyan-200 ring-2 ring-cyan-200 dark:ring-cyan-500/30' : 'bg-muted text-muted-foreground hover:bg-cyan-50 dark:hover:bg-cyan-500/15 hover:text-cyan-800 dark:hover:text-cyan-200'
                     }`}
                   >
                     <Icons.ThumbsUp className="h-4 w-4" />
@@ -434,11 +434,11 @@ export default function ItSummitCategoriesPanel() {
                       title={categoryResultsLocked ? 'Results are read-only' : 'Vote for this subcategory'}
                       className={`flex min-h-[52px] items-center gap-2 rounded-xl border px-3 py-2 text-left text-sm transition-all duration-200 active:scale-[0.99] disabled:cursor-default ${
                         highlightIds[`vote-${subcategory.id}`] ? 'summit-categories-pulse' : ''
-                      } ${myVotes[subcategory.id] ? 'border-cyan-300 bg-cyan-50 text-cyan-950 ring-1 ring-cyan-200' : 'border-slate-200 bg-slate-50 text-slate-800 hover:border-cyan-200 hover:bg-white'}`}
+                      } ${myVotes[subcategory.id] ? 'border-cyan-300 dark:border-cyan-500/40 bg-cyan-50 dark:bg-cyan-500/15 text-cyan-950 dark:text-cyan-200 ring-1 ring-cyan-200 dark:ring-cyan-500/30' : 'border-border bg-muted/50 text-foreground hover:border-cyan-200 dark:hover:border-cyan-500/30 hover:bg-card'}`}
                     >
-                      <Icon name={subcategory.icon || 'Tag'} className="h-4 w-4 shrink-0 text-slate-500" />
+                      <Icon name={subcategory.icon || 'Tag'} className="h-4 w-4 shrink-0 text-muted-foreground" />
                       <span className="min-w-0 flex-1 leading-snug">{subcategory.name}</span>
-                      <span className={`flex min-h-8 min-w-8 items-center justify-center rounded-lg px-2 text-xs font-semibold ${myVotes[subcategory.id] ? 'bg-cyan-100 text-cyan-900' : 'bg-white text-slate-500'}`}>
+                      <span className={`flex min-h-8 min-w-8 items-center justify-center rounded-lg px-2 text-xs font-semibold ${myVotes[subcategory.id] ? 'bg-cyan-100 dark:bg-cyan-500/20 text-cyan-900 dark:text-cyan-200' : 'bg-card text-muted-foreground'}`}>
                         {voteCount(votes, subcategory.id) || <Icons.ThumbsUp className="h-3.5 w-3.5" />}
                       </span>
                     </button>
@@ -456,16 +456,16 @@ export default function ItSummitCategoriesPanel() {
                         title={categoryResultsLocked ? 'Results are read-only' : 'Vote for this suggestion'}
                         className={`flex min-h-[62px] items-center gap-2 rounded-xl border px-3 py-2 text-left text-sm transition-all duration-200 active:scale-[0.99] disabled:cursor-default ${
                           highlightIds[`idea-${item.id}`] || highlightIds[`vote-${item.id}`] ? 'summit-categories-pulse' : ''
-                        } ${myVotes[item.id] ? 'border-amber-300 bg-amber-50 text-amber-950 ring-1 ring-amber-200' : 'border-amber-200 bg-amber-50/70 text-slate-800 hover:border-amber-300 hover:bg-amber-50'}`}
+                        } ${myVotes[item.id] ? 'border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/15 text-amber-950 dark:text-amber-200 ring-1 ring-amber-200 dark:ring-amber-500/30' : 'border-amber-200 dark:border-amber-500/30 bg-amber-50/70 dark:bg-amber-500/10 text-foreground hover:border-amber-300 dark:hover:border-amber-500/40 hover:bg-amber-50 dark:hover:bg-amber-500/15'}`}
                       >
-                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-200 text-amber-900">
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-200 dark:bg-amber-500/30 text-amber-900 dark:text-amber-200">
                           <Icons.Tag className="h-4 w-4" />
                         </span>
                         <span className="min-w-0 flex-1">
                           <span className="block font-semibold leading-snug">{suggestion.itemLabel}</span>
-                          <span className="text-xs text-amber-800">Suggested by {suggestion.participantName}</span>
+                          <span className="text-xs text-amber-800 dark:text-amber-200">Suggested by {suggestion.participantName}</span>
                         </span>
-                        <span className={`flex min-h-8 min-w-8 items-center justify-center rounded-lg px-2 text-xs font-semibold ${myVotes[item.id] ? 'bg-amber-200 text-amber-950' : 'bg-white text-amber-700'}`}>
+                        <span className={`flex min-h-8 min-w-8 items-center justify-center rounded-lg px-2 text-xs font-semibold ${myVotes[item.id] ? 'bg-amber-200 dark:bg-amber-500/30 text-amber-950 dark:text-amber-200' : 'bg-card text-amber-700 dark:text-amber-200'}`}>
                           {voteCount(votes, item.id) || <Icons.ThumbsUp className="h-3.5 w-3.5" />}
                         </span>
                       </button>
@@ -473,18 +473,18 @@ export default function ItSummitCategoriesPanel() {
                   })}
 
                   {!categoryResultsLocked && (
-                    <form onSubmit={(event) => submitQuickSubcategory(event, category)} className="flex min-h-[52px] items-center gap-2 rounded-xl border border-dashed border-amber-300 bg-amber-50/50 px-3 py-2">
-                      <Icons.Plus className="h-4 w-4 shrink-0 text-amber-700" />
+                    <form onSubmit={(event) => submitQuickSubcategory(event, category)} className="flex min-h-[52px] items-center gap-2 rounded-xl border border-dashed border-amber-300 dark:border-amber-500/40 bg-amber-50/50 dark:bg-amber-500/10 px-3 py-2">
+                      <Icons.Plus className="h-4 w-4 shrink-0 text-amber-700 dark:text-amber-200" />
                       <input
                         value={quickSubcategoryNames[category.id] || ''}
                         onChange={(event) => setQuickSubcategoryNames((current) => ({ ...current, [category.id]: event.target.value }))}
                         placeholder={`Suggest subcategory under ${category.name}`}
-                        className="min-w-0 flex-1 bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
+                        className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground/75"
                       />
                       <button
                         type="submit"
                         disabled={!String(quickSubcategoryNames[category.id] || '').trim()}
-                        className="rounded-lg bg-amber-200 px-3 py-2 text-xs font-semibold text-amber-950 transition hover:bg-amber-300 disabled:opacity-40"
+                        className="rounded-lg bg-amber-200 dark:bg-amber-500/30 px-3 py-2 text-xs font-semibold text-amber-950 dark:text-amber-200 transition hover:bg-amber-300 disabled:opacity-40"
                       >
                       Add
                       </button>
@@ -498,62 +498,62 @@ export default function ItSummitCategoriesPanel() {
 
         <aside className="space-y-4 xl:sticky xl:top-20 xl:self-start">
           {categoryResultsLocked ? (
-            <section className="rounded-2xl border border-cyan-200 bg-white p-4 shadow-sm">
+            <section className="rounded-2xl border border-cyan-200 dark:border-cyan-500/30 bg-card p-4 shadow-sm">
               <div className="flex items-start gap-3">
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-cyan-50 text-cyan-700">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-cyan-50 dark:bg-cyan-500/15 text-cyan-700 dark:text-cyan-200">
                   <Icons.Lock className="h-5 w-5" />
                 </span>
                 <div>
-                  <h3 className="font-semibold text-slate-950">Suggestions closed</h3>
-                  <p className="mt-1 text-sm text-slate-600">The submitted room ideas remain visible below for review.</p>
+                  <h3 className="font-semibold text-foreground">Suggestions closed</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">The submitted room ideas remain visible below for review.</p>
                 </div>
               </div>
             </section>
           ) : (
-            <form onSubmit={submitTopIdea} className="rounded-2xl border border-amber-200 bg-white p-4 shadow-sm">
+            <form onSubmit={submitTopIdea} className="rounded-2xl border border-amber-200 dark:border-amber-500/30 bg-card p-4 shadow-sm">
               <div className="flex items-center gap-2">
-                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-100 text-amber-800">
+                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-200">
                   <Icons.Lightbulb className="h-5 w-5" />
                 </span>
                 <div>
-                  <h3 className="font-semibold text-slate-950">Suggest a new category</h3>
-                  <p className="text-xs text-slate-500">For subcategories, use the row inside each category.</p>
+                  <h3 className="font-semibold text-foreground">Suggest a new category</h3>
+                  <p className="text-xs text-muted-foreground">For subcategories, use the row inside each category.</p>
                 </div>
               </div>
               <input
                 value={ideaName}
                 onChange={(event) => setIdeaName(event.target.value)}
-                className="mt-3 h-11 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-amber-300 focus:bg-white focus:ring-2 focus:ring-amber-100"
+                className="mt-3 h-11 w-full rounded-lg border border-border bg-muted/50 px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground/75 focus:border-amber-300 dark:focus:border-amber-500/40 focus:bg-card focus:ring-2 focus:ring-amber-100 dark:focus:ring-amber-500/30"
                 placeholder="New top category name"
               />
               <textarea
                 value={ideaReason}
                 onChange={(event) => setIdeaReason(event.target.value)}
-                className="mt-2 min-h-24 w-full resize-y rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-amber-300 focus:bg-white focus:ring-2 focus:ring-amber-100"
+                className="mt-2 min-h-24 w-full resize-y rounded-lg border border-border bg-muted/50 px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground/75 focus:border-amber-300 dark:focus:border-amber-500/40 focus:bg-card focus:ring-2 focus:ring-amber-100 dark:focus:ring-amber-500/30"
                 placeholder="Why should we consider it?"
               />
-              <button disabled={!ideaName.trim()} className="mt-3 h-10 w-full rounded-lg bg-amber-300 px-4 text-sm font-semibold text-amber-950 transition hover:bg-amber-200 disabled:opacity-40">
+              <button disabled={!ideaName.trim()} className="mt-3 h-10 w-full rounded-lg bg-amber-300 px-4 text-sm font-semibold text-amber-950 dark:text-amber-200 transition hover:bg-amber-200 dark:hover:bg-amber-500/30 disabled:opacity-40">
               Submit idea
               </button>
             </form>
           )}
 
-          <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <section className="rounded-2xl border border-border bg-card p-4 shadow-sm">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h3 className="font-semibold text-slate-950">Room ideas</h3>
-                <p className="mt-1 text-xs text-slate-500">Vote here or inside the matching category card.</p>
+                <h3 className="font-semibold text-foreground">Room ideas</h3>
+                <p className="mt-1 text-xs text-muted-foreground">Vote here or inside the matching category card.</p>
               </div>
-              <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">{votes.categorySuggestions.length}</span>
+              <span className="rounded-full bg-muted px-2 py-1 text-xs font-semibold text-foreground/85">{votes.categorySuggestions.length}</span>
             </div>
             <div className="mt-3 grid grid-cols-2 gap-2">
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-center">
-                <div className="text-xl font-semibold text-slate-950">{roomIdeaCounts.top}</div>
-                <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Top</div>
+              <div className="rounded-xl border border-border bg-muted/50 p-3 text-center">
+                <div className="text-xl font-semibold text-foreground">{roomIdeaCounts.top}</div>
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Top</div>
               </div>
-              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-center">
-                <div className="text-xl font-semibold text-amber-800">{roomIdeaCounts.sub}</div>
-                <div className="text-[10px] font-semibold uppercase tracking-wide text-amber-700">Sub</div>
+              <div className="rounded-xl border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 p-3 text-center">
+                <div className="text-xl font-semibold text-amber-800 dark:text-amber-200">{roomIdeaCounts.sub}</div>
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-200">Sub</div>
               </div>
             </div>
             <div className="mt-3 max-h-[34rem] space-y-2 overflow-auto pr-1">
@@ -561,19 +561,19 @@ export default function ItSummitCategoriesPanel() {
                 const item = suggestionSupportItem(suggestion);
                 const isSubcategory = suggestion.value?.scope === 'subcategory';
                 return (
-                  <div key={suggestion.id} className={`rounded-xl border p-3 transition-all duration-300 ${highlightIds[`vote-${item.id}`] ? 'summit-categories-pulse' : ''} ${isSubcategory ? 'border-amber-200 bg-amber-50/70' : 'border-slate-200 bg-slate-50'}`}>
+                  <div key={suggestion.id} className={`rounded-xl border p-3 transition-all duration-300 ${highlightIds[`vote-${item.id}`] ? 'summit-categories-pulse' : ''} ${isSubcategory ? 'border-amber-200 dark:border-amber-500/30 bg-amber-50/70 dark:bg-amber-500/10' : 'border-border bg-muted/50'}`}>
                     <div className="flex items-start gap-3">
-                      <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${isSubcategory ? 'bg-amber-200 text-amber-950' : 'bg-cyan-100 text-cyan-800'}`}>
+                      <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${isSubcategory ? 'bg-amber-200 dark:bg-amber-500/30 text-amber-950 dark:text-amber-200' : 'bg-cyan-100 dark:bg-cyan-500/20 text-cyan-800 dark:text-cyan-200'}`}>
                         <Icon name={item.icon} className="h-4 w-4" />
                       </span>
                       <div className="min-w-0 flex-1">
-                        <div className="font-semibold leading-tight text-slate-950">{suggestion.itemLabel}</div>
+                        <div className="font-semibold leading-tight text-foreground">{suggestion.itemLabel}</div>
                         <div className="mt-1 flex flex-wrap gap-1.5">
-                          <span className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-slate-600">by {suggestion.participantName}</span>
-                          <span className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-slate-600">{isSubcategory ? 'Subcategory' : 'Top category'}</span>
-                          {suggestion.value?.parentName && <span className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-slate-600">{suggestion.value.parentName}</span>}
+                          <span className="rounded-full bg-card px-2 py-1 text-xs font-semibold text-muted-foreground">by {suggestion.participantName}</span>
+                          <span className="rounded-full bg-card px-2 py-1 text-xs font-semibold text-muted-foreground">{isSubcategory ? 'Subcategory' : 'Top category'}</span>
+                          {suggestion.value?.parentName && <span className="rounded-full bg-card px-2 py-1 text-xs font-semibold text-muted-foreground">{suggestion.value.parentName}</span>}
                         </div>
-                        {suggestion.value?.reason && <p className="mt-2 text-sm leading-5 text-slate-600">{suggestion.value.reason}</p>}
+                        {suggestion.value?.reason && <p className="mt-2 text-sm leading-5 text-muted-foreground">{suggestion.value.reason}</p>}
                       </div>
                       <button
                         type="button"
@@ -581,7 +581,7 @@ export default function ItSummitCategoriesPanel() {
                         disabled={categoryResultsLocked}
                         onClick={() => toggleVote(item, 'suggestion')}
                         title={categoryResultsLocked ? 'Results are read-only' : 'Vote for this idea'}
-                        className={`flex min-h-9 items-center gap-1 rounded-lg px-3 text-sm font-semibold transition active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-80 ${myVotes[item.id] ? 'bg-cyan-100 text-cyan-900' : 'bg-white text-slate-600 hover:bg-cyan-50 hover:text-cyan-800'}`}
+                        className={`flex min-h-9 items-center gap-1 rounded-lg px-3 text-sm font-semibold transition active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-80 ${myVotes[item.id] ? 'bg-cyan-100 dark:bg-cyan-500/20 text-cyan-900 dark:text-cyan-200' : 'bg-card text-muted-foreground hover:bg-cyan-50 dark:hover:bg-cyan-500/15 hover:text-cyan-800 dark:hover:text-cyan-200'}`}
                       >
                         <Icons.ThumbsUp className="h-4 w-4" />
                         {voteCount(votes, item.id)}
@@ -591,7 +591,7 @@ export default function ItSummitCategoriesPanel() {
                 );
               })}
               {!votes.categorySuggestions.length && (
-                <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-sm text-slate-500">
+                <div className="rounded-xl border border-dashed border-border bg-muted/50 p-6 text-center text-sm text-muted-foreground">
                   New category suggestions will appear here.
                 </div>
               )}

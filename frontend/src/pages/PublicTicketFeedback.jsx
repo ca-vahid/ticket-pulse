@@ -199,7 +199,7 @@ function Shell({ accent, bgImage, preview, children }) {
       background: `radial-gradient(1200px 600px at 50% -10%, ${hexToRgba(accent, 0.16)}, transparent 60%), linear-gradient(180deg, #f8fafc 0%, #ffffff 100%)`,
     };
   return (
-    <div className="flex min-h-screen items-center justify-center p-4 sm:p-6" style={style}>
+    <div className="tp-light flex min-h-screen items-center justify-center p-4 sm:p-6" style={style}>
       {preview && (
         <div className="fixed inset-x-0 top-0 z-50 flex items-center justify-center gap-3 bg-slate-900/95 px-4 py-1.5 text-center text-xs font-semibold text-white">
           <span>Preview — this is exactly what requesters see. Submissions are not recorded.</span>

@@ -498,8 +498,8 @@ export default function Settings() {
   if (isLoading && !settings) {
     return (
       <div className="tp-page-backdrop flex min-h-screen items-center justify-center">
-        <div className="tp-glass-strong flex items-center gap-3 rounded-2xl border border-white/70 px-5 py-4 text-sm font-semibold text-slate-700">
-          <Activity className="h-5 w-5 animate-spin text-blue-600" />
+        <div className="tp-glass-strong flex items-center gap-3 rounded-2xl border border-card/70 dark:border-white/10 px-5 py-4 text-sm font-semibold text-foreground/85">
+          <Activity className="h-5 w-5 animate-spin text-blue-600 dark:text-blue-300" />
           Loading settings
         </div>
       </div>
@@ -508,35 +508,35 @@ export default function Settings() {
 
   return (
     <TooltipProvider delayDuration={180}>
-      <div className="tp-page-backdrop flex h-screen flex-col overflow-hidden text-slate-950 pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0">
-        <header className="tp-glass-strong sticky top-0 z-40 flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-white/70 px-3 py-2.5 sm:px-6">
+      <div className="tp-page-backdrop flex h-screen flex-col overflow-hidden text-foreground pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0">
+        <header className="tp-glass-strong sticky top-0 z-40 flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-card/70 dark:border-white/10 px-3 py-2.5 sm:px-6">
           <div className="flex min-w-0 items-center gap-3">
             <Button
               type="button"
               variant="ghost"
               size="sm"
               onClick={() => navigate('/dashboard')}
-              className="shrink-0 text-slate-600 hover:text-slate-950"
+              className="shrink-0 text-muted-foreground hover:text-foreground"
             >
               <ArrowLeft className="h-4 w-4" />
               <span className="hidden sm:inline">Back to Dashboard</span>
             </Button>
-            <div className="hidden h-5 w-px bg-slate-300/80 sm:block" />
+            <div className="hidden h-5 w-px bg-muted-foreground/80 sm:block" />
             <div className="flex min-w-0 items-center gap-2">
               {activeNavigationItem?.Icon && (
-                <span className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/70 text-blue-700 ring-1 ring-slate-200/80 sm:inline-flex">
+                <span className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-card/70 text-blue-700 dark:text-blue-200 ring-1 ring-border/80 sm:inline-flex">
                   <activeNavigationItem.Icon className="h-4 w-4" />
                 </span>
               )}
               <div className="min-w-0">
-                <h1 className="truncate text-sm font-semibold text-slate-950">Settings</h1>
-                <p className="hidden truncate text-xs text-slate-500 sm:block">{activeNavigationItem?.label || 'Workspace settings'}</p>
+                <h1 className="truncate text-sm font-semibold text-foreground">Settings</h1>
+                <p className="hidden truncate text-xs text-muted-foreground sm:block">{activeNavigationItem?.label || 'Workspace settings'}</p>
               </div>
             </div>
           </div>
           {currentWorkspace && availableWorkspaces.length > 1 && (
-            <div className="flex items-center gap-2 rounded-xl border border-white/70 bg-white/65 px-2 py-1 shadow-subtle backdrop-blur-xl">
-              <span className="hidden text-xs font-semibold uppercase tracking-wide text-slate-500 sm:inline">Workspace</span>
+            <div className="flex items-center gap-2 rounded-xl border border-card/70 dark:border-white/10 bg-card/65 px-2 py-1 shadow-subtle backdrop-blur-xl">
+              <span className="hidden text-xs font-semibold uppercase tracking-wide text-muted-foreground sm:inline">Workspace</span>
               <select
                 value={currentWorkspace.id}
                 onChange={(e) => {
@@ -545,7 +545,7 @@ export default function Settings() {
                   switchWorkspace(newId);
                   window.location.reload();
                 }}
-                className="min-w-[180px] rounded-lg border border-blue-100 bg-blue-50/90 px-2.5 py-1.5 text-xs font-semibold text-blue-700 outline-none transition hover:bg-blue-100 focus:ring-2 focus:ring-blue-200"
+                className="min-w-[180px] rounded-lg border border-blue-100 dark:border-blue-500/20 bg-blue-50/90 dark:bg-blue-500/10 px-2.5 py-1.5 text-xs font-semibold text-blue-700 dark:text-blue-200 outline-none transition hover:bg-blue-100 dark:hover:bg-blue-500/20 focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-500/30"
                 title="Switch workspace"
               >
                 {availableWorkspaces.map(ws => (
@@ -561,15 +561,15 @@ export default function Settings() {
             layout
             transition={{ type: 'spring', stiffness: 360, damping: 34 }}
             className={cn(
-              'tp-glass-strong z-30 w-full shrink-0 border-b border-white/70 md:sticky md:top-[61px] md:h-[calc(100vh-61px)] md:self-start md:border-b-0 md:border-r',
+              'tp-glass-strong z-30 w-full shrink-0 border-b border-card/70 dark:border-white/10 md:sticky md:top-[61px] md:h-[calc(100vh-61px)] md:self-start md:border-b-0 md:border-r',
               isNavCollapsed ? 'md:w-[76px]' : 'md:w-[250px]',
             )}
           >
-            <div className={cn('hidden items-center border-b border-white/65 px-3 py-3 md:flex', isNavCollapsed ? 'justify-center' : 'justify-between')}>
+            <div className={cn('hidden items-center border-b border-card/65 dark:border-white/[0.08] px-3 py-3 md:flex', isNavCollapsed ? 'justify-center' : 'justify-between')}>
               {!isNavCollapsed && (
                 <div>
-                  <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Settings</div>
-                  <div className="text-xs text-slate-400">Workspace controls</div>
+                  <div className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Settings</div>
+                  <div className="text-xs text-muted-foreground/75">Workspace controls</div>
                 </div>
               )}
               <Tooltip>
@@ -597,7 +597,7 @@ export default function Settings() {
                 // the mobile horizontal strip stays a flat scroll).
                 const showGroupHeader = item.group && item.group !== navigationItems[idx - 1]?.group;
                 const groupHeader = showGroupHeader && !isNavCollapsed ? (
-                  <div key={`group-${item.group}`} className={cn('hidden px-3 pb-1 text-[10px] font-bold uppercase tracking-wide text-slate-400 md:block', idx > 0 && 'pt-3')}>
+                  <div key={`group-${item.group}`} className={cn('hidden px-3 pb-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground/75 md:block', idx > 0 && 'pt-3')}>
                     {item.group}
                   </div>
                 ) : null;
@@ -608,16 +608,16 @@ export default function Settings() {
                     disabled={isDisabled}
                     className={cn(
                       'group relative flex h-11 shrink-0 items-center gap-2.5 rounded-xl px-3 text-left text-[13px] font-medium transition-all md:w-full',
-                      isDisabled && 'cursor-not-allowed bg-slate-100/70 text-slate-400 opacity-70',
-                      !isDisabled && isActive && 'bg-white/82 text-slate-950 shadow-subtle ring-1 ring-white/80',
-                      !isDisabled && !isActive && 'text-slate-500 hover:bg-white/58 hover:text-slate-800',
+                      isDisabled && 'cursor-not-allowed bg-muted/70 text-muted-foreground/75 opacity-70',
+                      !isDisabled && isActive && 'bg-card/82 text-foreground shadow-subtle ring-1 ring-card/80 dark:bg-white/[0.07] dark:ring-white/10',
+                      !isDisabled && !isActive && 'text-muted-foreground hover:bg-card/58 hover:text-foreground dark:hover:bg-white/[0.04]',
                       isNavCollapsed && 'md:justify-center md:px-2',
                     )}
                   >
                     {isActive && !isDisabled && (
-                      <span className="absolute left-1 hidden h-6 w-1 rounded-full bg-blue-600 md:block" />
+                      <span className="absolute left-1 hidden h-6 w-1 rounded-full bg-primary md:block" />
                     )}
-                    <item.Icon className={cn('h-4 w-4 shrink-0 transition-colors', isActive && !isDisabled ? 'text-blue-600' : 'text-slate-400 group-hover:text-slate-600')} />
+                    <item.Icon className={cn('h-4 w-4 shrink-0 transition-colors', isActive && !isDisabled ? 'text-blue-600 dark:text-blue-300' : 'text-muted-foreground/75 group-hover:text-muted-foreground')} />
                     <span
                       className={cn(
                         'truncate transition-all duration-200',
@@ -627,7 +627,7 @@ export default function Settings() {
                       {item.label}
                     </span>
                     {item.status && !isNavCollapsed && (
-                      <span className="ml-auto hidden rounded-full bg-slate-200/80 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 md:inline">
+                      <span className="ml-auto hidden rounded-full bg-secondary/80 px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground md:inline">
                         {item.status}
                       </span>
                     )}
@@ -658,11 +658,11 @@ export default function Settings() {
             {!activeNavigationItem && (
               <div className="flex min-h-full items-center justify-center p-8">
                 <div className="tp-card max-w-md p-8 text-center">
-                  <span className="mx-auto mb-4 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
+                  <span className="mx-auto mb-4 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground/75">
                     <Shield className="h-6 w-6" />
                   </span>
-                  <h2 className="text-base font-semibold text-slate-900">No settings available for your role</h2>
-                  <p className="mt-2 text-sm text-slate-500">
+                  <h2 className="text-base font-semibold text-foreground">No settings available for your role</h2>
+                  <p className="mt-2 text-sm text-muted-foreground">
                     Workspace settings are managed by coordinators and admins. Your
                     personal preferences live in your agent pages instead.
                   </p>
@@ -683,12 +683,12 @@ export default function Settings() {
                 {/* FreshService Configuration */}
                 {activeSectionId === 'freshservice' && (
                   <form onSubmit={handleSave} className="p-6 space-y-4">
-                    <div className="bg-white rounded-lg shadow-sm p-5 border border-gray-200">
-                      <h2 className="text-base font-semibold mb-4 text-gray-900">FreshService Configuration</h2>
+                    <div className="bg-card rounded-lg shadow-sm p-5 border border-border">
+                      <h2 className="text-base font-semibold mb-4 text-foreground">FreshService Configuration</h2>
 
                       <div className="space-y-4">
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                          <label className="block text-sm font-medium text-foreground/85 mb-2">
                   FreshService Domain
                           </label>
                           <input
@@ -697,15 +697,15 @@ export default function Settings() {
                             value={formData.freshservice_domain}
                             onChange={handleChange}
                             placeholder="your-company"
-                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            className="w-full px-4 py-2 border border-input rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                           />
-                          <p className="text-xs text-gray-500 mt-1">
+                          <p className="text-xs text-muted-foreground mt-1">
                   Enter just the subdomain (e.g., &quot;company&quot; for company.freshservice.com)
                           </p>
                         </div>
 
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                          <label className="block text-sm font-medium text-foreground/85 mb-2">
                   API Key
                           </label>
                           <input
@@ -714,15 +714,15 @@ export default function Settings() {
                             value={formData.freshservice_api_key}
                             onChange={handleChange}
                             placeholder={settings?.freshservice_api_key === '***MASKED***' ? '(Configured)' : 'Enter API key'}
-                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            className="w-full px-4 py-2 border border-input rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                           />
-                          <p className="text-xs text-gray-500 mt-1">
+                          <p className="text-xs text-muted-foreground mt-1">
                   Leave blank to keep existing API key
                           </p>
                         </div>
 
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                          <label className="block text-sm font-medium text-foreground/85 mb-1">
                   Service Account Name(s)
                           </label>
                           <input
@@ -731,9 +731,9 @@ export default function Settings() {
                             value={formData.service_account_names}
                             onChange={handleChange}
                             placeholder="e.g. Ticket Pulse, Vahid Haeri"
-                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            className="w-full px-4 py-2 border border-input rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                           />
-                          <p className="text-xs text-gray-500 mt-1">
+                          <p className="text-xs text-muted-foreground mt-1">
                   Comma-separated names of FreshService agents used by the app. Assignments by these agents will be shown as &ldquo;App Assigned&rdquo; on the dashboard. Tip: create a dedicated agent (e.g. &ldquo;Ticket Pulse&rdquo;) and use its API key above.
                           </p>
                         </div>
@@ -749,7 +749,7 @@ export default function Settings() {
                         </button>
 
                         {testStatus && (
-                          <div className={`flex items-center gap-2 p-3 rounded-lg ${testStatus.success ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
+                          <div className={`flex items-center gap-2 p-3 rounded-lg ${testStatus.success ? 'bg-green-50 dark:bg-green-500/15 text-green-800 dark:text-green-200' : 'bg-red-50 dark:bg-red-500/15 text-red-800 dark:text-red-200'}`}>
                             {testStatus.success ? <CheckCircle className="w-5 h-5" /> : <XCircle className="w-5 h-5" />}
                             <span>{testStatus.message}</span>
                           </div>
@@ -770,7 +770,7 @@ export default function Settings() {
                     </div>
 
                     {saveStatus && (
-                      <div className={`flex items-center gap-2 p-4 rounded-lg ${saveStatus.success ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
+                      <div className={`flex items-center gap-2 p-4 rounded-lg ${saveStatus.success ? 'bg-green-50 dark:bg-green-500/15 text-green-800 dark:text-green-200' : 'bg-red-50 dark:bg-red-500/15 text-red-800 dark:text-red-200'}`}>
                         {saveStatus.success ? <CheckCircle className="w-5 h-5" /> : <XCircle className="w-5 h-5" />}
                         <span>{saveStatus.message}</span>
                       </div>
@@ -781,16 +781,16 @@ export default function Settings() {
                 {/* FreshService Webhooks */}
                 {activeSectionId === 'webhooks' && (
                   <div className="p-6 space-y-4">
-                    <div className="bg-white rounded-lg shadow-sm p-5 border border-gray-200">
+                    <div className="bg-card rounded-lg shadow-sm p-5 border border-border">
                       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
                         <div>
-                          <h2 className="text-base font-semibold text-gray-900">FreshService Webhooks</h2>
-                          <p className="mt-1 text-sm text-gray-500">
+                          <h2 className="text-base font-semibold text-foreground">FreshService Webhooks</h2>
+                          <p className="mt-1 text-sm text-muted-foreground">
                         Configure the inbound ticket webhook for {currentWorkspace?.name || 'the selected workspace'}.
                           </p>
                         </div>
                         {currentWorkspace?.slug && (
-                          <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600">
+                          <span className="rounded-full border border-border bg-muted/50 px-2.5 py-1 text-xs font-medium text-muted-foreground">
                             {currentWorkspace.slug}
                           </span>
                         )}
@@ -809,18 +809,18 @@ export default function Settings() {
                     <SyncHealthCard />
                     <RealtimeHealthCard />
                     {!isGlobalAdmin && (
-                      <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-                      Notification <span className="font-semibold text-slate-800">provider setup</span> (SendGrid / Twilio
+                      <div className="rounded-xl border border-border bg-muted/50 p-4 text-sm text-muted-foreground">
+                      Notification <span className="font-semibold text-foreground">provider setup</span> (SendGrid / Twilio
                       credentials) is shared across all workspaces and managed by a global admin. You can monitor
                       delivery health above; contact a global admin to change provider credentials.
                       </div>
                     )}
                     {isGlobalAdmin && (
-                      <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-4">
+                      <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
+                        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border/60 pb-4">
                           <div>
-                            <h2 className="text-base font-semibold text-slate-950">Notification Providers</h2>
-                            <p className="mt-1 text-sm text-slate-500">
+                            <h2 className="text-base font-semibold text-foreground">Notification Providers</h2>
+                            <p className="mt-1 text-sm text-muted-foreground">
                         Global provider setup for all workspaces. Tests save the provider settings first, then send a real test message.
                             </p>
                           </div>
@@ -835,21 +835,21 @@ export default function Settings() {
                         </div>
 
                         <div className="mt-5 grid gap-4 xl:grid-cols-2">
-                          <section className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+                          <section className="rounded-xl border border-border bg-muted/30 p-4">
                             <div className="mb-4 flex items-start justify-between gap-3">
                               <div className="flex items-center gap-2">
-                                <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-blue-100 text-blue-700">
+                                <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200">
                                   <Mail className="h-4 w-4" />
                                 </span>
                                 <div>
-                                  <h3 className="text-sm font-semibold text-slate-950">SendGrid Email</h3>
-                                  <p className="text-xs text-slate-500">Uses the SendGrid v3 Web API with a Bearer API key.</p>
+                                  <h3 className="text-sm font-semibold text-foreground">SendGrid Email</h3>
+                                  <p className="text-xs text-muted-foreground">Uses the SendGrid v3 Web API with a Bearer API key.</p>
                                 </div>
                               </div>
                               <span className={`rounded-full px-2 py-1 text-xs font-semibold ${
                                 settings?.sendgrid_api_key === '***MASKED***' && settings?.sendgrid_from_email
-                                  ? 'bg-emerald-100 text-emerald-700'
-                                  : 'bg-slate-200 text-slate-600'
+                                  ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-200'
+                                  : 'bg-secondary text-muted-foreground'
                               }`}>
                                 {settings?.sendgrid_api_key === '***MASKED***' && settings?.sendgrid_from_email ? 'Configured' : 'Not configured'}
                               </span>
@@ -857,33 +857,33 @@ export default function Settings() {
 
                             <div className="grid gap-3">
                               <label className="block">
-                                <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">API key</span>
+                                <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">API key</span>
                                 <input
                                   type="password"
                                   name="sendgrid_api_key"
                                   value={formData.sendgrid_api_key}
                                   onChange={handleChange}
                                   placeholder={settings?.sendgrid_api_key === '***MASKED***' ? '(Configured)' : 'SG.xxxxx'}
-                                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                                  className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
                                 />
-                                <span className="mt-1 block text-xs text-slate-500">Leave blank to keep the existing key.</span>
+                                <span className="mt-1 block text-xs text-muted-foreground">Leave blank to keep the existing key.</span>
                               </label>
 
                               <label className="block">
-                                <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">From email</span>
+                                <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">From email</span>
                                 <input
                                   type="email"
                                   name="sendgrid_from_email"
                                   value={formData.sendgrid_from_email}
                                   onChange={handleChange}
                                   placeholder="ticketpulse@example.com"
-                                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                                  className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
                                 />
-                                <span className="mt-1 block text-xs text-slate-500">Must be a verified sender or domain in SendGrid.</span>
+                                <span className="mt-1 block text-xs text-muted-foreground">Must be a verified sender or domain in SendGrid.</span>
                               </label>
 
                               <label className="block">
-                                <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">From display name</span>
+                                <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">From display name</span>
                                 <input
                                   type="text"
                                   name="sendgrid_from_name"
@@ -891,28 +891,28 @@ export default function Settings() {
                                   onChange={handleChange}
                                   placeholder="Ticket Pulse"
                                   maxLength={80}
-                                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                                  className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
                                 />
-                                <span className="mt-1 block text-xs text-slate-500">
+                                <span className="mt-1 block text-xs text-muted-foreground">
                                   Default sender name recipients see (&quot;Ticket Pulse&quot; when blank). Workspaces can override it under Mail Workflows &rarr; Email Branding.
                                 </span>
                               </label>
 
-                              <div className="mt-2 rounded-lg border border-slate-200 bg-white p-3">
-                                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Test email</div>
+                              <div className="mt-2 rounded-lg border border-border bg-card p-3">
+                                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Test email</div>
                                 <div className="flex flex-col gap-2 sm:flex-row">
                                   <input
                                     type="email"
                                     value={providerTestTargets.sendgrid}
                                     onChange={(event) => handleProviderTargetChange('sendgrid', event.target.value)}
                                     placeholder="recipient@example.com"
-                                    className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                                    className="min-w-0 flex-1 rounded-lg border border-border px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
                                   />
                                   <button
                                     type="button"
                                     onClick={() => handleProviderTest('sendgrid')}
                                     disabled={providerTesting === 'sendgrid' || !providerTestTargets.sendgrid}
-                                    className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                                    className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-foreground px-4 text-sm font-semibold text-background hover:bg-foreground/90 disabled:cursor-not-allowed disabled:opacity-60"
                                   >
                                     <Send className="h-4 w-4" />
                                     {providerTesting === 'sendgrid' ? 'Sending...' : 'Send Test'}
@@ -920,7 +920,7 @@ export default function Settings() {
                                 </div>
                                 {providerTestStatus.sendgrid && (
                                   <div className={`mt-2 flex items-start gap-2 rounded-lg px-3 py-2 text-xs ${
-                                    providerTestStatus.sendgrid.success ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'
+                                    providerTestStatus.sendgrid.success ? 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200' : 'bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200'
                                   }`}>
                                     {providerTestStatus.sendgrid.success ? <CheckCircle className="h-4 w-4 shrink-0" /> : <XCircle className="h-4 w-4 shrink-0" />}
                                     <span>{providerTestStatus.sendgrid.message}</span>
@@ -930,22 +930,22 @@ export default function Settings() {
                             </div>
                           </section>
 
-                          <section className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+                          <section className="rounded-xl border border-border bg-muted/30 p-4">
                             <div className="mb-4 flex items-start justify-between gap-3">
                               <div className="flex items-center gap-2">
-                                <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700">
+                                <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-100 dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-200">
                                   <MessageSquare className="h-4 w-4" />
                                 </span>
                                 <div>
-                                  <h3 className="text-sm font-semibold text-slate-950">Twilio SMS, WhatsApp, and Voice</h3>
-                                  <p className="text-xs text-slate-500">WhatsApp alerts use an approved Twilio Content template.</p>
+                                  <h3 className="text-sm font-semibold text-foreground">Twilio SMS, WhatsApp, and Voice</h3>
+                                  <p className="text-xs text-muted-foreground">WhatsApp alerts use an approved Twilio Content template.</p>
                                 </div>
                               </div>
                               <div className="flex flex-wrap justify-end gap-1.5">
                                 <span className={`rounded-full px-2 py-1 text-xs font-semibold ${
                                   settings?.twilio_account_sid && settings?.twilio_auth_token === '***MASKED***' && settings?.twilio_from_number
-                                    ? 'bg-emerald-100 text-emerald-700'
-                                    : 'bg-slate-200 text-slate-600'
+                                    ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-200'
+                                    : 'bg-secondary text-muted-foreground'
                                 }`}>
                                   {settings?.twilio_account_sid && settings?.twilio_auth_token === '***MASKED***' && settings?.twilio_from_number ? 'SMS/voice ready' : 'SMS/voice incomplete'}
                                 </span>
@@ -954,8 +954,8 @@ export default function Settings() {
                               && settings?.twilio_auth_token === '***MASKED***'
                               && settings?.twilio_whatsapp_content_sid
                               && (settings?.twilio_whatsapp_messaging_service_sid || settings?.twilio_whatsapp_sender || settings?.twilio_from_number)
-                                    ? 'bg-emerald-100 text-emerald-700'
-                                    : 'bg-amber-100 text-amber-700'
+                                    ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-200'
+                                    : 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-200'
                                 }`}>
                                   {settings?.twilio_whatsapp_content_sid ? 'WhatsApp template set' : 'WhatsApp template needed'}
                                 </span>
@@ -964,118 +964,118 @@ export default function Settings() {
 
                             <div className="grid gap-3">
                               <label className="block">
-                                <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Account SID</span>
+                                <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">Account SID</span>
                                 <input
                                   type="text"
                                   name="twilio_account_sid"
                                   value={formData.twilio_account_sid}
                                   onChange={handleChange}
                                   placeholder="AC..."
-                                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                                  className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
                                 />
                               </label>
 
                               <label className="block">
-                                <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Auth token</span>
+                                <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">Auth token</span>
                                 <input
                                   type="password"
                                   name="twilio_auth_token"
                                   value={formData.twilio_auth_token}
                                   onChange={handleChange}
                                   placeholder={settings?.twilio_auth_token === '***MASKED***' ? '(Configured)' : 'Enter auth token'}
-                                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                                  className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
                                 />
-                                <span className="mt-1 block text-xs text-slate-500">Leave blank to keep the existing token.</span>
+                                <span className="mt-1 block text-xs text-muted-foreground">Leave blank to keep the existing token.</span>
                               </label>
 
                               <label className="block">
-                                <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Twilio phone number</span>
+                                <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">Twilio phone number</span>
                                 <input
                                   type="tel"
                                   name="twilio_from_number"
                                   value={formData.twilio_from_number}
                                   onChange={handleChange}
                                   placeholder="+16045550100"
-                                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                                  className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
                                 />
-                                <span className="mt-1 block text-xs text-slate-500">Use E.164 format.</span>
+                                <span className="mt-1 block text-xs text-muted-foreground">Use E.164 format.</span>
                               </label>
 
-                              <div className="grid gap-3 rounded-lg border border-emerald-100 bg-emerald-50/50 p-3">
+                              <div className="grid gap-3 rounded-lg border border-emerald-100 dark:border-emerald-500/20 bg-emerald-50/50 dark:bg-emerald-500/10 p-3">
                                 <div>
-                                  <div className="text-xs font-semibold uppercase tracking-wide text-emerald-700">WhatsApp template</div>
+                                  <div className="text-xs font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-200">WhatsApp template</div>
                                   <p className="mt-1 text-xs text-emerald-700/80">
                               Use a Twilio-approved template for business-initiated WhatsApp tests and alerts.
                                   </p>
                                 </div>
 
                                 <label className="block">
-                                  <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">WhatsApp sender</span>
+                                  <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">WhatsApp sender</span>
                                   <input
                                     type="tel"
                                     name="twilio_whatsapp_sender"
                                     value={formData.twilio_whatsapp_sender}
                                     onChange={handleChange}
                                     placeholder="Defaults to Twilio phone number"
-                                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                                    className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
                                   />
-                                  <span className="mt-1 block text-xs text-slate-500">Optional. Use +16045550100 or whatsapp:+16045550100.</span>
+                                  <span className="mt-1 block text-xs text-muted-foreground">Optional. Use +16045550100 or whatsapp:+16045550100.</span>
                                 </label>
 
                                 <label className="block">
-                                  <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Messaging Service SID</span>
+                                  <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">Messaging Service SID</span>
                                   <input
                                     type="text"
                                     name="twilio_whatsapp_messaging_service_sid"
                                     value={formData.twilio_whatsapp_messaging_service_sid}
                                     onChange={handleChange}
                                     placeholder="MG..."
-                                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                                    className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
                                   />
-                                  <span className="mt-1 block text-xs text-slate-500">Optional. If set, Twilio selects the WhatsApp sender from the service.</span>
+                                  <span className="mt-1 block text-xs text-muted-foreground">Optional. If set, Twilio selects the WhatsApp sender from the service.</span>
                                 </label>
 
                                 <label className="block">
-                                  <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Content SID</span>
+                                  <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">Content SID</span>
                                   <input
                                     type="text"
                                     name="twilio_whatsapp_content_sid"
                                     value={formData.twilio_whatsapp_content_sid}
                                     onChange={handleChange}
                                     placeholder="HX..."
-                                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                                    className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
                                   />
-                                  <span className="mt-1 block text-xs text-slate-500">Required for WhatsApp tests and assignment alerts.</span>
+                                  <span className="mt-1 block text-xs text-muted-foreground">Required for WhatsApp tests and assignment alerts.</span>
                                 </label>
 
                                 <label className="block">
-                                  <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Content variables JSON</span>
+                                  <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">Content variables JSON</span>
                                   <textarea
                                     name="twilio_whatsapp_content_variables"
                                     value={formData.twilio_whatsapp_content_variables}
                                     onChange={handleChange}
                                     rows={3}
-                                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 font-mono text-xs outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                                    className="w-full rounded-lg border border-border bg-card px-3 py-2 font-mono text-xs outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
                                   />
-                                  <span className="mt-1 block text-xs text-slate-500">Default sends the full alert text as template variable 1.</span>
+                                  <span className="mt-1 block text-xs text-muted-foreground">Default sends the full alert text as template variable 1.</span>
                                 </label>
                               </div>
 
-                              <div className="mt-2 rounded-lg border border-slate-200 bg-white p-3">
-                                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Test SMS, WhatsApp, and voice</div>
+                              <div className="mt-2 rounded-lg border border-border bg-card p-3">
+                                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Test SMS, WhatsApp, and voice</div>
                                 <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto]">
                                   <input
                                     type="tel"
                                     value={providerTestTargets.twilio}
                                     onChange={(event) => handleProviderTargetChange('twilio', event.target.value)}
                                     placeholder="+16045550100"
-                                    className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                                    className="min-w-0 flex-1 rounded-lg border border-border px-3 py-2 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
                                   />
                                   <button
                                     type="button"
                                     onClick={() => handleProviderTest('twilio_sms')}
                                     disabled={providerTesting === 'twilio_sms' || !providerTestTargets.twilio}
-                                    className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                                    className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-foreground px-4 text-sm font-semibold text-background hover:bg-foreground/90 disabled:cursor-not-allowed disabled:opacity-60"
                                   >
                                     <MessageSquare className="h-4 w-4" />
                                     {providerTesting === 'twilio_sms' ? 'Sending...' : 'Test SMS'}
@@ -1084,7 +1084,7 @@ export default function Settings() {
                                     type="button"
                                     onClick={() => handleProviderTest('twilio_whatsapp')}
                                     disabled={providerTesting === 'twilio_whatsapp' || !providerTestTargets.twilio}
-                                    className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 text-sm font-semibold text-emerald-800 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                    className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 px-4 text-sm font-semibold text-emerald-800 dark:text-emerald-200 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
                                   >
                                     <MessageCircle className="h-4 w-4" />
                                     {providerTesting === 'twilio_whatsapp' ? 'Sending...' : 'Test WhatsApp'}
@@ -1093,7 +1093,7 @@ export default function Settings() {
                                     type="button"
                                     onClick={() => handleProviderTest('twilio_voice')}
                                     disabled={providerTesting === 'twilio_voice' || !providerTestTargets.twilio}
-                                    className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                    className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-border bg-card px-4 text-sm font-semibold text-foreground/85 hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-60"
                                   >
                                     <PhoneCall className="h-4 w-4" />
                                     {providerTesting === 'twilio_voice' ? 'Calling...' : 'Test Voice'}
@@ -1102,7 +1102,7 @@ export default function Settings() {
                                 {['twilio_sms', 'twilio_whatsapp', 'twilio_voice'].map((channel) => (
                                   providerTestStatus[channel] && (
                                     <div key={channel} className={`mt-2 flex items-start gap-2 rounded-lg px-3 py-2 text-xs ${
-                                      providerTestStatus[channel].success ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'
+                                      providerTestStatus[channel].success ? 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200' : 'bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200'
                                     }`}>
                                       {providerTestStatus[channel].success ? <CheckCircle className="h-4 w-4 shrink-0" /> : <XCircle className="h-4 w-4 shrink-0" />}
                                       <span>{channel === 'twilio_sms' ? 'SMS: ' : channel === 'twilio_whatsapp' ? 'WhatsApp: ' : 'Voice: '}{providerTestStatus[channel].message}</span>
@@ -1117,7 +1117,7 @@ export default function Settings() {
                     )}
 
                     {isGlobalAdmin && saveStatus && (
-                      <div className={`flex items-center gap-2 rounded-lg p-4 ${saveStatus.success ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
+                      <div className={`flex items-center gap-2 rounded-lg p-4 ${saveStatus.success ? 'bg-green-50 dark:bg-green-500/15 text-green-800 dark:text-green-200' : 'bg-red-50 dark:bg-red-500/15 text-red-800 dark:text-red-200'}`}>
                         {saveStatus.success ? <CheckCircle className="h-5 w-5" /> : <XCircle className="h-5 w-5" />}
                         <span>{saveStatus.message}</span>
                       </div>
@@ -1128,12 +1128,12 @@ export default function Settings() {
                 {/* Sync Configuration */}
                 {activeSectionId === 'sync' && (
                   <div className="p-6 space-y-4">
-                    <div className="bg-white rounded-lg shadow-sm p-5 border border-gray-200">
-                      <h2 className="text-base font-semibold mb-4 text-gray-900">Sync Configuration</h2>
+                    <div className="bg-card rounded-lg shadow-sm p-5 border border-border">
+                      <h2 className="text-base font-semibold mb-4 text-foreground">Sync Configuration</h2>
 
                       <div className="space-y-4">
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                          <label className="block text-sm font-medium text-foreground/85 mb-2">
                   Sync Interval (minutes)
                           </label>
                           <input
@@ -1143,22 +1143,22 @@ export default function Settings() {
                             onChange={handleChange}
                             min="1"
                             max="60"
-                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            className="w-full px-4 py-2 border border-input rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                           />
-                          <p className="text-xs text-gray-500 mt-1">
+                          <p className="text-xs text-muted-foreground mt-1">
                   How often to sync with FreshService (1-60 minutes)
                           </p>
                         </div>
 
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                          <label className="block text-sm font-medium text-foreground/85 mb-2">
                   Default Timezone
                           </label>
                           <select
                             name="default_timezone"
                             value={formData.default_timezone}
                             onChange={handleChange}
-                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            className="w-full px-4 py-2 border border-input rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                           >
                             <option value="America/Los_Angeles">Pacific (Los Angeles)</option>
                             <option value="America/Denver">Mountain (Denver)</option>
@@ -1168,12 +1168,12 @@ export default function Settings() {
                         </div>
 
                         {syncStatus && (
-                          <div className="mt-4 p-4 bg-blue-50 rounded-lg">
-                            <p className="text-sm text-gray-700">
+                          <div className="mt-4 p-4 bg-blue-50 dark:bg-blue-500/15 rounded-lg">
+                            <p className="text-sm text-foreground/85">
                               <strong>Sync Status:</strong> {syncStatus.sync?.isRunning ? 'Running' : 'Idle'}
                             </p>
                             {syncStatus.sync?.lastSyncTime && (
-                              <p className="text-sm text-gray-600 mt-1">
+                              <p className="text-sm text-muted-foreground mt-1">
                       Last sync: {new Date(syncStatus.sync.lastSyncTime).toLocaleString()}
                               </p>
                             )}
@@ -1290,11 +1290,11 @@ export default function Settings() {
                 {/* Dashboard Configuration */}
                 {activeSectionId === 'dashboard' && (
                   <div className="p-6">
-                    <div className="bg-white rounded-lg shadow-sm p-5 border border-gray-200">
-                      <h2 className="text-base font-semibold mb-4 text-gray-900">Dashboard Configuration</h2>
+                    <div className="bg-card rounded-lg shadow-sm p-5 border border-border">
+                      <h2 className="text-base font-semibold mb-4 text-foreground">Dashboard Configuration</h2>
 
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <label className="block text-sm font-medium text-foreground/85 mb-2">
                 Dashboard Refresh Interval (seconds)
                         </label>
                         <input
@@ -1304,9 +1304,9 @@ export default function Settings() {
                           onChange={handleChange}
                           min="10"
                           max="300"
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          className="w-full px-4 py-2 border border-input rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                         />
-                        <p className="text-xs text-gray-500 mt-1">
+                        <p className="text-xs text-muted-foreground mt-1">
                 How often the dashboard polls for updates (10-300 seconds)
                         </p>
                       </div>
@@ -1317,37 +1317,37 @@ export default function Settings() {
                 {/* Photos & Locations */}
                 {activeSectionId === 'photos' && (
                   <div className="p-6">
-                    <div className="bg-white rounded-lg shadow-sm p-5 border border-gray-200">
-                      <h2 className="text-base font-semibold mb-1 text-gray-900">Photos &amp; Locations</h2>
-                      <p className="text-sm text-gray-500 mb-4">
+                    <div className="bg-card rounded-lg shadow-sm p-5 border border-border">
+                      <h2 className="text-base font-semibold mb-1 text-foreground">Photos &amp; Locations</h2>
+                      <p className="text-sm text-muted-foreground mb-4">
                     Sync technician profile photos and office locations from Azure AD (Entra ID). Locations are only updated for technicians without a manually set location.
                       </p>
 
                       {photoStatus && (
                         <div className="grid grid-cols-2 gap-3 mb-4">
-                          <div className="p-3 bg-blue-50 rounded-lg">
-                            <p className="text-xs text-gray-500 uppercase font-medium mb-2">Photos</p>
+                          <div className="p-3 bg-blue-50 dark:bg-blue-500/15 rounded-lg">
+                            <p className="text-xs text-muted-foreground uppercase font-medium mb-2">Photos</p>
                             <div className="flex items-baseline gap-3">
-                              <span className="text-2xl font-bold text-green-600">{photoStatus.withPhotos}</span>
-                              <span className="text-xs text-gray-500">with photos</span>
-                              <span className="text-lg font-semibold text-gray-400">{photoStatus.withoutPhotos}</span>
-                              <span className="text-xs text-gray-500">missing</span>
+                              <span className="text-2xl font-bold text-green-600 dark:text-green-300">{photoStatus.withPhotos}</span>
+                              <span className="text-xs text-muted-foreground">with photos</span>
+                              <span className="text-lg font-semibold text-muted-foreground/75">{photoStatus.withoutPhotos}</span>
+                              <span className="text-xs text-muted-foreground">missing</span>
                             </div>
                           </div>
-                          <div className="p-3 bg-indigo-50 rounded-lg">
-                            <p className="text-xs text-gray-500 uppercase font-medium mb-2">Locations</p>
+                          <div className="p-3 bg-indigo-50 dark:bg-indigo-500/15 rounded-lg">
+                            <p className="text-xs text-muted-foreground uppercase font-medium mb-2">Locations</p>
                             <div className="flex items-baseline gap-3">
-                              <span className="text-2xl font-bold text-indigo-600">{photoStatus.withLocation ?? '—'}</span>
-                              <span className="text-xs text-gray-500">with location</span>
-                              <span className="text-lg font-semibold text-gray-400">{photoStatus.withoutLocation ?? '—'}</span>
-                              <span className="text-xs text-gray-500">missing</span>
+                              <span className="text-2xl font-bold text-indigo-600 dark:text-indigo-300">{photoStatus.withLocation ?? '—'}</span>
+                              <span className="text-xs text-muted-foreground">with location</span>
+                              <span className="text-lg font-semibold text-muted-foreground/75">{photoStatus.withoutLocation ?? '—'}</span>
+                              <span className="text-xs text-muted-foreground">missing</span>
                             </div>
                           </div>
                         </div>
                       )}
 
                       {photoStatus && (
-                        <p className="text-xs text-gray-400 mb-4">{photoStatus.total} active technician{photoStatus.total !== 1 ? 's' : ''} in this workspace</p>
+                        <p className="text-xs text-muted-foreground/75 mb-4">{photoStatus.total} active technician{photoStatus.total !== 1 ? 's' : ''} in this workspace</p>
                       )}
 
                       <div className="flex items-center gap-4 mb-3">
@@ -1360,56 +1360,56 @@ export default function Settings() {
                           <Users className="w-4 h-4" />
                           {isPhotoSyncing ? 'Syncing from Azure AD...' : 'Sync Photos & Locations from Azure AD'}
                         </button>
-                        <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
+                        <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer select-none">
                           <input
                             type="checkbox"
                             checked={forceLocations}
                             onChange={(e) => setForceLocations(e.target.checked)}
-                            className="rounded border-gray-300"
+                            className="rounded border-input"
                           />
                       Overwrite existing locations with AD data
                         </label>
                       </div>
 
                       {photoSyncStatus && (
-                        <div className={`flex items-start gap-2 p-3 rounded-lg ${photoSyncStatus.success ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
+                        <div className={`flex items-start gap-2 p-3 rounded-lg ${photoSyncStatus.success ? 'bg-green-50 dark:bg-green-500/15 text-green-800 dark:text-green-200' : 'bg-red-50 dark:bg-red-500/15 text-red-800 dark:text-red-200'}`}>
                           {photoSyncStatus.success ? <CheckCircle className="w-5 h-5 mt-0.5 flex-shrink-0" /> : <XCircle className="w-5 h-5 mt-0.5 flex-shrink-0" />}
                           <span className="text-sm">{photoSyncStatus.message}</span>
                         </div>
                       )}
 
                       {syncDetails && syncDetails.length > 0 && (
-                        <div className="mt-4 border border-gray-200 rounded-lg overflow-hidden">
-                          <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
-                            <h3 className="text-xs font-semibold text-gray-600 uppercase">Sync Details</h3>
+                        <div className="mt-4 border border-border rounded-lg overflow-hidden">
+                          <div className="bg-muted/50 px-4 py-2 border-b border-border">
+                            <h3 className="text-xs font-semibold text-muted-foreground uppercase">Sync Details</h3>
                           </div>
                           <div className="max-h-80 overflow-y-auto">
                             <table className="w-full text-xs">
                               <thead>
-                                <tr className="bg-gray-50 border-b">
-                                  <th className="text-left px-3 py-1.5 font-medium text-gray-500">Name</th>
-                                  <th className="text-center px-3 py-1.5 font-medium text-gray-500">Photo</th>
-                                  <th className="text-left px-3 py-1.5 font-medium text-gray-500">Location (DB)</th>
-                                  <th className="text-left px-3 py-1.5 font-medium text-gray-500">Location (AD)</th>
-                                  <th className="text-left px-3 py-1.5 font-medium text-gray-500">AD Title</th>
-                                  <th className="text-center px-3 py-1.5 font-medium text-gray-500">Action</th>
+                                <tr className="bg-muted/50 border-b">
+                                  <th className="text-left px-3 py-1.5 font-medium text-muted-foreground">Name</th>
+                                  <th className="text-center px-3 py-1.5 font-medium text-muted-foreground">Photo</th>
+                                  <th className="text-left px-3 py-1.5 font-medium text-muted-foreground">Location (DB)</th>
+                                  <th className="text-left px-3 py-1.5 font-medium text-muted-foreground">Location (AD)</th>
+                                  <th className="text-left px-3 py-1.5 font-medium text-muted-foreground">AD Title</th>
+                                  <th className="text-center px-3 py-1.5 font-medium text-muted-foreground">Action</th>
                                 </tr>
                               </thead>
-                              <tbody className="divide-y divide-gray-100">
+                              <tbody className="divide-y divide-border/60">
                                 {syncDetails.map((d, i) => (
-                                  <tr key={i} className="hover:bg-gray-50/50">
-                                    <td className="px-3 py-1.5 font-medium text-gray-900">{d.name}</td>
+                                  <tr key={i} className="hover:bg-muted/25">
+                                    <td className="px-3 py-1.5 font-medium text-foreground">{d.name}</td>
                                     <td className="px-3 py-1.5 text-center">
-                                      {d.photo ? <span className="text-green-600">&#10003;</span> : <span className="text-gray-300">&#10005;</span>}
+                                      {d.photo ? <span className="text-green-600 dark:text-green-300">&#10003;</span> : <span className="text-muted-foreground/50">&#10005;</span>}
                                     </td>
-                                    <td className="px-3 py-1.5 text-gray-600">{d.locationBefore || <span className="text-gray-300 italic">none</span>}</td>
-                                    <td className="px-3 py-1.5 text-gray-600">{d.locationAD || <span className="text-gray-300 italic">none</span>}</td>
-                                    <td className="px-3 py-1.5 text-gray-500">{d.adJobTitle || '—'}</td>
+                                    <td className="px-3 py-1.5 text-muted-foreground">{d.locationBefore || <span className="text-muted-foreground/50 italic">none</span>}</td>
+                                    <td className="px-3 py-1.5 text-muted-foreground">{d.locationAD || <span className="text-muted-foreground/50 italic">none</span>}</td>
+                                    <td className="px-3 py-1.5 text-muted-foreground">{d.adJobTitle || '—'}</td>
                                     <td className="px-3 py-1.5 text-center">
-                                      {d.locationAction === 'set' && <span className="text-green-600 font-medium">Set</span>}
-                                      {d.locationAction === 'overwritten' && <span className="text-amber-600 font-medium">Updated</span>}
-                                      {d.locationAction === 'kept' && <span className="text-gray-400">Kept</span>}
-                                      {d.locationAction === 'no_ad_data' && <span className="text-gray-300 italic">No AD data</span>}
+                                      {d.locationAction === 'set' && <span className="text-green-600 dark:text-green-300 font-medium">Set</span>}
+                                      {d.locationAction === 'overwritten' && <span className="text-amber-600 dark:text-amber-300 font-medium">Updated</span>}
+                                      {d.locationAction === 'kept' && <span className="text-muted-foreground/75">Kept</span>}
+                                      {d.locationAction === 'no_ad_data' && <span className="text-muted-foreground/50 italic">No AD data</span>}
                                       {d.locationAction === 'error' && <span className="text-red-500">Error</span>}
                                     </td>
                                   </tr>
@@ -1510,7 +1510,7 @@ export default function Settings() {
                       const isSavingAll = !!scheduleSaving._all;
 
                       const Pill = ({ options, value, onChange, className = '' }) => (
-                        <div className={`inline-flex rounded-lg border border-gray-200 overflow-hidden ${className}`}>
+                        <div className={`inline-flex rounded-lg border border-border overflow-hidden ${className}`}>
                           {options.map(opt => (
                             <button
                               key={opt.value}
@@ -1518,8 +1518,8 @@ export default function Settings() {
                               className={`px-3 py-1.5 text-xs font-medium transition-all ${
                                 value === opt.value
                                   ? 'bg-blue-600 text-white shadow-inner'
-                                  : 'bg-white text-gray-600 hover:bg-gray-50'
-                              } ${options.indexOf(opt) > 0 ? 'border-l border-gray-200' : ''}`}
+                                  : 'bg-card text-muted-foreground hover:bg-muted/50'
+                              } ${options.indexOf(opt) > 0 ? 'border-l border-border' : ''}`}
                             >
                               {opt.label}
                             </button>
@@ -1528,7 +1528,7 @@ export default function Settings() {
                       );
 
                       const TzPill = ({ value, onChange }) => (
-                        <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden">
+                        <div className="inline-flex rounded-lg border border-border overflow-hidden">
                           {TZ.map((tz, i) => (
                             <button
                               key={tz.value}
@@ -1537,8 +1537,8 @@ export default function Settings() {
                               className={`px-2.5 py-1.5 text-xs font-bold transition-all ${
                                 normTz(value) === tz.value
                                   ? `${TZ_COLORS[tz.value]} text-white shadow-inner`
-                                  : 'bg-white text-gray-500 hover:bg-gray-50'
-                              } ${i > 0 ? 'border-l border-gray-200' : ''}`}
+                                  : 'bg-card text-muted-foreground hover:bg-muted/50'
+                              } ${i > 0 ? 'border-l border-border' : ''}`}
                             >
                               {tz.short}
                             </button>
@@ -1549,22 +1549,22 @@ export default function Settings() {
                       return (
                         <div className="space-y-5">
                           {/* Header + Apply All */}
-                          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                          <div className="bg-card rounded-xl shadow-sm border border-border overflow-hidden">
                             <div className="px-5 pt-5 pb-3">
-                              <h2 className="text-base font-semibold text-gray-900">Work Schedules</h2>
-                              <p className="text-xs text-gray-500 mt-0.5">Click to set timezone and hours per tech. Use the bar below to apply to everyone.</p>
+                              <h2 className="text-base font-semibold text-foreground">Work Schedules</h2>
+                              <p className="text-xs text-muted-foreground mt-0.5">Click to set timezone and hours per tech. Use the bar below to apply to everyone.</p>
                             </div>
 
                             {scheduleStatus && (
-                              <div className={`mx-5 mb-3 flex items-center gap-2 p-2.5 rounded-lg text-sm ${scheduleStatus.success ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                              <div className={`mx-5 mb-3 flex items-center gap-2 p-2.5 rounded-lg text-sm ${scheduleStatus.success ? 'bg-green-50 dark:bg-green-500/15 text-green-700 dark:text-green-200' : 'bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200'}`}>
                                 {scheduleStatus.success ? <CheckCircle className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
                                 {scheduleStatus.message}
                               </div>
                             )}
 
                             {/* Bulk controls */}
-                            <div className="px-5 py-3 bg-gradient-to-r from-blue-50 to-indigo-50 border-y border-blue-100 flex items-center gap-4 flex-wrap">
-                              <span className="text-xs font-semibold text-blue-700 uppercase tracking-wide">Set all</span>
+                            <div className="px-5 py-3 bg-gradient-to-r from-blue-50 dark:from-blue-500/15 to-indigo-50 dark:to-indigo-500/15 border-y border-blue-100 dark:border-blue-500/20 flex items-center gap-4 flex-wrap">
+                              <span className="text-xs font-semibold text-blue-700 dark:text-blue-200 uppercase tracking-wide">Set all</span>
                               <div className="flex items-center gap-1.5">
                                 <span className="text-[10px] text-blue-500 font-medium">TZ</span>
                                 <TzPill value="" onChange={v => {
@@ -1589,13 +1589,13 @@ export default function Settings() {
                             </div>
 
                             {/* Tech rows */}
-                            <div className="divide-y divide-gray-100">
+                            <div className="divide-y divide-border/60">
                               {activeTechs.map(tech => (
-                                <div key={tech.id} className="px-5 py-3 flex items-center gap-4 hover:bg-gray-50/50 transition-colors">
+                                <div key={tech.id} className="px-5 py-3 flex items-center gap-4 hover:bg-muted/25 transition-colors">
                                   {/* Name */}
                                   <div className="w-[160px] flex-shrink-0">
-                                    <div className="text-sm font-semibold text-gray-900 truncate">{tech.name}</div>
-                                    <div className="text-[10px] text-gray-400">{tzLabel(tech.timezone)}</div>
+                                    <div className="text-sm font-semibold text-foreground truncate">{tech.name}</div>
+                                    <div className="text-[10px] text-muted-foreground/75">{tzLabel(tech.timezone)}</div>
                                   </div>
 
                                   {/* TZ pills */}
@@ -1606,7 +1606,7 @@ export default function Settings() {
 
                                   {/* Start pills */}
                                   <div className="flex items-center gap-1.5">
-                                    <span className="text-[10px] text-gray-400 font-medium w-5">IN</span>
+                                    <span className="text-[10px] text-muted-foreground/75 font-medium w-5">IN</span>
                                     <Pill
                                       options={STARTS}
                                       value={tech.workStartTime}
@@ -1616,7 +1616,7 @@ export default function Settings() {
 
                                   {/* End pills */}
                                   <div className="flex items-center gap-1.5">
-                                    <span className="text-[10px] text-gray-400 font-medium w-6">OUT</span>
+                                    <span className="text-[10px] text-muted-foreground/75 font-medium w-6">OUT</span>
                                     <Pill
                                       options={ENDS}
                                       value={tech.workEndTime}
@@ -1628,7 +1628,7 @@ export default function Settings() {
                             </div>
 
                             {/* Save bar */}
-                            <div className="px-5 py-3 bg-gray-50 border-t border-gray-200 flex items-center justify-between">
+                            <div className="px-5 py-3 bg-muted/50 border-t border-border flex items-center justify-between">
                               <button
                                 onClick={handleSaveAllSchedules}
                                 disabled={isSavingAll}
@@ -1637,30 +1637,30 @@ export default function Settings() {
                                 <Save className="w-4 h-4" />
                                 {isSavingAll ? 'Saving...' : 'Save All Schedules'}
                               </button>
-                              <span className="text-xs text-gray-400">{activeTechs.length} active technicians</span>
+                              <span className="text-xs text-muted-foreground/75">{activeTechs.length} active technicians</span>
                             </div>
                           </div>
 
                           {/* Inactive techs - collapsible */}
                           {inactiveTechs.length > 0 && (
-                            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                            <div className="bg-card rounded-xl shadow-sm border border-border overflow-hidden">
                               <button
                                 onClick={() => setShowInactive(p => !p)}
-                                className="w-full px-5 py-3 flex items-center justify-between text-left hover:bg-gray-50 transition-colors"
+                                className="w-full px-5 py-3 flex items-center justify-between text-left hover:bg-muted/50 transition-colors"
                               >
-                                <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+                                <span className="text-xs font-semibold text-muted-foreground/75 uppercase tracking-wide">
                               Inactive Technicians ({inactiveTechs.length})
                                 </span>
-                                <span className={`text-gray-400 text-xs transition-transform ${showInactive ? 'rotate-180' : ''}`}>&#9660;</span>
+                                <span className={`text-muted-foreground/75 text-xs transition-transform ${showInactive ? 'rotate-180' : ''}`}>&#9660;</span>
                               </button>
                               {showInactive && (
-                                <div className="divide-y divide-gray-100 border-t border-gray-100">
+                                <div className="divide-y divide-border/60 border-t border-border/60">
                                   {inactiveTechs.map(tech => (
                                     <div key={tech.id} className="px-5 py-2.5 flex items-center gap-4 opacity-50">
-                                      <div className="w-[160px] text-sm text-gray-600 truncate">{tech.name}</div>
-                                      <span className="text-xs text-gray-400">{tzShort(tech.timezone)}</span>
-                                      <span className="text-xs text-gray-400">{tech.workStartTime || '—'}</span>
-                                      <span className="text-xs text-gray-400">{tech.workEndTime || '—'}</span>
+                                      <div className="w-[160px] text-sm text-muted-foreground truncate">{tech.name}</div>
+                                      <span className="text-xs text-muted-foreground/75">{tzShort(tech.timezone)}</span>
+                                      <span className="text-xs text-muted-foreground/75">{tech.workStartTime || '—'}</span>
+                                      <span className="text-xs text-muted-foreground/75">{tech.workEndTime || '—'}</span>
                                     </div>
                                   ))}
                                 </div>
@@ -1669,8 +1669,8 @@ export default function Settings() {
                           )}
 
                           {techSchedules.length === 0 && (
-                            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8 text-center">
-                              <p className="text-sm text-gray-500">No technicians found. Sync technicians first.</p>
+                            <div className="bg-card rounded-xl shadow-sm border border-border p-8 text-center">
+                              <p className="text-sm text-muted-foreground">No technicians found. Sync technicians first.</p>
                             </div>
                           )}
                         </div>

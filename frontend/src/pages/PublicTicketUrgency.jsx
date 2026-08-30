@@ -28,7 +28,7 @@ function reasonText(reason, data) {
 
 function LoadingPage() {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-orange-50 via-white to-blue-50 p-6">
+    <div className="tp-light min-h-screen bg-gradient-to-br from-orange-50 via-white to-blue-50 p-6">
       <div className="mx-auto flex min-h-[60vh] max-w-3xl items-center justify-center rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="text-center text-slate-600">
           <Loader2 className="mx-auto mb-3 h-8 w-8 animate-spin text-orange-600" />
@@ -123,7 +123,7 @@ export default function PublicTicketUrgency() {
   }[statusCard.tone] || 'border-slate-200 bg-white text-slate-900';
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-orange-50 via-white to-cyan-50 p-4 text-slate-900 sm:p-8">
+    <div className="tp-light min-h-screen bg-gradient-to-br from-orange-50 via-white to-cyan-50 p-4 text-slate-900 sm:p-8">
       <div className="mx-auto max-w-5xl">
         <header className="mb-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="flex items-center gap-4">

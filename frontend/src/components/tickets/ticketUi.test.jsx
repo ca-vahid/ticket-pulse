@@ -120,7 +120,8 @@ describe('ticketUi components', () => {
     render(<QueueStatePill state={null} />);
     const dash = screen.getByLabelText('No state');
     expect(dash).toHaveTextContent('—');
-    expect(dash).toHaveClass('text-slate-300');
+    // Dark mode (DM-B): the quiet dash rides the muted token at half strength.
+    expect(dash).toHaveClass('text-muted-foreground/50');
     expect(dash.title).toMatch(/unknown/);
     expect(dash.title).toMatch(/First-response history is incomplete/);
     cleanup();

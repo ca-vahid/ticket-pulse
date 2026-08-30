@@ -38,7 +38,7 @@ export default function WorkspacePicker() {
 
   return (
     <div
-      className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-slate-50 to-blue-50 bg-no-repeat bg-cover"
+      className="tp-light min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-slate-50 to-blue-50 bg-no-repeat bg-cover"
       style={{ backgroundImage: 'url(/brand/dashboard-background.webp)' }}
     >
       <div className="w-full max-w-2xl">
