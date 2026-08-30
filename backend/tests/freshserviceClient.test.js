@@ -299,3 +299,49 @@ describe('FreshService note payloads suppress FS notifications (notify_emails: [
     expect(typeof form.getHeaders).toBe('function');
   });
 });
+
+// Mega 08-30 Phase DR4 — FS documents `user_id` ("ID of the agent/user who is
+// adding the note") on Create a Reply AND Create a Note. Sent only when the
+// caller resolved an id (per-workspace flag, default off).
+describe('FreshService reply/note actor attribution (user_id)', () => {
+  test('createReply omits user_id by default and sends it when userId is given', async () => {
+    const client = new FreshServiceClient('example.freshservice.com', 'api-key');
+    client._post = jest.fn().mockResolvedValue({ data: { conversation: { id: 1 } } });
+
+    await client.createReply(51, '<p>hi</p>');
+    expect(client._post).toHaveBeenLastCalledWith('/tickets/51/reply', { body: '<p>hi</p>' });
+
+    await client.createReply(51, '<p>hi</p>', { ccEmails: ['boss@example.com'], userId: 1002090731 });
+    expect(client._post).toHaveBeenLastCalledWith('/tickets/51/reply', {
+      body: '<p>hi</p>', user_id: 1002090731, cc_emails: ['boss@example.com'],
+    });
+  });
+
+  test('createReply ignores unusable userId values (null, "", 0, NaN)', async () => {
+    const client = new FreshServiceClient('example.freshservice.com', 'api-key');
+    client._post = jest.fn().mockResolvedValue({ data: { conversation: { id: 1 } } });
+    for (const userId of [null, undefined, '', 0, -5, 'abc']) {
+      await client.createReply(51, '<p>hi</p>', { userId });
+      expect(client._post).toHaveBeenLastCalledWith('/tickets/51/reply', { body: '<p>hi</p>' });
+    }
+  });
+
+  test('addNote carries user_id on the JSON branch and the multipart branch', async () => {
+    const client = new FreshServiceClient('example.freshservice.com', 'api-key');
+    client._post = jest.fn().mockResolvedValue({ data: { conversation: { id: 2 } } });
+
+    await client.addNote(51, '<p>note</p>', { isPrivate: true, userId: '1002090731' });
+    expect(client._post).toHaveBeenLastCalledWith('/tickets/51/notes', {
+      body: '<p>note</p>', private: true, notify_emails: [], user_id: 1002090731,
+    });
+
+    await client.addNote(51, '<p>note</p>', {
+      isPrivate: true, userId: 1002090731,
+      attachments: [{ filename: 'a.txt', buffer: Buffer.from('x'), contentType: 'text/plain' }],
+    });
+    const [path, form] = client._post.mock.calls[client._post.mock.calls.length - 1];
+    expect(path).toBe('/tickets/51/notes');
+    expect(typeof form.getHeaders).toBe('function');
+    expect(form.getBuffer().toString('utf8')).toContain('name="user_id"\r\n\r\n1002090731');
+  });
+});

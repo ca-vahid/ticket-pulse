@@ -2,6 +2,44 @@ import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { DatabaseError } from '../utils/errors.js';
 
+/** Rows Ticket Pulse authored itself (live reply/note write). */
+export const TP_AUTHORED_SOURCE = 'ticketpulse_user';
+
+function plainObject(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
+/**
+ * Update data for an FS-ingested entry landing on a row Ticket Pulse wrote
+ * itself (Phase DR2). Attribution + content fields are deliberately absent:
+ * source / actorName / actorEmail / actorFreshserviceId / authorType /
+ * eventType / incoming / isPrivate / visibility / bodyHtml / bodyText /
+ * content stay exactly as the agent sent them. actorFreshserviceId is
+ * attribution too: FS's `user_id` on a reply Ticket Pulse posted is the
+ * API-key owner, and the detail page's actor resolver would render THAT
+ * ("Ticket Pulse") over the stored agent name. FS-derived metadata still
+ * refreshes (timestamp, conversation payload).
+ */
+export function preservedUpdateData(entry, existingRow) {
+  const data = { syncedAt: new Date() };
+  if (entry.occurredAt) data.occurredAt = entry.occurredAt;
+  if (entry.title && !existingRow?.title) data.title = entry.title;
+  // Local keys win on collision except the wire-level recipient lists, which
+  // FS knows better (it addressed the email) — everything else the local
+  // row carries (editHistory, idempotencyKey, subject) is kept.
+  const localRaw = plainObject(existingRow?.rawPayload);
+  const fsRaw = plainObject(entry.rawPayload);
+  if (Object.keys(fsRaw).length || Object.keys(localRaw).length) {
+    data.rawPayload = {
+      ...fsRaw,
+      ...localRaw,
+      ...(Array.isArray(fsRaw.to_emails) && fsRaw.to_emails.length ? { to_emails: fsRaw.to_emails } : {}),
+      ...(Array.isArray(fsRaw.cc_emails) && fsRaw.cc_emails.length ? { cc_emails: fsRaw.cc_emails } : {}),
+    };
+  }
+  return data;
+}
+
 class TicketThreadRepository {
   async bulkUpsert(entries = []) {
     if (!Array.isArray(entries) || entries.length === 0) {
@@ -16,47 +54,72 @@ class TicketThreadRepository {
     // Which of these rows already exist? Needed below to tell a NEW customer
     // reply (should re-classify requester sentiment) from a re-synced old one
     // (should not). Best-effort — a failed lookup only skips the refresh.
+    // The same lookup also carries id + source + rawPayload so the update
+    // branch below can tell a row Ticket Pulse authored itself
+    // (source='ticketpulse_user' — the live reply/note write on an FS-born
+    // ticket) from a plain FS-ingested one (Phase DR2).
     const keyed = entries.filter((e) => e.externalEntryId);
     let existingKeys = new Set();
+    const existingRows = new Map(); // `${ticketId}:${externalEntryId}` -> { id, source, rawPayload }
     if (keyed.length) {
       try {
         const existing = await prisma.ticketThreadEntry.findMany({
           where: { OR: keyed.map((e) => ({ ticketId: e.ticketId, externalEntryId: e.externalEntryId })) },
-          select: { ticketId: true, externalEntryId: true },
+          select: { id: true, ticketId: true, externalEntryId: true, source: true, rawPayload: true },
         });
         existingKeys = new Set(existing.map((r) => `${r.ticketId}:${r.externalEntryId}`));
-      } catch { /* detection only */ }
+        for (const r of existing) existingRows.set(`${r.ticketId}:${r.externalEntryId}`, r);
+      } catch (error) {
+        logger.warn('Thread entry pre-lookup failed (attribution guard degraded for this batch)', { error: error.message });
+      }
     }
 
     const withAttachments = []; // { entryRowId, entry } for FS attachment ingest
     for (const entry of entries) {
       try {
-        const row = await prisma.ticketThreadEntry.upsert({
-          where: {
-            ticketId_externalEntryId: {
-              ticketId: entry.ticketId,
-              externalEntryId: entry.externalEntryId,
+        const existingRow = entry.externalEntryId
+          ? existingRows.get(`${entry.ticketId}:${entry.externalEntryId}`)
+          : null;
+        let row;
+        if (existingRow && existingRow.source === TP_AUTHORED_SOURCE) {
+          // Attribution preservation (Phase DR2, QA 08-28 #1): the row was
+          // written by Ticket Pulse when the agent sent the reply — keep the
+          // agent's name/email, the clean body and the TP source. Only
+          // FS-derived metadata refreshes: the actor's FS id, the FS
+          // timestamp, and the conversation payload (merged UNDER the local
+          // rawPayload so recipients/editHistory/idempotency survive).
+          row = await prisma.ticketThreadEntry.update({
+            where: { id: existingRow.id },
+            data: preservedUpdateData(entry, existingRow),
+          });
+        } else {
+          row = await prisma.ticketThreadEntry.upsert({
+            where: {
+              ticketId_externalEntryId: {
+                ticketId: entry.ticketId,
+                externalEntryId: entry.externalEntryId,
+              },
             },
-          },
-          create: entry,
-          update: {
-            source: entry.source,
-            eventType: entry.eventType,
-            actorName: entry.actorName,
-            actorEmail: entry.actorEmail,
-            actorFreshserviceId: entry.actorFreshserviceId,
-            incoming: entry.incoming,
-            isPrivate: entry.isPrivate,
-            visibility: entry.visibility,
-            title: entry.title,
-            content: entry.content,
-            bodyHtml: entry.bodyHtml,
-            bodyText: entry.bodyText,
-            occurredAt: entry.occurredAt,
-            syncedAt: new Date(),
-            rawPayload: entry.rawPayload,
-          },
-        });
+            create: entry,
+            update: {
+              source: entry.source,
+              eventType: entry.eventType,
+              actorName: entry.actorName,
+              actorEmail: entry.actorEmail,
+              actorFreshserviceId: entry.actorFreshserviceId,
+              incoming: entry.incoming,
+              isPrivate: entry.isPrivate,
+              visibility: entry.visibility,
+              title: entry.title,
+              content: entry.content,
+              bodyHtml: entry.bodyHtml,
+              bodyText: entry.bodyText,
+              occurredAt: entry.occurredAt,
+              syncedAt: new Date(),
+              rawPayload: entry.rawPayload,
+            },
+          });
+        }
         upserted++;
         if (Array.isArray(entry.rawPayload?.attachments) && entry.rawPayload.attachments.length) {
           withAttachments.push({ entryRowId: row.id, entry });

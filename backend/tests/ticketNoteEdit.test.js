@@ -241,6 +241,24 @@ describe('ticketService.updateNote re-mirroring', () => {
     expect(mirrorServiceMock.enqueueThreadEntryUpdate).not.toHaveBeenCalled();
   });
 
+  // Phase DR1/DR5: the canonical `fs-conversation:<id>` stamp the live write
+  // now mints resolves exactly like the legacy `fs-conv-<id>` above.
+  test('TP-authored note stamped fs-conversation:<id> (canonical) also updates FreshService directly', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue({
+      ...nativeTicket, origin: 'freshservice', freshserviceTicketId: BigInt(9),
+    });
+    prismaMock.ticketThreadEntry.findFirst.mockResolvedValue({
+      ...baseNote, externalEntryId: 'fs-conversation:555', mirrorState: 'mirrored',
+    });
+
+    await ticketService.updateNote(501, 1, 9002, { bodyHtml: '<p>edited canonical</p>' }, author);
+
+    expect(fsClientMock.updateConversation).toHaveBeenCalledWith(555, {
+      body: expect.stringContaining('<p>edited canonical</p>'),
+    });
+    expect(mirrorServiceMock.enqueueThreadEntryUpdate).not.toHaveBeenCalled();
+  });
+
   test('a note with no FS id edits locally only', async () => {
     await ticketService.updateNote(501, 1, 9002, { bodyHtml: '<p>local only</p>' }, author);
     expect(fsClientMock.updateConversation).not.toHaveBeenCalled();

@@ -97,4 +97,47 @@ describe('SenderIdentityCard', () => {
     render(<SenderIdentityCard />);
     await waitFor(() => expect(screen.getByText('Request failed')).toBeInTheDocument());
   });
+
+  // Mega 08-30 Phase SN2 — "Replies show the agent's name" toggle.
+  describe('reply sender toggle', () => {
+    test('defaults ON (also when the field is missing) and previews the agent name on replies', async () => {
+      settingsAPI.getSenderIdentity.mockResolvedValue({ success: true, data: inheritedIdentity });
+      render(<SenderIdentityCard />);
+      const toggle = await screen.findByRole('switch', { name: /replies show the agent's name/i });
+      expect(toggle).toHaveAttribute('aria-checked', 'true');
+      const replyPreview = screen.getByTestId('sender-identity-reply-preview');
+      expect(replyPreview).toHaveTextContent('Susan Xu');
+      expect(replyPreview).toHaveTextContent('<ticketpulse@bgcengineering.ca>');
+      expect(screen.getByText(/Microsoft 365 mailbox sends are best-effort/i)).toBeInTheDocument();
+    });
+
+    test('flipping it PUTs only replyUsesAgentName and the preview follows', async () => {
+      settingsAPI.getSenderIdentity.mockResolvedValue({ success: true, data: { ...inheritedIdentity, replyUsesAgentName: true } });
+      settingsAPI.updateSenderIdentity.mockResolvedValue({
+        success: true,
+        data: { ...inheritedIdentity, replyUsesAgentName: false },
+      });
+      render(<SenderIdentityCard />);
+      const toggle = await screen.findByRole('switch', { name: /replies show the agent's name/i });
+      fireEvent.click(toggle);
+
+      await waitFor(() => expect(settingsAPI.updateSenderIdentity).toHaveBeenCalledWith({ replyUsesAgentName: false }));
+      await waitFor(() => expect(screen.getByRole('switch', { name: /replies show the agent's name/i })).toHaveAttribute('aria-checked', 'false'));
+      const replyPreview = screen.getByTestId('sender-identity-reply-preview');
+      expect(replyPreview).not.toHaveTextContent('Susan Xu');
+      expect(replyPreview).toHaveTextContent('Ticket Pulse');
+      // The display-name draft is untouched by a toggle save.
+      expect(screen.getByLabelText('From display name for this workspace')).toHaveValue('');
+    });
+
+    test('a failed flip shows an alert and keeps the previous state', async () => {
+      settingsAPI.getSenderIdentity.mockResolvedValue({ success: true, data: { ...inheritedIdentity, replyUsesAgentName: true } });
+      settingsAPI.updateSenderIdentity.mockRejectedValue(new Error('Admin access required'));
+      render(<SenderIdentityCard />);
+      const toggle = await screen.findByRole('switch', { name: /replies show the agent's name/i });
+      fireEvent.click(toggle);
+      await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Admin access required'));
+      expect(screen.getByRole('switch', { name: /replies show the agent's name/i })).toHaveAttribute('aria-checked', 'true');
+    });
+  });
 });

@@ -359,7 +359,11 @@ router.get('/export.csv', asyncHandler(async (req, res) => {
     const s = v === null || v === undefined ? '' : String(v);
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
-  const header = ['Ref', 'Subject', 'Status', 'Priority', 'Type', 'State', 'Requester', 'Requester Email', 'Assignee', 'Category', 'Subcategory', 'Tags', 'Origin', 'Created', 'Last Activity', ...cfDefs.map((d) => d.label)];
+  // "SLA State" = the clock-side stateChip (overdue/response_due/…) that this
+  // column has always carried; "State" (Phase QX, QA 08-27 #3) = the queue's
+  // FS-style "who acts next" state — appended so existing column positions
+  // keep working for anyone diffing exports (custom fields still trail).
+  const header = ['Ref', 'Subject', 'Status', 'Priority', 'Type', 'SLA State', 'Requester', 'Requester Email', 'Assignee', 'Category', 'Subcategory', 'Tags', 'Origin', 'Created', 'Last Activity', 'State', ...cfDefs.map((d) => d.label)];
   const lines = [header.join(',')];
   for (const t of result.items) {
     lines.push([
@@ -370,6 +374,7 @@ router.get('/export.csv', asyncHandler(async (req, res) => {
       esc((t.tags || []).map((tag) => tag.name).join('; ')),
       esc(t.origin), esc(t.createdAt?.toISOString?.() || t.createdAt),
       esc(t.lastActivityAt?.toISOString?.() || t.lastActivityAt),
+      esc(t.state),
       // Values stringified as stored (booleans → true/false, dates → ISO).
       ...cfDefs.map((d) => esc(t.customFields?.[d.key])),
     ].join(','));
@@ -693,6 +698,33 @@ router.put('/also-for-settings', asyncHandler(async (req, res) => {
   const enabled = await setAlsoForNotifyEnabled(req.workspaceId, req.body.notifyAdditionalRequesters);
   logger.info(`Also-notify additional requesters ${enabled ? 'ON' : 'OFF'} for workspace ${req.workspaceId} by ${actor?.email || 'unknown'}`);
   res.json({ success: true, data: { notifyAdditionalRequesters: enabled } });
+}));
+
+// ------------------------- FS replies posted as the acting agent (Phase DR4)
+// Per-workspace flag, DEFAULT OFF: when ON, replies/notes Ticket Pulse posts
+// to FS-born tickets carry `user_id: technicians.freshservice_id` so
+// FreshService attributes (and addresses) them as the agent instead of the
+// API-key owner. Same app_settings storage as the "Also for" toggle. Admin
+// write; any member may read. Enable → send ONE test reply → verify (see
+// qa/evidence-0830/phaseDRSN/FINDINGS.md) before leaving it on.
+
+router.get('/fs-reply-as-agent-settings', asyncHandler(async (req, res) => {
+  const { isFsReplyAsAgentEnabled } = await import('../services/fsReplyAsAgentService.js');
+  res.json({ success: true, data: { fsReplyAsAgent: await isFsReplyAsAgentEnabled(req.workspaceId) } });
+}));
+
+router.put('/fs-reply-as-agent-settings', asyncHandler(async (req, res) => {
+  const actor = req.ticketActor;
+  if (!(actor?.role === 'admin' || actor?.workspaceRole === 'admin')) {
+    return res.status(403).json({ success: false, message: 'Changing FreshService attribution settings requires admin access.' });
+  }
+  if (typeof req.body?.fsReplyAsAgent !== 'boolean') {
+    throw new ValidationError('fsReplyAsAgent must be true or false');
+  }
+  const { setFsReplyAsAgentEnabled } = await import('../services/fsReplyAsAgentService.js');
+  const enabled = await setFsReplyAsAgentEnabled(req.workspaceId, req.body.fsReplyAsAgent);
+  logger.info(`FS reply-as-agent ${enabled ? 'ON' : 'OFF'} for workspace ${req.workspaceId} by ${actor?.email || 'unknown'}`);
+  res.json({ success: true, data: { fsReplyAsAgent: enabled } });
 }));
 
 // ------------------------------------------------- watch subscriptions (T3.6)
@@ -1254,18 +1286,28 @@ router.post('/:id/noise', asyncHandler(async (req, res) => {
 }));
 
 // Multipart (files + fields) or plain JSON — multer only engages on multipart.
+// `Idempotency-Key` (Phase DR3): the composer mints one per session; a replay
+// (double-click, retry after a dropped response) returns the entry that
+// already exists — 200, not 201 — and never sends twice.
+function threadInput(req) {
+  const idempotencyKey = String(req.headers['idempotency-key'] || '').trim();
+  return { ...(req.body || {}), ...(idempotencyKey ? { idempotencyKey } : {}) };
+}
+
 router.post('/:id/replies', requireNativeTicketing, attachmentUpload.array('files', 5), asyncHandler(async (req, res) => {
   const result = await ticketService.addReply(
-    parseTicketId(req), req.workspaceId, req.body || {}, req.ticketActor, req.files || [],
+    parseTicketId(req), req.workspaceId, threadInput(req), req.ticketActor, req.files || [],
   );
-  res.status(201).json({ success: true, data: result });
+  if (result.deduped) res.set('Idempotent-Replayed', 'true');
+  res.status(result.deduped ? 200 : 201).json({ success: true, data: result });
 }));
 
 router.post('/:id/notes', requireNativeTicketing, attachmentUpload.array('files', 5), asyncHandler(async (req, res) => {
   const result = await ticketService.addPrivateNote(
-    parseTicketId(req), req.workspaceId, req.body || {}, req.ticketActor, req.files || [],
+    parseTicketId(req), req.workspaceId, threadInput(req), req.ticketActor, req.files || [],
   );
-  res.status(201).json({ success: true, data: result });
+  if (result.deduped) res.set('Idempotent-Replayed', 'true');
+  res.status(result.deduped ? 200 : 201).json({ success: true, data: result });
 }));
 
 // Manual "Mirror now" — force this native ticket's pending/failed FreshService

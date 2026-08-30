@@ -3,7 +3,7 @@ import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, test } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import {
-  AgentFirstName, ExternalChip, FeaturedFieldChip, MirrorChip, OriginChip, PersonAvatar, PriorityDot, SlaChip, SlaTargetChip, StatusPill, formatDay, formatDayTime, initials, slaTargetState, timeAgo, timeAgoShort,
+  AgentFirstName, ExternalChip, FeaturedFieldChip, MirrorChip, OriginChip, PersonAvatar, PriorityDot, QueueStatePill, SlaChip, SlaTargetChip, StatusPill, formatDay, formatDayTime, initials, slaTargetState, timeAgo, timeAgoShort,
 } from './ticketUi';
 
 afterEach(cleanup);
@@ -93,6 +93,39 @@ describe('ticketUi components', () => {
   test('PriorityDot exposes an accessible priority label', () => {
     render(<PriorityDot priority={4} />);
     expect(screen.getByText('Urgent priority')).toBeInTheDocument();
+  });
+
+  test('PriorityDot withLabel shows the word; the title can be overridden for the read-only FS note (Phase QX)', () => {
+    const { container } = render(<PriorityDot priority={3} withLabel title="Priority: High — synced from FreshService, read-only here" />);
+    expect(screen.getByText('High')).toBeInTheDocument();
+    expect(container.firstChild).toHaveAttribute('title', 'Priority: High — synced from FreshService, read-only here');
+  });
+
+  // Queue State column (Mega 08-30 Phase QX): labelled pill per server state,
+  // StatusPill geometry, tones in the StateChip family, "—" for null with the
+  // incomplete-history caveat in the tooltip.
+  test.each([
+    ['new', 'New', 'bg-blue-50', 'text-blue-700'],
+    ['response_due', 'Response due', 'bg-amber-50', 'text-amber-700'],
+    ['requester_responded', 'Requester replied', 'bg-sky-50', 'text-sky-700'],
+  ])('QueueStatePill %s renders a labelled pill', (state, label, bg, fg) => {
+    render(<QueueStatePill state={state} />);
+    const pill = screen.getByText(label).closest('span[title]');
+    expect(pill).toHaveClass('rounded-full', 'text-[11px]', 'font-semibold', bg, fg);
+    expect(pill.title).toContain(label);
+    expect(pill.title).toMatch(/First-response history is incomplete/);
+  });
+
+  test('QueueStatePill null/unknown → quiet "—" carrying the caveat, never a guessed state', () => {
+    render(<QueueStatePill state={null} />);
+    const dash = screen.getByLabelText('No state');
+    expect(dash).toHaveTextContent('—');
+    expect(dash).toHaveClass('text-slate-300');
+    expect(dash.title).toMatch(/unknown/);
+    expect(dash.title).toMatch(/First-response history is incomplete/);
+    cleanup();
+    render(<QueueStatePill state="overdue" />); // not a queue state — the SLA chip owns it
+    expect(screen.getByLabelText('No state')).toBeInTheDocument();
   });
 
   test('OriginChip distinguishes TP-born from FS-born', () => {

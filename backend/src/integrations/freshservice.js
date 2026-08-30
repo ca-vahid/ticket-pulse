@@ -1155,21 +1155,26 @@ class FreshServiceClient {
    * conversation WITHOUT emailing the requester — the mirror uses them for
    * TP-authored public replies (Ticket Pulse already emailed the requester).
    */
-  async addNote(ticketId, body, { isPrivate = true, attachments = [] } = {}) {
+  async addNote(ticketId, body, { isPrivate = true, attachments = [], userId = null } = {}) {
     try {
+      // Same documented `user_id` as createReply (Phase DR4) — attributes the
+      // note to the acting agent when the workspace flag resolved one.
+      const fsUserId = userId === null || userId === undefined || userId === '' ? null : Number(userId);
+      const actorField = Number.isFinite(fsUserId) && fsUserId > 0 ? { user_id: fsUserId } : {};
       let response;
       if (Array.isArray(attachments) && attachments.length > 0) {
         // notify_emails rides the fields too (FR 08-07 #9) — multipart cannot
         // express an EMPTY array (nothing is appended), so suppression there
         // relies on the FS-side marker exclusion rule; the JSON branch below
         // sends the explicit [] opt-out.
-        const form = this._buildAttachmentForm({ body, private: isPrivate === true, notify_emails: [] }, attachments);
+        const form = this._buildAttachmentForm({ body, private: isPrivate === true, notify_emails: [], ...actorField }, attachments);
         response = await this._post(`/tickets/${ticketId}/notes`, form, { headers: form.getHeaders() });
       } else {
         response = await this._post(`/tickets/${ticketId}/notes`, {
           body,
           private: isPrivate === true,
           notify_emails: [],
+          ...actorField,
         });
       }
       return response.data;
@@ -1188,18 +1193,24 @@ class FreshServiceClient {
    * Post a public agent reply. FreshService EMAILS THE REQUESTER for replies —
    * only use for FS-born tickets where FS owns requester communication.
    */
-  async createReply(ticketId, body, { ccEmails = [], attachments = [] } = {}) {
+  async createReply(ticketId, body, { ccEmails = [], attachments = [], userId = null } = {}) {
     try {
       const hasCc = Array.isArray(ccEmails) && ccEmails.length > 0;
+      // `user_id` (documented: "ID of the agent/user who is adding the
+      // note") makes FS attribute + address the reply as that agent instead
+      // of the API-key owner — only sent when the caller resolved one
+      // (Phase DR4, per-workspace flag, default off).
+      const fsUserId = userId === null || userId === undefined || userId === '' ? null : Number(userId);
+      const actorField = Number.isFinite(fsUserId) && fsUserId > 0 ? { user_id: fsUserId } : {};
       let response;
       if (Array.isArray(attachments) && attachments.length > 0) {
         const form = this._buildAttachmentForm(
-          { body, ...(hasCc ? { cc_emails: ccEmails } : {}) },
+          { body, ...(hasCc ? { cc_emails: ccEmails } : {}), ...actorField },
           attachments,
         );
         response = await this._post(`/tickets/${ticketId}/reply`, form, { headers: form.getHeaders() });
       } else {
-        const payload = { body };
+        const payload = { body, ...actorField };
         if (hasCc) payload.cc_emails = ccEmails;
         response = await this._post(`/tickets/${ticketId}/reply`, payload);
       }

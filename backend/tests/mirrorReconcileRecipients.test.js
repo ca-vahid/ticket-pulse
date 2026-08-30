@@ -81,7 +81,7 @@ describe('mirror reconciliation recipient capture', () => {
     expect(result.imported).toBe(1);
     expect(prismaMock.ticketThreadEntry.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
-        externalEntryId: 'fs-conv-88001',
+        externalEntryId: 'fs-conversation:88001',
         source: 'freshservice_reconciliation',
         rawPayload: {
           to_emails: ['rita@example.com'],

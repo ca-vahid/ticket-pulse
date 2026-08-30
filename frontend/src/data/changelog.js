@@ -1,6 +1,17 @@
-export const APP_VERSION = '3.7.03-preview';
+export const APP_VERSION = '3.8.00-preview';
 
 export const changelog = [
+  {
+    version: '3.8.00-preview',
+    date: 'August 30, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>🔍 The “duplicate reply” on FreshService tickets, solved</strong> — the requester only ever received ONE email; the ticket thread was showing the same FreshService conversation twice because our live write and the later sync stamped it under two different ids, and the sync copy carried the FreshService API user’s name (“Ticket Pulse”). Ids are unified, your name stays on the entry when the sync catches up, and replies are idempotent (a network retry can never post twice). Existing duplicates in prod are being cleaned up. (QA 08-28 #1)' },
+      { type: 'improved', html: '<strong>👤 Replies now come from YOU</strong> — emails Ticket Pulse sends on your behalf show your name as the sender (“Susan Xu <ticketpulse@…>”), matching FreshService, with the reply address unchanged. Per-workspace switch on the Sender identity card, on by default. (QA 08-28 #2)' },
+      { type: 'new', html: '<strong>✏️ Edit the reply subject</strong> — a collapsible Subject row in the reply composer, prefilled with the default; the ticket reference is kept automatically so threading never breaks. On FreshService-born tickets the subject is composed by FreshService (their reply API has no subject field) — the composer says so. (QA 08-27 #8)' },
+      { type: 'new', html: '<strong>🗂️ Priority and State columns</strong> — Columns → Priority (dot + label, inline-editable on Ticket-Pulse-born tickets, sorts Urgent-first) and Columns → State (FreshService-style “who acts next”: Requester replied › Response due › New; resolved/paused show “—”, as do older FreshService tickets whose first-response history is incomplete — the tooltip explains). CSV export: the old “State” is now “SLA State” and a new “State” column is appended. (QA 08-27 #2, #3)' },
+      { type: 'improved', html: '<strong>📏 Queue rows easier to tell apart</strong> — row dividers now use the design token (measured 1.10 → 1.34 : 1 against white) with a firmer hover tint; no zebra striping — it tested invisible and fought the selection highlight. (QA 08-27 #4)' },
+    ],
+  },
   {
     version: '3.7.03-preview',
     date: 'August 27, 2026',

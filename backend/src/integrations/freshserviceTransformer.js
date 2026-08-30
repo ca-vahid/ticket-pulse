@@ -2,6 +2,7 @@ import { createHash } from 'crypto';
 import logger from '../utils/logger.js';
 import { FRESHSERVICE_TZ_TO_IANA } from '../config/constants.js';
 import { cleanDisplayName } from '../utils/textEncoding.js';
+import { fsConversationEntryId } from '../utils/fsEntryId.js';
 
 /**
  * Transform FreshService API data to our database schema
@@ -576,8 +577,10 @@ export function transformTicketConversationEntry(conversation, { ticketId, works
         ? 'customer_reply'
         : 'public_reply';
 
+    // Canonical stamp shared with the live write + reconcile (Phase DR1) —
+    // the SAME conversation must always land on the SAME row.
     const externalEntryId = conversation.id
-      ? `fs-conversation:${conversation.id}`
+      ? fsConversationEntryId(conversation.id)
       : `fs-conversation-fallback:${createHash('sha1').update(JSON.stringify({
         created_at: conversation.created_at || null,
         body: conversation.body || null,

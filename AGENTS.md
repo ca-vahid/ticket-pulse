@@ -204,6 +204,7 @@ ticket-pulse/
 - Tickets → AssignmentPipelineRuns / AssignmentEpisodes / TicketThreadEntries
 - Workspaces scope all tenant-specific operational tables.
 - Analytics caveat: some historical fields are sparse (`assignedAt`, `firstPublicAgentReplyAt`, `department`, `internalCategoryId`), so prefer populated fields documented above.
+- Queue-row derived fields (computed per page, never stored — `ticketService.deriveStateChip` / `deriveQueueState`): `stateChip` = the SLA-clock state (overdue > response_due > requester_responded > new; CSV "SLA State"), `state` = the FreshService-style "who acts next" state (requester_responded > response_due > new; CSV "State", queue State column). `state` returns null for terminal/Deleted/Spam rows, for paused (Pending-base) rows unless the requester replied, and — the honesty guard — for FS-born rows with no known agent reply whose activities feed errored or never synced (`activitiesSyncError` / `activitiesSyncedAt`), because `firstPublicAgentReplyAt` is unknowable there. Neither field has a server-side sort.
 
 ## Development Commands
 

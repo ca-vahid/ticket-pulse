@@ -2353,6 +2353,9 @@ model WorkspaceEmailIdentity {
   workspaceId Int       @unique @map("workspace_id")
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   fromName    String?   @map("from_name") @db.VarChar(80)
+  // Requester replies sent from Ticket Pulse go out as the replying agent's
+  // name (Phase SN2, default ON); off = the workspace/global From name.
+  replyUsesAgentName Boolean @default(true) @map("reply_uses_agent_name")
   updatedBy   String?   @map("updated_by") @db.VarChar(255)
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")

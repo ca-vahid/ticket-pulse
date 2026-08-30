@@ -13,13 +13,14 @@ import { MemoryRouter } from 'react-router-dom';
 //    defaults reproduce today's exact set + order (zero change untouched),
 //    the flyout toggles/reorders/resets, and the choice round-trips through
 //    the per-user preference endpoints (server wins over the local mirror).
-const { listSpy, metaSpy, statsSpy, decideSpy, getPrefSpy, setPrefSpy, roleRef } = vi.hoisted(() => ({
+const { listSpy, metaSpy, statsSpy, decideSpy, getPrefSpy, setPrefSpy, updateSpy, roleRef } = vi.hoisted(() => ({
   listSpy: vi.fn(),
   metaSpy: vi.fn(),
   statsSpy: vi.fn(),
   decideSpy: vi.fn(),
   getPrefSpy: vi.fn(),
   setPrefSpy: vi.fn(),
+  updateSpy: vi.fn(), // PATCH /tickets/:id — the inline priority picker (Phase QX)
   // Mutable workspace role: the historical default is this OBJECT (which the
   // page's `wsRole === 'admin'` string compare treats as non-reviewer); the
   // AI-visibility tests below set real role STRINGS ('viewer' / 'admin').
@@ -28,7 +29,7 @@ const { listSpy, metaSpy, statsSpy, decideSpy, getPrefSpy, setPrefSpy, roleRef }
 
 vi.mock('../services/api', () => ({
   ticketsAPI: new Proxy(
-    { list: listSpy, meta: metaSpy, stats: statsSpy, getQueuePreference: getPrefSpy, setQueuePreference: setPrefSpy },
+    { list: listSpy, meta: metaSpy, stats: statsSpy, getQueuePreference: getPrefSpy, setQueuePreference: setPrefSpy, update: updateSpy },
     { get: (target, key) => target[key] || (() => new Promise(() => {})) },
   ),
   assignmentAPI: { decide: decideSpy, latestRun: vi.fn(() => new Promise(() => {})) },
@@ -527,5 +528,130 @@ describe('Non-destructive refresh (deferred Phase-2 item, QA 08-07 #10)', () => 
     expect(screen.queryByLabelText('Loading tickets')).not.toBeInTheDocument();
     expect(screen.getAllByText('Row 1')[0]).toBe(rowNodeBefore);
     expect(screen.getByRole('checkbox', { name: 'Select TP-1' })).toBeChecked();
+  });
+});
+
+// Mega 08-30 Phase QX (QA 08-27 #2/#3): the opt-in Priority + State columns.
+// Both are defaultOn:false, so the stock template above is byte-identical —
+// the registry add is inert for untouched users.
+describe('Priority + State columns (Mega 08-30 Phase QX)', () => {
+  const withColumns = (...extra) => {
+    getPrefSpy.mockResolvedValue({ data: { key: 'queue.columns', value: [...DEFAULT_COLUMN_KEYS, ...extra] } });
+  };
+
+  test('hidden by default; the Columns flyout lists both, unchecked', async () => {
+    mount();
+    await waitFor(() => expect(screen.getAllByText('Row 1').length).toBeGreaterThan(0));
+    expect(currentTemplate()).toBe(DEFAULT_COMPACT_TEMPLATE);
+    expect(screen.queryByTitle('Sort by priority (Urgent first)')).not.toBeInTheDocument();
+    expect(screen.queryByText(/^State$/)).not.toBeInTheDocument();
+
+    await openColumnsMenu();
+    const priorityBox = screen.getByRole('checkbox', { name: 'Priority column' });
+    const stateBox = screen.getByRole('checkbox', { name: 'State column' });
+    expect(priorityBox).not.toBeChecked();
+    expect(priorityBox).not.toBeDisabled();
+    expect(stateBox).not.toBeChecked();
+
+    // Toggling Priority on appends its 96px track and shows the header.
+    fireEvent.click(priorityBox);
+    await waitFor(() => expect(currentTemplate()).toBe(`${DEFAULT_COMPACT_TEMPLATE} 96px`));
+    expect(screen.getByTitle('Sort by priority (Urgent first)')).toBeInTheDocument();
+  });
+
+  test('Priority cell renders dot + label; FS-born rows are read-only, the header sorts Urgent-first', async () => {
+    withColumns('priority');
+    listSpy.mockResolvedValue({
+      data: { items: [{ ...row(1, 'Open'), priority: 4, freshserviceTicketId: 901 }], total: 1 },
+    });
+    mount();
+    await waitFor(() => expect(currentTemplate()).toBe(`${DEFAULT_COMPACT_TEMPLATE} 96px`));
+
+    // Read-only dot+label in the column with the FreshService note; no picker.
+    // (The subject-line dot carries the same note — the COLUMN copy is the
+    // labelled one.)
+    const dots = screen.getAllByTitle('Priority: Urgent — synced from FreshService, read-only here');
+    expect(dots.length).toBe(2);
+    const cell = dots.find((el) => within(el).queryByText('Urgent'));
+    expect(cell).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Priority Urgent — change/ })).not.toBeInTheDocument();
+    // The column cell sits in the xl grid (placement index after Updated = 9).
+    const colCell = cell.closest('span[style]');
+    expect(colCell.style.getPropertyValue('--tp-q-col')).toBe('9');
+
+    // The subject-line dot is suppressed at xl only (column carries it there;
+    // the tablet band keeps the dot because the column is not an md essential).
+    const subjectDot = screen.getByTestId('subject-priority-dot');
+    expect(subjectDot).toHaveClass('xl:hidden');
+
+    // Header sort: desc-first (Urgent first) — priority is NOT in ASC_FIRST_SORTS.
+    fireEvent.click(screen.getByTitle('Sort by priority (Urgent first)'));
+    await waitFor(() => expect(lastListParams().sort).toBe('priority'));
+    expect(lastListParams().dir).toBe('desc');
+  });
+
+  test('TP-born row (native ticketing on): the column picker PATCHes the priority and refreshes', async () => {
+    withColumns('priority');
+    metaSpy.mockResolvedValue({
+      data: {
+        workspaceId: 1, nativeTicketingEnabled: true, technicians: [], groups: [], categoryTree: [], sources: [], tags: [],
+        actor: { role: 'admin' },
+      },
+    });
+    listSpy.mockResolvedValue({
+      data: { items: [{ ...row(1, 'Open'), priority: 2, origin: 'ticketpulse' }], total: 1 },
+    });
+    updateSpy.mockResolvedValue({ data: { id: 1, priority: 4 } });
+    mount();
+    await waitFor(() => expect(currentTemplate()).toBe(`${DEFAULT_COMPACT_TEMPLATE} 96px`));
+
+    // Two pickers exist (subject line, xl-hidden wrapper; and the column) —
+    // the column one carries the label.
+    const pickers = screen.getAllByRole('button', { name: 'Priority Medium — change' });
+    expect(pickers.length).toBe(2);
+    const columnPicker = pickers.find((b) => within(b).queryByText('Medium'));
+    expect(columnPicker).toBeTruthy();
+
+    fireEvent.click(columnPicker);
+    const listbox = await screen.findByRole('listbox', { name: 'Change priority' });
+    // Portal: the menu lives on document.body, not inside the overflow-hidden card.
+    expect(listbox.closest('.tp-card.overflow-hidden')).toBeNull();
+    const callsBefore = listSpy.mock.calls.length;
+    fireEvent.click(within(listbox).getByRole('option', { name: /Urgent/ }));
+
+    await waitFor(() => expect(updateSpy).toHaveBeenCalledWith(1, { priority: 4 }));
+    // onChanged → refreshAfterEdit refetches the queue.
+    await waitFor(() => expect(listSpy.mock.calls.length).toBeGreaterThan(callsBefore));
+    expect(screen.queryByRole('listbox', { name: 'Change priority' })).not.toBeInTheDocument();
+  });
+
+  test('State column: labelled pill per server state, "—" for null, unsortable header explains itself', async () => {
+    withColumns('state');
+    listSpy.mockResolvedValue({
+      data: {
+        items: [
+          { ...row(1, 'Open'), state: 'requester_responded' },
+          { ...row(2, 'Open'), state: 'response_due' },
+          { ...row(3, 'Open'), state: 'new' },
+          { ...row(4, 'Closed'), state: null },
+        ],
+        total: 4,
+      },
+    });
+    mount();
+    await waitFor(() => expect(currentTemplate()).toBe(`${DEFAULT_COMPACT_TEMPLATE} 148px`));
+
+    expect(screen.getByText('Requester replied')).toBeInTheDocument();
+    expect(screen.getByText('Response due')).toBeInTheDocument();
+    expect(screen.getByText('New')).toBeInTheDocument();
+    expect(screen.getByLabelText('No state')).toHaveTextContent('—');
+    // Every pill carries the incomplete-history caveat.
+    expect(screen.getByText('Requester replied').closest('span[title]').title).toMatch(/First-response history is incomplete/);
+
+    // No sort button — a plain header whose tooltip carries the derivation.
+    expect(screen.queryByRole('button', { name: /^State/ })).not.toBeInTheDocument();
+    const header = screen.getByText('State', { selector: 'span.cursor-help' });
+    expect(header.title).toMatch(/Requester replied › Response due › New/);
+    expect(header.title).toMatch(/First-response history is incomplete/);
   });
 });

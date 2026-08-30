@@ -3,6 +3,7 @@ import { BlobServiceClient } from '@azure/storage-blob';
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { ValidationError, NotFoundError } from '../utils/errors.js';
+import { fsConversationEntryIdCandidates, parseFsConversationId } from '../utils/fsEntryId.js';
 
 export const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024; // 100 MB per file
 export const MAX_ATTACHMENTS_PER_TICKET = 20;
@@ -158,14 +159,22 @@ class AttachmentService {
       if (row) ingested += 1;
     }
     if (Array.isArray(conversations) && conversations.length) {
-      const entryIds = new Map(); // fs conversation external id -> thread entry id
+      // Keyed by the FS conversation id so rows on either stamp (canonical
+      // `fs-conversation:` or legacy `fs-conv-`, Phase DR1) link their files.
+      const entryIds = new Map(); // fs conversation id (string) -> thread entry id
       const rows = await prisma.ticketThreadEntry.findMany({
-        where: { ticketId: ticket.id, externalEntryId: { in: conversations.map((c) => `fs-conversation:${c.id}`) } },
+        where: {
+          ticketId: ticket.id,
+          externalEntryId: { in: conversations.flatMap((c) => (c?.id ? fsConversationEntryIdCandidates(c.id) : [])) },
+        },
         select: { id: true, externalEntryId: true },
       });
-      for (const r of rows) entryIds.set(r.externalEntryId, r.id);
+      for (const r of rows) {
+        const convId = parseFsConversationId(r.externalEntryId);
+        if (convId && !entryIds.has(convId)) entryIds.set(convId, r.id);
+      }
       for (const conv of conversations) {
-        const threadEntryId = entryIds.get(`fs-conversation:${conv.id}`) || null;
+        const threadEntryId = entryIds.get(String(conv.id)) || null;
         for (const att of (conv.attachments || [])) {
           const row = await this.ingestFreshServiceAttachment({
             workspaceId: ticket.workspaceId, ticketId: ticket.id, threadEntryId, fsAttachment: att,

@@ -293,13 +293,13 @@ describe('mirrorService.reconcile', () => {
     // per-conversation stamp (QA 07-06 #4).
     await new Promise((r) => setTimeout(r, 10)); // emit rides a dynamic import
     expect(emitTicketEventMock).toHaveBeenCalledWith('ticket.reply_received', 501, expect.objectContaining({
-      dedupeStamp: 'fs-conv-2',
+      dedupeStamp: 'fs-conversation:2',
       source: 'freshservice_reconciliation',
     }));
     expect(result.conflicts).toBe(1); // status + assignee drift on the FS copy
     expect(prismaMock.ticketThreadEntry.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
-        externalEntryId: 'fs-conv-2',
+        externalEntryId: 'fs-conversation:2',
         source: 'freshservice_reconciliation',
         incoming: true,
         authorType: 'requester',

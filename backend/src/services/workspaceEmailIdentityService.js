@@ -16,13 +16,20 @@ import { sanitizeFromName } from '../utils/emailSender.js';
  * arbitrary from-names to the directory displayName — graphMailClient
  * still sets it best-effort, but the durable Graph fix is renaming the
  * mailbox in Entra.
+ *
+ * Requester REPLIES (Mega 08-30 Phase SN, QA 08-28 #2) go out under the
+ * replying agent's own name — "Susan Xu <ticketpulse@…>" — exactly like
+ * FreshService does, via `resolveReplyFromName`. Per-workspace toggle
+ * `reply_uses_agent_name` (default ON) falls back to the chain above.
+ * Approvals, workflows and sync-health mails keep the workspace identity.
  */
 
 const CACHE_TTL_MS = 60 * 1000;
 const GLOBAL_CACHE_KEY = 'global';
 const HARD_DEFAULT_FROM_NAME = 'Ticket Pulse';
+const REPLY_AGENT_NAME_DEFAULT = true;
 
-// key (workspaceId number or 'global') -> { value, expiresAt }
+// key (workspaceId number, 'global', or 'reply-agent:<id>') -> { value, expiresAt }
 const resolvedNameCache = new Map();
 
 function cacheGet(key) {
@@ -87,9 +94,63 @@ export async function resolveFromName(workspaceId = null) {
 }
 
 /**
+ * Is "replies show the agent's name" on for this workspace? No row = the
+ * documented default (ON). Cached 60s; a read failure resolves to the
+ * default too (the toggle is cosmetic — it must never block a send).
+ */
+export async function isReplyAgentNameEnabled(workspaceId) {
+  const id = normalizeWorkspaceId(workspaceId);
+  if (id === null) return REPLY_AGENT_NAME_DEFAULT;
+  const key = `reply-agent:${id}`;
+  const cached = cacheGet(key);
+  if (cached !== undefined) return cached;
+  let enabled = REPLY_AGENT_NAME_DEFAULT;
+  try {
+    const row = await prisma.workspaceEmailIdentity.findUnique({
+      where: { workspaceId: id },
+      select: { replyUsesAgentName: true },
+    });
+    if (row && typeof row.replyUsesAgentName === 'boolean') enabled = row.replyUsesAgentName;
+  } catch (error) {
+    logger.warn(`Reply agent-name toggle read failed (using default): ${error.message}`);
+    enabled = REPLY_AGENT_NAME_DEFAULT;
+  }
+  cacheSet(key, enabled);
+  return enabled;
+}
+
+/**
+ * A bare email address is not a display name — "coord@example.com
+ * <ticketpulse@…>" reads as a spoof. Names that are just an address fall
+ * back to the workspace identity.
+ */
+function usableActorName(actorName) {
+  const cleaned = sanitizeFromName(actorName);
+  if (!cleaned) return null;
+  if (/^[^\s@]+@[^\s@]+$/.test(cleaned)) return null;
+  return cleaned;
+}
+
+/**
+ * From display name for a REQUESTER REPLY sent by an agent (Phase SN1):
+ * the agent's own (sanitized) name when the workspace toggle is on and a
+ * usable name exists; otherwise the workspace identity. Scoped to replies —
+ * approvals / workflows / sync-health keep calling resolveFromName.
+ *
+ * @param {number|null} workspaceId
+ * @param {string|null|undefined} actorName the entry's actorName
+ * @returns {Promise<string>}
+ */
+export async function resolveReplyFromName(workspaceId = null, actorName = null) {
+  const agentName = usableActorName(actorName);
+  if (agentName && await isReplyAgentNameEnabled(workspaceId)) return agentName;
+  return resolveFromName(workspaceId);
+}
+
+/**
  * Full identity view for the Settings UI: the workspace override (null =
- * inherit), the inherited global default, the effective name, and the
- * addresses the name will ride on.
+ * inherit), the inherited global default, the effective name, the reply
+ * agent-name toggle, and the addresses the name will ride on.
  */
 export async function getSenderIdentity(workspaceId) {
   const id = normalizeWorkspaceId(workspaceId);
@@ -114,6 +175,7 @@ export async function getSenderIdentity(workspaceId) {
     fromName: overrideFromName,
     globalFromName,
     effectiveFromName: overrideFromName || globalFromName,
+    replyUsesAgentName: typeof row?.replyUsesAgentName === 'boolean' ? row.replyUsesAgentName : REPLY_AGENT_NAME_DEFAULT,
     fromEmail: sendgridConfig.fromEmail || sendgridConfig.smtpFromEmail || null,
     mailboxAddress: mailboxConnection?.address || null,
     updatedBy: row?.updatedBy || null,
@@ -123,18 +185,28 @@ export async function getSenderIdentity(workspaceId) {
 
 /**
  * Upsert the workspace override. A blank/whitespace fromName clears the
- * override back to "inherit global". Returns the fresh identity view.
+ * override back to "inherit global"; an undefined fromName leaves it alone
+ * (toggle-only saves). `replyUsesAgentName` is applied only when a boolean
+ * is passed. Returns the fresh identity view.
  */
-export async function upsertSenderIdentity(workspaceId, { fromName } = {}, actor = null) {
+export async function upsertSenderIdentity(workspaceId, { fromName, replyUsesAgentName } = {}, actor = null) {
   const id = normalizeWorkspaceId(workspaceId);
   if (id === null) throw new Error('workspaceId is required');
-  const cleaned = sanitizeFromName(fromName);
   const updatedBy = actor?.email || actor?.name || null;
+
+  const patch = { updatedBy };
+  if (fromName !== undefined) patch.fromName = sanitizeFromName(fromName);
+  if (typeof replyUsesAgentName === 'boolean') patch.replyUsesAgentName = replyUsesAgentName;
 
   await prisma.workspaceEmailIdentity.upsert({
     where: { workspaceId: id },
-    update: { fromName: cleaned, updatedBy },
-    create: { workspaceId: id, fromName: cleaned, updatedBy },
+    update: patch,
+    create: {
+      workspaceId: id,
+      fromName: fromName !== undefined ? sanitizeFromName(fromName) : null,
+      ...(typeof replyUsesAgentName === 'boolean' ? { replyUsesAgentName } : {}),
+      updatedBy,
+    },
   });
   clearSenderIdentityCache();
   return getSenderIdentity(id);
@@ -142,6 +214,8 @@ export async function upsertSenderIdentity(workspaceId, { fromName } = {}, actor
 
 export default {
   resolveFromName,
+  resolveReplyFromName,
+  isReplyAgentNameEnabled,
   getSenderIdentity,
   upsertSenderIdentity,
   clearSenderIdentityCache,

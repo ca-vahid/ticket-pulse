@@ -686,18 +686,29 @@ export const syncAPI = {
   },
 };
 
-/** JSON for plain replies; FormData (browser-set boundary) when files are attached. */
-function buildThreadPayload(body = {}) {
-  const { files, cc, ...rest } = body;
+/**
+ * JSON for plain replies; FormData (browser-set boundary) when files are
+ * attached. `idempotencyKey` (Phase DR3) rides as the `Idempotency-Key`
+ * header so a replayed POST returns the existing entry instead of a twin;
+ * `subject` (Phase SN4) is the agent's reply-subject override (TP-born only).
+ */
+export function buildThreadPayload(body = {}) {
+  const { files, cc, idempotencyKey, subject, ...rest } = body;
+  const headers = idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {};
+  const subjectField = typeof subject === 'string' && subject.trim() ? { subject: subject.trim() } : {};
   if (files && files.length > 0) {
     const form = new FormData();
     if (rest.bodyText) form.append('bodyText', rest.bodyText);
     if (rest.bodyHtml) form.append('bodyHtml', rest.bodyHtml);
     if (cc && cc.length) form.append('cc', cc.join(','));
+    if (subjectField.subject) form.append('subject', subjectField.subject);
     for (const file of files) form.append('files', file);
-    return [form, { headers: { 'Content-Type': undefined }, timeout: 120000 }];
+    return [form, { headers: { 'Content-Type': undefined, ...headers }, timeout: 120000 }];
   }
-  return [{ ...rest, ...(cc && cc.length ? { cc } : {}) }, undefined];
+  return [
+    { ...rest, ...(cc && cc.length ? { cc } : {}), ...subjectField },
+    Object.keys(headers).length ? { headers } : undefined,
+  ];
 }
 
 /**

@@ -95,7 +95,7 @@ jest.unstable_mockModule('../src/services/attachmentService.js', () => ({
   MAX_ATTACHMENTS_PER_TICKET: 20,
 }));
 
-const { default: ticketService } = await import('../src/services/ticketService.js');
+const { default: ticketService, deriveQueueState, deriveStateChip } = await import('../src/services/ticketService.js');
 const { invalidateStatusCache } = await import('../src/services/statusService.js');
 const { ValidationError, ExternalAPIError } = await import('../src/utils/errors.js');
 
@@ -375,7 +375,7 @@ describe('ticketService conversation + status + assignment', () => {
     const { entry, email } = await ticketService.addReply(501, 1, { bodyText: 'hello from TP' }, actor);
 
     expect(fsClientMock.createReply).toHaveBeenCalledWith(9, expect.stringContaining('hello from TP'), { ccEmails: [], attachments: [] });
-    expect(entry.externalEntryId).toBe('fs-conv-42001');
+    expect(entry.externalEntryId).toBe('fs-conversation:42001');
     expect(entry.mirrorState).toBe('mirrored');
     expect(email).toEqual({ sent: true, via: 'freshservice' });
     // TP does NOT email the requester for FS-born replies — FS does.
@@ -994,6 +994,93 @@ describe('ticketService.listTickets sorting', () => {
       skip: 0,
       take: 1,
     }));
+  });
+});
+
+// Mega 08-30 Phase QX (QA 08-27 #3): the queue "State" column — FS-style
+// "who acts next" (requester_responded > response_due > new), distinct from
+// stateChip's SLA-clock precedence, with the sparse-history guard.
+describe('ticketService.deriveQueueState (Phase QX)', () => {
+  const future = new Date(Date.now() + 3600 * 1000);
+  const past = new Date(Date.now() - 3600 * 1000);
+  const synced = new Date('2026-08-01T00:00:00Z');
+  const tp = (over = {}) => ({
+    origin: 'ticketpulse', status: 'Open', assignedTechId: null, firstPublicAgentReplyAt: null,
+    frDueBy: null, dueBy: null, activitiesSyncedAt: null, activitiesSyncError: null, ...over,
+  });
+  const fs = (over = {}) => ({ ...tp({ origin: 'freshservice', activitiesSyncedAt: synced }), ...over });
+
+  test.each([
+    ['fresh unassigned TP-born → new', tp(), false, 'new'],
+    ['first-response target, unassigned → response_due (beats new)', tp({ frDueBy: future }), false, 'response_due'],
+    ['first-response target, assigned → response_due', tp({ frDueBy: future, assignedTechId: 7 }), false, 'response_due'],
+    ['late first response still reads response_due (lateness is the SLA State\'s job)', tp({ frDueBy: past, assignedTechId: 7 }), false, 'response_due'],
+    ['requester replied beats response_due', tp({ frDueBy: future, assignedTechId: 7 }), true, 'requester_responded'],
+    ['requester replied beats new', tp(), true, 'requester_responded'],
+    ['requester replied after the agent already replied', tp({ assignedTechId: 7, firstPublicAgentReplyAt: past }), true, 'requester_responded'],
+    ['assigned + agent replied, quiet → null', tp({ assignedTechId: 7, firstPublicAgentReplyAt: past }), false, null],
+    ['assigned, no FR target, no reply → null (not new: someone owns it)', tp({ assignedTechId: 7 }), false, null],
+    ['Resolved → null', tp({ status: 'Resolved' }), false, null],
+    ['Closed with a requester reply → still null (terminal)', tp({ status: 'Closed' }), true, null],
+    ['Deleted → null', tp({ status: 'Deleted' }), true, null],
+    ['Spam → null', tp({ status: 'Spam' }), false, null],
+    ['Pending (paused) with FR target → null', tp({ status: 'Pending', frDueBy: future }), false, null],
+    ['Pending (paused) unassigned → null, not new', tp({ status: 'Pending' }), false, null],
+    ['Pending (paused) + requester replied → requester_responded', tp({ status: 'Pending' }), true, 'requester_responded'],
+    // Sparse guard: FS-born, no known reply, activities never synced / errored.
+    ['FS-born, synced, unassigned → new', fs(), false, 'new'],
+    ['FS-born, synced, FR target → response_due', fs({ frDueBy: future }), false, 'response_due'],
+    ['FS-born, activities never synced → null (unknowable, no guessed New)', fs({ activitiesSyncedAt: null }), false, null],
+    ['FS-born, activities never synced, FR target → null (no guessed Response due)', fs({ activitiesSyncedAt: null, frDueBy: future }), false, null],
+    ['FS-born, activities sync error → null even though synced once', fs({ activitiesSyncError: 'HTTP 500', frDueBy: future }), false, null],
+    ['FS-born, sync error but requester replied → requester_responded (thread evidence is real)', fs({ activitiesSyncError: 'HTTP 500' }), true, 'requester_responded'],
+    ['FS-born, sync error but agent reply known → null (nothing owed)', fs({ activitiesSyncError: 'HTTP 500', assignedTechId: 7, firstPublicAgentReplyAt: past }), false, null],
+    ['TP-born never hits the guard (no activities feed)', tp({ activitiesSyncedAt: null, activitiesSyncError: null }), false, 'new'],
+  ])('%s', (_label, ticket, awaitingReply, expected) => {
+    expect(deriveQueueState(ticket, awaitingReply)).toBe(expected);
+  });
+
+  test('precedence differs from stateChip on purpose: requester reply wins over an open first-response clock', () => {
+    const t = tp({ frDueBy: future, assignedTechId: 7 });
+    expect(deriveStateChip(t, true)).toBe('response_due');
+    expect(deriveQueueState(t, true)).toBe('requester_responded');
+    const late = tp({ frDueBy: past, assignedTechId: 7 });
+    expect(deriveStateChip(late, false)).toBe('overdue');
+    expect(deriveQueueState(late, false)).toBe('response_due');
+  });
+
+  test('custom status registry: custom terminal → null, custom Pending-base pauses, custom Open-base runs', () => {
+    const statusSets = {
+      terminal: new Set(['Resolved', 'Closed', 'Done']),
+      pending: new Set(['Pending', 'Waiting on Customer']),
+    };
+    expect(deriveQueueState(tp({ status: 'Done' }), false, statusSets)).toBeNull();
+    expect(deriveQueueState(tp({ status: 'Waiting on Customer', frDueBy: future }), false, statusSets)).toBeNull();
+    expect(deriveQueueState(tp({ status: 'Waiting on Customer' }), true, statusSets)).toBe('requester_responded');
+    expect(deriveQueueState(tp({ status: 'Triage', frDueBy: future }), false, statusSets)).toBe('response_due');
+  });
+
+  test('listTickets exposes `state` beside `stateChip` on every row with zero extra queries', async () => {
+    jest.clearAllMocks();
+    prismaMock.workspace.findUnique.mockResolvedValue({ id: 1, internalDomains: [] });
+    prismaMock.ticket.count.mockResolvedValue(2);
+    prismaMock.ticket.findMany.mockResolvedValue([
+      { id: 1, origin: 'ticketpulse', status: 'Open', assignedTechId: null, frDueBy: future, requester: null, tagLinks: [] },
+      { id: 2, origin: 'freshservice', status: 'Open', assignedTechId: null, activitiesSyncedAt: null, requester: null, tagLinks: [] },
+    ]);
+    // _lastPublicEntryIncoming: ticket 1's last public entry is inbound.
+    prismaMock.$queryRaw.mockResolvedValue([{ ticket_id: 1, incoming: true, author_type: 'requester' }]);
+    prismaMock.assignmentPipelineRun.findMany = jest.fn().mockResolvedValue([]);
+    prismaMock.ticketProposedReply = { findMany: jest.fn().mockResolvedValue([]) };
+    prismaMock.ticketAssignmentEpisode.findMany = jest.fn().mockResolvedValue([]);
+
+    const { items } = await ticketService.listTickets(1, {});
+    expect(items.map((t) => [t.stateChip, t.state])).toEqual([
+      ['response_due', 'requester_responded'],
+      ['new', null], // FS-born with no activities sync → honest "—"
+    ]);
+    // Exactly one raw query (the shared last-entry lookup) — no new round trips.
+    expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(1);
   });
 });
 

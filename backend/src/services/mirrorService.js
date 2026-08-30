@@ -6,6 +6,7 @@ import attachmentService from './attachmentService.js';
 import { createFreshServiceClient } from '../integrations/freshservice.js';
 import { TICKET_ORIGIN, ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { cleanDisplayName } from '../utils/textEncoding.js';
+import { fsConversationEntryId, fsConversationEntryIdCandidates } from '../utils/fsEntryId.js';
 import ticketTypeService from './ticketTypeService.js';
 import statusService from './statusService.js';
 import { sseManager } from '../routes/sse.routes.js';
@@ -783,9 +784,11 @@ class MirrorService {
       if (!conv?.id) continue;
       const bodyText = String(conv.body_text || conv.body || '');
       if (bodyText.includes(MIRROR_MARKER) || String(conv.body || '').includes(MIRROR_MARKER)) continue;
-      const externalEntryId = `fs-conv-${conv.id}`;
+      // Canonical stamp (Phase DR1); the "already imported" check also
+      // honours rows still carrying the legacy `fs-conv-` form.
+      const externalEntryId = fsConversationEntryId(conv.id);
       const exists = await prisma.ticketThreadEntry.findFirst({
-        where: { ticketId: ticket.id, externalEntryId },
+        where: { ticketId: ticket.id, externalEntryId: { in: fsConversationEntryIdCandidates(conv.id) } },
         select: { id: true },
       });
       if (exists) continue;

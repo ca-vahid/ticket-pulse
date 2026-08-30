@@ -37,6 +37,15 @@ import {
   pipelineTriggerLabel, ticketCategoryLabels, ticketSourceLabel, timeAgo,
 } from '../components/tickets/ticketUi';
 import { FRESHSERVICE_DOMAIN } from '../components/tech-detail/constants';
+
+// UUID for the composer's Idempotency-Key (Phase DR3). crypto.randomUUID is
+// secure-context only; the fallback is plenty for a per-session nonce.
+export function newIdempotencyKey() {
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  } catch { /* fall through */ }
+  return `tp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}-${Math.random().toString(36).slice(2, 12)}`;
+}
 import { useWorkspaceRole } from '../components/nav/navDestinations';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { assignmentAPI, ticketsAPI } from '../services/api';
@@ -721,6 +730,20 @@ export default function TicketDetail() {
   const [composerText, setComposerText] = useState(''); // plain-text mirror for guards/sending
   const [composerCc, setComposerCc] = useState([]);
   const [composerFiles, setComposerFiles] = useState([]);
+  // Reply subject override (Phase SN5, QA 08-27 #8): '' = use the server's
+  // default (`ticket.replySubjectDefault`); the row is collapsed until the
+  // agent opens it. TP-born only — FreshService composes FS-born subjects.
+  const [composerSubject, setComposerSubject] = useState('');
+  const [subjectOpen, setSubjectOpen] = useState(false);
+  // Idempotency key per composer session (Phase DR3): the same key on a
+  // retried/double-submitted POST returns the existing entry instead of a
+  // twin; regenerated after every successful send.
+  const idemKeyRef = useRef(newIdempotencyKey());
+  useEffect(() => {
+    setComposerSubject('');
+    setSubjectOpen(false);
+    idemKeyRef.current = newIdempotencyKey();
+  }, [ticketId]);
   const [editFile, setEditFile] = useState(null);
   const [cloneConfirm, setCloneConfirm] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false); // multi-merge modal (QA 07-13 #1)
@@ -1639,16 +1662,26 @@ export default function TicketDetail() {
         bodyText: body,
         ...(isRichContent(composerBody) ? { bodyHtml: composerBody } : {}),
         files: composerFiles,
+        idempotencyKey: idemKeyRef.current,
       };
       if (composerMode === 'reply') {
-        await ticketsAPI.reply(ticketId, { ...payload, cc: composerCc });
+        // Subject override only when the agent actually changed it (SN5);
+        // the server keeps the [TP-n] token either way. FS-born never sends one.
+        const subjectDraft = composerSubject.trim();
+        const subjectOverride = isNative && subjectDraft && subjectDraft !== (ticket?.replySubjectDefault || '')
+          ? subjectDraft
+          : null;
+        await ticketsAPI.reply(ticketId, { ...payload, cc: composerCc, ...(subjectOverride ? { subject: subjectOverride } : {}) });
       } else {
         await ticketsAPI.note(ticketId, payload);
       }
+      idemKeyRef.current = newIdempotencyKey();
       setComposerBody('');
       setComposerText('');
       setComposerCc([]);
       setComposerFiles([]);
+      setComposerSubject('');
+      setSubjectOpen(false);
       try { localStorage.removeItem(draftKey); } catch { /* no-op */ }
       await fetchTicket({ silent: true });
       const ccNote = composerMode === 'reply' && composerCc.length ? ` (+${composerCc.length} Cc)` : '';
@@ -2532,6 +2565,55 @@ export default function TicketDetail() {
                             </span>
                           )}
                         </div>
+                        {composerMode === 'reply' && (
+                          <div className="mb-2" data-testid="reply-subject-row">
+                            {isNative ? (
+                              subjectOpen ? (
+                                <label className="flex items-center gap-2 text-xs text-slate-500">
+                                  <span className="shrink-0 font-medium">Subject</span>
+                                  <input
+                                    type="text"
+                                    value={composerSubject}
+                                    onChange={(e) => setComposerSubject(e.target.value)}
+                                    onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); setSubjectOpen(false); } }}
+                                    maxLength={255}
+                                    aria-label="Reply subject"
+                                    className="tp-focus-ring flex-1 min-w-0 text-sm bg-white border border-input rounded-lg px-2.5 py-1.5 text-slate-700 placeholder:text-slate-400"
+                                    placeholder={ticket?.replySubjectDefault || 'Re: …'}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => { setComposerSubject(''); setSubjectOpen(false); }}
+                                    className="tp-focus-ring shrink-0 rounded px-1.5 py-1 text-[11px] text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+                                    title="Use the default subject"
+                                  >
+                                    Reset
+                                  </button>
+                                </label>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setComposerSubject((v) => v || ticket?.replySubjectDefault || '');
+                                    setSubjectOpen(true);
+                                  }}
+                                  aria-label="Edit reply subject"
+                                  className="tp-focus-ring group flex w-full items-center gap-2 rounded-lg px-1 py-0.5 text-left text-xs text-slate-500 hover:bg-slate-50"
+                                >
+                                  <span className="shrink-0 font-medium">Subject</span>
+                                  <span className="min-w-0 truncate text-slate-600">
+                                    {composerSubject.trim() || ticket?.replySubjectDefault || 'Re: …'}
+                                  </span>
+                                  <Pencil className="ml-auto h-3 w-3 shrink-0 text-slate-300 group-hover:text-blue-600" aria-hidden="true" />
+                                </button>
+                              )
+                            ) : (
+                              <p className="px-1 text-[11px] text-slate-400">
+                                FreshService composes the subject for replies on FreshService tickets.
+                              </p>
+                            )}
+                          </div>
+                        )}
                         {composerMode === 'reply' && (
                           <div className="mb-2">
                             <CcChips value={composerCc} onChange={setComposerCc} />
