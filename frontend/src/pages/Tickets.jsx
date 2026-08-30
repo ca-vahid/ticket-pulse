@@ -21,7 +21,7 @@ import {
   ExternalChip, FeaturedFieldChip, PersonAvatar, PriorityDot, StateChip, StatusPill, TagChip, TypePill,
   PRIORITY_LABELS, PRIORITY_STRIP_COLORS, ticketCategoryLabels, timeAgo,
 } from '../components/tickets/ticketUi';
-import { isTerminalStatus, statusDefsFromMeta, statusNamesForBase, statusToneFromDefs } from '../components/tickets/statusDefs';
+import { baseStatusOf, isTerminalStatus, statusDefsFromMeta, statusNamesForBase, statusToneFromDefs } from '../components/tickets/statusDefs';
 import {
   BypassBadge, CELL, ColumnResizeHandle, DEFAULT_COLUMN_KEYS, InlinePriorityPicker, QUEUE_COLUMNS, QueueColumnsMenu,
   buildQueueGridMinWidth, buildQueueGridTemplate, isModifiedClick, normalizeColumnKeys, useColumnWidths,
@@ -608,12 +608,15 @@ export default function Tickets() {
   // ---- AI assignment: live modal + the Assignment Review connector chip ----
   const [aiTicket, setAiTicket] = useState(null); // ticket whose pipeline modal is open
   const [assignSheetTicket, setAssignSheetTicket] = useState(null); // mobile touch-first assign sheet
-  const [toast, setToast] = useState(null); // { message, undo? } — instant-save feedback (QA 07-06 #3)
+  // { message, undo?, tone?, action? } — instant-save feedback (QA 07-06 #3);
+  // tone 'red' for loud failures (Phase MB3), `action` {label, run} for a
+  // one-click follow-up like "Show it" (Phase MB4).
+  const [toast, setToast] = useState(null);
   const toastTimerRef = useRef(null);
-  const showToast = useCallback((message, undo = null) => {
+  const showToast = useCallback((message, undo = null, { tone = 'emerald', action = null } = {}) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-    setToast({ message, undo });
-    toastTimerRef.current = setTimeout(() => setToast(null), undo ? 5000 : 3000);
+    setToast({ message, undo, tone, action });
+    toastTimerRef.current = setTimeout(() => setToast(null), undo || action || tone === 'red' ? 6000 : 3000);
   }, []);
   // Mirror of the rendered list for diffing/lookup inside SSE callbacks.
   const ticketsRef = useRef([]);
@@ -860,15 +863,18 @@ export default function Tickets() {
   // (fails first if FreshService rejects), per QA 07-06 #2.
   const fsStatusChange = useCallback((ticket, nextStatus) => new Promise((resolve, reject) => {
     setFsError(null);
+    // A terminal → non-terminal move is a REOPEN (Phase MB5): say so in the
+    // confirm so the user knows the resolution stamps come off.
+    const reopen = isTerminalStatus(statusDefs, ticket.status) && !isTerminalStatus(statusDefs, nextStatus);
     setFsConfirm({
       ticketId: ticket.id,
       fsRef: String(ticket.freshserviceTicketId),
-      changes: [{ field: 'Status', from: ticket.status, to: nextStatus }],
+      changes: [{ field: reopen ? 'Reopen' : 'Status', from: ticket.status, to: nextStatus }],
       payload: { status: nextStatus },
       resolve,
       reject,
     });
-  }), []);
+  }), [statusDefs]);
   const runFsSync = async () => {
     if (!fsConfirm) return;
     setFsBusy(true); setFsError(null);
@@ -1090,21 +1096,64 @@ export default function Tickets() {
   // Board drag-drop → the same origin-aware status flow the StatusPicker uses:
   // TP-born saves directly (undo toast); FS-born goes through the confirmed
   // FreshService write-back modal (QA 07-27 #3).
+  // Is a status inside what the queue currently fetches? Segments carry
+  // their own scope (mirrors buildListWhere); otherwise the rail's status
+  // checkboxes decide (empty = every status).
+  const statusInScope = useCallback((status) => {
+    const base = baseStatusOf(statusDefs, status);
+    if (segment === 'all') return statuses.length === 0 || statuses.includes(status);
+    if (['open', 'unassigned', 'awaiting'].includes(segment)) return ['Open', 'Pending'].includes(base);
+    if (['due_today', 'overdue'].includes(segment)) return base === 'Open';
+    if (segment === 'resolved') return ['Resolved', 'Closed'].includes(base);
+    return true; // deleted / noise / created_* — status-agnostic
+  }, [segment, statuses, statusDefs]);
   const onBoardStatusDrop = useCallback(async (ticket, nextStatus) => {
     const isTpEditable = ticket.origin === 'ticketpulse' && ticketingOn;
+    const reopen = isTerminalStatus(statusDefs, ticket.status) && !isTerminalStatus(statusDefs, nextStatus);
+    const label = reopen ? `Reopen ${ticket.displayRef} → ${nextStatus}` : `${ticket.displayRef} → ${nextStatus}`;
     try {
       if (isTpEditable) {
-        const prev = ticket.status;
         await ticketsAPI.setStatus(ticket.id, nextStatus);
-        refreshAfterEdit();
-        showToast(`${ticket.displayRef} → ${nextStatus}`, async () => {
-          try { await ticketsAPI.setStatus(ticket.id, prev); refreshAfterEdit(); } catch { /* refresh shows truth */ }
-        });
       } else if (ticket.freshserviceTicketId) {
         await fsStatusChange(ticket, nextStatus); // resolves after the confirm modal syncs
+      } else {
+        return;
       }
-    } catch { /* cancelled confirm or failed save — refresh already shows truth */ }
-  }, [ticketingOn, refreshAfterEdit, showToast, fsStatusChange]);
+    } catch (err) {
+      // A dismissed FS confirm rejects with 'cancelled' — nothing happened,
+      // nothing to say. Anything else is a real failure and must be loud
+      // (Phase MB3, QA 08-27 #6): the old bare catch turned a 400 into a
+      // silent snap-back that looked like "the board is broken".
+      if (err?.message === 'cancelled') return;
+      refreshAfterEdit();
+      // api.js re-throws an enhanced Error whose .message IS the server message
+      // (response.data.message) — keep the raw axios shape as a first choice.
+      showToast(err?.response?.data?.message || err?.message || `Could not move ${ticket.displayRef} to ${nextStatus}`, null, { tone: 'red' });
+      return;
+    }
+    const undo = isTpEditable
+      ? async () => { try { await ticketsAPI.setStatus(ticket.id, ticket.status); refreshAfterEdit(); } catch { /* refresh shows truth */ } }
+      : null;
+    // No vanish-on-success (Phase MB4): a card dropped into a column the
+    // current fetch scope excludes would refetch away and look like a
+    // failure. Checkbox scope → widen it (a visible, reversible URL change,
+    // the same shape as the board's own "Show closed"). Segment scope can't
+    // be widened in place → keep the segment and offer a one-click "Show it".
+    if (!statusInScope(nextStatus)) {
+      if (segment === 'all') {
+        setParams({ status: [...new Set([...statuses, nextStatus])].join(',') });
+        showToast(`${label} · filter widened to show it`, undo);
+      } else {
+        refreshAfterEdit();
+        showToast(`${label} — outside the current "${segment.replace(/_/g, ' ')}" view`, undo, {
+          action: { label: 'Show it', run: () => setParams({ segment: null, status: [...new Set([...defaultStatuses, nextStatus])].join(',') }) },
+        });
+      }
+      return;
+    }
+    refreshAfterEdit();
+    showToast(label, undo);
+  }, [ticketingOn, refreshAfterEdit, showToast, fsStatusChange, statusDefs, statusInScope, segment, statuses, defaultStatuses, setParams]);
   const sortLabel = SORT_OPTIONS.find((o) => o.value === sort)?.label || 'Last activity';
 
   // Board "Closed hidden" affordance: does the effective fetch scope exclude
@@ -2019,10 +2068,21 @@ export default function Tickets() {
       {/* Instant-save toast with Undo (QA 07-06 #3) */}
       {toast && (
         <div
-          role="status"
-          className="fixed bottom-20 md:bottom-5 right-5 z-[70] flex items-center gap-3 px-4 py-2.5 rounded-lg shadow-soft text-sm font-medium bg-emerald-600 text-white animate-slideInLeft"
+          role={toast.tone === 'red' ? 'alert' : 'status'}
+          data-tone={toast.tone || 'emerald'}
+          className={`fixed bottom-20 md:bottom-5 right-5 z-[70] flex items-center gap-3 px-4 py-2.5 rounded-lg shadow-soft text-sm font-medium text-white animate-slideInLeft ${
+            toast.tone === 'red' ? 'bg-red-600' : toast.tone === 'sky' ? 'bg-sky-600' : 'bg-emerald-600'
+          }`}
         >
           {toast.message}
+          {toast.action && (
+            <button
+              onClick={() => { const fn = toast.action.run; setToast(null); fn(); }}
+              className="tp-focus-ring px-2 py-0.5 rounded-md bg-white/20 hover:bg-white/30 text-xs font-bold uppercase tracking-wide"
+            >
+              {toast.action.label}
+            </button>
+          )}
           {toast.undo && (
             <button
               onClick={() => { const fn = toast.undo; setToast(null); fn(); }}

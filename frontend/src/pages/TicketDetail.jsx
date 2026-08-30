@@ -53,6 +53,8 @@ import { useSSE } from '../hooks/useSSE';
 import { useTicketPresence } from '../hooks/useTicketPresence';
 import { useTicketTypes } from '../hooks/useTicketTypes';
 import MergeTicketsModal from '../components/tickets/MergeTicketsModal';
+import { MERGE_FS_BLOCKED_REASON, MERGE_TERMINAL_BLOCKED_REASON } from '../components/tickets/mergeRules';
+import EditTicketModal from '../components/tickets/EditTicketModal';
 import { baseStatusOf, isTerminalStatus, statusDefsFromMeta, statusToneFromDefs } from '../components/tickets/statusDefs';
 import { looksLikeRealHtml } from '../utils/htmlContent';
 
@@ -760,7 +762,8 @@ export default function TicketDetail() {
   const [editingSubject, setEditingSubject] = useState(false);
   const [subjectDraft, setSubjectDraft] = useState('');
   const [editingDescription, setEditingDescription] = useState(false);
-  const [descriptionDraft, setDescriptionDraft] = useState('');
+  const [descriptionDraft, setDescriptionDraft] = useState({ html: '', text: '' }); // rich editor draft (Phase ET4)
+  const [editOpen, setEditOpen] = useState(false); // Edit ticket modal (Phase ET3)
   const composerRef = useRef(null);
   const composerFileInputRef = useRef(null);
   const pasteCountRef = useRef(0);
@@ -967,6 +970,12 @@ export default function TicketDetail() {
   const canConverse = ticketingOn && (isNative || Boolean(ticket?.freshserviceTicketId));
   // FS-born tickets take confirmed write-backs for assignee/status/priority/category.
   const fsEditable = !isNative && Boolean(ticket?.freshserviceTicketId);
+  // Why this ticket cannot RECEIVE a merge (Phase MB1) — null when it can.
+  // Same copy as the survivor radios in MergeTicketsModal.
+  const mergeBlockedReason = !ticket ? null
+    : !isNative ? MERGE_FS_BLOCKED_REASON
+      : !ticketOpenLike ? MERGE_TERMINAL_BLOCKED_REASON
+        : null;
   const fsUrl = ticket?.freshserviceTicketId
     ? `https://${FRESHSERVICE_DOMAIN}/a/tickets/${ticket.freshserviceTicketId}`
     : null;
@@ -1614,21 +1623,43 @@ export default function TicketDetail() {
     setSubjectDraft(ticket.subject || '');
     setEditingSubject(true);
   };
+  // Inline pencils (both origins since Phase ET4): TP-born saves directly,
+  // FS-born routes through the FreshService write-back confirm.
   const commitSubject = () => {
     setEditingSubject(false);
     const next = subjectDraft.trim();
     if (next && next !== ticket.subject) {
-      applyChange('subject', () => ticketsAPI.update(ticketId, { subject: next }));
+      if (isNative) applyChange('subject', () => ticketsAPI.update(ticketId, { subject: next }));
+      else requestFsSync([{ field: 'Subject', from: ticket.subject, to: next }], { subject: next }).catch(() => {});
     }
   };
 
   const startDescriptionEdit = () => {
-    setDescriptionDraft(ticket.descriptionText || ticket.description || '');
+    const html = ticket.description || ticket.descriptionText || '';
+    setDescriptionDraft({ html, text: ticket.descriptionText || '' });
     setEditingDescription(true);
   };
   const commitDescription = () => {
     setEditingDescription(false);
-    applyChange('description', () => ticketsAPI.update(ticketId, { description: descriptionDraft }));
+    const html = descriptionDraft.html;
+    if (html === (ticket.description || ticket.descriptionText || '')) return; // untouched
+    if (isNative) applyChange('description', () => ticketsAPI.update(ticketId, { description: html }));
+    else requestFsSync([{ field: 'Description', from: ticket.descriptionText?.slice(0, 70) || '—', to: descriptionDraft.text?.slice(0, 70) || '—' }], { description: html }).catch(() => {});
+  };
+
+  // Edit ticket modal (Phase ET3): requester / subject / description in one
+  // dialog. TP-born → one PATCH with the changed fields; FS-born → the same
+  // FsSyncConfirm flow every other FS write-back uses (write, verify, mirror).
+  const submitTicketEdit = async (payload, changes) => {
+    if (isNative) {
+      lastLocalMutationRef.current = Date.now();
+      await ticketsAPI.update(ticketId, payload);
+      await fetchTicket({ silent: true });
+      showToast('emerald', 'Ticket updated');
+    } else {
+      await requestFsSync(changes, payload); // resolves once FreshService confirmed; rejects 'cancelled' on dismiss
+    }
+    setEditOpen(false);
   };
 
   const sendComposer = async () => {
@@ -1909,7 +1940,7 @@ export default function TicketDetail() {
                       }`}
                     >
                       {ticket.subject || '(no subject)'}
-                      {canWrite && (
+                      {canConverse && ticket.status !== 'Deleted' && (
                         <button
                           onClick={startSubjectEdit}
                           aria-label="Edit subject"
@@ -1943,6 +1974,16 @@ export default function TicketDetail() {
                       >
                         {savingField === 'pickup' ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <Hand className="w-3.5 h-3.5" aria-hidden="true" />}
                         {confirmPickup ? 'Confirm pick up?' : 'Pick up'}
+                      </button>
+                    )}
+                    {canConverse && ticket.status !== 'Deleted' && (
+                      <button
+                        onClick={() => setEditOpen(true)}
+                        title={isNative ? 'Edit requester, subject and description' : 'Edit requester, subject and description — written to FreshService first'}
+                        className="tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100"
+                      >
+                        <Pencil className="w-3.5 h-3.5" aria-hidden="true" />
+                        Edit
                       </button>
                     )}
                     {canWrite && !ticketTerminal && (
@@ -1991,11 +2032,17 @@ export default function TicketDetail() {
                     Clone
                       </button>
                     )}
-                    {ticketingOn && isNative && meta?.actor?.kind !== 'agent' && ticketOpenLike && (
+                    {/* Merge (Phase MB1): always present for coordinators —
+                        disabled WITH the reason instead of silently missing
+                        (QA 08-27 #7). The reason mirrors the survivor rule. */}
+                    {ticketingOn && meta?.actor?.kind !== 'agent' && (
                       <button
-                        onClick={() => setMergeOpen(true)}
-                        title="Merge duplicate or related tickets into this one"
-                        className="tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-white text-slate-600 border border-slate-200 hover:border-violet-300 hover:text-violet-700"
+                        onClick={mergeBlockedReason ? undefined : () => setMergeOpen(true)}
+                        disabled={Boolean(mergeBlockedReason)}
+                        aria-disabled={Boolean(mergeBlockedReason)}
+                        title={mergeBlockedReason || 'Merge duplicate or related tickets into this one'}
+                        data-testid="merge-button"
+                        className="tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-white text-slate-600 border border-slate-200 hover:border-violet-300 hover:text-violet-700 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-slate-200 disabled:hover:text-slate-600"
                       >
                         <GitMerge className="w-3.5 h-3.5" aria-hidden="true" />
                         Merge
@@ -2089,7 +2136,7 @@ export default function TicketDetail() {
                   {!isNative && (
                     <div className="mt-3 flex flex-wrap items-center gap-2 p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-600">
                       <ShieldCheck className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" aria-hidden="true" />
-                  FreshService owns this ticket — edits to assignee, status, priority and category sync back to FreshService (with confirmation); replies are delivered through FreshService.
+                  FreshService owns this ticket — edits to requester, subject, description, assignee, status, priority and category are written to FreshService first (with confirmation); replies are delivered through FreshService.
                       {fsUrl && (
                         <a href={fsUrl} target="_blank" rel="noreferrer" className="tp-focus-ring inline-flex items-center gap-1 font-semibold text-blue-700 hover:underline rounded ml-auto">
                       Open in FreshService <ExternalLink className="w-3 h-3" aria-hidden="true" />
@@ -2279,7 +2326,7 @@ export default function TicketDetail() {
                         <div className="flex items-center gap-2 mb-2">
                           <MessageSquare className="w-4 h-4 text-blue-500" aria-hidden="true" />
                           <h2 className="text-sm font-bold text-slate-800">Description</h2>
-                          {canWrite && (
+                          {canConverse && ticket.status !== 'Deleted' && (
                             <button
                               onClick={startDescriptionEdit}
                               aria-label="Edit description"
@@ -2312,16 +2359,21 @@ export default function TicketDetail() {
                       </section>
                     )}
                     {editingDescription && (
-                      <section className="tp-card rounded-xl p-4" aria-label="Edit description">
-                        <textarea
-                          autoFocus
-                          rows={6}
-                          value={descriptionDraft}
-                          onChange={(e) => setDescriptionDraft(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === 'Escape') setEditingDescription(false); }}
-                          className="tp-focus-ring w-full text-sm bg-white border border-blue-300 rounded-lg px-3 py-2 resize-y"
-                          aria-label="Description"
+                      <section className="tp-card rounded-xl p-4" aria-label="Edit description" onKeyDown={(e) => { if (e.key === 'Escape') setEditingDescription(false); }}>
+                        {/* Rich editor (Phase ET4): the stored HTML round-trips
+                            instead of being flattened through a textarea. */}
+                        <RichTextEditor
+                          value={ticket.description || ticket.descriptionText || ''}
+                          onChange={({ html, text }) => setDescriptionDraft({ html, text })}
+                          onSubmit={commitDescription}
+                          minHeight={160}
+                          placeholder="Describe the request… (Ctrl+Enter to save)"
+                          ariaLabel="Description"
+                          className="bg-white border-blue-300"
                         />
+                        {!isNative && (
+                          <p className="mt-2 text-[11px] text-slate-500">FreshService owns this ticket — saving writes the description there first.</p>
+                        )}
                         <div className="flex items-center justify-end gap-2 mt-2">
                           <button onClick={() => setEditingDescription(false)} className="tp-focus-ring px-3 py-1.5 text-xs font-medium text-slate-500 rounded-lg hover:bg-slate-100">Cancel</button>
                           <button onClick={commitDescription} className="tp-focus-ring px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700">Save</button>
@@ -3710,6 +3762,7 @@ export default function TicketDetail() {
       {mergeOpen && ticket && (
         <MergeTicketsModal
           ticket={ticket}
+          statusDefs={statusDefs}
           onClose={() => setMergeOpen(false)}
           onMerged={(result) => {
             setMergeOpen(false);
@@ -3721,6 +3774,16 @@ export default function TicketDetail() {
             }
             showToast('emerald', `Merged ${result?.merged?.length || 0} ticket${(result?.merged?.length || 0) === 1 ? '' : 's'} into ${result?.primaryRef || 'this ticket'} — ${result?.messagesCopied || 0} messages copied`);
           }}
+        />
+      )}
+
+      {editOpen && ticket && (
+        <EditTicketModal
+          ticket={ticket}
+          isNative={isNative}
+          fsRef={ticket.freshserviceTicketId ? String(ticket.freshserviceTicketId) : null}
+          onClose={() => setEditOpen(false)}
+          onSubmit={submitTicketEdit}
         />
       )}
 

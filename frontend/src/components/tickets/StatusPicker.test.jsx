@@ -96,3 +96,38 @@ describe('StatusPicker workspace custom statuses (Phase 8b)', () => {
     expect(screen.getAllByRole('option')).toHaveLength(4);
   });
 });
+
+describe('StatusPicker loud failures (Mega 08-30 Phase MB3, QA 08-27 #6)', () => {
+  test('a rejected save (400 with a server message) reaches onError with the error and the target status', async () => {
+    const err = { response: { data: { message: 'FreshService did not accept: status (FS kept Closed) — nothing was changed in Ticket Pulse' } } };
+    setStatus.mockRejectedValueOnce(err);
+    const onError = vi.fn();
+    const onChanged = vi.fn();
+    render(<StatusPicker ticketId={501} value="Closed" onChanged={onChanged} onError={onError} />);
+    fireEvent.click(screen.getByRole('button', { name: /status: closed/i }));
+    fireEvent.click(await screen.findByRole('option', { name: /pending/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^confirm$/i }));
+    await waitFor(() => expect(onError).toHaveBeenCalledWith(err, 'Pending'));
+    expect(onChanged).not.toHaveBeenCalled();
+  });
+
+  test('a cancelled FS confirm is silent — onError is NOT called', async () => {
+    const fsChange = vi.fn().mockRejectedValue(new Error('cancelled'));
+    const onError = vi.fn();
+    render(<StatusPicker ticketId={501} value="Closed" fsChange={fsChange} onChanged={() => {}} onError={onError} />);
+    fireEvent.click(screen.getByRole('button', { name: /status: closed/i }));
+    fireEvent.click(await screen.findByRole('option', { name: /pending/i }));
+    await waitFor(() => expect(fsChange).toHaveBeenCalledWith('Pending'));
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  test('an FS write-back that FreshService refused reaches onError (not swallowed)', async () => {
+    const err = { response: { data: { message: 'FreshService did not accept: status (FS kept Closed) — nothing was changed in Ticket Pulse' } } };
+    const fsChange = vi.fn().mockRejectedValue(err);
+    const onError = vi.fn();
+    render(<StatusPicker ticketId={501} value="Closed" fsChange={fsChange} onChanged={() => {}} onError={onError} />);
+    fireEvent.click(screen.getByRole('button', { name: /status: closed/i }));
+    fireEvent.click(await screen.findByRole('option', { name: /open/i }));
+    await waitFor(() => expect(onError).toHaveBeenCalledWith(err, 'Open'));
+  });
+});

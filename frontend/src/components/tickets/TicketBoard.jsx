@@ -76,6 +76,26 @@ const makeBucketFor = (statusDefs) => (status) => {
   return null; // Deleted / Spam / unknown labels — not shown on the board
 };
 
+/**
+ * Drag rules as pure, testable helpers (Phase MB6). `canDragTicket` mirrors
+ * the queue's origin-aware editing; `planStatusDrop` resolves a drop onto a
+ * column into the status to set — or null when nothing should happen (same
+ * bucket, unknown column, unknown ticket).
+ */
+export const canDragTicket = (ticket, ticketingOn) => {
+  if (!ticket || ['Deleted', 'Spam'].includes(ticket.status)) return false;
+  if (ticket.origin === 'ticketpulse') return Boolean(ticketingOn);
+  return Boolean(ticket.freshserviceTicketId); // FS-born → confirmed write-back
+};
+export const planStatusDrop = (ticket, overId, statusDefs = null) => {
+  const column = BOARD_COLUMNS.find((c) => c.key === overId);
+  if (!ticket || !column) return null;
+  if (makeBucketFor(statusDefs)(ticket.status) === column.key) return null; // same column (any member status) — no-op
+  // Dropping into a column always sets that column's BASE canonical status
+  // (column.status) — see the drag-out rule in the header comment.
+  return column.status;
+};
+
 // Anchor clicks on a card (QA 08-07 #7): plain left-click preventDefaults into
 // the card's own open/peek flow; Ctrl/Cmd/Shift/middle-click and the
 // right-click context menu keep NATIVE anchor behavior. Always stopPropagation
@@ -273,23 +293,12 @@ function TicketBoardInner({
     if (activeId && !byId.has(activeId)) setActiveId(null);
   }, [activeId, byId]);
 
-  const canDragTicket = (ticket) => {
-    const removedLike = ['Deleted', 'Spam'].includes(ticket.status);
-    if (removedLike) return false;
-    if (ticket.origin === 'ticketpulse') return Boolean(ticketingOn);
-    return Boolean(ticket.freshserviceTicketId); // FS-born → confirmed write-back
-  };
-
   const handleDragEnd = ({ active, over }) => {
     setActiveId(null);
     if (!over) return;
     const ticket = byId.get(String(active.id));
-    const column = BOARD_COLUMNS.find((c) => c.key === over.id);
-    if (!ticket || !column) return;
-    if (bucketFor(ticket.status) === column.key) return; // same column (any member status) — no-op
-    // Dropping into a column always sets that column's BASE canonical status
-    // (column.status) — see the drag-out rule in the header comment.
-    onStatusDrop?.(ticket, column.status);
+    const nextStatus = planStatusDrop(ticket, over.id, statusDefs);
+    if (nextStatus) onStatusDrop?.(ticket, nextStatus);
   };
 
   return (
@@ -329,7 +338,7 @@ function TicketBoardInner({
                 key={ticket.id}
                 ticket={ticket}
                 statusDefs={statusDefs}
-                canDrag={canDragTicket(ticket)}
+                canDrag={canDragTicket(ticket, ticketingOn)}
                 linkState={linkState}
                 onClick={onCardClick}
                 onDoubleClick={onCardDoubleClick}

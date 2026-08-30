@@ -253,7 +253,19 @@ const updateTicketSchema = z.object({
   // by emailListSchema; [] clears the list. Every reply to the requester
   // reaches them (unionReplyCc), the FS mirror carries them as cc_emails.
   ccEmails: emailListSchema.optional(),
+  // Requester change (Phase ET1, QA 08-27 #1): a known requester by id, or an
+  // email (resolved / created through the same resolveRequester ladder the
+  // create path uses — Entra-enriched when new). requesterName only matters
+  // alongside a new email (directory picks carry the display name).
+  requesterId: z.number().int().positive().optional(),
+  requesterEmail: z.string().trim().email().max(255).optional(),
+  requesterName: z.string().trim().max(255).optional(),
 }).strict();
+
+// FS-born edit surface (Phase ET2): subject / description / requester ride the
+// PUT-first/verify seam next to status/priority/assignee/category/cc.
+const fsSubjectSchema = z.string().trim().min(3).max(500);
+const fsDescriptionSchema = z.string().max(100000).nullable();
 
 const threadBodySchema = z.object({
   bodyHtml: z.string().max(200000).optional().nullable(),
@@ -2561,6 +2573,23 @@ class TicketService {
 
     const patch = {};
     const changes = {};
+    // Requester change (Phase ET1): resolve first (unknown id / bad email is
+    // a ValidationError before anything else is touched), repoint only when
+    // it actually differs, audit from→to with names so the timeline reads.
+    if (data.requesterId !== undefined || data.requesterEmail !== undefined) {
+      const nextRequester = await this.resolveRequester(workspaceId, {
+        requesterId: data.requesterId,
+        requesterEmail: data.requesterEmail,
+        requesterName: data.requesterName,
+      });
+      if (nextRequester.id !== ticket.requesterId) {
+        patch.requesterId = nextRequester.id;
+        changes.requester = {
+          from: ticket.requester ? { id: ticket.requester.id, name: ticket.requester.name, email: ticket.requester.email } : null,
+          to: { id: nextRequester.id, name: nextRequester.name, email: nextRequester.email },
+        };
+      }
+    }
     if (data.subject !== undefined && data.subject !== ticket.subject) {
       patch.subject = data.subject;
       changes.subject = { from: ticket.subject, to: data.subject };
@@ -2857,6 +2886,55 @@ class TicketService {
       }
     }
 
+    // Subject / description / requester on an FS-born ticket (Phase ET2, QA
+    // 08-27 #1): FS's PUT /tickets accepts all three; each rides the same
+    // write-first/verify seam. Description goes up as HTML (FS stores HTML +
+    // derives description_text); requester maps TP requester → FS requester
+    // id and refuses clearly when the person has no FreshService record.
+    if (input.subject !== undefined) {
+      const parsedSubject = fsSubjectSchema.safeParse(input.subject);
+      if (!parsedSubject.success) throw new ValidationError(zodMessage(parsedSubject.error));
+      if (parsedSubject.data !== ticket.subject) {
+        fsPayload.subject = parsedSubject.data;
+        localPatch.subject = parsedSubject.data;
+        changes.subject = { from: ticket.subject, to: parsedSubject.data };
+      }
+    }
+    let descriptionNormalized = null;
+    if (input.description !== undefined) {
+      const parsedDescription = fsDescriptionSchema.safeParse(input.description);
+      if (!parsedDescription.success) throw new ValidationError(zodMessage(parsedDescription.error));
+      descriptionNormalized = normalizeDescriptionInput(parsedDescription.data);
+      if (!descriptionNormalized.description) throw new ValidationError('Description cannot be emptied on a FreshService ticket');
+      if (descriptionNormalized.description !== ticket.description) {
+        fsPayload.description = descriptionNormalized.description;
+        localPatch.description = descriptionNormalized.description;
+        localPatch.descriptionText = descriptionNormalized.descriptionText;
+        changes.description = { changed: true };
+      }
+    }
+    if (input.requesterId !== undefined || input.requesterEmail !== undefined) {
+      if (input.requesterId !== undefined && !(Number.isInteger(Number(input.requesterId)) && Number(input.requesterId) > 0)) {
+        throw new ValidationError('requesterId must be a positive integer');
+      }
+      const nextRequester = await this.resolveRequester(workspaceId, {
+        requesterId: input.requesterId !== undefined ? Number(input.requesterId) : undefined,
+        requesterEmail: input.requesterEmail,
+        requesterName: input.requesterName,
+      });
+      if (nextRequester.id !== ticket.requesterId) {
+        if (!nextRequester.freshserviceId) {
+          throw new ValidationError(`${nextRequester.name || nextRequester.email} has no FreshService requester record, so FreshService cannot own this change — pick a requester who exists in FreshService, or change the requester in FreshService.`);
+        }
+        fsPayload.requester_id = Number(nextRequester.freshserviceId);
+        localPatch.requesterId = nextRequester.id;
+        changes.requester = {
+          from: ticket.requester ? { id: ticket.requester.id, name: ticket.requester.name, email: ticket.requester.email } : null,
+          to: { id: nextRequester.id, name: nextRequester.name, email: nextRequester.email },
+        };
+      }
+    }
+
     if (Object.keys(fsPayload).length === 0) {
       // Everything requested already matches (e.g. a retried status change) —
       // succeed as a no-op instead of erroring or re-writing FS.
@@ -2938,19 +3016,44 @@ class TicketService {
       if (String(cf[workspace.tpSkillCustomField] ?? '') !== String(fsPayload.custom_fields[workspace.tpSkillCustomField] ?? '')) rejected.push('category');
       if (String(cf[workspace.tpSubskillCustomField] ?? '') !== String(fsPayload.custom_fields[workspace.tpSubskillCustomField] ?? '')) rejected.push('subcategory');
     }
+    // Phase ET2 echo checks: subject exact; requester_id exact; description
+    // as whitespace-collapsed TEXT (FS re-serializes the HTML it stores, so a
+    // byte comparison would reject every accepted write) — when the echo
+    // carries neither description nor description_text the field is
+    // unverifiable and the write is trusted (logged), never rejected blindly.
+    if (fsPayload.subject !== undefined && String(fsTicket.subject ?? '') !== fsPayload.subject) rejected.push('subject');
+    if (fsPayload.requester_id !== undefined && String(fsTicket.requester_id ?? '') !== String(fsPayload.requester_id)) rejected.push('requester');
+    if (fsPayload.description !== undefined) {
+      const collapse = (s) => String(s || '').replace(/\s+/g, ' ').trim();
+      if (fsTicket.description === undefined && fsTicket.description_text === undefined) {
+        logger.warn(`FS write-back: #${ticket.freshserviceTicketId} echo carries no description — accepted unverified`);
+      } else {
+        const echoedText = collapse(fsTicket.description_text ?? stripHtml(fsTicket.description));
+        if (echoedText !== collapse(descriptionNormalized?.descriptionText)) rejected.push('description');
+      }
+    }
     if (rejected.length > 0) {
       throw new ValidationError(`FreshService did not accept: ${rejected.join(', ')} — nothing was changed in Ticket Pulse`);
     }
 
     // 3) FS confirmed — now mirror the same values locally. Resolution stamps
     //    key on the BASE status (Phase 8c) so custom terminal labels stamp too.
+    //    Leaving a terminal status (Phase MB5 — board reopen of an FS-born
+    //    ticket) clears the stamps and reopens the assignment episode exactly
+    //    like changeStatus does for TP-born tickets.
     const now = new Date();
+    let reopened = false;
     if (localPatch.status) {
       const newBase = await statusService.resolveBaseStatus(workspaceId, localPatch.status);
       const oldBase = await statusService.resolveBaseStatus(workspaceId, ticket.status);
       if (TERMINAL_STATUSES.includes(newBase) && !TERMINAL_STATUSES.includes(oldBase)) {
         localPatch.resolvedAt = ticket.resolvedAt || now;
         if (newBase === 'Closed') localPatch.closedAt = ticket.closedAt || now;
+      } else if (!TERMINAL_STATUSES.includes(newBase) && TERMINAL_STATUSES.includes(oldBase)) {
+        localPatch.resolvedAt = null;
+        localPatch.closedAt = null;
+        localPatch.resolutionTimeSeconds = null;
+        reopened = true;
       }
     }
     if (localPatch.assignedTechId) {
@@ -2966,9 +3069,23 @@ class TicketService {
       data: localPatch,
       include: TICKET_INCLUDE,
     });
+    if (reopened && updated.assignedTechId) {
+      await prisma.ticketAssignmentEpisode.create({
+        data: {
+          ticketId: ticket.id,
+          technicianId: updated.assignedTechId,
+          workspaceId,
+          startedAt: now,
+          startMethod: 'unknown',
+          startAssignedByName: actor?.name || null,
+        },
+      }).catch(() => { /* duplicate startedAt guard — harmless */ });
+    }
 
     await this._audit(ticket.id, 'fs_write_back', actor, { changes, fsTicketId: Number(ticket.freshserviceTicketId) });
     this._broadcast(workspaceId, 'fs_update', updated, { changes: Object.keys(changes) });
+    // Subject/description changed → the content embedding is stale (P5.2).
+    if (changes.subject || changes.description) this._refreshEmbedding(ticket.id, workspaceId);
     logger.info(`FS write-back OK for #${ticket.freshserviceTicketId} (ticket ${ticket.id}): ${Object.keys(changes).join(', ')} by ${actor?.email || 'unknown'}`);
     // Parity with assignTicket: a manual reassignment that overrode a completed
     // AI decision is flagged so the UI can ask for a one-click reason (the
