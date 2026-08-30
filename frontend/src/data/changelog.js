@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.8.01-preview';
+export const APP_VERSION = '3.8.02-preview';
 
 export const changelog = [
+  {
+    version: '3.8.02-preview',
+    date: 'August 30, 2026',
+    entries: [
+      { type: 'new', html: '<strong>🌙 Dark mode — Early access</strong> — choose Light, Dark or System from your account menu (desktop) or the More sheet (phone); System follows your OS live. Your choice is remembered on this device (no flash on reload) and seeds your other devices. Converted this release: the app frame — top bar, navigation rail, phone tab bar, command palette, health banners, loading screens — plus page backgrounds and panels. Tickets, Dashboard content, Settings content, Analytics charts, maps and modals keep their light styling for now (still readable) and convert next release. Login and public ticket pages stay light by design. (QA 08-27 #5)' },
+    ],
+  },
   {
     version: '3.8.01-preview',
     date: 'August 30, 2026',

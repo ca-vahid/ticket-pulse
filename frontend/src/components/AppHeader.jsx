@@ -27,6 +27,7 @@ import { APP_VERSION } from '../data/changelog';
 import { syncAPI } from '../services/api';
 import { NAV_DESTINATIONS, useCanAccessSettings, useWorkspaceRole } from './nav/navDestinations';
 import SideRail from './nav/SideRail';
+import ThemeControl from './nav/ThemeControl';
 import ChangelogModal from './ChangelogModal';
 
 // Slim top bar for desktop. Primary navigation lives in the fixed left
@@ -211,17 +212,17 @@ export default function AppHeader({
       <>
         <span className="truncate">{workspaceName}</span>
         {wsRole && (
-          <span className="flex-none rounded bg-blue-100 px-1 py-px text-[9px] font-bold uppercase tracking-wide">
+          <span className="flex-none rounded bg-blue-100 px-1 py-px text-[9px] dark:bg-blue-400/20 font-bold uppercase tracking-wide">
             {wsRole}
           </span>
         )}
-        {multi && <ChevronDown className={`h-3.5 w-3.5 flex-none text-blue-500 transition-transform ${workspaceMenuOpen ? 'rotate-180' : ''}`} />}
+        {multi && <ChevronDown className={`h-3.5 w-3.5 flex-none text-blue-500 transition-transform dark:text-blue-300 ${workspaceMenuOpen ? 'rotate-180' : ''}`} />}
       </>
     );
 
     if (!multi) {
       return (
-        <span className="inline-flex min-w-0 max-w-[15rem] items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700">
+        <span className="inline-flex min-w-0 max-w-[15rem] items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700 dark:border-blue-400/30 dark:bg-blue-500/15 dark:text-blue-200">
           {pillInner}
         </span>
       );
@@ -235,16 +236,16 @@ export default function AppHeader({
           aria-haspopup="menu"
           aria-expanded={workspaceMenuOpen}
           title="Switch workspace"
-          className="inline-flex min-w-0 max-w-[15rem] items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700 transition-colors hover:bg-blue-100 tp-focus-ring"
+          className="inline-flex min-w-0 max-w-[15rem] items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700 transition-colors hover:bg-blue-100 dark:border-blue-400/30 dark:bg-blue-500/15 dark:text-blue-200 dark:hover:bg-blue-500/25 tp-focus-ring"
         >
           {pillInner}
         </button>
         {workspaceMenuOpen && (
           <div
             role="menu"
-            className="absolute left-0 top-full z-50 mt-2 w-64 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-xl shadow-slate-900/10"
+            className="absolute left-0 top-full z-50 mt-2 w-64 overflow-hidden rounded-lg border border-border bg-card py-1 shadow-xl shadow-slate-900/10 dark:shadow-black/50"
           >
-            <p className="px-3 pb-1 pt-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">Workspace</p>
+            <p className="px-3 pb-1 pt-2 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Workspace</p>
             {availableWorkspaces.map((ws) => {
               const isCurrent = ws.id === currentWorkspace.id;
               return (
@@ -259,13 +260,13 @@ export default function AppHeader({
                     window.location.reload();
                   }}
                   aria-current={isCurrent ? 'true' : undefined}
-                  className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm hover:bg-slate-50 ${isCurrent ? 'font-semibold text-slate-900' : 'text-slate-700'}`}
+                  className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm hover:bg-muted ${isCurrent ? 'font-semibold text-foreground' : 'text-foreground/85'}`}
                 >
                   <span className="min-w-0 flex-1">
                     <span className="block truncate">{demoMode ? scrubDemoText(ws.name) : ws.name}</span>
-                    {ws.role && <span className="block text-[10px] uppercase tracking-wide text-slate-400">{ws.role}</span>}
+                    {ws.role && <span className="block text-[10px] uppercase tracking-wide text-muted-foreground">{ws.role}</span>}
                   </span>
-                  {isCurrent && <Check className="h-3.5 w-3.5 flex-none text-blue-600" />}
+                  {isCurrent && <Check className="h-3.5 w-3.5 flex-none text-primary" />}
                 </button>
               );
             })}
@@ -310,11 +311,13 @@ export default function AppHeader({
       : ladderState === 'connecting' ? 'connecting' : 'offline';
 
   const STATUS_PILL = {
-    live: 'border-emerald-200 bg-emerald-50/80 text-emerald-700 hover:bg-emerald-100/80',
-    sync: 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100',
-    poll: 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100',
-    connecting: 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100',
-    offline: 'border-red-200 bg-red-50 text-red-700 hover:bg-red-100',
+    // Accent tints have no token — the dark twins keep the same hue family at
+    // ~10–20% strength on the slate ground (Phase DM-A convention).
+    live: 'border-emerald-200 bg-emerald-50/80 text-emerald-700 hover:bg-emerald-100/80 dark:border-emerald-400/30 dark:bg-emerald-500/10 dark:text-emerald-300 dark:hover:bg-emerald-500/20',
+    sync: 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 dark:border-blue-400/30 dark:bg-blue-500/15 dark:text-blue-200 dark:hover:bg-blue-500/25',
+    poll: 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:border-amber-400/30 dark:bg-amber-500/10 dark:text-amber-300 dark:hover:bg-amber-500/20',
+    connecting: 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:border-amber-400/30 dark:bg-amber-500/10 dark:text-amber-300 dark:hover:bg-amber-500/20',
+    offline: 'border-red-200 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-400/30 dark:bg-red-500/10 dark:text-red-300 dark:hover:bg-red-500/20',
   };
 
   const STATUS_LABEL = {
@@ -383,10 +386,10 @@ export default function AppHeader({
             <RefreshCw className="h-3.5 w-3.5 animate-spin" />
             {syncPct !== null && (
               <svg className="absolute inset-0 h-4 w-4 -rotate-90" viewBox="0 0 20 20" aria-hidden="true">
-                <circle cx="10" cy="10" r="8" fill="none" stroke="#bfdbfe" strokeWidth="2.5" />
+                <circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" className="text-blue-200 dark:text-blue-400/30" strokeWidth="2.5" />
                 <circle
                   cx="10" cy="10" r="8" fill="none"
-                  stroke="#2563eb" strokeWidth="2.5"
+                  stroke="currentColor" className="text-blue-600 dark:text-blue-300" strokeWidth="2.5"
                   strokeDasharray={`${(syncPct / 100) * 2 * Math.PI * 8} ${2 * Math.PI * 8}`}
                   strokeLinecap="round"
                 />
@@ -413,12 +416,12 @@ export default function AppHeader({
       </button>
 
       {statusOpen && (
-        <div className="absolute right-0 top-full z-50 mt-2 w-72 rounded-lg border border-slate-200 bg-white p-3.5 text-xs text-slate-700 shadow-xl shadow-slate-900/10">
+        <div className="absolute right-0 top-full z-50 mt-2 w-72 rounded-lg border border-border bg-card p-3.5 text-xs text-foreground shadow-xl shadow-slate-900/10 dark:shadow-black/50">
           <div className="flex items-center justify-between py-1">
-            <span className="text-slate-400">Realtime feed</span>
+            <span className="text-muted-foreground">Realtime feed</span>
             <span className={`inline-flex items-center gap-1.5 font-semibold ${
-              ladderState === 'live-sse' ? 'text-emerald-600'
-                : ladderState === 'live-poll' || ladderState === 'connecting' ? 'text-amber-600' : 'text-red-600'
+              ladderState === 'live-sse' ? 'text-emerald-600 dark:text-emerald-400'
+                : ladderState === 'live-poll' || ladderState === 'connecting' ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400'
             }`}>
               {ladderState === 'live-sse' || ladderState === 'live-poll' ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
               {ladderState === 'live-sse' ? 'Live'
@@ -428,7 +431,7 @@ export default function AppHeader({
                 <button
                   type="button"
                   onClick={pillRetry}
-                  className="tp-focus-ring rounded border border-red-200 bg-red-50 px-1.5 py-0.5 font-semibold text-red-600 hover:bg-red-100"
+                  className="tp-focus-ring rounded border border-red-200 bg-red-50 px-1.5 py-0.5 font-semibold text-red-600 hover:bg-red-100 dark:border-red-400/30 dark:bg-red-500/10 dark:text-red-300 dark:hover:bg-red-500/20"
                 >
                   Reconnect
                 </button>
@@ -436,19 +439,19 @@ export default function AppHeader({
             </span>
           </div>
           {ladderState === 'live-poll' && (
-            <p className="mb-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-700">
+            <p className="mb-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-700 dark:border-amber-400/30 dark:bg-amber-500/10 dark:text-amber-200">
               Live stream unavailable on this network — updating automatically instead.
             </p>
           )}
           {/* Phase 3: the server closes a user's OLDEST stream past the
               per-user cap — say so instead of looking mysteriously offline. */}
           {ladderState === 'offline' && rtDiag?.reason === 'too-many-connections' && (
-            <p className="mb-1 rounded-md border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-medium text-red-700">
+            <p className="mb-1 rounded-md border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-medium text-red-700 dark:border-red-400/30 dark:bg-red-500/10 dark:text-red-200">
               Too many Ticket Pulse tabs are open for your account — this one was disconnected. Close unused tabs, then click Reconnect.
             </p>
           )}
           <div className="flex items-center justify-between py-1">
-            <span className="text-slate-400">Data refreshed</span>
+            <span className="text-muted-foreground">Data refreshed</span>
             <span className="font-medium">{lastUpdated ? new Date(lastUpdated).toLocaleString() : '—'}</span>
           </div>
           {/* Self-diagnosing rows (Phase 2): what support needs from one
@@ -456,19 +459,19 @@ export default function AppHeader({
           {rtDiag && (
             <>
               <div className="flex items-center justify-between py-1">
-                <span className="text-slate-400">Transport</span>
+                <span className="text-muted-foreground">Transport</span>
                 <span className="font-medium">{TRANSPORT_LABEL[pillTransport || rtDiag.transport] || '—'}</span>
               </div>
               <div className="flex items-center justify-between py-1">
-                <span className="text-slate-400">Last event</span>
+                <span className="text-muted-foreground">Last event</span>
                 <span className="font-medium">{formatEventAge(rtDiag.lastEventAt)}</span>
               </div>
               <div className="flex items-center justify-between py-1">
-                <span className="text-slate-400">Reconnects</span>
+                <span className="text-muted-foreground">Reconnects</span>
                 <span className="font-medium">{pillGetReconnectChurn ? pillGetReconnectChurn() : rtDiag.churn}</span>
               </div>
               <div className="flex items-center justify-between py-1">
-                <span className="text-slate-400">Channel</span>
+                <span className="text-muted-foreground">Channel</span>
                 <span className="font-medium">
                   {rtDiag.workspaceId != null
                     ? (rtDiag.workspaceId === currentWorkspace?.id ? `${workspaceName} (ws ${rtDiag.workspaceId})` : `ws ${rtDiag.workspaceId}`)
@@ -478,33 +481,33 @@ export default function AppHeader({
             </>
           )}
           <div className="flex items-center justify-between gap-3 py-1">
-            <span className="flex-none text-slate-400">Background sync</span>
+            <span className="flex-none text-muted-foreground">Background sync</span>
             {syncRowRunning ? (
               <span className="flex min-w-0 items-center gap-2">
-                <span className="truncate font-medium text-blue-700">{syncRowStep || 'Running…'}</span>
+                <span className="truncate font-medium text-blue-700 dark:text-blue-300">{syncRowStep || 'Running…'}</span>
                 {backgroundSyncRunning && (
                   <button
                     type="button"
                     onClick={onKillSync}
                     disabled={killingSync || !onKillSync}
-                    className="flex-none rounded border border-red-200 bg-red-50 px-1.5 py-0.5 font-semibold text-red-600 hover:bg-red-100 disabled:opacity-50"
+                    className="flex-none rounded border border-red-200 bg-red-50 px-1.5 py-0.5 font-semibold text-red-600 hover:bg-red-100 disabled:opacity-50 dark:border-red-400/30 dark:bg-red-500/10 dark:text-red-300 dark:hover:bg-red-500/20"
                   >
                     Stop
                   </button>
                 )}
               </span>
             ) : (
-              <span className="font-medium text-slate-500">Idle</span>
+              <span className="font-medium text-muted-foreground">Idle</span>
             )}
           </div>
 
           {canManageWorkspace && (dashboardActions ? (
-            <div className="mt-2 flex gap-2 border-t border-slate-100 pt-2.5">
+            <div className="mt-2 flex gap-2 border-t border-border pt-2.5">
               <button
                 type="button"
                 onClick={() => { setStatusOpen(false); dashboardActions.onRefresh(); }}
                 disabled={dashboardActions.refreshing || syncRowRunning}
-                className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2 py-1.5 font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-input bg-card px-2 py-1.5 font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <RefreshCw className="h-3.5 w-3.5" /> Sync now
               </button>
@@ -513,19 +516,19 @@ export default function AppHeader({
                 onClick={() => { setStatusOpen(false); dashboardActions.onSyncWeek(); }}
                 disabled={dashboardActions.refreshing || syncRowRunning}
                 title="Full detail sync for the current week"
-                className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2 py-1.5 font-semibold text-slate-700 transition-colors hover:border-blue-300 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-40"
+                className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-input bg-card px-2 py-1.5 font-semibold text-foreground transition-colors hover:border-primary/40 hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <Calendar className="h-3.5 w-3.5" /> Full week
               </button>
             </div>
           ) : (
-            <div className="mt-2 border-t border-slate-100 pt-2.5">
+            <div className="mt-2 border-t border-border pt-2.5">
               <button
                 type="button"
                 onClick={triggerManualSync}
                 disabled={manualSyncing || syncRowRunning}
                 title="Pull the latest tickets and changes from FreshService"
-                className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2 py-1.5 font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-input bg-card px-2 py-1.5 font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <RefreshCw className={`h-3.5 w-3.5 ${manualSyncing ? 'animate-spin' : ''}`} /> {manualSyncing ? 'Syncing…' : 'Sync now'}
               </button>
@@ -536,10 +539,10 @@ export default function AppHeader({
               role="status"
               className={`mt-2 rounded-md border px-2 py-1.5 text-[11px] font-medium ${
                 syncNotice.tone === 'ok'
-                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-400/30 dark:bg-emerald-500/10 dark:text-emerald-200'
                   : syncNotice.tone === 'warn'
-                    ? 'border-amber-200 bg-amber-50 text-amber-700'
-                    : 'border-red-200 bg-red-50 text-red-700'
+                    ? 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-400/30 dark:bg-amber-500/10 dark:text-amber-200'
+                    : 'border-red-200 bg-red-50 text-red-700 dark:border-red-400/30 dark:bg-red-500/10 dark:text-red-200'
               }`}
             >
               {syncNotice.text}
@@ -590,23 +593,23 @@ export default function AppHeader({
           onClick={() => { setUserMenuOpen((open) => !open); setWorkspaceMenuOpen(false); setStatusOpen(false); }}
           aria-haspopup="menu"
           aria-expanded={userMenuOpen}
-          className="inline-flex h-9 items-center gap-1 rounded-full border border-slate-200 bg-slate-100 pl-2.5 pr-2 text-xs font-bold text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-200 touch-manipulation tp-focus-ring"
+          className="inline-flex h-9 items-center gap-1 rounded-full border border-border bg-muted pl-2.5 pr-2 text-xs font-bold text-foreground transition-colors hover:border-input hover:bg-secondary touch-manipulation tp-focus-ring"
           title={displayUserName}
         >
-          <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white text-slate-700 shadow-sm">
+          <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-card text-foreground shadow-sm">
             {userInitials}
           </span>
-          <ChevronDown className={`h-4 w-4 text-slate-500 transition-transform ${userMenuOpen ? 'rotate-180' : ''}`} />
+          <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${userMenuOpen ? 'rotate-180' : ''}`} />
         </button>
 
         {userMenuOpen && (
           <div
             role="menu"
-            className="absolute right-0 top-full z-50 mt-2 w-60 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-xl shadow-slate-900/10"
+            className="absolute right-0 top-full z-50 mt-2 w-60 overflow-hidden rounded-lg border border-border bg-card py-1 shadow-xl shadow-slate-900/10 dark:shadow-black/50"
           >
-            <div className="border-b border-slate-100 px-3 py-2">
-              <p className="truncate text-sm font-semibold text-slate-900">{displayUserName}</p>
-              <p className="truncate text-xs text-slate-500">{user?.email || user?.username || wsRole}</p>
+            <div className="border-b border-border px-3 py-2">
+              <p className="truncate text-sm font-semibold text-foreground">{displayUserName}</p>
+              <p className="truncate text-xs text-muted-foreground">{user?.email || user?.username || wsRole}</p>
             </div>
 
             {menuItems.map(({ id, label, description, path, Icon }) => (
@@ -615,12 +618,12 @@ export default function AppHeader({
                 type="button"
                 role="menuitem"
                 onClick={() => navigateFromMenu(path)}
-                className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-foreground hover:bg-muted"
               >
-                <Icon className="h-4 w-4 text-slate-500" />
+                <Icon className="h-4 w-4 text-muted-foreground" />
                 <span className="min-w-0">
                   <span className="block font-semibold">{label}</span>
-                  <span className="block truncate text-xs text-slate-500">{description}</span>
+                  <span className="block truncate text-xs text-muted-foreground">{description}</span>
                 </span>
               </button>
             ))}
@@ -630,9 +633,9 @@ export default function AppHeader({
                 type="button"
                 role="menuitem"
                 onClick={() => navigateFromMenu('/settings')}
-                className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-foreground hover:bg-muted"
               >
-                <Settings className="h-4 w-4 text-slate-500" />
+                <Settings className="h-4 w-4 text-muted-foreground" />
                 <span className="font-semibold">Settings</span>
               </button>
             )}
@@ -641,25 +644,31 @@ export default function AppHeader({
               type="button"
               role="menuitem"
               onClick={() => { setUserMenuOpen(false); setShowChangelog(true); }}
-              className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+              className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-foreground hover:bg-muted"
             >
-              <Sparkles className="h-4 w-4 text-slate-500" />
+              <Sparkles className="h-4 w-4 text-muted-foreground" />
               <span className="min-w-0 flex-1">
                 <span className="block font-semibold">What&rsquo;s new</span>
-                <span className="block truncate text-xs text-slate-500">Changelog</span>
+                <span className="block truncate text-xs text-muted-foreground">Changelog</span>
               </span>
-              <span className="flex-none rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-600">
+              <span className="flex-none rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-600 dark:border-blue-400/30 dark:bg-blue-500/15 dark:text-blue-300">
                 v{APP_VERSION}
               </span>
             </button>
 
-            <div className="my-1 border-t border-slate-100" />
+            <div className="my-1 border-t border-border" />
+
+            {/* Theme (Phase DM-A): applies immediately and keeps the menu open
+                so the user can compare — never routed through navigateFromMenu. */}
+            <ThemeControl />
+
+            <div className="my-1 border-t border-border" />
 
             <button
               type="button"
               role="menuitem"
               onClick={handleLogout}
-              className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm font-semibold text-red-600 hover:bg-red-50"
+              className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm font-semibold text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10"
             >
               <LogOut className="h-4 w-4" />
               Sign out
@@ -675,7 +684,7 @@ export default function AppHeader({
       <SideRail />
 
       {/* Desktop bar — phones get no top chrome (MobileTabBar is the nav). */}
-      <header className="sticky top-0 z-40 hidden border-b border-gray-200 bg-white shadow-sm md:block">
+      <header className="sticky top-0 z-40 hidden border-b border-border bg-card shadow-sm md:block">
         <div className="flex items-center gap-3 px-4 py-2 lg:px-6">
           <div className="flex min-w-0 items-center gap-3">
             {renderWorkspaceControl()}
@@ -683,12 +692,12 @@ export default function AppHeader({
               type="button"
               onClick={() => setShowChangelog(true)}
               title="What's new — view changelog"
-              className="flex-none rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-600 transition-colors hover:bg-blue-100 tp-focus-ring"
+              className="flex-none rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-600 transition-colors hover:bg-blue-100 dark:border-blue-400/30 dark:bg-blue-500/15 dark:text-blue-300 dark:hover:bg-blue-500/25 tp-focus-ring"
             >
               v{APP_VERSION}
             </button>
             {pageTitle && (
-              <h1 className="hidden truncate text-sm font-bold tracking-tight text-slate-900 lg:block">{pageTitle}</h1>
+              <h1 className="hidden truncate text-sm font-bold tracking-tight text-foreground lg:block">{pageTitle}</h1>
             )}
           </div>
 
@@ -704,19 +713,19 @@ export default function AppHeader({
           exhausted) — the session may still point at the previous workspace,
           which is exactly the wrong-SSE-channel zombie setup. Surface it. */}
       {switchError && (
-        <div role="alert" className="flex items-center gap-3 border-b border-red-200 bg-red-50 px-4 py-1.5 text-xs text-red-700">
+        <div role="alert" className="flex items-center gap-3 border-b border-red-200 bg-red-50 px-4 py-1.5 text-xs text-red-700 dark:border-red-400/30 dark:bg-red-500/10 dark:text-red-200">
           <span className="min-w-0 flex-1 truncate font-medium">{switchError}</span>
           <button
             type="button"
             onClick={() => { retryWorkspaceSync?.(); }}
-            className="flex-none rounded border border-red-200 bg-white px-2 py-0.5 font-semibold text-red-600 transition-colors hover:bg-red-100 tp-focus-ring"
+            className="flex-none rounded border border-red-200 bg-card px-2 py-0.5 font-semibold text-red-600 transition-colors hover:bg-red-100 dark:border-red-400/30 dark:text-red-300 dark:hover:bg-red-500/20 tp-focus-ring"
           >
             Retry
           </button>
           <button
             type="button"
             onClick={() => clearSwitchError?.()}
-            className="flex-none rounded px-1.5 py-0.5 font-semibold text-red-500 transition-colors hover:bg-red-100 tp-focus-ring"
+            className="flex-none rounded px-1.5 py-0.5 font-semibold text-red-500 transition-colors hover:bg-red-100 dark:text-red-300 dark:hover:bg-red-500/20 tp-focus-ring"
           >
             Dismiss
           </button>
@@ -733,7 +742,7 @@ export default function AppHeader({
               <button
                 onClick={onKillSync}
                 disabled={killingSync || !onKillSync}
-                className="inline-flex h-8 w-8 flex-none items-center justify-center rounded-lg border border-blue-200 bg-blue-50 text-blue-700 touch-manipulation disabled:opacity-50"
+                className="inline-flex h-8 w-8 flex-none items-center justify-center rounded-lg border border-blue-200 bg-blue-50 text-blue-700 touch-manipulation disabled:opacity-50 dark:border-blue-400/30 dark:bg-blue-500/15 dark:text-blue-200"
                 title={backgroundSyncStep ? `Syncing: ${backgroundSyncStep} (tap to stop)` : 'Syncing... (tap to stop)'}
               >
                 <RefreshCw className="h-3.5 w-3.5 animate-spin" />

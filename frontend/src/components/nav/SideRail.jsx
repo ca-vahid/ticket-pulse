@@ -85,13 +85,13 @@ export default function SideRail() {
           'group/row relative mx-[9px] flex h-10 flex-none items-center gap-3 overflow-hidden whitespace-nowrap rounded-xl border px-[8px] text-left text-[12.5px] font-semibold transition-colors tp-focus-ring',
           isActive
             ? `${dest.tile} cursor-default`
-            : 'border-transparent text-slate-500 hover:bg-slate-100 hover:text-slate-800',
+            : 'border-transparent text-muted-foreground hover:bg-muted hover:text-foreground',
         )}
       >
         <span className="relative inline-flex h-5 w-5 flex-none items-center justify-center">
           <Icon className="h-5 w-5" />
           {dest.badgeKey === 'approvals' && approvalCount > 0 && (
-            <span className="absolute -top-1.5 -right-1.5 inline-flex h-[15px] min-w-[15px] items-center justify-center rounded-full bg-red-600 px-0.5 text-[8.5px] font-bold text-white shadow-sm ring-1 ring-white">
+            <span className="absolute -top-1.5 -right-1.5 inline-flex h-[15px] min-w-[15px] items-center justify-center rounded-full bg-red-600 px-0.5 text-[8.5px] font-bold text-white shadow-sm ring-1 ring-card">
               {approvalCount > 99 ? '99+' : approvalCount}
             </span>
           )}
@@ -109,7 +109,7 @@ export default function SideRail() {
       onClick={peek && !peekPinned ? () => setPeekPinned(true) : undefined}
       onMouseLeave={peekPinned ? () => setPeekPinned(false) : undefined}
       className={cn(
-        'tp-side-rail fixed inset-y-0 left-0 z-50 hidden flex-col gap-1 overflow-hidden border-r border-slate-200/80 bg-white/90 py-3 shadow-subtle backdrop-blur-md transition-[width] duration-200 ease-out hover:w-[210px] focus-within:w-[210px] motion-reduce:transition-none md:flex print:hidden',
+        'tp-side-rail fixed inset-y-0 left-0 z-50 hidden flex-col gap-1 overflow-hidden border-r border-border/80 bg-card/90 py-3 shadow-subtle backdrop-blur-md transition-[width] duration-200 ease-out hover:w-[210px] focus-within:w-[210px] motion-reduce:transition-none md:flex print:hidden',
         peek
           ? cn('tp-side-rail--peek', peekPinned ? 'tp-side-rail--peek-open w-[210px]' : 'w-[20px] cursor-pointer')
           : 'w-[58px]',
@@ -118,7 +118,7 @@ export default function SideRail() {
       {peek && (
         <span
           aria-hidden="true"
-          className="tp-rail-peek-hint pointer-events-none absolute inset-y-0 left-0 flex w-[20px] items-center justify-center rounded-r-md text-slate-500"
+          className="tp-rail-peek-hint pointer-events-none absolute inset-y-0 left-0 flex w-[20px] items-center justify-center rounded-r-md text-muted-foreground"
         >
           <ChevronsRight className="h-4 w-4" />
         </span>
@@ -132,7 +132,7 @@ export default function SideRail() {
           className="mx-[9px] mb-2 flex h-10 flex-none items-center gap-2.5 overflow-hidden whitespace-nowrap rounded-xl px-[4px] text-left tp-focus-ring"
         >
           <img src="/brand/logo-mark.png" alt="Ticket Pulse" className="h-8 w-8 flex-none object-contain" />
-          <span className="tp-rail-label text-[15px] font-extrabold tracking-tight text-slate-900">ticket pulse</span>
+          <span className="tp-rail-label text-[15px] font-extrabold tracking-tight text-foreground">ticket pulse</span>
         </button>
 
         <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overflow-x-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
@@ -148,8 +148,8 @@ export default function SideRail() {
             className={cn(
               'mx-[9px] mt-1 flex h-10 flex-none items-center gap-3 overflow-hidden whitespace-nowrap rounded-xl border px-[8px] text-left text-[12.5px] font-semibold transition-colors tp-focus-ring',
               settingsActive
-                ? 'border-slate-300 bg-slate-100 text-slate-700 cursor-default'
-                : 'border-transparent text-slate-500 hover:bg-slate-100 hover:text-slate-800',
+                ? 'border-input bg-muted text-foreground cursor-default'
+                : 'border-transparent text-muted-foreground hover:bg-muted hover:text-foreground',
             )}
           >
             <span className="inline-flex h-5 w-5 flex-none items-center justify-center">
@@ -166,7 +166,7 @@ export default function SideRail() {
             type="button"
             onClick={(e) => { e.stopPropagation(); setPeekPinned(false); setCollapsed(!railCollapsed); }}
             title={railCollapsed ? 'Keep the navigation expanded' : 'Collapse the navigation to a thin edge'}
-            className="mx-[9px] mt-1 flex h-9 flex-none items-center gap-3 overflow-hidden whitespace-nowrap rounded-xl border border-transparent px-[8px] text-left text-[12px] font-semibold text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 tp-focus-ring"
+            className="mx-[9px] mt-1 flex h-9 flex-none items-center gap-3 overflow-hidden whitespace-nowrap rounded-xl border border-transparent px-[8px] text-left text-[12px] font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground tp-focus-ring"
           >
             <span className="inline-flex h-5 w-5 flex-none items-center justify-center">
               {railCollapsed ? <ChevronsRight className="h-[18px] w-[18px]" /> : <ChevronsLeft className="h-[18px] w-[18px]" />}

@@ -38,7 +38,7 @@ export default function AccessBounceToast() {
     <div
       role="status"
       aria-live="polite"
-      className="fixed bottom-20 left-1/2 z-[9997] w-[min(92vw,420px)] -translate-x-1/2 rounded-xl border border-amber-200 bg-amber-50 p-3 pr-9 text-sm text-amber-900 shadow-soft animate-fadeIn md:bottom-6"
+      className="fixed bottom-20 left-1/2 z-[9997] w-[min(92vw,420px)] -translate-x-1/2 rounded-xl border border-amber-200 bg-amber-50 p-3 pr-9 text-sm text-amber-900 shadow-soft animate-fadeIn md:bottom-6 dark:border-amber-400/40 dark:bg-amber-500/15 dark:text-amber-100"
     >
       <div className="flex items-start gap-2.5">
         <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" aria-hidden="true" />

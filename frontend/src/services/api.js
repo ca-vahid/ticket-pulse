@@ -54,6 +54,11 @@ export function getAuthToken() {
 
 export function setWorkspaceId(id) {
   _workspaceId = id;
+  // Announce it: providers mounted OUTSIDE the workspace context (ThemeContext
+  // seeds a per-user preference) wait for this instead of guessing at boot.
+  if (typeof window !== 'undefined' && id) {
+    window.dispatchEvent(new CustomEvent('tp:workspace-selected', { detail: { id } }));
+  }
 }
 
 export function getWorkspaceId() {
@@ -1145,6 +1150,16 @@ export const ticketsAPI = {
   testMailbox: async (id) => {
     return await api.post(`/tickets/mailboxes/${id}/test`);
   },
+};
+
+/**
+ * Same per-user preference store, for app-chrome preferences (Phase DM-A:
+ * 'ui.theme'). Marked speculative: a stray 401 (the theme seed racing
+ * sign-in) must never trip the AuthContext recovery loop.
+ */
+export const uiPreferencesAPI = {
+  get: (key) => api.get(`/tickets/preferences/${encodeURIComponent(key)}`, { _speculative: true }),
+  set: (key, value) => api.put(`/tickets/preferences/${encodeURIComponent(key)}`, { value }, { _speculative: true }),
 };
 
 /**

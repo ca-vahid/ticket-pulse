@@ -9,6 +9,25 @@
     <link rel="icon" type="image/png" sizes="192x192" href="/brand/favicon-192.png" />
     <link rel="icon" type="image/png" sizes="512x512" href="/brand/favicon-512.png" />
     <meta name="theme-color" content="#0f172a" />
+    <!-- Theme pre-paint (Phase DM-A): main.jsx renders only after the async
+         MSAL initialize(), so the stored choice ('tp_theme': system|light|dark,
+         system = the OS preference) is stamped on <html> here, before the
+         first paint — no white flash on a dark reload. ThemeContext keeps it
+         in sync afterwards. Keep this before /src/main.jsx. -->
+    <style>html.dark { background: #090e1a; color-scheme: dark; }</style>
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem('tp_theme');
+          var dark = t === 'dark' || (t !== 'light' && !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches));
+          if (dark) {
+            document.documentElement.classList.add('dark');
+            var m = document.querySelector('meta[name="theme-color"]');
+            if (m) m.setAttribute('content', '#090e1a');
+          }
+        } catch (e) { /* storage blocked: light default */ }
+      })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Ticket Pulse - FreshService Dashboard</title>
   </head>

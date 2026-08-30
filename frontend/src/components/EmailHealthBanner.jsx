@@ -51,7 +51,7 @@ export default function EmailHealthBanner() {
       role="alert"
       aria-live="assertive"
     >
-      <div className="flex items-start gap-3 rounded-xl border border-red-300 bg-red-600 p-3.5 text-white shadow-lg">
+      <div className="flex items-start gap-3 rounded-xl border border-red-300 bg-red-600 p-3.5 text-white shadow-lg dark:border-red-400/60 dark:shadow-black/50">
         <MailWarning className="mt-0.5 h-5 w-5 flex-shrink-0" />
         <div className="min-w-0 text-sm">
           <div className="font-semibold">Email delivery is failing</div>

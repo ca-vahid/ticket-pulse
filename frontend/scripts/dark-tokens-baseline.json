@@ -1,0 +1,17 @@
+{
+  "src/App.jsx": 0,
+  "src/components/AppShell.jsx": 0,
+  "src/components/AppHeader.jsx": 0,
+  "src/components/CommandPalette.jsx": 0,
+  "src/components/DemoModeBanner.jsx": 0,
+  "src/components/SyncHealthBanner.jsx": 0,
+  "src/components/EmailHealthBanner.jsx": 0,
+  "src/components/nav/AccessBounceToast.jsx": 0,
+  "src/components/nav/AdminRoute.jsx": 0,
+  "src/components/nav/MobileTabBar.jsx": 0,
+  "src/components/nav/navDestinations.jsx": 0,
+  "src/components/nav/NavIcons.jsx": 0,
+  "src/components/nav/SideRail.jsx": 0,
+  "src/components/nav/ThemeControl.jsx": 0,
+  "src/contexts/ThemeContext.jsx": 0
+}

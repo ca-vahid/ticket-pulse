@@ -1,11 +1,12 @@
 import AppHeader from './AppHeader';
 import MobileTabBar from './nav/MobileTabBar';
 
-export const APP_BACKGROUND_STYLE = {
-  backgroundImage: 'url(/brand/dashboard-background.webp)',
-};
+// Ground art is class-driven (`.tp-app-backdrop` in index.css picks the light
+// photo or the DM0 dark contour texture under `.dark`), so no inline style is
+// needed any more. The STYLE export stays for callers that spread it.
+export const APP_BACKGROUND_STYLE = {};
 
-export const APP_BACKGROUND_CLASS = 'bg-gray-100 bg-no-repeat bg-cover bg-fixed';
+export const APP_BACKGROUND_CLASS = 'tp-app-backdrop bg-background bg-no-repeat bg-cover bg-fixed';
 
 // Reserves room for the fixed mobile tab bar (md:hidden) so content isn't
 // hidden behind it; collapses to nothing from md upward.

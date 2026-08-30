@@ -113,6 +113,13 @@ describe('GET /api/tickets/preferences/:key', () => {
     await request(buildApp()).get('/api/tickets/preferences/queue.columnWidths').expect(200);
     expect(prismaMock.userPreference.findUnique).toHaveBeenCalledWith({ where: WHERE_KEY('queue.columnWidths') });
   });
+
+  test('ui.theme is on the allowlist (Phase DM-A cross-device seed)', async () => {
+    prismaMock.userPreference.findUnique.mockResolvedValue({ id: 9, value: 'dark' });
+    const res = await request(buildApp()).get('/api/tickets/preferences/ui.theme').expect(200);
+    expect(res.body.data).toEqual({ key: 'ui.theme', value: 'dark' });
+    expect(prismaMock.userPreference.findUnique).toHaveBeenCalledWith({ where: WHERE_KEY('ui.theme') });
+  });
 });
 
 describe('PUT /api/tickets/preferences/:key', () => {
@@ -150,6 +157,30 @@ describe('PUT /api/tickets/preferences/:key', () => {
       update: { value },
       create: { workspaceId: 7, ownerEmail: 'ada@x.io', key: 'queue.columns', value },
     });
+  });
+
+  test.each(['system', 'light', 'dark'])('ui.theme accepts %s', async (value) => {
+    const res = await request(buildApp()).put('/api/tickets/preferences/ui.theme').send({ value }).expect(200);
+    expect(res.body.data).toEqual({ key: 'ui.theme', value });
+    expect(prismaMock.userPreference.upsert).toHaveBeenCalledWith(expect.objectContaining({ where: WHERE_KEY('ui.theme'), update: { value } }));
+  });
+
+  test.each([
+    ['a foreign string', 'sepia'],
+    ['wrong case', 'Dark'],
+    ['an object', { theme: 'dark' }],
+    ['an array', ['dark']],
+    ['a number', 1],
+    ['an empty string', ''],
+  ])('ui.theme rejects %s → 400, nothing written', async (_label, value) => {
+    const res = await request(buildApp()).put('/api/tickets/preferences/ui.theme').send({ value }).expect(400);
+    expect(res.body.message).toMatch(/not allowed for ui\.theme/i);
+    expect(prismaMock.userPreference.upsert).not.toHaveBeenCalled();
+  });
+
+  test('the validator is per key — queue.columns still takes arbitrary JSON', async () => {
+    await request(buildApp()).put('/api/tickets/preferences/queue.columns').send({ value: 'sepia' }).expect(200);
+    expect(prismaMock.userPreference.upsert).toHaveBeenCalledTimes(1);
   });
 
   test('non-admin members write under their OWN email (actor scoping, not body-controlled)', async () => {

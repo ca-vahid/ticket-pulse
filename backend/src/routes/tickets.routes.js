@@ -188,7 +188,10 @@ router.delete('/saved-views/:id', asyncHandler(async (req, res) => {
 // posture as an unknown route) and values are size-capped: this is a
 // preference store, not a document store.
 
-const PREFERENCE_KEYS = new Set(['queue.columns', 'queue.columnWidths']);
+const PREFERENCE_KEYS = new Set(['queue.columns', 'queue.columnWidths', 'ui.theme']);
+// Closed-vocabulary keys get a value validator (Phase DM-A: 'ui.theme' is one
+// of three strings — the cross-device seed for the theme choice).
+const PREFERENCE_VALIDATORS = { 'ui.theme': (v) => ['system', 'light', 'dark'].includes(v) };
 const PREFERENCE_VALUE_MAX_BYTES = 8 * 1024;
 
 function parsePreferenceKey(req) {
@@ -221,6 +224,9 @@ router.put('/preferences/:key', asyncHandler(async (req, res) => {
   }
   if (!Number.isFinite(bytes) || bytes > PREFERENCE_VALUE_MAX_BYTES) {
     return res.status(400).json({ success: false, message: `value too large (max ${PREFERENCE_VALUE_MAX_BYTES} bytes)` });
+  }
+  if (PREFERENCE_VALIDATORS[key] && !PREFERENCE_VALIDATORS[key](value)) {
+    return res.status(400).json({ success: false, message: `value not allowed for ${key}` });
   }
   const where = { workspaceId_ownerEmail_key: { workspaceId: req.workspaceId, ownerEmail: req.ticketActor.email, key } };
   const row = await prisma.userPreference.upsert({

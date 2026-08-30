@@ -67,13 +67,13 @@ export default function SyncHealthBanner() {
 
   return (
     <div className="max-w-sm animate-fadeIn" role="alert" aria-live="assertive">
-      <div className="flex items-start gap-3 rounded-xl border border-amber-300 bg-white p-3.5 text-slate-800 shadow-lg">
-        <DatabaseZap className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-600" />
+      <div className="flex items-start gap-3 rounded-xl border border-amber-300 bg-card p-3.5 text-foreground shadow-lg dark:border-amber-400/40 dark:shadow-black/50">
+        <DatabaseZap className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-600 dark:text-amber-400" />
         <div className="min-w-0 text-sm">
           <div className="font-semibold">
             {allRunning ? 'FreshService sync is catching up' : 'FreshService sync is stale'}
           </div>
-          <p className="mt-0.5 text-slate-600">
+          <p className="mt-0.5 text-muted-foreground">
             {stale.length === 1 ? `${names} hasn't` : `${names} haven't`} completed a sync in over 3× the schedule.
             {allRunning
               ? ' A sync is running now — data should refresh shortly.'
@@ -81,7 +81,7 @@ export default function SyncHealthBanner() {
           </p>
           <Link
             to="/settings#notification-providers"
-            className="mt-1.5 inline-block font-semibold text-amber-700 underline underline-offset-2 hover:text-amber-800"
+            className="mt-1.5 inline-block font-semibold text-amber-700 underline underline-offset-2 hover:text-amber-800 dark:text-amber-300 dark:hover:text-amber-200"
           >
             View sync freshness →
           </Link>
@@ -89,7 +89,7 @@ export default function SyncHealthBanner() {
         <button
           type="button"
           onClick={() => setDismissedKey(incidentKey)}
-          className="tp-focus-ring flex-shrink-0 rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+          className="tp-focus-ring flex-shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
           aria-label="Dismiss"
         >
           <X className="h-4 w-4" />
