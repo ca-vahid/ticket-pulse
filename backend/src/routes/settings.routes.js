@@ -312,11 +312,15 @@ router.put(
   requireAdmin,
   asyncHandler(async (req, res) => {
     validateFromDisplayName(req.body?.fromName, 'From display name');
-    const identity = await upsertSenderIdentity(
-      req.workspaceId,
-      { fromName: req.body?.fromName },
-      requestActor(req),
-    );
+    if (req.body?.replyUsesAgentName !== undefined && typeof req.body.replyUsesAgentName !== 'boolean') {
+      throw new ValidationError('replyUsesAgentName must be true or false');
+    }
+    // Partial patch: only the keys the client sent are touched — a toggle
+    // flip must not clear the display-name override and vice versa (SN2).
+    const patch = {};
+    if (req.body?.fromName !== undefined) patch.fromName = req.body.fromName;
+    if (typeof req.body?.replyUsesAgentName === 'boolean') patch.replyUsesAgentName = req.body.replyUsesAgentName;
+    const identity = await upsertSenderIdentity(req.workspaceId, patch, requestActor(req));
     res.json({ success: true, data: identity });
   }),
 );

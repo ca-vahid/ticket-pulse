@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
-import { ChevronDown, ChevronRight, Columns3, CornerUpRight, GripVertical, MoveHorizontal, RotateCcw, Sparkles } from 'lucide-react';
+import { ChevronDown, ChevronRight, Columns3, CornerUpRight, GripVertical, Loader2, MoveHorizontal, RotateCcw, Sparkles } from 'lucide-react';
 import AssigneePicker from './AssigneePicker';
 import StatusPicker from './StatusPicker';
 import {
-  AgentFirstName, PersonAvatar, SlaChip, StatusPill, UnassignedBadge,
+  AgentFirstName, PersonAvatar, PriorityDot, QueueStatePill, SlaChip, StatusPill, UnassignedBadge,
+  PRIORITY_LABELS, QUEUE_STATE_NOTE,
   formatDayTime, ticketCategoryLabels, ticketSourceLabel, timeAgo, timeAgoShort,
 } from './ticketUi';
 import { baseStatusOf, statusToneFromDefs } from './statusDefs';
@@ -29,6 +31,8 @@ import { ticketsAPI } from '../../services/api';
  *   canReview, canSeeAi                                     role bits
  *   fx, aiLive, aiProgress, isEditable, fsRowEditable,
  *   removedLike, resolvedLike, ticketHref, linkState        row bits
+ *   priorityColumnOn   the Priority column is in the user's set (Phase QX) —
+ *                      Tickets.jsx hides the subject-line dot at xl when so
  *   refreshAfterEdit, showToast, setAiTicket, fsAssign,
  *   fsStatusChange, onManualAssigned, onOpenFull            handlers
  */
@@ -469,6 +473,140 @@ function renderGroup(ticket, ctx) {
   );
 }
 
+/**
+ * Inline priority dropdown for TP-born rows (FS-born rows stay read-only).
+ * Lifted out of Tickets.jsx in Phase QX so the subject line AND the optional
+ * Priority column share one picker. The menu renders in a body portal
+ * (fixed, flip-up near the viewport bottom — the StatusPicker recipe) so the
+ * list card's overflow-hidden can never clip it on the last row.
+ * `withLabel` shows the priority word beside the dot (the column form).
+ */
+export function InlinePriorityPicker({ ticket, onChanged, withLabel = false }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const rootRef = useRef(null);
+  const panelRef = useRef(null);
+  const [panelPos, setPanelPos] = useState(null);
+
+  const place = () => {
+    const rect = rootRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const PANEL_W = 128;
+    const left = Math.min(rect.left, window.innerWidth - PANEL_W - 8);
+    const spaceBelow = window.innerHeight - rect.bottom;
+    if (spaceBelow < 150 && rect.top > spaceBelow) setPanelPos({ left, bottom: window.innerHeight - rect.top + 4 });
+    else setPanelPos({ left, top: rect.bottom + 4 });
+  };
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDoc = (e) => {
+      if (rootRef.current?.contains(e.target) || panelRef.current?.contains(e.target)) return;
+      setOpen(false);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); } };
+    const onMove = () => place();
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey, true);
+    window.addEventListener('scroll', onMove, true);
+    window.addEventListener('resize', onMove);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('scroll', onMove, true);
+      window.removeEventListener('resize', onMove);
+    };
+  }, [open]);
+
+  useLayoutEffect(() => { if (open) place(); }, [open]);
+  useEffect(() => { if (!open) setPanelPos(null); }, [open]);
+
+  const pick = async (p) => {
+    setBusy(true);
+    try {
+      await ticketsAPI.update(ticket.id, { priority: p });
+      onChanged?.();
+    } catch { /* silent refresh shows the real state */ }
+    setBusy(false);
+    setOpen(false);
+  };
+
+  const currentLabel = PRIORITY_LABELS[ticket.priority] || ticket.priority;
+  return (
+    <span
+      ref={rootRef}
+      className="relative inline-flex max-w-full min-w-0"
+      onClick={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+    >
+      <button
+        onClick={() => setOpen((v) => !v)}
+        title="Change priority"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={`Priority ${currentLabel} — change`}
+        className="tp-focus-ring rounded-md p-1 -m-1 hover:bg-blue-100/60 inline-flex max-w-full min-w-0 items-center"
+      >
+        {busy
+          ? <Loader2 className="w-3 h-3 animate-spin text-slate-400" aria-hidden="true" />
+          : <PriorityDot priority={ticket.priority} withLabel={withLabel} />}
+      </button>
+      {open && panelPos && createPortal(
+        <span
+          ref={panelRef}
+          role="listbox"
+          aria-label="Change priority"
+          className="fixed z-[60] w-32 tp-card rounded-lg shadow-soft p-1 flex flex-col animate-scaleIn"
+          style={panelPos}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {[1, 2, 3, 4].map((p) => (
+            <button
+              key={p}
+              role="option"
+              aria-selected={ticket.priority === p}
+              onClick={() => pick(p)}
+              className={`tp-focus-ring px-2 py-1 text-xs rounded-md hover:bg-blue-50 text-left ${ticket.priority === p ? 'bg-blue-50' : ''}`}
+            >
+              <PriorityDot priority={p} withLabel />
+            </button>
+          ))}
+        </span>,
+        document.body,
+      )}
+    </span>
+  );
+}
+
+// Priority column (Phase QX — QA 08-27 #2): dot + word. TP-born rows get the
+// same picker the subject line uses (origin-aware editing); FS-born rows are
+// read-only with the FreshService note in the tooltip.
+function renderPriority(ticket, ctx) {
+  const label = PRIORITY_LABELS[ticket.priority] || `P${ticket.priority}`;
+  return (
+    <span className={`${ctx.cell('priority')} py-1`} style={ctx.cellStyle('priority')}>
+      {ctx.isEditable
+        ? <InlinePriorityPicker ticket={ticket} onChanged={ctx.refreshAfterEdit} withLabel />
+        : <PriorityDot priority={ticket.priority} withLabel title={`Priority: ${label} — synced from FreshService, read-only here`} />}
+    </span>
+  );
+}
+
+// State column (Phase QX — QA 08-27 #3): the server-derived FS-style "who
+// acts next" state (`ticket.state`, ticketService.deriveQueueState). The pill
+// carries the per-state derivation + the incomplete-history caveat in its
+// tooltip; the header repeats the precedence. No server sort: it is derived
+// per page from thread + SLA data, not stored — if a sort is ever demanded,
+// follow the `_statusRankedPage` bucket pattern in ticketService.
+export const STATE_COLUMN_TITLE = `Who acts next — Requester replied › Response due › New. Resolved, closed and paused (Pending) tickets show "—". ${QUEUE_STATE_NOTE}`;
+function renderState(ticket, ctx) {
+  return (
+    <span className={`${ctx.cell('state')} py-1`} style={ctx.cellStyle('state')}>
+      <QueueStatePill state={ticket.state} />
+    </span>
+  );
+}
+
 // ---------------------------------------------------------------- registry
 
 /**
@@ -491,6 +629,17 @@ export const QUEUE_COLUMNS = [
   { key: 'category', label: 'Category', defaultOn: true, sortField: null, track: 'minmax(150px,1fr)', minPx: 120, mdEssential: true, render: renderCategory },
   { key: 'assignee', label: 'Assignee', defaultOn: true, sortField: null, track: '210px', minPx: 150, mdEssential: true, render: renderAssignee },
   { key: 'status', label: 'Status', defaultOn: true, sortField: 'status', headerTitle: 'Sort by status (Open first)', track: '116px', minPx: 90, mdEssential: true, render: renderStatus },
+  // Phase QX (QA 08-27 #2/#3): opt-in, so an untouched user still sees zero
+  // change (normalizeColumnKeys keeps stored sets intact; defaultOn false).
+  // priority sorts server-side (already whitelisted; desc-first = Urgent
+  // first via ASC_FIRST_SORTS exclusion in Tickets.jsx). state has NO server
+  // sort — derived per page (see renderState); slice via the Awaiting/
+  // Overdue quick cards instead.
+  { key: 'priority', label: 'Priority', defaultOn: false, sortField: 'priority', headerTitle: 'Sort by priority (Urgent first)', track: '96px', minPx: 72, render: renderPriority },
+  // 148px: "Requester replied" (the longest pill) needs ~123px of pill plus the
+  // cell padding — at the planned 124px it truncated to "Requester repl…" in
+  // the dev-stack screenshots. Users can still drag it down to minPx.
+  { key: 'state', label: 'State', defaultOn: false, sortField: null, headerTitle: STATE_COLUMN_TITLE, track: '148px', minPx: 96, render: renderState },
   { key: 'due', label: 'Due', defaultOn: true, sortField: 'dueBy', headerTitle: 'Sort by due date (soonest first)', track: '88px', minPx: 70, mdEssential: true, render: renderDue },
   { key: 'lastActivity', label: 'Updated', defaultOn: true, sortField: 'updatedAt', track: '74px', minPx: 60, headerClass: 'justify-end', render: renderLastActivity },
   { key: 'createdAt', label: 'Created', defaultOn: false, sortField: 'createdAt', headerTitle: 'Sort by created date', track: '124px', minPx: 100, render: renderCreatedAt },

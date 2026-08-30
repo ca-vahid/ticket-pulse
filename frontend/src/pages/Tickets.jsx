@@ -23,7 +23,7 @@ import {
 } from '../components/tickets/ticketUi';
 import { isTerminalStatus, statusDefsFromMeta, statusNamesForBase, statusToneFromDefs } from '../components/tickets/statusDefs';
 import {
-  BypassBadge, CELL, ColumnResizeHandle, DEFAULT_COLUMN_KEYS, QUEUE_COLUMNS, QueueColumnsMenu,
+  BypassBadge, CELL, ColumnResizeHandle, DEFAULT_COLUMN_KEYS, InlinePriorityPicker, QUEUE_COLUMNS, QueueColumnsMenu,
   buildQueueGridMinWidth, buildQueueGridTemplate, isModifiedClick, normalizeColumnKeys, useColumnWidths,
 } from '../components/tickets/queueColumns';
 import { QUEUE_CARD_REGISTRY, normalizeQueueCards } from '../components/tickets/queueCards';
@@ -89,63 +89,6 @@ const ASC_FIRST_SORTS = new Set(['status', 'dueBy', 'source', 'department']);
 // band has no width budget, 08-04 sweep) and mobile cards are untouched.
 const GRID_COMPACT = 'grid md:grid-cols-[6px_minmax(0,2.4fr)_minmax(100px,0.8fr)_118px_96px_84px] xl:[grid-template-columns:var(--tp-q-grid)] items-center';
 const GRID_ROOMY = 'grid md:grid-cols-[6px_60px_minmax(100px,1fr)_118px_96px_84px] xl:[grid-template-columns:var(--tp-q-grid)] items-stretch';
-
-/** Inline priority dropdown for TP-born rows (FS-born rows stay read-only). */
-function InlinePriorityPicker({ ticket, onChanged }) {
-  const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const rootRef = useRef(null);
-
-  useEffect(() => {
-    if (!open) return undefined;
-    const onDoc = (e) => { if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false); };
-    document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
-  }, [open]);
-
-  const pick = async (p) => {
-    setBusy(true);
-    try {
-      await ticketsAPI.update(ticket.id, { priority: p });
-      onChanged?.();
-    } catch { /* silent refresh shows the real state */ }
-    setBusy(false);
-    setOpen(false);
-  };
-
-  return (
-    <span
-      ref={rootRef}
-      className="relative inline-flex"
-      onClick={(e) => e.stopPropagation()}
-      onDoubleClick={(e) => e.stopPropagation()}
-    >
-      <button
-        onClick={() => setOpen((v) => !v)}
-        title="Change priority"
-        aria-label={`Priority ${PRIORITY_LABELS[ticket.priority] || ticket.priority} — change`}
-        className="tp-focus-ring rounded-md p-1 -m-1 hover:bg-blue-100/60"
-      >
-        {busy
-          ? <Loader2 className="w-3 h-3 animate-spin text-slate-400" aria-hidden="true" />
-          : <PriorityDot priority={ticket.priority} />}
-      </button>
-      {open && (
-        <span className="absolute left-0 top-full mt-1 z-30 w-28 tp-card rounded-lg shadow-soft p-1 flex flex-col">
-          {[1, 2, 3, 4].map((p) => (
-            <button
-              key={p}
-              onClick={() => pick(p)}
-              className={`tp-focus-ring px-2 py-1 text-xs rounded-md hover:bg-blue-50 text-left ${ticket.priority === p ? 'bg-blue-50' : ''}`}
-            >
-              <PriorityDot priority={p} withLabel />
-            </button>
-          ))}
-        </span>
-      )}
-    </span>
-  );
-}
 
 function pageWindow(current, total) {
   const pages = new Set([1, total]);
@@ -1240,6 +1183,10 @@ export default function Tickets() {
     el.style.setProperty('--tp-q-minw', `${buildQueueGridMinWidth(columnKeys, { roomy, widths }) + 36}px`);
   }, [columnKeys, roomy, colWidths]);
   const rowColumns = useMemo(() => QUEUE_COLUMNS.filter((c) => c.render && colMeta[c.key]?.render), [colMeta]);
+  // Phase QX: with the Priority column on, the subject line drops its dot at
+  // xl (the column carries dot + word); below xl the column never renders
+  // (not an md essential), so the dot stays there. Mobile cards keep theirs.
+  const priorityColumnOn = columnKeys.includes('priority');
   const headerColumns = useMemo(() => QUEUE_COLUMNS.filter((c) => c.key !== 'subject' && colMeta[c.key]?.headerRender), [colMeta]);
   const headerPad = roomy ? 'py-2' : cellPad;
   const headerCell = (col) => (
@@ -1252,6 +1199,10 @@ export default function Tickets() {
         >
           {col.label}{sortIndicator(col.sortField)}
         </button>
+      ) : col.headerTitle ? (
+        /* Unsortable but explained (State, Phase QX): the derivation lives on
+           the header tooltip so the "why no sort?" question answers itself. */
+        <span title={col.headerTitle} className="cursor-help">{col.label}</span>
       ) : col.label}
       <ColumnResizeHandle
         colKey={col.key}
@@ -1664,7 +1615,12 @@ export default function Tickets() {
                             )}
                           </div>
 
-                          <ul className="divide-y divide-slate-100">
+                          {/* Row dividers ride the --border token (Phase QX, QA 08-27 #4):
+                              slate-100 on white measured ≈1.08:1 — invisible on most
+                              panels; the token (214 32% 88%) lands ≈1.25:1. Decorative
+                              lines, so this is "measurably more visible", not a WCAG
+                              claim. Mobile cards share these <li>s — one change, both. */}
+                          <ul className="divide-y divide-border">
                             {tickets.map((ticket) => {
                               const previewing = previewId === ticket.id;
                               // The AI assignment pipeline is deciding this ticket RIGHT NOW —
@@ -1697,9 +1653,12 @@ export default function Tickets() {
                               //      one tight line, type folded into the title; roomy:
                               //      title on its own line, everything else beneath). ----
                               const typePill = <TypePill type={ticket.ticketType} />;
-                              const priorityEl = isEditable
+                              const priorityDot = isEditable
                                 ? <InlinePriorityPicker ticket={ticket} onChanged={refreshAfterEdit} />
-                                : <span title="Synced from FreshService — read-only here"><PriorityDot priority={ticket.priority} /></span>;
+                                : <PriorityDot priority={ticket.priority} title={`Priority: ${PRIORITY_LABELS[ticket.priority] || ticket.priority} — synced from FreshService, read-only here`} />;
+                              const priorityEl = priorityColumnOn
+                                ? <span className="xl:hidden inline-flex" data-testid="subject-priority-dot">{priorityDot}</span>
+                                : priorityDot;
                               // Real anchor (QA 08-07 #7): right-click → "Open in
                               // new tab" and modified clicks work natively; a plain
                               // left-click preventDefaults into the peek flow.
@@ -1805,6 +1764,7 @@ export default function Tickets() {
                                 fsRowEditable,
                                 removedLike,
                                 resolvedLike,
+                                priorityColumnOn,
                                 ticketHref,
                                 linkState,
                                 refreshAfterEdit,
@@ -1827,7 +1787,7 @@ export default function Tickets() {
                                   className={`group flex items-stretch transition-colors cursor-pointer ${
                                     aiLive ? 'tp-ai-live'
                                       : previewing ? 'bg-blue-50/50'
-                                        : selectedIds.has(ticket.id) ? 'bg-blue-50/40' : 'hover:bg-slate-50'
+                                        : selectedIds.has(ticket.id) ? 'bg-blue-50/40' : 'hover:bg-slate-100/70'
                                   }`}
                                   onClick={() => onRowClick(ticket.id)}
                                   onDoubleClick={() => onRowDoubleClick(ticket.id)}

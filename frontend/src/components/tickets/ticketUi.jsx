@@ -123,6 +123,48 @@ export function StateChip({ state, className = '' }) {
 }
 
 /**
+ * Queue "State" column (Mega 08-30 Phase QX — QA 08-27 #3): the FS-style
+ * "who acts next" state, computed server-side as `state` with the precedence
+ * requester_responded > response_due > new (see ticketService
+ * deriveQueueState — NOT the SLA-clock precedence of `stateChip` above).
+ * Tones stay in the STATE_CHIP_STYLES family so the dot and the pill agree.
+ */
+export const QUEUE_STATE_STYLES = {
+  new: { label: 'New', tone: 'bg-blue-50 text-blue-700', hint: 'unassigned and no agent reply yet' },
+  response_due: { label: 'Response due', tone: 'bg-amber-50 text-amber-700', hint: 'a first response is still owed to the requester' },
+  requester_responded: { label: 'Requester replied', tone: 'bg-sky-50 text-sky-700', hint: 'the last public message came from the requester' },
+};
+export const QUEUE_STATE_NOTE = 'First-response history is incomplete for some older FreshService tickets — those show "—" rather than a guess.';
+
+/**
+ * Labelled pill for the queue State column — StatusPill geometry so the two
+ * columns sit at the same height. Null/unknown state renders a quiet "—"
+ * (terminal, paused, or unknowable history) with the caveat in its tooltip.
+ */
+export function QueueStatePill({ state, className = '' }) {
+  const def = QUEUE_STATE_STYLES[state];
+  if (!def) {
+    return (
+      <span
+        className={`text-xs text-slate-300 ${className}`}
+        title={`No state — resolved, closed, paused, or the reply history is unknown. ${QUEUE_STATE_NOTE}`}
+        aria-label="No state"
+      >
+        —
+      </span>
+    );
+  }
+  return (
+    <span
+      className={`inline-flex max-w-full min-w-0 items-center px-2 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap ${def.tone} ${className}`}
+      title={`${def.label} — ${def.hint}. ${QUEUE_STATE_NOTE}`}
+    >
+      <span className="truncate">{def.label}</span>
+    </span>
+  );
+}
+
+/**
  * Featured custom-field chip (Custom Fields Activation Phase 2): the ONE
  * per-workspace definition flagged isFeatured renders as a quiet slate
  * "Label: value" chip on queue rows (compact + roomy) and in the peek
@@ -476,11 +518,11 @@ export function StatusPill({ status, className = '', size = 'md', tone: toneOver
   );
 }
 
-export function PriorityDot({ priority, withLabel = false }) {
+export function PriorityDot({ priority, withLabel = false, title = null }) {
   const color = PRIORITY_STRIP_COLORS[priority] || 'bg-slate-300';
   const label = PRIORITY_LABELS[priority] || `P${priority}`;
   return (
-    <span className="inline-flex items-center gap-1.5" title={`Priority: ${label}`}>
+    <span className="inline-flex items-center gap-1.5" title={title || `Priority: ${label}`}>
       <span aria-hidden="true" className={`w-2 h-2 rounded-full ${color}`} />
       {withLabel && <span className="text-xs font-medium text-slate-600">{label}</span>}
       {!withLabel && <span className="sr-only">{label} priority</span>}

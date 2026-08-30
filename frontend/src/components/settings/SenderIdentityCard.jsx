@@ -43,6 +43,29 @@ export default function SenderIdentityCard() {
   const previewAddress = identity?.fromEmail || identity?.mailboxAddress || 'ticketpulse@example.com';
   const previewInitial = useMemo(() => (previewName.trim()[0] || 'T').toUpperCase(), [previewName]);
   const dirty = (identity?.fromName || '') !== draftName.trim() && !(identity?.fromName == null && draftName.trim() === '');
+  // Replies-as-agent toggle (Phase SN2): saved on flip, independent of the
+  // display-name Save button. Missing field (older backend) = the default ON.
+  const replyUsesAgentName = identity?.replyUsesAgentName !== false;
+  const [togglingReplyName, setTogglingReplyName] = useState(false);
+  const [toggleError, setToggleError] = useState(null);
+
+  const toggleReplyUsesAgentName = async () => {
+    if (togglingReplyName) return;
+    setTogglingReplyName(true);
+    setToggleError(null);
+    try {
+      const response = await settingsAPI.updateSenderIdentity({ replyUsesAgentName: !replyUsesAgentName });
+      const data = response.data || null;
+      if (data) {
+        setIdentity(data);
+        setDraftName(data.fromName || '');
+      }
+    } catch (error) {
+      setToggleError(error.message || 'Could not update the reply sender setting');
+    } finally {
+      setTogglingReplyName(false);
+    }
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -141,6 +164,37 @@ export default function SenderIdentityCard() {
               <span>{saveStatus.message}</span>
             </div>
           )}
+
+          <div className="rounded-md border border-slate-200 bg-white px-3 py-2.5">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-slate-700">Replies show the agent&apos;s name</p>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  Requester replies sent from Ticket Pulse go out as the replying agent
+                  (&quot;Susan Xu &lt;{previewAddress}&gt;&quot;), matching FreshService. Off: replies use the
+                  display name above. Approvals, workflow and system mails always use the display name.
+                  Guaranteed for SendGrid sends; Microsoft 365 mailbox sends are best-effort
+                  (Exchange usually shows the mailbox&apos;s directory name).
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={replyUsesAgentName}
+                aria-label={`Replies show the agent's name ${replyUsesAgentName ? 'on' : 'off'}`}
+                onClick={toggleReplyUsesAgentName}
+                disabled={togglingReplyName}
+                className={`tp-focus-ring relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-60 ${replyUsesAgentName ? 'bg-blue-600' : 'bg-slate-300'}`}
+              >
+                <span
+                  className="absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform"
+                  style={{ transform: replyUsesAgentName ? 'translateX(16px)' : 'translateX(0)' }}
+                  aria-hidden="true"
+                />
+              </button>
+            </div>
+            {toggleError && <p className="mt-1.5 text-xs text-red-600" role="alert">{toggleError}</p>}
+          </div>
         </div>
 
         <div>
@@ -160,6 +214,27 @@ export default function SenderIdentityCard() {
                 </div>
                 <div className="truncate text-xs text-slate-700">Your ticket has been updated [TP-1024]</div>
                 <div className="truncate text-xs text-slate-400">Hi there — an agent replied to your request...</div>
+              </div>
+            </div>
+            <div
+              data-testid="sender-identity-reply-preview"
+              className="mt-2 flex items-center gap-3 border-t border-dashed border-slate-200 pt-2"
+            >
+              <span
+                aria-hidden="true"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-sm font-semibold text-white"
+              >
+                {replyUsesAgentName ? 'S' : previewInitial}
+              </span>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-baseline gap-x-2">
+                  <span className="truncate text-sm font-bold text-slate-900">{replyUsesAgentName ? 'Susan Xu' : previewName}</span>
+                  <span className="truncate text-xs text-slate-500">&lt;{previewAddress}&gt;</span>
+                </div>
+                <div className="truncate text-xs text-slate-700">Re: Laptop will not boot [TP-1024]</div>
+                <div className="truncate text-xs text-slate-400">
+                  {replyUsesAgentName ? 'Agent reply — sent under the agent\'s own name' : 'Agent reply — sent under the workspace name'}
+                </div>
               </div>
             </div>
           </div>

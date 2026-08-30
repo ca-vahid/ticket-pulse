@@ -180,3 +180,32 @@ describe('interceptor discipline (Phase A1: 401 recovers, 403 never does)', () =
     }
   });
 });
+
+// Mega 08-30 Phase DR3/SN4 — reply payload builder: Idempotency-Key header
+// (per composer session) and the subject override, on both the JSON and the
+// multipart (files) branch.
+describe('buildThreadPayload', () => {
+  test('JSON branch: subject rides the body, the key rides the header, neither leaks when absent', async () => {
+    const { buildThreadPayload } = await import('./api');
+    const [plain, plainConfig] = buildThreadPayload({ bodyText: 'hi', cc: [] });
+    expect(plain).toEqual({ bodyText: 'hi' });
+    expect(plainConfig).toBeUndefined();
+
+    const [payload, config] = buildThreadPayload({
+      bodyText: 'hi', cc: ['boss@example.com'], subject: '  Ready for pickup ', idempotencyKey: 'k-1',
+    });
+    expect(payload).toEqual({ bodyText: 'hi', cc: ['boss@example.com'], subject: 'Ready for pickup' });
+    expect(config).toEqual({ headers: { 'Idempotency-Key': 'k-1' } });
+  });
+
+  test('multipart branch: subject appended as a field, key kept in the headers next to the boundary reset', async () => {
+    const { buildThreadPayload } = await import('./api');
+    const file = new File(['%PDF-'], 'invoice.pdf', { type: 'application/pdf' });
+    const [form, config] = buildThreadPayload({ bodyText: 'hi', files: [file], subject: 'Custom', idempotencyKey: 'k-2' });
+    expect(form).toBeInstanceOf(FormData);
+    expect(form.get('subject')).toBe('Custom');
+    expect(form.get('bodyText')).toBe('hi');
+    expect(config.headers).toEqual({ 'Content-Type': undefined, 'Idempotency-Key': 'k-2' });
+    expect(config.timeout).toBe(120000);
+  });
+});

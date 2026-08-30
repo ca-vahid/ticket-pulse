@@ -28,10 +28,12 @@ jest.unstable_mockModule('../src/utils/logger.js', () => ({
 
 const {
   resolveFromName,
+  resolveReplyFromName,
   getSenderIdentity,
   upsertSenderIdentity,
   clearSenderIdentityCache,
 } = await import('../src/services/workspaceEmailIdentityService.js');
+const { formatSender } = await import('../src/utils/emailSender.js');
 
 describe('workspaceEmailIdentityService', () => {
   beforeEach(() => {
@@ -146,5 +148,68 @@ describe('workspaceEmailIdentityService', () => {
     test('rejects a missing workspace id', async () => {
       await expect(upsertSenderIdentity(null, { fromName: 'X' })).rejects.toThrow('workspaceId is required');
     });
+
+    // Phase SN2: toggle-only saves leave the display-name override alone.
+    test('a toggle-only patch does not touch fromName', async () => {
+      prismaMock.workspaceEmailIdentity.upsert.mockResolvedValue({});
+      await upsertSenderIdentity(1, { replyUsesAgentName: false }, { email: 'admin@example.com' });
+      expect(prismaMock.workspaceEmailIdentity.upsert).toHaveBeenCalledWith({
+        where: { workspaceId: 1 },
+        update: { replyUsesAgentName: false, updatedBy: 'admin@example.com' },
+        create: { workspaceId: 1, fromName: null, replyUsesAgentName: false, updatedBy: 'admin@example.com' },
+      });
+    });
+  });
+
+  // Mega 08-30 Phase SN1/SN3 — requester replies go out under the agent's name.
+  describe('resolveReplyFromName', () => {
+    test('returns the sanitized agent name when the toggle is on (default, no row)', async () => {
+      await expect(resolveReplyFromName(1, '  Susan Xu ')).resolves.toBe('Susan Xu');
+    });
+
+    test('toggle off → the workspace identity', async () => {
+      prismaMock.workspaceEmailIdentity.findUnique.mockResolvedValue({ fromName: 'Ticket Pulse IT', replyUsesAgentName: false });
+      await expect(resolveReplyFromName(1, 'Susan Xu')).resolves.toBe('Ticket Pulse IT');
+    });
+
+    test('null / blank / email-only actor → workspace identity fallback', async () => {
+      prismaMock.workspaceEmailIdentity.findUnique.mockResolvedValue({ fromName: 'Ticket Pulse IT', replyUsesAgentName: true });
+      await expect(resolveReplyFromName(1, null)).resolves.toBe('Ticket Pulse IT');
+      await expect(resolveReplyFromName(1, '   ')).resolves.toBe('Ticket Pulse IT');
+      await expect(resolveReplyFromName(1, 'coord@example.com')).resolves.toBe('Ticket Pulse IT');
+    });
+
+    test('CRLF / angle brackets in the agent name are stripped before the header', async () => {
+      const name = await resolveReplyFromName(1, 'Evil\r\nBcc: x@example.com <spoof>');
+      expect(name).toBe('Evil Bcc: x@example.com spoof');
+      expect(formatSender({ name, email: 'ticketpulse@bgcengineering.ca' })).toBe('"Evil Bcc: x@example.com spoof" <ticketpulse@bgcengineering.ca>');
+    });
+
+    test('a toggle read failure resolves to the default (agent name), never blocks', async () => {
+      prismaMock.workspaceEmailIdentity.findUnique.mockRejectedValue(new Error('db down'));
+      await expect(resolveReplyFromName(1, 'Susan Xu')).resolves.toBe('Susan Xu');
+    });
+
+    test('getSenderIdentity exposes the toggle (default ON without a row)', async () => {
+      await expect(getSenderIdentity(1)).resolves.toMatchObject({ replyUsesAgentName: true });
+      prismaMock.workspaceEmailIdentity.findUnique.mockResolvedValue({ fromName: null, replyUsesAgentName: false });
+      await expect(getSenderIdentity(1)).resolves.toMatchObject({ replyUsesAgentName: false });
+    });
+  });
+
+  // Approvals / workflows / sync-health keep the workspace identity — only
+  // the requester-reply seam in ticketService switches to resolveReplyFromName.
+  test('only _emailRequesterReply uses resolveReplyFromName; every other sender keeps resolveFromName', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const src = (p) => fs.readFileSync(path.resolve('src/services', p), 'utf8');
+    for (const file of ['transactionalEmailService.js', 'notificationDeliveryService.js', 'watcherNotificationService.js']) {
+      const text = src(file);
+      expect(text).toContain('resolveFromName(');
+      expect(text).not.toContain('resolveReplyFromName');
+    }
+    const ticketService = src('ticketService.js');
+    expect((ticketService.match(/resolveReplyFromName\(/g) || []).length).toBe(1);
+    expect(ticketService).toContain('resolveReplyFromName(ticket.workspaceId, entry.actorName)');
   });
 });

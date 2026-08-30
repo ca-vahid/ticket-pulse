@@ -13,7 +13,10 @@ import ticketThreadRepository from './ticketThreadRepository.js';
 import ticketLifecycleNotificationService from './ticketLifecycleNotificationService.js';
 import requesterRepository from './requesterRepository.js';
 import sendgridNotificationService from './sendgridNotificationService.js';
-import { resolveFromName } from './workspaceEmailIdentityService.js';
+import { resolveFromName, resolveReplyFromName } from './workspaceEmailIdentityService.js';
+import { fsConversationEntryId, parseFsConversationId } from '../utils/fsEntryId.js';
+import { isFsReplyAsAgentEnabled } from './fsReplyAsAgentService.js';
+import { createHash } from 'node:crypto';
 import mirrorService from './mirrorService.js';
 import { getFreshServiceDetail } from '../integrations/freshservice.js';
 import attachmentService from './attachmentService.js';
@@ -256,9 +259,56 @@ const threadBodySchema = z.object({
   bodyHtml: z.string().max(200000).optional().nullable(),
   bodyText: z.string().max(200000).optional().nullable(),
   cc: emailListSchema.default([]),
+  // Reply subject override (Phase SN4, QA 08-27 #8): TP-born replies only —
+  // FreshService composes the subject for FS-born ones (its reply API has
+  // no subject field). Trimmed, CR/LF stripped, ≤255.
+  subject: z.preprocess(
+    (v) => (typeof v === 'string' ? cleanReplySubject(v) : v),
+    z.string().max(255, 'Subject must be 255 characters or fewer').optional().nullable(),
+  ),
+  // Composer session key (Phase DR3) — audit only; the dedupe itself keys on
+  // (ticket, actor, body hash, kind) within 60s so retries without the
+  // header are covered too.
+  idempotencyKey: z.string().trim().max(255).optional().nullable(),
 }).refine((v) => (v.bodyHtml && v.bodyHtml.trim()) || (v.bodyText && v.bodyText.trim()), {
   message: 'Reply body is required',
 });
+
+/** Subject text safe for a mail header: no CR/LF, collapsed spaces, trimmed. */
+export function cleanReplySubject(value) {
+  return String(value ?? '').replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * The subject a TP-born requester reply goes out with when the agent does
+ * not override it: `Re: <ticket subject> [TP-n]`. Exposed on the ticket
+ * detail payload (`replySubjectDefault`) so the client never recomputes the
+ * format. Null for FS-born tickets — FreshService composes those.
+ */
+export function replySubjectDefault(ticket) {
+  if (!ticket || ticket.origin !== TICKET_ORIGIN.TICKETPULSE) return null;
+  return `Re: ${cleanReplySubject(ticket.subject) || 'Your ticket'} [${ticketDisplayRef(ticket)}]`;
+}
+
+/**
+ * Effective outbound subject for a TP-born reply: the agent's override when
+ * given, else the default — and ALWAYS carrying the `[TP-n]` token, which is
+ * the inbound threading signal (no In-Reply-To/References are set).
+ */
+export function effectiveReplySubject(ticket, override = null) {
+  const ref = ticketDisplayRef(ticket);
+  const token = `[${ref}]`;
+  const cleaned = cleanReplySubject(override);
+  if (!cleaned) return `Re: ${cleanReplySubject(ticket?.subject) || 'Your ticket'} ${token}`;
+  return cleaned.includes(token) ? cleaned : `${cleaned} ${token}`;
+}
+
+/** Idempotency fingerprint of a reply/note body (Phase DR3). */
+export function threadBodyFingerprint(bodyText) {
+  return createHash('sha1').update(String(bodyText ?? '').replace(/\s+/g, ' ').trim()).digest('hex');
+}
+
+const THREAD_DEDUPE_WINDOW_MS = 60 * 1000;
 
 function stripHtml(html) {
   if (!html) return null;
@@ -331,6 +381,56 @@ export function deriveStateChip(ticket, awaitingReply = false, statusSets = null
   if (!slaPaused && fr && fr >= now && noFirstReply) return 'response_due';
   if (awaitingReply) return 'requester_responded';
   if (!ticket.assignedTechId && noFirstReply) return 'new';
+  return null;
+}
+
+/**
+ * Queue "State" (Mega 08-30 Phase QX — QA 08-27 #3): the FreshService-style
+ * "whose ball is it" state, exported as `state` on list rows + detail and as
+ * the "State" CSV column. Same vocabulary and inputs as `deriveStateChip`
+ * (zero extra queries — `awaitingReply` comes from _lastPublicEntryIncoming),
+ * DIFFERENT precedence, deliberately:
+ *
+ *   stateChip ("SLA State"): overdue > response_due > requester_responded > new
+ *                            — "is the clock bleeding?"
+ *   state     ("State"):     requester_responded > response_due > new
+ *                            — "who acts next?" (FS's State column)
+ *
+ * Rules:
+ *  - terminal / Deleted / Spam → null (nobody's ball).
+ *  - requester_responded wins whenever the last public message is inbound —
+ *    including on Pending-base (paused) rows, where a requester reply is the
+ *    exact signal the agent is waiting for.
+ *  - response_due = a first-response target exists and no public agent reply
+ *    is known yet (late or not — lateness is the SLA State's job); paused rows
+ *    never claim it.
+ *  - new = unassigned and no known first reply.
+ *  - Sparse-data guard: `firstPublicAgentReplyAt` comes from the FS activities
+ *    feed, which is missing for older FS-born rows whose activity fetch never
+ *    ran or failed (AGENTS.md "sparse field" caveat). For an FS-born row with
+ *    no known reply and (activitiesSyncError set OR activitiesSyncedAt null)
+ *    the reply history is unknowable → null ("—"), never a confident
+ *    "New"/"Response due". TP-born rows have no activities feed and are
+ *    exempt (their firstPublicAgentReplyAt is stamped by our own reply path).
+ *
+ * No server-side sort for this column: it is derived per page, not stored.
+ * If a sort is demanded, follow the `_statusRankedPage` bucket pattern.
+ */
+export function deriveQueueState(ticket, awaitingReply = false, statusSets = null) {
+  const isTerminal = statusSets
+    ? statusSets.terminal.has(ticket.status)
+    : ['Resolved', 'Closed'].includes(ticket.status);
+  if (isTerminal || ['Deleted', 'Spam'].includes(ticket.status)) return null;
+  if (awaitingReply) return 'requester_responded';
+  const noFirstReply = !ticket.firstPublicAgentReplyAt;
+  if (!noFirstReply) return null;
+  const fsBorn = ticket.origin !== 'ticketpulse';
+  const historyUnknowable = fsBorn && (Boolean(ticket.activitiesSyncError) || !ticket.activitiesSyncedAt);
+  if (historyUnknowable) return null;
+  const slaPaused = statusSets ? statusSets.pending.has(ticket.status) : ticket.status === 'Pending';
+  if (slaPaused) return null;
+  if (ticket.frDueBy) return 'response_due';
+  if (!ticket.assignedTechId) return 'new';
   return null;
 }
 
@@ -858,6 +958,7 @@ class TicketService {
           lastActivityAt: t.lastRealActivityAt || t.freshserviceUpdatedAt || t.updatedAt,
           isExternal: isExternalRequester(t.requester?.email, internalDomains),
           stateChip: deriveStateChip(t, incoming.get(t.id) === true, statusSets),
+          state: deriveQueueState(t, incoming.get(t.id) === true, statusSets),
           ai: ai.get(t.id) || null, aiBypass: bypass.get(t.id) || null,
           hasProposedReply: proposed.has(t.id),
         })),
@@ -929,6 +1030,8 @@ class TicketService {
         lastActivityAt: t.lastRealActivityAt || t.freshserviceUpdatedAt || t.updatedAt,
         isExternal: isExternalRequester(t.requester?.email, internalDomains),
         stateChip: deriveStateChip(t, incomingByTicket.get(t.id) === true, statusSets),
+        // Queue "State" (Phase QX): FS-style "who acts next" — see deriveQueueState.
+        state: deriveQueueState(t, incomingByTicket.get(t.id) === true, statusSets),
         ai: aiByTicket.get(t.id) || null,
         aiBypass: bypassByTicket.get(t.id) || null,
         // A workflow-drafted reply is waiting for a human (QA 07-07 #4:
@@ -1472,6 +1575,7 @@ class TicketService {
     const mergedInto = await import('./ticketMergeService.js')
       .then(({ default: svc }) => svc.mergedInto(ticket.id, workspaceId))
       .catch(() => null);
+    const detailStatusSets = await statusService.baseStatusSets(workspaceId);
 
     return {
       ...ticket,
@@ -1480,13 +1584,18 @@ class TicketService {
       tags: ticketTags(ticket),
       displayRef: ticketDisplayRef(ticket),
       isExternal: isExternalRequester(ticket.requester?.email, await workspaceInternalDomains(workspaceId)),
+      // Default outbound reply subject (Phase SN4) — null for FS-born
+      // tickets, where FreshService composes it.
+      replySubjectDefault: replySubjectDefault(ticket),
       thread: resolvedThread,
       activities,
       approvals,
       attachments,
       pinnedCards,
       latestPipelineRun: ticket.pipelineRuns?.[0] || null,
-      stateChip: deriveStateChip(ticket, incomingByTicket.get(ticket.id) === true, await statusService.baseStatusSets(workspaceId)),
+      stateChip: deriveStateChip(ticket, incomingByTicket.get(ticket.id) === true, detailStatusSets),
+      // Queue "State" (Phase QX): FS-style "who acts next" — see deriveQueueState.
+      state: deriveQueueState(ticket, incomingByTicket.get(ticket.id) === true, detailStatusSets),
       lastActivityAt: ticket.lastRealActivityAt || ticket.freshserviceUpdatedAt || ticket.updatedAt,
     };
   }
@@ -3101,6 +3210,28 @@ class TicketService {
     }
   }
 
+  // The acting agent's FreshService user id for FS-side attribution (Phase
+  // DR4). Null unless the workspace flag is on AND the actor maps to a
+  // technician with an FS id (local/non-FS agents never qualify). Never
+  // throws — attribution is a nicety, the send is the job.
+  async _fsActorUserId(workspaceId, actor) {
+    try {
+      if (!actor?.technicianId) return null;
+      if (!(await isFsReplyAsAgentEnabled(workspaceId))) return null;
+      const technician = await prisma.technician.findFirst({
+        where: { id: actor.technicianId, workspaceId },
+        select: { freshserviceId: true },
+      });
+      const fsId = technician?.freshserviceId;
+      if (fsId === null || fsId === undefined) return null;
+      const numeric = Number(fsId);
+      return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+    } catch (err) {
+      logger.warn(`FS actor lookup failed for ${actor?.email || 'unknown'} (posting as API-key owner): ${err.message}`);
+      return null;
+    }
+  }
+
   // ------------------------------------------------------------ conversation
 
   async addReply(ticketId, workspaceId, input, actor, files = []) {
@@ -3129,6 +3260,18 @@ class TicketService {
     // _emailRequesterReply dedupes again for the wire). Notes carry none.
     const cc = isPrivate ? [] : unionReplyCc(ticket, parsed.data.cc);
 
+    // Reply subject override (Phase SN4/SN5): TP-born public replies only.
+    // FS-born → FreshService composes the subject (no API field) — reject
+    // loudly rather than silently dropping what the agent typed; notes have
+    // no subject at all.
+    const subjectOverride = cleanReplySubject(parsed.data.subject) || null;
+    if (subjectOverride && !isNative) {
+      throw new ValidationError('FreshService composes the subject for replies on FreshService tickets — remove the subject override');
+    }
+    if (subjectOverride && isPrivate) {
+      throw new ValidationError('A subject applies to requester replies only, not internal notes');
+    }
+
     // Validate attachments up front so a bad file can't leave an orphan entry.
     if (files.length > 0 && !attachmentService.isConfigured()) {
       throw new ValidationError('Attachment storage is not configured for this environment');
@@ -3143,6 +3286,47 @@ class TicketService {
     // to nothing — reject it like an empty submit instead of storing a blank.
     if (!bodyHtml && !bodyText) throw new ValidationError('Reply body is required');
     const now = new Date();
+
+    // POST idempotency (Phase DR3, defence in depth for QA 08-28 #1): the
+    // same actor posting the same body of the same kind on the same ticket
+    // within 60s is a replay (double-click, client retry after a dropped
+    // response, the composer re-sending with its session key) — hand back the
+    // entry that already exists and send NOTHING. Fail-open: a lookup error
+    // must never block a genuine send.
+    const idempotencyKey = parsed.data.idempotencyKey || null;
+    const fingerprint = threadBodyFingerprint(bodyText);
+    const eventType = isPrivate ? 'note' : 'reply';
+    const actorEmail = actor?.email || null;
+    try {
+      const recent = await prisma.ticketThreadEntry.findMany({
+        where: {
+          ticketId: ticket.id,
+          workspaceId,
+          source: 'ticketpulse_user',
+          eventType,
+          actorEmail,
+          occurredAt: { gte: new Date(now.getTime() - THREAD_DEDUPE_WINDOW_MS) },
+        },
+        orderBy: { id: 'desc' },
+        take: 5,
+      });
+      const twin = (recent || []).find((row) => {
+        const rowKey = row.rawPayload && typeof row.rawPayload === 'object' ? row.rawPayload.idempotencyKey : null;
+        if (idempotencyKey && rowKey && rowKey === idempotencyKey) return true;
+        return threadBodyFingerprint(row.bodyText || row.content) === fingerprint;
+      });
+      if (twin) {
+        logger.info(`Duplicate ${eventType} suppressed on ticket ${ticket.id} (entry ${twin.id}, actor ${actorEmail || 'n/a'}${idempotencyKey ? `, key ${idempotencyKey}` : ''})`);
+        return {
+          entry: twin,
+          email: { sent: false, deduped: true },
+          attachments: [],
+          deduped: true,
+        };
+      }
+    } catch (err) {
+      logger.warn(`Thread dedupe lookup failed for ticket ${ticket.id} (proceeding): ${err.message}`);
+    }
 
     // FS-born tickets: FS owns requester communication — send through the FS
     // API first (FS emails the requester itself), then cache the entry locally.
@@ -3173,11 +3357,17 @@ class TicketService {
       // Internal notes carry the TP marker so FS automation rules can exclude
       // them (FR 08-07 #9); requester-facing replies go unmarked.
       const fsNoteBody = `${tpNoteMarkerHtml(actor?.name || actor?.email)}${html}`;
+      // Phase DR4 (per-workspace flag, default OFF): post as the acting
+      // agent's FS user so FreshService attributes + addresses the reply as
+      // them rather than the API-key owner. Only when the actor maps to a
+      // technician with an FS id; never fatal.
+      const fsUserId = await this._fsActorUserId(workspaceId, actor);
+      const actorOpt = fsUserId ? { userId: fsUserId } : {};
       let result;
       try {
         result = isPrivate
-          ? await client.addNote(fsId, fsNoteBody, { isPrivate: true, attachments: fsAttachments })
-          : await client.createReply(fsId, outboundHtml, { ccEmails: cc, attachments: fsAttachments });
+          ? await client.addNote(fsId, fsNoteBody, { isPrivate: true, attachments: fsAttachments, ...actorOpt })
+          : await client.createReply(fsId, outboundHtml, { ccEmails: cc, attachments: fsAttachments, ...actorOpt });
       } catch (err) {
         // Queue-wait timeout: the send never launched — safe to retry, and the
         // composer keeps the draft, so tell the user plainly.
@@ -3185,19 +3375,31 @@ class TicketService {
         throw err;
       }
       const fsEntryId = result?.conversation?.id || result?.id || null;
-      externalEntryId = fsEntryId ? `fs-conv-${fsEntryId}` : null;
+      // Canonical FS stamp (Phase DR1): the later FS conversation sync lands
+      // on THIS row instead of minting a "Ticket Pulse" twin (QA 08-28 #1).
+      externalEntryId = fsEntryId ? fsConversationEntryId(fsEntryId) : null;
     }
 
     // Per-message recipients (QA 08-05 #3), stored in the SAME rawPayload
     // shape FS conversations carry ({to_emails, cc_emails}) so one UI reads
     // both origins. Public replies only — notes have no recipients.
     const requesterEmail = String(ticket.requester?.email || '').trim().toLowerCase();
-    const recipients = !isPrivate && (cc.length || requesterEmail)
+    // The effective outbound subject rides along when the agent overrode it
+    // (SN4) and the composer's session key when one was sent (DR3) — both
+    // merged into the same object, never replacing to/cc.
+    const outboundSubject = !isPrivate && isNative && subjectOverride ? effectiveReplySubject(ticket, subjectOverride) : null;
+    const recipientsBase = !isPrivate && (cc.length || requesterEmail)
       ? {
         ...(requesterEmail ? { to_emails: [requesterEmail] } : {}),
         ...(cc.length ? { cc_emails: cc } : {}),
       }
-      : null;
+      : {};
+    const recipientsMerged = {
+      ...recipientsBase,
+      ...(outboundSubject ? { subject: outboundSubject } : {}),
+      ...(idempotencyKey ? { idempotencyKey } : {}),
+    };
+    const recipients = Object.keys(recipientsMerged).length ? recipientsMerged : null;
 
     const entry = await prisma.ticketThreadEntry.create({
       data: {
@@ -3252,7 +3454,7 @@ class TicketService {
     let email = { sent: false };
     if (isNative) {
       if (!isPrivate && ticket.requester?.email) {
-        email = await this._emailRequesterReply(ticket, entry, { cc, attachments: storedAttachments, signature });
+        email = await this._emailRequesterReply(ticket, entry, { cc, attachments: storedAttachments, signature, subject: subjectOverride });
       }
       await mirrorService.enqueueThreadEntry(workspaceId, ticket.id, entry.id);
     } else if (!isPrivate) {
@@ -3340,7 +3542,7 @@ class TicketService {
    * 'note'` and non-system only — replies/forwards are the requester-facing
    * record and stay immutable. Works for BOTH origins: TP-born notes re-mirror
    * via a `thread_entry_update` job; TP-authored notes on FS-born tickets
-   * (`fs-conv-<id>`) update their FS conversation synchronously, exactly like
+   * (`fs-conversation:<id>`, legacy `fs-conv-<id>`) update their FS conversation synchronously, exactly like
    * the create path; entries with no FS id edit locally only. The prior body
    * is appended into rawPayload.editHistory so nothing is ever lost. Does NOT
    * re-fire ticket.note_added — an edit is not a new note.
@@ -3381,7 +3583,8 @@ class TicketService {
     const editorEmail = actor?.email || null;
     const ext = typeof entry.externalEntryId === 'string' ? entry.externalEntryId : '';
     const isMirrored = ext.startsWith('mirror-');
-    const fsConversationId = ext.startsWith('fs-conv-') ? ext.slice('fs-conv-'.length) : null;
+    // Canonical `fs-conversation:<id>` OR legacy `fs-conv-<id>` (Phase DR1).
+    const fsConversationId = parseFsConversationId(ext);
 
     // FS-born (and reconcile-imported) conversations update synchronously
     // BEFORE the local write — a rejected FS write leaves the note untouched,
@@ -3530,18 +3733,23 @@ class TicketService {
    * SendGrid/SMTP path. The subject carries the TP-<n> reference as a second
    * threading signal. Non-fatal by design.
    */
-  async _emailRequesterReply(ticket, entry, { cc = [], attachments = [], signature = null } = {}) {
+  async _emailRequesterReply(ticket, entry, { cc = [], attachments = [], signature = null, subject: subjectOverride = null } = {}) {
     const ref = ticketDisplayRef(ticket);
-    const subject = `Re: ${ticket.subject || 'Your ticket'} [${ref}]`;
+    // Agent-edited subject (Phase SN4) or the default — either way the
+    // `[TP-n]` token stays on: it is the inbound threading signal.
+    const subject = effectiveReplySubject(ticket, subjectOverride);
     // The acting agent's signature (Phase D) joins the OUTBOUND email only —
     // entry.bodyHtml (the stored thread entry) intentionally stays clean.
     let html = entry.bodyHtml || `<p>${(entry.bodyText || '').replace(/\n/g, '<br/>')}</p>`;
     let text = entry.bodyText || stripHtml(entry.bodyHtml) || '';
     if (signature) ({ html, text } = appendSignatureToEmail({ html, text }, signature));
     const dedupeKey = `native-reply:${entry.id}`;
-    // Workspace sender identity (Phase EB): guaranteed on the SendGrid
-    // fallback, best-effort on Graph (Exchange rewrites to the mailbox name).
-    const fromName = await resolveFromName(ticket.workspaceId);
+    // Sender display name (Phase SN1, QA 08-28 #2): the replying agent's own
+    // name — "Susan Xu <ticketpulse@…>", matching FreshService — unless the
+    // workspace toggle is off, then the workspace identity (Phase EB).
+    // Guaranteed on the SendGrid/SMTP path, best-effort on Graph (Exchange
+    // rewrites to the mailbox name). Reply-To stays unset on both paths.
+    const fromName = await resolveReplyFromName(ticket.workspaceId, entry.actorName);
     // Cc for the wire (Phase CC, QA 08-26 #1): the requester is already the
     // To — SendGrid rejects an address that appears in both to and cc, and
     // Graph would deliver twice. Case-insensitive, order preserved.

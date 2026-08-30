@@ -128,24 +128,43 @@ describe('GET /api/tickets/export.csv custom-field columns', () => {
     prismaMock.customFieldDefinition.findMany.mockResolvedValue(defs(3));
     const res = await request(buildApp()).get('/api/tickets/export.csv').expect(200);
     const [header, row] = res.text.trim().split('\n');
-    expect(header).toBe('Ref,Subject,Status,Priority,Type,State,Requester,Requester Email,Assignee,Category,Subcategory,Tags,Origin,Created,Last Activity,Client Name,Expedite,Amount');
+    // Phase QX (QA 08-27 #3): the clock-side stateChip column is now labelled
+    // "SLA State" in its historical slot; the queue "State" (who acts next)
+    // is APPENDED after Last Activity so older column positions still hold.
+    expect(header).toBe('Ref,Subject,Status,Priority,Type,SLA State,Requester,Requester Email,Assignee,Category,Subcategory,Tags,Origin,Created,Last Activity,State,Client Name,Expedite,Amount');
     expect(row).toContain('ACME Inc');
     expect(row.endsWith(',ACME Inc,true,42')).toBe(true);
+  });
+
+  test('State column carries the queue state (new for an unassigned TP-born row with no reply)', async () => {
+    prismaMock.customFieldDefinition.findMany.mockResolvedValue([]);
+    // Comma-free subject so a naive split lines the cells up with the header.
+    prismaMock.ticket.findMany.mockResolvedValue([{ ...TICKET_ROW, subject: 'Project setup' }]);
+    const res = await request(buildApp()).get('/api/tickets/export.csv').expect(200);
+    const [header, row] = res.text.trim().split('\n');
+    const cols = header.split(',');
+    const cells = row.split(',');
+    expect(cols.indexOf('SLA State')).toBe(5);
+    expect(cols.indexOf('State')).toBe(15);
+    // TICKET_ROW: TP-born, Open, unassigned, no firstPublicAgentReplyAt, no
+    // frDueBy → SLA State "new" (no due clocks) and State "new".
+    expect(cells[5]).toBe('new');
+    expect(cells[15]).toBe('new');
   });
 
   test('caps at 10 columns by sortOrder', async () => {
     prismaMock.customFieldDefinition.findMany.mockResolvedValue(defs(12));
     const res = await request(buildApp()).get('/api/tickets/export.csv').expect(200);
     const header = res.text.split('\n')[0];
-    expect(header.split(',')).toHaveLength(15 + 10);
+    expect(header.split(',')).toHaveLength(16 + 10);
     expect(header).toContain('Extra 9');
     expect(header).not.toContain('Extra 10');
   });
 
-  test('no definitions → the classic 15-column export, untouched', async () => {
+  test('no definitions → the classic 16-column export, untouched', async () => {
     prismaMock.customFieldDefinition.findMany.mockResolvedValue([]);
     const res = await request(buildApp()).get('/api/tickets/export.csv').expect(200);
-    expect(res.text.split('\n')[0].split(',')).toHaveLength(15);
+    expect(res.text.split('\n')[0].split(',')).toHaveLength(16);
   });
 
   test('missing values render as empty cells', async () => {
