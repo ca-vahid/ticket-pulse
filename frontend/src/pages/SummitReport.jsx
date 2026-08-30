@@ -254,7 +254,7 @@ export default function SummitReport() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-950 text-white">
+      <div className="tp-light flex min-h-screen items-center justify-center bg-slate-950 text-white">
         <div className="text-center">
           <Loader2 className="mx-auto h-10 w-10 animate-spin text-cyan-300" />
           <div className="mt-4 text-sm font-semibold text-slate-300">Loading summit report...</div>
@@ -265,7 +265,7 @@ export default function SummitReport() {
 
   if (error) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-950 px-4 text-white">
+      <div className="tp-light flex min-h-screen items-center justify-center bg-slate-950 px-4 text-white">
         <div className="max-w-lg rounded-2xl border border-red-400/30 bg-red-950/40 p-6">
           <AlertCircle className="h-8 w-8 text-red-200" />
           <h1 className="mt-3 text-2xl font-bold">Report unavailable</h1>
@@ -276,7 +276,7 @@ export default function SummitReport() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-950 text-white">
+    <main className="tp-light min-h-screen bg-slate-950 text-white">
       <style>{`
         @keyframes reportIn { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
         .summit-report-in { animation: reportIn .35s ease-out both; }

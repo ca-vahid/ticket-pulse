@@ -412,8 +412,8 @@ export default function TicketCreate() {
     }
   };
 
-  const fieldClass = 'tp-focus-ring w-full text-sm bg-white border border-input rounded-lg px-3 py-2.5 text-slate-800 placeholder:text-slate-400';
-  const labelClass = 'block text-sm font-semibold text-slate-700 mb-1.5';
+  const fieldClass = 'tp-focus-ring w-full text-sm bg-card border border-input rounded-lg px-3 py-2.5 text-foreground placeholder:text-muted-foreground/75';
+  const labelClass = 'block text-sm font-semibold text-foreground/85 mb-1.5';
   const submitDisabled = isSaving || !subject.trim() || !requesterReady || (assignMode === 'pick' && !assignTechId);
 
   const ticketingOn = meta ? meta.nativeTicketingEnabled : true;
@@ -427,8 +427,8 @@ export default function TicketCreate() {
         <AppHeader activePage="tickets" />
         <div className="max-w-2xl mx-auto px-4 py-16 text-center">
           <AlertCircle className="w-8 h-8 text-red-500 mx-auto mb-3" aria-hidden="true" />
-          <p className="text-slate-700 font-medium">{metaError}</p>
-          <button onClick={goBack} className="mt-4 tp-focus-ring px-4 py-2 text-sm font-medium rounded-lg bg-white border border-slate-200 hover:bg-slate-50">Back to tickets</button>
+          <p className="text-foreground/85 font-medium">{metaError}</p>
+          <button onClick={goBack} className="mt-4 tp-focus-ring px-4 py-2 text-sm font-medium rounded-lg bg-card border border-border hover:bg-muted/50">Back to tickets</button>
         </div>
       </div>
     );
@@ -446,39 +446,39 @@ export default function TicketCreate() {
           <button
             onClick={goBack}
             aria-label="Back to tickets"
-            className="tp-focus-ring p-2 rounded-lg text-slate-500 bg-white/70 border border-white/70 shadow-subtle hover:text-slate-700 hover:bg-white"
+            className="tp-focus-ring p-2 rounded-lg text-muted-foreground bg-card/70 border border-card/70 shadow-subtle hover:text-foreground/85 hover:bg-card"
           >
             <ArrowLeft className="w-4 h-4" aria-hidden="true" />
           </button>
           <div className="min-w-0">
-            <div className="flex items-center gap-2 text-xs text-slate-400 font-medium">
-              <button onClick={goBack} className="tp-focus-ring rounded hover:text-slate-600">Tickets</button>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground/75 font-medium">
+              <button onClick={goBack} className="tp-focus-ring rounded hover:text-muted-foreground">Tickets</button>
               <span aria-hidden="true">/</span>
-              <span className="text-slate-500">New</span>
+              <span className="text-muted-foreground">New</span>
             </div>
-            <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-              <Ticket className="w-5 h-5 text-blue-600" aria-hidden="true" />
+            <h1 className="text-xl font-bold text-foreground flex items-center gap-2">
+              <Ticket className="w-5 h-5 text-blue-600 dark:text-blue-300" aria-hidden="true" />
               New ticket
             </h1>
           </div>
         </div>
 
         {!ticketingOn && (
-          <div className="mb-4 flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800">
+          <div className="mb-4 flex items-start gap-2 p-3 bg-amber-50 dark:bg-amber-500/15 border border-amber-200 dark:border-amber-500/30 rounded-xl text-sm text-amber-800 dark:text-amber-200">
             <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" aria-hidden="true" />
             Native ticketing is off for this workspace — the ticket will still be created in Ticket Pulse.
           </div>
         )}
 
         {successNote && (
-          <div className="mb-4 flex items-center gap-2 px-3 py-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-sm text-emerald-800" role="status">
+          <div className="mb-4 flex items-center gap-2 px-3 py-2.5 bg-emerald-50 dark:bg-emerald-500/15 border border-emerald-200 dark:border-emerald-500/30 rounded-xl text-sm text-emerald-800 dark:text-emerald-200" role="status">
             <Check className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
             {successNote} — ready for the next one.
           </div>
         )}
 
         {!meta ? (
-          <div className="flex items-center justify-center py-24 text-slate-400">
+          <div className="flex items-center justify-center py-24 text-muted-foreground/75">
             <Loader2 className="w-6 h-6 animate-spin" aria-hidden="true" />
           </div>
         ) : (
@@ -504,10 +504,10 @@ export default function TicketCreate() {
                           stored as the ticket's ccEmails — every reply to the
                           requester reaches them, and the FS copy carries them. */}
                       <div className="flex items-baseline justify-between gap-2 mb-1">
-                        <span className="text-xs font-semibold text-slate-600">
-                          Also for <span className="font-normal text-slate-400">(additional requesters{fieldRequired('cc') ? ', required' : ''})</span>
+                        <span className="text-xs font-semibold text-muted-foreground">
+                          Also for <span className="font-normal text-muted-foreground/75">(additional requesters{fieldRequired('cc') ? ', required' : ''})</span>
                         </span>
-                        <span className="text-[11px] text-slate-400">They receive every reply to the requester</span>
+                        <span className="text-[11px] text-muted-foreground/75">They receive every reply to the requester</span>
                       </div>
                       <CcChips
                         value={cc}
@@ -516,15 +516,15 @@ export default function TicketCreate() {
                         label="Also for (additional requesters)"
                         placeholder={`Add additional requesters by name or email…${fieldRequired('cc') ? ' (required)' : ''}`}
                       />
-                      {fieldErrors.cc && <p className="mt-1 text-xs text-red-600" role="alert">{fieldErrors.cc}</p>}
+                      {fieldErrors.cc && <p className="mt-1 text-xs text-red-600 dark:text-red-300" role="alert">{fieldErrors.cc}</p>}
                     </div>
                   )}
-                  <label className="mt-2 flex items-center gap-2 text-xs text-slate-600 cursor-pointer w-fit">
+                  <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground cursor-pointer w-fit">
                     <input
                       type="checkbox"
                       checked={!notifyRequester}
                       onChange={(e) => setNotifyRequester(!e.target.checked)}
-                      className="tp-focus-ring rounded border-slate-300 text-blue-600"
+                      className="tp-focus-ring rounded border-input text-blue-600 dark:text-blue-300"
                     />
                     Don’t email the requester about this ticket
                   </label>
@@ -576,7 +576,7 @@ export default function TicketCreate() {
                         return name;
                       }}
                     />
-                    {fieldErrors.description && <p className="mt-1 text-xs text-red-600" role="alert">{fieldErrors.description}</p>}
+                    {fieldErrors.description && <p className="mt-1 text-xs text-red-600 dark:text-red-300" role="alert">{fieldErrors.description}</p>}
                   </div>
                 )}
 
@@ -609,24 +609,24 @@ export default function TicketCreate() {
                       onDragLeave={() => setDragOver(false)}
                       onDrop={(e) => { e.preventDefault(); setDragOver(false); addFiles(e.dataTransfer.files); }}
                       className={`rounded-xl border-2 border-dashed text-center transition-colors ${files.length > 0 ? 'px-3 py-3' : 'px-3 py-5'} ${
-                        dragOver ? 'border-blue-400 bg-blue-50/60' : 'border-slate-200 bg-slate-50/40'
+                        dragOver ? 'border-blue-400 bg-blue-50/60 dark:bg-blue-500/10' : 'border-border bg-muted/20'
                       }`}
                     >
-                      <p className="text-xs text-slate-500 inline-flex items-center gap-1.5">
-                        <Paperclip className={`w-4 h-4 ${dragOver ? 'text-blue-500' : 'text-slate-300'}`} aria-hidden="true" />
+                      <p className="text-xs text-muted-foreground inline-flex items-center gap-1.5">
+                        <Paperclip className={`w-4 h-4 ${dragOver ? 'text-blue-500' : 'text-muted-foreground/50'}`} aria-hidden="true" />
                       Drag files here, paste a screenshot into the description, or{' '}
                         <button
                           type="button"
                           onClick={() => fileInputRef.current?.click()}
                           disabled={files.length >= MAX_FILES}
-                          className="tp-focus-ring rounded font-semibold text-blue-600 hover:underline disabled:opacity-50"
+                          className="tp-focus-ring rounded font-semibold text-blue-600 dark:text-blue-300 hover:underline disabled:opacity-50"
                         >
                         browse
                         </button>
                       </p>
-                      <p className="text-[10px] text-slate-400 mt-0.5">{files.length}/{MAX_FILES} · up to {MAX_FILE_MB} MB each</p>
+                      <p className="text-[10px] text-muted-foreground/75 mt-0.5">{files.length}/{MAX_FILES} · up to {MAX_FILE_MB} MB each</p>
                     </div>
-                    {fieldErrors.attachments && <p className="mt-1 text-xs text-red-600" role="alert">{fieldErrors.attachments}</p>}
+                    {fieldErrors.attachments && <p className="mt-1 text-xs text-red-600 dark:text-red-300" role="alert">{fieldErrors.attachments}</p>}
                   </div>
                 )}
               </div>
@@ -638,7 +638,7 @@ export default function TicketCreate() {
               {['type', 'priority', 'category', 'subcategory', 'source', 'group'].some(fieldVisible) && (
                 <div className="tp-card rounded-2xl p-5 space-y-5">
                   {aiDecides && (
-                    <div className="flex items-start gap-2 -mt-1 px-3 py-2 rounded-lg bg-indigo-50/70 border border-indigo-100 text-[11px] text-indigo-700">
+                    <div className="flex items-start gap-2 -mt-1 px-3 py-2 rounded-lg bg-indigo-50/70 dark:bg-indigo-500/10 border border-indigo-100 dark:border-indigo-500/20 text-[11px] text-indigo-700 dark:text-indigo-200">
                       <Sparkles className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" aria-hidden="true" />
                     AI will set category, subcategory, priority and type on create. Turn off “Classify &amp; assess with AI” to set them yourself.
                     </div>
@@ -654,7 +654,7 @@ export default function TicketCreate() {
                               disabled={aiDecides}
                               onChange={(e) => setTicketType(e.target.value)}
                               aria-label="Ticket type"
-                              className="tp-focus-ring w-full rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs font-semibold text-slate-600 disabled:cursor-not-allowed"
+                              className="tp-focus-ring w-full rounded-lg border border-border bg-card px-2 py-2 text-xs font-semibold text-muted-foreground disabled:cursor-not-allowed"
                             >
                               {activeTypes.map((t) => <option key={t.id} value={t.name}>{t.name}</option>)}
                             </select>
@@ -675,7 +675,7 @@ export default function TicketCreate() {
                                   className={`tp-focus-ring px-2 py-2 rounded-lg text-xs font-semibold border transition-colors disabled:cursor-not-allowed ${
                                     ticketType === t.name
                                       ? (TYPE_SELECTED_CLASSES[t.color] || TYPE_SELECTED_CLASSES.slate)
-                                      : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'
+                                      : 'bg-card text-muted-foreground border-border hover:border-input'
                                   }`}
                                 >
                                   {t.name}
@@ -702,7 +702,7 @@ export default function TicketCreate() {
                                       : p === 3 ? 'bg-amber-500 text-white border-amber-500'
                                         : p === 2 ? 'bg-emerald-600 text-white border-emerald-600'
                                           : 'bg-blue-500 text-white border-blue-500'
-                                    : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'
+                                    : 'bg-card text-muted-foreground border-border hover:border-input'
                                 }`}
                               >
                                 {PRIORITY_LABELS[p]}
@@ -724,7 +724,7 @@ export default function TicketCreate() {
                             value={categoryId}
                             disabled={aiDecides}
                             onChange={(e) => { setCategoryId(e.target.value); setSubcategoryId(''); }}
-                            className={`${fieldClass} disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed`}
+                            className={`${fieldClass} disabled:bg-muted/50 disabled:text-muted-foreground/75 disabled:cursor-not-allowed`}
                           >
                             <option value="">{aiDecides ? 'AI will choose' : 'Choose a category'}</option>
                             {(() => {
@@ -741,7 +741,7 @@ export default function TicketCreate() {
                                 .map((c) => <option key={c.id} value={c.id}>{c.name}</option>);
                             })()}
                           </select>
-                          {fieldErrors.category && <p className="mt-1 text-xs text-red-600" role="alert">{fieldErrors.category}</p>}
+                          {fieldErrors.category && <p className="mt-1 text-xs text-red-600 dark:text-red-300" role="alert">{fieldErrors.category}</p>}
                         </div>
                       )}
                       {fieldVisible('subcategory') && (
@@ -752,14 +752,14 @@ export default function TicketCreate() {
                             value={subcategoryId}
                             onChange={(e) => setSubcategoryId(e.target.value)}
                             disabled={aiDecides || !categoryId || subcategories.length === 0}
-                            className={`${fieldClass} disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed`}
+                            className={`${fieldClass} disabled:bg-muted/50 disabled:text-muted-foreground/75 disabled:cursor-not-allowed`}
                           >
                             <option value="">{aiDecides ? 'AI will choose' : '—'}</option>
                             {subcategories.map((s) => (
                               <option key={s.id} value={s.id}>{s.name}</option>
                             ))}
                           </select>
-                          {fieldErrors.subcategory && <p className="mt-1 text-xs text-red-600" role="alert">{fieldErrors.subcategory}</p>}
+                          {fieldErrors.subcategory && <p className="mt-1 text-xs text-red-600 dark:text-red-300" role="alert">{fieldErrors.subcategory}</p>}
                         </div>
                       )}
                     </div>
@@ -773,7 +773,7 @@ export default function TicketCreate() {
                           <option key={opt.value} value={opt.value}>{opt.label}</option>
                         ))}
                       </select>
-                      <p className="mt-1 text-[11px] text-slate-400">How the request reached you — phone call, walk-up, Teams message…</p>
+                      <p className="mt-1 text-[11px] text-muted-foreground/75">How the request reached you — phone call, walk-up, Teams message…</p>
                     </div>
                   )}
 
@@ -798,9 +798,9 @@ export default function TicketCreate() {
                         )}
                       </select>
                       {form?.defaultGroup && groupId === (form.defaultGroup.kind === 'fs' ? `fs:${form.defaultGroup.id}` : `int:${form.defaultGroup.id}`) && (
-                        <p className="mt-1 text-[11px] text-slate-400">Preselected — this workspace&apos;s default group for new tickets.</p>
+                        <p className="mt-1 text-[11px] text-muted-foreground/75">Preselected — this workspace&apos;s default group for new tickets.</p>
                       )}
-                      {fieldErrors.group && <p className="mt-1 text-xs text-red-600" role="alert">{fieldErrors.group}</p>}
+                      {fieldErrors.group && <p className="mt-1 text-xs text-red-600 dark:text-red-300" role="alert">{fieldErrors.group}</p>}
                     </div>
                   )}
                 </div>
@@ -823,14 +823,14 @@ export default function TicketCreate() {
                           className={`tp-focus-ring px-2 py-0.5 rounded-full border text-[11px] font-medium transition-colors ${
                             tagIds.includes(tag.id)
                               ? 'bg-blue-600 text-white border-blue-600'
-                              : 'bg-white text-slate-500 border-slate-200 hover:border-blue-300'
+                              : 'bg-card text-muted-foreground border-border hover:border-blue-300 dark:hover:border-blue-500/40'
                           }`}
                         >
                           {tag.name}
                         </button>
                       ))}
                     </div>
-                    {fieldErrors.tags && <p className="mt-1 text-xs text-red-600" role="alert">{fieldErrors.tags}</p>}
+                    {fieldErrors.tags && <p className="mt-1 text-xs text-red-600 dark:text-red-300" role="alert">{fieldErrors.tags}</p>}
                   </div>
                 )}
               </div>
@@ -846,13 +846,13 @@ export default function TicketCreate() {
                     aria-expanded={customFieldsOpen}
                     className="tp-focus-ring w-full flex items-center gap-2 text-left"
                   >
-                    <span className="text-sm font-semibold text-slate-700">Custom fields</span>
-                    <span className="text-[11px] text-slate-400">
+                    <span className="text-sm font-semibold text-foreground/85">Custom fields</span>
+                    <span className="text-[11px] text-muted-foreground/75">
                       {Object.values(customFieldValues).filter((v) => v !== '' && v !== null && v !== undefined).length > 0
                         ? `${Object.values(customFieldValues).filter((v) => v !== '' && v !== null && v !== undefined).length} set`
                         : (hasRequiredCustomFields ? 'some required' : 'optional')}
                     </span>
-                    <ChevronDown className={`w-4 h-4 text-slate-400 ml-auto transition-transform ${customFieldsOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
+                    <ChevronDown className={`w-4 h-4 text-muted-foreground/75 ml-auto transition-transform ${customFieldsOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
                   </button>
                   {customFieldsOpen && (
                     <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -885,7 +885,7 @@ export default function TicketCreate() {
                                 className={fieldClass}
                               />
                             )}
-                            {fieldErrors[`cf:${def.key}`] && <p className="mt-1 text-xs text-red-600" role="alert">{fieldErrors[`cf:${def.key}`]}</p>}
+                            {fieldErrors[`cf:${def.key}`] && <p className="mt-1 text-xs text-red-600 dark:text-red-300" role="alert">{fieldErrors[`cf:${def.key}`]}</p>}
                           </div>
                         );
                       })}
@@ -895,9 +895,9 @@ export default function TicketCreate() {
               )}
 
               {error && (
-                <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-xl" role="alert">
-                  <AlertCircle className="w-4 h-4 text-red-600 mt-0.5 flex-shrink-0" aria-hidden="true" />
-                  <span className="text-sm text-red-800">{error}</span>
+                <div className="flex items-start gap-2 p-3 bg-red-50 dark:bg-red-500/15 border border-red-200 dark:border-red-500/30 rounded-xl" role="alert">
+                  <AlertCircle className="w-4 h-4 text-red-600 dark:text-red-300 mt-0.5 flex-shrink-0" aria-hidden="true" />
+                  <span className="text-sm text-red-800 dark:text-red-200">{error}</span>
                 </div>
               )}
             </div>
@@ -907,84 +907,84 @@ export default function TicketCreate() {
               {/* Requester context */}
               {requester && (
                 <div className="tp-card rounded-2xl p-4">
-                  <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-2.5">Requester</p>
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground/75 mb-2.5">Requester</p>
                   <div className="flex items-center gap-3">
                     {rqEnrich.photo ? (
                       <img src={rqEnrich.photo} alt="" className="h-11 w-11 rounded-full object-cover flex-shrink-0" />
                     ) : (
-                      <span className="h-11 w-11 rounded-full bg-blue-100 text-blue-700 inline-flex items-center justify-center text-sm font-semibold flex-shrink-0">
+                      <span className="h-11 w-11 rounded-full bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200 inline-flex items-center justify-center text-sm font-semibold flex-shrink-0">
                         {initials(requester.name)}
                       </span>
                     )}
                     <div className="min-w-0">
-                      <p className="text-sm font-semibold text-slate-800 truncate">{requester.name}</p>
-                      <p className="text-xs text-slate-500 truncate">{requester.email}</p>
+                      <p className="text-sm font-semibold text-foreground truncate">{requester.name}</p>
+                      <p className="text-xs text-muted-foreground truncate">{requester.email}</p>
                     </div>
                   </div>
                   <dl className="mt-3 space-y-1.5 text-xs">
                     {requester.jobTitle && (
-                      <div className="flex items-center gap-1.5 text-slate-600"><Building2 className="w-3.5 h-3.5 text-slate-400" aria-hidden="true" /><span className="truncate">{requester.jobTitle}{requester.department ? ` · ${requester.department}` : ''}</span></div>
+                      <div className="flex items-center gap-1.5 text-muted-foreground"><Building2 className="w-3.5 h-3.5 text-muted-foreground/75" aria-hidden="true" /><span className="truncate">{requester.jobTitle}{requester.department ? ` · ${requester.department}` : ''}</span></div>
                     )}
                     {requester.location && (
-                      <div className="flex items-center gap-1.5 text-slate-600"><MapPin className="w-3.5 h-3.5 text-slate-400" aria-hidden="true" /><span className="truncate">{requester.location}</span></div>
+                      <div className="flex items-center gap-1.5 text-muted-foreground"><MapPin className="w-3.5 h-3.5 text-muted-foreground/75" aria-hidden="true" /><span className="truncate">{requester.location}</span></div>
                     )}
                     {rqEnrich.stats && (rqEnrich.stats.total ?? rqEnrich.stats.totalTickets) != null && (
-                      <div className="flex items-center gap-1.5 text-slate-600"><Ticket className="w-3.5 h-3.5 text-slate-400" aria-hidden="true" /><span>{rqEnrich.stats.total ?? rqEnrich.stats.totalTickets} previous ticket{(rqEnrich.stats.total ?? rqEnrich.stats.totalTickets) === 1 ? '' : 's'}</span></div>
+                      <div className="flex items-center gap-1.5 text-muted-foreground"><Ticket className="w-3.5 h-3.5 text-muted-foreground/75" aria-hidden="true" /><span>{rqEnrich.stats.total ?? rqEnrich.stats.totalTickets} previous ticket{(rqEnrich.stats.total ?? rqEnrich.stats.totalTickets) === 1 ? '' : 's'}</span></div>
                     )}
                   </dl>
                   {requester.fromDirectory && (
-                    <p className="mt-2.5 text-[11px] text-violet-600 bg-violet-50 rounded-lg px-2 py-1.5">New to Ticket Pulse — created from the Entra directory with this ticket.</p>
+                    <p className="mt-2.5 text-[11px] text-violet-600 dark:text-violet-300 bg-violet-50 dark:bg-violet-500/15 rounded-lg px-2 py-1.5">New to Ticket Pulse — created from the Entra directory with this ticket.</p>
                   )}
                 </div>
               )}
 
               {/* AI on this ticket — assessment, independent of assignment */}
               <div className="tp-card rounded-2xl p-4">
-                <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-2.5 flex items-center gap-1.5">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground/75 mb-2.5 flex items-center gap-1.5">
                   <Sparkles className="w-3.5 h-3.5 text-indigo-500" aria-hidden="true" /> AI on this ticket
                 </p>
-                <label className={`flex items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors ${(aiClassify || assignMode === 'ai') ? 'border-indigo-300 bg-indigo-50/50' : 'border-slate-200 bg-white hover:border-indigo-200'} ${assignMode === 'ai' ? 'opacity-70' : ''}`}>
+                <label className={`flex items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors ${(aiClassify || assignMode === 'ai') ? 'border-indigo-300 dark:border-indigo-500/40 bg-indigo-50/50 dark:bg-indigo-500/10' : 'border-border bg-card hover:border-indigo-200 dark:hover:border-indigo-500/30'} ${assignMode === 'ai' ? 'opacity-70' : ''}`}>
                   <input
                     type="checkbox"
                     checked={aiClassify || assignMode === 'ai'}
                     disabled={assignMode === 'ai'}
                     onChange={(e) => setAiClassify(e.target.checked)}
-                    className="tp-focus-ring mt-0.5 rounded border-slate-300 text-indigo-600"
+                    className="tp-focus-ring mt-0.5 rounded border-input text-indigo-600 dark:text-indigo-300"
                   />
                   <span className="min-w-0">
-                    <span className="block text-sm text-slate-700">Classify &amp; assess with AI</span>
-                    <span className="block text-[11px] text-slate-500">Sets category · subcategory · priority · incident/request — leaves the assignee alone.</span>
+                    <span className="block text-sm text-foreground/85">Classify &amp; assess with AI</span>
+                    <span className="block text-[11px] text-muted-foreground">Sets category · subcategory · priority · incident/request — leaves the assignee alone.</span>
                   </span>
                 </label>
                 {assignMode === 'ai' && (
-                  <p className="mt-1.5 text-[11px] text-indigo-600">Included automatically with AI assignment below.</p>
+                  <p className="mt-1.5 text-[11px] text-indigo-600 dark:text-indigo-300">Included automatically with AI assignment below.</p>
                 )}
               </div>
 
               {/* Assignment */}
               <div className="tp-card rounded-2xl p-4">
-                <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-2.5">Assignment</p>
+                <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground/75 mb-2.5">Assignment</p>
                 <div className="space-y-1.5">
-                  <label className={`flex items-center gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors ${assignMode === 'ai' ? 'border-indigo-300 bg-indigo-50/60' : 'border-slate-200 bg-white hover:border-blue-200'}`}>
+                  <label className={`flex items-center gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors ${assignMode === 'ai' ? 'border-indigo-300 dark:border-indigo-500/40 bg-indigo-50/60 dark:bg-indigo-500/10' : 'border-border bg-card hover:border-blue-200 dark:hover:border-blue-500/30'}`}>
                     <input type="radio" name="tc-assign" checked={assignMode === 'ai'} onChange={() => setAssignMode('ai')} className="tp-focus-ring" />
                     <Sparkles className="w-4 h-4 text-indigo-500" aria-hidden="true" />
-                    <span className="text-sm text-slate-700">AI recommends an assignee</span>
+                    <span className="text-sm text-foreground/85">AI recommends an assignee</span>
                   </label>
                   {canTakeMyself && (
-                    <label className={`flex items-center gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors ${assignMode === 'me' ? 'border-blue-300 bg-blue-50/60' : 'border-slate-200 bg-white hover:border-blue-200'}`}>
+                    <label className={`flex items-center gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors ${assignMode === 'me' ? 'border-blue-300 dark:border-blue-500/40 bg-blue-50/60 dark:bg-blue-500/10' : 'border-border bg-card hover:border-blue-200 dark:hover:border-blue-500/30'}`}>
                       <input type="radio" name="tc-assign" checked={assignMode === 'me'} onChange={() => setAssignMode('me')} className="tp-focus-ring" />
-                      <span className="text-sm text-slate-700">Assign to me</span>
+                      <span className="text-sm text-foreground/85">Assign to me</span>
                     </label>
                   )}
-                  <label className={`flex items-center gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors ${assignMode === 'pick' ? 'border-blue-300 bg-blue-50/60' : 'border-slate-200 bg-white hover:border-blue-200'}`}>
+                  <label className={`flex items-center gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors ${assignMode === 'pick' ? 'border-blue-300 dark:border-blue-500/40 bg-blue-50/60 dark:bg-blue-500/10' : 'border-border bg-card hover:border-blue-200 dark:hover:border-blue-500/30'}`}>
                     <input type="radio" name="tc-assign" checked={assignMode === 'pick'} onChange={() => setAssignMode('pick')} className="tp-focus-ring" />
-                    <span className="text-sm text-slate-700">Assign to…</span>
+                    <span className="text-sm text-foreground/85">Assign to…</span>
                     <select
                       value={assignTechId}
                       onChange={(e) => { setAssignTechId(e.target.value); setAssignMode('pick'); }}
                       onClick={() => setAssignMode('pick')}
                       aria-label="Member to assign"
-                      className="tp-focus-ring ml-auto text-sm bg-white border border-input rounded-lg px-2 py-1 text-slate-700 max-w-[8rem]"
+                      className="tp-focus-ring ml-auto text-sm bg-card border border-input rounded-lg px-2 py-1 text-foreground/85 max-w-[8rem]"
                     >
                       <option value="">Choose…</option>
                       {(meta?.technicians || []).map((t) => (
@@ -992,9 +992,9 @@ export default function TicketCreate() {
                       ))}
                     </select>
                   </label>
-                  <label className={`flex items-center gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors ${assignMode === 'none' ? 'border-blue-300 bg-blue-50/60' : 'border-slate-200 bg-white hover:border-blue-200'}`}>
+                  <label className={`flex items-center gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors ${assignMode === 'none' ? 'border-blue-300 dark:border-blue-500/40 bg-blue-50/60 dark:bg-blue-500/10' : 'border-border bg-card hover:border-blue-200 dark:hover:border-blue-500/30'}`}>
                     <input type="radio" name="tc-assign" checked={assignMode === 'none'} onChange={() => setAssignMode('none')} className="tp-focus-ring" />
-                    <span className="text-sm text-slate-700">Leave unassigned</span>
+                    <span className="text-sm text-foreground/85">Leave unassigned</span>
                   </label>
                 </div>
               </div>
@@ -1002,14 +1002,14 @@ export default function TicketCreate() {
               {/* Create actions — on mobile the sticky bottom bar owns this, so hide here */}
               <div className="tp-card rounded-2xl p-4 hidden lg:block">
                 {scheduleOpen && (
-                  <div className="mb-3 p-2.5 rounded-lg border border-violet-200 bg-violet-50/50">
+                  <div className="mb-3 p-2.5 rounded-lg border border-violet-200 dark:border-violet-500/30 bg-violet-50/50 dark:bg-violet-500/10">
                     <div className="flex items-center justify-between gap-2 mb-2">
-                      <span className="text-[11px] font-semibold uppercase tracking-wide text-violet-600">Schedule for later</span>
+                      <span className="text-[11px] font-semibold uppercase tracking-wide text-violet-600 dark:text-violet-300">Schedule for later</span>
                       <button
                         onClick={() => { setScheduleOpen(false); setScheduleAt(''); setScheduleRepeat('none'); }}
                         type="button"
                         aria-label="Cancel scheduling"
-                        className="tp-focus-ring p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-white"
+                        className="tp-focus-ring p-1 rounded-lg text-muted-foreground/75 hover:text-muted-foreground hover:bg-card"
                       >
                         <X className="w-4 h-4" aria-hidden="true" />
                       </button>
@@ -1020,14 +1020,14 @@ export default function TicketCreate() {
                       min={toLocalDatetimeInput(new Date(Date.now() + 5 * 60 * 1000))}
                       onChange={(e) => setScheduleAt(e.target.value)}
                       aria-label="Schedule ticket for"
-                      className="tp-focus-ring w-full text-sm bg-white border border-input rounded-lg px-2.5 py-2 text-slate-700"
+                      className="tp-focus-ring w-full text-sm bg-card border border-input rounded-lg px-2.5 py-2 text-foreground/85"
                     />
                     <select
                       value={scheduleRepeat}
                       onChange={(e) => setScheduleRepeat(e.target.value)}
                       aria-label="Repeat"
                       title="Repeats at the picked time — weekly on that weekday, monthly on that day, yearly on that date"
-                      className="tp-focus-ring w-full mt-2 text-sm bg-white border border-input rounded-lg px-2 py-2 text-slate-700"
+                      className="tp-focus-ring w-full mt-2 text-sm bg-card border border-input rounded-lg px-2 py-2 text-foreground/85"
                     >
                       <option value="none">One time</option>
                       <option value="weekly">Repeat weekly</option>
@@ -1073,21 +1073,21 @@ export default function TicketCreate() {
                           <button
                             onClick={(e) => submit(e, 'new')}
                             role="menuitem"
-                            className="tp-focus-ring w-full text-left px-2.5 py-1.5 text-sm rounded-md text-slate-600 hover:bg-blue-50 hover:text-blue-700"
+                            className="tp-focus-ring w-full text-left px-2.5 py-1.5 text-sm rounded-md text-muted-foreground hover:bg-blue-50 dark:hover:bg-blue-500/15 hover:text-blue-700 dark:hover:text-blue-200"
                           >
                           Create & start another
                           </button>
                           <button
                             onClick={(e) => submit(e, 'resolve')}
                             role="menuitem"
-                            className="tp-focus-ring w-full text-left px-2.5 py-1.5 text-sm rounded-md text-slate-600 hover:bg-emerald-50 hover:text-emerald-700"
+                            className="tp-focus-ring w-full text-left px-2.5 py-1.5 text-sm rounded-md text-muted-foreground hover:bg-emerald-50 dark:hover:bg-emerald-500/15 hover:text-emerald-700 dark:hover:text-emerald-200"
                           >
                           Create & resolve (walk-up log)
                           </button>
                           <button
                             onClick={() => { setScheduleOpen(true); setSubmitMenuOpen(false); }}
                             role="menuitem"
-                            className="tp-focus-ring w-full text-left px-2.5 py-1.5 text-sm rounded-md text-slate-600 hover:bg-violet-50 hover:text-violet-700 flex items-center gap-2"
+                            className="tp-focus-ring w-full text-left px-2.5 py-1.5 text-sm rounded-md text-muted-foreground hover:bg-violet-50 dark:hover:bg-violet-500/15 hover:text-violet-700 dark:hover:text-violet-200 flex items-center gap-2"
                           >
                             <Clock className="w-3.5 h-3.5" aria-hidden="true" /> Schedule for later…
                           </button>
@@ -1096,10 +1096,10 @@ export default function TicketCreate() {
                     </div>
                   )}
                 </div>
-                <button onClick={goBack} type="button" className="tp-focus-ring w-full mt-2 px-4 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50">
+                <button onClick={goBack} type="button" className="tp-focus-ring w-full mt-2 px-4 py-2 text-sm font-medium text-muted-foreground bg-card border border-border rounded-lg hover:bg-muted/50">
                   Cancel
                 </button>
-                <p className="mt-3 text-[11px] text-slate-400 leading-relaxed">Born in Ticket Pulse — mirrored to FreshService as a fallback copy.</p>
+                <p className="mt-3 text-[11px] text-muted-foreground/75 leading-relaxed">Born in Ticket Pulse — mirrored to FreshService as a fallback copy.</p>
               </div>
             </div>
           </form>
@@ -1113,11 +1113,11 @@ export default function TicketCreate() {
           the home indicator when it wasn't — pb now floors at 12px and grows
           with the inset. z-50 keeps the bar above page content/overlays. */}
       {meta && (
-        <div className="lg:hidden fixed bottom-[calc(48px+env(safe-area-inset-bottom))] md:bottom-0 inset-x-0 z-50 bg-white/95 backdrop-blur border-t border-slate-200 px-4 pt-3 pb-3 md:pb-[max(0.75rem,env(safe-area-inset-bottom))] flex items-center gap-2 shadow-[0_-4px_16px_-8px_rgba(15,23,42,0.25)]">
+        <div className="lg:hidden fixed bottom-[calc(48px+env(safe-area-inset-bottom))] md:bottom-0 inset-x-0 z-50 bg-card/95 backdrop-blur border-t border-border px-4 pt-3 pb-3 md:pb-[max(0.75rem,env(safe-area-inset-bottom))] flex items-center gap-2 shadow-[0_-4px_16px_-8px_rgba(15,23,42,0.25)] dark:shadow-[0_-4px_16px_-8px_rgba(0,0,0,0.6)]">
           <button
             type="button"
             onClick={goBack}
-            className="tp-focus-ring px-4 min-h-[44px] text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50"
+            className="tp-focus-ring px-4 min-h-[44px] text-sm font-medium text-muted-foreground bg-card border border-border rounded-lg hover:bg-muted/50"
           >
             Cancel
           </button>

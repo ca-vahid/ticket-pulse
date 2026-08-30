@@ -114,11 +114,11 @@ export default function EvidenceTable({ tickets = [], chipKey = 'handled', title
             const requesters = uniq.size || r.count;
             return (
               <div className="min-w-0">
-                <span className="flex min-w-0 items-center gap-1.5 text-sm font-semibold text-sky-800">
+                <span className="flex min-w-0 items-center gap-1.5 text-sm font-semibold text-sky-800 dark:text-sky-200">
                   <Waves className="h-3.5 w-3.5 flex-shrink-0 text-sky-500" aria-hidden="true" />
                   <span className="truncate">{r.category} ×{r.count}</span>
                 </span>
-                <span className="mt-0.5 block truncate pl-5 text-[11px] text-slate-400">
+                <span className="mt-0.5 block truncate pl-5 text-[11px] text-muted-foreground/75">
                   {requesters} requester{requesters === 1 ? '' : 's'} · {fmtTime(r.startTs)} – {fmtTime(r.endTs)}
                 </span>
               </div>
@@ -136,25 +136,25 @@ export default function EvidenceTable({ tickets = [], chipKey = 'handled', title
                   <Link
                     to={`/tickets/${r.id}`}
                     state={backState}
-                    className="tp-focus-ring min-w-0 truncate rounded text-left text-sm font-medium text-slate-800 hover:text-blue-700"
+                    className="tp-focus-ring min-w-0 truncate rounded text-left text-sm font-medium text-foreground hover:text-blue-700 dark:hover:text-blue-200"
                     title={r.subject}
                   >
                     {r.subject || '(no subject)'}
                   </Link>
                 ) : (
-                  <span className="min-w-0 truncate text-sm font-medium text-slate-800" title={r.subject}>
+                  <span className="min-w-0 truncate text-sm font-medium text-foreground" title={r.subject}>
                     {r.subject || '(no subject)'}
                   </span>
                 )}
                 <StateChip state={r.stateChip} />
               </span>
               {/* Meta line: mono ref · requester · age */}
-              <span className="mt-0.5 flex min-w-0 items-center gap-1.5 pl-4 text-[11px] text-slate-400">
+              <span className="mt-0.5 flex min-w-0 items-center gap-1.5 pl-4 text-[11px] text-muted-foreground/75">
                 <TicketRefLink
                   ticket={r}
                   state={backState}
                   className="text-[11px]"
-                  linkClassName="font-mono font-medium text-slate-500 hover:text-blue-700"
+                  linkClassName="font-mono font-medium text-muted-foreground hover:text-blue-700 dark:hover:text-blue-200"
                 />
                 <span aria-hidden="true">·</span>
                 <PersonAvatar name={r.requesterName} size="h-4 w-4" textSize="text-[8px]" />
@@ -178,21 +178,21 @@ export default function EvidenceTable({ tickets = [], chipKey = 'handled', title
         cell: ({ row }) => {
           const r = row.original;
           if (r.isBatch) {
-            return <span className="block truncate text-xs text-slate-600" title={r.category}>{r.category}</span>;
+            return <span className="block truncate text-xs text-muted-foreground" title={r.category}>{r.category}</span>;
           }
           // Leaf-first (queue convention): the SUBCATEGORY is the most specific
           // (= most useful) piece, so it gets the primary line; parent under it.
           const { category: catLabel, subcategory: subLabel } = ticketCategoryLabels(r);
-          if (!catLabel && !subLabel) return <span className="text-[11px] text-slate-300">—</span>;
+          if (!catLabel && !subLabel) return <span className="text-[11px] text-muted-foreground/50">—</span>;
           return (
             <div className="min-w-0" title={[catLabel, subLabel].filter(Boolean).join(' / ')}>
               {subLabel ? (
                 <>
-                  <span className="block w-full truncate text-xs font-medium text-slate-700">{subLabel}</span>
-                  {catLabel && <span className="block w-full truncate text-[10px] text-slate-400">in {catLabel}</span>}
+                  <span className="block w-full truncate text-xs font-medium text-foreground/85">{subLabel}</span>
+                  {catLabel && <span className="block w-full truncate text-[10px] text-muted-foreground/75">in {catLabel}</span>}
                 </>
               ) : (
-                <span className="block w-full truncate text-xs text-slate-600">{catLabel}</span>
+                <span className="block w-full truncate text-xs text-muted-foreground">{catLabel}</span>
               )}
             </div>
           );
@@ -207,7 +207,7 @@ export default function EvidenceTable({ tickets = [], chipKey = 'handled', title
             const closed = r.subRows.filter((t) => ['Resolved', 'Closed'].includes(t.status)).length;
             return closed === r.count
               ? <StatusPill status="Closed" size="sm" />
-              : <span className="text-[11px] text-slate-500">{closed}/{r.count} closed</span>;
+              : <span className="text-[11px] text-muted-foreground">{closed}/{r.count} closed</span>;
           }
           return <StatusPill status={r.status} size="sm" />;
         },
@@ -220,7 +220,7 @@ export default function EvidenceTable({ tickets = [], chipKey = 'handled', title
           if (r.isBatch) {
             return (
               <span
-                className="whitespace-nowrap text-xs text-slate-400"
+                className="whitespace-nowrap text-xs text-muted-foreground/75"
                 title={`${new Date(r.startTs).toLocaleString()} – ${new Date(r.endTs).toLocaleString()}`}
               >
                 {formatDayTime(r.startTs)} · {timeAgo(r.startTs)}
@@ -230,7 +230,7 @@ export default function EvidenceTable({ tickets = [], chipKey = 'handled', title
           const ts = getValue();
           return (
             <span
-              className="whitespace-nowrap text-xs text-slate-400"
+              className="whitespace-nowrap text-xs text-muted-foreground/75"
               title={ts ? new Date(ts).toLocaleString() : ''}
             >
               {ts ? <>{formatDayTime(ts)} · {timeAgo(ts)}</> : '—'}
@@ -256,19 +256,19 @@ export default function EvidenceTable({ tickets = [], chipKey = 'handled', title
 
   return (
     <section className="tp-card overflow-hidden rounded-xl" aria-label="Evidence table">
-      <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-2.5">
-        <h3 className="text-sm font-bold text-slate-800">{title}</h3>
+      <div className="flex items-center gap-2 border-b border-border/60 px-4 py-2.5">
+        <h3 className="text-sm font-bold text-foreground">{title}</h3>
       </div>
 
       {tickets.length === 0 ? (
         <div className="py-12 text-center">
-          <Inbox className="mx-auto mb-2 h-8 w-8 text-slate-200" aria-hidden="true" />
-          <p className="text-sm text-slate-400">Nothing in this bucket for the selected period.</p>
+          <Inbox className="mx-auto mb-2 h-8 w-8 text-muted-foreground/40" aria-hidden="true" />
+          <p className="text-sm text-muted-foreground/75">Nothing in this bucket for the selected period.</p>
         </div>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
-            <thead className="bg-slate-50 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+            <thead className="bg-muted/50 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
               <tr>
                 <th className="w-1 p-0" aria-hidden="true" />
                 <th className="w-6 px-2 py-2" aria-label="Expand" />
@@ -282,10 +282,10 @@ export default function EvidenceTable({ tickets = [], chipKey = 'handled', title
                         <button
                           type="button"
                           onClick={header.column.getToggleSortingHandler()}
-                          className="tp-focus-ring inline-flex items-center gap-1 rounded hover:text-slate-700"
+                          className="tp-focus-ring inline-flex items-center gap-1 rounded hover:text-foreground/85"
                         >
                           {flexRender(header.column.columnDef.header, header.getContext())}
-                          <SortIcon className={`h-3 w-3 ${dir ? 'text-blue-500' : 'text-slate-300'}`} aria-hidden="true" />
+                          <SortIcon className={`h-3 w-3 ${dir ? 'text-blue-500' : 'text-muted-foreground/50'}`} aria-hidden="true" />
                         </button>
                       ) : (
                         flexRender(header.column.columnDef.header, header.getContext())
@@ -295,7 +295,7 @@ export default function EvidenceTable({ tickets = [], chipKey = 'handled', title
                 })}
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-border/60">
               {table.getRowModel().rows.map((row) => {
                 const r = row.original;
                 const isBatch = Boolean(r.isBatch);
@@ -307,7 +307,7 @@ export default function EvidenceTable({ tickets = [], chipKey = 'handled', title
                 return (
                   <tr
                     key={row.id}
-                    className={`${isBatch ? 'cursor-pointer bg-sky-50/40 hover:bg-sky-50' : isChild ? 'bg-slate-50/50 hover:bg-slate-50' : 'hover:bg-slate-50'} transition-colors`}
+                    className={`${isBatch ? 'cursor-pointer bg-sky-50/40 dark:bg-sky-500/10 hover:bg-sky-50 dark:hover:bg-sky-500/15' : isChild ? 'bg-muted/25 hover:bg-muted/50' : 'hover:bg-muted/50'} transition-colors`}
                     onClick={isBatch ? row.getToggleExpandedHandler() : undefined}
                   >
                     {/* Left priority accent strip (PRIORITY_STRIP_COLORS) */}
@@ -321,7 +321,7 @@ export default function EvidenceTable({ tickets = [], chipKey = 'handled', title
                           onClick={(e) => { e.stopPropagation(); row.toggleExpanded(); }}
                           aria-expanded={row.getIsExpanded()}
                           aria-label={row.getIsExpanded() ? `Collapse batch of ${r.count}` : `Expand batch of ${r.count}`}
-                          className="tp-focus-ring rounded p-0.5 text-slate-400 hover:text-slate-700"
+                          className="tp-focus-ring rounded p-0.5 text-muted-foreground/75 hover:text-foreground/85"
                         >
                           <ChevronRight
                             className={`h-3.5 w-3.5 transition-transform motion-reduce:transition-none ${row.getIsExpanded() ? 'rotate-90' : ''}`}

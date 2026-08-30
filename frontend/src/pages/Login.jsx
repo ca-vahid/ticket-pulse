@@ -32,7 +32,7 @@ export default function Login() {
   }, []);
 
   return (
-    <main className="fixed inset-0 h-screen h-[100lvh] min-h-[100dvh] w-full overflow-hidden bg-slate-950 text-white">
+    <main className="tp-light fixed inset-0 h-screen h-[100lvh] min-h-[100dvh] w-full overflow-hidden bg-slate-950 text-white">
       <img
         src="/brand/ticket-pulse-new-loginpage.png"
         alt=""

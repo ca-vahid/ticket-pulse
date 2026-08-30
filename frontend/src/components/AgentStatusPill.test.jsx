@@ -8,10 +8,12 @@ import { getLeaveBadge } from '../utils/leaveInfo';
 afterEach(cleanup);
 
 describe('AgentStatusPill (dashboard simple-view caption pill)', () => {
-  test('default tone: "Steady week" in a slate pill', () => {
+  test('default tone: "Steady week" in a muted pill', () => {
     render(<AgentStatusPill />);
     const pill = screen.getByText('Steady week');
-    expect(pill).toHaveClass('rounded-full', 'border', 'bg-slate-50', 'text-slate-500');
+    // Dark-mode migration: the calm default rides the muted tokens now
+    // (bg-muted/50 text-muted-foreground), not raw slate classes.
+    expect(pill).toHaveClass('rounded-full', 'border', 'bg-muted/50', 'text-muted-foreground');
   });
 
   test('topLoad tone: "Heaviest load on the team" in a violet pill', () => {

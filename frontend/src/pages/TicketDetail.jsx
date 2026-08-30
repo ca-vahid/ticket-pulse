@@ -80,25 +80,25 @@ const LIVE_FIELDS = {
 };
 // History timeline: icon + tone per activity type.
 const HISTORY_STYLES = {
-  created: { icon: Plus, tone: 'bg-blue-100 text-blue-600' },
-  assigned: { icon: UserRound, tone: 'bg-blue-100 text-blue-600' },
-  reassigned: { icon: UserRound, tone: 'bg-sky-100 text-sky-600' },
-  coordinator_assigned: { icon: UserRound, tone: 'bg-blue-100 text-blue-600' },
-  self_picked: { icon: Hand, tone: 'bg-emerald-100 text-emerald-600' },
-  picked: { icon: Hand, tone: 'bg-emerald-100 text-emerald-600' },
-  status_changed: { icon: RefreshCw, tone: 'bg-amber-100 text-amber-600' },
-  resolved: { icon: Check, tone: 'bg-emerald-100 text-emerald-600' },
-  requester_reply: { icon: Mail, tone: 'bg-sky-100 text-sky-600' },
-  forwarded: { icon: Forward, tone: 'bg-violet-100 text-violet-600' },
-  noise_flagged: { icon: VolumeX, tone: 'bg-violet-100 text-violet-600' },
-  noise_cleared: { icon: VolumeX, tone: 'bg-slate-100 text-slate-500' },
-  ai_triage: { icon: Sparkles, tone: 'bg-indigo-100 text-indigo-600' },
-  fields_updated: { icon: Pencil, tone: 'bg-slate-100 text-slate-500' },
-  due_changed: { icon: CalendarClock, tone: 'bg-amber-100 text-amber-600' },
-  task_status_changed: { icon: CheckSquare, tone: 'bg-amber-100 text-amber-600' },
-  rejected: { icon: X, tone: 'bg-red-100 text-red-600' },
-  group_changed: { icon: Building2, tone: 'bg-sky-100 text-sky-600' },
-  default: { icon: History, tone: 'bg-slate-100 text-slate-500' },
+  created: { icon: Plus, tone: 'bg-blue-100 dark:bg-blue-500/20 text-blue-600 dark:text-blue-300' },
+  assigned: { icon: UserRound, tone: 'bg-blue-100 dark:bg-blue-500/20 text-blue-600 dark:text-blue-300' },
+  reassigned: { icon: UserRound, tone: 'bg-sky-100 dark:bg-sky-500/20 text-sky-600 dark:text-sky-300' },
+  coordinator_assigned: { icon: UserRound, tone: 'bg-blue-100 dark:bg-blue-500/20 text-blue-600 dark:text-blue-300' },
+  self_picked: { icon: Hand, tone: 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-300' },
+  picked: { icon: Hand, tone: 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-300' },
+  status_changed: { icon: RefreshCw, tone: 'bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-300' },
+  resolved: { icon: Check, tone: 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-300' },
+  requester_reply: { icon: Mail, tone: 'bg-sky-100 dark:bg-sky-500/20 text-sky-600 dark:text-sky-300' },
+  forwarded: { icon: Forward, tone: 'bg-violet-100 dark:bg-violet-500/20 text-violet-600 dark:text-violet-300' },
+  noise_flagged: { icon: VolumeX, tone: 'bg-violet-100 dark:bg-violet-500/20 text-violet-600 dark:text-violet-300' },
+  noise_cleared: { icon: VolumeX, tone: 'bg-muted text-muted-foreground' },
+  ai_triage: { icon: Sparkles, tone: 'bg-indigo-100 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-300' },
+  fields_updated: { icon: Pencil, tone: 'bg-muted text-muted-foreground' },
+  due_changed: { icon: CalendarClock, tone: 'bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-300' },
+  task_status_changed: { icon: CheckSquare, tone: 'bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-300' },
+  rejected: { icon: X, tone: 'bg-red-100 dark:bg-red-500/20 text-red-600 dark:text-red-300' },
+  group_changed: { icon: Building2, tone: 'bg-sky-100 dark:bg-sky-500/20 text-sky-600 dark:text-sky-300' },
+  default: { icon: History, tone: 'bg-muted text-muted-foreground' },
 };
 
 // Known-tag detector (QA 08-06 #5): plain text carrying angle-bracket tokens
@@ -110,7 +110,7 @@ function looksLikeHtml(s) {
 function Body({ html, text, className = '' }) {
   if (html && looksLikeHtml(html)) return <SafeHtml html={html} className={className} />;
   const value = text || html || '';
-  return <p className={`text-sm text-slate-700 whitespace-pre-wrap break-words ${className}`}>{value}</p>;
+  return <p className={`text-sm text-foreground/85 whitespace-pre-wrap break-words ${className}`}>{value}</p>;
 }
 
 const escapeHtml = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -154,9 +154,9 @@ function RichBody({ html, text, onImageRef, className = '' }) {
  * needs-info reads at a glance — distinct from ordinary internal notes.
  */
 const APPROVAL_EVENT_STYLES = {
-  approved: { Icon: CheckCircle2, wrap: 'bg-emerald-50 border-emerald-200', accent: 'bg-emerald-500', text: 'text-emerald-800', chip: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
-  rejected: { Icon: XCircle, wrap: 'bg-red-50 border-red-200', accent: 'bg-red-500', text: 'text-red-800', chip: 'bg-red-100 text-red-700 border-red-200' },
-  clarification: { Icon: MessageCircleQuestion, wrap: 'bg-violet-50 border-violet-200', accent: 'bg-violet-500', text: 'text-violet-800', chip: 'bg-violet-100 text-violet-700 border-violet-200' },
+  approved: { Icon: CheckCircle2, wrap: 'bg-emerald-50 dark:bg-emerald-500/15 border-emerald-200 dark:border-emerald-500/30', accent: 'bg-emerald-500', text: 'text-emerald-800 dark:text-emerald-200', chip: 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-200 border-emerald-200 dark:border-emerald-500/30' },
+  rejected: { Icon: XCircle, wrap: 'bg-red-50 dark:bg-red-500/15 border-red-200 dark:border-red-500/30', accent: 'bg-red-500', text: 'text-red-800 dark:text-red-200', chip: 'bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-200 border-red-200 dark:border-red-500/30' },
+  clarification: { Icon: MessageCircleQuestion, wrap: 'bg-violet-50 dark:bg-violet-500/15 border-violet-200 dark:border-violet-500/30', accent: 'bg-violet-500', text: 'text-violet-800 dark:text-violet-200', chip: 'bg-violet-100 dark:bg-violet-500/20 text-violet-700 dark:text-violet-200 border-violet-200 dark:border-violet-500/30' },
 };
 
 export function approvalEventMeta(entry) {
@@ -216,12 +216,12 @@ function CollapsibleBody({ html, text }) {
         style={collapsed ? { maxHeight: `${BODY_PREVIEW_PX}px` } : undefined}
       >
         <Body html={html} text={text} />
-        {collapsed && <div className="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-white to-transparent" aria-hidden="true" />}
+        {collapsed && <div className="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-card to-transparent" aria-hidden="true" />}
       </div>
       {isLong && (
         <button
           onClick={() => { userToggled.current = true; setCollapsed((v) => !v); }}
-          className="tp-focus-ring mt-1.5 text-xs font-semibold text-blue-600 hover:underline rounded"
+          className="tp-focus-ring mt-1.5 text-xs font-semibold text-blue-600 dark:text-blue-300 hover:underline rounded"
         >
           {collapsed ? 'Show more' : 'Show less'}
         </button>
@@ -264,20 +264,20 @@ function DescriptionImageStrip({ ticketId, images, onPreview }) {
 
   if (!images.length) return null;
   return (
-    <div className="mt-3 pt-3 border-t border-slate-100 flex flex-wrap gap-2" aria-label="Images attached to the description">
+    <div className="mt-3 pt-3 border-t border-border/60 flex flex-wrap gap-2" aria-label="Images attached to the description">
       {images.map((a) => (
         <button
           key={a.id}
           type="button"
           onClick={() => onPreview(a)}
-          className="tp-focus-ring group relative rounded-lg overflow-hidden border border-slate-200 bg-slate-50 hover:border-blue-300 transition-colors"
+          className="tp-focus-ring group relative rounded-lg overflow-hidden border border-border bg-muted/50 hover:border-blue-300 dark:hover:border-blue-500/40 transition-colors"
           title={`Preview ${a.fileName}`}
         >
           {urls[a.id]
             ? <img src={urls[a.id]} alt={a.fileName} loading="lazy" className="h-24 w-auto max-w-[220px] object-cover" />
             : (
               <span className="flex items-center justify-center h-24 w-32">
-                <ImageIcon className="w-5 h-5 text-slate-300" aria-hidden="true" />
+                <ImageIcon className="w-5 h-5 text-muted-foreground/50" aria-hidden="true" />
               </span>
             )}
           <span className="absolute inset-x-0 bottom-0 bg-slate-900/55 text-white text-[10px] px-1.5 py-0.5 truncate opacity-0 group-hover:opacity-100 transition-opacity">
@@ -294,14 +294,14 @@ function AttachmentChip({ attachment, onPreview }) {
   return (
     <button
       onClick={onPreview}
-      className="tp-focus-ring inline-flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-sm font-medium text-slate-700 hover:border-blue-300 hover:text-blue-700 hover:bg-blue-50/40"
+      className="tp-focus-ring inline-flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-border bg-card text-sm font-medium text-foreground/85 hover:border-blue-300 dark:hover:border-blue-500/40 hover:text-blue-700 dark:hover:text-blue-200 hover:bg-blue-50/40 dark:hover:bg-blue-500/10"
       title={`Preview ${attachment.fileName} (${formatBytes(attachment.sizeBytes)})`}
     >
       {isImage
-        ? <ImageIcon className="w-4 h-4 flex-none text-slate-400" aria-hidden="true" />
-        : <Paperclip className="w-4 h-4 flex-none text-slate-400" aria-hidden="true" />}
+        ? <ImageIcon className="w-4 h-4 flex-none text-muted-foreground/75" aria-hidden="true" />
+        : <Paperclip className="w-4 h-4 flex-none text-muted-foreground/75" aria-hidden="true" />}
       <span className="truncate max-w-[260px]">{attachment.fileName}</span>
-      <span className="text-xs text-slate-400">{formatBytes(attachment.sizeBytes)}</span>
+      <span className="text-xs text-muted-foreground/75">{formatBytes(attachment.sizeBytes)}</span>
     </button>
   );
 }
@@ -376,7 +376,7 @@ export function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, ph
             <span className={`inline-flex items-center gap-1 text-[10px] font-semibold rounded-full px-1.5 py-0.5 border ${chip}`}>
               <Icon className="w-2.5 h-2.5" aria-hidden="true" /> {label}
             </span>
-            <span className="ml-auto text-xs text-slate-400 whitespace-nowrap" title={new Date(entry.occurredAt).toLocaleString()}>
+            <span className="ml-auto text-xs text-muted-foreground/75 whitespace-nowrap" title={new Date(entry.occurredAt).toLocaleString()}>
               {timeAgo(entry.occurredAt)}
             </span>
           </div>
@@ -393,7 +393,7 @@ export function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, ph
   const avatar = (
     <div className="flex-shrink-0 flex flex-col items-center gap-1 pt-0.5 w-12">
       {isTicketPulse ? (
-        <span className="h-10 w-10 rounded-full bg-gradient-to-br from-blue-50 to-indigo-100 border border-blue-200 flex items-center justify-center shadow-subtle overflow-hidden" title="Ticket Pulse">
+        <span className="h-10 w-10 rounded-full bg-gradient-to-br from-blue-50 dark:from-blue-500/15 to-indigo-100 dark:to-indigo-500/20 border border-blue-200 dark:border-blue-500/30 flex items-center justify-center shadow-subtle overflow-hidden" title="Ticket Pulse">
           <img src="/brand/logo-mark.png" alt="Ticket Pulse" className="h-full w-full object-contain p-0.5" />
         </span>
       ) : (
@@ -414,45 +414,45 @@ export function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, ph
       <div
         className={`min-w-0 rounded-2xl border p-4 shadow-subtle ${
           isNote
-            ? 'flex-1 bg-amber-50/80 border-amber-200 rounded-tl-md'
+            ? 'flex-1 bg-amber-50/80 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/30 rounded-tl-md'
             : incoming
-              ? 'max-w-[92%] flex-1 bg-white border-indigo-200/70 rounded-tl-md'
-              : 'max-w-[92%] flex-1 bg-blue-50/60 border-blue-200/70 rounded-tr-md'
+              ? 'max-w-[92%] flex-1 bg-card border-indigo-200/70 dark:border-indigo-500/30 rounded-tl-md'
+              : 'max-w-[92%] flex-1 bg-blue-50/60 dark:bg-blue-500/10 border-blue-200/70 dark:border-blue-500/30 rounded-tr-md'
         }`}
       >
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pb-2.5 mb-3 border-b border-slate-900/5">
-          <span className="text-sm font-bold text-slate-800">{entry.actorName || (entry.isPrivate ? 'Ticket Pulse' : 'Unknown')}</span>
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pb-2.5 mb-3 border-b border-foreground/10">
+          <span className="text-sm font-bold text-foreground">{entry.actorName || (entry.isPrivate ? 'Ticket Pulse' : 'Unknown')}</span>
           {isNote ? (
-            <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-700 bg-amber-100 border border-amber-200 rounded-full px-1.5 py-0.5">
+            <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-700 dark:text-amber-200 bg-amber-100 dark:bg-amber-500/20 border border-amber-200 dark:border-amber-500/30 rounded-full px-1.5 py-0.5">
               <Lock className="w-2.5 h-2.5" aria-hidden="true" /> Internal note
             </span>
           ) : entry.eventType === 'forward' ? (
-            <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-violet-700 bg-violet-50 border border-violet-200 rounded-full px-1.5 py-0.5">
+            <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-violet-700 dark:text-violet-200 bg-violet-50 dark:bg-violet-500/15 border border-violet-200 dark:border-violet-500/30 rounded-full px-1.5 py-0.5">
               <Forward className="w-2.5 h-2.5" aria-hidden="true" /> Forwarded
             </span>
           ) : (
             <span className={`inline-flex items-center gap-1 text-[10px] font-semibold rounded-full px-1.5 py-0.5 border ${
-              incoming ? 'text-indigo-700 bg-indigo-50 border-indigo-200' : 'text-blue-700 bg-blue-50 border-blue-200'
+              incoming ? 'text-indigo-700 dark:text-indigo-200 bg-indigo-50 dark:bg-indigo-500/15 border-indigo-200 dark:border-indigo-500/30' : 'text-blue-700 dark:text-blue-200 bg-blue-50 dark:bg-blue-500/15 border-blue-200 dark:border-blue-500/30'
             }`}
             >
               <Mail className="w-2.5 h-2.5" aria-hidden="true" /> {incoming ? 'From requester' : 'Reply to requester'}
             </span>
           )}
-          {viaEmail && <span className="text-[10px] text-slate-400">via email</span>}
+          {viaEmail && <span className="text-[10px] text-muted-foreground/75">via email</span>}
           <span className="ml-auto flex items-center gap-1">
             {canEdit && isNote && entry.authorType !== 'system' && !editing && (
               <button
                 onClick={startEdit}
                 aria-label="Edit note"
                 title="Edit note"
-                className="tp-focus-ring p-1 rounded text-slate-300 hover:text-amber-700 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+                className="tp-focus-ring p-1 rounded text-muted-foreground/50 hover:text-amber-700 dark:hover:text-amber-200 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
               >
                 <Pencil className="w-3 h-3" aria-hidden="true" />
               </button>
             )}
             {canDelete && isNote && entry.authorType !== 'system' && (
               confirmDelete ? (
-                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-red-700">
+                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-red-700 dark:text-red-200">
                   Delete?
                   <button
                     onClick={() => { setConfirmDelete(false); onDelete?.(entry.id); }}
@@ -463,7 +463,7 @@ export function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, ph
                   </button>
                   <button
                     onClick={() => setConfirmDelete(false)}
-                    className="tp-focus-ring px-1.5 py-0.5 rounded text-slate-500 hover:bg-slate-100"
+                    className="tp-focus-ring px-1.5 py-0.5 rounded text-muted-foreground hover:bg-muted"
                   >
                     No
                   </button>
@@ -473,7 +473,7 @@ export function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, ph
                   onClick={() => setConfirmDelete(true)}
                   aria-label="Delete note"
                   title="Delete note (admin)"
-                  className="tp-focus-ring p-1 rounded text-slate-300 hover:text-red-600 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+                  className="tp-focus-ring p-1 rounded text-muted-foreground/50 hover:text-red-600 dark:hover:text-red-300 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
                 >
                   <Trash2 className="w-3 h-3" aria-hidden="true" />
                 </button>
@@ -483,19 +483,19 @@ export function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, ph
               onClick={() => onCopy?.(body)}
               aria-label="Copy message text"
               title="Copy message text"
-              className="tp-focus-ring p-1 rounded text-slate-300 hover:text-slate-600 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+              className="tp-focus-ring p-1 rounded text-muted-foreground/50 hover:text-muted-foreground opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
             >
               <Copy className="w-3 h-3" aria-hidden="true" />
             </button>
             {entry.editedAt && (
               <span
-                className="inline-flex items-center text-[10px] font-medium text-slate-400 bg-slate-100/80 border border-slate-200 rounded-full px-1.5 py-0.5 whitespace-nowrap"
+                className="inline-flex items-center text-[10px] font-medium text-muted-foreground/75 bg-muted/80 border border-border rounded-full px-1.5 py-0.5 whitespace-nowrap"
                 title={`Edited ${entry.editedBy ? `by ${entry.editedBy} · ` : ''}${new Date(entry.editedAt).toLocaleString()}`}
               >
                 edited {formatDayTime(entry.editedAt)} · {timeAgo(entry.editedAt)}
               </span>
             )}
-            <span className="text-xs text-slate-400 whitespace-nowrap" title={new Date(entry.occurredAt).toLocaleString()}>
+            <span className="text-xs text-muted-foreground/75 whitespace-nowrap" title={new Date(entry.occurredAt).toLocaleString()}>
               {formatDayTime(entry.occurredAt)}
               {' · '}{timeAgo(entry.occurredAt)}
             </span>
@@ -519,13 +519,13 @@ export function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, ph
               minHeight={110}
               placeholder="Edit this note… (Ctrl+Enter to save)"
               ariaLabel="Edit note body"
-              className="bg-white border-amber-300"
+              className="bg-card border-amber-300 dark:border-amber-500/40"
             />
             <div className="mt-2 flex items-center justify-end gap-1.5">
               <button
                 onClick={() => setEditing(false)}
                 disabled={savingEdit}
-                className="tp-focus-ring px-2.5 py-1 rounded-lg text-xs font-semibold text-slate-500 hover:bg-slate-100 disabled:opacity-60"
+                className="tp-focus-ring px-2.5 py-1 rounded-lg text-xs font-semibold text-muted-foreground hover:bg-muted disabled:opacity-60"
               >
                 Cancel
               </button>
@@ -566,12 +566,12 @@ function SidebarField({ label, children, flash = false, onAck }) {
     <div
       onMouseEnter={flash ? onAck : undefined}
       onFocusCapture={flash ? onAck : undefined}
-      className={`rounded-lg transition-all duration-500 ${flash ? 'ring-2 ring-amber-300 bg-amber-50/80 p-1.5 -m-1.5' : ''}`}
+      className={`rounded-lg transition-all duration-500 ${flash ? 'ring-2 ring-amber-300 dark:ring-amber-500/50 bg-amber-50/80 dark:bg-amber-500/10 p-1.5 -m-1.5' : ''}`}
     >
-      <span className="flex items-center text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-1">
+      <span className="flex items-center text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/75 mb-1">
         {label}
         {flash && (
-          <span className="ml-auto inline-flex items-center gap-1 text-[10px] font-bold text-amber-600 normal-case tracking-normal animate-pulse">
+          <span className="ml-auto inline-flex items-center gap-1 text-[10px] font-bold text-amber-600 dark:text-amber-300 normal-case tracking-normal animate-pulse">
             <span aria-hidden="true" className="w-1.5 h-1.5 rounded-full bg-amber-500" />
             updated
           </span>
@@ -587,16 +587,16 @@ function SidebarField({ label, children, flash = false, onAck }) {
 export function HistoryEvent({ icon: Icon, tone, title, meta, at, isLast }) {
   return (
     <li className="relative flex gap-3 pb-5">
-      {!isLast && <span aria-hidden="true" className="absolute left-[15px] top-8 bottom-0 w-px bg-slate-200" />}
+      {!isLast && <span aria-hidden="true" className="absolute left-[15px] top-8 bottom-0 w-px bg-secondary" />}
       <span className={`relative z-10 flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${tone}`}>
         <Icon className="w-3.5 h-3.5" aria-hidden="true" />
       </span>
       <div className="min-w-0 flex-1 pt-0.5">
-        <p className="text-sm text-slate-700">{title}</p>
-        {meta && <p className="text-xs text-slate-400 mt-0.5">{meta}</p>}
+        <p className="text-sm text-foreground/85">{title}</p>
+        {meta && <p className="text-xs text-muted-foreground/75 mt-0.5">{meta}</p>}
       </div>
       <span
-        className="text-xs text-slate-400 whitespace-nowrap pt-1"
+        className="text-xs text-muted-foreground/75 whitespace-nowrap pt-1"
         title={new Date(at).toLocaleString()}
       >
         {formatDayTime(at)}
@@ -985,9 +985,9 @@ export default function TicketDetail() {
     const list = ticket?.approvals || [];
     if (!list.length) return null;
     const open = list.filter((a) => a.status === 'pending' || a.status === 'info_requested');
-    if (open.length) return { label: open.length > 1 ? `Awaiting approval (${open.length})` : 'Awaiting approval', cls: 'bg-amber-50 text-amber-700 border-amber-200' };
-    if (list.some((a) => a.status === 'approved')) return { label: 'Approved', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
-    if (list.some((a) => a.status === 'rejected')) return { label: 'Rejected', cls: 'bg-red-50 text-red-700 border-red-200' };
+    if (open.length) return { label: open.length > 1 ? `Awaiting approval (${open.length})` : 'Awaiting approval', cls: 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200 border-amber-200 dark:border-amber-500/30' };
+    if (list.some((a) => a.status === 'approved')) return { label: 'Approved', cls: 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 border-emerald-200 dark:border-emerald-500/30' };
+    if (list.some((a) => a.status === 'rejected')) return { label: 'Rejected', cls: 'bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200 border-red-200 dark:border-red-500/30' };
     return null;
   }, [ticket?.approvals]);
 
@@ -1118,7 +1118,7 @@ export default function TicketDetail() {
         title: (
           <>
             <span className="capitalize font-medium">{humanize(a.activityType)}</span>
-            {a.performedBy ? <span className="text-slate-500"> · {a.performedBy}</span> : null}
+            {a.performedBy ? <span className="text-muted-foreground"> · {a.performedBy}</span> : null}
           </>
         ),
         meta: bits.join(' · ') || null,
@@ -1132,7 +1132,7 @@ export default function TicketDetail() {
         title: (
           <>
             <span className="font-medium">{ep.technician?.name || 'Technician'}</span>
-            <span className="text-slate-500"> took ownership ({humanize(ep.startMethod)})</span>
+            <span className="text-muted-foreground"> took ownership ({humanize(ep.startMethod)})</span>
           </>
         ),
         meta: ep.startAssignedByName ? `by ${ep.startAssignedByName}` : null,
@@ -1145,7 +1145,7 @@ export default function TicketDetail() {
           title: (
             <>
               <span className="font-medium">{ep.technician?.name || 'Technician'}</span>
-              <span className="text-slate-500">’s ownership ended ({humanize(ep.endMethod)})</span>
+              <span className="text-muted-foreground">’s ownership ended ({humanize(ep.endMethod)})</span>
             </>
           ),
           meta: ep.endActorName ? `by ${ep.endActorName}` : null,
@@ -1160,7 +1160,7 @@ export default function TicketDetail() {
         title: (
           <>
             <span className="font-medium">{pr.status === 'queued' ? 'AI triage queued' : 'AI run'}</span>
-            <span className="text-slate-500"> — {pipelineRunLabel(pr)}</span>
+            <span className="text-muted-foreground"> — {pipelineRunLabel(pr)}</span>
           </>
         ),
         meta: `via ${pipelineTriggerLabel(pr.triggerSource)}${pr.syncStatus ? ` · sync ${pr.syncStatus}` : ''}`,
@@ -1178,11 +1178,11 @@ export default function TicketDetail() {
         key: `sys-${e.id}`,
         at: new Date(e.occurredAt).getTime(),
         icon: Bot,
-        tone: 'bg-slate-100 text-slate-500',
+        tone: 'bg-muted text-muted-foreground',
         title: (
           <>
             <span className="font-medium">{e.actorName || 'System'}</span>
-            <span className="text-slate-500"> · system activity</span>
+            <span className="text-muted-foreground"> · system activity</span>
           </>
         ),
         meta: text.length > 220 ? `${text.slice(0, 220)}…` : text,
@@ -1725,7 +1725,7 @@ export default function TicketDetail() {
     }
   };
 
-  const fieldClass = 'tp-focus-ring w-full text-sm bg-white border border-input rounded-lg px-2.5 py-1.5 text-slate-700 disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed';
+  const fieldClass = 'tp-focus-ring w-full text-sm bg-card border border-input rounded-lg px-2.5 py-1.5 text-foreground/85 disabled:bg-muted/50 disabled:text-muted-foreground/75 disabled:cursor-not-allowed';
   const pipelineRuns = ticket?.pipelineRuns || [];
   const canPickUp = canWrite && meta?.actor?.technicianId && ticket?.assignedTechId !== meta.actor.technicianId;
 
@@ -1782,7 +1782,7 @@ export default function TicketDetail() {
               else if (window.history.state?.idx > 0) navigate(-1);
               else navigate('/tickets');
             }}
-            className="tp-focus-ring inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-blue-700 rounded"
+            className="tp-focus-ring inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-blue-700 dark:hover:text-blue-200 rounded"
           >
             <ArrowLeft className="w-4 h-4" aria-hidden="true" /> {(backTo || window.history.state?.idx > 0) ? 'Back' : 'Back to tickets'}
           </button>
@@ -1792,16 +1792,16 @@ export default function TicketDetail() {
                 onClick={() => prevId && navigate(`/tickets/${prevId}`)}
                 disabled={!prevId}
                 aria-label="Previous ticket in queue"
-                className="tp-focus-ring p-1.5 rounded-lg border border-slate-200 bg-white text-slate-500 disabled:opacity-40 hover:border-blue-300 hover:text-blue-700"
+                className="tp-focus-ring p-1.5 rounded-lg border border-border bg-card text-muted-foreground disabled:opacity-40 hover:border-blue-300 dark:hover:border-blue-500/40 hover:text-blue-700 dark:hover:text-blue-200"
               >
                 <ChevronLeft className="w-4 h-4" aria-hidden="true" />
               </button>
-              <span className="text-xs text-slate-400 px-1">{navIndex + 1} / {navIds.length}</span>
+              <span className="text-xs text-muted-foreground/75 px-1">{navIndex + 1} / {navIds.length}</span>
               <button
                 onClick={() => nextId && navigate(`/tickets/${nextId}`)}
                 disabled={!nextId}
                 aria-label="Next ticket in queue"
-                className="tp-focus-ring p-1.5 rounded-lg border border-slate-200 bg-white text-slate-500 disabled:opacity-40 hover:border-blue-300 hover:text-blue-700"
+                className="tp-focus-ring p-1.5 rounded-lg border border-border bg-card text-muted-foreground disabled:opacity-40 hover:border-blue-300 dark:hover:border-blue-500/40 hover:text-blue-700 dark:hover:text-blue-200"
               >
                 <ChevronRight className="w-4 h-4" aria-hidden="true" />
               </button>
@@ -1811,12 +1811,12 @@ export default function TicketDetail() {
 
         {isLoading ? (
           <div className="tp-card rounded-xl p-16 flex items-center justify-center">
-            <Activity className="w-8 h-8 animate-spin text-blue-600" aria-label="Loading ticket" />
+            <Activity className="w-8 h-8 animate-spin text-blue-600 dark:text-blue-300" aria-label="Loading ticket" />
           </div>
         ) : loadError ? (
           <div className="tp-card rounded-xl p-8 text-center">
             <AlertCircle className="w-8 h-8 text-red-400 mx-auto mb-2" aria-hidden="true" />
-            <p className="text-slate-700">{loadError}</p>
+            <p className="text-foreground/85">{loadError}</p>
           </div>
         ) : ticket && (
           <>
@@ -1825,7 +1825,7 @@ export default function TicketDetail() {
               <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_300px] lg:gap-5">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2 mb-1.5">
-                    <span className="font-mono text-sm font-bold text-slate-500">{ticket.displayRef}</span>
+                    <span className="font-mono text-sm font-bold text-muted-foreground">{ticket.displayRef}</span>
                     <OriginChip origin={ticket.origin} />
                     {ticket.isExternal && <ExternalChip />}
                     <MirrorChip ticket={ticket} />
@@ -1834,7 +1834,7 @@ export default function TicketDetail() {
                         onClick={retryMirror}
                         disabled={savingField === 'mirror'}
                         title="Mirror to FreshService now (auto-mirrors every ~60s)"
-                        className="tp-focus-ring inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-white text-blue-700 border border-blue-200 hover:bg-blue-50 disabled:opacity-50"
+                        className="tp-focus-ring inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-card text-blue-700 dark:text-blue-200 border border-blue-200 dark:border-blue-500/30 hover:bg-blue-50 dark:hover:bg-blue-500/15 disabled:opacity-50"
                       >
                         {savingField === 'mirror' ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" /> : <RefreshCw className="w-3 h-3" aria-hidden="true" />}
                         Mirror now
@@ -1846,7 +1846,7 @@ export default function TicketDetail() {
                         target="_blank"
                         rel="noreferrer"
                         title={`FreshService fallback copy #${ticket.freshserviceTicketId}`}
-                        className="tp-focus-ring inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-white text-blue-700 border border-blue-200 hover:bg-blue-50"
+                        className="tp-focus-ring inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-card text-blue-700 dark:text-blue-200 border border-blue-200 dark:border-blue-500/30 hover:bg-blue-50 dark:hover:bg-blue-500/15"
                       >
                         <ExternalLink className="w-3 h-3" aria-hidden="true" /> View FS mirror #{String(ticket.freshserviceTicketId)}
                       </a>
@@ -1865,7 +1865,7 @@ export default function TicketDetail() {
                       </button>
                     )}
                     {ticket.isNoise && (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-500 border border-slate-200">Noise</span>
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-muted text-muted-foreground border border-border">Noise</span>
                     )}
                     {/* Requester sentiment (AI, team-safe: requester state only).
                         Neutral is the default state — only the actionable ends
@@ -1873,7 +1873,7 @@ export default function TicketDetail() {
                     {ticket.sentiment === 'frustrated' && (
                       <span
                         title={`Requester sounds frustrated in their recent messages (AI classification${ticket.sentimentComputedAt ? `, ${timeAgo(ticket.sentimentComputedAt)}` : ''}). Describes the requester, never the agent.`}
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-50 text-red-700 border border-red-200"
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200 border border-red-200 dark:border-red-500/30"
                       >
                         <Flame className="w-3 h-3" aria-hidden="true" /> Requester frustrated
                       </span>
@@ -1881,27 +1881,27 @@ export default function TicketDetail() {
                     {ticket.sentiment === 'positive' && (
                       <span
                         title={`Requester sounds positive in their recent messages (AI classification${ticket.sentimentComputedAt ? `, ${timeAgo(ticket.sentimentComputedAt)}` : ''}).`}
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200"
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 border border-emerald-200 dark:border-emerald-500/30"
                       >
                         <Smile className="w-3 h-3" aria-hidden="true" /> Requester positive
                       </span>
                     )}
                     {alsoViewing.length > 0 && (
                       <span
-                        className="inline-flex items-center gap-1.5 pl-1 pr-2 py-0.5 rounded-full bg-violet-50 border border-violet-200 animate-fadeIn"
+                        className="inline-flex items-center gap-1.5 pl-1 pr-2 py-0.5 rounded-full bg-violet-50 dark:bg-violet-500/15 border border-violet-200 dark:border-violet-500/30 animate-fadeIn"
                         title={`Also viewing: ${alsoViewing.map((v) => v.name).join(', ')}`}
                       >
                         <span className="flex -space-x-1.5" aria-hidden="true">
                           {alsoViewing.slice(0, 4).map((v) => (
                             <span
                               key={v.email}
-                              className="w-4.5 h-4.5 min-w-[18px] min-h-[18px] rounded-full bg-violet-500 border border-white text-white text-[8px] font-bold flex items-center justify-center uppercase"
+                              className="w-4.5 h-4.5 min-w-[18px] min-h-[18px] rounded-full bg-violet-500 border border-card text-white text-[8px] font-bold flex items-center justify-center uppercase"
                             >
                               {(v.name || v.email).trim().split(/\s+/).slice(0, 2).map((p) => p[0]).join('')}
                             </span>
                           ))}
                         </span>
-                        <span className="text-[10px] font-semibold text-violet-700">
+                        <span className="text-[10px] font-semibold text-violet-700 dark:text-violet-200">
                           {alsoViewing.length === 1
                             ? `${(alsoViewing[0].name || alsoViewing[0].email).split(/\s+/)[0]} is also viewing`
                             : `${alsoViewing.length} also viewing`}
@@ -1911,7 +1911,7 @@ export default function TicketDetail() {
                     <div
                       onMouseEnter={() => { ackChange('status'); ackChange('priority'); }}
                       className={`ml-auto flex items-center gap-2 rounded-lg transition-all ${
-                        liveChanges.status || liveChanges.priority ? 'ring-2 ring-amber-300 bg-amber-50 px-1.5 py-0.5' : ''
+                        liveChanges.status || liveChanges.priority ? 'ring-2 ring-amber-300 dark:ring-amber-500/50 bg-amber-50 dark:bg-amber-500/15 px-1.5 py-0.5' : ''
                       }`}
                     >
                       <PriorityDot priority={ticket.priority} withLabel />
@@ -1930,13 +1930,13 @@ export default function TicketDetail() {
                         if (e.key === 'Escape') setEditingSubject(false);
                       }}
                       aria-label="Edit subject"
-                      className="tp-focus-ring w-full text-lg sm:text-xl font-bold text-slate-900 bg-white border border-blue-300 rounded-lg px-2 py-1"
+                      className="tp-focus-ring w-full text-lg sm:text-xl font-bold text-foreground bg-card border border-blue-300 dark:border-blue-500/40 rounded-lg px-2 py-1"
                     />
                   ) : (
                     <h1
                       onMouseEnter={liveChanges.subject ? () => ackChange('subject') : undefined}
-                      className={`text-lg sm:text-xl font-bold text-slate-900 leading-snug group rounded-lg transition-all ${
-                        liveChanges.subject ? 'ring-2 ring-amber-300 bg-amber-50 px-1.5' : ''
+                      className={`text-lg sm:text-xl font-bold text-foreground leading-snug group rounded-lg transition-all ${
+                        liveChanges.subject ? 'ring-2 ring-amber-300 dark:ring-amber-500/50 bg-amber-50 dark:bg-amber-500/15 px-1.5' : ''
                       }`}
                     >
                       {ticket.subject || '(no subject)'}
@@ -1944,7 +1944,7 @@ export default function TicketDetail() {
                         <button
                           onClick={startSubjectEdit}
                           aria-label="Edit subject"
-                          className="tp-focus-ring ml-2 p-1 rounded text-slate-300 hover:text-blue-600 align-middle"
+                          className="tp-focus-ring ml-2 p-1 rounded text-muted-foreground/50 hover:text-blue-600 dark:hover:text-blue-300 align-middle"
                         >
                           <Pencil className="w-3.5 h-3.5" aria-hidden="true" />
                         </button>
@@ -1952,9 +1952,9 @@ export default function TicketDetail() {
                     </h1>
                   )}
 
-                  <p className="text-xs text-slate-400 mt-1">
+                  <p className="text-xs text-muted-foreground/75 mt-1">
                 Created <span title={new Date(ticket.createdAt).toLocaleString()}>{timeAgo(ticket.createdAt)}</span>
-                    {ticket.requester?.name ? <> by <span className="text-slate-600 font-medium">{ticket.requester.name}</span></> : null}
+                    {ticket.requester?.name ? <> by <span className="text-muted-foreground font-medium">{ticket.requester.name}</span></> : null}
                     {ticket.resolvedAt ? <> · resolved <span title={new Date(ticket.resolvedAt).toLocaleString()}>{timeAgo(ticket.resolvedAt)}</span></> : null}
                     {ticket.lastActivityAt ? <> · last activity <span title={new Date(ticket.lastActivityAt).toLocaleString()}>{formatDayTime(ticket.lastActivityAt)} · {timeAgo(ticket.lastActivityAt)}</span></> : null}
                   </p>
@@ -1969,7 +1969,7 @@ export default function TicketDetail() {
                         className={`tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors ${
                           confirmPickup
                             ? 'bg-blue-600 text-white border-blue-600'
-                            : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'
+                            : 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 border-blue-200 dark:border-blue-500/30 hover:bg-blue-100 dark:hover:bg-blue-500/20'
                         }`}
                       >
                         {savingField === 'pickup' ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <Hand className="w-3.5 h-3.5" aria-hidden="true" />}
@@ -1980,7 +1980,7 @@ export default function TicketDetail() {
                       <button
                         onClick={() => setEditOpen(true)}
                         title={isNative ? 'Edit requester, subject and description' : 'Edit requester, subject and description — written to FreshService first'}
-                        className="tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100"
+                        className="tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 border border-blue-200 dark:border-blue-500/30 hover:bg-blue-100 dark:hover:bg-blue-500/20"
                       >
                         <Pencil className="w-3.5 h-3.5" aria-hidden="true" />
                         Edit
@@ -1990,7 +1990,7 @@ export default function TicketDetail() {
                       <button
                         onClick={resolveTicket}
                         disabled={savingField === 'resolve'}
-                        className="tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100"
+                        className="tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 border border-emerald-200 dark:border-emerald-500/30 hover:bg-emerald-100 dark:hover:bg-emerald-500/20"
                       >
                         {savingField === 'resolve' ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <Check className="w-3.5 h-3.5" aria-hidden="true" />}
                     Resolve
@@ -1998,13 +1998,13 @@ export default function TicketDetail() {
                     )}
                     <button
                       onClick={copyLink}
-                      className="tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-white text-slate-600 border border-slate-200 hover:border-blue-300 hover:text-blue-700"
+                      className="tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-card text-muted-foreground border border-border hover:border-blue-300 dark:hover:border-blue-500/40 hover:text-blue-700 dark:hover:text-blue-200"
                     >
                       <Link2 className="w-3.5 h-3.5" aria-hidden="true" /> Copy link
                     </button>
                     <button
                       onClick={() => window.print()}
-                      className="tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-white text-slate-600 border border-slate-200 hover:border-blue-300 hover:text-blue-700"
+                      className="tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-card text-muted-foreground border border-border hover:border-blue-300 dark:hover:border-blue-500/40 hover:text-blue-700 dark:hover:text-blue-200"
                     >
                       <Download className="w-3.5 h-3.5" aria-hidden="true" /> Print
                     </button>
@@ -2026,7 +2026,7 @@ export default function TicketDetail() {
                         onClick={() => setCloneConfirm(true)}
                         disabled={savingField === 'clone'}
                         title="Create a new draft ticket pre-filled from this one"
-                        className="tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-white text-slate-600 border border-slate-200 hover:border-blue-300 hover:text-blue-700"
+                        className="tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-card text-muted-foreground border border-border hover:border-blue-300 dark:hover:border-blue-500/40 hover:text-blue-700 dark:hover:text-blue-200"
                       >
                         {savingField === 'clone' ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <CopyPlus className="w-3.5 h-3.5" aria-hidden="true" />}
                     Clone
@@ -2042,7 +2042,7 @@ export default function TicketDetail() {
                         aria-disabled={Boolean(mergeBlockedReason)}
                         title={mergeBlockedReason || 'Merge duplicate or related tickets into this one'}
                         data-testid="merge-button"
-                        className="tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-white text-slate-600 border border-slate-200 hover:border-violet-300 hover:text-violet-700 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-slate-200 disabled:hover:text-slate-600"
+                        className="tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-card text-muted-foreground border border-border hover:border-violet-300 dark:hover:border-violet-500/40 hover:text-violet-700 dark:hover:text-violet-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-border disabled:hover:text-muted-foreground"
                       >
                         <GitMerge className="w-3.5 h-3.5" aria-hidden="true" />
                         Merge
@@ -2057,7 +2057,7 @@ export default function TicketDetail() {
                         className={`tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
                           confirmDelete
                             ? 'bg-red-600 text-white border-red-600 hover:bg-red-700'
-                            : 'bg-white text-slate-600 border-slate-200 hover:border-red-300 hover:text-red-700'
+                            : 'bg-card text-muted-foreground border-border hover:border-red-300 dark:hover:border-red-500/40 hover:text-red-700 dark:hover:text-red-200'
                         }`}
                       >
                         {savingField === 'delete' ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />}
@@ -2071,8 +2071,8 @@ export default function TicketDetail() {
                         aria-expanded={ticket.isNoise ? undefined : noiseMenuOpen}
                         className={`tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
                           ticket.isNoise
-                            ? 'bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100'
-                            : 'bg-white text-slate-600 border-slate-200 hover:border-violet-300 hover:text-violet-700'
+                            ? 'bg-violet-50 dark:bg-violet-500/15 text-violet-700 dark:text-violet-200 border-violet-200 dark:border-violet-500/30 hover:bg-violet-100 dark:hover:bg-violet-500/20'
+                            : 'bg-card text-muted-foreground border-border hover:border-violet-300 dark:hover:border-violet-500/40 hover:text-violet-700 dark:hover:text-violet-200'
                         }`}
                       >
                         {savingField === 'noise' ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <VolumeX className="w-3.5 h-3.5" aria-hidden="true" />}
@@ -2083,7 +2083,7 @@ export default function TicketDetail() {
                           <button
                             onClick={() => setNoiseFlag(true)}
                             role="menuitem"
-                            className="tp-focus-ring w-full text-left px-2.5 py-1.5 text-sm rounded-md text-slate-600 hover:bg-violet-50 hover:text-violet-700"
+                            className="tp-focus-ring w-full text-left px-2.5 py-1.5 text-sm rounded-md text-muted-foreground hover:bg-violet-50 dark:hover:bg-violet-500/15 hover:text-violet-700 dark:hover:text-violet-200"
                           >
                         Flag as noise
                           </button>
@@ -2091,12 +2091,12 @@ export default function TicketDetail() {
                             <button
                               onClick={() => setNoiseFlag(true, true)}
                               role="menuitem"
-                              className="tp-focus-ring w-full text-left px-2.5 py-1.5 text-sm rounded-md text-slate-600 hover:bg-emerald-50 hover:text-emerald-700"
+                              className="tp-focus-ring w-full text-left px-2.5 py-1.5 text-sm rounded-md text-muted-foreground hover:bg-emerald-50 dark:hover:bg-emerald-500/15 hover:text-emerald-700 dark:hover:text-emerald-200"
                             >
                           Flag as noise & resolve
                             </button>
                           )}
-                          <span className="px-2.5 pt-1 pb-1.5 text-[10px] text-slate-400 border-t border-slate-100 mt-1">
+                          <span className="px-2.5 pt-1 pb-1.5 text-[10px] text-muted-foreground/75 border-t border-border/60 mt-1">
                         Noise tickets leave the default queue — find them under Views → Noise & spam.
                           </span>
                         </span>
@@ -2105,13 +2105,13 @@ export default function TicketDetail() {
                   </div>
 
                   {ticket.isNoise && (
-                    <div className="mt-3 flex flex-wrap items-center gap-2 p-2.5 bg-violet-50 border border-violet-200 rounded-lg text-xs text-violet-800">
+                    <div className="mt-3 flex flex-wrap items-center gap-2 p-2.5 bg-violet-50 dark:bg-violet-500/15 border border-violet-200 dark:border-violet-500/30 rounded-lg text-xs text-violet-800 dark:text-violet-200">
                       <VolumeX className="w-3.5 h-3.5 text-violet-500 flex-shrink-0" aria-hidden="true" />
                       <span>Flagged as noise — hidden from the default queue (Views → Noise &amp; spam).</span>
                       <button
                         onClick={() => setNoiseFlag(false)}
                         disabled={savingField === 'noise'}
-                        className="tp-focus-ring ml-auto inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-white text-violet-700 border border-violet-300 hover:bg-violet-100 disabled:opacity-50"
+                        className="tp-focus-ring ml-auto inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-card text-violet-700 dark:text-violet-200 border border-violet-300 dark:border-violet-500/40 hover:bg-violet-100 dark:hover:bg-violet-500/20 disabled:opacity-50"
                       >
                         {savingField === 'noise' ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" /> : null}
                         Not noise — restore
@@ -2120,12 +2120,12 @@ export default function TicketDetail() {
                   )}
 
                   {ticket.mergedInto && (
-                    <div className="mt-3 flex flex-wrap items-center gap-2 p-2.5 bg-violet-50 border border-violet-200 rounded-lg text-xs text-violet-800">
+                    <div className="mt-3 flex flex-wrap items-center gap-2 p-2.5 bg-violet-50 dark:bg-violet-500/15 border border-violet-200 dark:border-violet-500/30 rounded-lg text-xs text-violet-800 dark:text-violet-200">
                       <CopyPlus className="w-3.5 h-3.5 text-violet-500 flex-shrink-0" aria-hidden="true" />
                       This ticket was merged into
                       <button
                         onClick={() => navigate(`/tickets/${ticket.mergedInto.id}`)}
-                        className="tp-focus-ring font-mono font-bold text-violet-700 hover:underline rounded"
+                        className="tp-focus-ring font-mono font-bold text-violet-700 dark:text-violet-200 hover:underline rounded"
                       >
                         {ticket.mergedInto.displayRef}
                       </button>
@@ -2134,11 +2134,11 @@ export default function TicketDetail() {
                   )}
 
                   {!isNative && (
-                    <div className="mt-3 flex flex-wrap items-center gap-2 p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-600">
-                      <ShieldCheck className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" aria-hidden="true" />
+                    <div className="mt-3 flex flex-wrap items-center gap-2 p-2.5 bg-muted/50 border border-border rounded-lg text-xs text-muted-foreground">
+                      <ShieldCheck className="w-3.5 h-3.5 text-muted-foreground/75 flex-shrink-0" aria-hidden="true" />
                   FreshService owns this ticket — edits to requester, subject, description, assignee, status, priority and category are written to FreshService first (with confirmation); replies are delivered through FreshService.
                       {fsUrl && (
-                        <a href={fsUrl} target="_blank" rel="noreferrer" className="tp-focus-ring inline-flex items-center gap-1 font-semibold text-blue-700 hover:underline rounded ml-auto">
+                        <a href={fsUrl} target="_blank" rel="noreferrer" className="tp-focus-ring inline-flex items-center gap-1 font-semibold text-blue-700 dark:text-blue-200 hover:underline rounded ml-auto">
                       Open in FreshService <ExternalLink className="w-3 h-3" aria-hidden="true" />
                         </a>
                       )}
@@ -2147,23 +2147,23 @@ export default function TicketDetail() {
                 </div>
 
                 {/* Requester panel — compact contact card (Entra/FS enriched) */}
-                <div className="mt-4 lg:mt-0 lg:border-l lg:border-slate-100 lg:pl-5 lg:self-center">
+                <div className="mt-4 lg:mt-0 lg:border-l lg:border-border/60 lg:pl-5 lg:self-center">
                   {ticket.requester ? (
                     <div>
                       <div className="flex items-center gap-3">
                         {requesterPhoto ? (
-                          <img src={requesterPhoto} alt="" className="h-12 w-12 rounded-full object-cover ring-2 ring-white shadow-subtle flex-shrink-0" />
+                          <img src={requesterPhoto} alt="" className="h-12 w-12 rounded-full object-cover ring-2 ring-card shadow-subtle flex-shrink-0" />
                         ) : (
                           <PersonAvatar name={ticket.requester.name} size="h-12 w-12" textSize="text-base" />
                         )}
                         <div className="min-w-0">
-                          <p className="text-sm font-bold text-slate-900 truncate">{ticket.requester.name}</p>
+                          <p className="text-sm font-bold text-foreground truncate">{ticket.requester.name}</p>
                           {(() => {
                             const role = [
                               ticket.requester.entraJobTitle || ticket.requester.jobTitle,
                               ticket.requester.entraDepartment || ticket.requester.department,
                             ].filter(Boolean).join(' · ');
-                            return role ? <p className="text-xs text-slate-500 truncate">{role}</p> : null;
+                            return role ? <p className="text-xs text-muted-foreground truncate">{role}</p> : null;
                           })()}
                         </div>
                       </div>
@@ -2174,29 +2174,29 @@ export default function TicketDetail() {
                           <button
                             onClick={() => copyText(ticket.requester.email)}
                             title={`Copy ${ticket.requester.email}`}
-                            className="tp-focus-ring inline-flex items-center gap-1.5 max-w-full px-2 py-1 rounded-lg bg-slate-50 border border-slate-200 text-slate-600 hover:border-blue-300 hover:text-blue-700"
+                            className="tp-focus-ring inline-flex items-center gap-1.5 max-w-full px-2 py-1 rounded-lg bg-muted/50 border border-border text-muted-foreground hover:border-blue-300 dark:hover:border-blue-500/40 hover:text-blue-700 dark:hover:text-blue-200"
                           >
-                            <Mail className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" aria-hidden="true" />
+                            <Mail className="w-3.5 h-3.5 text-muted-foreground/75 flex-shrink-0" aria-hidden="true" />
                             <span className="truncate">{ticket.requester.email}</span>
                           </button>
                         )}
                         {(ticket.requester.entraOfficeLocation || ticket.requester.entraCity) && (
-                          <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-slate-50 border border-slate-200 text-slate-500">
-                            <MapPin className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" aria-hidden="true" />
+                          <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-muted/50 border border-border text-muted-foreground">
+                            <MapPin className="w-3.5 h-3.5 text-muted-foreground/75 flex-shrink-0" aria-hidden="true" />
                             <span className="truncate max-w-[160px]">
                               {[...new Set([ticket.requester.entraOfficeLocation, ticket.requester.entraCity, ticket.requester.entraState].filter(Boolean))].join(' · ')}
                             </span>
                           </span>
                         )}
                         {ticket.requester.phone && (
-                          <a href={`tel:${ticket.requester.phone}`} className="tp-focus-ring inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-slate-50 border border-slate-200 text-slate-500 hover:border-blue-300 hover:text-blue-700">
-                            <Phone className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" aria-hidden="true" />
+                          <a href={`tel:${ticket.requester.phone}`} className="tp-focus-ring inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-muted/50 border border-border text-muted-foreground hover:border-blue-300 dark:hover:border-blue-500/40 hover:text-blue-700 dark:hover:text-blue-200">
+                            <Phone className="w-3.5 h-3.5 text-muted-foreground/75 flex-shrink-0" aria-hidden="true" />
                             <span>{ticket.requester.phone}</span>
                           </a>
                         )}
                         {ticket.requester.mobile && ticket.requester.mobile !== ticket.requester.phone && (
-                          <a href={`tel:${ticket.requester.mobile}`} className="tp-focus-ring inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-slate-50 border border-slate-200 text-slate-500 hover:border-blue-300 hover:text-blue-700">
-                            <Smartphone className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" aria-hidden="true" />
+                          <a href={`tel:${ticket.requester.mobile}`} className="tp-focus-ring inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-muted/50 border border-border text-muted-foreground hover:border-blue-300 dark:hover:border-blue-500/40 hover:text-blue-700 dark:hover:text-blue-200">
+                            <Smartphone className="w-3.5 h-3.5 text-muted-foreground/75 flex-shrink-0" aria-hidden="true" />
                             <span>{ticket.requester.mobile}</span>
                           </a>
                         )}
@@ -2204,7 +2204,7 @@ export default function TicketDetail() {
                           <Link
                             to={`/tickets?requesterId=${ticket.requesterId}&requesterName=${encodeURIComponent(ticket.requester.name || '')}&status=any`}
                             title={`View all tickets from ${ticket.requester.name || 'this requester'}`}
-                            className="tp-focus-ring inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 font-medium hover:bg-blue-100"
+                            className="tp-focus-ring inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-blue-50 dark:bg-blue-500/15 border border-blue-200 dark:border-blue-500/30 text-blue-700 dark:text-blue-200 font-medium hover:bg-blue-100 dark:hover:bg-blue-500/20"
                           >
                             <History className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
                             <span>{related.sameRequesterCount} other ticket{related.sameRequesterCount === 1 ? '' : 's'}</span>
@@ -2227,7 +2227,7 @@ export default function TicketDetail() {
                           readOnly={!canEditAlsoFor}
                           disabled={savingField === 'alsoFor'}
                         />
-                        <p className="mt-1 text-[11px] text-slate-400">
+                        <p className="mt-1 text-[11px] text-muted-foreground/75">
                           {savingField === 'alsoFor'
                             ? 'Saving…'
                             : (ticket.ccEmails?.length ? 'Additional requesters — they receive every reply to the requester' : 'Additional requesters receive every reply to the requester')}
@@ -2236,7 +2236,7 @@ export default function TicketDetail() {
                       </div>
                     </div>
                   ) : (
-                    <p className="text-sm text-slate-400">No requester on record</p>
+                    <p className="text-sm text-muted-foreground/75">No requester on record</p>
                   )}
                 </div>
               </div>
@@ -2245,7 +2245,7 @@ export default function TicketDetail() {
             {/* Mobile quick-actions: on phones the properties sidebar stacks
                 BELOW the whole conversation, so surface the assignee + status up
                 here with a one-tap assign (reuses the touch-first bottom sheet). */}
-            <div className="lg:hidden mb-4 flex items-center gap-2 rounded-xl border border-slate-200 bg-white p-2 shadow-sm print-hide">
+            <div className="lg:hidden mb-4 flex items-center gap-2 rounded-xl border border-border bg-card p-2 shadow-sm print-hide">
               <button
                 type="button"
                 onClick={() => { if (canWrite || fsEditable) setMobileAssignOpen(true); }}
@@ -2255,10 +2255,10 @@ export default function TicketDetail() {
               >
                 <PersonAvatar name={ticket.assignedTech?.name} photoUrl={ticket.assignedTech?.photoUrl} size="h-8 w-8" />
                 <span className="min-w-0">
-                  <span className="block text-[10px] uppercase tracking-wide font-semibold text-slate-400">Assignee</span>
-                  <span className="block truncate text-sm font-semibold text-slate-700">{ticket.assignedTech?.name || 'Unassigned'}</span>
+                  <span className="block text-[10px] uppercase tracking-wide font-semibold text-muted-foreground/75">Assignee</span>
+                  <span className="block truncate text-sm font-semibold text-foreground/85">{ticket.assignedTech?.name || 'Unassigned'}</span>
                 </span>
-                {(canWrite || fsEditable) && <ChevronDown className="ml-auto h-4 w-4 flex-shrink-0 text-slate-300" aria-hidden="true" />}
+                {(canWrite || fsEditable) && <ChevronDown className="ml-auto h-4 w-4 flex-shrink-0 text-muted-foreground/50" aria-hidden="true" />}
               </button>
               <StatusPill status={ticket.status} tone={statusToneFromDefs(statusDefs, ticket.status)} />
             </div>
@@ -2279,7 +2279,7 @@ export default function TicketDetail() {
 
             {/* Page tabs — folder-style: squared, bordered, sitting on a baseline;
                 scroll horizontally on narrow screens instead of clipping. */}
-            <div role="tablist" aria-label="Ticket sections" className="flex items-end gap-1 border-b border-slate-200 mb-4 overflow-x-auto no-scrollbar print-hide">
+            <div role="tablist" aria-label="Ticket sections" className="flex items-end gap-1 border-b border-border mb-4 overflow-x-auto no-scrollbar print-hide">
               {[
                 { key: 'conversation', label: 'Conversation', icon: MessageSquare, count: conversationEntries.filter(isConversationEntry).length },
                 { key: 'approvals', label: 'Approvals', icon: CheckCircle2, count: new Set((ticket.approvals || []).map((a) => a.requestGroupId || `single-${a.id}`)).size },
@@ -2296,8 +2296,8 @@ export default function TicketDetail() {
                     onClick={() => setPageTab(key)}
                     className={`tp-focus-ring relative shrink-0 -mb-px inline-flex items-center gap-1.5 px-4 py-2.5 rounded-t-lg border text-sm font-semibold transition-colors ${
                       selected
-                        ? 'bg-white text-blue-700 border-slate-200 border-b-white'
-                        : 'bg-slate-50 text-slate-500 border-transparent hover:bg-slate-100 hover:text-slate-700'
+                        ? 'bg-card text-blue-700 dark:text-blue-200 border-border border-b-white'
+                        : 'bg-muted/50 text-muted-foreground border-transparent hover:bg-muted hover:text-foreground/85'
                     }`}
                   >
                     {selected && <span className="absolute inset-x-2 top-0 h-0.5 rounded-full bg-blue-600" aria-hidden="true" />}
@@ -2305,7 +2305,7 @@ export default function TicketDetail() {
                     {label}
                     {count > 0 && (
                       <span className={`inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-md text-[10px] font-bold ${
-                        selected ? 'bg-blue-100 text-blue-700' : 'bg-slate-200/80 text-slate-500'
+                        selected ? 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200' : 'bg-secondary/80 text-muted-foreground'
                       }`}
                       >
                         {count}
@@ -2322,15 +2322,15 @@ export default function TicketDetail() {
                 {pageTab === 'conversation' && (
                   <>
                     {(ticket.descriptionText || ticket.description) && !editingDescription && (
-                      <section className="tp-card rounded-xl p-4 bg-gradient-to-br from-white via-white to-slate-100/80" aria-label="Ticket description">
+                      <section className="tp-card rounded-xl p-4 bg-gradient-to-br from-card via-card to-muted/80" aria-label="Ticket description">
                         <div className="flex items-center gap-2 mb-2">
                           <MessageSquare className="w-4 h-4 text-blue-500" aria-hidden="true" />
-                          <h2 className="text-sm font-bold text-slate-800">Description</h2>
+                          <h2 className="text-sm font-bold text-foreground">Description</h2>
                           {canConverse && ticket.status !== 'Deleted' && (
                             <button
                               onClick={startDescriptionEdit}
                               aria-label="Edit description"
-                              className="tp-focus-ring ml-auto p-1 rounded text-slate-300 hover:text-blue-600"
+                              className="tp-focus-ring ml-auto p-1 rounded text-muted-foreground/50 hover:text-blue-600 dark:hover:text-blue-300"
                             >
                               <Pencil className="w-3.5 h-3.5" aria-hidden="true" />
                             </button>
@@ -2347,11 +2347,11 @@ export default function TicketDetail() {
                                 key={a.id}
                                 onClick={() => previewImage(a)}
                                 title={`Preview ${a.fileName}`}
-                                className="tp-focus-ring inline-flex max-w-full items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+                                className="tp-focus-ring inline-flex max-w-full items-center gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2 text-sm font-medium text-foreground/85 hover:border-blue-300 dark:hover:border-blue-500/40 hover:bg-blue-50 dark:hover:bg-blue-500/15 hover:text-blue-700 dark:hover:text-blue-200"
                               >
-                                <Paperclip className="w-4 h-4 flex-none text-slate-400" aria-hidden="true" />
+                                <Paperclip className="w-4 h-4 flex-none text-muted-foreground/75" aria-hidden="true" />
                                 <span className="truncate">{a.fileName}</span>
-                                <span className="flex-none text-xs text-slate-400">{formatBytes(a.sizeBytes)}</span>
+                                <span className="flex-none text-xs text-muted-foreground/75">{formatBytes(a.sizeBytes)}</span>
                               </button>
                             ))}
                           </div>
@@ -2369,13 +2369,13 @@ export default function TicketDetail() {
                           minHeight={160}
                           placeholder="Describe the request… (Ctrl+Enter to save)"
                           ariaLabel="Description"
-                          className="bg-white border-blue-300"
+                          className="bg-card border-blue-300 dark:border-blue-500/40"
                         />
                         {!isNative && (
-                          <p className="mt-2 text-[11px] text-slate-500">FreshService owns this ticket — saving writes the description there first.</p>
+                          <p className="mt-2 text-[11px] text-muted-foreground">FreshService owns this ticket — saving writes the description there first.</p>
                         )}
                         <div className="flex items-center justify-end gap-2 mt-2">
-                          <button onClick={() => setEditingDescription(false)} className="tp-focus-ring px-3 py-1.5 text-xs font-medium text-slate-500 rounded-lg hover:bg-slate-100">Cancel</button>
+                          <button onClick={() => setEditingDescription(false)} className="tp-focus-ring px-3 py-1.5 text-xs font-medium text-muted-foreground rounded-lg hover:bg-muted">Cancel</button>
                           <button onClick={commitDescription} className="tp-focus-ring px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700">Save</button>
                         </div>
                       </section>
@@ -2395,7 +2395,7 @@ export default function TicketDetail() {
                       {/* On-demand AI thread summary (read-only, never stored) */}
                       <ThreadSummaryCard ticketId={ticketId} />
                       <div className="flex flex-wrap items-center gap-2 mb-2 px-1">
-                        <h2 className="text-sm font-bold text-slate-800">Conversation</h2>
+                        <h2 className="text-sm font-bold text-foreground">Conversation</h2>
                         <div role="tablist" aria-label="Filter conversation" className="ml-auto flex items-center gap-1">
                           {CONVERSATION_TABS.map((tab) => (
                             <button
@@ -2405,8 +2405,8 @@ export default function TicketDetail() {
                               onClick={() => setConversationTab(tab.key)}
                               className={`tp-focus-ring px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${
                                 conversationTab === tab.key
-                                  ? 'bg-slate-800 text-white border-slate-800'
-                                  : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
+                                  ? 'bg-foreground text-background border-foreground'
+                                  : 'bg-card text-muted-foreground border-border hover:border-input'
                               }`}
                             >
                               {tab.label}
@@ -2415,21 +2415,21 @@ export default function TicketDetail() {
                         </div>
                       </div>
                       {timeline.length === 0 ? (
-                        <div className="tp-surface rounded-xl p-6 text-center text-sm text-slate-400">
+                        <div className="tp-surface rounded-xl p-6 text-center text-sm text-muted-foreground/75">
                           Nothing here yet{canConverse && conversationTab === 'all' ? ' — start the conversation below.' : '.'}
                           {' '}System events live under the History tab.
                         </div>
                       ) : (
-                        <div className="rounded-2xl border border-slate-200/70 bg-gradient-to-b from-slate-100/90 via-indigo-50/40 to-blue-50/40 p-3 sm:p-4">
+                        <div className="rounded-2xl border border-border/70 bg-gradient-to-b from-muted/90 via-indigo-50/40 to-blue-50/40 dark:from-muted/40 dark:via-indigo-500/5 dark:to-blue-500/5 p-3 sm:p-4">
                           <ul className="space-y-5">
                             {visibleTimeline.map((item, idx) => (
                               <li key={`wrap-${item.e.id}`} className="list-none">
                                 {folded && idx === 1 && (
                                   <div className="relative flex items-center justify-center py-1.5 mb-3.5" role="separator">
-                                    <span aria-hidden="true" className="absolute inset-x-2 top-1/2 border-t border-dashed border-slate-300" />
+                                    <span aria-hidden="true" className="absolute inset-x-2 top-1/2 border-t border-dashed border-input" />
                                     <button
                                       onClick={() => setShowFolded(true)}
-                                      className="tp-focus-ring relative inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white border border-slate-300 text-xs font-semibold text-slate-500 hover:text-blue-700 hover:border-blue-300 shadow-subtle"
+                                      className="tp-focus-ring relative inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-card border border-input text-xs font-semibold text-muted-foreground hover:text-blue-700 dark:hover:text-blue-200 hover:border-blue-300 dark:hover:border-blue-500/40 shadow-subtle"
                                     >
                                       <ChevronDown className="w-3.5 h-3.5" aria-hidden="true" />
                                       Show {foldedCount} earlier message{foldedCount === 1 ? '' : 's'}
@@ -2489,7 +2489,7 @@ export default function TicketDetail() {
                             onClick={() => switchComposerMode('reply')}
                             aria-pressed={composerMode === 'reply'}
                             className={`tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
-                              composerMode === 'reply' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300'
+                              composerMode === 'reply' ? 'bg-blue-600 text-white border-blue-600' : 'bg-card text-muted-foreground border-border hover:border-blue-300 dark:hover:border-blue-500/40'
                             }`}
                           >
                             {/* One flex item: a separate span after the text node
@@ -2501,7 +2501,7 @@ export default function TicketDetail() {
                             onClick={() => switchComposerMode('note')}
                             aria-pressed={composerMode === 'note'}
                             className={`tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
-                              composerMode === 'note' ? 'bg-amber-500 text-white border-amber-500' : 'bg-white text-slate-600 border-slate-200 hover:border-amber-300'
+                              composerMode === 'note' ? 'bg-amber-500 text-white border-amber-500' : 'bg-card text-muted-foreground border-border hover:border-amber-300 dark:hover:border-amber-500/40'
                             }`}
                           >
                             <StickyNote className="w-3.5 h-3.5" aria-hidden="true" /> <span className="sm:hidden">Note</span><span className="hidden sm:inline">Internal note</span>
@@ -2510,7 +2510,7 @@ export default function TicketDetail() {
                             onClick={() => switchComposerMode('forward')}
                             aria-pressed={composerMode === 'forward'}
                             className={`tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
-                              composerMode === 'forward' ? 'bg-violet-600 text-white border-violet-600' : 'bg-white text-slate-600 border-slate-200 hover:border-violet-300'
+                              composerMode === 'forward' ? 'bg-violet-600 text-white border-violet-600' : 'bg-card text-muted-foreground border-border hover:border-violet-300 dark:hover:border-violet-500/40'
                             }`}
                           >
                             <Forward className="w-3.5 h-3.5" aria-hidden="true" /> Forward
@@ -2521,7 +2521,7 @@ export default function TicketDetail() {
                               <button
                                 onClick={() => setQuickNotesOpen((v) => !v)}
                                 aria-expanded={quickNotesOpen}
-                                className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 hover:border-amber-400"
+                                className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-amber-700 dark:text-amber-200 bg-amber-50 dark:bg-amber-500/15 border border-amber-200 dark:border-amber-500/30 hover:border-amber-400"
                               >
                                 <StickyNote className="w-3.5 h-3.5" aria-hidden="true" />
                                 <span className="hidden sm:inline">Quick notes&nbsp;</span>({visibleQuickNotes.length})
@@ -2533,15 +2533,15 @@ export default function TicketDetail() {
                                       <button
                                         key={note.id}
                                         onClick={() => insertQuickNote(note)}
-                                        className="tp-focus-ring text-left px-2 py-1.5 text-sm rounded-md text-slate-700 hover:bg-amber-50"
+                                        className="tp-focus-ring text-left px-2 py-1.5 text-sm rounded-md text-foreground/85 hover:bg-amber-50 dark:hover:bg-amber-500/15"
                                         title={note.bodyText.slice(0, 200)}
                                       >
                                         <span className="block truncate">{note.name}</span>
-                                        <span className="block text-[10px] text-slate-400 truncate">{note.bodyText.slice(0, 60)}</span>
+                                        <span className="block text-[10px] text-muted-foreground/75 truncate">{note.bodyText.slice(0, 60)}</span>
                                       </button>
                                     ))}
                                   </span>
-                                  <span className="px-2 pt-1.5 mt-1 border-t border-slate-100 text-[10px] text-slate-400">Admins manage these under Settings → Ticket Ops.</span>
+                                  <span className="px-2 pt-1.5 mt-1 border-t border-border/60 text-[10px] text-muted-foreground/75">Admins manage these under Settings → Ticket Ops.</span>
                                 </span>
                               )}
                             </span>
@@ -2554,7 +2554,7 @@ export default function TicketDetail() {
                               <button
                                 onClick={() => setTemplatesOpen((v) => !v)}
                                 aria-expanded={templatesOpen}
-                                className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-500 bg-white border border-slate-200 hover:border-blue-300 hover:text-blue-700"
+                                className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-muted-foreground bg-card border border-border hover:border-blue-300 dark:hover:border-blue-500/40 hover:text-blue-700 dark:hover:text-blue-200"
                               >
                                 <FileText className="w-3.5 h-3.5" aria-hidden="true" />
                                 <span className="hidden sm:inline">Templates{templates.length > 0 ? ` (${templates.length})` : ''}</span>
@@ -2563,30 +2563,30 @@ export default function TicketDetail() {
                               {templatesOpen && (
                                 <span className="absolute right-0 top-full mt-1 z-30 w-72 max-w-[calc(100vw-2.5rem)] tp-card rounded-lg shadow-soft p-1.5 flex flex-col animate-scaleIn">
                                   {templates.length === 0 && (
-                                    <span className="px-2 py-1.5 text-xs text-slate-400">No templates yet — write a reply below, then save it here.</span>
+                                    <span className="px-2 py-1.5 text-xs text-muted-foreground/75">No templates yet — write a reply below, then save it here.</span>
                                   )}
                                   <span className="max-h-52 overflow-y-auto settings-scrollbar flex flex-col">
                                     {templates.map((template) => (
                                       <span key={template.id} className="flex items-center gap-1 group">
                                         <button
                                           onClick={() => insertTemplate(template)}
-                                          className="tp-focus-ring flex-1 min-w-0 text-left px-2 py-1.5 text-sm rounded-md text-slate-700 hover:bg-blue-50"
+                                          className="tp-focus-ring flex-1 min-w-0 text-left px-2 py-1.5 text-sm rounded-md text-foreground/85 hover:bg-blue-50 dark:hover:bg-blue-500/15"
                                           title={template.bodyText.slice(0, 200)}
                                         >
                                           <span className="block truncate">{template.name}</span>
-                                          <span className="block text-[10px] text-slate-400 truncate">{template.bodyText.slice(0, 60)}</span>
+                                          <span className="block text-[10px] text-muted-foreground/75 truncate">{template.bodyText.slice(0, 60)}</span>
                                         </button>
                                         <button
                                           onClick={() => removeTemplate(template)}
                                           aria-label={`Delete template ${template.name}`}
-                                          className="tp-focus-ring p-1 rounded text-slate-300 hover:text-red-600 hover:bg-red-50"
+                                          className="tp-focus-ring p-1 rounded text-muted-foreground/50 hover:text-red-600 dark:hover:text-red-300 hover:bg-red-50 dark:hover:bg-red-500/15"
                                         >
                                           <Trash2 className="w-3 h-3" aria-hidden="true" />
                                         </button>
                                       </span>
                                     ))}
                                   </span>
-                                  <span className="flex items-center gap-1.5 border-t border-slate-100 mt-1 pt-1.5 px-1">
+                                  <span className="flex items-center gap-1.5 border-t border-border/60 mt-1 pt-1.5 px-1">
                                     <input
                                       type="text"
                                       value={templateName}
@@ -2594,7 +2594,7 @@ export default function TicketDetail() {
                                       onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); saveTemplate(); } }}
                                       placeholder="Save current draft as…"
                                       aria-label="New template name"
-                                      className="tp-focus-ring flex-1 min-w-0 text-xs bg-white border border-input rounded-md px-2 py-1.5 placeholder:text-slate-400"
+                                      className="tp-focus-ring flex-1 min-w-0 text-xs bg-card border border-input rounded-md px-2 py-1.5 placeholder:text-muted-foreground/75"
                                     />
                                     <button
                                       onClick={saveTemplate}
@@ -2610,7 +2610,7 @@ export default function TicketDetail() {
                           )}
 
                           {composerMode === 'reply' && (
-                            <span className="text-[11px] text-slate-400 truncate">
+                            <span className="text-[11px] text-muted-foreground/75 truncate">
                               {isNative
                                 ? (ticket.requester?.email ? `emails ${ticket.requester.email}` : '')
                                 : 'sent via FreshService (emails the requester)'}
@@ -2621,7 +2621,7 @@ export default function TicketDetail() {
                           <div className="mb-2" data-testid="reply-subject-row">
                             {isNative ? (
                               subjectOpen ? (
-                                <label className="flex items-center gap-2 text-xs text-slate-500">
+                                <label className="flex items-center gap-2 text-xs text-muted-foreground">
                                   <span className="shrink-0 font-medium">Subject</span>
                                   <input
                                     type="text"
@@ -2630,13 +2630,13 @@ export default function TicketDetail() {
                                     onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); setSubjectOpen(false); } }}
                                     maxLength={255}
                                     aria-label="Reply subject"
-                                    className="tp-focus-ring flex-1 min-w-0 text-sm bg-white border border-input rounded-lg px-2.5 py-1.5 text-slate-700 placeholder:text-slate-400"
+                                    className="tp-focus-ring flex-1 min-w-0 text-sm bg-card border border-input rounded-lg px-2.5 py-1.5 text-foreground/85 placeholder:text-muted-foreground/75"
                                     placeholder={ticket?.replySubjectDefault || 'Re: …'}
                                   />
                                   <button
                                     type="button"
                                     onClick={() => { setComposerSubject(''); setSubjectOpen(false); }}
-                                    className="tp-focus-ring shrink-0 rounded px-1.5 py-1 text-[11px] text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+                                    className="tp-focus-ring shrink-0 rounded px-1.5 py-1 text-[11px] text-muted-foreground/75 hover:text-muted-foreground hover:bg-muted"
                                     title="Use the default subject"
                                   >
                                     Reset
@@ -2650,17 +2650,17 @@ export default function TicketDetail() {
                                     setSubjectOpen(true);
                                   }}
                                   aria-label="Edit reply subject"
-                                  className="tp-focus-ring group flex w-full items-center gap-2 rounded-lg px-1 py-0.5 text-left text-xs text-slate-500 hover:bg-slate-50"
+                                  className="tp-focus-ring group flex w-full items-center gap-2 rounded-lg px-1 py-0.5 text-left text-xs text-muted-foreground hover:bg-muted/50"
                                 >
                                   <span className="shrink-0 font-medium">Subject</span>
-                                  <span className="min-w-0 truncate text-slate-600">
+                                  <span className="min-w-0 truncate text-muted-foreground">
                                     {composerSubject.trim() || ticket?.replySubjectDefault || 'Re: …'}
                                   </span>
-                                  <Pencil className="ml-auto h-3 w-3 shrink-0 text-slate-300 group-hover:text-blue-600" aria-hidden="true" />
+                                  <Pencil className="ml-auto h-3 w-3 shrink-0 text-muted-foreground/50 group-hover:text-blue-600 dark:group-hover:text-blue-300" aria-hidden="true" />
                                 </button>
                               )
                             ) : (
-                              <p className="px-1 text-[11px] text-slate-400">
+                              <p className="px-1 text-[11px] text-muted-foreground/75">
                                 FreshService composes the subject for replies on FreshService tickets.
                               </p>
                             )}
@@ -2674,7 +2674,7 @@ export default function TicketDetail() {
                         {composerMode === 'forward' && (
                           <div className="mb-2">
                             <CcChips value={forwardTo} onChange={setForwardTo} placeholder="Forward to…" label="Forward recipients" />
-                            <p className="mt-1 text-[10px] text-slate-400">
+                            <p className="mt-1 text-[10px] text-muted-foreground/75">
                           Sends the description + the last public replies from the workspace mailbox; recorded on the ticket as a private entry.
                             </p>
                           </div>
@@ -2690,7 +2690,7 @@ export default function TicketDetail() {
                               ? 'Optional note to include above the forwarded thread…'
                               : 'Add context for the team (never emailed)…'}
                           ariaLabel={composerMode === 'reply' ? 'Reply body' : composerMode === 'forward' ? 'Forward note' : 'Internal note body'}
-                          className={composerMode === 'note' ? 'bg-amber-50/25 border-amber-200' : composerMode === 'forward' ? 'bg-violet-50/30 border-violet-200' : 'bg-white border-slate-300'}
+                          className={composerMode === 'note' ? 'bg-amber-50/25 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/30' : composerMode === 'forward' ? 'bg-violet-50/30 dark:bg-violet-500/10 border-violet-200 dark:border-violet-500/30' : 'bg-card border-input'}
                           onImagePaste={composerMode === 'forward' ? undefined : (file) => {
                             const ext = ((file.type || 'image/png').split('/')[1] || 'png').replace('jpeg', 'jpg');
                             const name = `pasted-image-${++pasteCountRef.current}.${ext}`;
@@ -2731,7 +2731,7 @@ export default function TicketDetail() {
                                 <button
                                   onClick={() => composerFileInputRef.current?.click()}
                                   disabled={composerFiles.length >= 5}
-                                  className="tp-focus-ring inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-500 bg-white border border-slate-200 rounded-lg hover:border-blue-300 hover:text-blue-700 disabled:opacity-50"
+                                  className="tp-focus-ring inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted-foreground bg-card border border-border rounded-lg hover:border-blue-300 dark:hover:border-blue-500/40 hover:text-blue-700 dark:hover:text-blue-200 disabled:opacity-50"
                                   title="Attach files (up to 5 · 100 MB each; ≤3 MB files are emailed with the reply)"
                                 >
                                   <Paperclip className="w-3.5 h-3.5" aria-hidden="true" />
@@ -2740,7 +2740,7 @@ export default function TicketDetail() {
                               </>
                             )}
                             {composerText.trim() && (
-                              <span className="text-[10px] text-slate-300 truncate" title="Drafts are kept per ticket until sent">draft saved</span>
+                              <span className="text-[10px] text-muted-foreground/50 truncate" title="Drafts are kept per ticket until sent">draft saved</span>
                             )}
                           </span>
                           <button
@@ -2758,7 +2758,7 @@ export default function TicketDetail() {
                         </div>
                       </section>
                     ) : isNative ? (
-                      <div className="tp-surface rounded-xl p-4 text-center text-sm text-slate-500">
+                      <div className="tp-surface rounded-xl p-4 text-center text-sm text-muted-foreground">
                     Native ticketing is disabled for this workspace, so the conversation is read-only.
                       </div>
                     ) : null}
@@ -2768,17 +2768,17 @@ export default function TicketDetail() {
                 {pageTab === 'approvals' && (
                   <section className="tp-card rounded-xl p-4 sm:p-5" aria-label="Approvals">
                     <div className="flex flex-wrap items-center gap-2 mb-3">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600" aria-hidden="true" />
-                      <h2 className="text-sm font-bold text-slate-800">Approvals</h2>
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-300" aria-hidden="true" />
+                      <h2 className="text-sm font-bold text-foreground">Approvals</h2>
                       {/* QA 08-11 #4: approvals are TP-only — say so where they live. */}
-                      <span className="inline-flex items-center gap-1 rounded-full border border-amber-200/80 bg-amber-50/70 px-2 py-0.5 text-[10px] font-medium text-amber-700 whitespace-nowrap">
+                      <span className="inline-flex items-center gap-1 rounded-full border border-amber-200/80 bg-amber-50/70 dark:bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-200 whitespace-nowrap">
                         <ShieldCheck className="w-3 h-3 flex-shrink-0" aria-hidden="true" />
                         Ticket Pulse feature — not synced to FreshService
                       </span>
                     </div>
 
                     {(ticket.approvals?.length || 0) === 0 && (
-                      <p className="text-sm text-slate-400 mb-4">
+                      <p className="text-sm text-muted-foreground/75 mb-4">
                         No approvals yet. Request one below — the approver decides in-app or through a personal magic link.
                       </p>
                     )}
@@ -2811,7 +2811,7 @@ export default function TicketDetail() {
                         Request approval
                       </button>
                     ) : (
-                      <p className="text-sm text-slate-400">
+                      <p className="text-sm text-muted-foreground/75">
                         No approval categories are set up yet. An admin can add them under <span className="font-medium">Settings → Approval Categories</span>.
                       </p>
                     )}
@@ -2840,10 +2840,10 @@ export default function TicketDetail() {
                   <section className="tp-card rounded-xl p-4 sm:p-5" aria-label="Ticket history">
                     <div className="flex items-center gap-2 mb-4">
                       <History className="w-4 h-4 text-blue-500" aria-hidden="true" />
-                      <h2 className="text-sm font-bold text-slate-800">Everything that happened on this ticket</h2>
+                      <h2 className="text-sm font-bold text-foreground">Everything that happened on this ticket</h2>
                     </div>
                     {historyItems.length === 0 ? (
-                      <p className="text-sm text-slate-400">No recorded events yet.</p>
+                      <p className="text-sm text-muted-foreground/75">No recorded events yet.</p>
                     ) : (
                       <ol>
                         {historyItems.map((item, i) => (
@@ -2915,14 +2915,14 @@ export default function TicketDetail() {
                       rows render even without a clock so agents can SET one.
                       FS-born: read-only, FreshService owns the dates. */}
                   {(ticket.frDueBy || ticket.dueBy || canWrite) && !['Deleted', 'Spam'].includes(ticket.status) && (
-                    <div className="pt-1 border-t border-slate-100 space-y-2">
+                    <div className="pt-1 border-t border-border/60 space-y-2">
                       {(ticket.frDueBy || canWrite) && (
                         <div className="flex items-center gap-2 text-xs">
-                          <span className="text-slate-500 font-medium">First response</span>
+                          <span className="text-muted-foreground font-medium">First response</span>
                           {ticket.frDueBy ? (
-                            <span className="ml-auto text-slate-400" title={`${new Date(ticket.frDueBy).toLocaleString()}${isNative ? '' : ' — FreshService owns this date'}`}>{formatDayTime(ticket.frDueBy)}</span>
+                            <span className="ml-auto text-muted-foreground/75" title={`${new Date(ticket.frDueBy).toLocaleString()}${isNative ? '' : ' — FreshService owns this date'}`}>{formatDayTime(ticket.frDueBy)}</span>
                           ) : (
-                            <span className="ml-auto text-slate-300">Not set</span>
+                            <span className="ml-auto text-muted-foreground/50">Not set</span>
                           )}
                           {ticket.frDueBy && <SlaTargetChip target={ticket.frDueBy} metAt={ticket.firstPublicAgentReplyAt} status={ticket.status} terminal={ticketTerminal} paused={ticketSlaPaused} calendarAware={meta?.slaCalendarAware === true} kind="response" />}
                           {canWrite && (
@@ -2943,11 +2943,11 @@ export default function TicketDetail() {
                       )}
                       {(ticket.dueBy || canWrite) && (
                         <div className="flex items-center gap-2 text-xs">
-                          <span className="text-slate-500 font-medium">Resolution</span>
+                          <span className="text-muted-foreground font-medium">Resolution</span>
                           {ticket.dueBy ? (
-                            <span className="ml-auto text-slate-400" title={`${new Date(ticket.dueBy).toLocaleString()}${isNative ? '' : ' — FreshService owns this date'}`}>{formatDayTime(ticket.dueBy)}</span>
+                            <span className="ml-auto text-muted-foreground/75" title={`${new Date(ticket.dueBy).toLocaleString()}${isNative ? '' : ' — FreshService owns this date'}`}>{formatDayTime(ticket.dueBy)}</span>
                           ) : (
-                            <span className="ml-auto text-slate-300">Not set</span>
+                            <span className="ml-auto text-muted-foreground/50">Not set</span>
                           )}
                           {ticket.dueBy && <SlaTargetChip target={ticket.dueBy} metAt={ticket.resolvedAt || ticket.closedAt} status={ticket.status} terminal={ticketTerminal} paused={ticketSlaPaused} calendarAware={meta?.slaCalendarAware === true} kind="resolution" />}
                           {canWrite && (
@@ -2988,9 +2988,9 @@ export default function TicketDetail() {
                         }}
                       />
                     ) : (
-                      <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-slate-50 border border-slate-100">
+                      <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-muted/50 border border-border/60">
                         <PersonAvatar name={ticket.assignedTech?.name} photoUrl={ticket.assignedTech?.photoUrl} size="h-7 w-7" />
-                        <span className="text-sm text-slate-600 truncate">{ticket.assignedTech?.name || 'Unassigned'}</span>
+                        <span className="text-sm text-muted-foreground truncate">{ticket.assignedTech?.name || 'Unassigned'}</span>
                       </div>
                     )}
                   </SidebarField>
@@ -3091,16 +3091,16 @@ export default function TicketDetail() {
                           </select>
                         )}
                         {fsEditable && (
-                          <p className="mt-1 text-[10px] text-slate-400">Edits sync to FreshService with confirmation.</p>
+                          <p className="mt-1 text-[10px] text-muted-foreground/75">Edits sync to FreshService with confirmation.</p>
                         )}
                       </>
                     ) : (
                       (() => {
                         const { category: catLabel, subcategory: subLabel } = ticketCategoryLabels(ticket);
                         return (
-                          <div className="px-2.5 py-1.5 rounded-lg bg-slate-50 border border-slate-100 text-sm min-w-0">
-                            <span className="block text-slate-700 truncate" title={catLabel || undefined}>{catLabel || 'Uncategorized'}</span>
-                            {subLabel && <span className="block text-xs text-slate-400 truncate" title={subLabel}>{subLabel}</span>}
+                          <div className="px-2.5 py-1.5 rounded-lg bg-muted/50 border border-border/60 text-sm min-w-0">
+                            <span className="block text-foreground/85 truncate" title={catLabel || undefined}>{catLabel || 'Uncategorized'}</span>
+                            {subLabel && <span className="block text-xs text-muted-foreground/75 truncate" title={subLabel}>{subLabel}</span>}
                           </div>
                         );
                       })()
@@ -3156,7 +3156,7 @@ export default function TicketDetail() {
                       we have no Entra write access (QA 07-13 #4). */}
                   <SidebarField label="Department">
                     <div
-                      className="px-3 py-2 text-sm text-slate-600 bg-slate-50 border border-slate-100 rounded-lg truncate"
+                      className="px-3 py-2 text-sm text-muted-foreground bg-muted/50 border border-border/60 rounded-lg truncate"
                       title="From Entra ID — read-only"
                     >
                       {[
@@ -3187,7 +3187,7 @@ export default function TicketDetail() {
                           className={`tp-focus-ring inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold rounded-lg border transition-colors ${
                             watchingCategory
                               ? 'bg-blue-600 text-white border-blue-600'
-                              : 'bg-white text-slate-500 border-slate-200 hover:border-blue-300 hover:text-blue-700'
+                              : 'bg-card text-muted-foreground border-border hover:border-blue-300 dark:hover:border-blue-500/40 hover:text-blue-700 dark:hover:text-blue-200'
                           }`}
                         >
                           {watchingCategory ? <BellRing className="w-3 h-3" aria-hidden="true" /> : <Bell className="w-3 h-3" aria-hidden="true" />}
@@ -3202,7 +3202,7 @@ export default function TicketDetail() {
                           className={`tp-focus-ring inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold rounded-lg border transition-colors ${
                             watchingGroup
                               ? 'bg-blue-600 text-white border-blue-600'
-                              : 'bg-white text-slate-500 border-slate-200 hover:border-blue-300 hover:text-blue-700'
+                              : 'bg-card text-muted-foreground border-border hover:border-blue-300 dark:hover:border-blue-500/40 hover:text-blue-700 dark:hover:text-blue-200'
                           }`}
                         >
                           {watchingGroup ? <BellRing className="w-3 h-3" aria-hidden="true" /> : <Bell className="w-3 h-3" aria-hidden="true" />}
@@ -3250,11 +3250,11 @@ export default function TicketDetail() {
                   <div className="tp-card rounded-xl p-4">
                     <div className="flex items-center gap-2 mb-2.5">
                       <History className="w-4 h-4 text-blue-500" aria-hidden="true" />
-                      <h2 className="text-sm font-bold text-slate-800">Related</h2>
+                      <h2 className="text-sm font-bold text-foreground">Related</h2>
                     </div>
                     {related.sameRequester.length > 0 && (
                       <>
-                        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-1">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/75 mb-1">
                           Other tickets from this requester
                         </p>
                         <ul className="space-y-1 mb-2.5">
@@ -3262,10 +3262,10 @@ export default function TicketDetail() {
                             <li key={r.id}>
                               <Link
                                 to={`/tickets/${r.id}`}
-                                className="tp-focus-ring flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-blue-50/60 border border-transparent hover:border-blue-100"
+                                className="tp-focus-ring flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-blue-50/60 dark:hover:bg-blue-500/10 border border-transparent hover:border-blue-100 dark:hover:border-blue-500/20"
                               >
-                                <span className="font-mono text-[10px] font-semibold text-slate-400 whitespace-nowrap">{r.displayRef}</span>
-                                <span className="min-w-0 flex-1 text-xs text-slate-700 truncate">{r.subject || '(no subject)'}</span>
+                                <span className="font-mono text-[10px] font-semibold text-muted-foreground/75 whitespace-nowrap">{r.displayRef}</span>
+                                <span className="min-w-0 flex-1 text-xs text-foreground/85 truncate">{r.subject || '(no subject)'}</span>
                                 <StatusPill status={r.status} className="!text-[9px] !px-1.5" />
                               </Link>
                             </li>
@@ -3274,16 +3274,16 @@ export default function TicketDetail() {
                       </>
                     )}
                     {related.nearDuplicates.length > 0 && !dupeDismissed && (
-                      <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-2">
+                      <div className="rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50/60 dark:bg-amber-500/10 p-2">
                         <div className="flex items-center gap-1.5 mb-1">
                           <Sparkles className="w-3 h-3 text-amber-500" aria-hidden="true" />
-                          <span className="text-[10px] font-semibold uppercase tracking-wide text-amber-700">
+                          <span className="text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-200">
                             Suggestion — same subject within 7 days
                           </span>
                           <button
                             onClick={dismissDupes}
                             aria-label="Dismiss duplicate suggestion"
-                            className="tp-focus-ring ml-auto p-0.5 rounded text-amber-400 hover:text-amber-700"
+                            className="tp-focus-ring ml-auto p-0.5 rounded text-amber-400 hover:text-amber-700 dark:hover:text-amber-200"
                           >
                             <X className="w-3 h-3" aria-hidden="true" />
                           </button>
@@ -3293,11 +3293,11 @@ export default function TicketDetail() {
                             <li key={r.id}>
                               <Link
                                 to={`/tickets/${r.id}`}
-                                className="tp-focus-ring flex items-center gap-2 px-1.5 py-1 rounded-md hover:bg-amber-100/70"
+                                className="tp-focus-ring flex items-center gap-2 px-1.5 py-1 rounded-md hover:bg-amber-100/70 dark:hover:bg-amber-500/15"
                               >
-                                <span className="font-mono text-[10px] font-semibold text-amber-600 whitespace-nowrap">{r.displayRef}</span>
-                                <span className="min-w-0 flex-1 text-xs text-slate-700 truncate">{r.subject || '(no subject)'}</span>
-                                <span className="text-[10px] text-slate-400 whitespace-nowrap">{timeAgo(r.createdAt)}</span>
+                                <span className="font-mono text-[10px] font-semibold text-amber-600 dark:text-amber-300 whitespace-nowrap">{r.displayRef}</span>
+                                <span className="min-w-0 flex-1 text-xs text-foreground/85 truncate">{r.subject || '(no subject)'}</span>
+                                <span className="text-[10px] text-muted-foreground/75 whitespace-nowrap">{timeAgo(r.createdAt)}</span>
                               </Link>
                             </li>
                           ))}
@@ -3306,10 +3306,10 @@ export default function TicketDetail() {
                       </div>
                     )}
                     {related.similarByContent?.length > 0 && (
-                      <div className={`rounded-lg border border-violet-200 bg-violet-50/50 p-2 ${related.nearDuplicates.length > 0 && !dupeDismissed ? 'mt-2' : ''}`}>
+                      <div className={`rounded-lg border border-violet-200 dark:border-violet-500/30 bg-violet-50/50 dark:bg-violet-500/10 p-2 ${related.nearDuplicates.length > 0 && !dupeDismissed ? 'mt-2' : ''}`}>
                         <div className="flex items-center gap-1.5 mb-1">
                           <Sparkles className="w-3 h-3 text-violet-500" aria-hidden="true" />
-                          <span className="text-[10px] font-semibold uppercase tracking-wide text-violet-700">
+                          <span className="text-[10px] font-semibold uppercase tracking-wide text-violet-700 dark:text-violet-200">
                             AI suggestion — similar by content
                           </span>
                         </div>
@@ -3318,10 +3318,10 @@ export default function TicketDetail() {
                             <li key={r.id}>
                               <Link
                                 to={`/tickets/${r.id}`}
-                                className="tp-focus-ring flex items-center gap-2 px-1.5 py-1 rounded-md hover:bg-violet-100/70"
+                                className="tp-focus-ring flex items-center gap-2 px-1.5 py-1 rounded-md hover:bg-violet-100/70 dark:hover:bg-violet-500/15"
                               >
-                                <span className="font-mono text-[10px] font-semibold text-violet-600 whitespace-nowrap">{r.displayRef}</span>
-                                <span className="min-w-0 flex-1 text-xs text-slate-700 truncate">{r.subject || '(no subject)'}</span>
+                                <span className="font-mono text-[10px] font-semibold text-violet-600 dark:text-violet-300 whitespace-nowrap">{r.displayRef}</span>
+                                <span className="min-w-0 flex-1 text-xs text-foreground/85 truncate">{r.subject || '(no subject)'}</span>
                                 <span
                                   className="text-[10px] font-semibold text-violet-500 whitespace-nowrap"
                                   title="Content similarity (cosine over text embeddings)"
@@ -3342,8 +3342,8 @@ export default function TicketDetail() {
                 <div className="tp-card rounded-xl p-4">
                   <div className="flex items-center gap-2 mb-2.5">
                     <Paperclip className="w-4 h-4 text-blue-500" aria-hidden="true" />
-                    <h2 className="text-sm font-bold text-slate-800">Attachments</h2>
-                    <span className="text-xs text-slate-400">({ticket.attachments?.length || 0})</span>
+                    <h2 className="text-sm font-bold text-foreground">Attachments</h2>
+                    <span className="text-xs text-muted-foreground/75">({ticket.attachments?.length || 0})</span>
                     {canWrite && (
                       <>
                         <input
@@ -3357,7 +3357,7 @@ export default function TicketDetail() {
                         <button
                           onClick={() => attachmentInputRef.current?.click()}
                           disabled={savingField === 'attachments'}
-                          className="tp-focus-ring ml-auto inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 disabled:opacity-50"
+                          className="tp-focus-ring ml-auto inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-blue-700 dark:text-blue-200 bg-blue-50 dark:bg-blue-500/15 border border-blue-200 dark:border-blue-500/30 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-500/20 disabled:opacity-50"
                         >
                           {savingField === 'attachments' ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" /> : <Paperclip className="w-3 h-3" aria-hidden="true" />}
                           {uploadProgress ? `${uploadProgress.pct}%` : 'Add'}
@@ -3366,14 +3366,14 @@ export default function TicketDetail() {
                     )}
                   </div>
                   {uploadProgress && (
-                    <div className="mb-2 rounded-lg border border-blue-100 bg-blue-50/60 px-2.5 py-2">
+                    <div className="mb-2 rounded-lg border border-blue-100 dark:border-blue-500/20 bg-blue-50/60 dark:bg-blue-500/10 px-2.5 py-2">
                       <div className="flex items-center justify-between text-[11px] mb-1">
-                        <span className="text-slate-600 truncate mr-2">
+                        <span className="text-muted-foreground truncate mr-2">
                           {uploadProgress.pct < 100 ? 'Uploading' : 'Processing'} {uploadProgress.name}
                         </span>
-                        <span className="font-semibold text-blue-700 tabular-nums flex-shrink-0">{uploadProgress.pct}%</span>
+                        <span className="font-semibold text-blue-700 dark:text-blue-200 tabular-nums flex-shrink-0">{uploadProgress.pct}%</span>
                       </div>
-                      <div className="h-1.5 rounded-full bg-blue-100 overflow-hidden">
+                      <div className="h-1.5 rounded-full bg-blue-100 dark:bg-blue-500/20 overflow-hidden">
                         <div
                           className="h-full bg-blue-600 rounded-full transition-[width] duration-150"
                           style={{ width: `${uploadProgress.pct}%` }}
@@ -3382,21 +3382,21 @@ export default function TicketDetail() {
                     </div>
                   )}
                   {(ticket.attachments?.length || 0) === 0 ? (
-                    <p className="text-xs text-slate-400">No files attached{canWrite ? ' — drop something in with Add.' : '.'}</p>
+                    <p className="text-xs text-muted-foreground/75">No files attached{canWrite ? ' — drop something in with Add.' : '.'}</p>
                   ) : (
                     <ul className="space-y-1.5">
                       {ticket.attachments.map((a) => (
-                        <li key={a.id} className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg border border-slate-100 bg-slate-50/60">
+                        <li key={a.id} className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg border border-border/60 bg-muted/30">
                           {isImageAttachment(a)
-                            ? <ImageIcon className="w-[18px] h-[18px] text-slate-400 flex-shrink-0" aria-hidden="true" />
-                            : <Paperclip className="w-[18px] h-[18px] text-slate-400 flex-shrink-0" aria-hidden="true" />}
+                            ? <ImageIcon className="w-[18px] h-[18px] text-muted-foreground/75 flex-shrink-0" aria-hidden="true" />
+                            : <Paperclip className="w-[18px] h-[18px] text-muted-foreground/75 flex-shrink-0" aria-hidden="true" />}
                           <button
                             onClick={() => previewImage(a)}
                             title={`Preview ${a.fileName}`}
                             className="tp-focus-ring min-w-0 flex-1 text-left rounded"
                           >
-                            <p className="text-sm font-medium text-slate-700 truncate hover:text-blue-700">{a.fileName}</p>
-                            <p className="text-[11px] text-slate-400 truncate">
+                            <p className="text-sm font-medium text-foreground/85 truncate hover:text-blue-700 dark:hover:text-blue-200">{a.fileName}</p>
+                            <p className="text-[11px] text-muted-foreground/75 truncate">
                               {formatBytes(a.sizeBytes)}
                               {a.source === 'email' ? ' · from email' : a.source === 'freshservice' ? ' · from FreshService' : a.uploadedBy ? ` · ${a.uploadedBy}` : ''}
                             </p>
@@ -3404,14 +3404,14 @@ export default function TicketDetail() {
                           <button
                             onClick={() => previewImage(a)}
                             aria-label={`Preview ${a.fileName}`}
-                            className="tp-focus-ring p-1 text-slate-400 hover:text-blue-700 hover:bg-blue-50 rounded"
+                            className="tp-focus-ring p-1 text-muted-foreground/75 hover:text-blue-700 dark:hover:text-blue-200 hover:bg-blue-50 dark:hover:bg-blue-500/15 rounded"
                           >
                             <Eye className="w-4 h-4" aria-hidden="true" />
                           </button>
                           <button
                             onClick={() => downloadAttachment(a)}
                             aria-label={`Download ${a.fileName}`}
-                            className="tp-focus-ring p-1 text-slate-400 hover:text-blue-700 hover:bg-blue-50 rounded"
+                            className="tp-focus-ring p-1 text-muted-foreground/75 hover:text-blue-700 dark:hover:text-blue-200 hover:bg-blue-50 dark:hover:bg-blue-500/15 rounded"
                           >
                             <Download className="w-4 h-4" aria-hidden="true" />
                           </button>
@@ -3420,7 +3420,7 @@ export default function TicketDetail() {
                               onClick={() => applyChange(`attach-del-${a.id}`, () => ticketsAPI.removeAttachment(ticketId, a.id))}
                               disabled={savingField === `attach-del-${a.id}`}
                               aria-label={`Remove ${a.fileName}`}
-                              className="tp-focus-ring p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded"
+                              className="tp-focus-ring p-1 text-muted-foreground/75 hover:text-red-600 dark:hover:text-red-300 hover:bg-red-50 dark:hover:bg-red-500/15 rounded"
                             >
                               <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
                             </button>
@@ -3436,11 +3436,11 @@ export default function TicketDetail() {
                   <div className="tp-card rounded-xl p-4">
                     <div className="flex items-center gap-2 mb-2.5">
                       <Sparkles className="w-4 h-4 text-indigo-500" aria-hidden="true" />
-                      <h2 className="text-sm font-bold text-slate-800">AI runs</h2>
-                      {pipelineRuns.length > 0 && <span className="text-xs text-slate-400">({pipelineRuns.length})</span>}
+                      <h2 className="text-sm font-bold text-foreground">AI runs</h2>
+                      {pipelineRuns.length > 0 && <span className="text-xs text-muted-foreground/75">({pipelineRuns.length})</span>}
                       <button
                         onClick={() => setAiModalOpen(true)}
-                        className="tp-focus-ring ml-auto inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-indigo-200 bg-indigo-50/70 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100"
+                        className="tp-focus-ring ml-auto inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-indigo-200 dark:border-indigo-500/30 bg-indigo-50/70 dark:bg-indigo-500/10 text-[11px] font-semibold text-indigo-700 dark:text-indigo-200 hover:bg-indigo-100 dark:hover:bg-indigo-500/20"
                         title="Run the assignment pipeline and watch it live"
                       >
                         <Sparkles className="w-3 h-3" aria-hidden="true" />
@@ -3450,12 +3450,12 @@ export default function TicketDetail() {
 
                     {/* Pending recommendation — approve without leaving the ticket */}
                     {aiPendingRun && aiRecs.length > 0 && (
-                      <div className={`mb-3 rounded-lg border p-3 ${alreadyAssigned ? 'border-amber-200 bg-amber-50/60' : 'border-indigo-200 bg-gradient-to-br from-indigo-50 to-violet-50/50'}`}>
-                        <p className={`flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider mb-2 ${alreadyAssigned ? 'text-amber-600' : 'text-indigo-500'}`}>
+                      <div className={`mb-3 rounded-lg border p-3 ${alreadyAssigned ? 'border-amber-200 dark:border-amber-500/30 bg-amber-50/60 dark:bg-amber-500/10' : 'border-indigo-200 dark:border-indigo-500/30 bg-gradient-to-br from-indigo-50 dark:from-indigo-500/15 to-violet-50/50'}`}>
+                        <p className={`flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider mb-2 ${alreadyAssigned ? 'text-amber-600 dark:text-amber-300' : 'text-indigo-500'}`}>
                           <Sparkles className="w-3 h-3" aria-hidden="true" /> {alreadyAssigned ? 'AI suggestion (already assigned)' : 'Awaiting your review'}
                         </p>
                         {alreadyAssigned && (
-                          <p className="mb-2 text-[11px] text-amber-700 leading-relaxed">
+                          <p className="mb-2 text-[11px] text-amber-700 dark:text-amber-200 leading-relaxed">
                             Already assigned{assigneeName ? ` to ${assigneeName}` : ''} — handled outside this run. Approving reassigns the ticket.
                           </p>
                         )}
@@ -3467,17 +3467,17 @@ export default function TicketDetail() {
                             textSize="text-[11px]"
                           />
                           <span className="min-w-0 flex-1">
-                            <span className="block text-sm font-semibold text-slate-800 truncate">{aiRecs[0].techName || 'Unknown'}</span>
+                            <span className="block text-sm font-semibold text-foreground truncate">{aiRecs[0].techName || 'Unknown'}</span>
                             {typeof aiRecs[0].score === 'number' && (
                               <span className="block text-[11px] text-indigo-500 font-medium">{Math.round(aiRecs[0].score * 100)}% match</span>
                             )}
                           </span>
                         </div>
                         {aiRecs[0].reasoning && (
-                          <p className="mt-1.5 text-[11px] text-slate-500 leading-relaxed line-clamp-3">{aiRecs[0].reasoning}</p>
+                          <p className="mt-1.5 text-[11px] text-muted-foreground leading-relaxed line-clamp-3">{aiRecs[0].reasoning}</p>
                         )}
                         {aiRecs.length > 1 && (
-                          <p className="mt-1.5 text-[10px] text-slate-400 truncate">
+                          <p className="mt-1.5 text-[10px] text-muted-foreground/75 truncate">
                           Also considered: {aiRecs.slice(1).map((r) => r.techName).filter(Boolean).join(', ')}
                           </p>
                         )}
@@ -3492,7 +3492,7 @@ export default function TicketDetail() {
                           </button>
                           <button
                             onClick={() => setAiModalOpen(true)}
-                            className="tp-focus-ring px-2.5 py-1.5 rounded-lg border border-indigo-200 text-indigo-700 text-xs font-medium hover:bg-indigo-100/60"
+                            className="tp-focus-ring px-2.5 py-1.5 rounded-lg border border-indigo-200 dark:border-indigo-500/30 text-indigo-700 dark:text-indigo-200 text-xs font-medium hover:bg-indigo-100/60 dark:hover:bg-indigo-500/15"
                             title="See reasoning, pick another technician, or reject"
                           >
                           Review…
@@ -3502,26 +3502,26 @@ export default function TicketDetail() {
                     )}
 
                     {pipelineRuns.length === 0 ? (
-                      <p className="text-sm text-slate-400">No pipeline run yet for this ticket.</p>
+                      <p className="text-sm text-muted-foreground/75">No pipeline run yet for this ticket.</p>
                     ) : (
                       <ul className="space-y-1.5">
                         {pipelineRuns.map((r) => (
                           <li key={r.id} className={`rounded-lg border p-2.5 ${
-                            r.status === 'queued' ? 'border-amber-200 bg-amber-50/60' : 'border-slate-100 bg-slate-50/60'
+                            r.status === 'queued' ? 'border-amber-200 dark:border-amber-500/30 bg-amber-50/60 dark:bg-amber-500/10' : 'border-border/60 bg-muted/30'
                           }`}
                           >
                             <div className="flex items-center gap-2">
-                              <span className={`text-xs font-semibold ${r.status === 'queued' ? 'text-amber-700' : 'text-slate-700'}`}>
+                              <span className={`text-xs font-semibold ${r.status === 'queued' ? 'text-amber-700 dark:text-amber-200' : 'text-foreground/85'}`}>
                                 {pipelineRunLabel(r)}
                               </span>
                               <span
-                                className="ml-auto text-[10px] text-slate-400 whitespace-nowrap"
+                                className="ml-auto text-[10px] text-muted-foreground/75 whitespace-nowrap"
                                 title={new Date(r.decidedAt || r.createdAt).toLocaleString()}
                               >
                                 {timeAgo(r.decidedAt || r.createdAt)}
                               </span>
                             </div>
-                            <p className="text-[11px] text-slate-400 mt-0.5">
+                            <p className="text-[11px] text-muted-foreground/75 mt-0.5">
                             via {pipelineTriggerLabel(r.triggerSource)}
                               {r.status === 'queued' && ' — runs when business hours open'}
                               {r.syncStatus ? ` · sync ${r.syncStatus}` : ''}
@@ -3529,7 +3529,7 @@ export default function TicketDetail() {
                             <Link
                               to={`/assignments/history/${r.id}`}
                               state={{ returnTo: `/tickets/${ticket.id}` }}
-                              className="tp-focus-ring inline-flex items-center gap-1 mt-1 text-[11px] font-semibold text-indigo-600 hover:underline rounded"
+                              className="tp-focus-ring inline-flex items-center gap-1 mt-1 text-[11px] font-semibold text-indigo-600 dark:text-indigo-300 hover:underline rounded"
                             >
                               <Bot className="w-3 h-3" aria-hidden="true" /> View run
                             </Link>
@@ -3633,22 +3633,22 @@ export default function TicketDetail() {
             <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-[2px]" onClick={() => setChangeApprovalTarget(null)} aria-hidden="true" />
             <div className="relative tp-card rounded-2xl shadow-soft w-full max-w-md p-5 animate-scaleIn">
               <div className="flex items-start gap-3">
-                <span className={`h-9 w-9 rounded-lg inline-flex items-center justify-center flex-shrink-0 ${toApprove ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}`}>
+                <span className={`h-9 w-9 rounded-lg inline-flex items-center justify-center flex-shrink-0 ${toApprove ? 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-300' : 'bg-red-50 dark:bg-red-500/15 text-red-600 dark:text-red-300'}`}>
                   <RefreshCw className="w-4.5 h-4.5" aria-hidden="true" />
                 </span>
                 <div className="min-w-0">
-                  <h2 id="chg-approval-title" className="text-base font-bold text-slate-900">
+                  <h2 id="chg-approval-title" className="text-base font-bold text-foreground">
                     Change this decision to {t.to}?
                   </h2>
-                  <p className="mt-1 text-sm text-slate-600 leading-relaxed">
+                  <p className="mt-1 text-sm text-muted-foreground leading-relaxed">
                     {t.categoryName ? <><span className="font-semibold">{t.categoryName}</span> is </> : 'This approval is '}
-                    currently <span className={`font-semibold ${t.from === 'approved' ? 'text-emerald-700' : 'text-red-700'}`}>{t.from}</span>.
-                    {' '}This will flip it to <span className={`font-semibold ${toApprove ? 'text-emerald-700' : 'text-red-700'}`}>{t.to}</span> and record the change on the ticket.
+                    currently <span className={`font-semibold ${t.from === 'approved' ? 'text-emerald-700 dark:text-emerald-200' : 'text-red-700 dark:text-red-200'}`}>{t.from}</span>.
+                    {' '}This will flip it to <span className={`font-semibold ${toApprove ? 'text-emerald-700 dark:text-emerald-200' : 'text-red-700 dark:text-red-200'}`}>{t.to}</span> and record the change on the ticket.
                   </p>
                 </div>
               </div>
-              <label htmlFor="change-note" className="block mt-4 text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-1.5">
-                Why the change? <span className="font-normal normal-case text-slate-300">— optional, shown in the audit trail</span>
+              <label htmlFor="change-note" className="block mt-4 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/75 mb-1.5">
+                Why the change? <span className="font-normal normal-case text-muted-foreground/50">— optional, shown in the audit trail</span>
               </label>
               <textarea
                 id="change-note"
@@ -3657,10 +3657,10 @@ export default function TicketDetail() {
                 value={changeNote}
                 onChange={(e) => setChangeNote(e.target.value)}
                 placeholder={toApprove ? 'e.g. “Budget was approved after all — clearing to proceed.”' : 'e.g. “Reversing — the spend exceeds this quarter’s cap.”'}
-                className="tp-focus-ring w-full text-sm bg-white border border-input rounded-xl px-3 py-2.5 placeholder:text-slate-400 resize-y"
+                className="tp-focus-ring w-full text-sm bg-card border border-input rounded-xl px-3 py-2.5 placeholder:text-muted-foreground/75 resize-y"
               />
               <div className="flex items-center justify-end gap-2 mt-4">
-                <button onClick={() => setChangeApprovalTarget(null)} className="tp-focus-ring px-3.5 py-2 text-sm font-medium rounded-lg text-slate-600 hover:bg-slate-100">Cancel</button>
+                <button onClick={() => setChangeApprovalTarget(null)} className="tp-focus-ring px-3.5 py-2 text-sm font-medium rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
                 <button
                   onClick={() => {
                     applyChange(`approval-${t.approvalId}`, async () => {
@@ -3685,21 +3685,21 @@ export default function TicketDetail() {
           <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-[2px]" onClick={() => setDeleteApprovalTarget(null)} aria-hidden="true" />
           <div className="relative tp-card rounded-2xl shadow-soft w-full max-w-md p-5 animate-scaleIn">
             <div className="flex items-start gap-3">
-              <span className="h-9 w-9 rounded-lg bg-red-50 text-red-600 inline-flex items-center justify-center flex-shrink-0">
+              <span className="h-9 w-9 rounded-lg bg-red-50 dark:bg-red-500/15 text-red-600 dark:text-red-300 inline-flex items-center justify-center flex-shrink-0">
                 <Trash2 className="w-4.5 h-4.5" aria-hidden="true" />
               </span>
               <div className="min-w-0">
-                <h2 id="del-approval-title" className="text-base font-bold text-slate-900">Delete this approval request?</h2>
-                <p className="mt-1 text-sm text-slate-600 leading-relaxed">
+                <h2 id="del-approval-title" className="text-base font-bold text-foreground">Delete this approval request?</h2>
+                <p className="mt-1 text-sm text-muted-foreground leading-relaxed">
                   This permanently removes the
                   {deleteApprovalTarget.approvalCategory?.name ? <> <span className="font-semibold">{deleteApprovalTarget.approvalCategory.name}</span></> : null} approval
-                  {' '}and its decision history from this ticket. <span className="font-medium text-red-600">Any approved/rejected status will be lost</span> and can&apos;t be recovered.
+                  {' '}and its decision history from this ticket. <span className="font-medium text-red-600 dark:text-red-300">Any approved/rejected status will be lost</span> and can&apos;t be recovered.
                   {' '}To keep the record instead, use <span className="font-medium">Cancel</span>.
                 </p>
               </div>
             </div>
             <div className="flex items-center justify-end gap-2 mt-4">
-              <button onClick={() => setDeleteApprovalTarget(null)} className="tp-focus-ring px-3.5 py-2 text-sm font-medium rounded-lg text-slate-600 hover:bg-slate-100">Keep it</button>
+              <button onClick={() => setDeleteApprovalTarget(null)} className="tp-focus-ring px-3.5 py-2 text-sm font-medium rounded-lg text-muted-foreground hover:bg-muted">Keep it</button>
               <button
                 onClick={() => {
                   const target = deleteApprovalTarget;
@@ -3724,15 +3724,15 @@ export default function TicketDetail() {
           <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-[2px]" onClick={() => setCloneConfirm(false)} aria-hidden="true" />
           <div className="relative tp-card rounded-2xl shadow-soft w-full max-w-md p-5 animate-scaleIn">
             <div className="flex items-start gap-3">
-              <span className="h-9 w-9 rounded-lg bg-blue-50 text-blue-600 inline-flex items-center justify-center flex-shrink-0">
+              <span className="h-9 w-9 rounded-lg bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-300 inline-flex items-center justify-center flex-shrink-0">
                 <CopyPlus className="w-4.5 h-4.5" aria-hidden="true" />
               </span>
               <div className="min-w-0">
-                <h2 id="clone-title" className="text-base font-bold text-slate-900">Clone this ticket?</h2>
-                <p className="mt-1 text-sm text-slate-600 leading-relaxed">
+                <h2 id="clone-title" className="text-base font-bold text-foreground">Clone this ticket?</h2>
+                <p className="mt-1 text-sm text-muted-foreground leading-relaxed">
                   This creates a <strong>new draft ticket</strong> pre-filled from <span className="font-mono">{ticket.displayRef}</span> — same requester, subject, description, priority and category. Handy for logging a recurring or near-identical request.
                 </p>
-                <ul className="mt-2.5 space-y-1 text-xs text-slate-500">
+                <ul className="mt-2.5 space-y-1 text-xs text-muted-foreground">
                   <li>• Titled <strong>“Copy of: {(ticket.subject || '').slice(0, 48)}{(ticket.subject || '').length > 48 ? '…' : ''}”</strong> so it’s easy to tell apart.</li>
                   <li>• Starts <strong>unassigned</strong>, and <strong>no AI triage</strong> runs automatically.</li>
                   <li>• The original ticket is untouched.</li>
@@ -3743,7 +3743,7 @@ export default function TicketDetail() {
               <button
                 type="button"
                 onClick={() => setCloneConfirm(false)}
-                className="tp-focus-ring px-3 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50"
+                className="tp-focus-ring px-3 py-2 text-sm font-medium text-muted-foreground bg-card border border-border rounded-lg hover:bg-muted/50"
               >
                 Cancel
               </button>

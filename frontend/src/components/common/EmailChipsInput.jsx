@@ -131,18 +131,18 @@ export default function EmailChipsInput({
   return (
     <div ref={boxRef} className={`relative ${className}`}>
       <div
-        className={`flex flex-wrap items-center gap-1.5 border rounded-lg px-2 py-1.5 bg-white ${
-          invalid ? 'border-red-300' : 'border-input focus-within:ring-2 focus-within:ring-ring'
+        className={`flex flex-wrap items-center gap-1.5 border rounded-lg px-2 py-1.5 bg-card ${
+          invalid ? 'border-red-300 dark:border-red-500/40' : 'border-input focus-within:ring-2 focus-within:ring-ring'
         }`}
       >
         {value.map((email) => (
-          <span key={email} className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full bg-blue-50 border border-blue-200 text-xs text-blue-800">
+          <span key={email} className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full bg-blue-50 dark:bg-blue-500/15 border border-blue-200 dark:border-blue-500/30 text-xs text-blue-800 dark:text-blue-200">
             {email}
             <button
               type="button"
               onClick={() => onChange(value.filter((v) => v !== email))}
               aria-label={`Remove ${email}`}
-              className="tp-focus-ring rounded-full p-0.5 hover:bg-blue-100 text-blue-500"
+              className="tp-focus-ring rounded-full p-0.5 hover:bg-blue-100 dark:hover:bg-blue-500/20 text-blue-500"
             >
               <X className="w-3 h-3" aria-hidden="true" />
             </button>
@@ -165,9 +165,9 @@ export default function EmailChipsInput({
             role={search ? 'combobox' : undefined}
             aria-autocomplete={search ? 'list' : undefined}
             autoComplete="off"
-            className="w-full text-xs py-0.5 outline-none placeholder:text-slate-400 disabled:bg-transparent"
+            className="w-full text-xs py-0.5 bg-transparent text-foreground outline-none placeholder:text-muted-foreground/75"
           />
-          {loading && <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-300 flex-shrink-0" aria-hidden="true" />}
+          {loading && <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground/50 flex-shrink-0" aria-hidden="true" />}
         </span>
         {invalid && <span className="text-[10px] text-red-500 w-full">Not a valid email address yet — press Enter once fixed</span>}
       </div>
@@ -183,11 +183,11 @@ export default function EmailChipsInput({
               // preventDefault keeps the input focused so onBlur-commit doesn't fire first
               onMouseDown={(e) => { e.preventDefault(); pick(p); }}
               onMouseEnter={() => setActive(i)}
-              className={`w-full text-left px-3 py-1.5 flex items-center gap-2.5 ${i === active ? 'bg-blue-50' : 'hover:bg-blue-50'}`}
+              className={`w-full text-left px-3 py-1.5 flex items-center gap-2.5 ${i === active ? 'bg-blue-50 dark:bg-blue-500/15' : 'hover:bg-blue-50 dark:hover:bg-blue-500/15'}`}
             >
               <span className="min-w-0">
-                <span className="block text-sm text-slate-800 truncate">{p.name || p.email}</span>
-                <span className="block text-xs text-slate-400 truncate flex items-center gap-1">
+                <span className="block text-sm text-foreground truncate">{p.name || p.email}</span>
+                <span className="block text-xs text-muted-foreground/75 truncate flex items-center gap-1">
                   <Building2 className="w-3 h-3 flex-shrink-0" aria-hidden="true" />{p.email}{p.hint ? ` · ${p.hint}` : ''}
                 </span>
               </span>

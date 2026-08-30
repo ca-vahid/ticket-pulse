@@ -52,7 +52,7 @@ export default function LiveUpdatePill({ count, state = 'idle', onApply }) {
               <Inbox className="w-[18px] h-[18px]" />
               <span
                 key={count}
-                className="tp-count-pop absolute -top-1.5 -right-2 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-white px-1 text-[10px] font-extrabold leading-none text-blue-700 ring-2 ring-blue-600"
+                className="tp-count-pop absolute -top-1.5 -right-2 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-card px-1 text-[10px] font-extrabold leading-none text-blue-700 dark:text-blue-200 ring-2 ring-blue-600"
               >
                 {count > 99 ? '99+' : count}
               </span>

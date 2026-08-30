@@ -94,7 +94,7 @@ describe('AssignmentConfigPanel — Collapse duplicate bursts', () => {
     render(<AssignmentConfigPanel />);
 
     await screen.findByText('Collapse duplicate bursts');
-    expect(findToggleButton().querySelector('svg')).toHaveClass('text-slate-300');
+    expect(findToggleButton().querySelector('svg')).toHaveClass('text-muted-foreground/50');
   });
 
   test('toggling off and saving sends duplicateBurstEnabled:false', async () => {

@@ -67,6 +67,7 @@ import SenderIdentityCard from './SenderIdentityCard';
 import EmailChipsInput from '../common/EmailChipsInput';
 import FieldCardNote, { FIELD_CARD_ACCENTS } from '../tickets/FieldCardNote';
 import WorkflowIndex from './WorkflowIndex';
+import { useTheme } from '../../contexts/ThemeContext';
 
 const WORKFLOW_EDITOR_LAYOUT_ID = 'ticket-pulse-notification-workflow-editor-v3';
 
@@ -137,18 +138,18 @@ const TRIGGER_PICKER_GROUPS = [
 // Per-event color + icon, so the four trigger groups read as distinct zones in the
 // workflow list (and the selected-workflow header) instead of identical gray bars.
 const TRIGGER_VISUALS = {
-  'ticket.created': { icon: Inbox, icon_: 'text-emerald-600', chip: 'bg-emerald-50 text-emerald-700 ring-emerald-200', rail: 'bg-emerald-400' },
-  'ticket.assigned': { icon: UserCheck, icon_: 'text-blue-600', chip: 'bg-blue-50 text-blue-700 ring-blue-200', rail: 'bg-blue-400' },
-  'ticket.reassigned': { icon: Repeat, icon_: 'text-amber-600', chip: 'bg-amber-50 text-amber-700 ring-amber-200', rail: 'bg-amber-400' },
-  'ticket.resolved_closed': { icon: CheckCircle2, icon_: 'text-slate-500', chip: 'bg-slate-100 text-slate-600 ring-slate-200', rail: 'bg-slate-400' },
-  'ticket.reply_received': { icon: Repeat, icon_: 'text-sky-600', chip: 'bg-sky-50 text-sky-700 ring-sky-200', rail: 'bg-sky-400' },
-  'ticket.note_added': { icon: FileJson, icon_: 'text-indigo-600', chip: 'bg-indigo-50 text-indigo-700 ring-indigo-200', rail: 'bg-indigo-400' },
-  'ticket.status_changed': { icon: Waypoints, icon_: 'text-violet-600', chip: 'bg-violet-50 text-violet-700 ring-violet-200', rail: 'bg-violet-400' },
-  'ticket.public_reply_added': { icon: Repeat, icon_: 'text-cyan-600', chip: 'bg-cyan-50 text-cyan-700 ring-cyan-200', rail: 'bg-cyan-400' },
+  'ticket.created': { icon: Inbox, icon_: 'text-emerald-600 dark:text-emerald-300', chip: 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 ring-emerald-200 dark:ring-emerald-500/30', rail: 'bg-emerald-400' },
+  'ticket.assigned': { icon: UserCheck, icon_: 'text-blue-600 dark:text-blue-300', chip: 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 ring-blue-200 dark:ring-blue-500/30', rail: 'bg-blue-400' },
+  'ticket.reassigned': { icon: Repeat, icon_: 'text-amber-600 dark:text-amber-300', chip: 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200 ring-amber-200 dark:ring-amber-500/30', rail: 'bg-amber-400' },
+  'ticket.resolved_closed': { icon: CheckCircle2, icon_: 'text-muted-foreground', chip: 'bg-muted text-muted-foreground ring-border', rail: 'bg-muted-foreground/60' },
+  'ticket.reply_received': { icon: Repeat, icon_: 'text-sky-600 dark:text-sky-300', chip: 'bg-sky-50 dark:bg-sky-500/15 text-sky-700 dark:text-sky-200 ring-sky-200 dark:ring-sky-500/30', rail: 'bg-sky-400' },
+  'ticket.note_added': { icon: FileJson, icon_: 'text-indigo-600 dark:text-indigo-300', chip: 'bg-indigo-50 dark:bg-indigo-500/15 text-indigo-700 dark:text-indigo-200 ring-indigo-200 dark:ring-indigo-500/30', rail: 'bg-indigo-400' },
+  'ticket.status_changed': { icon: Waypoints, icon_: 'text-violet-600 dark:text-violet-300', chip: 'bg-violet-50 dark:bg-violet-500/15 text-violet-700 dark:text-violet-200 ring-violet-200 dark:ring-violet-500/30', rail: 'bg-violet-400' },
+  'ticket.public_reply_added': { icon: Repeat, icon_: 'text-cyan-600 dark:text-cyan-300', chip: 'bg-cyan-50 dark:bg-cyan-500/15 text-cyan-700 dark:text-cyan-200 ring-cyan-200 dark:ring-cyan-500/30', rail: 'bg-cyan-400' },
 };
 
 function triggerVisuals(triggerType) {
-  return TRIGGER_VISUALS[triggerType] || { icon: Waypoints, icon_: 'text-slate-500', chip: 'bg-slate-100 text-slate-600 ring-slate-200', rail: 'bg-slate-400' };
+  return TRIGGER_VISUALS[triggerType] || { icon: Waypoints, icon_: 'text-muted-foreground', chip: 'bg-muted text-muted-foreground ring-border', rail: 'bg-muted-foreground/60' };
 }
 
 const WORKFLOW_NODE_REGISTRY = {
@@ -303,6 +304,28 @@ const NODE_LABELS = Object.fromEntries(
 const NODE_COLORS = Object.fromEntries(
   Object.entries(WORKFLOW_NODE_REGISTRY).map(([type, config]) => [type, config.color]),
 );
+
+// Node accents are hex because they feed inline borderLeft/color (Tailwind can't
+// theme those). The 600/700 shades sink into the dark card, so each gets a
+// 400-shade twin; nodeAccent() picks per resolved theme (Phase DM-B).
+const NODE_ACCENT_DARK = {
+  '#2563eb': '#60a5fa',
+  '#d97706': '#fbbf24',
+  '#059669': '#34d399',
+  '#7c3aed': '#a78bfa',
+  '#0f766e': '#2dd4bf',
+  '#0284c7': '#38bdf8',
+  '#8b5cf6': '#a78bfa',
+  '#be185d': '#f472b6',
+  '#4f46e5': '#818cf8',
+  '#0e7490': '#22d3ee',
+  '#dc2626': '#f87171',
+  '#6b7280': '#9ca3af',
+};
+function nodeAccent(hex, resolvedTheme) {
+  const base = hex || '#6b7280';
+  return resolvedTheme === 'dark' ? (NODE_ACCENT_DARK[base] || base) : base;
+}
 
 const ADDABLE_NODE_TYPES = Object.entries(WORKFLOW_NODE_REGISTRY)
   .filter(([, config]) => config.addable)
@@ -1057,7 +1080,7 @@ function LlmHelpButton({ topic, label = 'Open help', onOpenHelp, className = '' 
         onOpenHelp(topic);
       }}
       className={cls(
-        'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 shadow-sm hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700',
+        'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border bg-card text-muted-foreground shadow-sm hover:border-violet-200 dark:hover:border-violet-500/30 hover:bg-violet-50 dark:hover:bg-violet-500/15 hover:text-violet-700 dark:hover:text-violet-200',
         className,
       )}
       aria-label={label}
@@ -1082,7 +1105,7 @@ function LlmHelpModal({ topic, onClose }) {
   if (!help) return null;
 
   return (
-    <div className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-950/60 p-4">
+    <div className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-950/60 dark:bg-black/70 p-4">
       <button
         type="button"
         aria-label="Close help"
@@ -1090,21 +1113,21 @@ function LlmHelpModal({ topic, onClose }) {
         onClick={onClose}
       />
       <section
-        className="relative z-10 flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-md bg-white shadow-2xl"
+        className="relative z-10 flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-md bg-card shadow-2xl"
         role="dialog"
         aria-modal="true"
         aria-labelledby="llm-help-title"
       >
-        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+        <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
           <div className="min-w-0">
-            <div className="text-xs font-semibold uppercase tracking-wide text-violet-700">Mail workflow help</div>
-            <h3 id="llm-help-title" className="mt-1 text-lg font-semibold text-slate-950">{help.title}</h3>
-            <p className="mt-1 text-sm leading-6 text-slate-600">{help.summary}</p>
+            <div className="text-xs font-semibold uppercase tracking-wide text-violet-700 dark:text-violet-200">Mail workflow help</div>
+            <h3 id="llm-help-title" className="mt-1 text-lg font-semibold text-foreground">{help.title}</h3>
+            <p className="mt-1 text-sm leading-6 text-muted-foreground">{help.summary}</p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border bg-card text-muted-foreground hover:bg-muted/50"
             title="Close"
           >
             <XCircle className="h-4 w-4" />
@@ -1113,9 +1136,9 @@ function LlmHelpModal({ topic, onClose }) {
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
           <div className="space-y-4">
             {(help.sections || []).map((section) => (
-              <div key={section.heading} className="rounded-md border border-slate-200 bg-slate-50 px-4 py-3">
-                <h4 className="text-sm font-semibold text-slate-900">{section.heading}</h4>
-                <ul className="mt-2 space-y-2 text-sm leading-6 text-slate-600">
+              <div key={section.heading} className="rounded-md border border-border bg-muted/50 px-4 py-3">
+                <h4 className="text-sm font-semibold text-foreground">{section.heading}</h4>
+                <ul className="mt-2 space-y-2 text-sm leading-6 text-muted-foreground">
                   {(section.items || []).map((item) => (
                     <li key={item} className="flex gap-2">
                       <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-violet-500" />
@@ -1127,11 +1150,11 @@ function LlmHelpModal({ topic, onClose }) {
             ))}
           </div>
         </div>
-        <div className="flex justify-end border-t border-slate-200 px-5 py-3">
+        <div className="flex justify-end border-t border-border px-5 py-3">
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md bg-slate-950 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+            className="rounded-md bg-foreground px-4 py-2 text-sm font-semibold text-background hover:bg-foreground/90"
           >
             Got it
           </button>
@@ -1142,11 +1165,11 @@ function LlmHelpModal({ topic, onClose }) {
 }
 
 function statusClass(status) {
-  if (status === 'completed' || status === 'sent') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
-  if (status === 'failed') return 'bg-red-50 text-red-700 border-red-200';
-  if (status === 'mocked') return 'bg-sky-50 text-sky-700 border-sky-200';
-  if (status === 'running' || status === 'queued') return 'bg-amber-50 text-amber-700 border-amber-200';
-  return 'bg-gray-50 text-gray-700 border-gray-200';
+  if (status === 'completed' || status === 'sent') return 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 border-emerald-200 dark:border-emerald-500/30';
+  if (status === 'failed') return 'bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200 border-red-200 dark:border-red-500/30';
+  if (status === 'mocked') return 'bg-sky-50 dark:bg-sky-500/15 text-sky-700 dark:text-sky-200 border-sky-200 dark:border-sky-500/30';
+  if (status === 'running' || status === 'queued') return 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200 border-amber-200 dark:border-amber-500/30';
+  return 'bg-muted/50 text-foreground/85 border-border';
 }
 
 function statusDotClass(status) {
@@ -1154,14 +1177,14 @@ function statusDotClass(status) {
   if (status === 'failed') return 'bg-red-500';
   if (status === 'mocked') return 'bg-sky-500';
   if (status === 'running' || status === 'queued') return 'bg-amber-500';
-  return 'bg-slate-400';
+  return 'bg-muted-foreground/60';
 }
 
 function healthClass(state) {
-  if (state === 'completed_clean') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
-  if (state === 'completed_with_repair' || state === 'completed_with_warning') return 'bg-amber-50 text-amber-700 border-amber-200';
-  if (state === 'completed_with_fallback' || state === 'failed') return 'bg-red-50 text-red-700 border-red-200';
-  return 'bg-gray-50 text-gray-700 border-gray-200';
+  if (state === 'completed_clean') return 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 border-emerald-200 dark:border-emerald-500/30';
+  if (state === 'completed_with_repair' || state === 'completed_with_warning') return 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200 border-amber-200 dark:border-amber-500/30';
+  if (state === 'completed_with_fallback' || state === 'failed') return 'bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200 border-red-200 dark:border-red-500/30';
+  return 'bg-muted/50 text-foreground/85 border-border';
 }
 
 function workflowHealthWarningLabel(warning = {}) {
@@ -1332,17 +1355,17 @@ function recipientLine(label, values) {
 }
 
 function routingWindowTone(mode) {
-  if (mode === 'holiday') return 'border-violet-200 bg-violet-50 text-violet-950';
-  if (mode === 'after_hours') return 'border-amber-200 bg-amber-50 text-amber-950';
-  if (mode === 'standard') return 'border-emerald-200 bg-emerald-50 text-emerald-950';
-  return 'border-slate-200 bg-slate-50 text-slate-700';
+  if (mode === 'holiday') return 'border-violet-200 dark:border-violet-500/30 bg-violet-50 dark:bg-violet-500/15 text-violet-950 dark:text-violet-200';
+  if (mode === 'after_hours') return 'border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 text-amber-950 dark:text-amber-200';
+  if (mode === 'standard') return 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-950 dark:text-emerald-200';
+  return 'border-border bg-muted/50 text-foreground/85';
 }
 
 function routingWindowAccent(mode) {
   if (mode === 'holiday') return 'bg-violet-500';
   if (mode === 'after_hours') return 'bg-amber-500';
   if (mode === 'standard') return 'bg-emerald-500';
-  return 'bg-slate-400';
+  return 'bg-muted-foreground/60';
 }
 
 function timeOrFallback(value, fallback = 'Not scheduled') {
@@ -1386,7 +1409,8 @@ function WorkflowGraphNode({ id, data }) {
   // type rather than crashing or going blank. Handles stay so edges still draw.
   const isUnknown = !WORKFLOW_NODE_REGISTRY[data.nodeType];
   const NodeIcon = registry.icon;
-  const color = registry.color || '#6b7280';
+  const { resolvedTheme } = useTheme();
+  const color = nodeAccent(registry.color, resolvedTheme);
   const isTrigger = data.nodeType === 'trigger';
   const isTerminal = registry.terminal === true;
   const isCondition = data.nodeType === 'condition';
@@ -1394,10 +1418,10 @@ function WorkflowGraphNode({ id, data }) {
     <div
       className={cls(
         'relative min-h-[62px] w-[180px] rounded-lg border px-3 py-2 transition-shadow duration-200',
-        isUnknown ? 'bg-slate-50' : 'bg-white',
+        isUnknown ? 'bg-muted/50' : 'bg-card',
         data.selected
-          ? 'border-indigo-300 shadow-lg ring-2 ring-indigo-400/60'
-          : 'border-slate-200 shadow-sm hover:border-slate-300 hover:shadow-md',
+          ? 'border-indigo-300 dark:border-indigo-500/40 shadow-lg ring-2 ring-indigo-400/60'
+          : 'border-border shadow-sm hover:border-input hover:shadow-md',
       )}
       style={{ borderLeft: `5px solid ${color}` }}
     >
@@ -1406,16 +1430,16 @@ function WorkflowGraphNode({ id, data }) {
           type="target"
           position={Position.Top}
           title="Drop a connection here from another node's bottom dot"
-          className="!h-3 !w-3 !border-2 !border-white !bg-slate-700 transition-transform hover:!scale-150"
+          className="!h-3 !w-3 !border-2 !border-card !bg-muted-foreground transition-transform hover:!scale-150"
         />
       )}
       <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide" style={{ color }}>
         {NodeIcon && <NodeIcon className="h-3 w-3" />}
         {registry.label || data.nodeType}
       </div>
-      <div className="truncate text-sm font-semibold text-slate-900">{data.label || id}</div>
+      <div className="truncate text-sm font-semibold text-foreground">{data.label || id}</div>
       {isUnknown && (
-        <div className="mt-0.5 text-[10px] font-medium leading-4 text-slate-500">
+        <div className="mt-0.5 text-[10px] font-medium leading-4 text-muted-foreground">
           Unrecognized step — hard-refresh (Ctrl+Shift+R) to update this app.
         </div>
       )}
@@ -1429,7 +1453,7 @@ function WorkflowGraphNode({ id, data }) {
             type="source"
             position={Position.Bottom}
             title="True branch - drag to another node to connect"
-            className="!h-3 !w-3 !border-2 !border-white !bg-emerald-600 transition-transform hover:!scale-150"
+            className="!h-3 !w-3 !border-2 !border-card !bg-emerald-600 transition-transform hover:!scale-150"
             style={{ left: '30%' }}
           />
           <Handle
@@ -1437,7 +1461,7 @@ function WorkflowGraphNode({ id, data }) {
             type="source"
             position={Position.Bottom}
             title="False branch - drag to another node to connect"
-            className="!h-3 !w-3 !border-2 !border-white !bg-slate-500 transition-transform hover:!scale-150"
+            className="!h-3 !w-3 !border-2 !border-card !bg-muted-foreground/70 transition-transform hover:!scale-150"
             style={{ left: '70%' }}
           />
         </>
@@ -1448,7 +1472,7 @@ function WorkflowGraphNode({ id, data }) {
           type="source"
           position={Position.Bottom}
           title="Drag to another node's top dot to connect"
-          className="!h-3 !w-3 !border-2 !border-white !bg-blue-600 transition-transform hover:!scale-150"
+          className="!h-3 !w-3 !border-2 !border-card !bg-blue-600 transition-transform hover:!scale-150"
         />
       )}
     </div>
@@ -1491,7 +1515,7 @@ function WorkflowGraphEdge({
           style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}
         >
           {label ? (
-            <span className="rounded-full border border-slate-200 bg-white px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-slate-500 shadow-sm">
+            <span className="rounded-full border border-border bg-card px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-muted-foreground shadow-sm">
               {label}
             </span>
           ) : null}
@@ -1510,7 +1534,7 @@ function WorkflowGraphEdge({
                   y: event.clientY,
                 });
               }}
-              className="flex h-5 w-5 items-center justify-center rounded-full border border-blue-300 bg-white text-blue-600 opacity-80 shadow-sm transition hover:scale-125 hover:border-blue-500 hover:opacity-100"
+              className="flex h-5 w-5 items-center justify-center rounded-full border border-blue-300 dark:border-blue-500/40 bg-card text-blue-600 dark:text-blue-300 opacity-80 shadow-sm transition hover:scale-125 hover:border-blue-500 hover:opacity-100"
             >
               <Plus className="h-3 w-3" />
             </button>
@@ -1532,12 +1556,12 @@ function ContentSourcePicker({ definition, nodeId, value, onChange, allowedTypes
   const known = producers.some((node) => node.id === value);
   return (
     <div>
-      <label className="text-xs font-medium uppercase text-gray-500" htmlFor={`content-source-${nodeId}`}>{label}</label>
+      <label className="text-xs font-medium uppercase text-muted-foreground" htmlFor={`content-source-${nodeId}`}>{label}</label>
       <select
         id={`content-source-${nodeId}`}
         value={value || ''}
         onChange={(event) => onChange(event.target.value)}
-        className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900"
+        className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground"
       >
         <option value="">{automaticLabel}</option>
         {producers.map((node) => (
@@ -1550,12 +1574,27 @@ function ContentSourcePicker({ definition, nodeId, value, onChange, allowedTypes
       {value && !known && (
         <p className="mt-1 text-[11px] text-red-500 normal-case">This step no longer exists upstream — pick another source or Automatic.</p>
       )}
-      {hint && <p className="mt-1 text-[11px] text-gray-400 normal-case">{hint}</p>}
+      {hint && <p className="mt-1 text-[11px] text-muted-foreground/75 normal-case">{hint}</p>}
     </div>
   );
 }
 
 const FLOW_EDGE_TYPES = { workflowEdge: WorkflowGraphEdge };
+// @xyflow/react reads these custom properties for the pane, controls and
+// connection line; pointing them at the app tokens keeps the canvas on the
+// card colour (white / slate-900) in both themes instead of xyflow's neutral
+// #fff / #141414 defaults (Phase DM-B).
+const FLOW_CANVAS_VARS = {
+  '--xy-background-color': 'hsl(var(--card))',
+  '--xy-controls-button-background-color': 'hsl(var(--card))',
+  '--xy-controls-button-background-color-hover': 'hsl(var(--muted))',
+  '--xy-controls-button-color': 'hsl(var(--foreground))',
+  '--xy-controls-button-color-hover': 'hsl(var(--foreground))',
+  '--xy-controls-button-border-color': 'hsl(var(--border))',
+  '--xy-controls-box-shadow': '0 1px 2px rgb(0 0 0 / 0.12)',
+  '--xy-connectionline-stroke': 'hsl(var(--primary))',
+  '--xy-edge-stroke-selected': 'hsl(var(--primary))',
+};
 
 function flowNodesFromDefinition(definition, selectedNodeId) {
   const layout = computeVerticalLayout(definition);
@@ -1590,7 +1629,7 @@ function flowEdgesFromDefinition(definition, onInsert = null) {
     label: edge.sourceHandle || edge.label || undefined,
     type: 'workflowEdge',
     animated: edge.sourceHandle === 'true',
-    style: { stroke: edge.sourceHandle === 'false' ? '#9ca3af' : '#2563eb' },
+    style: { stroke: edge.sourceHandle === 'false' ? 'hsl(var(--muted-foreground))' : 'hsl(var(--primary))' },
     data: { onInsert, sourceHandle: edge.sourceHandle || null },
   }));
 }
@@ -2205,7 +2244,7 @@ const ADD_NOTE_ACCENT_SWATCHES = {
   blue: 'bg-blue-500',
   emerald: 'bg-emerald-500',
   amber: 'bg-amber-500',
-  slate: 'bg-slate-400',
+  slate: 'bg-muted-foreground/60',
 };
 
 const ADD_NOTE_MAX_FIELDS = 12;
@@ -2277,11 +2316,11 @@ export function AddNoteNodeEditor({ data = {}, defs = [], variables = [], workfl
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-gray-600">
+      <p className="text-sm text-muted-foreground">
         Posts an <strong>internal note</strong> on the ticket (system-authored, never mirrored to FreshService, never emailed).
       </p>
 
-      <div className="flex flex-wrap gap-1 rounded-md bg-gray-100 p-1" role="group" aria-label="Note mode">
+      <div className="flex flex-wrap gap-1 rounded-md bg-muted p-1" role="group" aria-label="Note mode">
         {[
           ['text', 'Rich text', Type],
           ['field_card', 'Field card', Rows3],
@@ -2296,7 +2335,7 @@ export function AddNoteNodeEditor({ data = {}, defs = [], variables = [], workfl
             onClick={() => onChange(id === 'text' && placement !== 'note' ? { mode: id, placement: 'note' } : { mode: id })}
             className={cls(
               'inline-flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-semibold',
-              mode === id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:bg-white/70',
+              mode === id ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:bg-card/70',
             )}
           >
             <Icon className="h-3.5 w-3.5" />
@@ -2307,24 +2346,24 @@ export function AddNoteNodeEditor({ data = {}, defs = [], variables = [], workfl
 
       {mode === 'text' ? (
         <div>
-          <label className="block text-xs font-medium uppercase text-gray-500">
+          <label className="block text-xs font-medium uppercase text-muted-foreground">
             Note body (Liquid HTML)
             <textarea
               ref={register('body')}
               value={data.body || ''}
               onFocus={() => setActiveField('body')}
               onChange={(event) => onChange({ body: event.target.value })}
-              className="mt-1 h-32 w-full rounded-md border border-gray-200 px-3 py-2 font-mono text-xs normal-case focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+              className="mt-1 h-32 w-full rounded-md border border-border px-3 py-2 font-mono text-xs normal-case focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
             />
           </label>
-          <p className="mt-1 text-[11px] text-gray-400">
+          <p className="mt-1 text-[11px] text-muted-foreground/75">
             Liquid enabled — e.g. <code>{'{{ ticket.subject }}'}</code> or <code>{'{{ ticket.customFields.client_name }}'}</code>. The HTML is sanitized server-side before it is written.
           </p>
         </div>
       ) : (
         <>
           <div className="grid grid-cols-1 gap-2">
-            <label className="block text-xs font-medium uppercase text-gray-500">
+            <label className="block text-xs font-medium uppercase text-muted-foreground">
               Card title (Liquid)
               <input
                 ref={register('title')}
@@ -2332,10 +2371,10 @@ export function AddNoteNodeEditor({ data = {}, defs = [], variables = [], workfl
                 onFocus={() => setActiveField('title')}
                 onChange={(event) => onChange({ title: event.target.value })}
                 placeholder="Ticket details"
-                className="mt-1 w-full rounded-md border border-gray-200 px-3 py-2 text-sm normal-case focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                className="mt-1 w-full rounded-md border border-border px-3 py-2 text-sm normal-case focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
               />
             </label>
-            <label className="block text-xs font-medium uppercase text-gray-500">
+            <label className="block text-xs font-medium uppercase text-muted-foreground">
               Intro line (Liquid, optional)
               <input
                 ref={register('intro')}
@@ -2343,17 +2382,17 @@ export function AddNoteNodeEditor({ data = {}, defs = [], variables = [], workfl
                 onFocus={() => setActiveField('intro')}
                 onChange={(event) => onChange({ intro: event.target.value })}
                 placeholder="e.g. Captured from the intake form"
-                className="mt-1 w-full rounded-md border border-gray-200 px-3 py-2 text-sm normal-case focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                className="mt-1 w-full rounded-md border border-border px-3 py-2 text-sm normal-case focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
               />
             </label>
           </div>
 
-          <div className="rounded-lg border border-slate-200 p-2.5">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Fields on the card <span className="font-normal normal-case text-slate-400">(snapshot at run time, up to {ADD_NOTE_MAX_FIELDS})</span>
+          <div className="rounded-lg border border-border p-2.5">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Fields on the card <span className="font-normal normal-case text-muted-foreground/75">(snapshot at run time, up to {ADD_NOTE_MAX_FIELDS})</span>
             </p>
             {defs.length === 0 ? (
-              <p className="mt-1 text-[11px] text-amber-600 normal-case">
+              <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-300 normal-case">
                 No custom fields defined yet — add them in Settings → Ticket Ops → Custom fields first.
               </p>
             ) : (
@@ -2362,16 +2401,16 @@ export function AddNoteNodeEditor({ data = {}, defs = [], variables = [], workfl
                   const checked = selectedKeys.includes(definition.key);
                   const capped = !checked && selectedKeys.length >= ADD_NOTE_MAX_FIELDS;
                   return (
-                    <label key={definition.key} className={cls('flex items-center gap-2 rounded-md px-1.5 py-1 text-sm normal-case', capped ? 'text-gray-300' : 'text-gray-700 hover:bg-violet-50/60')}>
+                    <label key={definition.key} className={cls('flex items-center gap-2 rounded-md px-1.5 py-1 text-sm normal-case', capped ? 'text-muted-foreground/50' : 'text-foreground/85 hover:bg-violet-50/60 dark:hover:bg-violet-500/10')}>
                       <input
                         type="checkbox"
                         checked={checked}
                         disabled={capped}
                         onChange={() => toggleFieldKey(definition.key)}
-                        className="rounded border-gray-300"
+                        className="rounded border-input"
                       />
                       <span className="min-w-0 truncate">{definition.label}</span>
-                      <span className="ml-auto text-[10px] uppercase text-gray-300">{definition.type}</span>
+                      <span className="ml-auto text-[10px] uppercase text-muted-foreground/50">{definition.type}</span>
                     </label>
                   );
                 })}
@@ -2380,7 +2419,7 @@ export function AddNoteNodeEditor({ data = {}, defs = [], variables = [], workfl
           </div>
 
           <div>
-            <p className="text-xs font-medium uppercase text-gray-500">Accent</p>
+            <p className="text-xs font-medium uppercase text-muted-foreground">Accent</p>
             <div className="mt-1 flex items-center gap-1.5" role="group" aria-label="Card accent">
               {FIELD_CARD_ACCENTS.map((tone) => (
                 <button
@@ -2393,7 +2432,7 @@ export function AddNoteNodeEditor({ data = {}, defs = [], variables = [], workfl
                   className={cls(
                     'h-6 w-6 rounded-full border-2 transition',
                     ADD_NOTE_ACCENT_SWATCHES[tone] || 'bg-violet-500',
-                    accent === tone ? 'border-gray-800 scale-110' : 'border-transparent hover:scale-105',
+                    accent === tone ? 'border-foreground scale-110' : 'border-transparent hover:scale-105',
                   )}
                 />
               ))}
@@ -2402,28 +2441,28 @@ export function AddNoteNodeEditor({ data = {}, defs = [], variables = [], workfl
         </>
       )}
 
-      <label className="block text-xs font-medium uppercase text-gray-500">
+      <label className="block text-xs font-medium uppercase text-muted-foreground">
         Placement
         <select
           value={placement}
           onChange={(event) => onChange({ placement: event.target.value })}
-          className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+          className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground"
         >
           <option value="note">Note in conversation</option>
           <option value="pinned" disabled={mode === 'text'}>Pinned card above the conversation</option>
           <option value="both" disabled={mode === 'text'}>Both</option>
         </select>
         {mode === 'text' && (
-          <span className="mt-0.5 block text-[11px] font-normal normal-case text-gray-400">Pinned cards require Field card mode.</span>
+          <span className="mt-0.5 block text-[11px] font-normal normal-case text-muted-foreground/75">Pinned cards require Field card mode.</span>
         )}
       </label>
 
       {mode === 'field_card' && (
         <div>
-          <p className="text-xs font-medium uppercase text-gray-500">Preview (sample values)</p>
-          <div className="mt-1 rounded-xl border border-slate-200/70 bg-gradient-to-b from-slate-100/90 to-blue-50/40 p-3">
+          <p className="text-xs font-medium uppercase text-muted-foreground">Preview (sample values)</p>
+          <div className="mt-1 rounded-xl border border-border/70 bg-gradient-to-b from-muted/90 to-blue-50/40 p-3">
             {previewFields.length === 0 && !data.title && !data.intro ? (
-              <p className="text-center text-xs text-slate-400">Pick fields above to preview the card.</p>
+              <p className="text-center text-xs text-muted-foreground/75">Pick fields above to preview the card.</p>
             ) : (
               <ul className="list-none">
                 <FieldCardNote entry={previewEntry} />
@@ -2434,9 +2473,9 @@ export function AddNoteNodeEditor({ data = {}, defs = [], variables = [], workfl
       )}
 
       <div>
-        <p className="text-xs font-medium uppercase text-gray-500">Variables</p>
-        <p className="text-[11px] text-gray-400 normal-case">Focus the {mode === 'text' ? 'body' : 'title or intro'} field, then click a variable to insert it as a Liquid token.</p>
-        <div className="mt-1 max-h-64 overflow-y-auto settings-scrollbar rounded-md border border-gray-100">
+        <p className="text-xs font-medium uppercase text-muted-foreground">Variables</p>
+        <p className="text-[11px] text-muted-foreground/75 normal-case">Focus the {mode === 'text' ? 'body' : 'title or intro'} field, then click a variable to insert it as a Liquid token.</p>
+        <div className="mt-1 max-h-64 overflow-y-auto settings-scrollbar rounded-md border border-border/60">
           <VariablePicker
             variables={variables}
             search={variableSearch}
@@ -2564,33 +2603,33 @@ function previewStepIssue(step) {
 function previewToneClasses(tone) {
   if (tone === 'red') {
     return {
-      card: 'border-red-200 bg-red-50/60',
-      badge: 'border-red-200 bg-red-100 text-red-700',
-      icon: 'text-red-600',
-      panel: 'border-red-200 bg-red-50 text-red-800',
+      card: 'border-red-200 dark:border-red-500/30 bg-red-50/60 dark:bg-red-500/10',
+      badge: 'border-red-200 dark:border-red-500/30 bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-200',
+      icon: 'text-red-600 dark:text-red-300',
+      panel: 'border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 text-red-800 dark:text-red-200',
     };
   }
   if (tone === 'amber') {
     return {
-      card: 'border-amber-200 bg-amber-50/60',
-      badge: 'border-amber-200 bg-amber-100 text-amber-800',
-      icon: 'text-amber-600',
-      panel: 'border-amber-200 bg-amber-50 text-amber-800',
+      card: 'border-amber-200 dark:border-amber-500/30 bg-amber-50/60 dark:bg-amber-500/10',
+      badge: 'border-amber-200 dark:border-amber-500/30 bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-200',
+      icon: 'text-amber-600 dark:text-amber-300',
+      panel: 'border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 text-amber-800 dark:text-amber-200',
     };
   }
   if (tone === 'blue') {
     return {
-      card: 'border-blue-200 bg-blue-50/60',
-      badge: 'border-blue-200 bg-blue-100 text-blue-800',
-      icon: 'text-blue-600',
-      panel: 'border-blue-200 bg-blue-50 text-blue-800',
+      card: 'border-blue-200 dark:border-blue-500/30 bg-blue-50/60 dark:bg-blue-500/10',
+      badge: 'border-blue-200 dark:border-blue-500/30 bg-blue-100 dark:bg-blue-500/20 text-blue-800 dark:text-blue-200',
+      icon: 'text-blue-600 dark:text-blue-300',
+      panel: 'border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 text-blue-800 dark:text-blue-200',
     };
   }
   return {
-    card: 'border-emerald-200 bg-white',
-    badge: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-    icon: 'text-emerald-600',
-    panel: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+    card: 'border-emerald-200 dark:border-emerald-500/30 bg-card',
+    badge: 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200',
+    icon: 'text-emerald-600 dark:text-emerald-300',
+    panel: 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-800 dark:text-emerald-200',
   };
 }
 
@@ -2806,10 +2845,10 @@ function collectPreviewIssues(preview, steps, email, recipients) {
 // Neutral, reusable detail card — the mature replacement for the per-section colored boxes.
 function AuditSection({ title, icon: Icon, right, children, className }) {
   return (
-    <section className={cls('overflow-hidden rounded-lg border border-slate-200 bg-white', className)}>
-      <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-3 py-2">
-        <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-          {Icon && <Icon className="h-3.5 w-3.5 text-slate-400" />}
+    <section className={cls('overflow-hidden rounded-lg border border-border bg-card', className)}>
+      <div className="flex items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
+        <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          {Icon && <Icon className="h-3.5 w-3.5 text-muted-foreground/75" />}
           {title}
         </div>
         {right}
@@ -2820,10 +2859,10 @@ function AuditSection({ title, icon: Icon, right, children, className }) {
 }
 
 function AuditStat({ label, value, tone = 'default' }) {
-  const valueClass = tone === 'warn' ? 'text-amber-700' : tone === 'bad' ? 'text-red-700' : 'text-slate-800';
+  const valueClass = tone === 'warn' ? 'text-amber-700 dark:text-amber-200' : tone === 'bad' ? 'text-red-700 dark:text-red-200' : 'text-foreground';
   return (
     <div className="flex items-baseline gap-1.5">
-      <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{label}</span>
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/75">{label}</span>
       <span className={cls('text-xs font-semibold', valueClass)}>{value}</span>
     </div>
   );
@@ -2840,7 +2879,7 @@ function ActionLinkDiagnostics({ diagnostics }) {
   if (!items.length) return null;
   return (
     <AuditSection title="Action blocks">
-      <div className="divide-y divide-slate-100">
+      <div className="divide-y divide-border/60">
         {items.map(({ key, label, tone, diagnostic }) => {
           const applied = diagnostic.applied && !diagnostic.skipped;
           const dot = diagnostic.skipped
@@ -2849,27 +2888,27 @@ function ActionLinkDiagnostics({ diagnostics }) {
               ? 'bg-blue-400'
               : applied
                 ? 'bg-emerald-500'
-                : 'bg-slate-300';
+                : 'bg-muted-foreground/40';
           const stateLabel = diagnostic.skipped ? 'Skipped' : diagnostic.forced ? 'Forced test' : applied ? 'Rendered' : 'Checked';
           return (
             <div key={key} className="flex items-start gap-2.5 py-2 text-xs first:pt-0 last:pb-0">
               <span className={cls('mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full', dot)} />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-semibold text-slate-700">{label}</span>
-                  <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-slate-400">{stateLabel}</span>
+                  <span className="font-semibold text-foreground/85">{label}</span>
+                  <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/75">{stateLabel}</span>
                 </div>
-                <div className="mt-0.5 leading-5 text-slate-500">
+                <div className="mt-0.5 leading-5 text-muted-foreground">
                   {diagnostic.reason || diagnostic.warning || diagnostic.liveWouldSkipReason || 'Ready'}
                 </div>
                 {key === 'afterHoursSupport' && diagnostic.hasActiveContact && (
-                  <div className="mt-0.5 text-[11px] text-slate-400">
+                  <div className="mt-0.5 text-[11px] text-muted-foreground/75">
                     Active contact configured{diagnostic.phoneVerified ? ' with verified phone' : ''}
                     {diagnostic.rotationLabel ? ` (${diagnostic.rotationLabel})` : ''}
                   </div>
                 )}
                 {tone === 'red' && diagnostic.hasUrl && (
-                  <div className="mt-0.5 text-[11px] text-slate-400">Action link URL captured in rendered email</div>
+                  <div className="mt-0.5 text-[11px] text-muted-foreground/75">Action link URL captured in rendered email</div>
                 )}
               </div>
             </div>
@@ -2890,7 +2929,7 @@ function BrandingDiagnostics({ branding }) {
   if (!items.length) return null;
   return (
     <AuditSection title="Branding">
-      <div className="divide-y divide-slate-100">
+      <div className="divide-y divide-border/60">
         {items.map(({ key, label, diagnostic }) => {
           const dot = diagnostic.applied
             ? diagnostic.fallback
@@ -2903,13 +2942,13 @@ function BrandingDiagnostics({ branding }) {
               <span className={cls('mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full', dot)} />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-semibold text-slate-700">{label}</span>
-                  <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-slate-400">{stateLabel}</span>
+                  <span className="font-semibold text-foreground/85">{label}</span>
+                  <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/75">{stateLabel}</span>
                 </div>
-                <div className="mt-0.5 leading-5 text-slate-500">
+                <div className="mt-0.5 leading-5 text-muted-foreground">
                   {diagnostic.blockName || diagnostic.reason || 'Workspace default'}
                 </div>
-                {diagnostic.warning && <div className="mt-0.5 text-[11px] text-slate-400">{diagnostic.warning}</div>}
+                {diagnostic.warning && <div className="mt-0.5 text-[11px] text-muted-foreground/75">{diagnostic.warning}</div>}
               </div>
             </div>
           );
@@ -2922,28 +2961,28 @@ function BrandingDiagnostics({ branding }) {
 function EmailFieldsView({ email }) {
   const normalized = normalizeEmailFields(email);
   if (!normalized) {
-    return <div className="px-3 py-2 text-sm text-slate-500">No email fields were captured.</div>;
+    return <div className="px-3 py-2 text-sm text-muted-foreground">No email fields were captured.</div>;
   }
   return (
-    <div className="space-y-3 border-t border-gray-100 bg-white p-3">
+    <div className="space-y-3 border-t border-border/60 bg-card p-3">
       <div>
-        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Subject</div>
-        <div className="mt-1 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-950">
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Subject</div>
+        <div className="mt-1 rounded-md border border-border bg-muted/50 px-3 py-2 text-sm font-semibold text-foreground">
           {normalized.subject}
         </div>
       </div>
       {normalized.html && (
         <div>
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">HTML preview</div>
-          <div className="mt-1 max-h-56 overflow-auto rounded-md border border-slate-200 bg-white px-3 py-2 text-sm leading-6 text-slate-800">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">HTML preview</div>
+          <div className="mt-1 max-h-56 overflow-auto rounded-md border border-border bg-card px-3 py-2 text-sm leading-6 text-foreground">
             <div dangerouslySetInnerHTML={{ __html: sanitizePreviewHtmlClient(normalized.html) }} />
           </div>
         </div>
       )}
       {normalized.text && (
         <div>
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Plain text</div>
-          <pre className="mt-1 max-h-44 overflow-auto whitespace-pre-wrap rounded-md border border-slate-200 bg-slate-50 px-3 py-2 font-sans text-sm leading-6 text-slate-800">{normalized.text}</pre>
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Plain text</div>
+          <pre className="mt-1 max-h-44 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-muted/50 px-3 py-2 font-sans text-sm leading-6 text-foreground">{normalized.text}</pre>
         </div>
       )}
     </div>
@@ -2952,7 +2991,7 @@ function EmailFieldsView({ email }) {
 
 export function LlmDiagnosticsList({ diagnostics = [], emptyText = 'This workflow has no LLM step, or the LLM step has not completed yet.' }) {
   if (!diagnostics.length) {
-    return <p className="text-sm text-gray-500">{emptyText}</p>;
+    return <p className="text-sm text-muted-foreground">{emptyText}</p>;
   }
   return (
     <div className="space-y-3 text-sm">
@@ -2981,12 +3020,12 @@ export function LlmDiagnosticsList({ diagnostics = [], emptyText = 'This workflo
         const guardRepaired = (llm.guard?.repairedIssues || []).length > 0;
         const guardAuditOnly = (llm.guard?.auditOnlyIssues || []).length > 0;
         const guardStatusClass = llm.guard?.accepted === false
-          ? 'border-red-200 bg-red-50 text-red-700'
+          ? 'border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200'
           : guardRepaired
-            ? 'border-amber-200 bg-amber-50 text-amber-800'
+            ? 'border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 text-amber-800 dark:text-amber-200'
             : guardAuditOnly
-              ? 'border-blue-200 bg-blue-50 text-blue-800'
-              : 'border-emerald-200 bg-emerald-50 text-emerald-700';
+              ? 'border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 text-blue-800 dark:text-blue-200'
+              : 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200';
         const guardStatusLabel = llm.guard?.accepted === false
           ? 'blocked output'
           : guardRepaired
@@ -3002,51 +3041,51 @@ export function LlmDiagnosticsList({ diagnostics = [], emptyText = 'This workflo
               ? (llm.guard.auditOnlyIssues || []).map((issue) => issue.beforeAfterSummary || issue.message || issue.ruleId || issue.id).join('; ')
               : 'No requester-facing claim issues detected.';
         return (
-          <div key={`${diagnostic.outputKey || diagnostic.nodeId || 'llm'}-${index}`} className="rounded-md border border-violet-100 bg-white p-3">
+          <div key={`${diagnostic.outputKey || diagnostic.nodeId || 'llm'}-${index}`} className="rounded-md border border-violet-100 dark:border-violet-500/20 bg-card p-3">
             <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
               <div className="min-w-0">
-                <div className="text-xs font-semibold uppercase tracking-wide text-violet-600">
+                <div className="text-xs font-semibold uppercase tracking-wide text-violet-600 dark:text-violet-300">
                   {diagnostic.outputKey ? `Output ${diagnostic.outputKey}` : 'LLM output'}
                 </div>
-                <div className="truncate text-sm font-semibold text-slate-950">{diagnostic.nodeId || 'LLM node'}</div>
+                <div className="truncate text-sm font-semibold text-foreground">{diagnostic.nodeId || 'LLM node'}</div>
               </div>
               <span className={cls(
                 'rounded-full border px-2 py-0.5 text-[11px] font-semibold',
                 llmFailed
-                  ? 'border-red-200 bg-red-50 text-red-700'
-                  : 'border-emerald-200 bg-emerald-50 text-emerald-700',
+                  ? 'border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200'
+                  : 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200',
               )}
               >
                 {llmFailed ? 'Failed' : diagnostic.status || 'Completed'}
               </span>
             </div>
             <div className="grid grid-cols-2 gap-2 text-xs">
-              <div className="rounded-md bg-gray-50 p-2 text-gray-500">Provider<br /><strong className="text-gray-800">{llm.provider || 'unknown'}</strong></div>
-              <div className="rounded-md bg-gray-50 p-2 text-gray-500">Model<br /><strong className="text-gray-800">{llm.model || 'unknown'}</strong></div>
+              <div className="rounded-md bg-muted/50 p-2 text-muted-foreground">Provider<br /><strong className="text-foreground">{llm.provider || 'unknown'}</strong></div>
+              <div className="rounded-md bg-muted/50 p-2 text-muted-foreground">Model<br /><strong className="text-foreground">{llm.model || 'unknown'}</strong></div>
             </div>
             {hasPromptAudit && (
               <div className="mt-2 grid gap-2 text-xs sm:grid-cols-4">
-                <div className="rounded-md bg-indigo-50 p-2 text-indigo-700">
+                <div className="rounded-md bg-indigo-50 dark:bg-indigo-500/15 p-2 text-indigo-700 dark:text-indigo-200">
                   Prompt policy<br /><strong>{promptPolicy.customSystemPromptUsed ? 'Custom prompt' : 'Default prompt'}</strong>
                 </div>
-                <div className="rounded-md bg-indigo-50 p-2 text-indigo-700">
+                <div className="rounded-md bg-indigo-50 dark:bg-indigo-500/15 p-2 text-indigo-700 dark:text-indigo-200">
                   Prompt source<br /><strong>{promptPolicy.source || 'not recorded'}</strong>
                 </div>
-                <div className="rounded-md bg-indigo-50 p-2 text-indigo-700">
+                <div className="rounded-md bg-indigo-50 dark:bg-indigo-500/15 p-2 text-indigo-700 dark:text-indigo-200">
                   Tone guard<br /><strong>{toneGuardStatus}</strong>
                 </div>
-                <div className="rounded-md bg-indigo-50 p-2 text-indigo-700">
+                <div className="rounded-md bg-indigo-50 dark:bg-indigo-500/15 p-2 text-indigo-700 dark:text-indigo-200">
                   Timing claims<br /><strong>{timingGuardStatus}</strong>
                 </div>
               </div>
             )}
             {llm.tokenDiagnostics && (
               <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
-                <div className="rounded-md bg-gray-50 p-2 text-gray-500">Output tokens<br /><strong className="text-gray-800">{llm.tokenDiagnostics.outputTokens || 0}</strong></div>
-                <div className="rounded-md bg-gray-50 p-2 text-gray-500">Token cap<br /><strong className="text-gray-800">{llm.tokenDiagnostics.requestedMaxTokens || 'unknown'}</strong></div>
+                <div className="rounded-md bg-muted/50 p-2 text-muted-foreground">Output tokens<br /><strong className="text-foreground">{llm.tokenDiagnostics.outputTokens || 0}</strong></div>
+                <div className="rounded-md bg-muted/50 p-2 text-muted-foreground">Token cap<br /><strong className="text-foreground">{llm.tokenDiagnostics.requestedMaxTokens || 'unknown'}</strong></div>
                 <div className={cls(
                   'rounded-md p-2',
-                  llm.tokenLimitHit ? 'bg-amber-50 text-amber-800' : 'bg-gray-50 text-gray-500',
+                  llm.tokenLimitHit ? 'bg-amber-50 dark:bg-amber-500/15 text-amber-800 dark:text-amber-200' : 'bg-muted/50 text-muted-foreground',
                 )}
                 >
                   Limit status<br /><strong>{llm.tokenLimitHit ? 'Hit limit' : 'OK'}</strong>
@@ -3054,23 +3093,23 @@ export function LlmDiagnosticsList({ diagnostics = [], emptyText = 'This workflo
               </div>
             )}
             <div className="mt-2 grid gap-2 text-xs sm:grid-cols-3">
-              <div className="rounded-md bg-slate-50 p-2 text-slate-500">Promoted<br /><strong className="text-slate-800">{llm.promotedToEmail === false ? 'No' : 'Yes/legacy'}</strong></div>
-              <div className="rounded-md bg-slate-50 p-2 text-slate-500">Output mode<br /><strong className="text-slate-800">{llm.outputMode || 'draft_email'}</strong></div>
-              <div className="rounded-md bg-slate-50 p-2 text-slate-500">Tool calls<br /><strong className="text-slate-800">{toolCount}</strong></div>
+              <div className="rounded-md bg-muted/50 p-2 text-muted-foreground">Promoted<br /><strong className="text-foreground">{llm.promotedToEmail === false ? 'No' : 'Yes/legacy'}</strong></div>
+              <div className="rounded-md bg-muted/50 p-2 text-muted-foreground">Output mode<br /><strong className="text-foreground">{llm.outputMode || 'draft_email'}</strong></div>
+              <div className="rounded-md bg-muted/50 p-2 text-muted-foreground">Tool calls<br /><strong className="text-foreground">{toolCount}</strong></div>
             </div>
             {(llm.failed || llm.error) && (
-              <div className="mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              <div className="mt-2 rounded-md border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 px-3 py-2 text-xs text-red-700 dark:text-red-200">
                 <div className="font-semibold">Schema or provider issue</div>
                 <div className="mt-0.5">{llm.error || 'LLM output did not pass validation.'}</div>
               </div>
             )}
             {llm.tokenLimitWarning && (
-              <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              <div className="mt-2 rounded-md border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
                 {llm.tokenLimitWarning}
               </div>
             )}
             {llm.fallbackUsed && (
-              <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              <div className="mt-2 rounded-md border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
                 Fallback provider was used{llm.fallbackReason ? `: ${llm.fallbackReason}` : '.'}
               </div>
             )}
@@ -3085,24 +3124,24 @@ export function LlmDiagnosticsList({ diagnostics = [], emptyText = 'This workflo
               </div>
             )}
             {(llm.repairedFields || []).length > 0 && (
-              <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              <div className="mt-2 rounded-md border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
                 Missing LLM field{llm.repairedFields.length === 1 ? '' : 's'} repaired from available output: {llm.repairedFields.join(', ')}.
               </div>
             )}
-            <details open className="mt-2 rounded-md border border-gray-200">
-              <summary className="cursor-pointer px-3 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Validated email fields</summary>
+            <details open className="mt-2 rounded-md border border-border">
+              <summary className="cursor-pointer px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Validated email fields</summary>
               <EmailFieldsView email={email} />
             </details>
             {(llm.raw || diagnostic.rawOutput) && (
-              <details className="mt-2 rounded-md border border-gray-200">
-                <summary className="cursor-pointer px-3 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Raw LLM step output</summary>
-                <pre className="max-h-56 overflow-auto border-t border-gray-100 bg-gray-950 p-2 text-[11px] leading-5 text-gray-100">{formatJson(llm.raw || diagnostic.rawOutput)}</pre>
+              <details className="mt-2 rounded-md border border-border">
+                <summary className="cursor-pointer px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Raw LLM step output</summary>
+                <pre className="max-h-56 overflow-auto border-t border-border/60 bg-gray-950 dark:ring-1 dark:ring-white/10 p-2 text-[11px] leading-5 text-gray-100">{formatJson(llm.raw || diagnostic.rawOutput)}</pre>
               </details>
             )}
             {diagnostic.prompt && (
-              <details className="mt-2 rounded-md border border-gray-200">
-                <summary className="cursor-pointer px-3 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Rendered prompt</summary>
-                <pre className="max-h-44 overflow-auto border-t border-gray-100 bg-gray-50 p-2 text-[11px] leading-5 text-gray-700">{diagnostic.prompt}</pre>
+              <details className="mt-2 rounded-md border border-border">
+                <summary className="cursor-pointer px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Rendered prompt</summary>
+                <pre className="max-h-44 overflow-auto border-t border-border/60 bg-muted/50 p-2 text-[11px] leading-5 text-foreground/85">{diagnostic.prompt}</pre>
               </details>
             )}
           </div>
@@ -3114,14 +3153,14 @@ export function LlmDiagnosticsList({ diagnostics = [], emptyText = 'This workflo
 
 function PreviewMetric({ label, value, tone = 'gray' }) {
   const toneClass = tone === 'red'
-    ? 'border-red-200 bg-red-50 text-red-800'
+    ? 'border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 text-red-800 dark:text-red-200'
     : tone === 'amber'
-      ? 'border-amber-200 bg-amber-50 text-amber-800'
+      ? 'border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 text-amber-800 dark:text-amber-200'
       : tone === 'emerald'
-        ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+        ? 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-800 dark:text-emerald-200'
         : tone === 'blue'
-          ? 'border-blue-200 bg-blue-50 text-blue-800'
-          : 'border-gray-200 bg-gray-50 text-gray-800';
+          ? 'border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 text-blue-800 dark:text-blue-200'
+          : 'border-border bg-muted/50 text-foreground';
   return (
     <div className={cls('rounded-lg border px-3 py-2.5 shadow-subtle', toneClass)}>
       <div className="text-[10px] font-semibold uppercase tracking-wider opacity-60">{label}</div>
@@ -3163,18 +3202,18 @@ export function TicketContextPicker({
   const items = tickets?.items || [];
   const totalPages = tickets?.totalPages || 1;
   return (
-    <section className={cls('rounded-md border border-gray-200 bg-white p-4', className)}>
+    <section className={cls('rounded-md border border-border bg-card p-4', className)}>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h4 className="text-sm font-semibold text-gray-900">{title}</h4>
-          <p className="text-xs text-gray-500">{description}</p>
+          <h4 className="text-sm font-semibold text-foreground">{title}</h4>
+          <p className="text-xs text-muted-foreground">{description}</p>
         </div>
         {showRunButton && (
           <button
             type="button"
             onClick={onRun}
             disabled={running || !selectedTicket}
-            className="inline-flex items-center gap-1.5 rounded-md bg-gray-900 px-3 py-2 text-sm font-semibold text-white hover:bg-gray-800 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-3 py-2 text-sm font-semibold text-background hover:bg-foreground/90 disabled:opacity-50"
           >
             {running ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
             {runLabel}
@@ -3184,12 +3223,12 @@ export function TicketContextPicker({
       <div className="mb-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_180px_170px]">
         <label className="relative min-w-0">
           <span className="sr-only">Search tickets</span>
-          <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+          <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground/75" />
           <input
             value={ticketSearch}
             onChange={(event) => onTicketSearchChange(event.target.value)}
             placeholder="Search by FreshService #, subject, requester, assignee, or category"
-            className="w-full rounded-md border border-gray-200 py-2 pl-9 pr-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            className="w-full rounded-md border border-border py-2 pl-9 pr-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
           />
         </label>
         <label>
@@ -3197,7 +3236,7 @@ export function TicketContextPicker({
           <select
             value={ticketPriority}
             onChange={(event) => onTicketPriorityChange(event.target.value)}
-            className="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            className="w-full rounded-md border border-border bg-card px-3 py-2 text-sm font-medium text-foreground/85 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
           >
             {PREVIEW_TICKET_PRIORITY_FILTERS.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>
@@ -3209,7 +3248,7 @@ export function TicketContextPicker({
           <select
             value={ticketStatus}
             onChange={(event) => onTicketStatusChange(event.target.value)}
-            className="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            className="w-full rounded-md border border-border bg-card px-3 py-2 text-sm font-medium text-foreground/85 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
           >
             {PREVIEW_TICKET_STATUS_FILTERS.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>
@@ -3219,12 +3258,12 @@ export function TicketContextPicker({
       </div>
       <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
         {ticketsLoading && (
-          <div className="rounded-md border border-dashed border-gray-300 px-3 py-6 text-center text-sm text-gray-500">
+          <div className="rounded-md border border-dashed border-input px-3 py-6 text-center text-sm text-muted-foreground">
             Loading tickets...
           </div>
         )}
         {!ticketsLoading && items.length === 0 && (
-          <div className="rounded-md border border-dashed border-gray-300 px-3 py-6 text-center text-sm text-gray-500">
+          <div className="rounded-md border border-dashed border-input px-3 py-6 text-center text-sm text-muted-foreground">
             No matching tickets in this workspace.
           </div>
         )}
@@ -3234,29 +3273,29 @@ export function TicketContextPicker({
             type="button"
             onClick={() => onSelectTicket(ticket)}
             className={cls(
-              'min-w-0 rounded-md border px-3 py-2 text-left transition hover:bg-gray-50',
-              selectedTicket?.id === ticket.id ? 'border-blue-400 bg-blue-50 ring-2 ring-blue-100' : 'border-gray-200 bg-white',
+              'min-w-0 rounded-md border px-3 py-2 text-left transition hover:bg-muted/50',
+              selectedTicket?.id === ticket.id ? 'border-blue-400 bg-blue-50 dark:bg-blue-500/15 ring-2 ring-blue-100 dark:ring-blue-500/30' : 'border-border bg-card',
             )}
           >
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
-                <div className="truncate text-sm font-semibold text-gray-900">#{ticket.freshserviceTicketId} {ticket.subject || 'No subject'}</div>
-                <div className="mt-1 truncate text-xs text-gray-500">{ticketPreviewSubtitle(ticket)}</div>
+                <div className="truncate text-sm font-semibold text-foreground">#{ticket.freshserviceTicketId} {ticket.subject || 'No subject'}</div>
+                <div className="mt-1 truncate text-xs text-muted-foreground">{ticketPreviewSubtitle(ticket)}</div>
               </div>
-              {ticket.isNoise && <span className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">Noise</span>}
+              {ticket.isNoise && <span className="shrink-0 rounded-full bg-amber-50 dark:bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-200">Noise</span>}
             </div>
-            <div className="mt-2 text-[11px] text-gray-400">Created {formatDate(ticket.createdAt || ticket.updatedAt)}</div>
+            <div className="mt-2 text-[11px] text-muted-foreground/75">Created {formatDate(ticket.createdAt || ticket.updatedAt)}</div>
           </button>
         ))}
       </div>
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
         <span>{tickets?.total || 0} tickets</span>
         <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => onTicketPageChange(Math.max(1, ticketPage - 1))}
             disabled={ticketPage <= 1 || ticketsLoading}
-            className="rounded-md border border-gray-200 px-2 py-1 font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            className="rounded-md border border-border px-2 py-1 font-medium text-foreground/85 hover:bg-muted/50 disabled:opacity-50"
           >
             Previous
           </button>
@@ -3265,7 +3304,7 @@ export function TicketContextPicker({
             type="button"
             onClick={() => onTicketPageChange(Math.min(totalPages, ticketPage + 1))}
             disabled={ticketPage >= totalPages || ticketsLoading}
-            className="rounded-md border border-gray-200 px-2 py-1 font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            className="rounded-md border border-border px-2 py-1 font-medium text-foreground/85 hover:bg-muted/50 disabled:opacity-50"
           >
             Next
           </button>
@@ -3284,9 +3323,9 @@ function PreviewStepCard({ step }) {
     <div className={cls('rounded-md border p-3 shadow-sm', classes.card)}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">{nodeLabel}</div>
-          <div className="truncate text-sm font-semibold text-gray-900">{step.nodeId}</div>
-          <div className="mt-1 text-xs text-gray-600">{summarizePreviewStep(step)}</div>
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{nodeLabel}</div>
+          <div className="truncate text-sm font-semibold text-foreground">{step.nodeId}</div>
+          <div className="mt-1 text-xs text-muted-foreground">{summarizePreviewStep(step)}</div>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
           <span className={cls('rounded-full border px-2 py-0.5 text-xs font-medium', statusClass(step.status))}>
@@ -3299,9 +3338,9 @@ function PreviewStepCard({ step }) {
           )}
         </div>
       </div>
-      <div className="mt-2 flex flex-wrap gap-2 text-xs text-gray-500">
+      <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
         {Number.isFinite(step.durationMs) && <span>{step.durationMs} ms</span>}
-        {step.error && <span className="text-red-600">{step.error}</span>}
+        {step.error && <span className="text-red-600 dark:text-red-300">{step.error}</span>}
       </div>
       {issue && (
         <div className={cls('mt-3 flex gap-2 rounded-md border px-3 py-2 text-xs', classes.panel)}>
@@ -3310,10 +3349,10 @@ function PreviewStepCard({ step }) {
         </div>
       )}
       <details className="mt-2">
-        <summary className="cursor-pointer text-xs font-medium text-gray-600">Inspect input/output</summary>
+        <summary className="cursor-pointer text-xs font-medium text-muted-foreground">Inspect input/output</summary>
         <div className="mt-2 grid gap-2">
-          <pre className="max-h-40 overflow-auto rounded-md bg-gray-950 p-2 text-[11px] leading-5 text-gray-100">{formatJson(step.input)}</pre>
-          <pre className="max-h-56 overflow-auto rounded-md bg-gray-950 p-2 text-[11px] leading-5 text-gray-100">{formatJson(step.output)}</pre>
+          <pre className="max-h-40 overflow-auto rounded-md bg-gray-950 dark:ring-1 dark:ring-white/10 p-2 text-[11px] leading-5 text-gray-100">{formatJson(step.input)}</pre>
+          <pre className="max-h-56 overflow-auto rounded-md bg-gray-950 dark:ring-1 dark:ring-white/10 p-2 text-[11px] leading-5 text-gray-100">{formatJson(step.output)}</pre>
         </div>
       </details>
     </div>
@@ -3345,45 +3384,45 @@ function VariablePicker({
   }, {});
 
   return (
-    <div className="rounded-md border border-gray-200 bg-white">
-      <div className="border-b border-gray-100 p-2">
+    <div className="rounded-md border border-border bg-card">
+      <div className="border-b border-border/60 p-2">
         <div className="relative">
-          <Search className="pointer-events-none absolute left-2 top-2.5 h-3.5 w-3.5 text-gray-400" />
+          <Search className="pointer-events-none absolute left-2 top-2.5 h-3.5 w-3.5 text-muted-foreground/75" />
           <input
             value={search}
             onChange={(event) => onSearch(event.target.value)}
             placeholder="Search variables"
-            className="w-full rounded-md border border-gray-200 py-2 pl-7 pr-2 text-xs focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            className="w-full rounded-md border border-border py-2 pl-7 pr-2 text-xs focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
           />
         </div>
-        <div className="mt-1 text-[11px] text-gray-500">
+        <div className="mt-1 text-[11px] text-muted-foreground">
           {activeTarget ? 'Click a variable to insert it into the active field.' : 'Focus a prompt or template field, or click to copy.'}
         </div>
       </div>
       <div className="max-h-72 space-y-3 overflow-auto p-2">
         {Object.keys(groups).length === 0 && (
-          <div className="rounded-md border border-dashed border-gray-200 p-3 text-center text-xs text-gray-500">
+          <div className="rounded-md border border-dashed border-border p-3 text-center text-xs text-muted-foreground">
             No matching variables.
           </div>
         )}
         {Object.entries(groups).map(([group, items]) => (
           <div key={group}>
-            <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500">{group}</div>
+            <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{group}</div>
             <div className="space-y-1">
               {items.map((variable) => (
                 <button
                   key={variable.path}
                   type="button"
                   onClick={() => onInsert(variable)}
-                  className="w-full rounded border border-gray-200 bg-gray-50 px-2 py-1.5 text-left hover:bg-gray-100"
+                  className="w-full rounded border border-border bg-muted/50 px-2 py-1.5 text-left hover:bg-muted"
                   title={variable.description}
                 >
                   <div className="flex items-center gap-1.5">
-                    <Clipboard className="h-3.5 w-3.5 shrink-0 text-gray-500" />
-                    <span className="truncate text-xs font-medium text-gray-800">{variable.label || variable.path}</span>
+                    <Clipboard className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <span className="truncate text-xs font-medium text-foreground">{variable.label || variable.path}</span>
                   </div>
-                  <div className="mt-0.5 truncate font-mono text-[11px] text-gray-600">{variable.token}</div>
-                  {variable.example && <div className="mt-0.5 truncate text-[11px] text-gray-400">Example: {variable.example}</div>}
+                  <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">{variable.token}</div>
+                  {variable.example && <div className="mt-0.5 truncate text-[11px] text-muted-foreground/75">Example: {variable.example}</div>}
                 </button>
               ))}
             </div>
@@ -3463,6 +3502,7 @@ function FullContentEditorModal({
   onClose,
 }) {
   const editorRef = useRef(null);
+  const { resolvedTheme } = useTheme();
   if (!open) return null;
 
   const insertVariable = (variable) => {
@@ -3484,17 +3524,17 @@ function FullContentEditorModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-gray-950/60 p-4">
-      <div className="flex h-[86vh] w-full max-w-7xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
-        <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4">
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-gray-950/60 dark:bg-black/70 p-4">
+      <div className="flex h-[86vh] w-full max-w-7xl flex-col overflow-hidden rounded-xl bg-card shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
           <div>
-            <h3 className="text-lg font-semibold text-gray-950">{title}</h3>
-            {description && <p className="mt-1 text-sm text-gray-500">{description}</p>}
+            <h3 className="text-lg font-semibold text-foreground">{title}</h3>
+            {description && <p className="mt-1 text-sm text-muted-foreground">{description}</p>}
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+            className="rounded-md border border-border bg-card px-3 py-2 text-sm font-semibold text-foreground/85 hover:bg-muted/50"
           >
             Close
           </button>
@@ -3512,10 +3552,11 @@ function FullContentEditorModal({
                 });
               }}
               onChange={(next) => onChange(next || '')}
+              theme={resolvedTheme === 'dark' ? 'vs-dark' : 'light'}
               options={PROSE_EDITOR_OPTIONS}
             />
           </div>
-          <aside className="min-h-0 overflow-auto border-l border-gray-200 bg-gray-50 p-3">
+          <aside className="min-h-0 overflow-auto border-l border-border bg-muted/50 p-3">
             <VariablePicker
               variables={variables}
               search={variableSearch}
@@ -3525,18 +3566,18 @@ function FullContentEditorModal({
             />
           </aside>
         </div>
-        <div className="flex justify-end gap-2 border-t border-gray-200 px-5 py-3">
+        <div className="flex justify-end gap-2 border-t border-border px-5 py-3">
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+            className="rounded-md border border-border bg-card px-4 py-2 text-sm font-semibold text-foreground/85 hover:bg-muted/50"
           >
             Cancel
           </button>
           <button
             type="button"
             onClick={onSave}
-            className="rounded-md bg-gray-950 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800"
+            className="rounded-md bg-foreground px-4 py-2 text-sm font-semibold text-background hover:bg-foreground/90"
           >
             Apply to workflow
           </button>
@@ -3612,19 +3653,19 @@ function PreviewModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/45 p-4">
-      <div className="mx-auto flex h-full max-w-7xl flex-col overflow-hidden rounded-md bg-white shadow-2xl">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 px-5 py-4">
+    <div className="fixed inset-0 z-50 bg-slate-950/45 dark:bg-black/70 p-4">
+      <div className="mx-auto flex h-full max-w-7xl flex-col overflow-hidden rounded-md bg-card shadow-2xl">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
           <div className="min-w-0">
-            <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Workflow Preview</div>
-            <h3 className="text-lg font-semibold text-gray-900">Live step audit</h3>
-            <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-gray-500">
+            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Workflow Preview</div>
+            <h3 className="text-lg font-semibold text-foreground">Live step audit</h3>
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
               <span>Real workspace ticket, real LLM generation, no workflow-recipient email. Uses current unsaved editor changes.</span>
               {auditId && (
                 <button
                   type="button"
                   onClick={copyAuditId}
-                  className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 font-mono text-xs font-semibold text-blue-700 hover:bg-blue-100"
+                  className="inline-flex items-center gap-1 rounded-full border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 px-2 py-0.5 font-mono text-xs font-semibold text-blue-700 dark:text-blue-200 hover:bg-blue-100 dark:hover:bg-blue-500/20"
                   title="Copy audit ID"
                 >
                   <Clipboard className="h-3.5 w-3.5" />
@@ -3639,7 +3680,7 @@ function PreviewModal({
               type="button"
               onClick={onRunPreview}
               disabled={running || !selectedTicket}
-              className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground/85 hover:bg-muted/50 disabled:opacity-50"
             >
               {running ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
               {preview ? 'Run again' : 'Run preview'}
@@ -3647,7 +3688,7 @@ function PreviewModal({
             <button
               type="button"
               onClick={onClose}
-              className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground/85 hover:bg-muted/50"
             >
               <XCircle className="h-4 w-4" />
               Close
@@ -3657,42 +3698,42 @@ function PreviewModal({
 
         <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
           {running && (
-            <div className="mb-4 flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">
+            <div className="mb-4 flex items-center gap-2 rounded-md border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 px-3 py-2 text-sm text-blue-800 dark:text-blue-200">
               <RefreshCw className="h-4 w-4 animate-spin" />
               Running workflow preview. LLM calls can take a moment.
             </div>
           )}
           {error && (
-            <div className="mb-4 flex items-center gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            <div className="mb-4 flex items-center gap-2 rounded-md border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 px-3 py-2 text-sm text-red-700 dark:text-red-200">
               <AlertCircle className="h-4 w-4" />
               {error}
             </div>
           )}
 
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-md border border-blue-200 bg-blue-50 px-3 py-2">
-            <label className="inline-flex items-start gap-2 text-sm text-blue-950">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-md border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 px-3 py-2">
+            <label className="inline-flex items-start gap-2 text-sm text-blue-950 dark:text-blue-200">
               <input
                 type="checkbox"
                 checked={forceActionLinks === true}
                 onChange={(event) => onForceActionLinksChange(event.target.checked)}
-                className="mt-0.5 h-4 w-4 rounded border-blue-300 text-blue-600 focus:ring-blue-500"
+                className="mt-0.5 h-4 w-4 rounded border-blue-300 dark:border-blue-500/40 text-blue-600 dark:text-blue-300 focus:ring-blue-500"
               />
               <span>
                 <span className="font-semibold">Show all checked action blocks for testing</span>
-                <span className="block text-xs text-blue-700">Test preview can force timing-gated sections so copy, links, and styling are visible.</span>
+                <span className="block text-xs text-blue-700 dark:text-blue-200">Test preview can force timing-gated sections so copy, links, and styling are visible.</span>
               </span>
             </label>
-            <span className="rounded-full border border-blue-300 bg-white px-2 py-1 text-xs font-semibold text-blue-700">
+            <span className="rounded-full border border-blue-300 dark:border-blue-500/40 bg-card px-2 py-1 text-xs font-semibold text-blue-700 dark:text-blue-200">
               Live sends remain timing-aware
             </span>
           </div>
 
           {preview && (
-            <section className="mb-4 rounded-md border border-gray-200 bg-white p-4 shadow-sm">
+            <section className="mb-4 rounded-md border border-border bg-card p-4 shadow-sm">
               <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Troubleshooting Summary</div>
-                  <h4 className="text-base font-semibold text-gray-900">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Troubleshooting Summary</div>
+                  <h4 className="text-base font-semibold text-foreground">
                     {issues.length > 0 ? `${issues.length} item${issues.length === 1 ? '' : 's'} need review` : 'Preview completed cleanly'}
                   </h4>
                 </div>
@@ -3700,7 +3741,7 @@ function PreviewModal({
                   <button
                     type="button"
                     onClick={copyAuditId}
-                    className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                    className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-xs font-semibold text-foreground/85 hover:bg-muted/50"
                   >
                     <Clipboard className="h-3.5 w-3.5" />
                     {copiedAuditId ? 'Copied audit ID' : 'Copy audit ID'}
@@ -3724,8 +3765,8 @@ function PreviewModal({
                 <div className={cls(
                   'mt-3 rounded-md border px-3 py-2 text-sm',
                   preview.routingPreview.wouldRunSelectedWorkflow
-                    ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                    : 'border-amber-200 bg-amber-50 text-amber-900',
+                    ? 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-800 dark:text-emerald-200'
+                    : 'border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 text-amber-900 dark:text-amber-200',
                 )}
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
@@ -3744,10 +3785,10 @@ function PreviewModal({
                     </div>
                     <div className="flex flex-wrap gap-1 text-[11px] font-semibold">
                       {(preview.routingPreview.selectedWorkflowIds || []).map((id) => (
-                        <span key={id} className="rounded-full bg-white/80 px-2 py-0.5 ring-1 ring-current/15">Selected #{id}</span>
+                        <span key={id} className="rounded-full bg-card/80 px-2 py-0.5 ring-1 ring-current/15">Selected #{id}</span>
                       ))}
                       {preview.routingPreview.fallbackWorkflowId && (
-                        <span className="rounded-full bg-white/80 px-2 py-0.5 ring-1 ring-current/15">Fallback #{preview.routingPreview.fallbackWorkflowId}</span>
+                        <span className="rounded-full bg-card/80 px-2 py-0.5 ring-1 ring-current/15">Fallback #{preview.routingPreview.fallbackWorkflowId}</span>
                       )}
                     </div>
                   </div>
@@ -3775,17 +3816,17 @@ function PreviewModal({
           )}
 
           {!showPicker && selectedTicket && (
-            <section className="mb-4 rounded-md border border-blue-200 bg-blue-50 px-4 py-3">
+            <section className="mb-4 rounded-md border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 px-4 py-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-blue-700">Selected test ticket</div>
-                  <div className="truncate text-sm font-semibold text-gray-900">#{selectedTicket.freshserviceTicketId} {selectedTicket.subject || 'No subject'}</div>
-                  <div className="mt-0.5 truncate text-xs text-gray-600">{ticketPreviewSubtitle(selectedTicket)}</div>
+                  <div className="text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-200">Selected test ticket</div>
+                  <div className="truncate text-sm font-semibold text-foreground">#{selectedTicket.freshserviceTicketId} {selectedTicket.subject || 'No subject'}</div>
+                  <div className="mt-0.5 truncate text-xs text-muted-foreground">{ticketPreviewSubtitle(selectedTicket)}</div>
                 </div>
                 <button
                   type="button"
                   onClick={() => setShowTicketPicker(true)}
-                  className="rounded-md border border-blue-200 bg-white px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50"
+                  className="rounded-md border border-blue-200 dark:border-blue-500/30 bg-card px-3 py-2 text-xs font-semibold text-blue-700 dark:text-blue-200 hover:bg-blue-50 dark:hover:bg-blue-500/15"
                 >
                   Change ticket
                 </button>
@@ -3822,7 +3863,7 @@ function PreviewModal({
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(390px,0.85fr)]">
             <section>
               <div className="mb-3 flex items-center justify-between">
-                <h4 className="text-sm font-semibold text-gray-900">Execution Timeline</h4>
+                <h4 className="text-sm font-semibold text-foreground">Execution Timeline</h4>
                 {preview?.status && (
                   <span className={cls('rounded-full border px-2 py-0.5 text-xs font-medium', statusClass(preview.status))}>
                     {preview.status}
@@ -3831,7 +3872,7 @@ function PreviewModal({
               </div>
               <div className="space-y-3">
                 {steps.length === 0 && (
-                  <div className="rounded-md border border-dashed border-gray-300 px-3 py-8 text-center text-sm text-gray-500">
+                  <div className="rounded-md border border-dashed border-input px-3 py-8 text-center text-sm text-muted-foreground">
                     {running ? 'Waiting for step output...' : 'Run a preview to see step output.'}
                   </div>
                 )}
@@ -3840,19 +3881,19 @@ function PreviewModal({
             </section>
 
             <aside className="space-y-4">
-              <div className="rounded-md border border-gray-200 bg-white p-4">
+              <div className="rounded-md border border-border bg-card p-4">
                 <div className="mb-2 flex items-center gap-2">
-                  <Bot className="h-4 w-4 text-violet-600" />
-                  <h4 className="text-sm font-semibold text-gray-900">LLM Diagnostics</h4>
+                  <Bot className="h-4 w-4 text-violet-600 dark:text-violet-300" />
+                  <h4 className="text-sm font-semibold text-foreground">LLM Diagnostics</h4>
                 </div>
                 <LlmDiagnosticsList diagnostics={llmDiagnostics} />
               </div>
 
-              <div className="rounded-md border border-gray-200 bg-white p-4">
+              <div className="rounded-md border border-border bg-card p-4">
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
-                    <Mail className="h-4 w-4 text-blue-600" />
-                    <h4 className="text-sm font-semibold text-gray-900">Email Preview</h4>
+                    <Mail className="h-4 w-4 text-blue-600 dark:text-blue-300" />
+                    <h4 className="text-sm font-semibold text-foreground">Email Preview</h4>
                   </div>
                   <button
                     type="button"
@@ -3867,7 +3908,7 @@ function PreviewModal({
                 {testResult && (
                   <div className={cls(
                     'mb-3 rounded-md border px-3 py-2 text-xs',
-                    testResult.type === 'error' ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700',
+                    testResult.type === 'error' ? 'border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200' : 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200',
                   )}
                   >
                     {testResult.text}
@@ -3881,24 +3922,24 @@ function PreviewModal({
                     {email.branding && (
                       <BrandingDiagnostics branding={email.branding} />
                     )}
-                    <div className="rounded-md bg-gray-50 p-3 text-xs text-gray-600">
-                      {auditId && <div><span className="font-semibold text-gray-800">Audit ID:</span> {auditId}</div>}
-                      <div><span className="font-semibold text-gray-800">Original To:</span> {(recipients.to || []).join(', ') || 'none'}</div>
-                      {(recipients.cc || []).length > 0 && <div><span className="font-semibold text-gray-800">Cc:</span> {recipients.cc.join(', ')}</div>}
-                      {(recipients.bcc || []).length > 0 && <div><span className="font-semibold text-gray-800">Bcc:</span> {recipients.bcc.join(', ')}</div>}
+                    <div className="rounded-md bg-muted/50 p-3 text-xs text-muted-foreground">
+                      {auditId && <div><span className="font-semibold text-foreground">Audit ID:</span> {auditId}</div>}
+                      <div><span className="font-semibold text-foreground">Original To:</span> {(recipients.to || []).join(', ') || 'none'}</div>
+                      {(recipients.cc || []).length > 0 && <div><span className="font-semibold text-foreground">Cc:</span> {recipients.cc.join(', ')}</div>}
+                      {(recipients.bcc || []).length > 0 && <div><span className="font-semibold text-foreground">Bcc:</span> {recipients.bcc.join(', ')}</div>}
                     </div>
                     {!(recipients.to || []).length && (
-                      <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                      <div className="rounded-md border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
                         No original To recipient was resolved. The test email still sends only to your account.
                       </div>
                     )}
                     <div>
-                      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Subject</div>
-                      <div className="mt-1 text-sm font-medium text-gray-900">{email.subject}</div>
+                      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Subject</div>
+                      <div className="mt-1 text-sm font-medium text-foreground">{email.subject}</div>
                     </div>
                     <div>
-                      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Rendered Body</div>
-                      <div className="mt-1 max-h-96 overflow-auto rounded-md border border-gray-200 p-3 text-sm text-gray-700">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Rendered Body</div>
+                      <div className="mt-1 max-h-96 overflow-auto rounded-md border border-border p-3 text-sm text-foreground/85">
                         {email.html ? (
                           <div dangerouslySetInnerHTML={{ __html: email.html }} />
                         ) : (
@@ -3908,7 +3949,7 @@ function PreviewModal({
                     </div>
                   </div>
                 ) : (
-                  <div className="rounded-md border border-dashed border-gray-300 px-3 py-8 text-center text-sm text-gray-500">
+                  <div className="rounded-md border border-dashed border-input px-3 py-8 text-center text-sm text-muted-foreground">
                     The rendered email will appear after preview completes.
                   </div>
                 )}
@@ -3959,9 +4000,9 @@ function blockTypeLabel(type) {
 function EmailBlockListGroup({ title, emptyText, blocks, selectedId, onSelect }) {
   return (
     <div>
-      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</div>
+      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</div>
       {blocks.length === 0 ? (
-        <div className="rounded-md border border-dashed border-slate-200 bg-white px-3 py-4 text-xs text-slate-500">{emptyText}</div>
+        <div className="rounded-md border border-dashed border-border bg-card px-3 py-4 text-xs text-muted-foreground">{emptyText}</div>
       ) : (
         <div className="space-y-2">
           {blocks.map((block) => (
@@ -3972,23 +4013,23 @@ function EmailBlockListGroup({ title, emptyText, blocks, selectedId, onSelect })
               className={cls(
                 'w-full rounded-md border px-3 py-2 text-left transition',
                 selectedId === block.id
-                  ? 'border-blue-300 bg-blue-50 text-blue-950 shadow-sm'
-                  : 'border-slate-200 bg-white text-slate-700 hover:border-blue-200 hover:bg-blue-50/50',
+                  ? 'border-blue-300 dark:border-blue-500/40 bg-blue-50 dark:bg-blue-500/15 text-blue-950 dark:text-blue-200 shadow-sm'
+                  : 'border-border bg-card text-foreground/85 hover:border-blue-200 dark:hover:border-blue-500/30 hover:bg-blue-50/50 dark:hover:bg-blue-500/10',
               )}
             >
               <div className="flex min-w-0 items-center justify-between gap-2">
                 <span className="truncate text-sm font-semibold">{block.name}</span>
                 <span className={cls(
                   'rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
-                  block.enabled ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500',
+                  block.enabled ? 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200' : 'bg-muted text-muted-foreground',
                 )}
                 >
                   {block.enabled ? 'On' : 'Off'}
                 </span>
               </div>
               <div className="mt-1 flex flex-wrap gap-1.5 text-[10px] font-semibold uppercase tracking-wide">
-                {block.isDefault && <span className="rounded-full bg-blue-100 px-2 py-0.5 text-blue-700">Default</span>}
-                {!String(block.html || block.text || '').trim() && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-amber-700">Empty</span>}
+                {block.isDefault && <span className="rounded-full bg-blue-100 dark:bg-blue-500/20 px-2 py-0.5 text-blue-700 dark:text-blue-200">Default</span>}
+                {!String(block.html || block.text || '').trim() && <span className="rounded-full bg-amber-50 dark:bg-amber-500/15 px-2 py-0.5 text-amber-700 dark:text-amber-200">Empty</span>}
               </div>
             </button>
           ))}
@@ -4020,17 +4061,17 @@ function EmailBrandingPanel({
   const disabledOrEmpty = !draft || tooLarge || !String(draft.name || '').trim();
 
   return (
-    <section className="min-h-0 flex-1 overflow-auto bg-white px-6 py-4">
+    <section className="min-h-0 flex-1 overflow-auto bg-card px-6 py-4">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
-            <Mail className="h-4 w-4 text-slate-700" />
-            <h3 className="text-sm font-semibold text-slate-950">Email Branding</h3>
-            <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-blue-700">
+            <Mail className="h-4 w-4 text-foreground/85" />
+            <h3 className="text-sm font-semibold text-foreground">Email Branding</h3>
+            <span className="rounded-full border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-blue-700 dark:text-blue-200">
               {collection.headers.length} headers / {collection.footers.length} footers
             </span>
           </div>
-          <p className="mt-1 text-xs text-slate-500">
+          <p className="mt-1 text-xs text-muted-foreground">
             Reusable workspace headers and footers are added after the LLM or template writes the main message body.
           </p>
         </div>
@@ -4038,7 +4079,7 @@ function EmailBrandingPanel({
           <button
             type="button"
             onClick={() => onCreate('header')}
-            className="inline-flex items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100"
+            className="inline-flex items-center gap-1.5 rounded-md border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 px-3 py-2 text-sm font-semibold text-blue-700 dark:text-blue-200 hover:bg-blue-100 dark:hover:bg-blue-500/20"
           >
             <Plus className="h-4 w-4" />
             Header
@@ -4046,7 +4087,7 @@ function EmailBrandingPanel({
           <button
             type="button"
             onClick={() => onCreate('footer')}
-            className="inline-flex items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100"
+            className="inline-flex items-center gap-1.5 rounded-md border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 px-3 py-2 text-sm font-semibold text-blue-700 dark:text-blue-200 hover:bg-blue-100 dark:hover:bg-blue-500/20"
           >
             <Plus className="h-4 w-4" />
             Footer
@@ -4055,7 +4096,7 @@ function EmailBrandingPanel({
             type="button"
             onClick={onSave}
             disabled={saving || disabledOrEmpty}
-            className="inline-flex items-center gap-1.5 rounded-md bg-gray-900 px-3 py-2 text-sm font-semibold text-white hover:bg-gray-800 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-3 py-2 text-sm font-semibold text-background hover:bg-foreground/90 disabled:opacity-50"
           >
             {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
             Save block
@@ -4066,7 +4107,7 @@ function EmailBrandingPanel({
       <SenderIdentityCard />
 
       <div className="grid min-h-0 gap-4 xl:grid-cols-[280px_minmax(420px,0.95fr)_minmax(420px,1.05fr)]">
-        <aside className="min-h-0 rounded-md border border-slate-200 bg-slate-50 p-3">
+        <aside className="min-h-0 rounded-md border border-border bg-muted/50 p-3">
           <div className="settings-scrollbar max-h-[680px] space-y-5 overflow-auto pr-1">
             <EmailBlockListGroup
               title="Headers"
@@ -4085,24 +4126,24 @@ function EmailBrandingPanel({
           </div>
         </aside>
 
-        <section className="min-h-0 rounded-md border border-slate-200 bg-slate-50 p-4">
+        <section className="min-h-0 rounded-md border border-border bg-muted/50 p-4">
           {draft ? (
             <>
               <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px]">
-                <label className="block text-xs font-medium uppercase text-gray-500">
+                <label className="block text-xs font-medium uppercase text-muted-foreground">
                   Name
                   <input
                     value={draft.name || ''}
                     onChange={(event) => onChange({ ...draft, name: event.target.value })}
-                    className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                    className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
                   />
                 </label>
-                <label className="block text-xs font-medium uppercase text-gray-500">
+                <label className="block text-xs font-medium uppercase text-muted-foreground">
                   Type
                   <select
                     value={draft.type || 'footer'}
                     onChange={(event) => onChange({ ...draft, type: event.target.value })}
-                    className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                    className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
                   >
                     <option value="header">Header</option>
                     <option value="footer">Footer / sign-off</option>
@@ -4111,12 +4152,12 @@ function EmailBrandingPanel({
               </div>
 
               <div className="mt-3 flex flex-wrap items-center gap-2">
-                <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-gray-700">
+                <label className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm font-medium text-foreground/85">
                   <input
                     type="checkbox"
                     checked={draft.enabled !== false}
                     onChange={(event) => onChange({ ...draft, enabled: event.target.checked })}
-                    className="h-4 w-4 rounded border-gray-300 text-blue-600"
+                    className="h-4 w-4 rounded border-input text-blue-600 dark:text-blue-300"
                   />
                   Enabled
                 </label>
@@ -4124,7 +4165,7 @@ function EmailBrandingPanel({
                   type="button"
                   onClick={() => onSetDefault(draft)}
                   disabled={!selectedBlock?.id || selectedBlock.isDefault}
-                  className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-2 text-sm font-medium text-foreground/85 hover:bg-muted/50 disabled:opacity-50"
                 >
                   <CheckCircle2 className="h-4 w-4" />
                   {selectedBlock?.isDefault ? 'Default' : 'Set default'}
@@ -4133,7 +4174,7 @@ function EmailBrandingPanel({
                   type="button"
                   onClick={() => onDuplicate(draft)}
                   disabled={!selectedBlock?.id}
-                  className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-2 text-sm font-medium text-foreground/85 hover:bg-muted/50 disabled:opacity-50"
                 >
                   <Clipboard className="h-4 w-4" />
                   Duplicate
@@ -4142,12 +4183,12 @@ function EmailBrandingPanel({
                   type="button"
                   onClick={() => onDelete(draft)}
                   disabled={!selectedBlock?.id}
-                  className="inline-flex items-center gap-1.5 rounded-md border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 rounded-md border border-red-200 dark:border-red-500/30 bg-card px-3 py-2 text-sm font-medium text-red-700 dark:text-red-200 hover:bg-red-50 dark:hover:bg-red-500/15 disabled:opacity-50"
                 >
                   <XCircle className="h-4 w-4" />
                   Delete
                 </button>
-                <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+                <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-border bg-card px-3 py-2 text-sm font-medium text-foreground/85 hover:bg-muted/50">
                   <UploadCloud className="h-4 w-4" />
                   Upload HTML
                   <input
@@ -4159,15 +4200,15 @@ function EmailBrandingPanel({
                 </label>
               </div>
 
-              <div className="mt-3 rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-xs leading-5 text-blue-900">
+              <div className="mt-3 rounded-md border border-blue-100 dark:border-blue-500/20 bg-blue-50 dark:bg-blue-500/15 px-3 py-2 text-xs leading-5 text-blue-900 dark:text-blue-200">
                 {blockTypeLabel(draft.type)} blocks are deterministic. The LLM and Liquid templates should generate only the main email body.
               </div>
 
-              <div className="mt-3 flex items-center justify-between text-xs text-gray-500">
+              <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
                 <span>HTML source</span>
-                <span className={tooLarge ? 'font-semibold text-red-600' : ''}>{Math.round(htmlBytes / 1024)} KB / {Math.round(maxBytes / 1024)} KB</span>
+                <span className={tooLarge ? 'font-semibold text-red-600 dark:text-red-300' : ''}>{Math.round(htmlBytes / 1024)} KB / {Math.round(maxBytes / 1024)} KB</span>
               </div>
-              <div className="mt-1 overflow-hidden rounded-md border border-gray-200">
+              <div className="mt-1 overflow-hidden rounded-md border border-border">
                 <MonacoEditor
                   height="320px"
                   defaultLanguage="html"
@@ -4182,32 +4223,32 @@ function EmailBrandingPanel({
                   }}
                 />
               </div>
-              <label className="mt-3 block text-xs font-medium uppercase text-gray-500">Plain text fallback</label>
+              <label className="mt-3 block text-xs font-medium uppercase text-muted-foreground">Plain text fallback</label>
               <textarea
                 value={draft.text || ''}
                 onChange={(event) => onChange({ ...draft, text: event.target.value })}
-                className="mt-1 h-24 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                className="mt-1 h-24 w-full rounded-md border border-border bg-card px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
               />
             </>
           ) : (
-            <div className="flex min-h-[420px] items-center justify-center rounded-md border border-dashed border-slate-200 bg-white text-sm text-slate-500">
+            <div className="flex min-h-[420px] items-center justify-center rounded-md border border-dashed border-border bg-card text-sm text-muted-foreground">
               Create a header or footer to begin.
             </div>
           )}
         </section>
 
-        <section className="min-h-0 rounded-md border border-slate-200 bg-white p-4">
+        <section className="min-h-0 rounded-md border border-border bg-card p-4">
           {tooLarge && (
-            <div className="mb-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            <div className="mb-3 rounded-md border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 px-3 py-2 text-sm text-red-700 dark:text-red-200">
               Branding HTML is too large. Reduce embedded image size before saving.
             </div>
           )}
-          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Preview</div>
-          <div className="min-h-[420px] rounded-md border border-gray-200 bg-white p-4 text-sm text-gray-800">
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Preview</div>
+          <div className="min-h-[420px] rounded-md border border-border bg-card p-4 text-sm text-foreground">
             {draft?.html ? (
               <div dangerouslySetInnerHTML={{ __html: sanitizePreviewHtmlClient(draft.html) }} />
             ) : (
-              <div className="flex h-64 items-center justify-center text-gray-500">Upload or paste HTML for this block.</div>
+              <div className="flex h-64 items-center justify-center text-muted-foreground">Upload or paste HTML for this block.</div>
             )}
           </div>
         </section>
@@ -4239,7 +4280,7 @@ function SendEmailBrandingControls({ nodeData = {}, blocks = EMPTY_EMAIL_BLOCKS,
       value={selectedId || ''}
       onChange={(event) => onSelect(event.target.value ? Number.parseInt(event.target.value, 10) : null)}
       disabled={!enabled}
-      className="mt-2 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:bg-gray-50 disabled:text-gray-400"
+      className="mt-2 w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30 disabled:bg-muted/50 disabled:text-muted-foreground/75"
     >
       <option value="">{defaultLabel}</option>
       {items.map((block) => (
@@ -4254,21 +4295,21 @@ function SendEmailBrandingControls({ nodeData = {}, blocks = EMPTY_EMAIL_BLOCKS,
   );
 
   return (
-    <div className="rounded-lg border border-emerald-100 bg-emerald-50/40 p-3">
+    <div className="rounded-lg border border-emerald-100 dark:border-emerald-500/20 bg-emerald-50/40 dark:bg-emerald-500/10 p-3">
       <div className="mb-2 flex items-center justify-between gap-2">
         <div>
-          <div className="text-sm font-semibold text-emerald-950">Email branding</div>
-          <div className="text-xs leading-5 text-emerald-900">
+          <div className="text-sm font-semibold text-emerald-950 dark:text-emerald-200">Email branding</div>
+          <div className="text-xs leading-5 text-emerald-900 dark:text-emerald-200">
             Headers appear above the generated body. Footers/sign-offs appear after action links.
           </div>
         </div>
-        <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700 ring-1 ring-emerald-100">
+        <span className="rounded-full bg-card px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700 dark:text-emerald-200 ring-1 ring-emerald-100 dark:ring-emerald-500/30">
           Post-processing
         </span>
       </div>
 
       <div className="space-y-3">
-        <div className="rounded-md border border-emerald-100 bg-white p-3">
+        <div className="rounded-md border border-emerald-100 dark:border-emerald-500/20 bg-card p-3">
           <button
             type="button"
             aria-pressed={includeHeader}
@@ -4278,10 +4319,10 @@ function SendEmailBrandingControls({ nodeData = {}, blocks = EMPTY_EMAIL_BLOCKS,
             })}
             className="flex w-full items-start gap-2 text-left"
           >
-            {includeHeader ? <ToggleRight className="mt-0.5 h-5 w-5 text-emerald-600" /> : <ToggleLeft className="mt-0.5 h-5 w-5 text-gray-400" />}
+            {includeHeader ? <ToggleRight className="mt-0.5 h-5 w-5 text-emerald-600 dark:text-emerald-300" /> : <ToggleLeft className="mt-0.5 h-5 w-5 text-muted-foreground/75" />}
             <span>
-              <span className="block text-sm font-semibold text-gray-900">Include header</span>
-              <span className="block text-xs leading-5 text-gray-500">Optional content above the generated email body.</span>
+              <span className="block text-sm font-semibold text-foreground">Include header</span>
+              <span className="block text-xs leading-5 text-muted-foreground">Optional content above the generated email body.</span>
             </span>
           </button>
           {renderSelect({
@@ -4293,16 +4334,16 @@ function SendEmailBrandingControls({ nodeData = {}, blocks = EMPTY_EMAIL_BLOCKS,
             onSelect: (value) => onChange({ headerBlockId: value }),
           })}
           {includeHeader && collection.headers.length === 0 && (
-            <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            <div className="mt-2 rounded-md border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
               No headers are configured yet.
             </div>
           )}
           {headerWarning && (
-            <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">{headerWarning}</div>
+            <div className="mt-2 rounded-md border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">{headerWarning}</div>
           )}
         </div>
 
-        <div className="rounded-md border border-emerald-100 bg-white p-3">
+        <div className="rounded-md border border-emerald-100 dark:border-emerald-500/20 bg-card p-3">
           <button
             type="button"
             aria-pressed={includeFooter}
@@ -4312,10 +4353,10 @@ function SendEmailBrandingControls({ nodeData = {}, blocks = EMPTY_EMAIL_BLOCKS,
             })}
             className="flex w-full items-start gap-2 text-left"
           >
-            {includeFooter ? <ToggleRight className="mt-0.5 h-5 w-5 text-emerald-600" /> : <ToggleLeft className="mt-0.5 h-5 w-5 text-gray-400" />}
+            {includeFooter ? <ToggleRight className="mt-0.5 h-5 w-5 text-emerald-600 dark:text-emerald-300" /> : <ToggleLeft className="mt-0.5 h-5 w-5 text-muted-foreground/75" />}
             <span>
-              <span className="block text-sm font-semibold text-gray-900">Include footer/sign-off</span>
-              <span className="block text-xs leading-5 text-gray-500">On by default so existing workflows keep their workspace footer.</span>
+              <span className="block text-sm font-semibold text-foreground">Include footer/sign-off</span>
+              <span className="block text-xs leading-5 text-muted-foreground">On by default so existing workflows keep their workspace footer.</span>
             </span>
           </button>
           {renderSelect({
@@ -4327,12 +4368,12 @@ function SendEmailBrandingControls({ nodeData = {}, blocks = EMPTY_EMAIL_BLOCKS,
             onSelect: (value) => onChange({ footerBlockId: value }),
           })}
           {includeFooter && collection.footers.length === 0 && (
-            <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            <div className="mt-2 rounded-md border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
               No footers are configured. Existing legacy signatures will still be used until migrated.
             </div>
           )}
           {footerWarning && (
-            <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">{footerWarning}</div>
+            <div className="mt-2 rounded-md border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">{footerWarning}</div>
           )}
         </div>
       </div>
@@ -4343,7 +4384,7 @@ function SendEmailBrandingControls({ nodeData = {}, blocks = EMPTY_EMAIL_BLOCKS,
 function MockModeBadge({ compact = false }) {
   return (
     <span className={cls(
-      'inline-flex shrink-0 items-center gap-1 rounded-full border border-sky-200 bg-sky-50 font-semibold uppercase tracking-wide text-sky-700',
+      'inline-flex shrink-0 items-center gap-1 rounded-full border border-sky-200 dark:border-sky-500/30 bg-sky-50 dark:bg-sky-500/15 font-semibold uppercase tracking-wide text-sky-700 dark:text-sky-200',
       compact ? 'px-1.5 py-0.5 text-[10px]' : 'px-2 py-1 text-xs',
     )}
     >
@@ -4358,22 +4399,22 @@ export function AuditModeBadge({ mode, compact = false }) {
   const config = {
     live: {
       label: 'Live',
-      className: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+      className: 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200',
       icon: Send,
     },
     mock: {
       label: 'Mock',
-      className: 'border-sky-200 bg-sky-50 text-sky-700',
+      className: 'border-sky-200 dark:border-sky-500/30 bg-sky-50 dark:bg-sky-500/15 text-sky-700 dark:text-sky-200',
       icon: FlaskConical,
     },
     preview: {
       label: 'Preview',
-      className: 'border-violet-200 bg-violet-50 text-violet-700',
+      className: 'border-violet-200 dark:border-violet-500/30 bg-violet-50 dark:bg-violet-500/15 text-violet-700 dark:text-violet-200',
       icon: Eye,
     },
   }[normalized] || {
     label: normalized || 'Run',
-    className: 'border-slate-200 bg-slate-50 text-slate-600',
+    className: 'border-border bg-muted/50 text-muted-foreground',
     icon: History,
   };
   const Icon = config.icon;
@@ -4398,10 +4439,10 @@ function WorkflowStatus({ workflow }) {
       <span
         className={cls(
           'inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide',
-          isEnabled ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-100 text-slate-500',
+          isEnabled ? 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200' : 'border-border bg-muted text-muted-foreground',
         )}
       >
-        <span className={cls('h-1.5 w-1.5 rounded-full', isEnabled ? 'bg-emerald-500' : 'bg-slate-400')} />
+        <span className={cls('h-1.5 w-1.5 rounded-full', isEnabled ? 'bg-emerald-500' : 'bg-muted-foreground/60')} />
         {isEnabled ? 'Enabled' : 'Disabled'}
       </span>
     </span>
@@ -4412,7 +4453,7 @@ function WorkflowStatus({ workflow }) {
 // way), and the track position + color shows the current state — not the action.
 function WorkflowToggle({ label, checked, onClick, disabled = false, title, tone = 'emerald' }) {
   const onTrack = tone === 'sky' ? 'bg-sky-500' : 'bg-emerald-500';
-  const onShell = tone === 'sky' ? 'border-sky-300 bg-sky-50 text-sky-800' : 'border-emerald-300 bg-emerald-50 text-emerald-800';
+  const onShell = tone === 'sky' ? 'border-sky-300 dark:border-sky-500/40 bg-sky-50 dark:bg-sky-500/15 text-sky-800 dark:text-sky-200' : 'border-emerald-300 dark:border-emerald-500/40 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-800 dark:text-emerald-200';
   return (
     <button
       type="button"
@@ -4424,12 +4465,12 @@ function WorkflowToggle({ label, checked, onClick, disabled = false, title, tone
       title={title}
       className={cls(
         'inline-flex h-8 items-center gap-2 rounded-md border px-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50',
-        checked ? onShell : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50',
+        checked ? onShell : 'border-border bg-card text-muted-foreground hover:bg-muted/50',
       )}
     >
       <span>{label}</span>
-      <span className={cls('relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors', checked ? onTrack : 'bg-slate-300')}>
-        <span className={cls('inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform', checked ? 'translate-x-3.5' : 'translate-x-0.5')} />
+      <span className={cls('relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors', checked ? onTrack : 'bg-muted-foreground/40')}>
+        <span className={cls('inline-block h-3 w-3 transform rounded-full bg-card shadow transition-transform', checked ? 'translate-x-3.5' : 'translate-x-0.5')} />
       </span>
     </button>
   );
@@ -4456,14 +4497,14 @@ function NotificationToast({ message, onDismiss }) {
           aria-live="polite"
           className={cls(
             'fixed bottom-5 right-5 z-[70] flex max-w-sm items-start gap-3 rounded-xl border px-4 py-3 shadow-soft backdrop-blur',
-            isError ? 'border-red-200 bg-red-50/95 text-red-800' : 'border-emerald-200 bg-emerald-50/95 text-emerald-800',
+            isError ? 'border-red-200 dark:border-red-500/30 bg-red-50/95 dark:bg-red-500/10 text-red-800 dark:text-red-200' : 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50/95 dark:bg-emerald-500/10 text-emerald-800 dark:text-emerald-200',
           )}
         >
-          <span className={cls('mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full', isError ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-600')}>
+          <span className={cls('mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full', isError ? 'bg-red-100 dark:bg-red-500/20 text-red-600 dark:text-red-300' : 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-300')}>
             {isError ? <AlertCircle className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
           </span>
           <span className="min-w-0 flex-1 text-sm font-medium leading-5">{message.text}</span>
-          <button type="button" onClick={onDismiss} aria-label="Dismiss" className="shrink-0 rounded-md p-0.5 text-slate-400 transition hover:bg-black/5 hover:text-slate-600">
+          <button type="button" onClick={onDismiss} aria-label="Dismiss" className="shrink-0 rounded-md p-0.5 text-muted-foreground/75 transition hover:bg-black/5 hover:text-muted-foreground">
             <XCircle className="h-4 w-4" />
           </button>
         </motion.div>
@@ -4519,32 +4560,32 @@ function WorkflowTemplatesMenu({ saving, onInstalled, setMessage }) {
         type="button"
         onClick={() => setOpen((v) => !v)}
         disabled={saving}
-        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-violet-200 bg-violet-50 px-2.5 text-sm font-medium text-violet-700 hover:bg-violet-100 disabled:opacity-50"
+        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-violet-200 dark:border-violet-500/30 bg-violet-50 dark:bg-violet-500/15 px-2.5 text-sm font-medium text-violet-700 dark:text-violet-200 hover:bg-violet-100 dark:hover:bg-violet-500/20 disabled:opacity-50"
       >
         <Sparkles className="h-4 w-4" />
         Templates
       </button>
       {open && (
-        <div className="absolute right-0 z-40 mt-1 w-96 rounded-xl border border-slate-200 bg-white p-2 shadow-lg">
-          <p className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">AI email workflow templates</p>
-          {templates === null && <p className="px-2 py-2 text-xs text-slate-400">Loading…</p>}
-          {templates?.length === 0 && <p className="px-2 py-2 text-xs text-slate-400">No templates available.</p>}
+        <div className="absolute right-0 z-40 mt-1 w-96 rounded-xl border border-border bg-card p-2 shadow-lg">
+          <p className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/75">AI email workflow templates</p>
+          {templates === null && <p className="px-2 py-2 text-xs text-muted-foreground/75">Loading…</p>}
+          {templates?.length === 0 && <p className="px-2 py-2 text-xs text-muted-foreground/75">No templates available.</p>}
           {(templates || []).map((template) => (
             <button
               key={template.key}
               type="button"
               onClick={() => install(template)}
               disabled={installing !== null}
-              className="w-full rounded-lg px-2 py-2 text-left hover:bg-violet-50 disabled:opacity-60"
+              className="w-full rounded-lg px-2 py-2 text-left hover:bg-violet-50 dark:hover:bg-violet-500/15 disabled:opacity-60"
             >
               <span className="flex items-center gap-2">
-                <span className="text-sm font-semibold text-slate-800">{template.name}</span>
+                <span className="text-sm font-semibold text-foreground">{template.name}</span>
                 {installing === template.key && <span className="text-[10px] text-violet-500">installing…</span>}
               </span>
-              <span className="mt-0.5 block text-xs leading-5 text-slate-500">{template.description}</span>
+              <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">{template.description}</span>
             </button>
           ))}
-          <p className="border-t border-slate-100 px-2 pt-1.5 mt-1 text-[11px] text-slate-400">Installs as a disabled draft — nothing runs until you publish and enable it.</p>
+          <p className="border-t border-border/60 px-2 pt-1.5 mt-1 text-[11px] text-muted-foreground/75">Installs as a disabled draft — nothing runs until you publish and enable it.</p>
         </div>
       )}
     </div>
@@ -4623,29 +4664,29 @@ function NewWorkflowDialog({ open, onClose, onCreated, setMessage, initialTrigge
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto bg-slate-900/40 px-4 py-[8vh]"
+      className="fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto bg-slate-900/40 dark:bg-black/70 px-4 py-[8vh]"
       role="dialog"
       aria-modal="true"
       aria-label="Create workflow"
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="w-full max-w-2xl rounded-xl bg-white shadow-xl">
-        <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-3.5">
-          <Plus className="h-4 w-4 text-indigo-600" />
-          <h3 className="text-sm font-bold text-slate-800">New workflow</h3>
-          <button type="button" onClick={onClose} aria-label="Close" className="ml-auto rounded p-1 text-slate-400 hover:text-slate-600">
+      <div className="w-full max-w-2xl rounded-xl bg-card shadow-xl">
+        <div className="flex items-center gap-2 border-b border-border/60 px-5 py-3.5">
+          <Plus className="h-4 w-4 text-indigo-600 dark:text-indigo-300" />
+          <h3 className="text-sm font-bold text-foreground">New workflow</h3>
+          <button type="button" onClick={onClose} aria-label="Close" className="ml-auto rounded p-1 text-muted-foreground/75 hover:text-muted-foreground">
             <XCircle className="h-4 w-4" />
           </button>
         </div>
 
         <div className="space-y-4 px-5 py-4">
           <label className="block">
-            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Name</span>
+            <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Name</span>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder={mode === 'sub' ? 'e.g. Notify facilities team' : 'e.g. VIP escalation on arrival'}
-              className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-indigo-300 focus:outline-none"
+              className="mt-1 w-full rounded-md border border-border px-3 py-2 text-sm focus:border-indigo-300 dark:focus:border-indigo-500/40 focus:outline-none"
               autoFocus
             />
           </label>
@@ -4658,11 +4699,11 @@ function NewWorkflowDialog({ open, onClose, onCreated, setMessage, initialTrigge
               onClick={() => setMode('event')}
               className={cls(
                 'rounded-lg border px-3 py-2.5 text-left',
-                mode === 'event' ? 'border-indigo-300 bg-indigo-50/70 ring-1 ring-indigo-200' : 'border-slate-200 hover:border-indigo-200',
+                mode === 'event' ? 'border-indigo-300 dark:border-indigo-500/40 bg-indigo-50/70 dark:bg-indigo-500/10 ring-1 ring-indigo-200 dark:ring-indigo-500/30' : 'border-border hover:border-indigo-200 dark:hover:border-indigo-500/30',
               )}
             >
-              <span className="block text-sm font-semibold text-slate-800">Runs on an event</span>
-              <span className="mt-0.5 block text-xs text-slate-500">Fires automatically when the trigger below happens.</span>
+              <span className="block text-sm font-semibold text-foreground">Runs on an event</span>
+              <span className="mt-0.5 block text-xs text-muted-foreground">Fires automatically when the trigger below happens.</span>
             </button>
             <button
               type="button"
@@ -4671,21 +4712,21 @@ function NewWorkflowDialog({ open, onClose, onCreated, setMessage, initialTrigge
               onClick={() => setMode('sub')}
               className={cls(
                 'rounded-lg border px-3 py-2.5 text-left',
-                mode === 'sub' ? 'border-indigo-300 bg-indigo-50/70 ring-1 ring-indigo-200' : 'border-slate-200 hover:border-indigo-200',
+                mode === 'sub' ? 'border-indigo-300 dark:border-indigo-500/40 bg-indigo-50/70 dark:bg-indigo-500/10 ring-1 ring-indigo-200 dark:ring-indigo-500/30' : 'border-border hover:border-indigo-200 dark:hover:border-indigo-500/30',
               )}
             >
-              <span className="block text-sm font-semibold text-slate-800">Sub-workflow (on demand)</span>
-              <span className="mt-0.5 block text-xs text-slate-500">Never fires on its own — other workflows call it with a Run-workflow step.</span>
+              <span className="block text-sm font-semibold text-foreground">Sub-workflow (on demand)</span>
+              <span className="mt-0.5 block text-xs text-muted-foreground">Never fires on its own — other workflows call it with a Run-workflow step.</span>
             </button>
           </div>
 
           {mode === 'event' && (
             <div>
-              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Trigger</span>
-              <div className="mt-1 max-h-56 space-y-2 overflow-y-auto rounded-lg border border-slate-200 p-2">
+              <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Trigger</span>
+              <div className="mt-1 max-h-56 space-y-2 overflow-y-auto rounded-lg border border-border p-2">
                 {TRIGGER_PICKER_GROUPS.filter((group) => group.label !== 'On demand').map((group) => (
                   <div key={group.label}>
-                    <p className="px-1 pb-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">{group.label}</p>
+                    <p className="px-1 pb-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground/75">{group.label}</p>
                     <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
                       {group.triggers.map((trigger) => (
                         <button
@@ -4696,11 +4737,11 @@ function NewWorkflowDialog({ open, onClose, onCreated, setMessage, initialTrigge
                           onClick={() => setTriggerType(trigger.value)}
                           className={cls(
                             'rounded-md border px-2 py-1.5 text-left',
-                            triggerType === trigger.value ? 'border-indigo-300 bg-indigo-50 ring-1 ring-indigo-200' : 'border-slate-100 hover:border-indigo-200',
+                            triggerType === trigger.value ? 'border-indigo-300 dark:border-indigo-500/40 bg-indigo-50 dark:bg-indigo-500/15 ring-1 ring-indigo-200 dark:ring-indigo-500/30' : 'border-border/60 hover:border-indigo-200 dark:hover:border-indigo-500/30',
                           )}
                         >
-                          <span className="block text-xs font-semibold text-slate-700">{EVENT_LABELS[trigger.value] || trigger.value}</span>
-                          <span className="block text-[11px] leading-4 text-slate-400">{trigger.hint}</span>
+                          <span className="block text-xs font-semibold text-foreground/85">{EVENT_LABELS[trigger.value] || trigger.value}</span>
+                          <span className="block text-[11px] leading-4 text-muted-foreground/75">{trigger.hint}</span>
                         </button>
                       ))}
                     </div>
@@ -4711,7 +4752,7 @@ function NewWorkflowDialog({ open, onClose, onCreated, setMessage, initialTrigge
           )}
 
           <div className="flex items-center justify-end gap-2 pt-1">
-            <button type="button" onClick={onClose} className="rounded-md px-3 py-2 text-sm text-slate-500 hover:bg-slate-50">Cancel</button>
+            <button type="button" onClick={onClose} className="rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-muted/50">Cancel</button>
             <button
               type="button"
               onClick={create}
@@ -4723,9 +4764,9 @@ function NewWorkflowDialog({ open, onClose, onCreated, setMessage, initialTrigge
           </div>
 
           {mode === 'event' && (
-            <div className="border-t border-slate-100 pt-3">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Or start from a template</p>
-              {templates === null && <p className="mt-1 text-xs text-slate-400">Loading…</p>}
+            <div className="border-t border-border/60 pt-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/75">Or start from a template</p>
+              {templates === null && <p className="mt-1 text-xs text-muted-foreground/75">Loading…</p>}
               <div className="mt-1.5 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
                 {(templates || []).map((template) => (
                   <button
@@ -4733,17 +4774,17 @@ function NewWorkflowDialog({ open, onClose, onCreated, setMessage, initialTrigge
                     type="button"
                     onClick={() => installTemplate(template)}
                     disabled={busy}
-                    className="rounded-lg border border-violet-100 bg-violet-50/50 px-2.5 py-2 text-left hover:bg-violet-50 disabled:opacity-60"
+                    className="rounded-lg border border-violet-100 dark:border-violet-500/20 bg-violet-50/50 dark:bg-violet-500/10 px-2.5 py-2 text-left hover:bg-violet-50 dark:hover:bg-violet-500/15 disabled:opacity-60"
                   >
-                    <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-800">
+                    <span className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
                       <Sparkles className="h-3 w-3 text-violet-500" />
                       {template.name}
                     </span>
-                    <span className="mt-0.5 block text-[11px] leading-4 text-slate-500">{template.description}</span>
+                    <span className="mt-0.5 block text-[11px] leading-4 text-muted-foreground">{template.description}</span>
                   </button>
                 ))}
               </div>
-              <p className="mt-1.5 text-[10px] text-slate-400">Templates install as disabled drafts — nothing runs until you publish and enable it.</p>
+              <p className="mt-1.5 text-[10px] text-muted-foreground/75">Templates install as disabled drafts — nothing runs until you publish and enable it.</p>
             </div>
           )}
         </div>
@@ -4762,12 +4803,12 @@ function WorkflowHealthMenu({ health, warnings = [] }) {
   const broaderPct = quality.possibleBroaderIssueRatePct || 0;
   const warnCount = warnings.length;
   const stats = [
-    { label: 'SendGrid', value: health.sendgridConfigured ? `Configured${health.sendgridMode === 'smtp' ? ' (SMTP)' : ''}` : 'Missing', tone: health.sendgridConfigured ? 'text-emerald-700' : 'text-red-700' },
-    { label: 'Enabled', value: String(health.enabledWorkflows || 0), tone: 'text-slate-900' },
-    { label: 'Audit 7d', value: `${health.workflowAuditRuns7d ?? health.mockRuns7d ?? health.mockedDeliveries7d ?? 0} runs · ${health.mockEnabledWorkflows || 0} mock`, tone: 'text-sky-700' },
-    { label: 'Quality 7d', value: `${templateFallbacks} fallback · ${guardHardBlocks} block`, tone: (templateFallbacks || guardHardBlocks) ? 'text-red-700' : 'text-emerald-700' },
-    { label: 'Payloads', value: `${payloadFailures} flagged`, tone: payloadFailures ? 'text-red-700' : 'text-emerald-700' },
-    { label: 'Broader signal', value: `${broaderPct}%`, tone: broaderPct > 25 ? 'text-amber-700' : 'text-slate-900' },
+    { label: 'SendGrid', value: health.sendgridConfigured ? `Configured${health.sendgridMode === 'smtp' ? ' (SMTP)' : ''}` : 'Missing', tone: health.sendgridConfigured ? 'text-emerald-700 dark:text-emerald-200' : 'text-red-700 dark:text-red-200' },
+    { label: 'Enabled', value: String(health.enabledWorkflows || 0), tone: 'text-foreground' },
+    { label: 'Audit 7d', value: `${health.workflowAuditRuns7d ?? health.mockRuns7d ?? health.mockedDeliveries7d ?? 0} runs · ${health.mockEnabledWorkflows || 0} mock`, tone: 'text-sky-700 dark:text-sky-200' },
+    { label: 'Quality 7d', value: `${templateFallbacks} fallback · ${guardHardBlocks} block`, tone: (templateFallbacks || guardHardBlocks) ? 'text-red-700 dark:text-red-200' : 'text-emerald-700 dark:text-emerald-200' },
+    { label: 'Payloads', value: `${payloadFailures} flagged`, tone: payloadFailures ? 'text-red-700 dark:text-red-200' : 'text-emerald-700 dark:text-emerald-200' },
+    { label: 'Broader signal', value: `${broaderPct}%`, tone: broaderPct > 25 ? 'text-amber-700 dark:text-amber-200' : 'text-foreground' },
   ];
   return (
     <div className="relative mr-auto">
@@ -4778,41 +4819,41 @@ function WorkflowHealthMenu({ health, warnings = [] }) {
         aria-expanded={open}
         className={cls(
           'inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-sm font-semibold transition',
-          warnCount > 0 ? 'border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100' : 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100',
+          warnCount > 0 ? 'border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 text-amber-800 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-500/20' : 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-800 dark:text-emerald-200 hover:bg-emerald-100 dark:hover:bg-emerald-500/20',
         )}
       >
         <Activity className="h-4 w-4" />
         <span>Health</span>
-        {warnCount > 0 && <span className="rounded-full bg-amber-200 px-1.5 text-[10px] font-bold text-amber-900">{warnCount}</span>}
+        {warnCount > 0 && <span className="rounded-full bg-amber-200 dark:bg-amber-500/30 px-1.5 text-[10px] font-bold text-amber-900 dark:text-amber-200">{warnCount}</span>}
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 z-40 mt-2 w-[22rem] rounded-xl border border-slate-200 bg-white p-3 shadow-xl">
-            <div className="mb-2 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-500">
-              <Activity className="h-3.5 w-3.5 text-blue-600" />
+          <div className="absolute left-0 z-40 mt-2 w-[22rem] rounded-xl border border-border bg-card p-3 shadow-xl">
+            <div className="mb-2 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+              <Activity className="h-3.5 w-3.5 text-blue-600 dark:text-blue-300" />
               Workflow health
             </div>
             <div className="grid grid-cols-2 gap-2">
               {stats.map((stat) => (
-                <div key={stat.label} className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5">
-                  <div className="text-[11px] text-slate-500">{stat.label}</div>
+                <div key={stat.label} className="rounded-lg border border-border bg-muted/50 px-2.5 py-1.5">
+                  <div className="text-[11px] text-muted-foreground">{stat.label}</div>
                   <div className={cls('text-xs font-semibold', stat.tone)}>{stat.value}</div>
                 </div>
               ))}
             </div>
             <div className="mt-3">
-              <div className="mb-1 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+              <div className="mb-1 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
                 {warnCount > 0 ? `${warnCount} warning${warnCount === 1 ? '' : 's'}` : 'Warnings'}
               </div>
               {warnCount === 0 ? (
-                <div className="flex items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-2 text-xs font-medium text-emerald-700">
+                <div className="flex items-center gap-1.5 rounded-md border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 px-2.5 py-2 text-xs font-medium text-emerald-700 dark:text-emerald-200">
                   <CheckCircle2 className="h-3.5 w-3.5" /> All checks clean
                 </div>
               ) : (
                 <div className="settings-scrollbar max-h-56 space-y-1 overflow-y-auto">
                   {warnings.map((warning, index) => (
-                    <div key={`${warning.type || 'warning'}-${index}`} className="rounded-md border border-amber-100 bg-amber-50 px-2.5 py-1.5 text-xs font-medium text-amber-900">
+                    <div key={`${warning.type || 'warning'}-${index}`} className="rounded-md border border-amber-100 dark:border-amber-500/20 bg-amber-50 dark:bg-amber-500/15 px-2.5 py-1.5 text-xs font-medium text-amber-900 dark:text-amber-200">
                       {workflowHealthWarningLabel(warning)}
                     </div>
                   ))}
@@ -4838,14 +4879,14 @@ function MailSettingsTabButton({ tab, active, onClick }) {
       className={cls(
         'group relative flex h-9 min-w-0 items-center gap-2 rounded-lg px-3 text-left transition-all duration-200',
         active
-          ? 'bg-white text-slate-900 shadow-subtle ring-1 ring-slate-900/5'
-          : 'text-slate-500 hover:bg-white/70 hover:text-slate-800',
+          ? 'bg-card text-foreground shadow-subtle ring-1 ring-black/5 dark:ring-white/10'
+          : 'text-muted-foreground hover:bg-card/70 hover:text-foreground',
       )}
     >
       <Icon
         className={cls(
           'h-4 w-4 shrink-0 transition-colors',
-          active ? (tab.iconColor || 'text-slate-700') : 'text-slate-400 group-hover:text-slate-600',
+          active ? (tab.iconColor || 'text-foreground/85') : 'text-muted-foreground/75 group-hover:text-muted-foreground',
         )}
       />
       <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">{tab.label}</span>
@@ -4853,7 +4894,7 @@ function MailSettingsTabButton({ tab, active, onClick }) {
         <span
           className={cls(
             'shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide transition-colors',
-            active ? tab.badgeClass : 'bg-slate-100 text-slate-400 group-hover:bg-slate-200/70 group-hover:text-slate-500',
+            active ? tab.badgeClass : 'bg-muted text-muted-foreground/75 group-hover:bg-secondary/70 group-hover:text-muted-foreground',
           )}
         >
           {tab.badge}
@@ -4871,15 +4912,15 @@ function AfterHoursSchedulePreview({ schedule, loading }) {
   const activeNow = schedule?.activeNow === true;
 
   return (
-    <div className="rounded-md border border-slate-200 bg-white p-3 shadow-sm">
+    <div className="rounded-md border border-border bg-card p-3 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Routing window</div>
-          <div className="mt-1 text-sm font-semibold text-slate-950">
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Routing window</div>
+          <div className="mt-1 text-sm font-semibold text-foreground">
             {loading && !schedule ? 'Calculating workspace schedule...' : current?.label || 'After-hours routing disabled'}
           </div>
         </div>
-        <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-600">
+        <span className="rounded-full border border-border bg-muted/50 px-2 py-1 text-[11px] font-semibold text-muted-foreground">
           {schedule?.timezone || 'Workspace timezone'}
         </span>
       </div>
@@ -4892,11 +4933,11 @@ function AfterHoursSchedulePreview({ schedule, loading }) {
           </span>
         </div>
         <div className="mt-2 grid gap-2 sm:grid-cols-2">
-          <div className="rounded-md bg-white/70 px-2 py-2">
+          <div className="rounded-md bg-card/70 px-2 py-2">
             <div className="text-[11px] font-semibold uppercase tracking-wide opacity-70">From</div>
             <div className="mt-0.5 text-xs font-semibold">{timeOrFallback(current?.startsAtLocal, activeNow ? 'Already active' : 'No active window')}</div>
           </div>
-          <div className="rounded-md bg-white/70 px-2 py-2">
+          <div className="rounded-md bg-card/70 px-2 py-2">
             <div className="text-[11px] font-semibold uppercase tracking-wide opacity-70">Until</div>
             <div className="mt-0.5 text-xs font-semibold">{timeOrFallback(current?.endsAtLocal, current?.mode === 'disabled' ? 'Disabled' : 'Always active')}</div>
           </div>
@@ -4909,8 +4950,8 @@ function AfterHoursSchedulePreview({ schedule, loading }) {
         )}
       </div>
 
-      <div className="mt-3 rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-blue-950">
-        <div className="text-[11px] font-semibold uppercase tracking-wide text-blue-700">Next after-hours / holiday window</div>
+      <div className="mt-3 rounded-md border border-blue-100 dark:border-blue-500/20 bg-blue-50 dark:bg-blue-500/15 px-3 py-2 text-blue-950 dark:text-blue-200">
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-200">Next after-hours / holiday window</div>
         {next ? (
           <div className="mt-1 text-xs leading-5">
             <span className="font-semibold">{next.label}</span>
@@ -4926,14 +4967,14 @@ function AfterHoursSchedulePreview({ schedule, loading }) {
 
       {upcoming.length > 0 && (
         <div className="mt-3 space-y-1.5">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Upcoming windows</div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Upcoming windows</div>
           {upcoming.slice(0, 3).map((window, index) => (
-            <div key={`${window.startsAt || index}-${window.endsAt || index}`} className="flex items-center justify-between gap-3 rounded-md border border-slate-100 bg-slate-50 px-2.5 py-2 text-xs text-slate-700">
+            <div key={`${window.startsAt || index}-${window.endsAt || index}`} className="flex items-center justify-between gap-3 rounded-md border border-border/60 bg-muted/50 px-2.5 py-2 text-xs text-foreground/85">
               <div className="min-w-0">
-                <div className="font-semibold text-slate-900">{window.label}{window.holidayName ? `: ${window.holidayName}` : ''}</div>
+                <div className="font-semibold text-foreground">{window.label}{window.holidayName ? `: ${window.holidayName}` : ''}</div>
                 <div className="truncate">{window.startsAtLocal || 'Already active'} to {window.endsAtLocal || 'Always active'}</div>
               </div>
-              {window.duration && <span className="shrink-0 rounded-full bg-white px-2 py-0.5 font-semibold text-slate-600">{window.duration}</span>}
+              {window.duration && <span className="shrink-0 rounded-full bg-card px-2 py-0.5 font-semibold text-muted-foreground">{window.duration}</span>}
             </div>
           ))}
         </div>
@@ -4960,12 +5001,12 @@ function AfterHoursRoutingPanel({
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <span className="flex h-9 w-9 items-center justify-center rounded-md bg-amber-100 text-amber-700">
+            <span className="flex h-9 w-9 items-center justify-center rounded-md bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-200">
               <CalendarClock className="h-5 w-5" />
             </span>
             <div>
-              <h3 className="text-sm font-semibold text-slate-950">After-hours workflow options</h3>
-              <p className="text-xs text-slate-500">
+              <h3 className="text-sm font-semibold text-foreground">After-hours workflow options</h3>
+              <p className="text-xs text-muted-foreground">
                 Live after-hours routing uses this workflow Enable state. These options refine what happens once the workflow is enabled.
               </p>
             </div>
@@ -4975,21 +5016,21 @@ function AfterHoursRoutingPanel({
           type="button"
           onClick={onSave}
           disabled={saving}
-          className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+          className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-3 py-2 text-sm font-semibold text-background hover:bg-foreground/90 disabled:opacity-50"
         >
           {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
           Save options
         </button>
       </div>
 
-      <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-3">
+      <div className="rounded-md border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-3 py-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <div className="flex items-center gap-2 text-sm font-semibold text-amber-950">
-              {workflowEnabled ? <ToggleRight className="h-5 w-5 text-emerald-700" /> : <ToggleLeft className="h-5 w-5 text-slate-500" />}
+            <div className="flex items-center gap-2 text-sm font-semibold text-amber-950 dark:text-amber-200">
+              {workflowEnabled ? <ToggleRight className="h-5 w-5 text-emerald-700 dark:text-emerald-200" /> : <ToggleLeft className="h-5 w-5 text-muted-foreground" />}
               Live after-hours routing
             </div>
-            <p className="mt-1 text-xs leading-5 text-amber-900">
+            <p className="mt-1 text-xs leading-5 text-amber-900 dark:text-amber-200">
               {workflowEnabled
                 ? 'On because this workflow is enabled. Ticket arrivals can use this workflow when the window matches.'
                 : workflowPublished
@@ -5003,7 +5044,7 @@ function AfterHoursRoutingPanel({
             disabled={saving || !workflowPublished}
             className={cls(
               'inline-flex h-9 items-center gap-1.5 rounded-md px-3 text-sm font-semibold disabled:opacity-50',
-              workflowEnabled ? 'bg-red-50 text-red-700 hover:bg-red-100' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100',
+              workflowEnabled ? 'bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200 hover:bg-red-100 dark:hover:bg-red-500/20' : 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 hover:bg-emerald-100 dark:hover:bg-emerald-500/20',
             )}
           >
             {workflowEnabled ? <ToggleLeft className="h-4 w-4" /> : <ToggleRight className="h-4 w-4" />}
@@ -5018,39 +5059,39 @@ function AfterHoursRoutingPanel({
           onClick={() => setAfterHoursDraft((current) => ({ ...current, holidaysEnabled: !current.holidaysEnabled }))}
           className={cls(
             'rounded-md border px-3 py-3 text-left transition',
-            afterHoursDraft.holidaysEnabled ? 'border-violet-300 bg-violet-50 text-violet-950' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50',
+            afterHoursDraft.holidaysEnabled ? 'border-violet-300 dark:border-violet-500/40 bg-violet-50 dark:bg-violet-500/15 text-violet-950 dark:text-violet-200' : 'border-border bg-card text-foreground/85 hover:bg-muted/50',
           )}
         >
           <div className="flex items-center gap-2 text-sm font-semibold">
-            {afterHoursDraft.holidaysEnabled ? <ToggleRight className="h-5 w-5 text-violet-700" /> : <ToggleLeft className="h-5 w-5 text-slate-400" />}
+            {afterHoursDraft.holidaysEnabled ? <ToggleRight className="h-5 w-5 text-violet-700 dark:text-violet-200" /> : <ToggleLeft className="h-5 w-5 text-muted-foreground/75" />}
             Include holidays
           </div>
-          <p className="mt-1 text-xs leading-5 text-slate-500">Use the workspace holiday calendar as an off-hours route.</p>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">Use the workspace holiday calendar as an off-hours route.</p>
         </button>
         <button
           type="button"
           onClick={() => setAfterHoursDraft((current) => ({ ...current, suppressStandardTicketCreated: !current.suppressStandardTicketCreated }))}
           className={cls(
             'rounded-md border px-3 py-3 text-left transition',
-            afterHoursDraft.suppressStandardTicketCreated ? 'border-blue-300 bg-blue-50 text-blue-950' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50',
+            afterHoursDraft.suppressStandardTicketCreated ? 'border-blue-300 dark:border-blue-500/40 bg-blue-50 dark:bg-blue-500/15 text-blue-950 dark:text-blue-200' : 'border-border bg-card text-foreground/85 hover:bg-muted/50',
           )}
         >
           <div className="flex items-center gap-2 text-sm font-semibold">
-            {afterHoursDraft.suppressStandardTicketCreated ? <ToggleRight className="h-5 w-5 text-blue-700" /> : <ToggleLeft className="h-5 w-5 text-slate-400" />}
+            {afterHoursDraft.suppressStandardTicketCreated ? <ToggleRight className="h-5 w-5 text-blue-700 dark:text-blue-200" /> : <ToggleLeft className="h-5 w-5 text-muted-foreground/75" />}
             Replace normal received email
           </div>
-          <p className="mt-1 text-xs leading-5 text-slate-500">On: only this workflow runs. Off: this and the normal Ticket arrived workflow both run.</p>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">On: only this workflow runs. Off: this and the normal Ticket arrived workflow both run.</p>
         </button>
       </div>
 
       <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
         <AfterHoursSchedulePreview schedule={afterHoursSchedule} loading={afterHoursScheduleLoading} />
-        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
-          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">How this workflow is selected</div>
-          <div className="mt-2 space-y-2 text-xs leading-5 text-slate-600">
+        <div className="rounded-md border border-border bg-muted/50 px-3 py-3">
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">How this workflow is selected</div>
+          <div className="mt-2 space-y-2 text-xs leading-5 text-muted-foreground">
             <p>Ticket arrives, then Ticket Pulse checks workspace business hours and holidays.</p>
             <p>If this route is active, this workflow receives the event before the standard Ticket arrived workflow is considered.</p>
-            <p className="font-semibold text-slate-900">
+            <p className="font-semibold text-foreground">
               Current replacement mode: {afterHoursDraft.suppressStandardTicketCreated ? 'standard received email is replaced' : 'standard received email also runs'}.
             </p>
           </div>
@@ -5059,37 +5100,37 @@ function AfterHoursRoutingPanel({
 
       <div className="mt-4 grid gap-3 lg:grid-cols-2">
         <div>
-          <label className="text-xs font-medium uppercase text-slate-500">Emergency support URL</label>
+          <label className="text-xs font-medium uppercase text-muted-foreground">Emergency support URL</label>
           <input
             value={afterHoursDraft.emergencySupportUrl || ''}
             onChange={(event) => setAfterHoursDraft((current) => ({ ...current, emergencySupportUrl: event.target.value }))}
             placeholder="https://example.com/request-after-hours-support"
-            className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            className="mt-1 w-full rounded-md border border-border px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
           />
         </div>
         <div>
-          <label className="text-xs font-medium uppercase text-slate-500">Emergency link label</label>
+          <label className="text-xs font-medium uppercase text-muted-foreground">Emergency link label</label>
           <input
             value={afterHoursDraft.emergencySupportLabel || ''}
             onChange={(event) => setAfterHoursDraft((current) => ({ ...current, emergencySupportLabel: event.target.value }))}
             placeholder="Request after-hours support"
-            className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            className="mt-1 w-full rounded-md border border-border px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
           />
         </div>
         <div>
-          <label className="text-xs font-medium uppercase text-slate-500">After-hours message</label>
+          <label className="text-xs font-medium uppercase text-muted-foreground">After-hours message</label>
           <textarea
             value={afterHoursDraft.offHoursMessage || ''}
             onChange={(event) => setAfterHoursDraft((current) => ({ ...current, offHoursMessage: event.target.value }))}
-            className="mt-1 h-24 w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            className="mt-1 h-24 w-full rounded-md border border-border px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
           />
         </div>
         <div>
-          <label className="text-xs font-medium uppercase text-slate-500">Holiday message</label>
+          <label className="text-xs font-medium uppercase text-muted-foreground">Holiday message</label>
           <textarea
             value={afterHoursDraft.holidayMessage || ''}
             onChange={(event) => setAfterHoursDraft((current) => ({ ...current, holidayMessage: event.target.value }))}
-            className="mt-1 h-24 w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            className="mt-1 h-24 w-full rounded-md border border-border px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
           />
         </div>
       </div>
@@ -5113,24 +5154,24 @@ function AfterHoursRoutingDrawer({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/35">
+    <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/35 dark:bg-black/70">
       <button
         type="button"
         aria-label="Close after-hours options"
         className="absolute inset-0 cursor-default"
         onClick={onClose}
       />
-      <aside className="relative z-10 flex h-full w-full max-w-3xl flex-col border-l border-slate-200 bg-white shadow-2xl">
-        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-200 px-5 py-4">
+      <aside className="relative z-10 flex h-full w-full max-w-3xl flex-col border-l border-border bg-card shadow-2xl">
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border px-5 py-4">
           <div>
-            <div className="text-xs font-semibold uppercase tracking-wide text-amber-700">Workflow-specific</div>
-            <h3 className="text-lg font-semibold text-slate-950">After-hours routing</h3>
-            <p className="mt-1 text-sm text-slate-500">Configure the selected Ticket arrived after-hours workflow without covering the diagram.</p>
+            <div className="text-xs font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-200">Workflow-specific</div>
+            <h3 className="text-lg font-semibold text-foreground">After-hours routing</h3>
+            <p className="mt-1 text-sm text-muted-foreground">Configure the selected Ticket arrived after-hours workflow without covering the diagram.</p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border bg-card text-muted-foreground hover:bg-muted/50"
             title="Close"
           >
             <XCircle className="h-4 w-4" />
@@ -5160,7 +5201,7 @@ function WorkflowArchiveConfirmModal({ workflow, archived, saving, onCancel, onC
   const isRestore = archived === false;
 
   return (
-    <div className="fixed inset-0 z-[96] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[96] flex items-center justify-center bg-slate-950/45 dark:bg-black/70 p-4 backdrop-blur-sm">
       <button
         type="button"
         aria-label="Cancel archive action"
@@ -5171,28 +5212,28 @@ function WorkflowArchiveConfirmModal({ workflow, archived, saving, onCancel, onC
         role="dialog"
         aria-modal="true"
         aria-labelledby="workflow-archive-confirm-title"
-        className="relative z-10 w-full max-w-lg overflow-hidden rounded-2xl border border-white/70 bg-white shadow-2xl"
+        className="relative z-10 w-full max-w-lg overflow-hidden rounded-2xl border border-card/70 dark:border-white/10 bg-card shadow-2xl"
       >
         <div className={cls(
           'flex items-start gap-3 border-b px-5 py-4',
-          isRestore ? 'border-emerald-100 bg-emerald-50' : 'border-amber-100 bg-amber-50',
+          isRestore ? 'border-emerald-100 dark:border-emerald-500/20 bg-emerald-50 dark:bg-emerald-500/15' : 'border-amber-100 dark:border-amber-500/20 bg-amber-50 dark:bg-amber-500/15',
         )}
         >
           <div className={cls(
-            'mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border bg-white',
-            isRestore ? 'border-emerald-200 text-emerald-700' : 'border-amber-200 text-amber-700',
+            'mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border bg-card',
+            isRestore ? 'border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-200' : 'border-amber-200 dark:border-amber-500/30 text-amber-700 dark:text-amber-200',
           )}
           >
             {isRestore ? <RefreshCw className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-xs font-bold uppercase tracking-wide text-slate-500">
+            <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
               {isRestore ? 'Restore workflow variant' : 'Archive workflow variant'}
             </div>
-            <h3 id="workflow-archive-confirm-title" className="mt-1 break-words text-lg font-semibold text-slate-950">
+            <h3 id="workflow-archive-confirm-title" className="mt-1 break-words text-lg font-semibold text-foreground">
               {isRestore ? `Restore ${workflowName}?` : `Archive ${workflowName}?`}
             </h3>
-            <p className="mt-1 text-sm leading-5 text-slate-600">
+            <p className="mt-1 text-sm leading-5 text-muted-foreground">
               {isRestore
                 ? 'This variant will become available for routing again. Review its rule and match order before enabling or publishing changes.'
                 : 'This removes the variant from future routing and disables it, but keeps its draft, published versions, audit runs, and delivery history.'}
@@ -5202,29 +5243,29 @@ function WorkflowArchiveConfirmModal({ workflow, archived, saving, onCancel, onC
             type="button"
             onClick={onCancel}
             disabled={saving}
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-slate-500 hover:bg-white/70 disabled:opacity-50"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-card/70 disabled:opacity-50"
             title="Cancel"
           >
             <XCircle className="h-4 w-4" />
           </button>
         </div>
         <div className="space-y-3 px-5 py-4">
-          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-            <div className="font-semibold text-slate-900">{EVENT_LABELS[workflow.triggerType] || workflow.triggerType}</div>
-            <div className="mt-0.5 text-xs leading-5 text-slate-500">{workflowRoutingDescription(workflow)}</div>
+          <div className="rounded-lg border border-border bg-muted/50 px-3 py-2 text-sm text-foreground/85">
+            <div className="font-semibold text-foreground">{EVENT_LABELS[workflow.triggerType] || workflow.triggerType}</div>
+            <div className="mt-0.5 text-xs leading-5 text-muted-foreground">{workflowRoutingDescription(workflow)}</div>
           </div>
           {!isRestore && (
-            <div className="rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs leading-5 text-amber-800">
+            <div className="rounded-lg border border-amber-200 dark:border-amber-500/30 bg-card px-3 py-2 text-xs leading-5 text-amber-800 dark:text-amber-200">
               If this is currently matching requesters, those tickets will fall back to the next matching replacement workflow or the default workflow.
             </div>
           )}
         </div>
-        <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-4">
+        <div className="flex flex-wrap justify-end gap-2 border-t border-border bg-muted/50 px-5 py-4">
           <button
             type="button"
             onClick={onCancel}
             disabled={saving}
-            className="inline-flex h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            className="inline-flex h-9 items-center justify-center rounded-md border border-border bg-card px-3 text-sm font-semibold text-foreground/85 hover:bg-muted/50 disabled:opacity-50"
           >
             Cancel
           </button>
@@ -5233,8 +5274,8 @@ function WorkflowArchiveConfirmModal({ workflow, archived, saving, onCancel, onC
             onClick={onConfirm}
             disabled={saving}
             className={cls(
-              'inline-flex h-9 items-center justify-center gap-1.5 rounded-md px-3 text-sm font-semibold text-white disabled:opacity-50',
-              isRestore ? 'bg-emerald-700 hover:bg-emerald-800' : 'bg-slate-900 hover:bg-slate-800',
+              'inline-flex h-9 items-center justify-center gap-1.5 rounded-md px-3 text-sm font-semibold disabled:opacity-50',
+              isRestore ? 'bg-emerald-700 text-white hover:bg-emerald-800' : 'bg-foreground text-background hover:bg-foreground/90',
             )}
           >
             {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : isRestore ? <RefreshCw className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
@@ -5257,7 +5298,7 @@ export function WorkflowEnableMockConfirmModal({ workflow, saving, onCancel, onE
   const workflowName = workflowDisplayName(workflow);
 
   return (
-    <div className="fixed inset-0 z-[96] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[96] flex items-center justify-center bg-slate-950/45 dark:bg-black/70 p-4 backdrop-blur-sm">
       <button
         type="button"
         aria-label="Cancel enabling this workflow"
@@ -5268,18 +5309,18 @@ export function WorkflowEnableMockConfirmModal({ workflow, saving, onCancel, onE
         role="dialog"
         aria-modal="true"
         aria-labelledby="workflow-enable-mock-confirm-title"
-        className="relative z-10 w-full max-w-lg overflow-hidden rounded-2xl border border-white/70 bg-white shadow-2xl"
+        className="relative z-10 w-full max-w-lg overflow-hidden rounded-2xl border border-card/70 dark:border-white/10 bg-card shadow-2xl"
       >
-        <div className="flex items-start gap-3 border-b border-amber-100 bg-amber-50 px-5 py-4">
-          <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-amber-200 bg-white text-amber-700">
+        <div className="flex items-start gap-3 border-b border-amber-100 dark:border-amber-500/20 bg-amber-50 dark:bg-amber-500/15 px-5 py-4">
+          <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-amber-200 dark:border-amber-500/30 bg-card text-amber-700 dark:text-amber-200">
             <FlaskConical className="h-4 w-4" />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Observe-only (mock) mode is on</div>
-            <h3 id="workflow-enable-mock-confirm-title" className="mt-1 break-words text-lg font-semibold text-slate-950">
+            <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Observe-only (mock) mode is on</div>
+            <h3 id="workflow-enable-mock-confirm-title" className="mt-1 break-words text-lg font-semibold text-foreground">
               Enable {workflowName}?
             </h3>
-            <p className="mt-1 text-sm leading-5 text-slate-600">
+            <p className="mt-1 text-sm leading-5 text-muted-foreground">
               This workflow is in observe-only (mock) mode — it will run on matching tickets but take
               <span className="font-semibold"> no real actions</span> (no emails, no ticket changes).
               Turn off mock mode too?
@@ -5289,18 +5330,18 @@ export function WorkflowEnableMockConfirmModal({ workflow, saving, onCancel, onE
             type="button"
             onClick={onCancel}
             disabled={saving}
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-slate-500 hover:bg-white/70 disabled:opacity-50"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-card/70 disabled:opacity-50"
             title="Cancel"
           >
             <XCircle className="h-4 w-4" />
           </button>
         </div>
-        <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-4">
+        <div className="flex flex-wrap justify-end gap-2 border-t border-border bg-muted/50 px-5 py-4">
           <button
             type="button"
             onClick={onCancel}
             disabled={saving}
-            className="inline-flex h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            className="inline-flex h-9 items-center justify-center rounded-md border border-border bg-card px-3 text-sm font-semibold text-foreground/85 hover:bg-muted/50 disabled:opacity-50"
           >
             Cancel
           </button>
@@ -5308,7 +5349,7 @@ export function WorkflowEnableMockConfirmModal({ workflow, saving, onCancel, onE
             type="button"
             onClick={onKeepObserveOnly}
             disabled={saving}
-            className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md border border-amber-300 bg-amber-50 px-3 text-sm font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+            className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/15 px-3 text-sm font-semibold text-amber-800 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-500/20 disabled:opacity-50"
           >
             <FlaskConical className="h-4 w-4" />
             Keep observe-only
@@ -5369,27 +5410,27 @@ function WorkflowVariantDialog({ open, sourceWorkflow, saving, onCancel, onCreat
       className={cls(
         'flex-1 rounded-xl border px-3 py-2.5 text-left transition-colors',
         mode === value
-          ? 'border-indigo-400 bg-indigo-50 ring-2 ring-inset ring-indigo-400'
-          : 'border-slate-200 bg-white hover:border-indigo-200 hover:bg-indigo-50/40',
+          ? 'border-indigo-400 bg-indigo-50 dark:bg-indigo-500/15 ring-2 ring-inset ring-indigo-400'
+          : 'border-border bg-card hover:border-indigo-200 dark:hover:border-indigo-500/30 hover:bg-indigo-50/40 dark:hover:bg-indigo-500/10',
       )}
     >
-      <span className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+      <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
         <span
           className={cls(
             'inline-flex h-3.5 w-3.5 items-center justify-center rounded-full border',
-            mode === value ? 'border-indigo-500 bg-indigo-500' : 'border-slate-300 bg-white',
+            mode === value ? 'border-indigo-500 bg-indigo-500' : 'border-input bg-card',
           )}
         >
-          {mode === value && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
+          {mode === value && <span className="h-1.5 w-1.5 rounded-full bg-card" />}
         </span>
         {title}
       </span>
-      <span className="mt-1 block text-xs leading-5 text-slate-500">{description}</span>
+      <span className="mt-1 block text-xs leading-5 text-muted-foreground">{description}</span>
     </button>
   );
 
   return (
-    <div className="fixed inset-0 z-[96] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[96] flex items-center justify-center bg-slate-950/45 dark:bg-black/70 p-4 backdrop-blur-sm">
       <button
         type="button"
         aria-label="Cancel variant creation"
@@ -5400,18 +5441,18 @@ function WorkflowVariantDialog({ open, sourceWorkflow, saving, onCancel, onCreat
         role="dialog"
         aria-modal="true"
         aria-labelledby="workflow-variant-dialog-title"
-        className="relative z-10 w-full max-w-lg overflow-hidden rounded-2xl border border-white/70 bg-white shadow-2xl"
+        className="relative z-10 w-full max-w-lg overflow-hidden rounded-2xl border border-card/70 dark:border-white/10 bg-card shadow-2xl"
       >
-        <div className="flex items-start gap-3 border-b border-indigo-100 bg-indigo-50 px-5 py-4">
-          <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-indigo-200 bg-white text-indigo-700">
+        <div className="flex items-start gap-3 border-b border-indigo-100 dark:border-indigo-500/20 bg-indigo-50 dark:bg-indigo-500/15 px-5 py-4">
+          <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-indigo-200 dark:border-indigo-500/30 bg-card text-indigo-700 dark:text-indigo-200">
             <Plus className="h-4 w-4" />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-xs font-bold uppercase tracking-wide text-slate-500">New variant</div>
-            <h3 id="workflow-variant-dialog-title" className="mt-1 break-words text-lg font-semibold text-slate-950">
+            <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">New variant</div>
+            <h3 id="workflow-variant-dialog-title" className="mt-1 break-words text-lg font-semibold text-foreground">
               Variant for “{eventLabel}”
             </h3>
-            <p className="mt-1 text-sm leading-5 text-slate-600">
+            <p className="mt-1 text-sm leading-5 text-muted-foreground">
               Variants answer the same trigger as the default workflow, but only for tickets that match their routing rule (a region, a group, …). Everyone else keeps getting the default.
             </p>
           </div>
@@ -5419,7 +5460,7 @@ function WorkflowVariantDialog({ open, sourceWorkflow, saving, onCancel, onCreat
             type="button"
             onClick={onCancel}
             disabled={saving}
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-slate-500 hover:bg-white/70 disabled:opacity-50"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-card/70 disabled:opacity-50"
             title="Cancel"
           >
             <XCircle className="h-4 w-4" />
@@ -5428,7 +5469,7 @@ function WorkflowVariantDialog({ open, sourceWorkflow, saving, onCancel, onCreat
 
         <div className="space-y-4 px-5 py-4">
           <label className="block">
-            <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Name</span>
+            <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-muted-foreground">Name</span>
             <input
               autoFocus
               value={name}
@@ -5436,29 +5477,29 @@ function WorkflowVariantDialog({ open, sourceWorkflow, saving, onCancel, onCreat
               onFocus={(e) => e.target.select()}
               onKeyDown={(e) => { if (e.key === 'Enter' && trimmed && !saving) onCreate({ name: trimmed, mode }); }}
               placeholder="e.g. Brisbane office · after-hours"
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+              className="w-full rounded-lg border border-input px-3 py-2 text-sm text-foreground focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:focus:ring-indigo-500/30"
             />
           </label>
 
           <div>
-            <span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">Start from</span>
+            <span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-muted-foreground">Start from</span>
             <div className="flex gap-2">
               {modeCard('copy', `Copy “${sourceName}”`, 'Same steps, template and routing as the selected workflow — tweak from there.')}
               {modeCard('blank', 'Start blank', 'An empty canvas for this trigger — add your own steps.')}
             </div>
           </div>
 
-          <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
+          <p className="rounded-lg border border-border bg-muted/50 px-3 py-2 text-xs leading-5 text-muted-foreground">
             Created as an <b>unpublished draft</b> — nothing runs or sends until you publish and enable it.
           </p>
         </div>
 
-        <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-4">
+        <div className="flex flex-wrap justify-end gap-2 border-t border-border bg-muted/50 px-5 py-4">
           <button
             type="button"
             onClick={onCancel}
             disabled={saving}
-            className="inline-flex h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            className="inline-flex h-9 items-center justify-center rounded-md border border-border bg-card px-3 text-sm font-semibold text-foreground/85 hover:bg-muted/50 disabled:opacity-50"
           >
             Cancel
           </button>
@@ -5484,7 +5525,7 @@ function WorkflowDeleteConfirmModal({ workflow, saving, onCancel, onConfirm }) {
   const runs = workflow._count?.runs || 0;
 
   return (
-    <div className="fixed inset-0 z-[97] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[97] flex items-center justify-center bg-slate-950/50 dark:bg-black/70 p-4 backdrop-blur-sm">
       <button
         type="button"
         aria-label="Cancel delete action"
@@ -5495,18 +5536,18 @@ function WorkflowDeleteConfirmModal({ workflow, saving, onCancel, onConfirm }) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="workflow-delete-confirm-title"
-        className="relative z-10 w-full max-w-lg overflow-hidden rounded-2xl border border-white/70 bg-white shadow-2xl"
+        className="relative z-10 w-full max-w-lg overflow-hidden rounded-2xl border border-card/70 dark:border-white/10 bg-card shadow-2xl"
       >
-        <div className="flex items-start gap-3 border-b border-red-100 bg-red-50 px-5 py-4">
-          <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-red-200 bg-white text-red-700">
+        <div className="flex items-start gap-3 border-b border-red-100 dark:border-red-500/20 bg-red-50 dark:bg-red-500/15 px-5 py-4">
+          <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-red-200 dark:border-red-500/30 bg-card text-red-700 dark:text-red-200">
             <Trash2 className="h-4 w-4" />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-xs font-bold uppercase tracking-wide text-red-600">Delete archived workflow variant</div>
-            <h3 id="workflow-delete-confirm-title" className="mt-1 break-words text-lg font-semibold text-slate-950">
+            <div className="text-xs font-bold uppercase tracking-wide text-red-600 dark:text-red-300">Delete archived workflow variant</div>
+            <h3 id="workflow-delete-confirm-title" className="mt-1 break-words text-lg font-semibold text-foreground">
               Delete {workflowName}?
             </h3>
-            <p className="mt-1 text-sm leading-5 text-slate-600">
+            <p className="mt-1 text-sm leading-5 text-muted-foreground">
               This permanently removes the archived variant, its draft, published versions, workflow runs, step logs, deliveries, and provider-attempt audit rows.
             </p>
           </div>
@@ -5514,30 +5555,30 @@ function WorkflowDeleteConfirmModal({ workflow, saving, onCancel, onConfirm }) {
             type="button"
             onClick={onCancel}
             disabled={saving}
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-slate-500 hover:bg-white/70 disabled:opacity-50"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-card/70 disabled:opacity-50"
             title="Cancel"
           >
             <XCircle className="h-4 w-4" />
           </button>
         </div>
         <div className="space-y-3 px-5 py-4">
-          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-            <div className="font-semibold text-slate-900">{EVENT_LABELS[workflow.triggerType] || workflow.triggerType}</div>
-            <div className="mt-0.5 text-xs leading-5 text-slate-500">{workflowRoutingDescription(workflow)}</div>
-            <div className="mt-1 text-xs font-medium text-slate-600">
+          <div className="rounded-lg border border-border bg-muted/50 px-3 py-2 text-sm text-foreground/85">
+            <div className="font-semibold text-foreground">{EVENT_LABELS[workflow.triggerType] || workflow.triggerType}</div>
+            <div className="mt-0.5 text-xs leading-5 text-muted-foreground">{workflowRoutingDescription(workflow)}</div>
+            <div className="mt-1 text-xs font-medium text-muted-foreground">
               {runs} {runs === 1 ? 'run' : 'runs'} will be removed with this variant.
             </div>
           </div>
-          <div className="rounded-lg border border-red-200 bg-white px-3 py-2 text-xs leading-5 text-red-800">
+          <div className="rounded-lg border border-red-200 dark:border-red-500/30 bg-card px-3 py-2 text-xs leading-5 text-red-800 dark:text-red-200">
             Delete is only available after archive. Use Restore instead if you want to keep this variant and its audit history.
           </div>
         </div>
-        <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-4">
+        <div className="flex flex-wrap justify-end gap-2 border-t border-border bg-muted/50 px-5 py-4">
           <button
             type="button"
             onClick={onCancel}
             disabled={saving}
-            className="inline-flex h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            className="inline-flex h-9 items-center justify-center rounded-md border border-border bg-card px-3 text-sm font-semibold text-foreground/85 hover:bg-muted/50 disabled:opacity-50"
           >
             Cancel
           </button>
@@ -5648,20 +5689,20 @@ export function LlmContextToolsPanel({
   ];
 
   return (
-    <section className="min-h-0 flex-1 bg-white px-6 py-4">
+    <section className="min-h-0 flex-1 bg-card px-6 py-4">
       <div className="grid gap-4 xl:grid-cols-[minmax(360px,0.9fr)_minmax(420px,1.1fr)]">
         <div className="min-w-0 space-y-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <div className="flex items-center gap-2">
-                <Bot className="h-4 w-4 text-violet-700" />
-                <h3 className="text-sm font-semibold text-slate-950">LLM evidence and tools policy</h3>
-                <span className="rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-violet-700">
+                <Bot className="h-4 w-4 text-violet-700 dark:text-violet-200" />
+                <h3 className="text-sm font-semibold text-foreground">LLM evidence and tools policy</h3>
+                <span className="rounded-full border border-violet-200 dark:border-violet-500/30 bg-violet-50 dark:bg-violet-500/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-violet-700 dark:text-violet-200">
                   Workspace
                 </span>
                 <LlmHelpButton topic="workspacePolicy" onOpenHelp={onOpenHelp} className="h-6 w-6 shadow-none" />
               </div>
-              <p className="mt-1 max-w-3xl text-xs leading-5 text-slate-500">
+              <p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">
                 Set what Mail Workflow LLM steps can use by default: no extra evidence, a redacted evidence bundle, or that bundle plus approved read-only tools.
               </p>
             </div>
@@ -5676,7 +5717,7 @@ export function LlmContextToolsPanel({
             </button>
           </div>
 
-          <div className="flex flex-wrap gap-1 rounded-lg border border-slate-200 bg-slate-100 p-1">
+          <div className="flex flex-wrap gap-1 rounded-lg border border-border bg-muted p-1">
             {sections.map((s) => (
               <button
                 key={s.id}
@@ -5684,7 +5725,7 @@ export function LlmContextToolsPanel({
                 onClick={() => setLlmSection(s.id)}
                 className={cls(
                   'flex-1 whitespace-nowrap rounded-md px-3 py-2 text-xs font-semibold transition',
-                  llmSection === s.id ? 'bg-white text-violet-700 shadow-subtle' : 'text-slate-500 hover:bg-white/60 hover:text-slate-700',
+                  llmSection === s.id ? 'bg-card text-violet-700 dark:text-violet-200 shadow-subtle' : 'text-muted-foreground hover:bg-card/60 hover:text-foreground/85',
                 )}
               >
                 {s.label}
@@ -5701,7 +5742,7 @@ export function LlmContextToolsPanel({
                     key={option.value}
                     className={cls(
                       'relative min-h-[86px] rounded-md border transition',
-                      active ? 'border-violet-300 bg-violet-50 text-violet-950' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50',
+                      active ? 'border-violet-300 dark:border-violet-500/40 bg-violet-50 dark:bg-violet-500/15 text-violet-950 dark:text-violet-200' : 'border-border bg-card text-foreground/85 hover:bg-muted/50',
                     )}
                   >
                     <button
@@ -5710,7 +5751,7 @@ export function LlmContextToolsPanel({
                       className="h-full w-full px-3 py-2 pr-10 text-left"
                     >
                       <span className="block text-sm font-semibold">{option.label}</span>
-                      <span className="mt-1 block text-xs leading-4 text-slate-500">{option.description}</span>
+                      <span className="mt-1 block text-xs leading-4 text-muted-foreground">{option.description}</span>
                     </button>
                     <LlmHelpButton topic={option.helpTopic} onOpenHelp={onOpenHelp} className="absolute right-2 top-2 h-6 w-6 shadow-none" />
                   </div>
@@ -5728,7 +5769,7 @@ export function LlmContextToolsPanel({
                     className={cls(
                       'relative rounded-md border transition',
                       mode === 'off' ? 'opacity-50' : '',
-                      row.enabled && mode !== 'off' ? 'border-emerald-200 bg-emerald-50 text-emerald-950' : 'border-slate-200 bg-slate-50 text-slate-600',
+                      row.enabled && mode !== 'off' ? 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-950 dark:text-emerald-200' : 'border-border bg-muted/50 text-muted-foreground',
                     )}
                   >
                     <button
@@ -5741,14 +5782,14 @@ export function LlmContextToolsPanel({
                         {row.label}
                         {row.enabled && mode !== 'off' ? <ToggleRight className="h-4 w-4" /> : <ToggleLeft className="h-4 w-4" />}
                       </span>
-                      <span className="mt-1 block text-xs leading-4 text-slate-500">{row.description}</span>
+                      <span className="mt-1 block text-xs leading-4 text-muted-foreground">{row.description}</span>
                     </button>
                     <LlmHelpButton topic={row.helpTopic} onOpenHelp={onOpenHelp} className="absolute right-2 top-2 h-6 w-6 shadow-none" />
                   </div>
                 ))}
               </div>
               <div className="grid gap-2 md:grid-cols-4">
-                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   <LabelWithHelp topic="threadEntries" onOpenHelp={onOpenHelp}>Thread entries</LabelWithHelp>
                   <input
                     type="number"
@@ -5756,10 +5797,10 @@ export function LlmContextToolsPanel({
                     max="20"
                     value={context.maxThreadEntries ?? 6}
                     onChange={(event) => onSettingChange('context', { maxThreadEntries: Number(event.target.value) })}
-                    className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-medium text-slate-900"
+                    className="mt-1 w-full rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground"
                   />
                 </label>
-                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   <LabelWithHelp topic="similarTicketLimit" onOpenHelp={onOpenHelp}>Similar tickets</LabelWithHelp>
                   <input
                     type="number"
@@ -5767,10 +5808,10 @@ export function LlmContextToolsPanel({
                     max="20"
                     value={context.maxSimilarTickets ?? 5}
                     onChange={(event) => onSettingChange('context', { maxSimilarTickets: Number(event.target.value) })}
-                    className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-medium text-slate-900"
+                    className="mt-1 w-full rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground"
                   />
                 </label>
-                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   <LabelWithHelp topic="watchThreshold" onOpenHelp={onOpenHelp}>Routine cluster threshold</LabelWithHelp>
                   <input
                     type="number"
@@ -5778,10 +5819,10 @@ export function LlmContextToolsPanel({
                     max="100"
                     value={outage.watchThreshold ?? 3}
                     onChange={(event) => onSettingChange('outageSignals', { watchThreshold: Number(event.target.value) })}
-                    className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-medium text-slate-900"
+                    className="mt-1 w-full rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground"
                   />
                 </label>
-                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   <LabelWithHelp topic="contextKb" onOpenHelp={onOpenHelp}>Context KB</LabelWithHelp>
                   <input
                     type="number"
@@ -5789,7 +5830,7 @@ export function LlmContextToolsPanel({
                     max="100"
                     value={Math.round((safety.maxContextBytes || 40000) / 1000)}
                     onChange={(event) => onSettingChange('safety', { maxContextBytes: Number(event.target.value) * 1000 })}
-                    className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-medium text-slate-900"
+                    className="mt-1 w-full rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground"
                   />
                 </label>
               </div>
@@ -5798,10 +5839,10 @@ export function LlmContextToolsPanel({
 
           {llmSection === 'privacy' && (
             <div className="space-y-3">
-              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
+              <div className="rounded-md border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-3 py-2 text-xs leading-5 text-amber-900 dark:text-amber-200">
                 <div className="flex items-center gap-1.5 font-semibold uppercase tracking-wide">
                   Requester-facing claim controls
-                  <LlmHelpButton topic="claimControls" onOpenHelp={onOpenHelp} className="h-6 w-6 border-amber-200 text-amber-700 shadow-none hover:border-amber-300 hover:bg-amber-100" />
+                  <LlmHelpButton topic="claimControls" onOpenHelp={onOpenHelp} className="h-6 w-6 border-amber-200 dark:border-amber-500/30 text-amber-700 dark:text-amber-200 shadow-none hover:border-amber-300 dark:hover:border-amber-500/40 hover:bg-amber-100 dark:hover:bg-amber-500/20" />
                 </div>
                 <div>Unsupported outage claims, private/internal note mentions, tool names, provider/model names, and audit wording are blocked from requester-facing fields. Similar-report wording is allowed only after threshold evidence.</div>
               </div>
@@ -5813,7 +5854,7 @@ export function LlmContextToolsPanel({
                     onClick={() => onChange({ redactionEnabled: !draft.redactionEnabled })}
                     className={cls(
                       'inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-semibold',
-                      draft.redactionEnabled ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-red-200 bg-red-50 text-red-700',
+                      draft.redactionEnabled ? 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200' : 'border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200',
                     )}
                   >
                     {draft.redactionEnabled ? <ToggleRight className="h-3.5 w-3.5" /> : <ToggleLeft className="h-3.5 w-3.5" />}
@@ -5827,7 +5868,7 @@ export function LlmContextToolsPanel({
                     onClick={() => onChange({ includePrivateNotes: !draft.includePrivateNotes })}
                     className={cls(
                       'inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-semibold',
-                      draft.includePrivateNotes ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-slate-200 bg-slate-50 text-slate-600',
+                      draft.includePrivateNotes ? 'border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200' : 'border-border bg-muted/50 text-muted-foreground',
                     )}
                   >
                     {draft.includePrivateNotes ? <ToggleRight className="h-3.5 w-3.5" /> : <ToggleLeft className="h-3.5 w-3.5" />}
@@ -5842,21 +5883,21 @@ export function LlmContextToolsPanel({
           {llmSection === 'tools' && (
             <div className="space-y-3">
               {mode !== 'tools_enabled' && (
-                <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-500">
-                  Read-only tools run only when the policy mode is <span className="font-semibold text-slate-700">Evidence + tools</span>. You can still set the safety budget below.
+                <div className="rounded-md border border-border bg-muted/50 px-3 py-2 text-xs leading-5 text-muted-foreground">
+                  Read-only tools run only when the policy mode is <span className="font-semibold text-foreground/85">Evidence + tools</span>. You can still set the safety budget below.
                 </div>
               )}
 
-              <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+              <div className="rounded-md border border-border bg-muted/50 p-3">
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                     Tool-mode safety budget
                     <LlmHelpButton topic="toolBudget" onOpenHelp={onOpenHelp} className="h-6 w-6 shadow-none" />
                   </div>
-                  <div className="text-[11px] font-medium text-slate-500">Hard limits for every Evidence + tools generation</div>
+                  <div className="text-[11px] font-medium text-muted-foreground">Hard limits for every Evidence + tools generation</div>
                 </div>
                 <div className="grid gap-2 md:grid-cols-5">
-                  <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                     <LabelWithHelp topic="toolBudget" onOpenHelp={onOpenHelp}>Turns</LabelWithHelp>
                     <input
                       type="number"
@@ -5864,10 +5905,10 @@ export function LlmContextToolsPanel({
                       max="8"
                       value={draft.maxTurns ?? 4}
                       onChange={(event) => onChange({ maxTurns: Number(event.target.value) })}
-                      className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-900"
+                      className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm font-medium text-foreground"
                     />
                   </label>
-                  <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                     <LabelWithHelp topic="toolBudget" onOpenHelp={onOpenHelp}>Tool calls</LabelWithHelp>
                     <input
                       type="number"
@@ -5875,10 +5916,10 @@ export function LlmContextToolsPanel({
                       max="12"
                       value={draft.maxToolCalls ?? 6}
                       onChange={(event) => onChange({ maxToolCalls: Number(event.target.value) })}
-                      className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-900"
+                      className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm font-medium text-foreground"
                     />
                   </label>
-                  <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                     <LabelWithHelp topic="toolBudget" onOpenHelp={onOpenHelp}>Total sec</LabelWithHelp>
                     <input
                       type="number"
@@ -5886,10 +5927,10 @@ export function LlmContextToolsPanel({
                       max="60"
                       value={Math.round((draft.totalTimeoutMs || 20000) / 1000)}
                       onChange={(event) => onChange({ totalTimeoutMs: Number(event.target.value) * 1000 })}
-                      className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-900"
+                      className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm font-medium text-foreground"
                     />
                   </label>
-                  <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                     <LabelWithHelp topic="toolBudget" onOpenHelp={onOpenHelp}>Tool sec</LabelWithHelp>
                     <input
                       type="number"
@@ -5897,10 +5938,10 @@ export function LlmContextToolsPanel({
                       max="20"
                       value={Math.round((draft.perToolTimeoutMs || 3000) / 1000)}
                       onChange={(event) => onChange({ perToolTimeoutMs: Number(event.target.value) * 1000 })}
-                      className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-900"
+                      className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm font-medium text-foreground"
                     />
                   </label>
-                  <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                     <LabelWithHelp topic="toolBudget" onOpenHelp={onOpenHelp}>Tool KB</LabelWithHelp>
                     <input
                       type="number"
@@ -5908,7 +5949,7 @@ export function LlmContextToolsPanel({
                       max="50"
                       value={Math.round((safety.maxToolOutputBytes || 12000) / 1000)}
                       onChange={(event) => onSettingChange('safety', { maxToolOutputBytes: Number(event.target.value) * 1000 })}
-                      className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-900"
+                      className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm font-medium text-foreground"
                     />
                   </label>
                 </div>
@@ -5917,14 +5958,14 @@ export function LlmContextToolsPanel({
               {mode === 'tools_enabled' && (
                 <div>
                   {/* First-enable notice (gap plan P5 rollout): what tool mode means. */}
-                  <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800">
+                  <div className="mb-3 rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-3 py-2.5 text-xs text-amber-800 dark:text-amber-200">
                     <span className="font-semibold">Tool mode is on for this workspace.</span>{' '}
                     The LLM may call the read-only Ticket Pulse evidence tools below while drafting.
                     Internal notes enter the evidence bundle but the output guard hard-blocks quoting them verbatim.
                     Recommended rollout: run one non-critical workflow in <span className="font-semibold">mock mode for a week</span>,
                     review its audit for unsupported claims and latency, then enable live delivery per workflow.
                   </div>
-                  <div className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-600">
+                  <div className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-muted-foreground">
                     Read-only tool availability
                     <LlmHelpButton topic="toolCatalog" onOpenHelp={onOpenHelp} className="h-6 w-6 shadow-none" />
                   </div>
@@ -5936,7 +5977,7 @@ export function LlmContextToolsPanel({
                           key={tool.name}
                           className={cls(
                             'relative rounded-md border transition',
-                            enabled ? 'border-violet-200 bg-violet-50 text-violet-950' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50',
+                            enabled ? 'border-violet-200 dark:border-violet-500/30 bg-violet-50 dark:bg-violet-500/15 text-violet-950 dark:text-violet-200' : 'border-border bg-card text-muted-foreground hover:bg-muted/50',
                           )}
                         >
                           <button
@@ -5946,9 +5987,9 @@ export function LlmContextToolsPanel({
                           >
                             <span className="flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide">
                               {tool.label}
-                              <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] text-slate-500 ring-1 ring-slate-200">{tool.riskLevel}</span>
+                              <span className="rounded-full bg-card/80 px-2 py-0.5 text-[10px] text-muted-foreground ring-1 ring-border">{tool.riskLevel}</span>
                             </span>
-                            <span className="mt-1 block text-xs leading-4 text-slate-500">{tool.description}</span>
+                            <span className="mt-1 block text-xs leading-4 text-muted-foreground">{tool.description}</span>
                           </button>
                           <LlmHelpButton topic={tool.name} onOpenHelp={onOpenHelp} className="absolute right-2 top-2 h-6 w-6 shadow-none" />
                         </div>
@@ -5962,14 +6003,14 @@ export function LlmContextToolsPanel({
 
         </div>
 
-        <div className="min-w-0 rounded-md border border-violet-100 bg-slate-50 p-3">
+        <div className="min-w-0 rounded-md border border-violet-100 dark:border-violet-500/20 bg-muted/50 p-3">
           <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
             <div>
-              <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 Preview ticket evidence
                 <LlmHelpButton topic="previewContext" onOpenHelp={onOpenHelp} className="h-6 w-6 shadow-none" />
               </div>
-              <div className="mt-0.5 text-xs text-slate-500">
+              <div className="mt-0.5 text-xs text-muted-foreground">
                 Search by visible FreshService ticket number or choose a recent ticket.
               </div>
             </div>
@@ -5978,7 +6019,7 @@ export function LlmContextToolsPanel({
                 type="button"
                 onClick={onPreview}
                 disabled={previewLoading || mode === 'off' || !hasContextTicket}
-                className="inline-flex items-center gap-1.5 rounded-md border border-violet-200 bg-white px-3 py-2 text-xs font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 rounded-md border border-violet-200 dark:border-violet-500/30 bg-card px-3 py-2 text-xs font-semibold text-violet-700 dark:text-violet-200 hover:bg-violet-50 dark:hover:bg-violet-500/15 disabled:opacity-50"
               >
                 {previewLoading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Eye className="h-3.5 w-3.5" />}
                 Preview context
@@ -5988,7 +6029,7 @@ export function LlmContextToolsPanel({
                 onClick={onTestRun}
                 disabled={testLoading || mode !== 'tools_enabled' || !canRunToolTest}
                 title={!canRunToolTest ? 'Select a ticket before running the full tool test.' : undefined}
-                className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-3 py-2 text-xs font-semibold text-background hover:bg-foreground/90 disabled:opacity-50"
               >
                 {testLoading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
                 Run tool test
@@ -5998,7 +6039,7 @@ export function LlmContextToolsPanel({
           </div>
 
           {manualFreshserviceTicketNumber && !selectedTicket && (
-            <div className="mb-3 rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+            <div className="mb-3 rounded-md border border-blue-100 dark:border-blue-500/20 bg-blue-50 dark:bg-blue-500/15 px-3 py-2 text-xs text-blue-800 dark:text-blue-200">
               Preview will resolve FreshService ticket #{String(ticketSearch || '').trim()} directly. Select the ticket below to enable the full tool test.
             </div>
           )}
@@ -6019,11 +6060,11 @@ export function LlmContextToolsPanel({
             onTicketPageChange={onTicketPageChange}
             onSelectTicket={onSelectTicket}
             showRunButton={false}
-            className="mb-3 border-slate-200"
+            className="mb-3 border-border"
           />
 
           {!preview && (
-            <div className="flex min-h-[210px] items-center justify-center rounded-md border border-dashed border-slate-200 bg-white px-4 text-center text-sm text-slate-500">
+            <div className="flex min-h-[210px] items-center justify-center rounded-md border border-dashed border-border bg-card px-4 text-center text-sm text-muted-foreground">
               Preview a real ticket to inspect the evidence bundle, similar-ticket counts, allowed outage wording, and redaction behavior.
             </div>
           )}
@@ -6036,59 +6077,59 @@ export function LlmContextToolsPanel({
                 <PreviewMetric label="Thread" value={String(summary?.threadEntryCount || 0)} tone="gray" />
                 <PreviewMetric label="Redactions" value={String(summary?.redactionCount || 0)} tone={summary?.redactionCount ? 'amber' : 'gray'} />
               </div>
-              <div className="rounded-md border border-slate-200 bg-white p-3">
-                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Similar-ticket windows</div>
+              <div className="rounded-md border border-border bg-card p-3">
+                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Similar-ticket windows</div>
                 <div className="flex flex-wrap gap-2">
                   {(summary?.similarTicketWindows || []).map((window) => (
-                    <span key={window.hours} className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">
+                    <span key={window.hours} className="rounded-full bg-muted px-2 py-1 text-xs font-semibold text-foreground/85">
                       {window.hours}h: {window.count}
                     </span>
                   ))}
-                  {(summary?.similarTicketWindows || []).length === 0 && <span className="text-xs text-slate-500">No windows returned.</span>}
+                  {(summary?.similarTicketWindows || []).length === 0 && <span className="text-xs text-muted-foreground">No windows returned.</span>}
                 </div>
                 {(summary?.allowedPublicPhrases || []).length > 0 && (
-                  <div className="mt-2 text-xs leading-5 text-slate-600">
+                  <div className="mt-2 text-xs leading-5 text-muted-foreground">
                     Allowed wording: {summary.allowedPublicPhrases.join('; ')}
                   </div>
                 )}
               </div>
-              <pre className="max-h-[220px] overflow-auto rounded-md bg-slate-950 p-3 text-[11px] leading-5 text-slate-100">
+              <pre className="max-h-[220px] overflow-auto rounded-md bg-slate-950 dark:ring-1 dark:ring-white/10 p-3 text-[11px] leading-5 text-slate-100">
                 {formatJson(bundle)}
               </pre>
             </div>
           )}
 
           {testRun && (
-            <div className="mt-3 rounded-md border border-slate-200 bg-white p-3">
+            <div className="mt-3 rounded-md border border-border bg-card p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
-                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Tool test run</div>
-                  <div className="text-sm font-semibold text-slate-950">{testRun.status || 'completed'} {testRun.auditId ? `| ${testRun.auditId}` : ''}</div>
+                  <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Tool test run</div>
+                  <div className="text-sm font-semibold text-foreground">{testRun.status || 'completed'} {testRun.auditId ? `| ${testRun.auditId}` : ''}</div>
                 </div>
-                <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-600">
+                <span className="rounded-full bg-muted px-2 py-1 text-[11px] font-semibold text-muted-foreground">
                   {(testRun.toolSteps || []).length} tool steps
                 </span>
               </div>
               <div className="mt-3 space-y-2">
                 {(testRun.toolSteps || []).map((step) => (
-                  <div key={step.stepRunId || step.nodeId} className="rounded-md border border-slate-100 bg-slate-50 px-3 py-2 text-xs">
-                    <div className="flex flex-wrap items-center justify-between gap-2 font-semibold text-slate-800">
+                  <div key={step.stepRunId || step.nodeId} className="rounded-md border border-border/60 bg-muted/50 px-3 py-2 text-xs">
+                    <div className="flex flex-wrap items-center justify-between gap-2 font-semibold text-foreground">
                       <span>{String(step.nodeId || '').split(':')[1] || step.nodeId}</span>
-                      <span className={cls('rounded-full px-2 py-0.5', step.status === 'completed' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700')}>
+                      <span className={cls('rounded-full px-2 py-0.5', step.status === 'completed' ? 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200' : 'bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200')}>
                         {step.status}
                       </span>
                     </div>
-                    <div className="mt-1 truncate text-slate-500">
+                    <div className="mt-1 truncate text-muted-foreground">
                       {step.output?.accepted ? 'Final email accepted' : JSON.stringify(step.output || {}).slice(0, 180)}
                     </div>
                   </div>
                 ))}
                 {(testRun.toolSteps || []).length === 0 && (
-                  <div className="rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-500">No tool steps were returned.</div>
+                  <div className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">No tool steps were returned.</div>
                 )}
               </div>
               {testRun.state?.email?.subject && (
-                <div className="mt-3 rounded-md bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                <div className="mt-3 rounded-md bg-emerald-50 dark:bg-emerald-500/15 px-3 py-2 text-xs text-emerald-800 dark:text-emerald-200">
                   Final subject: <span className="font-semibold">{testRun.state.email.subject}</span>
                 </div>
               )}
@@ -6189,26 +6230,26 @@ function MockAuditPanel({
     <section
       className={cls(
         'px-6 py-4',
-        tabbed ? 'flex min-h-0 flex-1 flex-col overflow-hidden' : 'shrink-0 border-b border-slate-100',
+        tabbed ? 'flex min-h-0 flex-1 flex-col overflow-hidden' : 'shrink-0 border-b border-border/60',
       )}
     >
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <FlaskConical className="h-4 w-4 text-sky-700" />
-            <h3 className="text-sm font-semibold text-slate-950">Workflow Audit</h3>
-            <span className="rounded-full border border-sky-200 bg-white px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-sky-700">
+            <FlaskConical className="h-4 w-4 text-sky-700 dark:text-sky-200" />
+            <h3 className="text-sm font-semibold text-foreground">Workflow Audit</h3>
+            <span className="rounded-full border border-sky-200 dark:border-sky-500/30 bg-card px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-sky-700 dark:text-sky-200">
               {visibleRuns.length} runs
             </span>
           </div>
-          <p className="mt-1 text-xs text-slate-500">Saved live, mock, and preview workflow runs with rendered email, delivery outcome, and LLM/tool evidence.</p>
+          <p className="mt-1 text-xs text-muted-foreground">Saved live, mock, and preview workflow runs with rendered email, delivery outcome, and LLM/tool evidence.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
             onClick={() => onSendTestToMe?.(activeRun)}
             disabled={!canSendTest || testSending}
-            className="inline-flex items-center gap-1.5 rounded-md border border-blue-200 bg-blue-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-md border border-blue-200 dark:border-blue-500/30 bg-blue-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
             title={activeEmail ? 'Send this rendered workflow email only to your account' : 'No rendered email was captured for this run'}
           >
             {testSending ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
@@ -6221,7 +6262,7 @@ function MockAuditPanel({
             title="Toggle compact run list"
             className={cls(
               'inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-semibold transition',
-              compact ? 'border-sky-300 bg-sky-50 text-sky-700' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50',
+              compact ? 'border-sky-300 dark:border-sky-500/40 bg-sky-50 dark:bg-sky-500/15 text-sky-700 dark:text-sky-200' : 'border-border bg-card text-muted-foreground hover:bg-muted/50',
             )}
           >
             <Rows3 className="h-3.5 w-3.5" />
@@ -6231,7 +6272,7 @@ function MockAuditPanel({
             type="button"
             onClick={onRefresh}
             disabled={loading}
-            className="inline-flex items-center gap-1.5 rounded-md border border-sky-200 bg-white px-3 py-2 text-xs font-semibold text-sky-700 hover:bg-sky-50 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-md border border-sky-200 dark:border-sky-500/30 bg-card px-3 py-2 text-xs font-semibold text-sky-700 dark:text-sky-200 hover:bg-sky-50 dark:hover:bg-sky-500/15 disabled:opacity-50"
           >
             {loading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
             Refresh
@@ -6240,7 +6281,7 @@ function MockAuditPanel({
             <button
               type="button"
               onClick={onClose}
-              className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-2 text-xs font-semibold text-muted-foreground hover:bg-muted/50"
             >
               <ChevronUp className="h-3.5 w-3.5" />
               Collapse
@@ -6255,7 +6296,7 @@ function MockAuditPanel({
           <select
             value={filters.executionMode}
             onChange={(event) => onFiltersChange({ ...filters, executionMode: event.target.value })}
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-subtle transition focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            className="w-full rounded-lg border border-border bg-card px-3 py-2 text-xs font-semibold text-foreground/85 shadow-subtle transition focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
           >
             {WORKFLOW_AUDIT_MODES.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>
@@ -6267,7 +6308,7 @@ function MockAuditPanel({
           <select
             value={filters.workflowId}
             onChange={(event) => onFiltersChange({ ...filters, workflowId: event.target.value })}
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-subtle transition focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            className="w-full rounded-lg border border-border bg-card px-3 py-2 text-xs font-semibold text-foreground/85 shadow-subtle transition focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
           >
             <option value="selected">Selected workflow</option>
             <option value="all">All workflows</option>
@@ -6285,7 +6326,7 @@ function MockAuditPanel({
           <select
             value={filters.range}
             onChange={(event) => onFiltersChange({ ...filters, range: event.target.value })}
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-subtle transition focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            className="w-full rounded-lg border border-border bg-card px-3 py-2 text-xs font-semibold text-foreground/85 shadow-subtle transition focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
           >
             {MOCK_AUDIT_RANGES.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>
@@ -6297,7 +6338,7 @@ function MockAuditPanel({
           <select
             value={filters.status}
             onChange={(event) => onFiltersChange({ ...filters, status: event.target.value })}
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-subtle transition focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            className="w-full rounded-lg border border-border bg-card px-3 py-2 text-xs font-semibold text-foreground/85 shadow-subtle transition focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
           >
             {MOCK_AUDIT_STATUSES.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>
@@ -6309,7 +6350,7 @@ function MockAuditPanel({
           <select
             value={filters.health || 'all'}
             onChange={(event) => onFiltersChange({ ...filters, health: event.target.value })}
-            className="w-full rounded-md border border-sky-100 bg-white px-3 py-2 text-xs font-semibold text-slate-700 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100"
+            className="w-full rounded-md border border-sky-100 dark:border-sky-500/20 bg-card px-3 py-2 text-xs font-semibold text-foreground/85 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:focus:ring-sky-500/30"
           >
             {MOCK_AUDIT_HEALTH_STATES.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>
@@ -6321,7 +6362,7 @@ function MockAuditPanel({
           <select
             value={filters.signalLevel || 'all'}
             onChange={(event) => onFiltersChange({ ...filters, signalLevel: event.target.value })}
-            className="w-full rounded-md border border-sky-100 bg-white px-3 py-2 text-xs font-semibold text-slate-700 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100"
+            className="w-full rounded-md border border-sky-100 dark:border-sky-500/20 bg-card px-3 py-2 text-xs font-semibold text-foreground/85 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:focus:ring-sky-500/30"
           >
             {WORKFLOW_AUDIT_SIGNAL_LEVELS.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>
@@ -6329,13 +6370,13 @@ function MockAuditPanel({
           </select>
         </label>
         <label className="relative min-w-0">
-          <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+          <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground/75" />
           <span className="sr-only">Search workflow audit</span>
           <input
             value={filters.search}
             onChange={(event) => onFiltersChange({ ...filters, search: event.target.value })}
             placeholder="Ticket, subject, workflow, event, or TP-NWF id"
-            className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-8 pr-3 text-xs font-medium text-slate-700 shadow-subtle transition focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            className="w-full rounded-lg border border-border bg-card py-2 pl-8 pr-3 text-xs font-medium text-foreground/85 shadow-subtle transition focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
           />
         </label>
       </div>
@@ -6346,7 +6387,7 @@ function MockAuditPanel({
           <select
             value={filters.eventType || 'all'}
             onChange={(event) => onFiltersChange({ ...filters, eventType: event.target.value })}
-            className="w-full rounded-md border border-sky-100 bg-white px-3 py-2 text-xs font-semibold text-slate-700 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100"
+            className="w-full rounded-md border border-sky-100 dark:border-sky-500/20 bg-card px-3 py-2 text-xs font-semibold text-foreground/85 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:focus:ring-sky-500/30"
           >
             {WORKFLOW_AUDIT_EVENT_FILTERS.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>
@@ -6358,7 +6399,7 @@ function MockAuditPanel({
           <select
             value={filters.triggerSource || 'all'}
             onChange={(event) => onFiltersChange({ ...filters, triggerSource: event.target.value })}
-            className="w-full rounded-md border border-sky-100 bg-white px-3 py-2 text-xs font-semibold text-slate-700 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100"
+            className="w-full rounded-md border border-sky-100 dark:border-sky-500/20 bg-card px-3 py-2 text-xs font-semibold text-foreground/85 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:focus:ring-sky-500/30"
           >
             {WORKFLOW_AUDIT_SOURCE_FILTERS.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>
@@ -6370,7 +6411,7 @@ function MockAuditPanel({
           <select
             value={filters.provider || 'all'}
             onChange={(event) => onFiltersChange({ ...filters, provider: event.target.value })}
-            className="w-full rounded-md border border-sky-100 bg-white px-3 py-2 text-xs font-semibold text-slate-700 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100"
+            className="w-full rounded-md border border-sky-100 dark:border-sky-500/20 bg-card px-3 py-2 text-xs font-semibold text-foreground/85 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:focus:ring-sky-500/30"
           >
             {WORKFLOW_AUDIT_PROVIDER_FILTERS.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>
@@ -6382,7 +6423,7 @@ function MockAuditPanel({
           <select
             value={filters.fallbackSource || 'all'}
             onChange={(event) => onFiltersChange({ ...filters, fallbackSource: event.target.value })}
-            className="w-full rounded-md border border-sky-100 bg-white px-3 py-2 text-xs font-semibold text-slate-700 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100"
+            className="w-full rounded-md border border-sky-100 dark:border-sky-500/20 bg-card px-3 py-2 text-xs font-semibold text-foreground/85 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:focus:ring-sky-500/30"
           >
             {WORKFLOW_AUDIT_FALLBACK_FILTERS.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>
@@ -6394,7 +6435,7 @@ function MockAuditPanel({
           <select
             value={filters.department || 'all'}
             onChange={(event) => onFiltersChange({ ...filters, department: event.target.value })}
-            className="w-full rounded-md border border-sky-100 bg-white px-3 py-2 text-xs font-semibold text-slate-700 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100"
+            className="w-full rounded-md border border-sky-100 dark:border-sky-500/20 bg-card px-3 py-2 text-xs font-semibold text-foreground/85 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:focus:ring-sky-500/30"
           >
             <option value="all">All departments</option>
             {departments.map((department) => (
@@ -6405,7 +6446,7 @@ function MockAuditPanel({
       </div>
 
       {error && (
-        <div className="mb-3 flex items-center gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
+        <div className="mb-3 flex items-center gap-2 rounded-md border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 px-3 py-2 text-xs font-semibold text-red-700 dark:text-red-200">
           <AlertCircle className="h-3.5 w-3.5" />
           {error}
         </div>
@@ -6414,8 +6455,8 @@ function MockAuditPanel({
         <div className={cls(
           'mb-3 flex items-center gap-2 rounded-md border px-3 py-2 text-xs font-semibold',
           testResult.type === 'error'
-            ? 'border-red-200 bg-red-50 text-red-700'
-            : 'border-emerald-200 bg-emerald-50 text-emerald-700',
+            ? 'border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200'
+            : 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200',
         )}
         >
           {testResult.type === 'error' ? <AlertCircle className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
@@ -6430,15 +6471,15 @@ function MockAuditPanel({
         )}
       >
         <div className="flex min-h-0 flex-col gap-2">
-          <div className="settings-scrollbar min-h-0 flex-1 space-y-2 overflow-auto rounded-xl border border-slate-200 bg-slate-50/40 p-2 shadow-subtle">
+          <div className="settings-scrollbar min-h-0 flex-1 space-y-2 overflow-auto rounded-xl border border-border bg-muted/20 p-2 shadow-subtle">
             {loading && (
-              <div className="flex h-full min-h-[220px] items-center justify-center text-sm text-slate-500">
+              <div className="flex h-full min-h-[220px] items-center justify-center text-sm text-muted-foreground">
                 <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
               Loading workflow audit
               </div>
             )}
             {!loading && visibleRuns.length === 0 && (
-              <div className="flex h-full min-h-[220px] items-center justify-center px-6 text-center text-sm text-slate-500">
+              <div className="flex h-full min-h-[220px] items-center justify-center px-6 text-center text-sm text-muted-foreground">
               No workflow runs match the current filters.
               </div>
             )}
@@ -6461,11 +6502,11 @@ function MockAuditPanel({
                         : 'slate';
               const borderLeftClass = {
                 emerald: 'border-l-emerald-400', red: 'border-l-red-400', amber: 'border-l-amber-400',
-                violet: 'border-l-violet-400', sky: 'border-l-sky-400', slate: 'border-l-slate-300',
+                violet: 'border-l-violet-400', sky: 'border-l-sky-400', slate: 'border-l-input',
               }[tone];
               const dotClass = {
                 emerald: 'bg-emerald-500', red: 'bg-red-500', amber: 'bg-amber-500',
-                violet: 'bg-violet-500', sky: 'bg-sky-500', slate: 'bg-slate-400',
+                violet: 'bg-violet-500', sky: 'bg-sky-500', slate: 'bg-muted-foreground/60',
               }[tone];
               return (
                 <motion.button
@@ -6478,7 +6519,7 @@ function MockAuditPanel({
                   whileHover={{ y: -2 }}
                   whileTap={{ scale: 0.994 }}
                   className={cls(
-                    'group relative block w-full overflow-hidden rounded-lg border border-slate-200 border-l-[3px] bg-white text-left shadow-subtle transition-shadow duration-200 hover:shadow-soft',
+                    'group relative block w-full overflow-hidden rounded-lg border border-border border-l-[3px] bg-card text-left shadow-subtle transition-shadow duration-200 hover:shadow-soft',
                     compact ? 'p-2' : 'p-3',
                     borderLeftClass,
                   )}
@@ -6486,16 +6527,16 @@ function MockAuditPanel({
                   {selected && (
                     <motion.span
                       layoutId="auditSelectedHighlight"
-                      className="pointer-events-none absolute inset-0 rounded-lg bg-blue-50/70 ring-2 ring-inset ring-blue-500/30"
+                      className="pointer-events-none absolute inset-0 rounded-lg bg-blue-50/70 dark:bg-blue-500/10 ring-2 ring-inset ring-blue-500/30"
                       transition={{ type: 'spring', stiffness: 520, damping: 42 }}
                     />
                   )}
                   <div className="relative space-y-1">
                     <div className="flex items-center gap-2">
-                      <span className="shrink-0 rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-slate-600 transition-colors group-hover:bg-slate-200/70">
+                      <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 font-mono text-[11px] font-semibold text-muted-foreground transition-colors group-hover:bg-secondary/70">
                         {auditTicketLabel(run)}
                       </span>
-                      <span className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-900">
+                      <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">
                         {auditTicketSubject(run)}
                       </span>
                       <span className={cls('inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-semibold capitalize', statusClass(run.status))}>
@@ -6504,7 +6545,7 @@ function MockAuditPanel({
                       </span>
                     </div>
 
-                    <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] leading-4 text-slate-400">
+                    <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] leading-4 text-muted-foreground/75">
                       <AuditModeBadge mode={run.executionMode} compact />
                       {!compact && (
                         <span className={cls('rounded-full border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide', healthClass(healthState))}>
@@ -6518,11 +6559,11 @@ function MockAuditPanel({
                       )}
                       <span className="min-w-0 truncate">
                         {workflowEventLabelForRun(run)}
-                        <span className="px-1 text-slate-300">·</span>
+                        <span className="px-1 text-muted-foreground/50">·</span>
                         {formatDate(run.startedAt)}
                         {!compact && recipientCount > 0 ? (
                           <>
-                            <span className="px-1 text-slate-300">·</span>
+                            <span className="px-1 text-muted-foreground/50">·</span>
                             {recipientCount} recip
                           </>
                         ) : null}
@@ -6533,13 +6574,13 @@ function MockAuditPanel({
               );
             })}
           </div>
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-subtle">
-            <label className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500">
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-card px-3 py-2 shadow-subtle">
+            <label className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
               <span>Rows</span>
               <select
                 value={pageSize}
                 onChange={(event) => onPageSizeChange?.(Number(event.target.value))}
-                className="rounded-md border border-slate-200 bg-white px-1.5 py-1 text-[11px] font-semibold text-slate-700 focus:border-blue-400 focus:outline-none"
+                className="rounded-md border border-border bg-card px-1.5 py-1 text-[11px] font-semibold text-foreground/85 focus:border-blue-400 focus:outline-none"
               >
                 {[50, 100, 250].map((n) => (
                   <option key={n} value={n}>{n}</option>
@@ -6547,16 +6588,16 @@ function MockAuditPanel({
               </select>
             </label>
             <div className="flex items-center gap-2">
-              <span className="text-[11px] font-medium text-slate-500">
+              <span className="text-[11px] font-medium text-muted-foreground">
               Page {page + 1}
-                <span className="px-1 text-slate-300">·</span>
+                <span className="px-1 text-muted-foreground/50">·</span>
                 {visibleRuns.length} shown
               </span>
               <button
                 type="button"
                 onClick={() => onPageChange?.(Math.max(0, page - 1))}
                 disabled={page === 0 || loading}
-                className="inline-flex items-center gap-0.5 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 shadow-subtle transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                className="inline-flex items-center gap-0.5 rounded-md border border-border bg-card px-2 py-1 text-[11px] font-semibold text-muted-foreground shadow-subtle transition hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <ChevronLeft className="h-3.5 w-3.5" />
               Prev
@@ -6565,7 +6606,7 @@ function MockAuditPanel({
                 type="button"
                 onClick={() => onPageChange?.(page + 1)}
                 disabled={!hasMore || loading}
-                className="inline-flex items-center gap-0.5 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 shadow-subtle transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                className="inline-flex items-center gap-0.5 rounded-md border border-border bg-card px-2 py-1 text-[11px] font-semibold text-muted-foreground shadow-subtle transition hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-40"
               >
               Next
                 <ChevronRight className="h-3.5 w-3.5" />
@@ -6574,10 +6615,10 @@ function MockAuditPanel({
           </div>
         </div>
 
-        <div className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-subtle">
+        <div className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-border bg-card shadow-subtle">
           {!activeRun ? (
-            <div className="flex h-full min-h-[240px] flex-col items-center justify-center gap-2 p-4 text-sm text-slate-400">
-              <FlaskConical className="h-6 w-6 text-slate-300" />
+            <div className="flex h-full min-h-[240px] flex-col items-center justify-center gap-2 p-4 text-sm text-muted-foreground/75">
+              <FlaskConical className="h-6 w-6 text-muted-foreground/50" />
               Select a workflow run.
             </div>
           ) : (
@@ -6592,14 +6633,14 @@ function MockAuditPanel({
               <div className="shrink-0 px-4 pt-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <h4 className="text-base font-semibold leading-snug text-slate-900">
-                      <span className="font-mono text-sm text-slate-400">{auditTicketLabel(activeRun)}</span> {auditTicketSubject(activeRun)}
+                    <h4 className="text-base font-semibold leading-snug text-foreground">
+                      <span className="font-mono text-sm text-muted-foreground/75">{auditTicketLabel(activeRun)}</span> {auditTicketSubject(activeRun)}
                     </h4>
-                    <div className="mt-1 flex flex-wrap items-center gap-x-1.5 text-xs text-slate-400">
+                    <div className="mt-1 flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground/75">
                       <span className="font-mono">{activeRun.auditId || `TP-NWF-${activeRun.id}`}</span>
-                      <span className="text-slate-300">·</span>
+                      <span className="text-muted-foreground/50">·</span>
                       <span>{workflowDisplayName(activeRun.workflow || selectedWorkflow)}</span>
-                      <span className="text-slate-300">·</span>
+                      <span className="text-muted-foreground/50">·</span>
                       <span>{formatDate(activeRun.startedAt)}</span>
                     </div>
                   </div>
@@ -6616,7 +6657,7 @@ function MockAuditPanel({
                     <AuditModeBadge mode={activeRun.executionMode} />
                   </div>
                 </div>
-                <div className="mt-2.5 flex flex-wrap gap-x-5 gap-y-1.5 border-t border-slate-100 pt-2.5">
+                <div className="mt-2.5 flex flex-wrap gap-x-5 gap-y-1.5 border-t border-border/60 pt-2.5">
                   <AuditStat label="Event" value={activeEventLabel} />
                   <AuditStat label="Email" value={activeEmail ? (activeDelivery?.status || 'Captured') : 'None'} tone={activeEmail ? 'default' : 'warn'} />
                   <AuditStat label="Recipients" value={activeRecipientCount} tone={activeRecipientCount ? 'default' : 'warn'} />
@@ -6633,7 +6674,7 @@ function MockAuditPanel({
               </div>
 
               {/* Tabs */}
-              <div className="mt-3 flex shrink-0 items-center gap-1 overflow-x-auto border-b border-slate-200 px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <div className="mt-3 flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 {[
                   { id: 'email', label: 'Email' },
                   { id: 'llm', label: 'LLM & Tools' },
@@ -6646,11 +6687,11 @@ function MockAuditPanel({
                     onClick={() => setDetailTab(t.id)}
                     className={cls(
                       '-mb-px flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-xs font-semibold transition-colors',
-                      detailTab === t.id ? 'border-blue-500 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800',
+                      detailTab === t.id ? 'border-blue-500 text-blue-700 dark:text-blue-200' : 'border-transparent text-muted-foreground hover:text-foreground',
                     )}
                   >
                     {t.label}
-                    {t.count != null && <span className="rounded-full bg-slate-100 px-1.5 text-[10px] text-slate-500">{t.count}</span>}
+                    {t.count != null && <span className="rounded-full bg-muted px-1.5 text-[10px] text-muted-foreground">{t.count}</span>}
                   </button>
                 ))}
               </div>
@@ -6660,7 +6701,7 @@ function MockAuditPanel({
                 {detailTab === 'email' && (
                   <>
                     <AuditSection title="Recipients" icon={Mail}>
-                      <div className="space-y-1 text-xs leading-5 text-slate-700">
+                      <div className="space-y-1 text-xs leading-5 text-foreground/85">
                         <div>{recipientLine('To', activeRecipients.to)}</div>
                         <div>{recipientLine('Cc', activeRecipients.cc)}</div>
                         <div>{recipientLine('Bcc', activeRecipients.bcc)}</div>
@@ -6673,14 +6714,14 @@ function MockAuditPanel({
                         <button
                           type="button"
                           onClick={() => setEmailModalOpen(true)}
-                          className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700 transition hover:bg-blue-100"
+                          className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 px-2.5 py-1 text-xs font-semibold text-blue-700 dark:text-blue-200 transition hover:bg-blue-100 dark:hover:bg-blue-500/20"
                         >
                           <Maximize2 className="h-3.5 w-3.5" />
                           Open
                         </button>
                       ) : null}
                     >
-                      <div className="mb-2 truncate text-sm font-semibold text-slate-900">{displayEmail?.subject || 'No subject rendered'}</div>
+                      <div className="mb-2 truncate text-sm font-semibold text-foreground">{displayEmail?.subject || 'No subject rendered'}</div>
                       {(displayBodyHtml || displayBodyText) ? (
                         <div
                           role="button"
@@ -6688,7 +6729,7 @@ function MockAuditPanel({
                           onClick={() => setEmailModalOpen(true)}
                           onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') setEmailModalOpen(true); }}
                           title="Open the full rendered email"
-                          className="block max-h-40 cursor-pointer overflow-hidden rounded-md border border-slate-100 bg-slate-50/50 p-3 text-sm leading-6 text-slate-800 [mask-image:linear-gradient(to_bottom,black_55%,transparent)]"
+                          className="block max-h-40 cursor-pointer overflow-hidden rounded-md border border-border/60 bg-muted/25 p-3 text-sm leading-6 text-foreground [mask-image:linear-gradient(to_bottom,black_55%,transparent)]"
                         >
                           {displayBodyHtml ? (
                             <div className="pointer-events-none" dangerouslySetInnerHTML={{ __html: sanitizePreviewHtmlClient(displayBodyHtml) }} />
@@ -6697,7 +6738,7 @@ function MockAuditPanel({
                           )}
                         </div>
                       ) : (
-                        <div className="text-sm text-slate-500">No email body captured for this run.</div>
+                        <div className="text-sm text-muted-foreground">No email body captured for this run.</div>
                       )}
                     </AuditSection>
 
@@ -6713,44 +6754,44 @@ function MockAuditPanel({
                         title="LLM evidence & tools"
                         icon={Bot}
                         right={activeContext?.contextHash ? (
-                          <span className="max-w-[180px] truncate rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-mono font-semibold text-slate-500">{activeContext.contextHash}</span>
+                          <span className="max-w-[180px] truncate rounded-full bg-muted px-2 py-0.5 text-[10px] font-mono font-semibold text-muted-foreground">{activeContext.contextHash}</span>
                         ) : null}
                       >
-                        <div className="grid gap-2 text-xs text-slate-600 sm:grid-cols-4">
-                          <div>Mode: <span className="font-semibold text-slate-800">{activeContext?.mode || 'not recorded'}</span></div>
-                          <div>Signal: <span className="font-semibold text-slate-800">{signalLevelLabel(activeContext?.signalLevel || 'none')}</span></div>
-                          <div>Thread: <span className="font-semibold text-slate-800">{activeContext?.threadEntryCount || 0}</span></div>
-                          <div>Redactions: <span className="font-semibold text-slate-800">{activeContext?.redactionCount || 0}</span></div>
+                        <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-4">
+                          <div>Mode: <span className="font-semibold text-foreground">{activeContext?.mode || 'not recorded'}</span></div>
+                          <div>Signal: <span className="font-semibold text-foreground">{signalLevelLabel(activeContext?.signalLevel || 'none')}</span></div>
+                          <div>Thread: <span className="font-semibold text-foreground">{activeContext?.threadEntryCount || 0}</span></div>
+                          <div>Redactions: <span className="font-semibold text-foreground">{activeContext?.redactionCount || 0}</span></div>
                         </div>
                         {activeContext?.signalRationale && (
-                          <div className="mt-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
-                            <div className="font-semibold text-slate-800">
+                          <div className="mt-2 rounded-md border border-border bg-muted/50 px-3 py-2 text-xs leading-5 text-muted-foreground">
+                            <div className="font-semibold text-foreground">
                               Signal confidence: {activeContext.signalConfidence || 'unknown'}
                               {Number.isFinite(Number(activeContext.signalConfidenceScore)) ? ` (${activeContext.signalConfidenceScore})` : ''}
                             </div>
                             <div>{activeContext.signalRationale}</div>
                             {activeContext.signalCounts && (
-                              <div className="mt-1 text-slate-500">
+                              <div className="mt-1 text-muted-foreground">
                                 Similar {activeContext.signalCounts.similarTickets || 0} | Open strong {activeContext.signalCounts.openStrongSimilarTickets || 0} | Requesters {activeContext.signalCounts.distinctRequesters || 0} | Departments {activeContext.signalCounts.distinctDepartments || 0}
                               </div>
                             )}
                           </div>
                         )}
                         {(activeContext?.allowedPublicPhrases || []).length > 0 && (
-                          <div className="mt-2 text-xs leading-5 text-slate-600">
+                          <div className="mt-2 text-xs leading-5 text-muted-foreground">
                             Allowed wording: {activeContext.allowedPublicPhrases.join('; ')}
                           </div>
                         )}
                         {activeToolRecords.length > 0 && (
                           <div className="mt-3 space-y-2">
-                            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Tool calls</div>
+                            <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/75">Tool calls</div>
                             <div className="space-y-2">
                               {activeToolRecords.map((tool, index) => (
-                                <details key={`${tool.name}-${index}`} className="rounded-md border border-slate-200 bg-white">
-                                  <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-slate-700">
-                                    {tool.name} <span className="ml-1 text-slate-400">{tool.status || 'completed'}{Number.isFinite(tool.durationMs) ? `, ${tool.durationMs} ms` : ''}</span>
+                                <details key={`${tool.name}-${index}`} className="rounded-md border border-border bg-card">
+                                  <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-foreground/85">
+                                    {tool.name} <span className="ml-1 text-muted-foreground/75">{tool.status || 'completed'}{Number.isFinite(tool.durationMs) ? `, ${tool.durationMs} ms` : ''}</span>
                                   </summary>
-                                  <pre className="max-h-40 overflow-auto border-t border-slate-100 bg-slate-950 p-2 text-[11px] leading-5 text-slate-100">{formatJson(tool.output || tool.input)}</pre>
+                                  <pre className="max-h-40 overflow-auto border-t border-border/60 bg-slate-950 dark:ring-1 dark:ring-white/10 p-2 text-[11px] leading-5 text-slate-100">{formatJson(tool.output || tool.input)}</pre>
                                 </details>
                               ))}
                             </div>
@@ -6771,16 +6812,16 @@ function MockAuditPanel({
                 {detailTab === 'steps' && (
                   activeSteps.length > 0 ? (
                     <div className="relative space-y-3 pl-5">
-                      <span className="absolute bottom-2 left-1 top-2 w-px bg-slate-200" aria-hidden />
+                      <span className="absolute bottom-2 left-1 top-2 w-px bg-secondary" aria-hidden />
                       {activeSteps.map((step) => (
                         <div key={step.id || `${step.nodeId}-${step.startedAt}`} className="relative">
-                          <span className={cls('absolute -left-[18px] top-3 h-2.5 w-2.5 rounded-full ring-2 ring-white', statusDotClass(step.status))} />
+                          <span className={cls('absolute -left-[18px] top-3 h-2.5 w-2.5 rounded-full ring-2 ring-card', statusDotClass(step.status))} />
                           <PreviewStepCard step={step} />
                         </div>
                       ))}
                     </div>
                   ) : (
-                    <div className="py-10 text-center text-sm text-slate-400">No steps recorded for this run.</div>
+                    <div className="py-10 text-center text-sm text-muted-foreground/75">No steps recorded for this run.</div>
                   )
                 )}
 
@@ -6788,12 +6829,12 @@ function MockAuditPanel({
                   <>
                     {Array.isArray(activeRun.warnings) && activeRun.warnings.length > 0 && (
                       <AuditSection title="Run warnings" icon={AlertCircle}>
-                        <div className="space-y-1.5 text-xs leading-5 text-slate-600">
+                        <div className="space-y-1.5 text-xs leading-5 text-muted-foreground">
                           {activeRun.warnings.map((warning, index) => (
                             <div key={`${warning.type || 'warning'}-${index}`} className="flex gap-2">
                               <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
                               <span>
-                                <span className="font-semibold text-slate-700">{warning.type || 'warning'}:</span> {warning.message || 'Review this run before enabling live sends.'}
+                                <span className="font-semibold text-foreground/85">{warning.type || 'warning'}:</span> {warning.message || 'Review this run before enabling live sends.'}
                                 {warning.templateFallbackUsed && <span> Template fallback was used.</span>}
                               </span>
                             </div>
@@ -6804,15 +6845,15 @@ function MockAuditPanel({
 
                     {activeHealth?.degraded && (
                       <AuditSection title={`${activeHealth.label || 'Run health'} run`} icon={AlertCircle}>
-                        <div className="space-y-1.5 text-xs leading-5 text-slate-600">
+                        <div className="space-y-1.5 text-xs leading-5 text-muted-foreground">
                           {activeHealth.fallbackSummary && (
-                            <div><span className="font-semibold text-slate-700">Fallback:</span> {activeHealth.fallbackSummary.reason || activeHealth.fallbackSummary.type}</div>
+                            <div><span className="font-semibold text-foreground/85">Fallback:</span> {activeHealth.fallbackSummary.reason || activeHealth.fallbackSummary.type}</div>
                           )}
                           {(activeHealth.reasons || []).map((reason, index) => (
                             <div key={`${reason.type || 'reason'}-${index}`} className="flex gap-2">
                               <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
                               <span>
-                                <span className="font-semibold text-slate-700">{reason.type || 'reason'}:</span> {reason.message || 'Review this run before live sends.'}
+                                <span className="font-semibold text-foreground/85">{reason.type || 'reason'}:</span> {reason.message || 'Review this run before live sends.'}
                                 {reason.ruleIds?.length > 0 && <span> Rules: {reason.ruleIds.join(', ')}.</span>}
                               </span>
                             </div>
@@ -6822,7 +6863,7 @@ function MockAuditPanel({
                     )}
 
                     <AuditSection title="Redacted event context" icon={Code}>
-                      <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-md bg-slate-950 p-3 text-[11px] leading-5 text-slate-100">{formatJson(activeRun.eventContext)}</pre>
+                      <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-md bg-slate-950 dark:ring-1 dark:ring-white/10 p-3 text-[11px] leading-5 text-slate-100">{formatJson(activeRun.eventContext)}</pre>
                     </AuditSection>
                   </>
                 )}
@@ -6830,45 +6871,45 @@ function MockAuditPanel({
 
               {emailModalOpen && (displayBodyHtml || displayBodyText) && (
                 <div
-                  className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
+                  className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 dark:bg-black/70 p-4"
                   onClick={() => setEmailModalOpen(false)}
                 >
                   <div
-                    className="flex h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+                    className="flex h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-card shadow-2xl"
                     onClick={(event) => event.stopPropagation()}
                   >
-                    <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-5 py-3">
+                    <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-3">
                       <div className="min-w-0">
-                        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Rendered email</div>
-                        <div className="truncate text-sm font-semibold text-slate-900">{displayEmail?.subject || 'No subject rendered'}</div>
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Rendered email</div>
+                        <div className="truncate text-sm font-semibold text-foreground">{displayEmail?.subject || 'No subject rendered'}</div>
                       </div>
                       <div className="flex shrink-0 items-center gap-2">
                         {displayBodyHtml && (
-                          <div className="flex items-center rounded-md border border-slate-200 p-0.5">
-                            <button type="button" onClick={() => setEmailDevice('desktop')} className={cls('rounded px-2 py-1 text-xs font-semibold transition-colors', emailDevice === 'desktop' ? 'bg-slate-100 text-slate-800' : 'text-slate-500 hover:text-slate-700')}>Desktop</button>
-                            <button type="button" onClick={() => setEmailDevice('mobile')} className={cls('rounded px-2 py-1 text-xs font-semibold transition-colors', emailDevice === 'mobile' ? 'bg-slate-100 text-slate-800' : 'text-slate-500 hover:text-slate-700')}>Mobile</button>
+                          <div className="flex items-center rounded-md border border-border p-0.5">
+                            <button type="button" onClick={() => setEmailDevice('desktop')} className={cls('rounded px-2 py-1 text-xs font-semibold transition-colors', emailDevice === 'desktop' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground/85')}>Desktop</button>
+                            <button type="button" onClick={() => setEmailDevice('mobile')} className={cls('rounded px-2 py-1 text-xs font-semibold transition-colors', emailDevice === 'mobile' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground/85')}>Mobile</button>
                           </div>
                         )}
                         <button
                           type="button"
                           onClick={() => setEmailModalOpen(false)}
-                          className="rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                          className="rounded-md p-1 text-muted-foreground/75 transition hover:bg-muted hover:text-foreground/85"
                           aria-label="Close"
                         >
                           <XCircle className="h-5 w-5" />
                         </button>
                       </div>
                     </div>
-                    <div className="min-h-0 flex-1 overflow-auto bg-slate-100 p-4">
+                    <div className="min-h-0 flex-1 overflow-auto bg-muted p-4">
                       {displayBodyHtml ? (
                         <iframe
                           title="Rendered email"
                           sandbox=""
                           srcDoc={sanitizePreviewHtmlClient(displayBodyHtml)}
-                          className={cls('mx-auto block h-full rounded-lg border border-slate-200 bg-white', emailDevice === 'mobile' ? 'w-[390px]' : 'w-full max-w-2xl')}
+                          className={cls('mx-auto block h-full rounded-lg border border-border bg-card', emailDevice === 'mobile' ? 'w-[390px]' : 'w-full max-w-2xl')}
                         />
                       ) : (
-                        <pre className="mx-auto max-w-2xl whitespace-pre-wrap rounded-lg bg-white p-4 font-sans text-sm leading-6 text-slate-800 shadow-sm">{displayBodyText}</pre>
+                        <pre className="mx-auto max-w-2xl whitespace-pre-wrap rounded-lg bg-card p-4 font-sans text-sm leading-6 text-foreground shadow-sm">{displayBodyText}</pre>
                       )}
                     </div>
                   </div>
@@ -6883,6 +6924,7 @@ function MockAuditPanel({
 }
 
 function NodePalette({ onAddNode, onRemoveNode, onUndo, canUndo = false, workflow, onRename }) {
+  const { resolvedTheme } = useTheme();
   const [addOpen, setAddOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
@@ -6901,15 +6943,15 @@ function NodePalette({ onAddNode, onRemoveNode, onUndo, canUndo = false, workflo
     if (ok) setRenaming(false);
   };
   return (
-    <div className="border-b border-gray-100 px-4 py-3">
+    <div className="border-b border-border/60 px-4 py-3">
       {/* Prominent identity of the workflow currently being edited. */}
-      <div className="mb-3 flex items-start justify-between gap-3 border-b border-slate-100 pb-3">
+      <div className="mb-3 flex items-start justify-between gap-3 border-b border-border/60 pb-3">
         <div className="flex min-w-0 items-start gap-2.5">
           <span className={cls('mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ring-1', visuals.chip)}>
             <HeaderIcon className={cls('h-4 w-4', visuals.icon_)} />
           </span>
           <div className="min-w-0 flex-1">
-            <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Editing workflow</div>
+            <div className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground/75">Editing workflow</div>
             {renaming ? (
               <form
                 onSubmit={(event) => { event.preventDefault(); submitRename(); }}
@@ -6921,18 +6963,18 @@ function NodePalette({ onAddNode, onRemoveNode, onUndo, canUndo = false, workflo
                   onChange={(event) => setNameDraft(event.target.value)}
                   onKeyDown={(event) => { if (event.key === 'Escape') setRenaming(false); }}
                   placeholder="Workflow name"
-                  className="min-w-0 flex-1 rounded-md border border-blue-300 px-2 py-1 text-base font-bold leading-6 text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  className="min-w-0 flex-1 rounded-md border border-blue-300 dark:border-blue-500/40 px-2 py-1 text-base font-bold leading-6 text-foreground focus:outline-none focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-500/30"
                 />
-                <button type="submit" title="Save name" className="shrink-0 rounded-md p-1 text-emerald-600 transition hover:bg-emerald-50">
+                <button type="submit" title="Save name" className="shrink-0 rounded-md p-1 text-emerald-600 dark:text-emerald-300 transition hover:bg-emerald-50 dark:hover:bg-emerald-500/15">
                   <Check className="h-4 w-4" />
                 </button>
-                <button type="button" title="Cancel" onClick={() => setRenaming(false)} className="shrink-0 rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700">
+                <button type="button" title="Cancel" onClick={() => setRenaming(false)} className="shrink-0 rounded-md p-1 text-muted-foreground/75 transition hover:bg-muted hover:text-foreground/85">
                   <XCircle className="h-4 w-4" />
                 </button>
               </form>
             ) : (
               <div className="flex items-center gap-1.5">
-                <span className="truncate text-base font-bold leading-6 text-slate-900" title={workflow?.name}>
+                <span className="truncate text-base font-bold leading-6 text-foreground" title={workflow?.name}>
                   {workflow ? workflowDisplayName(workflow) : 'No workflow selected'}
                 </span>
                 {workflow && onRename && (
@@ -6940,25 +6982,25 @@ function NodePalette({ onAddNode, onRemoveNode, onUndo, canUndo = false, workflo
                     type="button"
                     onClick={() => { setNameDraft(workflow.name || workflowDisplayName(workflow)); setRenaming(true); }}
                     title="Rename workflow"
-                    className="shrink-0 rounded-md p-1 text-slate-300 transition hover:bg-slate-100 hover:text-blue-600"
+                    className="shrink-0 rounded-md p-1 text-muted-foreground/50 transition hover:bg-muted hover:text-blue-600 dark:hover:text-blue-300"
                   >
                     <Pencil className="h-3.5 w-3.5" />
                   </button>
                 )}
               </div>
             )}
-            {roleLine && <div className="truncate text-xs font-medium text-slate-500">{roleLine}</div>}
+            {roleLine && <div className="truncate text-xs font-medium text-muted-foreground">{roleLine}</div>}
           </div>
         </div>
         {workflow && <WorkflowStatus workflow={workflow} />}
       </div>
-      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Workflow Steps</div>
+      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Workflow Steps</div>
       <div className="flex flex-wrap gap-2">
         <div className="relative">
           <button
             type="button"
             onClick={() => setAddOpen((current) => !current)}
-            className="inline-flex items-center gap-1.5 rounded-md border border-violet-200 bg-violet-50 px-2.5 py-1.5 text-xs font-medium text-violet-700 hover:bg-violet-100"
+            className="inline-flex items-center gap-1.5 rounded-md border border-violet-200 dark:border-violet-500/30 bg-violet-50 dark:bg-violet-500/15 px-2.5 py-1.5 text-xs font-medium text-violet-700 dark:text-violet-200 hover:bg-violet-100 dark:hover:bg-violet-500/20"
           >
             <Plus className="h-3.5 w-3.5" />
             Add step
@@ -6974,13 +7016,13 @@ function NodePalette({ onAddNode, onRemoveNode, onUndo, canUndo = false, workflo
               ...(leftovers.length ? [{ label: 'More', entries: leftovers.map((type) => [type, null]) }] : []),
             ].filter((section) => section.entries.length);
             return (
-              <div className="settings-scrollbar absolute left-0 top-9 z-20 max-h-[26rem] w-72 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1.5 shadow-lg">
+              <div className="settings-scrollbar absolute left-0 top-9 z-20 max-h-[26rem] w-72 overflow-y-auto rounded-lg border border-border bg-card p-1.5 shadow-lg">
                 {sections.map((section) => (
                   <div key={section.label}>
-                    <p className="px-2 pb-0.5 pt-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">{section.label}</p>
+                    <p className="px-2 pb-0.5 pt-1.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground/75">{section.label}</p>
                     {section.entries.map(([type, hint]) => {
                       const Icon = WORKFLOW_NODE_REGISTRY[type]?.icon;
-                      const color = NODE_COLORS[type] || '#6b7280';
+                      const color = nodeAccent(NODE_COLORS[type], resolvedTheme);
                       return (
                         <button
                           key={type}
@@ -6989,7 +7031,7 @@ function NodePalette({ onAddNode, onRemoveNode, onUndo, canUndo = false, workflo
                             onAddNode(type);
                             setAddOpen(false);
                           }}
-                          className="flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left hover:bg-violet-50"
+                          className="flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left hover:bg-violet-50 dark:hover:bg-violet-500/15"
                         >
                           <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md" style={{ backgroundColor: `${color}18` }}>
                             {Icon
@@ -6997,8 +7039,8 @@ function NodePalette({ onAddNode, onRemoveNode, onUndo, canUndo = false, workflo
                               : <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} />}
                           </span>
                           <span className="min-w-0">
-                            <span className="block text-xs font-semibold text-slate-800">{NODE_LABELS[type] || type}</span>
-                            {hint && <span className="block text-[11px] leading-4 text-slate-400">{hint}</span>}
+                            <span className="block text-xs font-semibold text-foreground">{NODE_LABELS[type] || type}</span>
+                            {hint && <span className="block text-[11px] leading-4 text-muted-foreground/75">{hint}</span>}
                           </span>
                         </button>
                       );
@@ -7012,7 +7054,7 @@ function NodePalette({ onAddNode, onRemoveNode, onUndo, canUndo = false, workflo
         <button
           type="button"
           onClick={onRemoveNode}
-          className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+          className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-foreground/85 hover:bg-muted/50"
         >
           <XCircle className="h-3.5 w-3.5" />
           Remove selected
@@ -7025,8 +7067,8 @@ function NodePalette({ onAddNode, onRemoveNode, onUndo, canUndo = false, workflo
           className={cls(
             'inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium transition',
             canUndo
-              ? 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
-              : 'cursor-not-allowed border-gray-100 bg-gray-50 text-gray-300',
+              ? 'border-border bg-card text-foreground/85 hover:bg-muted/50'
+              : 'cursor-not-allowed border-border/60 bg-muted/50 text-muted-foreground/50',
           )}
         >
           <Undo2 className="h-3.5 w-3.5" />
@@ -7044,6 +7086,7 @@ export default function NotificationWorkflowsPanel({
   rootClassName = null,
   onHealthChange = null,
 } = {}) {
+  const { resolvedTheme } = useTheme();
   const editorLayout = useDefaultLayout({
     id: WORKFLOW_EDITOR_LAYOUT_ID,
     panelIds: ['workflow-canvas', 'workflow-inspector'],
@@ -7294,7 +7337,7 @@ export default function NotificationWorkflowsPanel({
       : '',
     editorProps: {
       attributes: {
-        class: 'min-h-[260px] max-h-[420px] overflow-y-auto rounded-md border border-gray-200 bg-white px-3 py-2 text-sm leading-6 focus:outline-none focus:ring-2 focus:ring-blue-500',
+        class: 'min-h-[260px] max-h-[420px] overflow-y-auto rounded-md border border-border bg-card px-3 py-2 text-sm leading-6 focus:outline-none focus:ring-2 focus:ring-blue-500',
       },
     },
     onUpdate: ({ editor: activeEditor }) => {
@@ -7760,46 +7803,46 @@ export default function NotificationWorkflowsPanel({
       label: 'Notification Workflows',
       description: 'Build, preview, publish, and enable live workflow diagrams.',
       icon: Send,
-      activeIconClass: 'border-blue-200 bg-blue-50 text-blue-700',
-      iconColor: 'text-blue-600',
+      activeIconClass: 'border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200',
+      iconColor: 'text-blue-600 dark:text-blue-300',
       badge: workflows.length ? String(workflows.length) : null,
-      badgeClass: 'bg-blue-50 text-blue-700',
+      badgeClass: 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200',
     },
     {
       id: 'llm-context',
       label: 'LLM Context',
       description: 'Workspace evidence and read-only tools for generated mail.',
       icon: Bot,
-      activeIconClass: 'border-violet-200 bg-violet-50 text-violet-700',
-      iconColor: 'text-violet-600',
+      activeIconClass: 'border-violet-200 dark:border-violet-500/30 bg-violet-50 dark:bg-violet-500/15 text-violet-700 dark:text-violet-200',
+      iconColor: 'text-violet-600 dark:text-violet-300',
       badge: llmModeLabel,
       badgeClass: llmToolPolicy?.mode === 'tools_enabled'
-        ? 'bg-violet-50 text-violet-700'
+        ? 'bg-violet-50 dark:bg-violet-500/15 text-violet-700 dark:text-violet-200'
         : llmToolPolicy?.mode === 'off'
-          ? 'bg-slate-100 text-slate-500'
-          : 'bg-violet-50 text-violet-700',
+          ? 'bg-muted text-muted-foreground'
+          : 'bg-violet-50 dark:bg-violet-500/15 text-violet-700 dark:text-violet-200',
     },
     {
       id: 'signature',
       label: 'Email Branding',
       description: 'Reusable headers and footers for notification emails.',
       icon: Mail,
-      activeIconClass: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-      iconColor: 'text-emerald-600',
+      activeIconClass: 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200',
+      iconColor: 'text-emerald-600 dark:text-emerald-300',
       badge: `${emailBlocks.headers.length + emailBlocks.footers.length} blocks`,
       badgeClass: emailBlocks.footers.some((block) => block.isDefault)
-        ? 'bg-emerald-50 text-emerald-700'
-        : 'bg-amber-50 text-amber-700',
+        ? 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200'
+        : 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200',
     },
     {
       id: 'mock-audit',
       label: 'Workflow Audit',
       description: 'Review live, mock, and preview workflow runs.',
       icon: FlaskConical,
-      activeIconClass: 'border-sky-200 bg-sky-50 text-sky-700',
-      iconColor: 'text-sky-600',
+      activeIconClass: 'border-sky-200 dark:border-sky-500/30 bg-sky-50 dark:bg-sky-500/15 text-sky-700 dark:text-sky-200',
+      iconColor: 'text-sky-600 dark:text-sky-300',
       badge: `${health?.workflowAuditRuns7d ?? health?.mockRuns7d ?? health?.mockedDeliveries7d ?? 0} 7d`,
-      badgeClass: 'bg-sky-50 text-sky-700',
+      badgeClass: 'bg-sky-50 dark:bg-sky-500/15 text-sky-700 dark:text-sky-200',
     },
   ];
   // Mock mode is independent of live-enable: it can be armed on a disabled
@@ -8971,51 +9014,51 @@ export default function NotificationWorkflowsPanel({
           : 'Preview ticket is routed to another variant'
       : null;
     const previewTone = routingPreview?.wouldRunSelectedWorkflow
-      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-      : 'border-amber-200 bg-amber-50 text-amber-800';
+      ? 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200'
+      : 'border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 text-amber-800 dark:text-amber-200';
     const behavior = ROUTING_BEHAVIOR_OPTIONS.find((option) => option.value === routingMode) || ROUTING_BEHAVIOR_OPTIONS[0];
     const routeTest = routingTestResult?.routingPreview || null;
     const routeTestSelected = routeTest?.selectedWorkflows || [];
     const routeTestRequester = routingTestResult?.requester || null;
     const routeTestTone = routingTestResult?.error
-      ? 'border-red-200 bg-red-50 text-red-800'
+      ? 'border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 text-red-800 dark:text-red-200'
       : routeTest?.wouldRunSelectedWorkflow
-        ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+        ? 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-800 dark:text-emerald-200'
         : routeTest
-          ? 'border-amber-200 bg-amber-50 text-amber-800'
-          : 'border-slate-200 bg-slate-50 text-slate-600';
+          ? 'border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 text-amber-800 dark:text-amber-200'
+          : 'border-border bg-muted/50 text-muted-foreground';
 
     return (
-      <div className="border-b border-slate-200 bg-white px-4 py-3">
+      <div className="border-b border-border bg-card px-4 py-3">
         <div className="grid gap-3 2xl:grid-cols-[minmax(260px,0.85fr)_minmax(520px,1.4fr)_minmax(300px,0.9fr)]">
           <div className="min-w-0 space-y-2">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Routing rule</span>
+              <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Routing rule</span>
               <span className={cls(
                 'rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
-                selected.isDefaultVariant ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-indigo-200 bg-indigo-50 text-indigo-700',
+                selected.isDefaultVariant ? 'border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200' : 'border-indigo-200 dark:border-indigo-500/30 bg-indigo-50 dark:bg-indigo-500/15 text-indigo-700 dark:text-indigo-200',
               )}
               >
                 {workflowVariantTypeLabel(selected)}
               </span>
-              <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-600">
+              <span className="rounded-full border border-border bg-muted/50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
                 {selected.isDefaultVariant ? 'Default fallback' : `Match order ${routingPriority || 1}`}
               </span>
             </div>
-            <p className="text-xs leading-5 text-slate-500">
+            <p className="text-xs leading-5 text-muted-foreground">
               {selected.isDefaultVariant
                 ? 'Runs when no replacement workflow matches after schedule routing.'
                 : workflowRoutingDescription({ ...selected, routingRule: currentRoutingRule() })}
             </p>
             {!selected.isDefaultVariant && !selected.routingRule && !routingDirty && (
-              <div className="rounded-md border border-dashed border-slate-300 bg-white px-2.5 py-1.5 text-xs leading-5 text-slate-500">
+              <div className="rounded-md border border-dashed border-input bg-card px-2.5 py-1.5 text-xs leading-5 text-muted-foreground">
                 No routing rule yet — this workflow follows its behavior setting for every ticket.
-                Build one above to target it, e.g. <span className="font-semibold text-slate-700">Requester region equals AU-BRISBANE</span>.
+                Build one above to target it, e.g. <span className="font-semibold text-foreground/85">Requester region equals AU-BRISBANE</span>.
               </div>
             )}
             {selected.lastSuppressedAt && !selected.isDefaultVariant && (
               <div
-                className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs leading-5 text-amber-800"
+                className="rounded-md border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-2.5 py-1.5 text-xs leading-5 text-amber-800 dark:text-amber-200"
                 data-testid="routing-last-skipped"
               >
                 <span className="font-semibold">Last skipped</span>
@@ -9024,10 +9067,10 @@ export default function NotificationWorkflowsPanel({
               </div>
             )}
             {!selected.isDefaultVariant && (
-              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
-                <div className="font-semibold text-slate-900">{behavior.label}</div>
+              <div className="rounded-lg border border-border bg-muted/50 px-3 py-2 text-xs leading-5 text-muted-foreground">
+                <div className="font-semibold text-foreground">{behavior.label}</div>
                 <div>{behavior.description}</div>
-                <div className="mt-1 text-slate-500">Lower match order numbers run first when more than one replacement workflow matches.</div>
+                <div className="mt-1 text-muted-foreground">Lower match order numbers run first when more than one replacement workflow matches.</div>
               </div>
             )}
             {routingPreview && (
@@ -9040,7 +9083,7 @@ export default function NotificationWorkflowsPanel({
 
           <div className="min-w-0 space-y-3">
             <div className="grid gap-2 md:grid-cols-[minmax(160px,0.9fr)_minmax(120px,0.65fr)_minmax(180px,1fr)]">
-              <label className="text-xs font-medium uppercase text-slate-500">
+              <label className="text-xs font-medium uppercase text-muted-foreground">
                 Requester/ticket field
                 <select
                   value={routingBuilder.field}
@@ -9050,27 +9093,27 @@ export default function NotificationWorkflowsPanel({
                     setRoutingTestResult(null);
                   }}
                   disabled={selected.isDefaultVariant || Boolean(selected.archivedAt)}
-                  className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-2 text-sm normal-case text-slate-900 disabled:bg-slate-100 disabled:text-slate-500"
+                  className="mt-1 w-full rounded-md border border-border bg-card px-2 py-2 text-sm normal-case text-foreground disabled:bg-muted disabled:text-muted-foreground"
                 >
                   {routingFieldOptions.map((option) => (
                     <option key={option.value} value={option.value}>{option.label}</option>
                   ))}
                 </select>
               </label>
-              <label className="text-xs font-medium uppercase text-slate-500">
+              <label className="text-xs font-medium uppercase text-muted-foreground">
                 Operator
                 <select
                   value={routingBuilder.operator}
                   onChange={(event) => touchRoutingBuilder({ operator: event.target.value })}
                   disabled={selected.isDefaultVariant || Boolean(selected.archivedAt)}
-                  className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-2 text-sm normal-case text-slate-900 disabled:bg-slate-100 disabled:text-slate-500"
+                  className="mt-1 w-full rounded-md border border-border bg-card px-2 py-2 text-sm normal-case text-foreground disabled:bg-muted disabled:text-muted-foreground"
                 >
                   {CONDITION_OPERATOR_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>{option.label}</option>
                   ))}
                 </select>
               </label>
-              <label className="text-xs font-medium uppercase text-slate-500">
+              <label className="text-xs font-medium uppercase text-muted-foreground">
                 Value
                 <input
                   list={`routing-known-values-${selected.id}`}
@@ -9081,7 +9124,7 @@ export default function NotificationWorkflowsPanel({
                   }}
                   disabled={selected.isDefaultVariant || Boolean(selected.archivedAt) || valueDisabled}
                   placeholder={fieldExample}
-                  className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-2 text-sm normal-case text-slate-900 disabled:bg-slate-100 disabled:text-slate-500"
+                  className="mt-1 w-full rounded-md border border-border bg-card px-2 py-2 text-sm normal-case text-foreground disabled:bg-muted disabled:text-muted-foreground"
                 />
                 <datalist id={`routing-known-values-${selected.id}`}>
                   {knownValues.map((item) => (
@@ -9092,20 +9135,20 @@ export default function NotificationWorkflowsPanel({
             </div>
 
             <div className="grid gap-2 md:grid-cols-[minmax(160px,1fr)_minmax(130px,0.55fr)_auto]">
-              <label className="text-xs font-medium uppercase text-slate-500">
+              <label className="text-xs font-medium uppercase text-muted-foreground">
                 Behavior
                 <select
                   value={routingMode}
                   onChange={(event) => setRoutingMode(event.target.value)}
                   disabled={selected.isDefaultVariant || Boolean(selected.archivedAt)}
-                  className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-2 text-sm normal-case text-slate-900 disabled:bg-slate-100 disabled:text-slate-500"
+                  className="mt-1 w-full rounded-md border border-border bg-card px-2 py-2 text-sm normal-case text-foreground disabled:bg-muted disabled:text-muted-foreground"
                 >
                   {ROUTING_BEHAVIOR_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>{option.label}</option>
                   ))}
                 </select>
               </label>
-              <label className="text-xs font-medium uppercase text-slate-500">
+              <label className="text-xs font-medium uppercase text-muted-foreground">
                 Match order
                 <input
                   type="number"
@@ -9114,14 +9157,14 @@ export default function NotificationWorkflowsPanel({
                   value={routingPriority}
                   onChange={(event) => setRoutingPriority(Number.parseInt(event.target.value, 10) || 1)}
                   disabled={selected.isDefaultVariant || Boolean(selected.archivedAt)}
-                  className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-2 text-sm normal-case text-slate-900 disabled:bg-slate-100 disabled:text-slate-500"
+                  className="mt-1 w-full rounded-md border border-border bg-card px-2 py-2 text-sm normal-case text-foreground disabled:bg-muted disabled:text-muted-foreground"
                 />
               </label>
               <button
                 type="button"
                 onClick={saveRoutingSettings}
                 disabled={saving || selected.isDefaultVariant || Boolean(selected.archivedAt)}
-                className="mt-5 inline-flex h-9 items-center justify-center gap-1.5 rounded-md bg-slate-900 px-3 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+                className="mt-5 inline-flex h-9 items-center justify-center gap-1.5 rounded-md bg-foreground px-3 text-xs font-semibold text-background hover:bg-foreground/90 disabled:opacity-50"
               >
                 <Save className="h-3.5 w-3.5" />
                 Save routing
@@ -9129,26 +9172,26 @@ export default function NotificationWorkflowsPanel({
             </div>
 
             {!selected.isDefaultVariant && (
-              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+              <div className="rounded-lg border border-border bg-muted/50 px-3 py-2">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
-                    <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Known values</div>
-                    <div className="text-xs text-slate-500">
+                    <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Known values</div>
+                    <div className="text-xs text-muted-foreground">
                       {routingMetadataLoading ? 'Looking up workspace values...' : `${knownValues.length} shown from ${routingMetadata.sampleSize || 0} recent tickets`}
                     </div>
                   </div>
-                  <label className="relative min-w-[180px] flex-1 text-xs font-medium uppercase text-slate-500 sm:max-w-[260px]">
-                    <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+                  <label className="relative min-w-[180px] flex-1 text-xs font-medium uppercase text-muted-foreground sm:max-w-[260px]">
+                    <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/75" />
                     <input
                       value={routingLookupSearch}
                       onChange={(event) => setRoutingLookupSearch(event.target.value)}
                       placeholder="Search values"
-                      className="mt-1 w-full rounded-md border border-slate-200 bg-white py-1.5 pl-7 pr-2 text-sm normal-case text-slate-900"
+                      className="mt-1 w-full rounded-md border border-border bg-card py-1.5 pl-7 pr-2 text-sm normal-case text-foreground"
                     />
                   </label>
                 </div>
                 {routingMetadata.error && (
-                  <div className="mt-2 rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700">{routingMetadata.error}</div>
+                  <div className="mt-2 rounded-md border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 px-2 py-1 text-xs text-red-700 dark:text-red-200">{routingMetadata.error}</div>
                 )}
                 <div className="mt-2 flex max-h-24 flex-wrap gap-1.5 overflow-y-auto">
                   {knownValues.slice(0, 12).map((item) => (
@@ -9157,22 +9200,22 @@ export default function NotificationWorkflowsPanel({
                       type="button"
                       onClick={() => touchRoutingBuilder({ value: item.value })}
                       disabled={selected.isDefaultVariant || Boolean(selected.archivedAt) || valueDisabled}
-                      className="rounded-md border border-white bg-white px-2 py-1 text-left text-xs text-slate-700 shadow-sm ring-1 ring-slate-200 hover:bg-blue-50 hover:text-blue-800 disabled:opacity-50"
+                      className="rounded-md border border-card bg-card px-2 py-1 text-left text-xs text-foreground/85 shadow-sm ring-1 ring-border hover:bg-blue-50 dark:hover:bg-blue-500/15 hover:text-blue-800 dark:hover:text-blue-200 disabled:opacity-50"
                       title={`${item.value}${item.sources?.length ? ` - ${item.sources.join(', ')}` : ''}`}
                     >
-                      <span className="font-semibold text-slate-900">{item.value}</span>
-                      <span className="ml-1 text-slate-500">{item.count} seen</span>
-                      {item.label && item.label !== item.value && <span className="ml-1 text-slate-500">- {item.label}</span>}
+                      <span className="font-semibold text-foreground">{item.value}</span>
+                      <span className="ml-1 text-muted-foreground">{item.count} seen</span>
+                      {item.label && item.label !== item.value && <span className="ml-1 text-muted-foreground">- {item.label}</span>}
                     </button>
                   ))}
                   {!routingMetadataLoading && knownValues.length === 0 && (
-                    <div className="rounded-md border border-dashed border-slate-300 bg-white px-2 py-1 text-xs text-slate-500">
+                    <div className="rounded-md border border-dashed border-input bg-card px-2 py-1 text-xs text-muted-foreground">
                       No known values found for this field in recent workspace tickets.
                     </div>
                   )}
                 </div>
                 {!routingLookupSearch && currentValue && !currentValueSeen && knownValues.length > 0 && !valueDisabled && (
-                  <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                  <div className="mt-2 rounded-md border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-2 py-1 text-xs text-amber-800 dark:text-amber-200">
                     This value is not in the current workspace lookup. It can still be saved, but test it against a real ticket before publishing.
                   </div>
                 )}
@@ -9180,40 +9223,40 @@ export default function NotificationWorkflowsPanel({
             )}
           </div>
 
-          <div className="min-w-0 space-y-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+          <div className="min-w-0 space-y-2 rounded-lg border border-border bg-muted/50 px-3 py-2">
             <div className="flex items-start gap-2">
-              <CircleHelp className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" />
+              <CircleHelp className="mt-0.5 h-4 w-4 shrink-0 text-blue-600 dark:text-blue-300" />
               <div className="min-w-0">
-                <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Normalization</div>
-                <p className="mt-0.5 text-xs leading-5 text-slate-600">
+                <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Normalization</div>
+                <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
                   {selectedFieldMeta.normalization || selectedFieldMeta.description || 'This field is compared against the value saved in the workflow context.'}
                 </p>
               </div>
             </div>
             {(routingMetadata.normalizationRules || []).length > 0 && (
-              <ul className="space-y-1 text-xs leading-4 text-slate-500">
+              <ul className="space-y-1 text-xs leading-4 text-muted-foreground">
                 {(routingMetadata.normalizationRules || []).slice(0, 4).map((rule) => (
                   <li key={rule} className="flex gap-1.5">
-                    <span className="mt-1 h-1 w-1 shrink-0 rounded-full bg-slate-400" />
+                    <span className="mt-1 h-1 w-1 shrink-0 rounded-full bg-muted-foreground/60" />
                     <span>{rule}</span>
                   </li>
                 ))}
               </ul>
             )}
-            <div className="border-t border-slate-200 pt-2">
-              <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Test routing</div>
+            <div className="border-t border-border pt-2">
+              <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Test routing</div>
               <div className="mt-1 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
                 <input
                   value={routingTestTicketSearch}
                   onChange={(event) => setRoutingTestTicketSearch(event.target.value)}
                   placeholder="FreshService ticket #"
-                  className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-900"
+                  className="h-9 rounded-md border border-border bg-card px-2 text-sm text-foreground"
                 />
                 <button
                   type="button"
                   onClick={runRoutingTest}
                   disabled={routingTestLoading || !selected}
-                  className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-3 text-xs font-semibold text-blue-700 hover:bg-blue-100 disabled:opacity-50"
+                  className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 px-3 text-xs font-semibold text-blue-700 dark:text-blue-200 hover:bg-blue-100 dark:hover:bg-blue-500/20 disabled:opacity-50"
                 >
                   {routingTestLoading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Eye className="h-3.5 w-3.5" />}
                   Test
@@ -9253,7 +9296,7 @@ export default function NotificationWorkflowsPanel({
   }
 
   function renderInspector() {
-    if (!selectedNode) return <div className="p-4 text-sm text-gray-500">Select a workflow node.</div>;
+    if (!selectedNode) return <div className="p-4 text-sm text-muted-foreground">Select a workflow node.</div>;
 
     if (selectedNode.type === 'trigger') {
       const triggerType = selectedNode.data?.triggerType;
@@ -9261,9 +9304,9 @@ export default function NotificationWorkflowsPanel({
       return (
         <div className="space-y-3">
           <div>
-            <label className="text-xs font-medium uppercase text-gray-500" htmlFor="trigger-event-select">Event</label>
+            <label className="text-xs font-medium uppercase text-muted-foreground" htmlFor="trigger-event-select">Event</label>
             {triggerLocked ? (
-              <div className="mt-1 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900">
+              <div className="mt-1 rounded-md border border-border bg-muted/50 px-3 py-2 text-sm text-foreground">
                 {EVENT_LABELS[triggerType] || triggerType}
               </div>
             ) : (
@@ -9272,7 +9315,7 @@ export default function NotificationWorkflowsPanel({
                 value={triggerType}
                 onChange={(event) => changeTriggerType(event.target.value)}
                 disabled={saving}
-                className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900"
+                className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground"
               >
                 {TRIGGER_PICKER_GROUPS.map((group) => (
                   <optgroup key={group.label} label={group.label}>
@@ -9283,7 +9326,7 @@ export default function NotificationWorkflowsPanel({
                 ))}
               </select>
             )}
-            <p className="mt-1 text-[11px] text-gray-400 normal-case">
+            <p className="mt-1 text-[11px] text-muted-foreground/75 normal-case">
               {triggerLocked
                 ? 'Default variants anchor their trigger group — duplicate the workflow to move it to another trigger.'
                 : 'Changing the event keeps your steps; a live workflow is paused until you re-publish on the new trigger.'}
@@ -9292,68 +9335,68 @@ export default function NotificationWorkflowsPanel({
           {/* Time-trigger thresholds — read by the time-trigger worker. */}
           {triggerType === 'ticket.aging' && (
             <div>
-              <label className="text-xs font-medium uppercase text-gray-500">
+              <label className="text-xs font-medium uppercase text-muted-foreground">
                 Fire when unresolved for (hours)
                 <input
                   type="number"
                   min="1"
                   value={selectedNode.data?.agingHours ?? 24}
                   onChange={(event) => updateNodeData({ agingHours: Math.max(1, Number(event.target.value) || 24) })}
-                  className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900 tabular-nums"
+                  className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground tabular-nums"
                 />
               </label>
-              <p className="mt-1 text-[11px] text-gray-400 normal-case">Open/Pending tickets older than this fire once per ticket (checked every few minutes).</p>
+              <p className="mt-1 text-[11px] text-muted-foreground/75 normal-case">Open/Pending tickets older than this fire once per ticket (checked every few minutes).</p>
             </div>
           )}
           {triggerType === 'ticket.sla_pre_breach' && (
             <div>
-              <label className="text-xs font-medium uppercase text-gray-500">
+              <label className="text-xs font-medium uppercase text-muted-foreground">
                 Warn before the due date (minutes)
                 <input
                   type="number"
                   min="5"
                   value={selectedNode.data?.preBreachMinutes ?? 60}
                   onChange={(event) => updateNodeData({ preBreachMinutes: Math.max(5, Number(event.target.value) || 60) })}
-                  className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900 tabular-nums"
+                  className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground tabular-nums"
                 />
               </label>
-              <p className="mt-1 text-[11px] text-gray-400 normal-case">Fires when a ticket&apos;s due date falls inside this window; a moved deadline re-arms it.</p>
+              <p className="mt-1 text-[11px] text-muted-foreground/75 normal-case">Fires when a ticket&apos;s due date falls inside this window; a moved deadline re-arms it.</p>
             </div>
           )}
           {triggerType === 'ticket.sla_breach' && (
-            <p className="text-[11px] text-gray-400 normal-case">Fires once per ticket when its due date passes while still Open/Pending; a moved deadline re-arms it.</p>
+            <p className="text-[11px] text-muted-foreground/75 normal-case">Fires once per ticket when its due date passes while still Open/Pending; a moved deadline re-arms it.</p>
           )}
           {triggerType === 'schedule.time' && (
             <div className="space-y-2">
               <div className="grid grid-cols-2 gap-2">
-                <label className="block text-xs font-medium uppercase text-gray-500">
+                <label className="block text-xs font-medium uppercase text-muted-foreground">
                   Frequency
                   <select
                     value={selectedNode.data?.frequency || 'daily'}
                     onChange={(event) => updateNodeData({ frequency: event.target.value })}
-                    className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+                    className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground"
                   >
                     <option value="daily">Daily</option>
                     <option value="weekly">Weekly</option>
                   </select>
                 </label>
-                <label className="block text-xs font-medium uppercase text-gray-500">
+                <label className="block text-xs font-medium uppercase text-muted-foreground">
                   Send at (workspace time)
                   <input
                     type="time"
                     value={selectedNode.data?.time || '08:30'}
                     onChange={(event) => updateNodeData({ time: event.target.value })}
-                    className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900 tabular-nums"
+                    className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground tabular-nums"
                   />
                 </label>
               </div>
               {(selectedNode.data?.frequency || 'daily') === 'weekly' && (
-                <label className="block text-xs font-medium uppercase text-gray-500">
+                <label className="block text-xs font-medium uppercase text-muted-foreground">
                   On
                   <select
                     value={selectedNode.data?.weekday ?? 1}
                     onChange={(event) => updateNodeData({ weekday: Number(event.target.value) })}
-                    className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+                    className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground"
                   >
                     {['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((day, i) => (
                       <option key={day} value={i}>{day}</option>
@@ -9361,7 +9404,7 @@ export default function NotificationWorkflowsPanel({
                   </select>
                 </label>
               )}
-              <p className="text-[11px] text-gray-400 normal-case">Runs without a ticket — templates use <code>{'{{ digest.* }}'}</code> variables (openCount, unassignedCount, overdueCount, dueTodayCount, oldestOpen list). Fires once per slot; restarts within an hour catch up safely.</p>
+              <p className="text-[11px] text-muted-foreground/75 normal-case">Runs without a ticket — templates use <code>{'{{ digest.* }}'}</code> variables (openCount, unassignedCount, overdueCount, dueTodayCount, oldestOpen list). Fires once per slot; restarts within an hour catch up safely.</p>
             </div>
           )}
         </div>
@@ -9377,7 +9420,7 @@ export default function NotificationWorkflowsPanel({
       return (
         <div className="space-y-4">
           <div>
-            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-indigo-700">Conditions</div>
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-indigo-700 dark:text-indigo-200">Conditions</div>
             {/* Structured AND/OR builder — compiled to json-logic by the engine
                 at run time; takes precedence over the raw rule below. */}
             <ConditionGroupBuilder
@@ -9387,19 +9430,19 @@ export default function NotificationWorkflowsPanel({
             />
           </div>
 
-          <div className="rounded-md border border-gray-200 bg-white p-3">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Branch routes</div>
+          <div className="rounded-md border border-border bg-card p-3">
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Branch routes</div>
             <div className="grid gap-2">
               {[
                 ['true', 'True branch'],
                 ['false', 'False branch'],
               ].map(([handle, label]) => (
-                <label key={handle} className="text-xs font-medium uppercase text-gray-500">
+                <label key={handle} className="text-xs font-medium uppercase text-muted-foreground">
                   {label}
                   <select
                     value={targetForBranch(handle)}
                     onChange={(event) => updateConditionBranch(handle, event.target.value)}
-                    className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+                    className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground"
                   >
                     <option value="">Choose target node</option>
                     {branchTargets.map((node) => (
@@ -9413,16 +9456,16 @@ export default function NotificationWorkflowsPanel({
             </div>
           </div>
 
-          <label className="text-xs font-medium uppercase text-gray-500">Advanced JSONLogic Rule</label>
+          <label className="text-xs font-medium uppercase text-muted-foreground">Advanced JSONLogic Rule</label>
           <textarea
             value={conditionText}
             onChange={(event) => setConditionText(event.target.value)}
-            className="h-52 w-full rounded-md border border-gray-200 px-3 py-2 font-mono text-xs focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            className="h-52 w-full rounded-md border border-border px-3 py-2 font-mono text-xs focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
           />
           <button
             type="button"
             onClick={applyConditionRule}
-            className="inline-flex items-center gap-1.5 rounded-md bg-gray-900 px-3 py-2 text-xs font-semibold text-white hover:bg-gray-800"
+            className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-3 py-2 text-xs font-semibold text-background hover:bg-foreground/90"
           >
             <CheckCircle2 className="h-4 w-4" />
             Apply condition
@@ -9442,23 +9485,23 @@ export default function NotificationWorkflowsPanel({
       return (
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-2">
-            <label className="block text-xs font-medium uppercase text-gray-500">
+            <label className="block text-xs font-medium uppercase text-muted-foreground">
               Set status
               <select
                 value={selectedNode.data?.setStatus || ''}
                 onChange={(event) => updateNodeData({ setStatus: event.target.value || null })}
-                className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+                className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground"
               >
                 <option value="">Unchanged</option>
                 {['Open', 'Pending', 'Resolved', 'Closed'].map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
             </label>
-            <label className="block text-xs font-medium uppercase text-gray-500">
+            <label className="block text-xs font-medium uppercase text-muted-foreground">
               Set priority
               <select
                 value={selectedNode.data?.setPriority || ''}
                 onChange={(event) => updateNodeData({ setPriority: Number(event.target.value) || null })}
-                className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+                className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground"
               >
                 <option value="">Unchanged</option>
                 {[['1', 'Low'], ['2', 'Medium'], ['3', 'High'], ['4', 'Urgent']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
@@ -9466,13 +9509,13 @@ export default function NotificationWorkflowsPanel({
             </label>
           </div>
 
-          <div className="rounded-lg border border-blue-100 bg-blue-50/50 p-2.5 space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Assignment</p>
+          <div className="rounded-lg border border-blue-100 dark:border-blue-500/20 bg-blue-50/50 dark:bg-blue-500/10 p-2.5 space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-200">Assignment</p>
             <select
               value={assignMode}
               onChange={(event) => setAssign({ mode: event.target.value })}
               aria-label="Assignment mode"
-              className="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900"
+              className="w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground"
             >
               <option value="none">Don&apos;t assign</option>
               <option value="tech">Specific member</option>
@@ -9484,34 +9527,34 @@ export default function NotificationWorkflowsPanel({
                 value={selectedNode.data?.assignTo?.technicianId || ''}
                 onChange={(event) => setAssign({ technicianId: Number(event.target.value) || null })}
                 aria-label="Technician"
-                className="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900"
+                className="w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground"
               >
                 <option value="">Choose member…</option>
                 {technicians.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
               </select>
             )}
-            <p className="text-[11px] text-gray-500 normal-case">Assignment works for BOTH origins (FS-born via write-back). Other field changes apply to Ticket-Pulse-born tickets only.</p>
+            <p className="text-[11px] text-muted-foreground normal-case">Assignment works for BOTH origins (FS-born via write-back). Other field changes apply to Ticket-Pulse-born tickets only.</p>
           </div>
 
           <div className="grid grid-cols-2 gap-2">
-            <label className="block text-xs font-medium uppercase text-gray-500">
+            <label className="block text-xs font-medium uppercase text-muted-foreground">
               Set category
               <select
                 value={selectedNode.data?.setInternalCategoryId || ''}
                 onChange={(event) => updateNodeData({ setInternalCategoryId: Number(event.target.value) || null, setInternalSubcategoryId: null })}
-                className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+                className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground"
               >
                 <option value="">Unchanged</option>
                 {categoryTree.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </label>
-            <label className="block text-xs font-medium uppercase text-gray-500">
+            <label className="block text-xs font-medium uppercase text-muted-foreground">
               Subcategory
               <select
                 value={selectedNode.data?.setInternalSubcategoryId || ''}
                 onChange={(event) => updateNodeData({ setInternalSubcategoryId: Number(event.target.value) || null })}
                 disabled={!selectedCategory}
-                className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900 disabled:bg-gray-50 disabled:text-gray-400"
+                className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground disabled:bg-muted/50 disabled:text-muted-foreground/75"
               >
                 <option value="">None</option>
                 {(selectedCategory?.subcategories || []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -9519,42 +9562,42 @@ export default function NotificationWorkflowsPanel({
             </label>
           </div>
 
-          <div className="rounded-lg border border-slate-200 p-2.5 space-y-1.5">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Category by name</p>
-            <p className="text-[11px] text-slate-400 normal-case">For API-intake mappings and installed templates: names are matched against this workspace&apos;s categories when the workflow runs (case-insensitive). The pickers above take precedence when set.</p>
+          <div className="rounded-lg border border-border p-2.5 space-y-1.5">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Category by name</p>
+            <p className="text-[11px] text-muted-foreground/75 normal-case">For API-intake mappings and installed templates: names are matched against this workspace&apos;s categories when the workflow runs (case-insensitive). The pickers above take precedence when set.</p>
             <div className="grid grid-cols-2 gap-2">
-              <label className="block text-[11px] text-slate-500">
+              <label className="block text-[11px] text-muted-foreground">
                 Category name
                 <input
                   value={selectedNode.data?.setCategoryName || ''}
                   onChange={(event) => updateNodeData({ setCategoryName: event.target.value || null })}
                   placeholder="e.g. Project Setup"
-                  className="mt-0.5 w-full rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm normal-case text-gray-900"
+                  className="mt-0.5 w-full rounded-md border border-border bg-card px-2 py-1.5 text-sm normal-case text-foreground"
                 />
               </label>
-              <label className="block text-[11px] text-slate-500">
+              <label className="block text-[11px] text-muted-foreground">
                 Subcategory name
                 <input
                   value={selectedNode.data?.setSubcategoryName || ''}
                   onChange={(event) => updateNodeData({ setSubcategoryName: event.target.value || null })}
                   placeholder="optional"
-                  className="mt-0.5 w-full rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm normal-case text-gray-900"
+                  className="mt-0.5 w-full rounded-md border border-border bg-card px-2 py-1.5 text-sm normal-case text-foreground"
                 />
               </label>
             </div>
-            <p className="text-[11px] text-slate-400 normal-case">
+            <p className="text-[11px] text-muted-foreground/75 normal-case">
               A subcategory on its own is fine — it resolves under the category named above, or under
-              the ticket&apos;s <span className="font-medium text-slate-500">current</span> category when
+              the ticket&apos;s <span className="font-medium text-muted-foreground">current</span> category when
               none is set (uncategorized tickets record an error on the run instead).
             </p>
           </div>
 
-          <label className="block text-xs font-medium uppercase text-gray-500">
+          <label className="block text-xs font-medium uppercase text-muted-foreground">
             Move to group
             <select
               value={selectedNode.data?.setInternalGroupId || ''}
               onChange={(event) => updateNodeData({ setInternalGroupId: Number(event.target.value) || null })}
-              className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+              className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground"
             >
               <option value="">Unchanged</option>
               {groups.map((g) => <option key={g.id} value={g.id}>{g.name}{g.origin === 'local' ? ' (internal)' : ''}</option>)}
@@ -9562,11 +9605,11 @@ export default function NotificationWorkflowsPanel({
           </label>
 
           {(customFieldDefs || []).length > 0 && (
-            <div className="rounded-lg border border-slate-200 p-2.5 space-y-1.5">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Set custom fields</p>
-              <p className="text-[11px] text-slate-400 normal-case">Values support Liquid — e.g. <code>{'{{ ticket.subject }}'}</code> or <code>{'{{ requester.name }}'}</code> render when the workflow runs.</p>
+            <div className="rounded-lg border border-border p-2.5 space-y-1.5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Set custom fields</p>
+              <p className="text-[11px] text-muted-foreground/75 normal-case">Values support Liquid — e.g. <code>{'{{ ticket.subject }}'}</code> or <code>{'{{ requester.name }}'}</code> render when the workflow runs.</p>
               {(customFieldDefs || []).map((definition) => (
-                <label key={definition.key} className="block text-[11px] text-slate-500">
+                <label key={definition.key} className="block text-[11px] text-muted-foreground">
                   {definition.label}
                   {definition.type === 'select' ? (
                     <select
@@ -9574,7 +9617,7 @@ export default function NotificationWorkflowsPanel({
                       onChange={(event) => updateNodeData({
                         setCustomFields: { ...customValues, [definition.key]: event.target.value || undefined },
                       })}
-                      className="mt-0.5 w-full rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-900"
+                      className="mt-0.5 w-full rounded-md border border-border bg-card px-2 py-1.5 text-sm text-foreground"
                     >
                       <option value="">Unchanged</option>
                       {definition.options.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
@@ -9586,7 +9629,7 @@ export default function NotificationWorkflowsPanel({
                         setCustomFields: { ...customValues, [definition.key]: event.target.value || undefined },
                       })}
                       placeholder="Unchanged"
-                      className="mt-0.5 w-full rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-900"
+                      className="mt-0.5 w-full rounded-md border border-border bg-card px-2 py-1.5 text-sm text-foreground"
                     />
                   )}
                 </label>
@@ -9594,10 +9637,10 @@ export default function NotificationWorkflowsPanel({
             </div>
           )}
 
-          <div className="rounded-lg border border-slate-200 p-2.5 space-y-1.5">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Tags</p>
-            <p className="text-[11px] text-slate-400 normal-case">Applies to both origins (Ticket Pulse layer — never written to FreshService). Missing tags are created automatically.</p>
-            <label className="block text-[11px] text-slate-500">
+          <div className="rounded-lg border border-border p-2.5 space-y-1.5">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Tags</p>
+            <p className="text-[11px] text-muted-foreground/75 normal-case">Applies to both origins (Ticket Pulse layer — never written to FreshService). Missing tags are created automatically.</p>
+            <label className="block text-[11px] text-muted-foreground">
               Add tags (comma-separated)
               <input
                 value={Array.isArray(selectedNode.data?.addTags) ? selectedNode.data.addTags.join(', ') : ''}
@@ -9605,10 +9648,10 @@ export default function NotificationWorkflowsPanel({
                   addTags: event.target.value.split(',').map((v) => v.trim()).filter(Boolean),
                 })}
                 placeholder="e.g. vip, follow-up"
-                className="mt-0.5 w-full rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-900"
+                className="mt-0.5 w-full rounded-md border border-border bg-card px-2 py-1.5 text-sm text-foreground"
               />
             </label>
-            <label className="block text-[11px] text-slate-500">
+            <label className="block text-[11px] text-muted-foreground">
               Remove tags (comma-separated)
               <input
                 value={Array.isArray(selectedNode.data?.removeTags) ? selectedNode.data.removeTags.join(', ') : ''}
@@ -9616,17 +9659,17 @@ export default function NotificationWorkflowsPanel({
                   removeTags: event.target.value.split(',').map((v) => v.trim()).filter(Boolean),
                 })}
                 placeholder="e.g. new"
-                className="mt-0.5 w-full rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-900"
+                className="mt-0.5 w-full rounded-md border border-border bg-card px-2 py-1.5 text-sm text-foreground"
               />
             </label>
           </div>
 
-          <label className="block text-xs font-medium uppercase text-gray-500">
+          <label className="block text-xs font-medium uppercase text-muted-foreground">
             Audit note (optional)
             <input
               value={selectedNode.data?.note || ''}
               onChange={(event) => updateNodeData({ note: event.target.value })}
-              className="mt-1 w-full rounded-md border border-gray-200 px-3 py-2 text-sm normal-case text-gray-900"
+              className="mt-1 w-full rounded-md border border-border px-3 py-2 text-sm normal-case text-foreground"
             />
           </label>
         </div>
@@ -9654,9 +9697,9 @@ export default function NotificationWorkflowsPanel({
       const setBranches = (nextBranches) => updateNodeData({ branches: nextBranches });
       return (
         <div className="space-y-4">
-          <p className="text-xs text-gray-500">Branches are checked top to bottom — the first match wins; nothing matching takes the <strong>otherwise</strong> path.</p>
+          <p className="text-xs text-muted-foreground">Branches are checked top to bottom — the first match wins; nothing matching takes the <strong>otherwise</strong> path.</p>
           {branches.map((branch, index) => (
-            <div key={branch.key || index} className="rounded-lg border border-violet-200 bg-violet-50/40 p-3 space-y-2">
+            <div key={branch.key || index} className="rounded-lg border border-violet-200 dark:border-violet-500/30 bg-violet-50/40 dark:bg-violet-500/10 p-3 space-y-2">
               <div className="flex items-center gap-2">
                 <input
                   value={branch.label || ''}
@@ -9667,12 +9710,12 @@ export default function NotificationWorkflowsPanel({
                   }}
                   placeholder={`Branch ${index + 1}`}
                   aria-label="Branch label"
-                  className="flex-1 rounded-md border border-violet-200 bg-white px-2.5 py-1.5 text-sm"
+                  className="flex-1 rounded-md border border-violet-200 dark:border-violet-500/30 bg-card px-2.5 py-1.5 text-sm"
                 />
                 <button
                   type="button"
                   onClick={() => setBranches(branches.filter((_, i) => i !== index))}
-                  className="rounded-md p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-500"
+                  className="rounded-md p-1.5 text-muted-foreground/75 hover:bg-red-50 dark:hover:bg-red-500/15 hover:text-red-500"
                   aria-label="Remove branch"
                 >
                   <XCircle className="h-4 w-4" />
@@ -9691,12 +9734,12 @@ export default function NotificationWorkflowsPanel({
                   setBranches(next);
                 }}
               />
-              <label className="block text-xs font-medium uppercase text-gray-500">
+              <label className="block text-xs font-medium uppercase text-muted-foreground">
                 Route to
                 <select
                   value={targetForBranch(String(branch.key || '').toLowerCase())}
                   onChange={(event) => updateConditionBranch(String(branch.key || '').toLowerCase(), event.target.value)}
-                  className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+                  className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground"
                 >
                   <option value="">Choose target node</option>
                   {branchTargets.map((node) => (
@@ -9713,16 +9756,16 @@ export default function NotificationWorkflowsPanel({
               { key: `branch_${branches.length + 1}`, label: `Branch ${branches.length + 1}`, conditionGroup: { logic: 'all', conditions: [] } },
             ])}
             disabled={branches.length >= 8}
-            className="inline-flex items-center gap-1.5 rounded-md border border-violet-300 px-3 py-2 text-xs font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-md border border-violet-300 dark:border-violet-500/40 px-3 py-2 text-xs font-semibold text-violet-700 dark:text-violet-200 hover:bg-violet-50 dark:hover:bg-violet-500/15 disabled:opacity-50"
           >
             + Add branch
           </button>
-          <label className="block text-xs font-medium uppercase text-gray-500">
+          <label className="block text-xs font-medium uppercase text-muted-foreground">
             Otherwise route to
             <select
               value={targetForBranch('otherwise')}
               onChange={(event) => updateConditionBranch('otherwise', event.target.value)}
-              className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+              className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground"
             >
               <option value="">Choose target node</option>
               {branchTargets.map((node) => (
@@ -9737,7 +9780,7 @@ export default function NotificationWorkflowsPanel({
     if (selectedNode.type === 'delay') {
       return (
         <div className="space-y-3">
-          <label className="block text-xs font-medium uppercase text-gray-500">
+          <label className="block text-xs font-medium uppercase text-muted-foreground">
             Wait for (minutes)
             <input
               type="number"
@@ -9745,10 +9788,10 @@ export default function NotificationWorkflowsPanel({
               max="10080"
               value={selectedNode.data?.minutes ?? 60}
               onChange={(event) => updateNodeData({ minutes: Math.min(10080, Math.max(1, Number(event.target.value) || 60)) })}
-              className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900 tabular-nums"
+              className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground tabular-nums"
             />
           </label>
-          <p className="text-[11px] text-gray-400">The run parks durably and resumes after the wait (survives restarts). Max 7 days. Previews skip the wait.</p>
+          <p className="text-[11px] text-muted-foreground/75">The run parks durably and resumes after the wait (survives restarts). Max 7 days. Previews skip the wait.</p>
         </div>
       );
     }
@@ -9756,47 +9799,47 @@ export default function NotificationWorkflowsPanel({
     if (selectedNode.type === 'call_webhook') {
       return (
         <div className="space-y-3">
-          <label className="block text-xs font-medium uppercase text-gray-500">
+          <label className="block text-xs font-medium uppercase text-muted-foreground">
             URL
             <input
               value={selectedNode.data?.url || ''}
               onChange={(event) => updateNodeData({ url: event.target.value })}
               placeholder="https://example.com/hook"
-              className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+              className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground"
             />
           </label>
           <div className="grid grid-cols-2 gap-2">
-            <label className="block text-xs font-medium uppercase text-gray-500">
+            <label className="block text-xs font-medium uppercase text-muted-foreground">
               Method
               <select
                 value={selectedNode.data?.method || 'POST'}
                 onChange={(event) => updateNodeData({ method: event.target.value })}
-                className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+                className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground"
               >
                 {['POST', 'GET', 'PUT', 'PATCH', 'DELETE'].map((m) => <option key={m} value={m}>{m}</option>)}
               </select>
             </label>
-            <label className="block text-xs font-medium uppercase text-gray-500">
+            <label className="block text-xs font-medium uppercase text-muted-foreground">
               On error
               <select
                 value={selectedNode.data?.onError || 'continue'}
                 onChange={(event) => updateNodeData({ onError: event.target.value })}
-                className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+                className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground"
               >
                 <option value="continue">Continue the workflow</option>
                 <option value="fail">Fail the workflow</option>
               </select>
             </label>
           </div>
-          <label className="block text-xs font-medium uppercase text-gray-500">
+          <label className="block text-xs font-medium uppercase text-muted-foreground">
             Body template (Liquid, JSON)
             <textarea
               value={selectedNode.data?.bodyTemplate || ''}
               onChange={(event) => updateNodeData({ bodyTemplate: event.target.value })}
-              className="mt-1 h-28 w-full rounded-md border border-gray-200 px-3 py-2 font-mono text-xs normal-case"
+              className="mt-1 h-28 w-full rounded-md border border-border px-3 py-2 font-mono text-xs normal-case"
             />
           </label>
-          <p className="text-[11px] text-gray-400">Private/internal addresses are blocked. Responses are recorded (truncated) in the run audit.</p>
+          <p className="text-[11px] text-muted-foreground/75">Private/internal addresses are blocked. Responses are recorded (truncated) in the run audit.</p>
         </div>
       );
     }
@@ -9804,23 +9847,23 @@ export default function NotificationWorkflowsPanel({
     if (selectedNode.type === 'create_child_ticket') {
       return (
         <div className="space-y-3">
-          <label className="block text-xs font-medium uppercase text-gray-500">
+          <label className="block text-xs font-medium uppercase text-muted-foreground">
             Subject template
             <input
               value={selectedNode.data?.subjectTemplate || ''}
               onChange={(event) => updateNodeData({ subjectTemplate: event.target.value })}
-              className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+              className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground"
             />
           </label>
-          <label className="block text-xs font-medium uppercase text-gray-500">
+          <label className="block text-xs font-medium uppercase text-muted-foreground">
             Description template
             <textarea
               value={selectedNode.data?.descriptionTemplate || ''}
               onChange={(event) => updateNodeData({ descriptionTemplate: event.target.value })}
-              className="mt-1 h-24 w-full rounded-md border border-gray-200 px-3 py-2 text-sm normal-case"
+              className="mt-1 h-24 w-full rounded-md border border-border px-3 py-2 text-sm normal-case"
             />
           </label>
-          <p className="text-[11px] text-gray-400">Creates a Ticket-Pulse-born ticket for the same requester, noting the source ticket. Requires native ticketing on this workspace.</p>
+          <p className="text-[11px] text-muted-foreground/75">Creates a Ticket-Pulse-born ticket for the same requester, noting the source ticket. Requires native ticketing on this workspace.</p>
         </div>
       );
     }
@@ -9829,12 +9872,12 @@ export default function NotificationWorkflowsPanel({
       const approvalCategories = ticketMeta?.approvalCategories || [];
       return (
         <div className="space-y-3">
-          <label className="block text-xs font-medium uppercase text-gray-500">
+          <label className="block text-xs font-medium uppercase text-muted-foreground">
             Approval category
             <select
               value={selectedNode.data?.approvalCategoryId ?? ''}
               onChange={(event) => updateNodeData({ approvalCategoryId: Number(event.target.value) || null })}
-              className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+              className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground"
             >
               <option value="">Choose a category…</option>
               {approvalCategories.map((category) => (
@@ -9843,17 +9886,17 @@ export default function NotificationWorkflowsPanel({
             </select>
           </label>
           {approvalCategories.length === 0 && ticketMeta && (
-            <p className="text-[11px] text-amber-600 normal-case">No approval categories yet — create one in Settings → Approval Categories first.</p>
+            <p className="text-[11px] text-amber-600 dark:text-amber-300 normal-case">No approval categories yet — create one in Settings → Approval Categories first.</p>
           )}
-          <label className="block text-xs font-medium uppercase text-gray-500">
+          <label className="block text-xs font-medium uppercase text-muted-foreground">
             Request note (Liquid)
             <textarea
               value={selectedNode.data?.note || ''}
               onChange={(event) => updateNodeData({ note: event.target.value })}
-              className="mt-1 h-20 w-full rounded-md border border-gray-200 px-3 py-2 text-sm normal-case"
+              className="mt-1 h-20 w-full rounded-md border border-border px-3 py-2 text-sm normal-case"
             />
           </label>
-          <p className="text-[11px] text-gray-400">Routes the ticket to the category&apos;s approval managers (any one approves).</p>
+          <p className="text-[11px] text-muted-foreground/75">Routes the ticket to the category&apos;s approval managers (any one approves).</p>
         </div>
       );
     }
@@ -9861,7 +9904,7 @@ export default function NotificationWorkflowsPanel({
     if (selectedNode.type === 'propose_reply') {
       return (
         <div className="space-y-3">
-          <p className="text-sm text-gray-600">Stages the upstream draft on the ticket as a <strong>proposed reply</strong>. An agent approves &amp; sends, edits it in the composer, or dismisses it — nothing is emailed automatically.</p>
+          <p className="text-sm text-muted-foreground">Stages the upstream draft on the ticket as a <strong>proposed reply</strong>. An agent approves &amp; sends, edits it in the composer, or dismisses it — nothing is emailed automatically.</p>
           <ContentSourcePicker
             definition={draft}
             nodeId={selectedNode.id}
@@ -9870,11 +9913,11 @@ export default function NotificationWorkflowsPanel({
             allowedTypes={['llm_generate', 'template_render']}
             automaticLabel="Automatic — LLM draft, else the rendered template"
           />
-          <p className="text-[11px] text-gray-400">Needs an LLM Generate or Template step earlier in the flow. A newer proposal supersedes an older open one on the same ticket.</p>
+          <p className="text-[11px] text-muted-foreground/75">Needs an LLM Generate or Template step earlier in the flow. A newer proposal supersedes an older open one on the same ticket.</p>
           <button
             type="button"
             onClick={() => setLlmHelpTopic('aiDraftedReplies')}
-            className="text-xs font-medium text-indigo-600 hover:text-indigo-700"
+            className="text-xs font-medium text-indigo-600 dark:text-indigo-300 hover:text-indigo-700 dark:hover:text-indigo-200"
           >
             How AI-drafted replies work →
           </button>
@@ -9894,12 +9937,12 @@ export default function NotificationWorkflowsPanel({
       );
       return (
         <div className="space-y-3">
-          <label className="block text-xs font-medium uppercase text-gray-500">
+          <label className="block text-xs font-medium uppercase text-muted-foreground">
             Workflow to run
             <select
               value={selectedNode.data?.workflowId || ''}
               onChange={(event) => updateNodeData({ workflowId: Number(event.target.value) || null })}
-              className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+              className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground"
             >
               <option value="">Choose a workflow…</option>
               {subWorkflows.length > 0 && (
@@ -9914,18 +9957,18 @@ export default function NotificationWorkflowsPanel({
               )}
             </select>
           </label>
-          <label className="block text-xs font-medium uppercase text-gray-500">
+          <label className="block text-xs font-medium uppercase text-muted-foreground">
             On error
             <select
               value={selectedNode.data?.onError || 'continue'}
               onChange={(event) => updateNodeData({ onError: event.target.value })}
-              className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+              className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground"
             >
               <option value="continue">Continue this workflow</option>
               <option value="fail">Fail this workflow</option>
             </select>
           </label>
-          <p className="text-[11px] text-gray-400">Runs the referenced workflow&apos;s <strong>published</strong> version with this event&apos;s context. One level only — sub-workflows can&apos;t call further sub-workflows. The child may be disabled (disabled only stops its own trigger), making it a reusable subflow.</p>
+          <p className="text-[11px] text-muted-foreground/75">Runs the referenced workflow&apos;s <strong>published</strong> version with this event&apos;s context. One level only — sub-workflows can&apos;t call further sub-workflows. The child may be disabled (disabled only stops its own trigger), making it a reusable subflow.</p>
         </div>
       );
     }
@@ -9960,15 +10003,15 @@ export default function NotificationWorkflowsPanel({
         <div className="space-y-4">
           {recipientGroups.map((group) => (
             <div key={group.key}>
-              <label className="text-xs font-medium uppercase text-gray-500">{group.label}</label>
+              <label className="text-xs font-medium uppercase text-muted-foreground">{group.label}</label>
               <div className="mt-2 grid grid-cols-1 gap-2 text-sm">
                 {group.options.map(([value, label]) => (
-                  <label key={value} className="flex items-center gap-2 rounded-md border border-gray-200 px-3 py-2">
+                  <label key={value} className="flex items-center gap-2 rounded-md border border-border px-3 py-2">
                     <input
                       type="checkbox"
                       checked={group.values.includes(value)}
                       onChange={(event) => setRecipientList(group.key, value, event.target.checked)}
-                      className="h-4 w-4 rounded border-gray-300 text-blue-600"
+                      className="h-4 w-4 rounded border-input text-blue-600 dark:text-blue-300"
                     />
                     <span>{label}</span>
                   </label>
@@ -9978,7 +10021,7 @@ export default function NotificationWorkflowsPanel({
           ))}
           {showCustomEmailInput && (
             <div>
-              <label className="text-xs font-medium uppercase text-gray-500">Custom Emails</label>
+              <label className="text-xs font-medium uppercase text-muted-foreground">Custom Emails</label>
               {/* QA 08-18 #1: chips input — the old controlled join/split
                   round-trip ate the comma on every keystroke. Persistence
                   contract unchanged: customEmails stays a string array. */}
@@ -9989,7 +10032,7 @@ export default function NotificationWorkflowsPanel({
                 label="Custom email recipients"
                 className="mt-1"
               />
-              <p className="mt-1 text-[11px] text-gray-400">Type or paste addresses — commas, semicolons and spaces all separate.</p>
+              <p className="mt-1 text-[11px] text-muted-foreground/75">Type or paste addresses — commas, semicolons and spaces all separate.</p>
             </div>
           )}
         </div>
@@ -10014,7 +10057,7 @@ export default function NotificationWorkflowsPanel({
       });
       return (
         <div className="space-y-4">
-          <div className="flex flex-wrap gap-1 rounded-md bg-gray-100 p-1">
+          <div className="flex flex-wrap gap-1 rounded-md bg-muted p-1">
             {[
               ['prompt', 'Prompt', Wand2],
               ['schema', 'Output Schema', FileJson],
@@ -10027,7 +10070,7 @@ export default function NotificationWorkflowsPanel({
                 onClick={() => setLlmTab(id)}
                 className={cls(
                   'inline-flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-semibold',
-                  llmTab === id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:bg-white/70',
+                  llmTab === id ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:bg-card/70',
                 )}
               >
                 <Icon className="h-3.5 w-3.5" />
@@ -10041,7 +10084,7 @@ export default function NotificationWorkflowsPanel({
             <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_260px]">
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-2">
-                  <label className="text-xs font-medium uppercase text-gray-500">System Prompt</label>
+                  <label className="text-xs font-medium uppercase text-muted-foreground">System Prompt</label>
                   <button
                     type="button"
                     onClick={() => openContentEditor({
@@ -10050,7 +10093,7 @@ export default function NotificationWorkflowsPanel({
                       description: 'Use the variable picker to insert live workflow values. Variables are inserted as Liquid tokens.',
                       language: 'plaintext',
                     })}
-                    className="inline-flex items-center gap-1 rounded-md border border-gray-200 px-2 py-1 text-xs font-semibold text-gray-600 hover:bg-gray-50"
+                    className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs font-semibold text-muted-foreground hover:bg-muted/50"
                   >
                     <Maximize2 className="h-3.5 w-3.5" />
                     Full editor
@@ -10061,10 +10104,10 @@ export default function NotificationWorkflowsPanel({
                   value={selectedNode.data?.systemPrompt || ''}
                   onFocus={() => focusInsertTarget('llm-system')}
                   onChange={(event) => updateNodeData({ systemPrompt: event.target.value })}
-                  className="h-28 w-full rounded-md border border-gray-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                  className="h-28 w-full rounded-md border border-border px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
                 />
                 <div className="flex items-center justify-between gap-2">
-                  <label className="text-xs font-medium uppercase text-gray-500">User Prompt</label>
+                  <label className="text-xs font-medium uppercase text-muted-foreground">User Prompt</label>
                   <button
                     type="button"
                     onClick={() => openContentEditor({
@@ -10073,7 +10116,7 @@ export default function NotificationWorkflowsPanel({
                       description: 'Large editor with searchable variables for prompt engineering.',
                       language: 'plaintext',
                     })}
-                    className="inline-flex items-center gap-1 rounded-md border border-gray-200 px-2 py-1 text-xs font-semibold text-gray-600 hover:bg-gray-50"
+                    className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs font-semibold text-muted-foreground hover:bg-muted/50"
                   >
                     <Maximize2 className="h-3.5 w-3.5" />
                     Full editor
@@ -10084,7 +10127,7 @@ export default function NotificationWorkflowsPanel({
                   value={selectedNode.data?.prompt || ''}
                   onFocus={() => focusInsertTarget('llm-prompt')}
                   onChange={(event) => updateNodeData({ prompt: event.target.value })}
-                  className="h-72 w-full rounded-md border border-gray-200 px-3 py-2 font-mono text-xs focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                  className="h-72 w-full rounded-md border border-border px-3 py-2 font-mono text-xs focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
                 />
               </div>
               <VariablePicker
@@ -10099,10 +10142,10 @@ export default function NotificationWorkflowsPanel({
 
           {llmTab === 'schema' && (
             <div className="space-y-3">
-              <div className="rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+              <div className="rounded-md border border-blue-100 dark:border-blue-500/20 bg-blue-50 dark:bg-blue-500/15 px-3 py-2 text-xs text-blue-800 dark:text-blue-200">
                 The workflow requires <span className="font-semibold">subject</span>, <span className="font-semibold">html</span>, and <span className="font-semibold">text</span>. Add optional fields under properties to make them available in the template picker.
               </div>
-              <div className="overflow-hidden rounded-md border border-gray-200">
+              <div className="overflow-hidden rounded-md border border-border">
                 <MonacoEditor
                   height="360px"
                   defaultLanguage="json"
@@ -10117,9 +10160,9 @@ export default function NotificationWorkflowsPanel({
                 />
               </div>
               {llmSchemaError ? (
-                <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{llmSchemaError}</div>
+                <div className="rounded-md border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 px-3 py-2 text-xs text-red-700 dark:text-red-200">{llmSchemaError}</div>
               ) : (
-                <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+                <div className="rounded-md border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-200">
                   Schema is valid. Available output fields: {outputFields.join(', ')}
                 </div>
               )}
@@ -10128,13 +10171,13 @@ export default function NotificationWorkflowsPanel({
 
           {llmTab === 'settings' && (
             <div className="space-y-3">
-              <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700">
+              <div className="rounded-md border border-border bg-muted/50 px-3 py-2 text-sm text-foreground/85">
                 Provider and fallback are controlled in <span className="font-semibold">{'Settings > AI Providers > Mail Workflow Generation'}</span>.
               </div>
-              <div className="rounded-md border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-900">
+              <div className="rounded-md border border-violet-200 dark:border-violet-500/30 bg-violet-50 dark:bg-violet-500/15 px-3 py-2 text-sm text-violet-900 dark:text-violet-200">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <div className="text-xs font-semibold uppercase tracking-wide text-violet-700">Workspace evidence policy</div>
+                    <div className="text-xs font-semibold uppercase tracking-wide text-violet-700 dark:text-violet-200">Workspace evidence policy</div>
                     <div className="mt-1">
                       Mode: <span className="font-semibold">{llmPolicyModeLabel(workspaceLlmMode)}</span>.
                       {' '}
@@ -10147,12 +10190,12 @@ export default function NotificationWorkflowsPanel({
                 </div>
               </div>
               <div className="grid gap-2 md:grid-cols-2">
-                <label className="text-xs font-medium uppercase text-gray-500">
+                <label className="text-xs font-medium uppercase text-muted-foreground">
                   <LabelWithHelp topic="outputMode" onOpenHelp={setLlmHelpTopic}>Output mode</LabelWithHelp>
                   <select
                     value={selectedNode.data?.outputMode || 'draft_email'}
                     onChange={(event) => updateNodeData({ outputMode: event.target.value })}
-                    className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+                    className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground"
                   >
                     <option value="draft_email">Draft email</option>
                     <option value="classify">Classify or score</option>
@@ -10161,13 +10204,13 @@ export default function NotificationWorkflowsPanel({
                     <option value="rewrite_final_email">Rewrite final email</option>
                   </select>
                 </label>
-                <div className="flex items-center justify-between gap-2 rounded-md border border-gray-200 px-3 py-2 text-sm">
+                <div className="flex items-center justify-between gap-2 rounded-md border border-border px-3 py-2 text-sm">
                   <label className="flex min-w-0 items-center gap-2">
                     <input
                       type="checkbox"
                       checked={selectedNode.data?.promoteToEmail !== false}
                       onChange={(event) => updateNodeData({ promoteToEmail: event.target.checked })}
-                      className="h-4 w-4 rounded border-gray-300 text-blue-600"
+                      className="h-4 w-4 rounded border-input text-blue-600 dark:text-blue-300"
                     />
                     <span>Use this LLM output as the email draft</span>
                   </label>
@@ -10175,17 +10218,17 @@ export default function NotificationWorkflowsPanel({
                 </div>
               </div>
               <div className="grid gap-2 md:grid-cols-2">
-                <div className="flex items-start justify-between gap-2 rounded-md border border-gray-200 px-3 py-2 text-sm">
+                <div className="flex items-start justify-between gap-2 rounded-md border border-border px-3 py-2 text-sm">
                   <label className="flex min-w-0 items-start gap-2">
                     <input
                       type="checkbox"
                       checked={nodeContextEnabled}
                       onChange={(event) => updateNodeData({ contextEnrichmentEnabled: event.target.checked })}
-                      className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600"
+                      className="mt-0.5 h-4 w-4 rounded border-input text-blue-600 dark:text-blue-300"
                     />
                     <span>
-                      <span className="block font-medium text-gray-900">Use workspace evidence bundle</span>
-                      <span className="mt-0.5 block text-xs leading-4 text-gray-500">Adds redacted ticket/thread/similar-ticket evidence according to the workspace policy.</span>
+                      <span className="block font-medium text-foreground">Use workspace evidence bundle</span>
+                      <span className="mt-0.5 block text-xs leading-4 text-muted-foreground">Adds redacted ticket/thread/similar-ticket evidence according to the workspace policy.</span>
                     </span>
                   </label>
                   <LlmHelpButton topic="nodeContextEnrichment" onOpenHelp={setLlmHelpTopic} className="h-7 w-7 shadow-none" />
@@ -10193,7 +10236,7 @@ export default function NotificationWorkflowsPanel({
                 <div
                   className={cls(
                     'flex items-start justify-between gap-2 rounded-md border px-3 py-2 text-sm',
-                    workspaceToolsAvailable ? 'border-gray-200' : 'border-gray-200 bg-gray-50 text-gray-500',
+                    workspaceToolsAvailable ? 'border-border' : 'border-border bg-muted/50 text-muted-foreground',
                   )}
                 >
                   <label className="flex min-w-0 items-start gap-2">
@@ -10202,11 +10245,11 @@ export default function NotificationWorkflowsPanel({
                       checked={nodeToolModeEnabled}
                       disabled={!workspaceToolsAvailable}
                       onChange={(event) => updateNodeData({ useWorkspaceToolPolicy: event.target.checked })}
-                      className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 disabled:opacity-50"
+                      className="mt-0.5 h-4 w-4 rounded border-input text-blue-600 dark:text-blue-300 disabled:opacity-50"
                     />
                     <span>
-                      <span className="block font-medium text-gray-900">Use workspace read-only tools</span>
-                      <span className="mt-0.5 block text-xs leading-4 text-gray-500">
+                      <span className="block font-medium text-foreground">Use workspace read-only tools</span>
+                      <span className="mt-0.5 block text-xs leading-4 text-muted-foreground">
                         {workspaceToolsAvailable
                           ? 'Tool schemas are injected automatically; prompts do not need tool names.'
                           : 'Enable Evidence + tools in the workspace policy to make tools available here.'}
@@ -10222,13 +10265,13 @@ export default function NotificationWorkflowsPanel({
                   ['includeSimilarTickets', 'Similar tickets', 'similarTickets'],
                   ['includeOutageSignals', 'Incident signal checks', 'outageSignals'],
                 ].map(([field, label, helpTopic]) => (
-                  <div key={field} className="flex items-center justify-between gap-2 rounded-md border border-gray-200 px-3 py-2 text-sm">
+                  <div key={field} className="flex items-center justify-between gap-2 rounded-md border border-border px-3 py-2 text-sm">
                     <label className="flex min-w-0 items-center gap-2">
                       <input
                         type="checkbox"
                         checked={selectedNode.data?.[field] !== false}
                         onChange={(event) => updateNodeData({ [field]: event.target.checked })}
-                        className="h-4 w-4 rounded border-gray-300 text-blue-600"
+                        className="h-4 w-4 rounded border-input text-blue-600 dark:text-blue-300"
                       />
                       <span>{label}</span>
                     </label>
@@ -10236,15 +10279,15 @@ export default function NotificationWorkflowsPanel({
                   </div>
                 ))}
               </div>
-              <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
+              <div className="rounded-md border border-border bg-muted/50 px-3 py-3 text-sm">
                 <div className="mb-2 flex items-start justify-between gap-3">
                   <div>
-                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-600">Requester guardrails</div>
-                    <div className="mt-1 text-xs leading-4 text-slate-500">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Requester guardrails</div>
+                    <div className="mt-1 text-xs leading-4 text-muted-foreground">
                       Policy findings are tagged in audit by tier. Relaxed tone is allowed by default; factual, privacy, contact, and internal leaks still stay protected.
                     </div>
                   </div>
-                  <label className="flex items-center gap-2 text-xs font-semibold text-slate-700">
+                  <label className="flex items-center gap-2 text-xs font-semibold text-foreground/85">
                     <input
                       type="checkbox"
                       checked={requesterGuardrails.disableInPreview === true || requesterGuardrails.enabled === false}
@@ -10255,18 +10298,18 @@ export default function NotificationWorkflowsPanel({
                           disableInPreview: event.target.checked,
                         },
                       })}
-                      className="h-4 w-4 rounded border-gray-300 text-blue-600"
+                      className="h-4 w-4 rounded border-input text-blue-600 dark:text-blue-300"
                     />
                     Disable in preview
                   </label>
                 </div>
                 <div className="mb-2 grid gap-2 md:grid-cols-2">
-                  <label className="text-xs font-medium uppercase text-slate-500">
+                  <label className="text-xs font-medium uppercase text-muted-foreground">
                     Tone mode
                     <select
                       value={requesterGuardrails.toneMode || 'friendly'}
                       onChange={(event) => updateRequesterGuardrail('toneMode', event.target.value)}
-                      className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm normal-case text-slate-900"
+                      className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground"
                     >
                       <option value="friendly">Friendly</option>
                       <option value="playful">Playful</option>
@@ -10274,7 +10317,7 @@ export default function NotificationWorkflowsPanel({
                       <option value="custom">Custom prompt</option>
                     </select>
                   </label>
-                  <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs leading-4 text-slate-500">
+                  <div className="rounded-md border border-border bg-card px-3 py-2 text-xs leading-4 text-muted-foreground">
                     Preview disable affects preview/manual testing only. Live and mock runs still record the policy tier, action taken, and rule IDs in audit.
                   </div>
                 </div>
@@ -10284,16 +10327,16 @@ export default function NotificationWorkflowsPanel({
                     ['autoRepair', 'Auto repair', 'Generated email-address leaks plus unsupported timing, outage, similar-report, and citation issues.'],
                     ['auditOnly', 'Audit only', 'Emoji, playful metaphors, and harmless personality markers.'],
                   ].map(([field, label, description]) => (
-                    <label key={field} className="flex min-w-0 items-start gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-slate-700">
+                    <label key={field} className="flex min-w-0 items-start gap-2 rounded-md border border-border bg-card px-3 py-2 text-foreground/85">
                       <input
                         type="checkbox"
                         checked={requesterGuardrails[field] !== false}
                         onChange={(event) => updateRequesterGuardrail(field, event.target.checked)}
-                        className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600"
+                        className="mt-0.5 h-4 w-4 rounded border-input text-blue-600 dark:text-blue-300"
                       />
                       <span>
-                        <span className="block font-medium text-slate-900">{label}</span>
-                        <span className="mt-0.5 block text-xs leading-4 text-slate-500">{description}</span>
+                        <span className="block font-medium text-foreground">{label}</span>
+                        <span className="mt-0.5 block text-xs leading-4 text-muted-foreground">{description}</span>
                       </span>
                     </label>
                   ))}
@@ -10309,18 +10352,18 @@ export default function NotificationWorkflowsPanel({
                       key={field}
                       className={cls(
                         'flex min-w-0 items-start gap-2 rounded-md border px-3 py-2',
-                        'border-slate-200 bg-white text-slate-700',
+                        'border-border bg-card text-foreground/85',
                       )}
                     >
                       <input
                         type="checkbox"
                         checked={requesterGuardrails[field] !== false}
                         onChange={(event) => updateRequesterGuardrail(field, event.target.checked)}
-                        className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600"
+                        className="mt-0.5 h-4 w-4 rounded border-input text-blue-600 dark:text-blue-300"
                       />
                       <span>
-                        <span className="block font-medium text-slate-900">{label}</span>
-                        <span className="mt-0.5 block text-xs leading-4 text-slate-500">{description}</span>
+                        <span className="block font-medium text-foreground">{label}</span>
+                        <span className="mt-0.5 block text-xs leading-4 text-muted-foreground">{description}</span>
                       </span>
                     </label>
                   ))}
@@ -10328,7 +10371,7 @@ export default function NotificationWorkflowsPanel({
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-medium uppercase text-gray-500">
+                  <label className="text-xs font-medium uppercase text-muted-foreground">
                     <LabelWithHelp topic="maxTokens" onOpenHelp={setLlmHelpTopic}>Max tokens</LabelWithHelp>
                   </label>
                   <input
@@ -10337,11 +10380,11 @@ export default function NotificationWorkflowsPanel({
                     max="10000"
                     value={selectedNode.data?.maxTokens || DEFAULT_LLM_MAX_TOKENS}
                     onChange={(event) => updateNodeData({ maxTokens: Number.parseInt(event.target.value, 10) || DEFAULT_LLM_MAX_TOKENS })}
-                    className="mt-1 w-full rounded-md border border-gray-200 px-3 py-2 text-sm"
+                    className="mt-1 w-full rounded-md border border-border px-3 py-2 text-sm"
                   />
                 </div>
                 <div>
-                  <label className="text-xs font-medium uppercase text-gray-500">
+                  <label className="text-xs font-medium uppercase text-muted-foreground">
                     <LabelWithHelp topic="temperature" onOpenHelp={setLlmHelpTopic}>Temperature</LabelWithHelp>
                   </label>
                   <input
@@ -10351,17 +10394,17 @@ export default function NotificationWorkflowsPanel({
                     step="0.1"
                     value={selectedNode.data?.temperature ?? 0.3}
                     onChange={(event) => updateNodeData({ temperature: Number(event.target.value) })}
-                    className="mt-1 w-full rounded-md border border-gray-200 px-3 py-2 text-sm"
+                    className="mt-1 w-full rounded-md border border-border px-3 py-2 text-sm"
                   />
                 </div>
               </div>
-              <div className="flex items-center justify-between gap-2 rounded-md border border-gray-200 px-3 py-2 text-sm">
+              <div className="flex items-center justify-between gap-2 rounded-md border border-border px-3 py-2 text-sm">
                 <label className="flex min-w-0 items-center gap-2">
                   <input
                     type="checkbox"
                     checked={selectedNode.data?.failWorkflowOnError === true}
                     onChange={(event) => updateNodeData({ failWorkflowOnError: event.target.checked })}
-                    className="h-4 w-4 rounded border-gray-300 text-blue-600"
+                    className="h-4 w-4 rounded border-input text-blue-600 dark:text-blue-300"
                   />
                   <span>Stop workflow if this LLM step fails</span>
                 </label>
@@ -10373,9 +10416,9 @@ export default function NotificationWorkflowsPanel({
           {llmTab === 'preview' && (
             <div className="space-y-3">
               {preview?.state?.llm ? (
-                <pre className="max-h-[520px] overflow-auto rounded-md bg-gray-950 p-3 text-xs leading-5 text-gray-100">{formatJson(preview.state.llm)}</pre>
+                <pre className="max-h-[520px] overflow-auto rounded-md bg-gray-950 dark:ring-1 dark:ring-white/10 p-3 text-xs leading-5 text-gray-100">{formatJson(preview.state.llm)}</pre>
               ) : (
-                <div className="rounded-md border border-dashed border-gray-300 px-3 py-8 text-center text-sm text-gray-500">
+                <div className="rounded-md border border-dashed border-input px-3 py-8 text-center text-sm text-muted-foreground">
                   Run preview to see LLM provider, fallback, usage, and JSON output.
                 </div>
               )}
@@ -10393,7 +10436,7 @@ export default function NotificationWorkflowsPanel({
       return (
         <div className="space-y-4">
           <div>
-            <div className="mb-2 text-xs font-medium uppercase text-gray-500">Content Source</div>
+            <div className="mb-2 text-xs font-medium uppercase text-muted-foreground">Content Source</div>
             <div className="grid gap-2">
               {TEMPLATE_CONTENT_SOURCES.map(([value, label, description]) => (
                 <button
@@ -10402,11 +10445,11 @@ export default function NotificationWorkflowsPanel({
                   onClick={() => updateNodeData({ contentSource: value })}
                   className={cls(
                     'rounded-md border px-3 py-2 text-left',
-                    contentSource === value ? 'border-blue-300 bg-blue-50 text-blue-900' : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50',
+                    contentSource === value ? 'border-blue-300 dark:border-blue-500/40 bg-blue-50 dark:bg-blue-500/15 text-blue-900 dark:text-blue-200' : 'border-border bg-card text-foreground/85 hover:bg-muted/50',
                   )}
                 >
                   <div className="text-sm font-semibold">{label}</div>
-                  <div className="text-xs text-gray-500">{description}</div>
+                  <div className="text-xs text-muted-foreground">{description}</div>
                 </button>
               ))}
             </div>
@@ -10427,7 +10470,7 @@ export default function NotificationWorkflowsPanel({
 
           <div>
             <div className="flex items-center justify-between gap-2">
-              <label className="text-xs font-medium uppercase text-gray-500">Subject</label>
+              <label className="text-xs font-medium uppercase text-muted-foreground">Subject</label>
               <button
                 type="button"
                 onClick={() => openContentEditor({
@@ -10436,7 +10479,7 @@ export default function NotificationWorkflowsPanel({
                   description: 'Use Liquid variables for ticket and workflow values.',
                   language: 'plaintext',
                 })}
-                className="inline-flex items-center gap-1 rounded-md border border-gray-200 px-2 py-1 text-xs font-semibold text-gray-600 hover:bg-gray-50"
+                className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs font-semibold text-muted-foreground hover:bg-muted/50"
               >
                 <Maximize2 className="h-3.5 w-3.5" />
                 Full editor
@@ -10447,11 +10490,11 @@ export default function NotificationWorkflowsPanel({
               value={selectedNode.data?.subject || ''}
               onFocus={() => focusInsertTarget('template-subject')}
               onChange={(event) => updateNodeData({ subject: event.target.value })}
-              className="mt-1 w-full rounded-md border border-gray-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+              className="mt-1 w-full rounded-md border border-border px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
             />
           </div>
 
-          <div className="flex flex-wrap gap-1 rounded-md bg-gray-100 p-1">
+          <div className="flex flex-wrap gap-1 rounded-md bg-muted p-1">
             {[
               ['rich', 'Rich HTML', Type],
               ['source', 'HTML Source', Code],
@@ -10464,7 +10507,7 @@ export default function NotificationWorkflowsPanel({
                 onClick={() => setTemplateTab(id)}
                 className={cls(
                   'inline-flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-semibold',
-                  templateTab === id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:bg-white/70',
+                  templateTab === id ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:bg-card/70',
                 )}
               >
                 <Icon className="h-3.5 w-3.5" />
@@ -10478,15 +10521,15 @@ export default function NotificationWorkflowsPanel({
               {templateTab === 'rich' && (
                 templateHtmlAdvanced ? (
                   <div>
-                    <label className="text-xs font-medium uppercase text-gray-500">HTML Body</label>
+                    <label className="text-xs font-medium uppercase text-muted-foreground">HTML Body</label>
                     <div
                       data-testid="advanced-html-notice"
-                      className="mt-1 flex min-h-[220px] flex-col items-center justify-center gap-3 rounded-md border border-dashed border-amber-300 bg-amber-50/60 px-6 py-8 text-center"
+                      className="mt-1 flex min-h-[220px] flex-col items-center justify-center gap-3 rounded-md border border-dashed border-amber-300 dark:border-amber-500/40 bg-amber-50/60 dark:bg-amber-500/10 px-6 py-8 text-center"
                     >
                       <AlertCircle className="h-6 w-6 text-amber-500" aria-hidden="true" />
                       <div>
-                        <p className="text-sm font-semibold text-gray-900">This template uses advanced HTML</p>
-                        <p className="mx-auto mt-1 max-w-sm text-xs leading-5 text-gray-600 normal-case">
+                        <p className="text-sm font-semibold text-foreground">This template uses advanced HTML</p>
+                        <p className="mx-auto mt-1 max-w-sm text-xs leading-5 text-muted-foreground normal-case">
                           It contains tables, divs, images, links, or inline styles that the rich editor
                           can&apos;t represent — opening it here would strip that formatting.
                           Edit it in the code editor to preserve it exactly.
@@ -10509,12 +10552,12 @@ export default function NotificationWorkflowsPanel({
                   </div>
                 ) : (
                   <div>
-                    <label className="text-xs font-medium uppercase text-gray-500">HTML Body</label>
+                    <label className="text-xs font-medium uppercase text-muted-foreground">HTML Body</label>
                     <div className="mt-1" onFocus={() => focusInsertTarget('template-html-rich')}>
                       {editor && !editor.isDestroyed ? (
                         <EditorContent editor={editor} />
                       ) : (
-                        <div className="min-h-[220px] rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-500">
+                        <div className="min-h-[220px] rounded-md border border-border bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
                           Loading editor...
                         </div>
                       )}
@@ -10526,7 +10569,7 @@ export default function NotificationWorkflowsPanel({
               {templateTab === 'source' && (
                 <div>
                   <div className="flex items-center justify-between gap-2">
-                    <label className="text-xs font-medium uppercase text-gray-500">HTML Source</label>
+                    <label className="text-xs font-medium uppercase text-muted-foreground">HTML Source</label>
                     <button
                       type="button"
                       onClick={() => openContentEditor({
@@ -10535,7 +10578,7 @@ export default function NotificationWorkflowsPanel({
                         description: 'Monaco editor with searchable Liquid variables. Use this for larger rich HTML templates.',
                         language: 'html',
                       })}
-                      className="inline-flex items-center gap-1 rounded-md border border-gray-200 px-2 py-1 text-xs font-semibold text-gray-600 hover:bg-gray-50"
+                      className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs font-semibold text-muted-foreground hover:bg-muted/50"
                     >
                       <Maximize2 className="h-3.5 w-3.5" />
                       Full editor
@@ -10546,28 +10589,28 @@ export default function NotificationWorkflowsPanel({
                     value={selectedNode.data?.html || ''}
                     onFocus={() => focusInsertTarget('template-html-source')}
                     onChange={(event) => updateNodeData({ html: event.target.value })}
-                    className="mt-1 h-80 w-full rounded-md border border-gray-200 px-3 py-2 font-mono text-xs focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                    className="mt-1 h-80 w-full rounded-md border border-border px-3 py-2 font-mono text-xs focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
                   />
                 </div>
               )}
 
               {templateTab === 'text' && (
                 <div className="space-y-3">
-                  <label className="flex items-center gap-2 rounded-md border border-gray-200 px-3 py-2 text-sm">
+                  <label className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm">
                     <input
                       type="radio"
                       checked={plainTextMode === 'auto'}
                       onChange={() => updateNodeData({ plainTextMode: 'auto' })}
-                      className="h-4 w-4 border-gray-300 text-blue-600"
+                      className="h-4 w-4 border-input text-blue-600 dark:text-blue-300"
                     />
                     Auto-generate plain text from HTML
                   </label>
-                  <label className="flex items-center gap-2 rounded-md border border-gray-200 px-3 py-2 text-sm">
+                  <label className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm">
                     <input
                       type="radio"
                       checked={plainTextMode === 'custom'}
                       onChange={() => updateNodeData({ plainTextMode: 'custom', text: selectedNode.data?.text || autoText })}
-                      className="h-4 w-4 border-gray-300 text-blue-600"
+                      className="h-4 w-4 border-input text-blue-600 dark:text-blue-300"
                     />
                     Custom plain text fallback
                   </label>
@@ -10582,7 +10625,7 @@ export default function NotificationWorkflowsPanel({
                             description: 'Plain text fallback with searchable Liquid variables.',
                             language: 'plaintext',
                           })}
-                          className="inline-flex items-center gap-1 rounded-md border border-gray-200 px-2 py-1 text-xs font-semibold text-gray-600 hover:bg-gray-50"
+                          className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs font-semibold text-muted-foreground hover:bg-muted/50"
                         >
                           <Maximize2 className="h-3.5 w-3.5" />
                           Full editor
@@ -10593,11 +10636,11 @@ export default function NotificationWorkflowsPanel({
                         value={selectedNode.data?.text || ''}
                         onFocus={() => focusInsertTarget('template-text')}
                         onChange={(event) => updateNodeData({ text: event.target.value })}
-                        className="h-64 w-full rounded-md border border-gray-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                        className="h-64 w-full rounded-md border border-border px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
                       />
                     </div>
                   ) : (
-                    <pre className="h-64 overflow-auto rounded-md border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700 whitespace-pre-wrap">{autoText || 'Plain text will be generated from the HTML body.'}</pre>
+                    <pre className="h-64 overflow-auto rounded-md border border-border bg-muted/50 p-3 text-sm text-foreground/85 whitespace-pre-wrap">{autoText || 'Plain text will be generated from the HTML body.'}</pre>
                   )}
                 </div>
               )}
@@ -10605,12 +10648,12 @@ export default function NotificationWorkflowsPanel({
               {templateTab === 'preview' && (
                 <div className="space-y-3">
                   <div>
-                    <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Subject</div>
-                    <div className="mt-1 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900">{selectedNode.data?.subject || 'Ticket Pulse notification'}</div>
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Subject</div>
+                    <div className="mt-1 rounded-md border border-border bg-muted/50 px-3 py-2 text-sm text-foreground">{selectedNode.data?.subject || 'Ticket Pulse notification'}</div>
                   </div>
                   <div>
-                    <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">HTML preview</div>
-                    <div className="mt-1 max-h-96 overflow-auto rounded-md border border-gray-200 p-3 text-sm text-gray-700">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">HTML preview</div>
+                    <div className="mt-1 max-h-96 overflow-auto rounded-md border border-border p-3 text-sm text-foreground/85">
                       <div dangerouslySetInnerHTML={{ __html: sanitizePreviewHtmlClient(selectedNode.data?.html || '') }} />
                     </div>
                   </div>
@@ -10678,26 +10721,26 @@ export default function NotificationWorkflowsPanel({
           {linkOptions.map((option) => {
             const enabled = selectedNode.data?.[option.key] === true;
             const enabledClass = option.color === 'red'
-              ? 'border-red-300 bg-red-50 text-red-950'
+              ? 'border-red-300 dark:border-red-500/40 bg-red-50 dark:bg-red-500/15 text-red-950 dark:text-red-200'
               : option.color === 'amber'
-                ? 'border-amber-300 bg-amber-50 text-amber-950'
+                ? 'border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/15 text-amber-950 dark:text-amber-200'
                 : option.color === 'teal'
-                  ? 'border-teal-300 bg-teal-50 text-teal-950'
-                  : 'border-blue-300 bg-blue-50 text-blue-950';
+                  ? 'border-teal-300 dark:border-teal-500/40 bg-teal-50 dark:bg-teal-500/15 text-teal-950 dark:text-teal-200'
+                  : 'border-blue-300 dark:border-blue-500/40 bg-blue-50 dark:bg-blue-500/15 text-blue-950 dark:text-blue-200';
             const iconClass = option.color === 'red'
-              ? 'text-red-600'
+              ? 'text-red-600 dark:text-red-300'
               : option.color === 'amber'
-                ? 'text-amber-600'
+                ? 'text-amber-600 dark:text-amber-300'
                 : option.color === 'teal'
-                  ? 'text-teal-600'
-                  : 'text-blue-600';
+                  ? 'text-teal-600 dark:text-teal-300'
+                  : 'text-blue-600 dark:text-blue-300';
             const previewClass = option.color === 'red'
-              ? 'border-red-200 text-red-900'
+              ? 'border-red-200 dark:border-red-500/30 text-red-900 dark:text-red-200'
               : option.color === 'amber'
-                ? 'border-amber-200 text-amber-900'
+                ? 'border-amber-200 dark:border-amber-500/30 text-amber-900 dark:text-amber-200'
                 : option.color === 'teal'
-                  ? 'border-teal-200 text-teal-900'
-                  : 'border-blue-200 text-blue-900';
+                  ? 'border-teal-200 dark:border-teal-500/30 text-teal-900 dark:text-teal-200'
+                  : 'border-blue-200 dark:border-blue-500/30 text-blue-900 dark:text-blue-200';
             return (
               <button
                 key={option.key}
@@ -10705,30 +10748,30 @@ export default function NotificationWorkflowsPanel({
                 onClick={() => updateNodeData({ [option.key]: !enabled })}
                 className={cls(
                   'flex w-full items-start gap-3 rounded-lg border px-3 py-3 text-left transition',
-                  enabled ? enabledClass : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50',
+                  enabled ? enabledClass : 'border-border bg-card text-foreground/85 hover:bg-muted/50',
                 )}
               >
                 {enabled ? (
                   <ToggleRight className={cls('mt-0.5 h-5 w-5 shrink-0', iconClass)} />
                 ) : (
-                  <ToggleLeft className="mt-0.5 h-5 w-5 shrink-0 text-gray-400" />
+                  <ToggleLeft className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground/75" />
                 )}
                 <span className="min-w-0">
                   <span className="flex flex-wrap items-center gap-2 text-sm font-semibold">
                     {option.title}
                     <span className={cls(
                       'rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
-                      enabled ? 'bg-white/80 text-current ring-1 ring-current/20' : 'bg-gray-100 text-gray-500',
+                      enabled ? 'bg-card/80 text-current ring-1 ring-current/20' : 'bg-muted text-muted-foreground',
                     )}
                     >
                       {enabled ? 'Selected' : 'Off'}
                     </span>
                   </span>
-                  <span className="mt-1 block text-xs leading-5 text-gray-500">{option.description}</span>
-                  <span className="mt-1 block text-xs font-semibold leading-5 text-gray-700">{option.liveRule}</span>
-                  <span className="block text-xs leading-5 text-gray-500">Preview/test can force selected blocks so admins can inspect the full email.</span>
+                  <span className="mt-1 block text-xs leading-5 text-muted-foreground">{option.description}</span>
+                  <span className="mt-1 block text-xs font-semibold leading-5 text-foreground/85">{option.liveRule}</span>
+                  <span className="block text-xs leading-5 text-muted-foreground">Preview/test can force selected blocks so admins can inspect the full email.</span>
                   {enabled && (
-                    <span className={cls('mt-2 block rounded-md border bg-white/70 px-3 py-2 text-xs leading-5', previewClass)}>
+                    <span className={cls('mt-2 block rounded-md border bg-card/70 px-3 py-2 text-xs leading-5', previewClass)}>
                       {option.activePreview}
                     </span>
                   )}
@@ -10743,37 +10786,37 @@ export default function NotificationWorkflowsPanel({
           />
 
           <div>
-            <label className="text-xs font-medium uppercase text-gray-500">Provider</label>
-            <div className="mt-1 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900">SendGrid</div>
+            <label className="text-xs font-medium uppercase text-muted-foreground">Provider</label>
+            <div className="mt-1 rounded-md border border-border bg-muted/50 px-3 py-2 text-sm text-foreground">SendGrid</div>
           </div>
           <div>
-            <label className="text-xs font-medium uppercase text-gray-500">From Address Override</label>
+            <label className="text-xs font-medium uppercase text-muted-foreground">From Address Override</label>
             <input
               value={selectedNode.data?.fromAddress || ''}
               onChange={(event) => updateNodeData({ fromAddress: event.target.value })}
               placeholder="Use configured SendGrid sender"
-              className="mt-1 w-full rounded-md border border-gray-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+              className="mt-1 w-full rounded-md border border-border px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
             />
           </div>
 
           {/* Auto-send safety gates for LLM-authored content: below the
               confidence bar or an always-human match, the send downgrades to a
               staged proposed reply instead of emailing the requester. */}
-          <div className="rounded-lg border border-indigo-200 bg-indigo-50/50 p-3 space-y-2.5">
-            <p className="text-xs font-semibold uppercase tracking-wide text-indigo-700">AI auto-send safety</p>
-            <label className="block text-xs font-medium uppercase text-gray-500">
+          <div className="rounded-lg border border-indigo-200 dark:border-indigo-500/30 bg-indigo-50/50 dark:bg-indigo-500/10 p-3 space-y-2.5">
+            <p className="text-xs font-semibold uppercase tracking-wide text-indigo-700 dark:text-indigo-200">AI auto-send safety</p>
+            <label className="block text-xs font-medium uppercase text-muted-foreground">
               Minimum LLM confidence to auto-send
               <select
                 value={selectedNode.data?.minLlmConfidence || ''}
                 onChange={(event) => updateNodeData({ minLlmConfidence: event.target.value || null })}
-                className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+                className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground"
               >
                 <option value="">Off — always send</option>
                 <option value="medium">Medium or higher</option>
                 <option value="high">High only</option>
               </select>
             </label>
-            <label className="block text-xs font-medium uppercase text-gray-500">
+            <label className="block text-xs font-medium uppercase text-muted-foreground">
               Always-human recipients (emails or @domains, comma-separated)
               <input
                 value={(selectedNode.data?.alwaysHumanRecipients || []).join(', ')}
@@ -10781,10 +10824,10 @@ export default function NotificationWorkflowsPanel({
                   alwaysHumanRecipients: event.target.value.split(',').map((v) => v.trim()).filter(Boolean),
                 })}
                 placeholder="vip@example.com, @execs.example.com"
-                className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm normal-case text-gray-900"
+                className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground"
               />
             </label>
-            <p className="text-[11px] text-gray-500 normal-case">Gates apply only when the email content came from the LLM. A blocked send is staged on the ticket as an AI proposed reply — never silently dropped.</p>
+            <p className="text-[11px] text-muted-foreground normal-case">Gates apply only when the email content came from the LLM. A blocked send is staged on the ticket as an AI proposed reply — never silently dropped.</p>
           </div>
         </div>
       );
@@ -10795,11 +10838,11 @@ export default function NotificationWorkflowsPanel({
     // the node's settings are left untouched so nothing is lost.
     if (!WORKFLOW_NODE_REGISTRY[selectedNode.type]) {
       return (
-        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-          <p className="text-xs font-semibold text-slate-700">
-            Unrecognized step type: <code className="rounded bg-slate-200/70 px-1 py-0.5 font-mono text-[11px]">{selectedNode.type}</code>
+        <div className="rounded-lg border border-border bg-muted/50 p-3">
+          <p className="text-xs font-semibold text-foreground/85">
+            Unrecognized step type: <code className="rounded bg-secondary/70 px-1 py-0.5 font-mono text-[11px]">{selectedNode.type}</code>
           </p>
-          <p className="mt-1.5 text-xs leading-5 text-slate-600">
+          <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
             This app version doesn&apos;t recognize this step — hard-refresh (Ctrl+Shift+R) to update; if it persists, contact support. The step&apos;s settings are preserved and nothing runs differently until you publish.
           </p>
         </div>
@@ -10808,11 +10851,11 @@ export default function NotificationWorkflowsPanel({
 
     return (
       <div>
-        <label className="text-xs font-medium uppercase text-gray-500">Reason</label>
+        <label className="text-xs font-medium uppercase text-muted-foreground">Reason</label>
         <input
           value={selectedNode.data?.reason || ''}
           onChange={(event) => updateNodeData({ reason: event.target.value })}
-          className="mt-1 w-full rounded-md border border-gray-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+          className="mt-1 w-full rounded-md border border-border px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
         />
       </div>
     );
@@ -10822,7 +10865,7 @@ export default function NotificationWorkflowsPanel({
 
   if (loading) {
     return (
-      <div className="flex min-h-[420px] items-center justify-center text-sm text-gray-500">
+      <div className="flex min-h-[420px] items-center justify-center text-sm text-muted-foreground">
         <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
         Loading notification workflows
       </div>
@@ -10832,18 +10875,18 @@ export default function NotificationWorkflowsPanel({
   const showPanelHeader = !hideTabBar || workflowTabActive;
 
   return (
-    <div className={rootClassName || 'tp-glass-strong m-3 flex h-[calc(100dvh-8.5rem)] min-h-0 max-h-[calc(100dvh-8.5rem)] flex-col overflow-hidden rounded-2xl border border-white/70 sm:m-4'}>
+    <div className={rootClassName || 'tp-glass-strong m-3 flex h-[calc(100dvh-8.5rem)] min-h-0 max-h-[calc(100dvh-8.5rem)] flex-col overflow-hidden rounded-2xl border border-card/70 dark:border-white/10 sm:m-4'}>
       <NotificationToast message={message} onDismiss={dismissMessage} />
       {showPanelHeader && (
-        <div className="shrink-0 border-b border-white/70 px-5 py-3">
+        <div className="shrink-0 border-b border-card/70 dark:border-white/10 px-5 py-3">
           {!hideTabBar && (
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <h2 className="text-lg font-semibold text-gray-900">Mail Settings</h2>
+                  <h2 className="text-lg font-semibold text-foreground">Mail Settings</h2>
                   {selected?.mockModeEnabled && <MockModeBadge />}
                 </div>
-                <p className="text-sm text-gray-500">Workspace-scoped notification workflows, LLM evidence, email branding, and workflow audit.</p>
+                <p className="text-sm text-muted-foreground">Workspace-scoped notification workflows, LLM evidence, email branding, and workflow audit.</p>
               </div>
             </div>
           )}
@@ -10853,7 +10896,7 @@ export default function NotificationWorkflowsPanel({
               <div
                 role="tablist"
                 aria-label="Mail settings sections"
-                className="grid grid-cols-2 gap-1 rounded-xl border border-slate-200/80 bg-slate-100/70 p-1 shadow-subtle sm:grid-cols-4"
+                className="grid grid-cols-2 gap-1 rounded-xl border border-border/80 bg-muted/70 p-1 shadow-subtle sm:grid-cols-4"
               >
                 {globalTabs.map((tab) => (
                   <MailSettingsTabButton
@@ -10884,7 +10927,7 @@ export default function NotificationWorkflowsPanel({
                   onClick={() => setVariantDialogOpen(true)}
                   disabled={saving || !selected}
                   title="Create a variant of the selected workflow — start blank or copy its steps; you pick the name"
-                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-indigo-200 bg-indigo-50 px-2.5 text-sm font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-indigo-200 dark:border-indigo-500/30 bg-indigo-50 dark:bg-indigo-500/15 px-2.5 text-sm font-medium text-indigo-700 dark:text-indigo-200 hover:bg-indigo-100 dark:hover:bg-indigo-500/20 disabled:opacity-50"
                 >
                   <Plus className="h-4 w-4" />
                 New variant
@@ -10896,7 +10939,7 @@ export default function NotificationWorkflowsPanel({
                   title={selected?.isDefaultVariant ? 'Default variants can be disabled but not archived.' : selected?.archivedAt ? 'Restore this variant.' : 'Archive this custom variant.'}
                   className={cls(
                     'inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm font-medium disabled:opacity-50',
-                    selected?.archivedAt ? 'border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100' : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50',
+                    selected?.archivedAt ? 'border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 hover:bg-emerald-100 dark:hover:bg-emerald-500/20' : 'border border-border bg-card text-foreground/85 hover:bg-muted/50',
                   )}
                 >
                   {selected?.archivedAt ? <RefreshCw className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
@@ -10908,7 +10951,7 @@ export default function NotificationWorkflowsPanel({
                     onClick={() => setDeleteConfirm({ workflow: selected })}
                     disabled={saving || !selected}
                     title="Permanently delete this archived variant and its workflow audit history."
-                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-red-200 bg-red-50 px-2.5 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-50"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 px-2.5 text-sm font-medium text-red-700 dark:text-red-200 hover:bg-red-100 dark:hover:bg-red-500/20 disabled:opacity-50"
                   >
                     <Trash2 className="h-4 w-4" />
                     Delete
@@ -10917,7 +10960,7 @@ export default function NotificationWorkflowsPanel({
                 <button
                   type="button"
                   onClick={() => loadWorkflows(selected?.id)}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-card px-2.5 text-sm font-medium text-foreground/85 hover:bg-muted/50"
                 >
                   <RefreshCw className="h-4 w-4" />
               Refresh
@@ -10926,7 +10969,7 @@ export default function NotificationWorkflowsPanel({
                   type="button"
                   onClick={openPreviewModal}
                   disabled={saving || previewRunning || !selected}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-card px-2.5 text-sm font-medium text-foreground/85 hover:bg-muted/50 disabled:opacity-50"
                 >
                   {previewRunning ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
                   {previewRunning ? 'Previewing' : 'Preview'}
@@ -10947,7 +10990,7 @@ export default function NotificationWorkflowsPanel({
                   {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
                   {hasPublishableChanges ? 'Save & publish' : 'Saved'}
                 </button>
-                <span className="mx-0.5 h-6 w-px bg-slate-200" aria-hidden="true" />
+                <span className="mx-0.5 h-6 w-px bg-secondary" aria-hidden="true" />
                 <WorkflowToggle
                   label="Live"
                   tone="emerald"
@@ -10973,7 +11016,7 @@ export default function NotificationWorkflowsPanel({
                     next to the toggles. */}
                 {selected?.isEnabled === true && selected?.mockModeEnabled === true && (
                   <span
-                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-amber-300 bg-amber-50 px-2.5 text-xs font-bold text-amber-800"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/15 px-2.5 text-xs font-bold text-amber-800 dark:text-amber-200"
                     data-testid="observe-only-warning"
                     title="This workflow is Live AND in mock mode: it runs on matching tickets but takes no real actions (no emails, no ticket updates). Turn off mock mode to make it act."
                   >
@@ -11082,21 +11125,21 @@ export default function NotificationWorkflowsPanel({
           <div className="flex min-h-[560px] flex-1 flex-col overflow-hidden">
             {selected && (
               <div className="shrink-0">
-                <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-white px-4 py-2">
-                  <Waypoints className="h-4 w-4 text-slate-400" />
-                  <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Routing</span>
+                <div className="flex flex-wrap items-center gap-2 border-b border-border bg-card px-4 py-2">
+                  <Waypoints className="h-4 w-4 text-muted-foreground/75" />
+                  <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Routing</span>
                   <span className={cls(
                     'rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
-                    selected.isDefaultVariant ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-indigo-200 bg-indigo-50 text-indigo-700',
+                    selected.isDefaultVariant ? 'border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200' : 'border-indigo-200 dark:border-indigo-500/30 bg-indigo-50 dark:bg-indigo-500/15 text-indigo-700 dark:text-indigo-200',
                   )}
                   >
                     {workflowVariantTypeLabel(selected)}
                   </span>
-                  <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-600">
+                  <span className="rounded-full border border-border bg-muted/50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
                     {selected.isDefaultVariant ? 'Default fallback' : `Match order ${routingPriority || 1}`}
                   </span>
                   {selectedIsAfterHoursWorkflow && (
-                    <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700">
+                    <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700 dark:text-amber-200">
                       <Moon className="h-3 w-3" />
                       After-hours
                     </span>
@@ -11107,7 +11150,7 @@ export default function NotificationWorkflowsPanel({
                         type="button"
                         onClick={() => setAfterHoursDrawerOpen(true)}
                         title="Configure after-hours routing — holidays, replacement behavior, and requester copy"
-                        className="inline-flex items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-800 transition hover:bg-amber-100"
+                        className="inline-flex items-center gap-1.5 rounded-md border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-2.5 py-1 text-[11px] font-semibold text-amber-800 dark:text-amber-200 transition hover:bg-amber-100 dark:hover:bg-amber-500/20"
                       >
                         <CalendarClock className="h-3.5 w-3.5" />
                         Configure
@@ -11116,17 +11159,17 @@ export default function NotificationWorkflowsPanel({
                     <button
                       type="button"
                       onClick={() => setNormalizationOpen((open) => !open)}
-                      className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-50"
+                      className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1 text-[11px] font-semibold text-muted-foreground transition hover:bg-muted/50"
                       title="How routing values are normalized"
                     >
-                      <CircleHelp className="h-3.5 w-3.5 text-blue-600" />
+                      <CircleHelp className="h-3.5 w-3.5 text-blue-600 dark:text-blue-300" />
                       Normalization
                     </button>
                     <button
                       type="button"
                       onClick={() => setRoutingExpanded((open) => !open)}
                       aria-expanded={routingExpanded}
-                      className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-50"
+                      className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-2.5 py-1 text-[11px] font-semibold text-muted-foreground transition hover:bg-muted/50"
                     >
                       {routingExpanded ? 'Hide routing' : 'Edit routing'}
                       <ChevronDown className={cls('h-3.5 w-3.5 transition-transform', routingExpanded && 'rotate-180')} />
@@ -11134,17 +11177,17 @@ export default function NotificationWorkflowsPanel({
                     {normalizationOpen && (
                       <>
                         <div className="fixed inset-0 z-30" onClick={() => setNormalizationOpen(false)} />
-                        <div className="absolute right-0 top-full z-40 mt-1 w-80 rounded-lg border border-slate-200 bg-white p-3 text-xs leading-5 text-slate-600 shadow-xl">
-                          <div className="mb-1 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-500">
-                            <CircleHelp className="h-3.5 w-3.5 text-blue-600" />
+                        <div className="absolute right-0 top-full z-40 mt-1 w-80 rounded-lg border border-border bg-card p-3 text-xs leading-5 text-muted-foreground shadow-xl">
+                          <div className="mb-1 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                            <CircleHelp className="h-3.5 w-3.5 text-blue-600 dark:text-blue-300" />
                             Normalization
                           </div>
                           <p>Routing values are normalized to stable route keys before they are matched.</p>
                           {(routingMetadata.normalizationRules || []).length > 0 && (
-                            <ul className="mt-1.5 space-y-1 text-slate-500">
+                            <ul className="mt-1.5 space-y-1 text-muted-foreground">
                               {(routingMetadata.normalizationRules || []).slice(0, 6).map((rule) => (
                                 <li key={rule} className="flex gap-1.5">
-                                  <span className="mt-1 h-1 w-1 shrink-0 rounded-full bg-slate-400" />
+                                  <span className="mt-1 h-1 w-1 shrink-0 rounded-full bg-muted-foreground/60" />
                                   <span>{rule}</span>
                                 </li>
                               ))}
@@ -11165,13 +11208,13 @@ export default function NotificationWorkflowsPanel({
             >
               <aside
                 className={cls(
-                  'z-10 flex min-h-0 flex-col overflow-hidden border-r border-gray-200 transition-colors duration-300',
-                  workflowListCollapsed ? 'bg-slate-100' : 'bg-slate-50',
+                  'z-10 flex min-h-0 flex-col overflow-hidden border-r border-border transition-colors duration-300',
+                  workflowListCollapsed ? 'bg-muted' : 'bg-muted/50',
                 )}
               >
                 <div
                   className={cls(
-                    'flex items-center gap-2 px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500',
+                    'flex items-center gap-2 px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground',
                     workflowListCollapsed ? 'justify-center px-2' : 'justify-between',
                   )}
                 >
@@ -11179,12 +11222,12 @@ export default function NotificationWorkflowsPanel({
                     <div className="flex min-w-0 flex-col gap-1">
                       <span>Workspace Workflows</span>
                       {archivedWorkflowCount > 0 && (
-                        <label className="flex items-center gap-1.5 text-[11px] font-medium normal-case tracking-normal text-slate-500">
+                        <label className="flex items-center gap-1.5 text-[11px] font-medium normal-case tracking-normal text-muted-foreground">
                           <input
                             type="checkbox"
                             checked={showArchivedWorkflows}
                             onChange={(event) => updateShowArchivedWorkflows(event.target.checked)}
-                            className="h-3.5 w-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                            className="h-3.5 w-3.5 rounded border-input text-blue-600 dark:text-blue-300 focus:ring-blue-500"
                           />
                           Show only archived ({archivedWorkflowCount})
                         </label>
@@ -11196,25 +11239,25 @@ export default function NotificationWorkflowsPanel({
                     onClick={() => setWorkflowListCollapsed((current) => !current)}
                     aria-label={workflowListCollapsed ? 'Expand workspace workflows' : 'Collapse workspace workflows'}
                     title={workflowListCollapsed ? 'Expand workspace workflows' : 'Collapse workspace workflows'}
-                    className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+                    className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border bg-card text-muted-foreground shadow-sm transition hover:border-blue-200 dark:hover:border-blue-500/30 hover:bg-blue-50 dark:hover:bg-blue-500/15 hover:text-blue-700 dark:hover:text-blue-200"
                   >
                     {workflowListCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
                   </button>
                 </div>
                 {workflowListCollapsed ? (
-                  <div className="flex flex-1 flex-col items-center gap-3 border-t border-slate-200 px-2 py-3 text-slate-500">
-                    <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 text-xs font-bold text-blue-700 ring-1 ring-blue-200">
+                  <div className="flex flex-1 flex-col items-center gap-3 border-t border-border px-2 py-3 text-muted-foreground">
+                    <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-500/20 text-xs font-bold text-blue-700 dark:text-blue-200 ring-1 ring-blue-200 dark:ring-blue-500/30">
                       {visibleWorkflows.length}
                     </span>
                     <span
-                      className="hidden min-h-0 rotate-180 break-words text-[10px] font-bold uppercase leading-4 tracking-wide text-slate-600 [writing-mode:vertical-rl] lg:block"
+                      className="hidden min-h-0 rotate-180 break-words text-[10px] font-bold uppercase leading-4 tracking-wide text-muted-foreground [writing-mode:vertical-rl] lg:block"
                       title={selected?.name || 'Workflows'}
                     >
                       {selected?.name || 'Workflows'}
                     </span>
                   </div>
                 ) : (
-                  <div className="settings-scrollbar min-h-0 flex-1 overflow-y-auto border-t border-slate-100">
+                  <div className="settings-scrollbar min-h-0 flex-1 overflow-y-auto border-t border-border/60">
                     <WorkflowIndex
                       workflows={visibleWorkflows}
                       selectedId={selected?.id}
@@ -11239,7 +11282,7 @@ export default function NotificationWorkflowsPanel({
                 className="min-h-0 min-w-0"
               >
                 <Panel id="workflow-canvas" minSize="38%" defaultSize="56%">
-                  <main className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-r border-gray-200">
+                  <main className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-r border-border">
                     <NodePalette
                       onAddNode={addWorkflowNode}
                       onRemoveNode={removeSelectedNode}
@@ -11249,9 +11292,9 @@ export default function NotificationWorkflowsPanel({
                       onRename={renameWorkflow}
                     />
                     {hasBlockingGraphErrors && (
-                      <div className="border-b border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">
+                      <div className="border-b border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-4 py-3 text-xs text-amber-900 dark:text-amber-200">
                         <div className="flex items-start gap-2">
-                          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
+                          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-200" />
                           <div className="min-w-0">
                             <div className="font-semibold">Workflow needs fixes before publish</div>
                             <ul className="mt-1 space-y-0.5">
@@ -11266,9 +11309,11 @@ export default function NotificationWorkflowsPanel({
                         </div>
                       </div>
                     )}
-                    <div className="relative min-h-[360px] flex-1 overflow-hidden bg-gray-50">
+                    <div className="relative min-h-[360px] flex-1 overflow-hidden bg-muted/50">
                       {draft ? (
                         <ReactFlow
+                          colorMode={resolvedTheme === 'dark' ? 'dark' : 'light'}
+                          style={FLOW_CANVAS_VARS}
                           nodes={flowNodes}
                           edges={flowEdges}
                           nodeTypes={FLOW_NODE_TYPES}
@@ -11285,25 +11330,25 @@ export default function NotificationWorkflowsPanel({
                           onNodesChange={handleFlowNodesChange}
                         >
                           <Controls />
-                          <Background gap={18} color="#e5e7eb" />
+                          <Background gap={18} color={resolvedTheme === 'dark' ? '#283549' : '#e5e7eb'} />
                         </ReactFlow>
                       ) : (
-                        <div className="flex h-full items-center justify-center text-sm text-gray-500">Select a workflow</div>
+                        <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Select a workflow</div>
                       )}
                       {draft && (
-                        <div className="pointer-events-none absolute bottom-2 right-2 z-10 max-w-[280px] rounded-lg border border-slate-200 bg-white/90 px-2.5 py-1.5 text-[10px] font-medium leading-4 text-slate-500 shadow-subtle">
-                          Click <span className="font-bold text-blue-600">+</span> on a line to insert a step. Drag a node&apos;s bottom dot to another node&apos;s top dot to connect blocks.
+                        <div className="pointer-events-none absolute bottom-2 right-2 z-10 max-w-[280px] rounded-lg border border-border bg-card/90 px-2.5 py-1.5 text-[10px] font-medium leading-4 text-muted-foreground shadow-subtle">
+                          Click <span className="font-bold text-blue-600 dark:text-blue-300">+</span> on a line to insert a step. Drag a node&apos;s bottom dot to another node&apos;s top dot to connect blocks.
                         </div>
                       )}
                       {edgeInsert && draft && (
-                        <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-900/20 p-4" onClick={() => setEdgeInsert(null)}>
+                        <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-900/20 dark:bg-black/50 p-4" onClick={() => setEdgeInsert(null)}>
                           <div
-                            className="w-64 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl"
+                            className="w-64 overflow-hidden rounded-xl border border-border bg-card shadow-xl"
                             onClick={(event) => event.stopPropagation()}
                           >
-                            <div className="border-b border-slate-100 px-3 py-2">
-                              <div className="text-xs font-bold text-slate-900">Insert a step</div>
-                              <div className="mt-0.5 truncate text-[11px] text-slate-500">
+                            <div className="border-b border-border/60 px-3 py-2">
+                              <div className="text-xs font-bold text-foreground">Insert a step</div>
+                              <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
                                 Between <span className="font-semibold">{edgeInsert.source}</span> and <span className="font-semibold">{edgeInsert.target}</span>
                                 {edgeInsert.sourceHandle ? ` (${edgeInsert.sourceHandle} branch)` : ''}
                               </div>
@@ -11315,12 +11360,12 @@ export default function NotificationWorkflowsPanel({
                                   key={type}
                                   type="button"
                                   onClick={() => insertNodeBetween(edgeInsert, type)}
-                                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-semibold text-gray-700 hover:bg-blue-50"
+                                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-semibold text-foreground/85 hover:bg-blue-50 dark:hover:bg-blue-500/15"
                                 >
                                   {TypeIcon ? (
-                                    <TypeIcon className="h-3.5 w-3.5" style={{ color: NODE_COLORS[type] || '#6b7280' }} />
+                                    <TypeIcon className="h-3.5 w-3.5" style={{ color: nodeAccent(NODE_COLORS[type], resolvedTheme) }} />
                                   ) : (
-                                    <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: NODE_COLORS[type] || '#6b7280' }} />
+                                    <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: nodeAccent(NODE_COLORS[type], resolvedTheme) }} />
                                   )}
                                   {NODE_LABELS[type] || type}
                                 </button>
@@ -11329,7 +11374,7 @@ export default function NotificationWorkflowsPanel({
                             <button
                               type="button"
                               onClick={() => setEdgeInsert(null)}
-                              className="w-full border-t border-slate-100 px-3 py-2 text-left text-xs font-medium text-slate-500 hover:bg-slate-50"
+                              className="w-full border-t border-border/60 px-3 py-2 text-left text-xs font-medium text-muted-foreground hover:bg-muted/50"
                             >
                               Cancel
                             </button>
@@ -11340,24 +11385,24 @@ export default function NotificationWorkflowsPanel({
                   </main>
                 </Panel>
 
-                <PanelResizeHandle id="workflow-editor-resizer" className="w-1 bg-gray-100 transition hover:bg-blue-300" />
+                <PanelResizeHandle id="workflow-editor-resizer" className="w-1 bg-muted transition hover:bg-blue-300" />
 
                 <Panel id="workflow-inspector" minSize="25%" maxSize="62%" defaultSize="44%">
-                  <aside className="flex h-full min-h-0 flex-col overflow-hidden bg-white">
-                    <div className="shrink-0 border-b border-gray-200 px-4 py-3">
+                  <aside className="flex h-full min-h-0 flex-col overflow-hidden bg-card">
+                    <div className="shrink-0 border-b border-border px-4 py-3">
                       <div className="flex items-center justify-between gap-3">
                         <div>
-                          <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Inspector</div>
-                          <h3 className="text-sm font-semibold text-gray-900">{selectedNode ? NODE_LABELS[selectedNode.type] || selectedNode.type : 'No node selected'}</h3>
+                          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Inspector</div>
+                          <h3 className="text-sm font-semibold text-foreground">{selectedNode ? NODE_LABELS[selectedNode.type] || selectedNode.type : 'No node selected'}</h3>
                         </div>
                         {selectedNode?.type === 'llm_generate' && (
-                          <span className="inline-flex items-center gap-1 rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700">
+                          <span className="inline-flex items-center gap-1 rounded-full border border-violet-200 dark:border-violet-500/30 bg-violet-50 dark:bg-violet-500/15 px-2 py-0.5 text-xs font-medium text-violet-700 dark:text-violet-200">
                             <Bot className="h-3.5 w-3.5" />
                         Drafts email
                           </span>
                         )}
                         {selectedNode?.type === 'send_email' && (
-                          <span className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">
+                          <span className="inline-flex items-center gap-1 rounded-full border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 px-2 py-0.5 text-xs font-medium text-red-700 dark:text-red-200">
                             <Send className="h-3.5 w-3.5" />
                         Email
                           </span>

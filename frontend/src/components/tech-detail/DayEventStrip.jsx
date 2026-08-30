@@ -236,9 +236,9 @@ function MemberRow({ event, interactive, onOpen }) {
   const body = (
     <>
       <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${style.dot}`} aria-hidden="true" />
-      <span className="flex-shrink-0 font-mono text-slate-300">{ticketRefLabel(event.ticket)}</span>
+      <span className="flex-shrink-0 font-mono text-white/55">{ticketRefLabel(event.ticket)}</span>
       <span className="min-w-0 flex-1 truncate">{event.ticket?.subject || '(no subject)'}</span>
-      <span className="flex-shrink-0 tabular-nums text-slate-400">{fmtTime(event.ts)}</span>
+      <span className="flex-shrink-0 tabular-nums text-white/70">{fmtTime(event.ts)}</span>
     </>
   );
   if (interactive) {
@@ -264,9 +264,9 @@ function UnitTipContent({ unit, interactive, onOpen }) {
         <div className="flex items-center gap-1.5 font-semibold">
           <span className={`h-1.5 w-1.5 rounded-full ${style.dot}`} aria-hidden="true" />
           <span>{style.label}</span>
-          <span className="font-normal tabular-nums text-slate-400">· {fmtTime(e.ts)}</span>
+          <span className="font-normal tabular-nums text-white/70">· {fmtTime(e.ts)}</span>
         </div>
-        <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-slate-300">
+        <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-white/55">
           <span className="flex-shrink-0 font-mono">{ticketRefLabel(e.ticket)}</span>
           <span className="min-w-0 truncate">{e.ticket?.subject || '(no subject)'}</span>
         </div>
@@ -286,7 +286,7 @@ function UnitTipContent({ unit, interactive, onOpen }) {
       <div className="flex items-baseline justify-between gap-2 font-semibold">
         <span>{header}</span>
         {unit.kind !== 'hour' && (
-          <span className="font-normal tabular-nums text-slate-400">
+          <span className="font-normal tabular-nums text-white/70">
             {fmtTime(first.ts)}{unit.count > 1 ? `–${fmtTime(last.ts)}` : ''}
           </span>
         )}
@@ -296,10 +296,10 @@ function UnitTipContent({ unit, interactive, onOpen }) {
           <MemberRow key={e.id} event={e} interactive={interactive} onOpen={onOpen} />
         ))}
         {!interactive && unit.events.length > MEMBER_LIST_MAX && (
-          <div className="px-1 pt-0.5 text-slate-400">…and {unit.events.length - MEMBER_LIST_MAX} more — click to browse</div>
+          <div className="px-1 pt-0.5 text-white/70">…and {unit.events.length - MEMBER_LIST_MAX} more — click to browse</div>
         )}
         {!interactive && unit.events.length > 1 && (
-          <div className="px-1 pt-0.5 text-[9px] uppercase tracking-wide text-slate-500">Click to browse tickets</div>
+          <div className="px-1 pt-0.5 text-[9px] uppercase tracking-wide text-white/60">Click to browse tickets</div>
         )}
       </div>
     </>
@@ -417,9 +417,9 @@ export default function DayEventStrip({ ticketsOnDate = [], dayLabel = '', dayIs
     <section ref={rootRef} className="tp-card rounded-xl p-3" aria-label={`Event strip for ${dayLabel}`}>
       {/* Header: title + options row (legend filter chips, view toggle) */}
       <div className="mb-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-        <h3 className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">
+        <h3 className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/75">
           The day, hour by hour
-          <span className="ml-1.5 font-medium normal-case tracking-normal text-slate-300">
+          <span className="ml-1.5 font-medium normal-case tracking-normal text-muted-foreground/50">
             · {allEvents.length} event{allEvents.length === 1 ? '' : 's'}
           </span>
         </h3>
@@ -438,19 +438,19 @@ export default function DayEventStrip({ ticketsOnDate = [], dayLabel = '', dayIs
                   aria-label={`${s.label}: ${typeCounts[key]} event${typeCounts[key] === 1 ? '' : 's'}${off ? ' (hidden)' : ''}`}
                   className={`tp-focus-ring inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[9px] font-medium transition-colors motion-reduce:transition-none ${
                     off
-                      ? 'border-transparent bg-slate-50 text-slate-300'
-                      : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300'
+                      ? 'border-transparent bg-muted/50 text-muted-foreground/50'
+                      : 'border-border bg-card text-muted-foreground hover:border-input'
                   }`}
                 >
                   <span className={`h-2 w-2 rounded-full ${s.dot} ${off ? 'opacity-30' : ''}`} aria-hidden="true" />
                   <span className={off ? 'line-through' : ''}>{s.label}</span>
-                  <span className="tabular-nums text-slate-400">{typeCounts[key]}</span>
+                  <span className="tabular-nums text-muted-foreground/75">{typeCounts[key]}</span>
                 </button>
               );
             })}
           </div>
           {/* View toggle */}
-          <div className="flex rounded-md bg-slate-100 p-0.5" role="group" aria-label="Strip view">
+          <div className="flex rounded-md bg-muted p-0.5" role="group" aria-label="Strip view">
             {[['dots', 'Dots'], ['hourly', 'Hourly']].map(([key, label]) => (
               <button
                 key={key}
@@ -458,7 +458,7 @@ export default function DayEventStrip({ ticketsOnDate = [], dayLabel = '', dayIs
                 onClick={() => { setView(key); setPinned(null); setHovered(null); }}
                 aria-pressed={view === key}
                 className={`tp-focus-ring rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide transition-colors motion-reduce:transition-none ${
-                  view === key ? 'bg-white text-slate-700 shadow-subtle' : 'text-slate-400 hover:text-slate-600'
+                  view === key ? 'bg-card text-foreground/85 shadow-subtle' : 'text-muted-foreground/75 hover:text-muted-foreground'
                 }`}
               >
                 {label}
@@ -475,7 +475,7 @@ export default function DayEventStrip({ ticketsOnDate = [], dayLabel = '', dayIs
           h % 2 === 0 ? (
             <div
               key={`band-${h}`}
-              className="absolute inset-y-0 rounded-sm bg-slate-50/80"
+              className="absolute inset-y-0 rounded-sm bg-muted/40"
               style={{ left: `${((h - axis.start) / span) * 100}%`, width: `${(1 / span) * 100}%` }}
               aria-hidden="true"
             />
@@ -485,21 +485,21 @@ export default function DayEventStrip({ ticketsOnDate = [], dayLabel = '', dayIs
         {hours.map((h) => (
           <div
             key={`grid-${h}`}
-            className={`absolute inset-y-0 w-px ${h === 12 ? 'bg-slate-300' : 'bg-slate-200/80'}`}
+            className={`absolute inset-y-0 w-px ${h === 12 ? 'bg-muted-foreground/40' : 'bg-secondary/80'}`}
             style={{ left: `${((h - axis.start) / span) * 100}%` }}
             aria-hidden="true"
           />
         ))}
 
         {allHidden ? (
-          <p className="absolute inset-0 flex items-center justify-center text-[10px] text-slate-400">
+          <p className="absolute inset-0 flex items-center justify-center text-[10px] text-muted-foreground/75">
             All event types hidden — click a legend chip to bring them back.
           </p>
         ) : view === 'dots' ? (
           <>
             {/* Center guide line only when the swarm is a single lane */}
             {maxLanes === 1 && (
-              <div className="absolute inset-x-0 top-1/2 h-px bg-slate-200" aria-hidden="true" />
+              <div className="absolute inset-x-0 top-1/2 h-px bg-secondary" aria-hidden="true" />
             )}
             {placed.map((u) => {
               const common = {
@@ -575,9 +575,9 @@ export default function DayEventStrip({ ticketsOnDate = [], dayLabel = '', dayIs
                   onBlur={() => setHovered(null)}
                   aria-label={`${hourLabel(b.hour)} to ${hourLabel(b.hour + 1)}: ${parts}`}
                   aria-expanded={pinned?.unit.key === unit.key}
-                  className="tp-focus-ring group flex h-full flex-1 flex-col items-center justify-end rounded-sm pb-px hover:bg-slate-100/70"
+                  className="tp-focus-ring group flex h-full flex-1 flex-col items-center justify-end rounded-sm pb-px hover:bg-muted/70"
                 >
-                  <span className="mb-0.5 text-[9px] font-semibold tabular-nums text-slate-400 group-hover:text-slate-600">
+                  <span className="mb-0.5 text-[9px] font-semibold tabular-nums text-muted-foreground/75 group-hover:text-muted-foreground">
                     {b.total}
                   </span>
                   <span
@@ -605,7 +605,7 @@ export default function DayEventStrip({ ticketsOnDate = [], dayLabel = '', dayIs
         {floating && (
           <div
             role="tooltip"
-            className={`absolute bottom-full z-20 mb-1.5 w-max max-w-[320px] rounded-lg bg-slate-800 px-2.5 py-1.5 text-[11px] leading-snug text-white shadow-soft ${
+            className={`absolute bottom-full z-20 mb-1.5 w-max max-w-[320px] rounded-lg bg-slate-800 px-2.5 py-1.5 text-[11px] leading-snug text-white shadow-soft dark:bg-slate-700 dark:ring-1 dark:ring-white/10 ${
               pinned ? '' : 'pointer-events-none'
             }`}
             style={{ left: `${floating.unit.x}%`, transform: tipTransform(floating.unit.x) }}
@@ -620,7 +620,7 @@ export default function DayEventStrip({ ticketsOnDate = [], dayLabel = '', dayIs
       </div>
 
       {/* Hour tick labels */}
-      <div className="relative mt-1 h-3 border-t border-slate-200 text-[9px] font-medium text-slate-400" aria-hidden="true">
+      <div className="relative mt-1 h-3 border-t border-border text-[9px] font-medium text-muted-foreground/75" aria-hidden="true">
         {hours.filter((h) => (h - axis.start) % labelStep === 0 || h === axis.end).map((h) => (
           <span
             key={h}

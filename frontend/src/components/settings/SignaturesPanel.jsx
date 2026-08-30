@@ -25,24 +25,24 @@ const TEMPLATE_STARTER = '<p>Kind regards,</p><p><strong>{{name}}</strong><br>{{
 
 function Avatar({ name, photoUrl, dim = false }) {
   return (
-    <div className={`h-8 w-8 rounded-full bg-slate-100 overflow-hidden flex items-center justify-center shrink-0 ${dim ? 'grayscale opacity-60' : ''}`}>
+    <div className={`h-8 w-8 rounded-full bg-muted overflow-hidden flex items-center justify-center shrink-0 ${dim ? 'grayscale opacity-60' : ''}`}>
       {photoUrl
         ? <img src={photoUrl} alt="" className="w-full h-full object-cover" />
-        : <span className="text-[10px] font-semibold text-slate-500">{(name || '?').split(' ').map((p) => p[0]).join('').slice(0, 2).toUpperCase()}</span>}
+        : <span className="text-[10px] font-semibold text-muted-foreground">{(name || '?').split(' ').map((p) => p[0]).join('').slice(0, 2).toUpperCase()}</span>}
     </div>
   );
 }
 
 function SignatureStatus({ signature }) {
   if (!signature || !signature.exists) {
-    return <span className="text-xs text-slate-300">None</span>;
+    return <span className="text-xs text-muted-foreground/50">None</span>;
   }
   return signature.enabled ? (
-    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700">
+    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-200">
       <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500" aria-hidden="true" /> Enabled
     </span>
   ) : (
-    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-500 border border-slate-200">
+    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-muted text-muted-foreground border border-border">
       Disabled
     </span>
   );
@@ -202,12 +202,12 @@ export default function SignaturesPanel() {
     <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center gap-3">
-        <div className="p-2 bg-blue-100 rounded-lg">
-          <PenLine className="w-5 h-5 text-blue-600" />
+        <div className="p-2 bg-blue-100 dark:bg-blue-500/20 rounded-lg">
+          <PenLine className="w-5 h-5 text-blue-600 dark:text-blue-300" />
         </div>
         <div>
-          <h3 className="text-lg font-semibold text-gray-900">Signatures</h3>
-          <p className="text-sm text-gray-500 max-w-2xl">
+          <h3 className="text-lg font-semibold text-foreground">Signatures</h3>
+          <p className="text-sm text-muted-foreground max-w-2xl">
             Per-user email signatures, appended to outbound <strong>reply emails only</strong> — internal notes and
             the stored ticket thread stay clean. Members manage their own from the account menu (Notifications);
             here you can edit any member&rsquo;s, toggle them, or mass-apply a template.
@@ -217,21 +217,21 @@ export default function SignaturesPanel() {
 
       {/* Alerts */}
       {error && (
-        <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+        <div className="flex items-start gap-2 p-3 bg-red-50 dark:bg-red-500/15 border border-red-200 dark:border-red-500/30 rounded-lg text-sm text-red-700 dark:text-red-200">
           <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" /><span>{error}</span>
         </div>
       )}
       {successMsg && (
-        <div className="flex items-start gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-700">
+        <div className="flex items-start gap-2 p-3 bg-emerald-50 dark:bg-emerald-500/15 border border-emerald-200 dark:border-emerald-500/30 rounded-lg text-sm text-emerald-700 dark:text-emerald-200">
           <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" /><span>{successMsg}</span>
         </div>
       )}
 
       {/* Mass-apply template */}
       <div className="tp-card p-3.5 space-y-2.5">
-        <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
-          <Wand2 className="w-4 h-4 text-blue-600" /> Apply a signature template
-          <span className="text-xs font-normal text-gray-500">
+        <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+          <Wand2 className="w-4 h-4 text-blue-600 dark:text-blue-300" /> Apply a signature template
+          <span className="text-xs font-normal text-muted-foreground">
             to {selected.size} selected member{selected.size === 1 ? '' : 's'}
           </span>
         </div>
@@ -242,10 +242,10 @@ export default function SignaturesPanel() {
           ariaLabel="Signature template"
           minHeight={110}
         />
-        <p className="text-[11px] text-slate-500">
-          Variables: <code className="rounded bg-slate-100 px-1">{'{{name}}'}</code>{' '}
-          <code className="rounded bg-slate-100 px-1">{'{{title}}'}</code>{' '}
-          <code className="rounded bg-slate-100 px-1">{'{{email}}'}</code> — filled from each member&rsquo;s
+        <p className="text-[11px] text-muted-foreground">
+          Variables: <code className="rounded bg-muted px-1">{'{{name}}'}</code>{' '}
+          <code className="rounded bg-muted px-1">{'{{title}}'}</code>{' '}
+          <code className="rounded bg-muted px-1">{'{{email}}'}</code> — filled from each member&rsquo;s
           profile (title comes from Entra when available).
         </p>
         <div className="flex items-center gap-2">
@@ -253,7 +253,7 @@ export default function SignaturesPanel() {
             type="button"
             onClick={runPreview}
             disabled={previewing || selected.size === 0 || !template.trim()}
-            className="tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            className="tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-border bg-card text-foreground/85 hover:bg-muted/50 disabled:opacity-50"
           >
             {previewing ? <Loader className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
             Preview
@@ -269,24 +269,24 @@ export default function SignaturesPanel() {
             Apply to selected
           </button>
           {!previews && selected.size > 0 && (
-            <span className="text-[11px] text-slate-400">Preview first — nothing is written until you apply.</span>
+            <span className="text-[11px] text-muted-foreground/75">Preview first — nothing is written until you apply.</span>
           )}
         </div>
         {previews && (
-          <div className="space-y-2 rounded-lg border border-blue-100 bg-blue-50/40 p-3" data-testid="mass-apply-previews">
-            <div className="text-xs font-semibold text-slate-700">
+          <div className="space-y-2 rounded-lg border border-blue-100 dark:border-blue-500/20 bg-blue-50/40 dark:bg-blue-500/10 p-3" data-testid="mass-apply-previews">
+            <div className="text-xs font-semibold text-foreground/85">
               Preview — what each member gets ({previews.results?.length || 0}):
             </div>
             <div className="grid gap-2 sm:grid-cols-2">
               {(previews.results || []).map((p) => (
-                <div key={p.technicianId} className="rounded-lg border border-slate-200 bg-white p-2.5">
-                  <div className="mb-1 text-xs font-semibold text-slate-600">{p.name} · {p.email}</div>
+                <div key={p.technicianId} className="rounded-lg border border-border bg-card p-2.5">
+                  <div className="mb-1 text-xs font-semibold text-muted-foreground">{p.name} · {p.email}</div>
                   <SafeHtml html={p.html} className="text-xs" />
                 </div>
               ))}
             </div>
             {(previews.skipped || []).length > 0 && (
-              <p className="text-[11px] text-amber-700">
+              <p className="text-[11px] text-amber-700 dark:text-amber-200">
                 Skipped: {previews.skipped.map((s) => `${s.name} (${s.reason})`).join(', ')}
               </p>
             )}
@@ -295,30 +295,30 @@ export default function SignaturesPanel() {
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center py-12 text-gray-400">
+        <div className="flex items-center justify-center py-12 text-muted-foreground/75">
           <Loader className="w-5 h-5 animate-spin mr-2" /> Loading signatures…
         </div>
       ) : (
         <div className="tp-card rounded-xl overflow-hidden">
-          <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-slate-50/60 px-3 py-2.5">
+          <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-3 py-2.5">
             <div className="relative w-full sm:w-64">
-              <Search className="w-4 h-4 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" aria-hidden="true" />
+              <Search className="w-4 h-4 text-muted-foreground/75 absolute left-2.5 top-1/2 -translate-y-1/2" aria-hidden="true" />
               <input
                 value={searchQ}
                 onChange={(e) => setSearchQ(e.target.value)}
                 placeholder="Search name or email…"
                 aria-label="Search members"
-                className="w-full pl-8 pr-3 py-1.5 border border-input rounded-lg text-sm bg-white tp-focus-ring"
+                className="w-full pl-8 pr-3 py-1.5 border border-input rounded-lg text-sm bg-card tp-focus-ring"
               />
             </div>
-            <span className="ml-auto hidden md:inline text-xs text-slate-400">
+            <span className="ml-auto hidden md:inline text-xs text-muted-foreground/75">
               {rows.length} shown · select rows for the template above
             </span>
           </div>
 
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
-              <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+              <thead className="bg-muted/50 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
                 <tr>
                   <th className="px-3 py-2 w-8">
                     <input
@@ -326,7 +326,7 @@ export default function SignaturesPanel() {
                       checked={allSelected}
                       onChange={toggleSelectAll}
                       aria-label="Select all active members"
-                      className="h-4 w-4 rounded border-slate-300 text-blue-600"
+                      className="h-4 w-4 rounded border-input text-blue-600 dark:text-blue-300"
                     />
                   </th>
                   <th className="px-3 py-2">Member</th>
@@ -335,10 +335,10 @@ export default function SignaturesPanel() {
                   <th className="px-3 py-2 text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 bg-white">
+              <tbody className="divide-y divide-border/60 bg-card">
                 {rows.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="px-3 py-8 text-center text-sm text-slate-400">
+                    <td colSpan={5} className="px-3 py-8 text-center text-sm text-muted-foreground/75">
                       {searchQ ? `No members match “${searchQ}”.` : 'No members in this workspace.'}
                     </td>
                   </tr>
@@ -347,7 +347,7 @@ export default function SignaturesPanel() {
                   const key = m.email || `tech-${m.technicianId}`;
                   const canSelect = Boolean(m.technicianId && m.email && m.isActive);
                   return (
-                    <tr key={key} className={`transition-colors hover:bg-slate-50/70 ${m.isActive ? '' : 'opacity-60'}`}>
+                    <tr key={key} className={`transition-colors hover:bg-muted/35 ${m.isActive ? '' : 'opacity-60'}`}>
                       <td className="px-3 py-2">
                         <input
                           type="checkbox"
@@ -355,25 +355,25 @@ export default function SignaturesPanel() {
                           disabled={!canSelect}
                           onChange={() => toggleSelect(m.technicianId)}
                           aria-label={`Select ${m.name}`}
-                          className="h-4 w-4 rounded border-slate-300 text-blue-600 disabled:opacity-40"
+                          className="h-4 w-4 rounded border-input text-blue-600 dark:text-blue-300 disabled:opacity-40"
                         />
                       </td>
                       <td className="px-3 py-2">
                         <div className="flex items-center gap-2.5 min-w-0">
                           <Avatar name={m.name} photoUrl={m.photoUrl} dim={!m.isActive} />
                           <div className="min-w-0">
-                            <div className={`text-sm font-medium truncate ${m.isActive ? 'text-gray-900' : 'text-slate-500'}`}>{m.name}</div>
-                            <div className="text-xs text-gray-500 truncate">{m.email || '—'}</div>
+                            <div className={`text-sm font-medium truncate ${m.isActive ? 'text-foreground' : 'text-muted-foreground'}`}>{m.name}</div>
+                            <div className="text-xs text-muted-foreground truncate">{m.email || '—'}</div>
                           </div>
                         </div>
                       </td>
                       <td className="px-3 py-2"><SignatureStatus signature={m.signature} /></td>
                       <td className="px-3 py-2 hidden md:table-cell">
                         {m.signature?.updatedAt ? (
-                          <span className="text-xs text-slate-500" title={m.signature.updatedBy ? `by ${m.signature.updatedBy}` : undefined}>
+                          <span className="text-xs text-muted-foreground" title={m.signature.updatedBy ? `by ${m.signature.updatedBy}` : undefined}>
                             {new Date(m.signature.updatedAt).toLocaleDateString()}
                           </span>
-                        ) : <span className="text-xs text-slate-300">—</span>}
+                        ) : <span className="text-xs text-muted-foreground/50">—</span>}
                       </td>
                       <td className="px-3 py-2">
                         <div className="flex items-center justify-end gap-0.5">
@@ -383,7 +383,7 @@ export default function SignaturesPanel() {
                               onClick={() => toggleEnabled(m)}
                               disabled={togglingEmail === m.email}
                               title={m.signature.enabled ? 'Disable signature' : 'Enable signature'}
-                              className={`p-1.5 rounded-lg tp-focus-ring ${m.signature.enabled ? 'text-gray-400 hover:text-red-600' : 'text-emerald-600 hover:text-emerald-700'}`}
+                              className={`p-1.5 rounded-lg tp-focus-ring ${m.signature.enabled ? 'text-muted-foreground/75 hover:text-red-600 dark:hover:text-red-300' : 'text-emerald-600 dark:text-emerald-300 hover:text-emerald-700 dark:hover:text-emerald-200'}`}
                             >
                               {togglingEmail === m.email
                                 ? <Loader className="w-4 h-4 animate-spin" />
@@ -395,7 +395,7 @@ export default function SignaturesPanel() {
                               type="button"
                               onClick={() => openEdit(m)}
                               title={`Edit ${m.name}'s signature`}
-                              className="p-1.5 text-gray-400 hover:text-blue-600 rounded-lg tp-focus-ring"
+                              className="p-1.5 text-muted-foreground/75 hover:text-blue-600 dark:hover:text-blue-300 rounded-lg tp-focus-ring"
                             >
                               <PenLine className="w-4 h-4" />
                             </button>
@@ -413,24 +413,24 @@ export default function SignaturesPanel() {
 
       {/* Edit modal */}
       {editTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" role="dialog" aria-modal="true" aria-label={`Edit ${editTarget.name}'s signature`}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 dark:bg-black/70 p-4" role="dialog" aria-modal="true" aria-label={`Edit ${editTarget.name}'s signature`}>
           <div className="tp-card w-full max-w-2xl rounded-xl shadow-soft animate-scaleIn max-h-[90vh] overflow-y-auto settings-scrollbar">
-            <div className="flex items-center gap-2.5 border-b border-slate-200 px-4 py-3">
+            <div className="flex items-center gap-2.5 border-b border-border px-4 py-3">
               <Avatar name={editTarget.name} photoUrl={editTarget.photoUrl} />
               <div className="min-w-0 flex-1">
-                <div className="text-sm font-bold text-slate-900 truncate">{editTarget.name}</div>
-                <div className="text-xs text-slate-500 truncate">{editTarget.email}</div>
+                <div className="text-sm font-bold text-foreground truncate">{editTarget.name}</div>
+                <div className="text-xs text-muted-foreground truncate">{editTarget.email}</div>
               </div>
-              <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-600">
+              <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-semibold text-muted-foreground">
                 <input
                   type="checkbox"
                   checked={editEnabled}
                   onChange={(e) => setEditEnabled(e.target.checked)}
-                  className="h-4 w-4 rounded border-slate-300 text-blue-600"
+                  className="h-4 w-4 rounded border-input text-blue-600 dark:text-blue-300"
                 />
                 Enabled
               </label>
-              <button type="button" onClick={() => setEditTarget(null)} aria-label="Close" className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg tp-focus-ring">
+              <button type="button" onClick={() => setEditTarget(null)} aria-label="Close" className="p-1.5 text-muted-foreground/75 hover:text-foreground/85 rounded-lg tp-focus-ring">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -443,16 +443,16 @@ export default function SignaturesPanel() {
                 minHeight={130}
               />
               <div>
-                <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Preview</div>
-                <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50/60 p-3">
+                <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Preview</div>
+                <div className="rounded-lg border border-dashed border-border bg-muted/30 p-3">
                   {String(editHtml || '').trim()
                     ? <SafeHtml html={editHtml} />
-                    : <p className="text-sm text-slate-400">Empty — their replies go out unsigned.</p>}
+                    : <p className="text-sm text-muted-foreground/75">Empty — their replies go out unsigned.</p>}
                 </div>
               </div>
             </div>
-            <div className="flex justify-end gap-2 border-t border-slate-200 px-4 py-3">
-              <button type="button" onClick={() => setEditTarget(null)} className="tp-focus-ring px-3 py-2 rounded-lg text-sm text-slate-600 hover:text-slate-900">
+            <div className="flex justify-end gap-2 border-t border-border px-4 py-3">
+              <button type="button" onClick={() => setEditTarget(null)} className="tp-focus-ring px-3 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground">
                 Cancel
               </button>
               <button

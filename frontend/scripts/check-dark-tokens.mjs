@@ -1,20 +1,27 @@
-#!/usr/bin/env node
 /**
- * Dark-mode token guard (Phase DM-A, v3.8.02).
+ * Dark-mode token guard (Phase DM-A, v3.8.02; widened in DM-B, v3.8.03).
  *
- * The swept chrome uses design tokens (bg-card, text-foreground,
+ * Swept surfaces use design tokens (bg-card, text-foreground,
  * text-muted-foreground, border-border, bg-muted …) instead of hardcoded
- * slate/white utilities, so it themes for free. This grep-based check keeps
- * it that way: for every file under the swept paths it counts legacy
- * classes — `bg-white`, `text-slate-*`, `border-slate-*` (and `/alpha`
- * variants) — and fails when a file exceeds its baselined count. New files
- * under a swept path start at a baseline of 0. `dark:`-prefixed twins are
- * exempt (they are the sanctioned way to tint an accent that has no token).
+ * slate/gray/white utilities, so they theme for free. This grep-based check
+ * keeps it that way: for every file under the swept paths it counts legacy
+ * classes — `bg-white`, `text-slate-*`/`text-gray-*`, `border-slate-*`,
+ * `bg-slate-50…400`, `divide-slate-*` (and `/alpha` variants) — and fails when
+ * a file exceeds its baselined count. New files under a swept path start at a
+ * baseline of 0. Exempt on purpose: `dark:`-prefixed twins (the sanctioned way
+ * to tint an accent that has no token), low-alpha white overlays
+ * (`bg-white/10…30` — highlights on coloured buttons/bands, same in both
+ * themes) and dark chrome (`bg-slate-800/900/950` tooltips and hero bands,
+ * which are dark in both themes).
+ *
+ * Since DM-B the swept set is the whole of src/ minus the light-only pages
+ * (Login, WorkspacePicker, the public token pages, the Summit pages) and the
+ * legacy TechnicianDetail.jsx. Baselined residue = dark-chrome text
+ * (`text-slate-300` on a slate-900 band) that is correct as written.
  *
  *   node scripts/check-dark-tokens.mjs            # check (CI)
  *   node scripts/check-dark-tokens.mjs --update   # re-baseline after a sweep
- *
- * Widen SWEPT_PATHS as DM-B converts more of the app.
+ *   node scripts/dark-migrate.mjs <files>         # the codemod that does the bulk
  */
 import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
@@ -24,19 +31,25 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const BASELINE_FILE = join(ROOT, 'scripts', 'dark-tokens-baseline.json');
 
 // Files or directories (relative to frontend/) that have been swept.
-export const SWEPT_PATHS = [
-  'src/App.jsx',
-  'src/components/AppShell.jsx',
-  'src/components/AppHeader.jsx',
-  'src/components/CommandPalette.jsx',
-  'src/components/DemoModeBanner.jsx',
-  'src/components/SyncHealthBanner.jsx',
-  'src/components/EmailHealthBanner.jsx',
-  'src/components/nav',
-  'src/contexts/ThemeContext.jsx',
+export const SWEPT_PATHS = ['src'];
+
+// Light-only by design (they carry `.tp-light`), plus the legacy tech page.
+export const EXCLUDED_PATHS = [
+  'src/pages/Login.jsx',
+  'src/pages/WorkspacePicker.jsx',
+  'src/pages/PublicApprovalDecision.jsx',
+  'src/pages/PublicTicketEscalation.jsx',
+  'src/pages/PublicTicketFeedback.jsx',
+  'src/pages/PublicTicketStatus.jsx',
+  'src/pages/PublicTicketUrgency.jsx',
+  'src/pages/SummitReport.jsx',
+  'src/pages/SummitVote.jsx',
+  'src/pages/TechnicianDetail.jsx',
 ];
 
-const LEGACY = /^(bg-white|text-slate-\d{2,3}|border-slate-\d{2,3})(\/[\w.[\]]+)?$/;
+const LEGACY = /^(bg-white|text-(?:slate|gray)-\d{2,3}|border(?:-[trblxyse])?-(?:slate|gray)-\d{2,3}|bg-(?:slate|gray)-(?:50|100|200|300|400)|divide-(?:slate|gray)-\d{2,3})(\/[\w.[\]]+)?$/;
+// `bg-white/10…30` = overlay highlight on a coloured surface; not a light surface.
+const LOW_ALPHA_WHITE = /^bg-white\/(?:[5-9]|[12]\d|30)$/;
 
 /** Count legacy utility classes in a source string (dark: twins exempt). */
 export function countLegacyTokens(source) {
@@ -48,6 +61,7 @@ export function countLegacyTokens(source) {
     const parts = raw.split(':');
     const base = parts[parts.length - 1];
     if (parts.slice(0, -1).includes('dark')) continue;
+    if (LOW_ALPHA_WHITE.test(base)) continue;
     if (LEGACY.test(base)) {
       count += 1;
       hits.push(raw);
@@ -65,15 +79,17 @@ function walk(path, out) {
   }
 }
 
-export function scanSwept(root = ROOT, sweptPaths = SWEPT_PATHS) {
+export function scanSwept(root = ROOT, sweptPaths = SWEPT_PATHS, excluded = EXCLUDED_PATHS) {
   const files = [];
   for (const p of sweptPaths) {
     const abs = join(root, p);
     try { walk(abs, files); } catch { /* path not present (yet) */ }
   }
+  const skip = new Set(excluded);
   const counts = {};
   for (const file of files) {
     const rel = relative(root, file).split(sep).join('/');
+    if (skip.has(rel) || rel.includes('/__mocks__/')) continue;
     counts[rel] = countLegacyTokens(readFileSync(file, 'utf8'));
   }
   return counts;

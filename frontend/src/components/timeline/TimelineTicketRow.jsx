@@ -45,7 +45,7 @@ export default function TimelineTicketRow({ ticket, defaultFirstName, onExcludeC
   const accent = ticket._accent;
 
   const pickedStripClass = accent ? accent.bg : 'bg-emerald-500';
-  const pickedBadgeClass = accent ? accent.badge : 'bg-emerald-100 text-emerald-800 border border-emerald-300';
+  const pickedBadgeClass = accent ? accent.badge : 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-500/40';
   const episodes = Array.isArray(ticket.assignmentEpisodes) ? ticket.assignmentEpisodes : [];
   const hasHandoffHistory = episodes.length > 0
     && (episodes.length > 1 || ticket.wasRejected || (ticket.assignmentEvents || []).length > 0);
@@ -81,24 +81,24 @@ export default function TimelineTicketRow({ ticket, defaultFirstName, onExcludeC
       className={`border rounded overflow-hidden transition-all ${
         picked
           ? isExtended
-            ? 'bg-emerald-50/40 border-emerald-200'
-            : 'bg-emerald-50 border-emerald-200'
+            ? 'bg-emerald-50/40 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/30'
+            : 'bg-emerald-50 dark:bg-emerald-500/15 border-emerald-200 dark:border-emerald-500/30'
           : isExtended
-            ? 'bg-slate-50 border-slate-200 opacity-60'
-            : 'bg-slate-100 border-slate-300 opacity-75'
+            ? 'bg-muted/50 border-border opacity-60'
+            : 'bg-muted border-input opacity-75'
       }`}
     >
       <div className="flex items-stretch">
         {/* Priority strip */}
-        <div className={`${PRIORITY_STRIP_COLORS[ticket.priority] || 'bg-slate-300'} w-1 flex-shrink-0`} />
+        <div className={`${PRIORITY_STRIP_COLORS[ticket.priority] || 'bg-muted-foreground/40'} w-1 flex-shrink-0`} />
         {/* Picked/not-picked indicator strip */}
-        <div className={`w-1 flex-shrink-0 ${picked ? pickedStripClass : 'bg-slate-400'}`} />
+        <div className={`w-1 flex-shrink-0 ${picked ? pickedStripClass : 'bg-muted-foreground/60'}`} />
 
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 px-2 py-2 sm:py-1.5">
           {hasHandoffHistory && (
             <button
               onClick={() => setExpanded((value) => !value)}
-              className="p-0.5 rounded text-slate-400 hover:bg-slate-200 hover:text-slate-700 flex-shrink-0"
+              className="p-0.5 rounded text-muted-foreground/75 hover:bg-secondary hover:text-foreground/85 flex-shrink-0"
               title={expanded ? 'Hide handoff history' : 'Show handoff history'}
             >
               <ChevronDown className={`w-3 h-3 transition-transform ${expanded ? 'rotate-180' : ''}`} />
@@ -111,7 +111,7 @@ export default function TimelineTicketRow({ ticket, defaultFirstName, onExcludeC
             : <Sunrise className="w-3 h-3 text-amber-500 flex-shrink-0" />}
 
           {/* Date-time (PT) */}
-          <span className={`text-slate-400 text-[10px] flex-shrink-0 whitespace-nowrap ${showFullDate ? 'sm:w-[105px]' : 'sm:w-[68px]'}`}>
+          <span className={`text-muted-foreground/75 text-[10px] flex-shrink-0 whitespace-nowrap ${showFullDate ? 'sm:w-[105px]' : 'sm:w-[68px]'}`}>
             {(() => {
               const d = new Date(ticket.createdAt);
               const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/Los_Angeles' });
@@ -132,7 +132,7 @@ export default function TimelineTicketRow({ ticket, defaultFirstName, onExcludeC
               target="_blank"
               rel="noopener noreferrer"
               title="Open in FreshService"
-              className={`flex-shrink-0 ${internalHref ? 'text-slate-400 hover:text-blue-600' : 'text-blue-600 hover:text-blue-800'}`}
+              className={`flex-shrink-0 ${internalHref ? 'text-muted-foreground/75 hover:text-blue-600 dark:hover:text-blue-300' : 'text-blue-600 dark:text-blue-300 hover:text-blue-800 dark:hover:text-blue-200'}`}
             >
               <ExternalLink className="w-3 h-3" />
             </a>
@@ -144,7 +144,7 @@ export default function TimelineTicketRow({ ticket, defaultFirstName, onExcludeC
               src={pickerPhoto}
               alt={pickerName}
               title={pickerName}
-              className="w-5 h-5 rounded-full object-cover flex-shrink-0 border border-slate-200"
+              className="w-5 h-5 rounded-full object-cover flex-shrink-0 border border-border"
               onError={(e) => { e.currentTarget.style.display = 'none'; }}
             />
           ) : picked ? (
@@ -159,30 +159,30 @@ export default function TimelineTicketRow({ ticket, defaultFirstName, onExcludeC
               to={internalHref}
               state={linkState}
               title="Open in Ticket Pulse"
-              className={`order-first min-w-0 w-full font-medium text-sm hover:underline hover:text-blue-700 sm:order-none sm:w-auto sm:flex-1 sm:text-xs ${picked ? 'text-slate-900' : 'text-slate-500'}`}
+              className={`order-first min-w-0 w-full font-medium text-sm hover:underline hover:text-blue-700 dark:hover:text-blue-200 sm:order-none sm:w-auto sm:flex-1 sm:text-xs ${picked ? 'text-foreground' : 'text-muted-foreground'}`}
             >
               {ticket.subject}
             </Link>
           ) : (
-            <span className={`order-first min-w-0 w-full font-medium text-sm sm:order-none sm:w-auto sm:flex-1 sm:text-xs ${picked ? 'text-slate-900' : 'text-slate-500'}`}>
+            <span className={`order-first min-w-0 w-full font-medium text-sm sm:order-none sm:w-auto sm:flex-1 sm:text-xs ${picked ? 'text-foreground' : 'text-muted-foreground'}`}>
               {ticket.subject}
             </span>
           )}
 
           {/* Picked badge */}
-          <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium flex-shrink-0 ${picked ? pickedBadgeClass : 'bg-slate-200 text-slate-600'}`}>
+          <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium flex-shrink-0 ${picked ? pickedBadgeClass : 'bg-secondary text-muted-foreground'}`}>
             {picked ? `✓ ${pickerName}` : '✗ Not picked'}
           </span>
 
           {acquisitionLabel && (
-            <span className="px-1.5 py-0.5 rounded text-[10px] font-medium flex-shrink-0 bg-indigo-50 text-indigo-700 border border-indigo-100">
+            <span className="px-1.5 py-0.5 rounded text-[10px] font-medium flex-shrink-0 bg-indigo-50 dark:bg-indigo-500/15 text-indigo-700 dark:text-indigo-200 border border-indigo-100 dark:border-indigo-500/20">
               {acquisitionLabel}
             </span>
           )}
 
           {ticket.wasRejected && (
             <span
-              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold flex-shrink-0 bg-red-50 text-red-700 border border-red-200"
+              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold flex-shrink-0 bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200 border border-red-200 dark:border-red-500/30"
               title={ticket.lastRejectedAt ? `Last returned ${formatPTTime(ticket.lastRejectedAt)}${ticket.lastRejectedByName ? ` by ${ticket.lastRejectedByName}` : ''}` : 'Ticket was returned to the queue'}
             >
               <RotateCcw className="w-3 h-3" />
@@ -191,14 +191,14 @@ export default function TimelineTicketRow({ ticket, defaultFirstName, onExcludeC
           )}
 
           {ticket.handoffCount > 1 && (
-            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium flex-shrink-0 bg-amber-50 text-amber-700 border border-amber-100">
+            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium flex-shrink-0 bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200 border border-amber-100 dark:border-amber-500/20">
               <GitBranch className="w-3 h-3" />
               {ticket.handoffCount} handoffs
             </span>
           )}
 
           {/* Status */}
-          <span className={`${STATUS_COLORS[ticket.status] || 'bg-slate-100 text-slate-600'} px-1.5 py-0.5 rounded text-[10px] font-medium flex-shrink-0`}>
+          <span className={`${STATUS_COLORS[ticket.status] || 'bg-muted text-muted-foreground'} px-1.5 py-0.5 rounded text-[10px] font-medium flex-shrink-0`}>
             {ticket.status}
           </span>
 
@@ -206,7 +206,7 @@ export default function TimelineTicketRow({ ticket, defaultFirstName, onExcludeC
           {categoryLabel && (
             <button
               onClick={() => onExcludeCategory?.(categoryLabel)}
-              className="max-w-[150px] truncate rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600 hover:bg-red-50 hover:text-red-600 hover:line-through cursor-pointer sm:max-w-[100px] flex-shrink-0"
+              className="max-w-[150px] truncate rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-red-50 dark:hover:bg-red-500/15 hover:text-red-600 dark:hover:text-red-300 hover:line-through cursor-pointer sm:max-w-[100px] flex-shrink-0"
               title={`Click to hide "${categoryLabel}"`}
             >
               {categoryLabel}
@@ -215,13 +215,13 @@ export default function TimelineTicketRow({ ticket, defaultFirstName, onExcludeC
 
           {/* Assignee (if not picked by any selected tech) */}
           {!picked && ticket.assignedTechName && (
-            <span className="text-slate-500 font-semibold text-[10px] flex-shrink-0 whitespace-nowrap">
+            <span className="text-muted-foreground font-semibold text-[10px] flex-shrink-0 whitespace-nowrap">
               → {ticket.assignedTechName}
             </span>
           )}
 
           {showCurrentHolder && (
-            <span className="text-slate-500 font-semibold text-[10px] flex-shrink-0 whitespace-nowrap">
+            <span className="text-muted-foreground font-semibold text-[10px] flex-shrink-0 whitespace-nowrap">
               Now → {currentHolderName}
             </span>
           )}
@@ -229,7 +229,7 @@ export default function TimelineTicketRow({ ticket, defaultFirstName, onExcludeC
           {/* Wait time */}
           {wait && (
             <span
-              className="bg-slate-100 text-slate-600 border border-slate-200 px-1.5 py-0.5 rounded text-[10px] font-semibold flex-shrink-0 whitespace-nowrap"
+              className="bg-muted text-muted-foreground border border-border px-1.5 py-0.5 rounded text-[10px] font-semibold flex-shrink-0 whitespace-nowrap"
               title="Time to first assignment"
             >
               ⏱ {wait}
@@ -238,7 +238,7 @@ export default function TimelineTicketRow({ ticket, defaultFirstName, onExcludeC
         </div>
       </div>
       {expanded && episodes.length > 0 && (
-        <div className="border-t border-slate-200 bg-white/70 px-3 py-2">
+        <div className="border-t border-border bg-card/70 px-3 py-2">
           <div className="flex flex-wrap items-center gap-1.5">
             {episodes.map((episode, index) => {
               const isRejected = episode.endMethod === 'rejected';
@@ -249,10 +249,10 @@ export default function TimelineTicketRow({ ticket, defaultFirstName, onExcludeC
                   <div
                     className={`flex min-w-0 flex-wrap items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] ${
                       isActive
-                        ? 'bg-green-50 border-green-200 text-green-800'
+                        ? 'bg-green-50 dark:bg-green-500/15 border-green-200 dark:border-green-500/30 text-green-800 dark:text-green-200'
                         : isRejected
-                          ? 'bg-red-50 border-red-200 text-red-700'
-                          : 'bg-slate-50 border-slate-200 text-slate-700'
+                          ? 'bg-red-50 dark:bg-red-500/15 border-red-200 dark:border-red-500/30 text-red-700 dark:text-red-200'
+                          : 'bg-muted/50 border-border text-foreground/85'
                     }`}
                     title={[
                       episode.techName || 'Unknown technician',
@@ -263,13 +263,13 @@ export default function TimelineTicketRow({ ticket, defaultFirstName, onExcludeC
                     ].filter(Boolean).join('\n')}
                   >
                     <span className="max-w-[11rem] truncate font-semibold sm:max-w-none">{episode.techName || 'Unknown'}</span>
-                    <span className="rounded bg-white/70 px-1 font-medium">{methodLabel}</span>
-                    <span className="text-slate-400">{formatPTTime(episode.startedAt)}</span>
+                    <span className="rounded bg-card/70 px-1 font-medium">{methodLabel}</span>
+                    <span className="text-muted-foreground/75">{formatPTTime(episode.startedAt)}</span>
                     {isRejected && <RotateCcw className="w-3 h-3" />}
-                    {isActive && <span className="font-semibold text-green-700">current</span>}
+                    {isActive && <span className="font-semibold text-green-700 dark:text-green-200">current</span>}
                   </div>
                   {index < episodes.length - 1 && (
-                    <div className="flex items-center gap-0.5 text-[10px] font-medium text-slate-400">
+                    <div className="flex items-center gap-0.5 text-[10px] font-medium text-muted-foreground/75">
                       <ArrowRight className="w-3 h-3" />
                       <span>{isRejected ? 'rejected' : 'reassigned'}</span>
                     </div>

@@ -23,9 +23,9 @@ function SectionCard({ icon: Icon, title, hint, children }) {
     <section className="tp-card rounded-xl p-4">
       <div className="flex items-center gap-2 mb-1">
         <Icon className="w-4 h-4 text-blue-500" aria-hidden="true" />
-        <h3 className="text-sm font-bold text-slate-800">{title}</h3>
+        <h3 className="text-sm font-bold text-foreground">{title}</h3>
       </div>
-      <p className="text-xs text-slate-400 mb-3">{hint}</p>
+      <p className="text-xs text-muted-foreground/75 mb-3">{hint}</p>
       {children}
     </section>
   );
@@ -97,14 +97,14 @@ export function SlaSection() {
 
   return (
     <SectionCard icon={Timer} title="SLA policies (Ticket Pulse tickets)" hint="Per-type, per-priority clocks applied when a TP-born ticket is created (e.g. a tighter Major Incident response than a Service Request). The clock pauses while a ticket is Pending. Build escalation ladders as workflows on the SLA-breach triggers.">
-      <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2.5">
+      <div className="mb-3 rounded-lg border border-border bg-muted/35 px-3 py-2.5">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-start gap-2">
             <CalendarClock className="w-4 h-4 text-blue-500 mt-0.5 shrink-0" aria-hidden="true" />
             <div>
-              <p className="text-xs font-bold text-slate-700">Calendar-aware SLAs</p>
-              <p className="text-[11px] text-slate-500 mt-0.5 max-w-lg">
-                Due dates count business hours only — uses <span className="font-semibold text-slate-600">Settings → Business Hours &amp; Holidays</span>.
+              <p className="text-xs font-bold text-foreground/85">Calendar-aware SLAs</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5 max-w-lg">
+                Due dates count business hours only — uses <span className="font-semibold text-muted-foreground">Settings → Business Hours &amp; Holidays</span>.
                 The clock already pauses while a ticket is Pending; this also stops it over weekends and holidays.
               </p>
             </div>
@@ -116,9 +116,9 @@ export function SlaSection() {
             aria-label={`Calendar-aware SLAs ${calendarAware ? 'on' : 'off'}`}
             onClick={toggleCalendar}
             disabled={calendarAware === null || calendarBusy}
-            className={`tp-focus-ring relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-60 ${calendarAware ? 'bg-blue-600' : 'bg-slate-300'}`}
+            className={`tp-focus-ring relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-60 ${calendarAware ? 'bg-blue-600' : 'bg-muted-foreground/40'}`}
           >
-            <span className="absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform" style={{ transform: calendarAware ? 'translateX(16px)' : 'translateX(0)' }} aria-hidden="true" />
+            <span className="absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-card shadow transition-transform" style={{ transform: calendarAware ? 'translateX(16px)' : 'translateX(0)' }} aria-hidden="true" />
           </button>
         </div>
         {calendarAware === true && (
@@ -128,7 +128,7 @@ export function SlaSection() {
         )}
       </div>
       {activeTypes.length === 0 && (
-        <p className="text-xs text-slate-400 italic">Configure ticket types above first — SLAs are defined per type.</p>
+        <p className="text-xs text-muted-foreground/75 italic">Configure ticket types above first — SLAs are defined per type.</p>
       )}
       {activeTypes.length > 1 && (
         <div className="flex flex-wrap gap-1 mb-2.5" role="tablist" aria-label="SLA ticket type">
@@ -140,7 +140,7 @@ export function SlaSection() {
                 role="tab"
                 aria-selected={typeTab === String(t.id)}
                 onClick={() => setTypeTab(String(t.id))}
-                className={`tp-focus-ring px-2.5 py-1 rounded-full text-[11px] font-semibold border ${typeTab === String(t.id) ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-500 border-slate-200 hover:border-blue-300'}`}
+                className={`tp-focus-ring px-2.5 py-1 rounded-full text-[11px] font-semibold border ${typeTab === String(t.id) ? 'bg-blue-600 text-white border-blue-600' : 'bg-card text-muted-foreground border-border hover:border-blue-300 dark:hover:border-blue-500/40'}`}
               >
                 {t.name}{count > 0 && <span className="ml-1 opacity-70">({count})</span>}
               </button>
@@ -177,15 +177,15 @@ function SlaRow({ priority, policy, busy, onSave, onDelete, calendarAware = fals
 
   return (
     <div className="flex items-center gap-2 text-xs">
-      <span className="w-16 font-semibold text-slate-600">{PRIORITY_LABELS[priority]}</span>
-      <label className="flex items-center gap-1 text-slate-400">
+      <span className="w-16 font-semibold text-muted-foreground">{PRIORITY_LABELS[priority]}</span>
+      <label className="flex items-center gap-1 text-muted-foreground/75">
         first response
-        <input type="number" min="5" value={fr} onChange={(e) => setFr(e.target.value)} placeholder="—" aria-label={`${PRIORITY_LABELS[priority]} first-response minutes`} className="tp-focus-ring w-20 border border-slate-200 rounded-md px-1.5 py-1 tabular-nums" />
+        <input type="number" min="5" value={fr} onChange={(e) => setFr(e.target.value)} placeholder="—" aria-label={`${PRIORITY_LABELS[priority]} first-response minutes`} className="tp-focus-ring w-20 border border-border rounded-md px-1.5 py-1 tabular-nums" />
         m
       </label>
-      <label className="flex items-center gap-1 text-slate-400">
+      <label className="flex items-center gap-1 text-muted-foreground/75">
         resolve
-        <input type="number" min="5" value={resolve} onChange={(e) => setResolve(e.target.value)} placeholder="—" aria-label={`${PRIORITY_LABELS[priority]} resolve minutes`} className="tp-focus-ring w-24 border border-slate-200 rounded-md px-1.5 py-1 tabular-nums" />
+        <input type="number" min="5" value={resolve} onChange={(e) => setResolve(e.target.value)} placeholder="—" aria-label={`${PRIORITY_LABELS[priority]} resolve minutes`} className="tp-focus-ring w-24 border border-border rounded-md px-1.5 py-1 tabular-nums" />
         m
       </label>
       {dirty && (
@@ -205,13 +205,13 @@ function SlaRow({ priority, policy, busy, onSave, onDelete, calendarAware = fals
             : 'Follows the business-hours calendar. Click to run this clock 24/7 (e.g. Urgent / Major Incident).'}
           className={`tp-focus-ring px-1.5 py-0.5 rounded-full text-[10px] font-bold border disabled:opacity-60 ${policy.calendarMode === 'always_on'
             ? 'bg-indigo-600 text-white border-indigo-600'
-            : 'bg-white text-slate-400 border-slate-200 hover:border-indigo-300 hover:text-indigo-500'}`}
+            : 'bg-card text-muted-foreground/75 border-border hover:border-indigo-300 dark:hover:border-indigo-500/40 hover:text-indigo-500'}`}
         >
           24/7
         </button>
       )}
       {policy && (
-        <button onClick={onDelete} aria-label={`Remove ${PRIORITY_LABELS[priority]} SLA`} className="tp-focus-ring ml-auto p-1 rounded text-slate-300 hover:text-red-500">
+        <button onClick={onDelete} aria-label={`Remove ${PRIORITY_LABELS[priority]} SLA`} className="tp-focus-ring ml-auto p-1 rounded text-muted-foreground/50 hover:text-red-500">
           <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
         </button>
       )}
@@ -298,21 +298,21 @@ function TicketTypesSection() {
         {types.map((t) => {
           const tone = TYPE_COLOR_TONES[t.color] || TYPE_COLOR_TONES.slate;
           return (
-            <div key={t.id} className={`rounded-lg border px-2.5 py-1.5 ${t.isActive ? 'border-slate-100' : 'border-slate-100 opacity-50'}`}>
+            <div key={t.id} className={`rounded-lg border px-2.5 py-1.5 ${t.isActive ? 'border-border/60' : 'border-border/60 opacity-50'}`}>
               <div className="flex items-center gap-2 text-xs">
                 <span aria-hidden="true" className={`inline-flex items-center justify-center min-w-[30px] h-[18px] px-1 rounded-[5px] text-[9px] font-bold tracking-wider ${tone.tile}`}>
                   {t.abbreviation || t.name.slice(0, 4).toUpperCase()}
                 </span>
-                <span className={`font-semibold ${t.isActive ? 'text-slate-700' : 'text-slate-400 line-through'}`}>{t.name}</span>
+                <span className={`font-semibold ${t.isActive ? 'text-foreground/85' : 'text-muted-foreground/75 line-through'}`}>{t.name}</span>
                 {t.isDefault && <span title="Default for new tickets"><Star className="w-3 h-3 text-amber-400 fill-amber-400" aria-label="Default type" /></span>}
                 {t.aiAssignable !== false
                   ? <span className="inline-flex items-center gap-0.5 text-[10px] text-indigo-500" title="The AI may classify tickets as this type"><Sparkles className="w-3 h-3" aria-hidden="true" />AI</span>
-                  : <span className="text-[10px] text-slate-400" title="Human-only: the AI never assigns this type">human-only</span>}
+                  : <span className="text-[10px] text-muted-foreground/75" title="Human-only: the AI never assigns this type">human-only</span>}
                 {t.fsTypeValue
-                  ? <span className="text-[10px] text-slate-400" title={`Written to FreshService as "${t.fsTypeValue}"`}>FS: {t.fsTypeValue}</span>
-                  : <span className="text-[10px] text-cyan-600 font-medium" title="Ticket Pulse–native: never written to FreshService">TP-only</span>}
+                  ? <span className="text-[10px] text-muted-foreground/75" title={`Written to FreshService as "${t.fsTypeValue}"`}>FS: {t.fsTypeValue}</span>
+                  : <span className="text-[10px] text-cyan-600 dark:text-cyan-300 font-medium" title="Ticket Pulse–native: never written to FreshService">TP-only</span>}
                 {fsStale(t) && (
-                  <span className="inline-flex items-center gap-0.5 text-[10px] text-amber-600" title="FreshService hasn't offered this type choice recently — it may have been removed in FS admin">
+                  <span className="inline-flex items-center gap-0.5 text-[10px] text-amber-600 dark:text-amber-300" title="FreshService hasn't offered this type choice recently — it may have been removed in FS admin">
                     <AlertTriangle className="w-3 h-3" aria-hidden="true" /> FS drift
                   </span>
                 )}
@@ -322,72 +322,72 @@ function TicketTypesSection() {
                 <span className="flex-1" />
                 {t.isActive && (
                   <>
-                    <button onClick={() => startEdit(t)} className="tp-focus-ring text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 hover:bg-slate-50">Edit</button>
+                    <button onClick={() => startEdit(t)} className="tp-focus-ring text-[10px] px-1.5 py-0.5 rounded border border-border text-muted-foreground hover:bg-muted/50">Edit</button>
                     {confirmRetire === t.id ? (
                       <button onClick={() => retire(t.id)} className="tp-focus-ring inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-red-600 text-white font-semibold">
                         <Archive className="w-3 h-3" aria-hidden="true" /> Confirm retire
                       </button>
                     ) : (
-                      <button onClick={() => setConfirmRetire(t.id)} aria-label={`Retire type ${t.name}`} className="tp-focus-ring text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-400 hover:text-red-500 hover:border-red-200">Retire</button>
+                      <button onClick={() => setConfirmRetire(t.id)} aria-label={`Retire type ${t.name}`} className="tp-focus-ring text-[10px] px-1.5 py-0.5 rounded border border-border text-muted-foreground/75 hover:text-red-500 hover:border-red-200 dark:hover:border-red-500/30">Retire</button>
                     )}
                   </>
                 )}
-                {!t.isActive && <span className="text-[10px] text-slate-300 italic">retired</span>}
+                {!t.isActive && <span className="text-[10px] text-muted-foreground/50 italic">retired</span>}
               </div>
-              {t.description && <p className="mt-1 ml-9 text-[11px] text-slate-400 line-clamp-2">{t.description}</p>}
+              {t.description && <p className="mt-1 ml-9 text-[11px] text-muted-foreground/75 line-clamp-2">{t.description}</p>}
             </div>
           );
         })}
-        {types.length === 0 && <p className="text-xs text-slate-400 italic">No ticket types configured — &ldquo;Check FreshService&rdquo; imports this workspace&apos;s FS type choices.</p>}
+        {types.length === 0 && <p className="text-xs text-muted-foreground/75 italic">No ticket types configured — &ldquo;Check FreshService&rdquo; imports this workspace&apos;s FS type choices.</p>}
       </div>
       {error && <p className="text-xs text-red-500 mb-1.5">{error}</p>}
       {draft ? (
-        <div className="rounded-lg border border-slate-200 p-2.5 space-y-1.5 text-xs">
+        <div className="rounded-lg border border-border p-2.5 space-y-1.5 text-xs">
           <div className="grid grid-cols-2 gap-1.5">
-            <input value={draft.name} disabled={Boolean(editingId)} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Type name (e.g. Breakfix)" aria-label="Type name" title={editingId ? 'Types cannot be renamed — retire and create a new one' : undefined} className="tp-focus-ring border border-slate-200 rounded-md px-2 py-1 disabled:bg-slate-50 disabled:text-slate-400" />
-            <input value={draft.abbreviation} onChange={(e) => setDraft({ ...draft, abbreviation: e.target.value.toUpperCase().slice(0, 6) })} placeholder="Pill code (e.g. BRK)" aria-label="Abbreviation" className="tp-focus-ring border border-slate-200 rounded-md px-2 py-1 uppercase" />
+            <input value={draft.name} disabled={Boolean(editingId)} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Type name (e.g. Breakfix)" aria-label="Type name" title={editingId ? 'Types cannot be renamed — retire and create a new one' : undefined} className="tp-focus-ring border border-border rounded-md px-2 py-1 disabled:bg-muted/50 disabled:text-muted-foreground/75" />
+            <input value={draft.abbreviation} onChange={(e) => setDraft({ ...draft, abbreviation: e.target.value.toUpperCase().slice(0, 6) })} placeholder="Pill code (e.g. BRK)" aria-label="Abbreviation" className="tp-focus-ring border border-border rounded-md px-2 py-1 uppercase" />
           </div>
           <textarea
             value={draft.description}
             onChange={(e) => setDraft({ ...draft, description: e.target.value })}
             placeholder="Description — this is the AI's classification guidance. Say when a ticket IS this type (e.g. “Something that used to work is broken or degraded…”)."
             aria-label="Type description (AI guidance)"
-            className="tp-focus-ring w-full h-16 border border-slate-200 rounded-md px-2 py-1"
+            className="tp-focus-ring w-full h-16 border border-border rounded-md px-2 py-1"
           />
           <div className="flex flex-wrap items-center gap-3">
-            <select value={draft.color} onChange={(e) => setDraft({ ...draft, color: e.target.value })} aria-label="Pill color" className="tp-focus-ring border border-slate-200 rounded-md px-1.5 py-1">
+            <select value={draft.color} onChange={(e) => setDraft({ ...draft, color: e.target.value })} aria-label="Pill color" className="tp-focus-ring border border-border rounded-md px-1.5 py-1">
               {TYPE_COLOR_KEYS.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
-            <label className="flex items-center gap-1.5 text-slate-500">
+            <label className="flex items-center gap-1.5 text-muted-foreground">
               <input type="checkbox" checked={draft.aiAssignable} onChange={(e) => setDraft({ ...draft, aiAssignable: e.target.checked })} className="tp-focus-ring" />
               AI may pick this type
             </label>
-            <label className="flex items-center gap-1.5 text-slate-500">
+            <label className="flex items-center gap-1.5 text-muted-foreground">
               <input type="checkbox" checked={draft.isDefault} onChange={(e) => setDraft({ ...draft, isDefault: e.target.checked })} className="tp-focus-ring" />
               Default for new tickets
             </label>
-            <label className="flex items-center gap-1.5 text-slate-500" title="Unmapped types stay Ticket Pulse–only: never written to FreshService">
+            <label className="flex items-center gap-1.5 text-muted-foreground" title="Unmapped types stay Ticket Pulse–only: never written to FreshService">
               <input type="checkbox" checked={draft.fsMapped} onChange={(e) => setDraft({ ...draft, fsMapped: e.target.checked })} className="tp-focus-ring" />
               Maps to FreshService
             </label>
             {draft.fsMapped && (
-              <input value={draft.fsTypeValue} onChange={(e) => setDraft({ ...draft, fsTypeValue: e.target.value })} placeholder={draft.name || 'FS value'} aria-label="FreshService type value" className="tp-focus-ring w-36 border border-slate-200 rounded-md px-2 py-1" />
+              <input value={draft.fsTypeValue} onChange={(e) => setDraft({ ...draft, fsTypeValue: e.target.value })} placeholder={draft.name || 'FS value'} aria-label="FreshService type value" className="tp-focus-ring w-36 border border-border rounded-md px-2 py-1" />
             )}
           </div>
-          <input value={draft.aliases} onChange={(e) => setDraft({ ...draft, aliases: e.target.value })} placeholder="Aliases, comma-separated (e.g. breakfix, break-fix) — accepted as input and normalized to the name" aria-label="Aliases" className="tp-focus-ring w-full border border-slate-200 rounded-md px-2 py-1" />
+          <input value={draft.aliases} onChange={(e) => setDraft({ ...draft, aliases: e.target.value })} placeholder="Aliases, comma-separated (e.g. breakfix, break-fix) — accepted as input and normalized to the name" aria-label="Aliases" className="tp-focus-ring w-full border border-border rounded-md px-2 py-1" />
           <div className="flex gap-1.5">
             <button onClick={save} disabled={busy || (!editingId && !draft.name.trim())} className="tp-focus-ring px-2.5 py-1 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-60">
               {busy ? <Loader2 className="w-3 h-3 animate-spin inline" aria-hidden="true" /> : (editingId ? 'Save' : 'Create')}
             </button>
-            <button onClick={() => { setDraft(null); setEditingId(null); setError(null); }} className="tp-focus-ring px-2.5 py-1 rounded-md text-slate-500 hover:bg-slate-50">Cancel</button>
+            <button onClick={() => { setDraft(null); setEditingId(null); setError(null); }} className="tp-focus-ring px-2.5 py-1 rounded-md text-muted-foreground hover:bg-muted/50">Cancel</button>
           </div>
         </div>
       ) : (
         <div className="flex items-center gap-3">
-          <button onClick={() => setDraft({ name: '', description: '', color: 'slate', abbreviation: '', aiAssignable: true, isDefault: false, fsMapped: false, fsTypeValue: '', aliases: '' })} className="tp-focus-ring inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700">
+          <button onClick={() => setDraft({ name: '', description: '', color: 'slate', abbreviation: '', aiAssignable: true, isDefault: false, fsMapped: false, fsTypeValue: '', aliases: '' })} className="tp-focus-ring inline-flex items-center gap-1 text-xs font-medium text-blue-600 dark:text-blue-300 hover:text-blue-700 dark:hover:text-blue-200">
             <Plus className="w-3.5 h-3.5" aria-hidden="true" /> New type
           </button>
-          <button onClick={syncNow} disabled={syncing} className="tp-focus-ring inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-slate-700 disabled:opacity-60" title="Re-read this workspace's Type choices from FreshService; new FS types are added automatically">
+          <button onClick={syncNow} disabled={syncing} className="tp-focus-ring inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground/85 disabled:opacity-60" title="Re-read this workspace's Type choices from FreshService; new FS types are added automatically">
             {syncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <RefreshCw className="w-3.5 h-3.5" aria-hidden="true" />} Check FreshService
           </button>
         </div>
@@ -421,48 +421,48 @@ function MacrosSection() {
       <ul className="space-y-1 mb-2">
         {macros.map((macro) => (
           <li key={macro.id} className="flex items-center gap-2 text-xs">
-            <span className={`font-semibold ${macro.isActive ? 'text-slate-700' : 'text-slate-300 line-through'}`}>{macro.name}</span>
-            <span className="text-slate-400 truncate flex-1">{Object.keys(macro.actions || {}).join(' · ')}</span>
+            <span className={`font-semibold ${macro.isActive ? 'text-foreground/85' : 'text-muted-foreground/50 line-through'}`}>{macro.name}</span>
+            <span className="text-muted-foreground/75 truncate flex-1">{Object.keys(macro.actions || {}).join(' · ')}</span>
             <button
               onClick={async () => { await settingsAPI.updateMacro(macro.id, { isActive: !macro.isActive }).catch(() => {}); load(); }}
-              className="tp-focus-ring text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 hover:bg-slate-50"
+              className="tp-focus-ring text-[10px] px-1.5 py-0.5 rounded border border-border text-muted-foreground hover:bg-muted/50"
             >
               {macro.isActive ? 'Disable' : 'Enable'}
             </button>
             <button
               onClick={async () => { await settingsAPI.deleteMacro(macro.id).catch(() => {}); load(); }}
               aria-label={`Delete macro ${macro.name}`}
-              className="tp-focus-ring p-1 rounded text-slate-300 hover:text-red-500"
+              className="tp-focus-ring p-1 rounded text-muted-foreground/50 hover:text-red-500"
             >
               <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
             </button>
           </li>
         ))}
-        {macros.length === 0 && <li className="text-xs text-slate-400 italic">No macros yet.</li>}
+        {macros.length === 0 && <li className="text-xs text-muted-foreground/75 italic">No macros yet.</li>}
       </ul>
       {draft ? (
-        <div className="rounded-lg border border-slate-200 p-2.5 space-y-1.5 text-xs">
-          <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Macro name" aria-label="Macro name" className="tp-focus-ring w-full border border-slate-200 rounded-md px-2 py-1" />
+        <div className="rounded-lg border border-border p-2.5 space-y-1.5 text-xs">
+          <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Macro name" aria-label="Macro name" className="tp-focus-ring w-full border border-border rounded-md px-2 py-1" />
           <div className="grid grid-cols-2 gap-1.5">
-            <select value={draft.actions.setStatus || ''} onChange={(e) => setDraft({ ...draft, actions: { ...draft.actions, setStatus: e.target.value || undefined } })} aria-label="Set status" className="tp-focus-ring border border-slate-200 rounded-md px-1.5 py-1">
+            <select value={draft.actions.setStatus || ''} onChange={(e) => setDraft({ ...draft, actions: { ...draft.actions, setStatus: e.target.value || undefined } })} aria-label="Set status" className="tp-focus-ring border border-border rounded-md px-1.5 py-1">
               <option value="">Status: unchanged</option>
               {['Open', 'Pending', 'Resolved', 'Closed'].map((s) => <option key={s} value={s}>Status → {s}</option>)}
             </select>
-            <select value={draft.actions.setPriority || ''} onChange={(e) => setDraft({ ...draft, actions: { ...draft.actions, setPriority: Number(e.target.value) || undefined } })} aria-label="Set priority" className="tp-focus-ring border border-slate-200 rounded-md px-1.5 py-1">
+            <select value={draft.actions.setPriority || ''} onChange={(e) => setDraft({ ...draft, actions: { ...draft.actions, setPriority: Number(e.target.value) || undefined } })} aria-label="Set priority" className="tp-focus-ring border border-border rounded-md px-1.5 py-1">
               <option value="">Priority: unchanged</option>
               {[1, 2, 3, 4].map((p) => <option key={p} value={p}>Priority → {PRIORITY_LABELS[p]}</option>)}
             </select>
           </div>
-          <input value={draft.actions.addNote || ''} onChange={(e) => setDraft({ ...draft, actions: { ...draft.actions, addNote: e.target.value || undefined } })} placeholder="Internal note to add (optional)" aria-label="Internal note" className="tp-focus-ring w-full border border-slate-200 rounded-md px-2 py-1" />
-          <input value={draft.actions.replyBody || ''} onChange={(e) => setDraft({ ...draft, actions: { ...draft.actions, replyBody: e.target.value || undefined } })} placeholder="Reply to requester (optional)" aria-label="Reply body" className="tp-focus-ring w-full border border-slate-200 rounded-md px-2 py-1" />
+          <input value={draft.actions.addNote || ''} onChange={(e) => setDraft({ ...draft, actions: { ...draft.actions, addNote: e.target.value || undefined } })} placeholder="Internal note to add (optional)" aria-label="Internal note" className="tp-focus-ring w-full border border-border rounded-md px-2 py-1" />
+          <input value={draft.actions.replyBody || ''} onChange={(e) => setDraft({ ...draft, actions: { ...draft.actions, replyBody: e.target.value || undefined } })} placeholder="Reply to requester (optional)" aria-label="Reply body" className="tp-focus-ring w-full border border-border rounded-md px-2 py-1" />
           {error && <p className="text-red-500">{error}</p>}
           <div className="flex gap-1.5">
             <button onClick={save} disabled={busy} className="tp-focus-ring px-2.5 py-1 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-60">Create</button>
-            <button onClick={() => setDraft(null)} className="tp-focus-ring px-2.5 py-1 rounded-md text-slate-500 hover:bg-slate-50">Cancel</button>
+            <button onClick={() => setDraft(null)} className="tp-focus-ring px-2.5 py-1 rounded-md text-muted-foreground hover:bg-muted/50">Cancel</button>
           </div>
         </div>
       ) : (
-        <button onClick={() => setDraft({ name: '', description: '', actions: {} })} className="tp-focus-ring inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700">
+        <button onClick={() => setDraft({ name: '', description: '', actions: {} })} className="tp-focus-ring inline-flex items-center gap-1 text-xs font-medium text-blue-600 dark:text-blue-300 hover:text-blue-700 dark:hover:text-blue-200">
           <Plus className="w-3.5 h-3.5" aria-hidden="true" /> New macro
         </button>
       )}
@@ -542,33 +542,33 @@ export function CustomFieldsSection() {
         {fields.map((field) => (
           <li
             key={field.id}
-            className={`flex items-center gap-2 text-xs rounded-md px-1.5 py-1 -mx-1.5 ${isFreshFromApi(field) ? 'bg-indigo-50/70' : ''}`}
+            className={`flex items-center gap-2 text-xs rounded-md px-1.5 py-1 -mx-1.5 ${isFreshFromApi(field) ? 'bg-indigo-50/70 dark:bg-indigo-500/10' : ''}`}
           >
-            <span className={`font-semibold ${field.isActive ? 'text-slate-700' : 'text-slate-300 line-through'}`}>{field.label}</span>
-            <code className="text-[10px] bg-slate-100 rounded px-1 text-slate-500">{field.key}</code>
-            <span className="text-slate-400">{field.type}{field.type === 'select' ? ` (${(field.options || []).length})` : ''}</span>
+            <span className={`font-semibold ${field.isActive ? 'text-foreground/85' : 'text-muted-foreground/50 line-through'}`}>{field.label}</span>
+            <code className="text-[10px] bg-muted rounded px-1 text-muted-foreground">{field.key}</code>
+            <span className="text-muted-foreground/75">{field.type}{field.type === 'select' ? ` (${(field.options || []).length})` : ''}</span>
             {field.isRequiredOnCreate && (
-              <span className="text-[10px] font-semibold text-red-500 border border-red-200 bg-red-50 rounded-full px-1.5 py-px" title="Required when creating a ticket — binds the composer and the public API">
+              <span className="text-[10px] font-semibold text-red-500 border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 rounded-full px-1.5 py-px" title="Required when creating a ticket — binds the composer and the public API">
                 Required
               </span>
             )}
             {field.defaultValue !== null && field.defaultValue !== undefined && field.defaultValue !== '' && (
-              <span className="text-[10px] text-slate-400 border border-slate-200 rounded-full px-1.5 py-px" title="Prefilled in the new-ticket composer">
+              <span className="text-[10px] text-muted-foreground/75 border border-border rounded-full px-1.5 py-px" title="Prefilled in the new-ticket composer">
                 default: {String(field.defaultValue)}
               </span>
             )}
             {isApiBorn(field) ? (
               <span
-                className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-indigo-600 bg-indigo-50 border border-indigo-100 rounded-full px-1.5 py-px"
+                className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-indigo-600 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-500/15 border border-indigo-100 dark:border-indigo-500/20 rounded-full px-1.5 py-px"
                 title="Auto-provisioned by API intake — type inferred from the first value; edit to curate"
               >
                 <Sparkles className="w-2.5 h-2.5" aria-hidden="true" /> API
               </span>
             ) : (
-              <span className="text-[10px] text-slate-400 border border-slate-200 rounded-full px-1.5 py-px" title="Created by an admin in Settings">Manual</span>
+              <span className="text-[10px] text-muted-foreground/75 border border-border rounded-full px-1.5 py-px" title="Created by an admin in Settings">Manual</span>
             )}
             {isFreshFromApi(field) && <span className="text-[10px] text-indigo-500 italic">new from API</span>}
-            {!field.isActive && <span className="text-[10px] text-slate-300 italic">retired</span>}
+            {!field.isActive && <span className="text-[10px] text-muted-foreground/50 italic">retired</span>}
             <span className="flex-1" />
             <button
               onClick={() => toggleFeatured(field)}
@@ -577,19 +577,19 @@ export function CustomFieldsSection() {
               title={field.isFeatured
                 ? 'Featured: shown as a chip on queue rows and in the peek. Click to unfeature.'
                 : 'Feature this field: shows as a chip on queue rows and in the peek (one per workspace — featuring this unfeatures the current one)'}
-              className={`tp-focus-ring p-1 rounded ${field.isFeatured ? 'text-amber-400 hover:text-amber-500' : 'text-slate-300 hover:text-amber-400'}`}
+              className={`tp-focus-ring p-1 rounded ${field.isFeatured ? 'text-amber-400 hover:text-amber-500' : 'text-muted-foreground/50 hover:text-amber-400'}`}
             >
               <Star className={`w-3.5 h-3.5 ${field.isFeatured ? 'fill-amber-400' : ''}`} aria-hidden="true" />
             </button>
             <button
               onClick={() => startEdit(field)}
-              className="tp-focus-ring text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 hover:bg-slate-50"
+              className="tp-focus-ring text-[10px] px-1.5 py-0.5 rounded border border-border text-muted-foreground hover:bg-muted/50"
             >
               Edit
             </button>
             <button
               onClick={async () => { await settingsAPI.updateCustomField(field.id, { isActive: !field.isActive }).catch(() => {}); load(); }}
-              className="tp-focus-ring text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 hover:bg-slate-50"
+              className="tp-focus-ring text-[10px] px-1.5 py-0.5 rounded border border-border text-muted-foreground hover:bg-muted/50"
               title={field.isActive
                 ? 'Retire: hides the field from forms and conditions; stored ticket values are kept'
                 : 'Reactivate this field'}
@@ -599,18 +599,18 @@ export function CustomFieldsSection() {
             <button
               onClick={async () => { await settingsAPI.deleteCustomField(field.id).catch(() => {}); load(); }}
               aria-label={`Delete field ${field.label}`}
-              className="tp-focus-ring p-1 rounded text-slate-300 hover:text-red-500"
+              className="tp-focus-ring p-1 rounded text-muted-foreground/50 hover:text-red-500"
             >
               <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
             </button>
           </li>
         ))}
-        {fields.length === 0 && <li className="text-xs text-slate-400 italic">No custom fields yet.</li>}
+        {fields.length === 0 && <li className="text-xs text-muted-foreground/75 italic">No custom fields yet.</li>}
       </ul>
       {draft ? (
-        <div className="rounded-lg border border-slate-200 p-2.5 space-y-1.5 text-xs">
+        <div className="rounded-lg border border-border p-2.5 space-y-1.5 text-xs">
           <div className="grid grid-cols-2 gap-1.5">
-            <input value={draft.label} onChange={(e) => setDraft({ ...draft, label: e.target.value })} placeholder="Label (e.g. Cost centre)" aria-label="Field label" className="tp-focus-ring border border-slate-200 rounded-md px-2 py-1" />
+            <input value={draft.label} onChange={(e) => setDraft({ ...draft, label: e.target.value })} placeholder="Label (e.g. Cost centre)" aria-label="Field label" className="tp-focus-ring border border-border rounded-md px-2 py-1" />
             <input
               value={draft.key}
               disabled={Boolean(editingId)}
@@ -618,37 +618,37 @@ export function CustomFieldsSection() {
               placeholder="key (e.g. cost_centre)"
               aria-label="Field key"
               title={editingId ? 'Keys are permanent — ticket values are stored under them' : undefined}
-              className="tp-focus-ring border border-slate-200 rounded-md px-2 py-1 font-mono disabled:bg-slate-50 disabled:text-slate-400"
+              className="tp-focus-ring border border-border rounded-md px-2 py-1 font-mono disabled:bg-muted/50 disabled:text-muted-foreground/75"
             />
           </div>
           <div className="flex gap-1.5">
-            <select value={draft.type} onChange={(e) => setDraft({ ...draft, type: e.target.value })} aria-label="Field type" className="tp-focus-ring border border-slate-200 rounded-md px-1.5 py-1">
+            <select value={draft.type} onChange={(e) => setDraft({ ...draft, type: e.target.value })} aria-label="Field type" className="tp-focus-ring border border-border rounded-md px-1.5 py-1">
               {['text', 'number', 'select', 'boolean', 'date'].map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
             {draft.type === 'select' && (
-              <input value={draft.options} onChange={(e) => setDraft({ ...draft, options: e.target.value })} placeholder="Options, comma-separated" aria-label="Options" className="tp-focus-ring flex-1 border border-slate-200 rounded-md px-2 py-1" />
+              <input value={draft.options} onChange={(e) => setDraft({ ...draft, options: e.target.value })} placeholder="Options, comma-separated" aria-label="Options" className="tp-focus-ring flex-1 border border-border rounded-md px-2 py-1" />
             )}
           </div>
           {/* New-ticket form knobs (Phase TF) */}
           <div className="flex flex-wrap items-center gap-3">
-            <label className="flex items-center gap-1.5 text-slate-500 cursor-pointer" title="A create without this field is rejected — in the composer AND on the public API">
+            <label className="flex items-center gap-1.5 text-muted-foreground cursor-pointer" title="A create without this field is rejected — in the composer AND on the public API">
               <input
                 type="checkbox"
                 checked={draft.isRequiredOnCreate === true}
                 onChange={(e) => setDraft({ ...draft, isRequiredOnCreate: e.target.checked })}
-                className="tp-focus-ring rounded border-slate-300 text-blue-600"
+                className="tp-focus-ring rounded border-input text-blue-600 dark:text-blue-300"
               />
               Required on create
             </label>
-            <label className="flex items-center gap-1.5 text-slate-500">
+            <label className="flex items-center gap-1.5 text-muted-foreground">
               Default
               {draft.type === 'select' ? (
-                <select value={draft.defaultValue ?? ''} onChange={(e) => setDraft({ ...draft, defaultValue: e.target.value })} aria-label="Default value" className="tp-focus-ring border border-slate-200 rounded-md px-1.5 py-1">
+                <select value={draft.defaultValue ?? ''} onChange={(e) => setDraft({ ...draft, defaultValue: e.target.value })} aria-label="Default value" className="tp-focus-ring border border-border rounded-md px-1.5 py-1">
                   <option value="">none</option>
                   {String(draft.options || '').split(',').map((v) => v.trim()).filter(Boolean).map((opt) => <option key={opt} value={opt}>{opt}</option>)}
                 </select>
               ) : draft.type === 'boolean' ? (
-                <select value={draft.defaultValue ?? ''} onChange={(e) => setDraft({ ...draft, defaultValue: e.target.value })} aria-label="Default value" className="tp-focus-ring border border-slate-200 rounded-md px-1.5 py-1">
+                <select value={draft.defaultValue ?? ''} onChange={(e) => setDraft({ ...draft, defaultValue: e.target.value })} aria-label="Default value" className="tp-focus-ring border border-border rounded-md px-1.5 py-1">
                   <option value="">none</option>
                   <option value="true">Yes</option>
                   <option value="false">No</option>
@@ -660,25 +660,25 @@ export function CustomFieldsSection() {
                   onChange={(e) => setDraft({ ...draft, defaultValue: e.target.value })}
                   placeholder="none"
                   aria-label="Default value"
-                  className="tp-focus-ring w-36 border border-slate-200 rounded-md px-2 py-1"
+                  className="tp-focus-ring w-36 border border-border rounded-md px-2 py-1"
                 />
               )}
             </label>
-            <span className="text-[10px] text-slate-400">Prefills the composer; API senders still set their own values.</span>
+            <span className="text-[10px] text-muted-foreground/75">Prefills the composer; API senders still set their own values.</span>
           </div>
           {editingId && (
-            <p className="text-[10px] text-slate-400">Existing ticket values keep their stored shape — the new type applies from the next edit or API write.</p>
+            <p className="text-[10px] text-muted-foreground/75">Existing ticket values keep their stored shape — the new type applies from the next edit or API write.</p>
           )}
           {error && <p className="text-red-500">{error}</p>}
           <div className="flex gap-1.5">
             <button onClick={save} disabled={busy || !String(draft.label || '').trim()} className="tp-focus-ring px-2.5 py-1 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-60">
               {busy ? <Loader2 className="w-3 h-3 animate-spin inline" aria-hidden="true" /> : (editingId ? 'Save' : 'Create')}
             </button>
-            <button onClick={() => { setDraft(null); setEditingId(null); setError(null); }} className="tp-focus-ring px-2.5 py-1 rounded-md text-slate-500 hover:bg-slate-50">Cancel</button>
+            <button onClick={() => { setDraft(null); setEditingId(null); setError(null); }} className="tp-focus-ring px-2.5 py-1 rounded-md text-muted-foreground hover:bg-muted/50">Cancel</button>
           </div>
         </div>
       ) : (
-        <button onClick={() => setDraft({ key: '', label: '', type: 'text', options: '', isRequiredOnCreate: false, defaultValue: '' })} className="tp-focus-ring inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700">
+        <button onClick={() => setDraft({ key: '', label: '', type: 'text', options: '', isRequiredOnCreate: false, defaultValue: '' })} className="tp-focus-ring inline-flex items-center gap-1 text-xs font-medium text-blue-600 dark:text-blue-300 hover:text-blue-700 dark:hover:text-blue-200">
           <Plus className="w-3.5 h-3.5" aria-hidden="true" /> New field
         </button>
       )}
@@ -771,10 +771,10 @@ export function CreateTemplatesSection() {
           const subcategory = subcategoryLabel(template.internalCategoryId, template.internalSubcategoryId);
           const isEditing = editingId === template.id;
           return (
-            <li key={template.id} className={`flex items-center gap-2 text-xs rounded-md px-1.5 py-1 -mx-1.5 ${isEditing ? 'bg-blue-50/70' : ''}`}>
-              <span className={`font-semibold whitespace-nowrap ${template.isActive ? 'text-slate-700' : 'text-slate-300 line-through'}`}>{template.name}</span>
+            <li key={template.id} className={`flex items-center gap-2 text-xs rounded-md px-1.5 py-1 -mx-1.5 ${isEditing ? 'bg-blue-50/70 dark:bg-blue-500/10' : ''}`}>
+              <span className={`font-semibold whitespace-nowrap ${template.isActive ? 'text-foreground/85' : 'text-muted-foreground/50 line-through'}`}>{template.name}</span>
               <span
-                className={`truncate min-w-0 flex-1 ${template.subject ? 'text-slate-500' : 'text-slate-300 italic'}`}
+                className={`truncate min-w-0 flex-1 ${template.subject ? 'text-muted-foreground' : 'text-muted-foreground/50 italic'}`}
                 title={template.subject ? `Subject: ${template.subject}` : 'No subject — the composer keeps whatever the agent typed'}
               >
                 {template.subject || 'no subject'}
@@ -785,27 +785,27 @@ export function CreateTemplatesSection() {
                 </span>
               )}
               {category && (
-                <span className="text-[10px] text-slate-500 border border-slate-200 bg-slate-50 rounded-full px-1.5 py-px whitespace-nowrap" title="Category applied by this template">
+                <span className="text-[10px] text-muted-foreground border border-border bg-muted/50 rounded-full px-1.5 py-px whitespace-nowrap" title="Category applied by this template">
                   {category.name}{subcategory ? ` › ${subcategory}` : ''}
                 </span>
               )}
               {template.priority && (
-                <span className="text-[10px] text-slate-400 border border-slate-200 rounded-full px-1.5 py-px whitespace-nowrap" title="Priority applied by this template">
+                <span className="text-[10px] text-muted-foreground/75 border border-border rounded-full px-1.5 py-px whitespace-nowrap" title="Priority applied by this template">
                   {PRIORITY_LABELS[template.priority] || template.priority}
                 </span>
               )}
-              {!template.isActive && <span className="text-[10px] text-slate-300 italic">disabled</span>}
+              {!template.isActive && <span className="text-[10px] text-muted-foreground/50 italic">disabled</span>}
               <button
                 onClick={() => startEdit(template)}
                 aria-label={`Edit template ${template.name}`}
                 title="Edit this template (name, subject, scaffold, priority, type, category)"
-                className="tp-focus-ring p-1 rounded text-slate-400 hover:text-blue-600 hover:bg-white"
+                className="tp-focus-ring p-1 rounded text-muted-foreground/75 hover:text-blue-600 dark:hover:text-blue-300 hover:bg-card"
               >
                 <Pencil className="w-3.5 h-3.5" aria-hidden="true" />
               </button>
               <button
                 onClick={async () => { await settingsAPI.updateTicketTemplate(template.id, { isActive: !template.isActive }).catch(() => {}); load(); }}
-                className="tp-focus-ring text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 hover:bg-slate-50"
+                className="tp-focus-ring text-[10px] px-1.5 py-0.5 rounded border border-border text-muted-foreground hover:bg-muted/50"
                 title={template.isActive ? 'Hide this template from the composer (kept for later)' : 'Show this template in the composer again'}
               >
                 {template.isActive ? 'Disable' : 'Enable'}
@@ -813,45 +813,45 @@ export function CreateTemplatesSection() {
               <button
                 onClick={async () => { await settingsAPI.deleteTicketTemplate(template.id).catch(() => {}); load(); }}
                 aria-label={`Delete template ${template.name}`}
-                className="tp-focus-ring p-1 rounded text-slate-300 hover:text-red-500"
+                className="tp-focus-ring p-1 rounded text-muted-foreground/50 hover:text-red-500"
               >
                 <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
               </button>
             </li>
           );
         })}
-        {templates.length === 0 && <li className="text-xs text-slate-400 italic">No templates yet.</li>}
+        {templates.length === 0 && <li className="text-xs text-muted-foreground/75 italic">No templates yet.</li>}
       </ul>
       {draft ? (
-        <div className="rounded-lg border border-slate-200 p-2.5 space-y-2 text-xs" data-testid="template-form">
+        <div className="rounded-lg border border-border p-2.5 space-y-2 text-xs" data-testid="template-form">
           {editingId && (
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-blue-600">Editing “{templates.find((t) => t.id === editingId)?.name || draft.name}”</p>
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-300">Editing “{templates.find((t) => t.id === editingId)?.name || draft.name}”</p>
           )}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <label className="block">
-              <span className="mb-0.5 block font-semibold text-slate-600">Template name <span className="text-red-500">*</span></span>
-              <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="e.g. New starter" aria-label="Template name" className="tp-focus-ring w-full border border-slate-200 rounded-md px-2 py-1" />
+              <span className="mb-0.5 block font-semibold text-muted-foreground">Template name <span className="text-red-500">*</span></span>
+              <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="e.g. New starter" aria-label="Template name" className="tp-focus-ring w-full border border-border rounded-md px-2 py-1" />
             </label>
             <label className="block">
-              <span className="mb-0.5 block font-semibold text-slate-600">Priority</span>
-              <select value={draft.priority || ''} onChange={(e) => setDraft({ ...draft, priority: e.target.value })} aria-label="Priority" className="tp-focus-ring w-full border border-slate-200 rounded-md px-1.5 py-1">
+              <span className="mb-0.5 block font-semibold text-muted-foreground">Priority</span>
+              <select value={draft.priority || ''} onChange={(e) => setDraft({ ...draft, priority: e.target.value })} aria-label="Priority" className="tp-focus-ring w-full border border-border rounded-md px-1.5 py-1">
                 <option value="">Leave as-is</option>
                 {[1, 2, 3, 4].map((p) => <option key={p} value={p}>{PRIORITY_LABELS[p]}</option>)}
               </select>
             </label>
           </div>
           <label className="block">
-            <span className="mb-0.5 block font-semibold text-slate-600">Subject <span className="font-normal text-slate-400">— fills the composer’s Subject field</span></span>
-            <input value={draft.subject} onChange={(e) => setDraft({ ...draft, subject: e.target.value })} placeholder="e.g. New starter — laptop + accounts" aria-label="Subject" maxLength={500} className="tp-focus-ring w-full border border-slate-200 rounded-md px-2 py-1" />
+            <span className="mb-0.5 block font-semibold text-muted-foreground">Subject <span className="font-normal text-muted-foreground/75">— fills the composer’s Subject field</span></span>
+            <input value={draft.subject} onChange={(e) => setDraft({ ...draft, subject: e.target.value })} placeholder="e.g. New starter — laptop + accounts" aria-label="Subject" maxLength={500} className="tp-focus-ring w-full border border-border rounded-md px-2 py-1" />
           </label>
           <label className="block">
-            <span className="mb-0.5 block font-semibold text-slate-600">Description scaffold</span>
-            <textarea value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} placeholder={'e.g.\nStart date:\nManager:\nEquipment needed:'} aria-label="Description scaffold" className="tp-focus-ring w-full h-20 border border-slate-200 rounded-md px-2 py-1" />
+            <span className="mb-0.5 block font-semibold text-muted-foreground">Description scaffold</span>
+            <textarea value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} placeholder={'e.g.\nStart date:\nManager:\nEquipment needed:'} aria-label="Description scaffold" className="tp-focus-ring w-full h-20 border border-border rounded-md px-2 py-1" />
           </label>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             <label className="block">
-              <span className="mb-0.5 block font-semibold text-slate-600">Type</span>
-              <select value={draft.ticketType} onChange={(e) => setDraft({ ...draft, ticketType: e.target.value })} aria-label="Ticket type" className="tp-focus-ring w-full border border-slate-200 rounded-md px-1.5 py-1">
+              <span className="mb-0.5 block font-semibold text-muted-foreground">Type</span>
+              <select value={draft.ticketType} onChange={(e) => setDraft({ ...draft, ticketType: e.target.value })} aria-label="Ticket type" className="tp-focus-ring w-full border border-border rounded-md px-1.5 py-1">
                 <option value="">Leave as-is</option>
                 {activeTypes.map((t) => <option key={t.id} value={t.name}>{t.name}</option>)}
                 {draft.ticketType && !activeTypes.some((t) => t.name === draft.ticketType) && (
@@ -860,25 +860,25 @@ export function CreateTemplatesSection() {
               </select>
             </label>
             <label className="block">
-              <span className="mb-0.5 block font-semibold text-slate-600">Category</span>
+              <span className="mb-0.5 block font-semibold text-muted-foreground">Category</span>
               <select
                 value={draft.internalCategoryId}
                 onChange={(e) => setDraft({ ...draft, internalCategoryId: e.target.value, internalSubcategoryId: '' })}
                 aria-label="Category"
-                className="tp-focus-ring w-full border border-slate-200 rounded-md px-1.5 py-1"
+                className="tp-focus-ring w-full border border-border rounded-md px-1.5 py-1"
               >
                 <option value="">Leave as-is</option>
                 {categoryTree.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </label>
             <label className="block">
-              <span className="mb-0.5 block font-semibold text-slate-600">Subcategory</span>
+              <span className="mb-0.5 block font-semibold text-muted-foreground">Subcategory</span>
               <select
                 value={draft.internalSubcategoryId}
                 onChange={(e) => setDraft({ ...draft, internalSubcategoryId: e.target.value })}
                 disabled={!draft.internalCategoryId || draftSubcategories.length === 0}
                 aria-label="Subcategory"
-                className="tp-focus-ring w-full border border-slate-200 rounded-md px-1.5 py-1 disabled:bg-slate-50 disabled:text-slate-400"
+                className="tp-focus-ring w-full border border-border rounded-md px-1.5 py-1 disabled:bg-muted/50 disabled:text-muted-foreground/75"
               >
                 <option value="">{draft.internalCategoryId && draftSubcategories.length === 0 ? 'No subcategories' : 'Leave as-is'}</option>
                 {draftSubcategories.map((sc) => <option key={sc.id} value={sc.id}>{sc.name}</option>)}
@@ -890,11 +890,11 @@ export function CreateTemplatesSection() {
             <button onClick={save} disabled={busy || !draft.name.trim()} className="tp-focus-ring px-2.5 py-1 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-60">
               {busy ? <Loader2 className="w-3 h-3 animate-spin inline" aria-hidden="true" /> : (editingId ? 'Save' : 'Create')}
             </button>
-            <button onClick={cancel} className="tp-focus-ring px-2.5 py-1 rounded-md text-slate-500 hover:bg-slate-50">Cancel</button>
+            <button onClick={cancel} className="tp-focus-ring px-2.5 py-1 rounded-md text-muted-foreground hover:bg-muted/50">Cancel</button>
           </div>
         </div>
       ) : (
-        <button onClick={() => { setEditingId(null); setError(null); setDraft({ ...EMPTY_TEMPLATE_DRAFT }); }} className="tp-focus-ring inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700">
+        <button onClick={() => { setEditingId(null); setError(null); setDraft({ ...EMPTY_TEMPLATE_DRAFT }); }} className="tp-focus-ring inline-flex items-center gap-1 text-xs font-medium text-blue-600 dark:text-blue-300 hover:text-blue-700 dark:hover:text-blue-200">
           <Plus className="w-3.5 h-3.5" aria-hidden="true" /> New template
         </button>
       )}
@@ -943,8 +943,8 @@ function QuickNotesSection() {
       <ul className="space-y-1 mb-2">
         {notes.map((note) => (
           <li key={note.id} className="flex items-center gap-2 text-xs">
-            <span className={`font-semibold ${note.isActive ? 'text-slate-700' : 'text-slate-300 line-through'}`}>{note.name}</span>
-            <span className="text-slate-400 truncate flex-1" title={note.bodyText}>
+            <span className={`font-semibold ${note.isActive ? 'text-foreground/85' : 'text-muted-foreground/50 line-through'}`}>{note.name}</span>
+            <span className="text-muted-foreground/75 truncate flex-1" title={note.bodyText}>
               {(note.internalCategoryIds || []).length > 0
                 ? (note.internalCategoryIds || []).map(categoryName).join(', ')
                 : 'All categories'}
@@ -952,33 +952,33 @@ function QuickNotesSection() {
             </span>
             <button
               onClick={() => { setEditingId(note.id); setDraft({ name: note.name, bodyText: note.bodyText, internalCategoryIds: note.internalCategoryIds || [] }); }}
-              className="tp-focus-ring text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 hover:bg-slate-50"
+              className="tp-focus-ring text-[10px] px-1.5 py-0.5 rounded border border-border text-muted-foreground hover:bg-muted/50"
             >
               Edit
             </button>
             <button
               onClick={async () => { await settingsAPI.updateQuickNote(note.id, { isActive: !note.isActive }).catch(() => {}); load(); }}
-              className="tp-focus-ring text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 hover:bg-slate-50"
+              className="tp-focus-ring text-[10px] px-1.5 py-0.5 rounded border border-border text-muted-foreground hover:bg-muted/50"
             >
               {note.isActive ? 'Disable' : 'Enable'}
             </button>
             <button
               onClick={async () => { await settingsAPI.deleteQuickNote(note.id).catch(() => {}); load(); }}
               aria-label={`Delete quick note ${note.name}`}
-              className="tp-focus-ring p-1 rounded text-slate-300 hover:text-red-500"
+              className="tp-focus-ring p-1 rounded text-muted-foreground/50 hover:text-red-500"
             >
               <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
             </button>
           </li>
         ))}
-        {notes.length === 0 && <li className="text-xs text-slate-400 italic">No quick notes yet.</li>}
+        {notes.length === 0 && <li className="text-xs text-muted-foreground/75 italic">No quick notes yet.</li>}
       </ul>
       {draft ? (
-        <div className="rounded-lg border border-slate-200 p-2.5 space-y-1.5 text-xs">
-          <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Note name (e.g. Chased requester — no response)" aria-label="Quick note name" className="tp-focus-ring w-full border border-slate-200 rounded-md px-2 py-1" />
-          <textarea value={draft.bodyText} onChange={(e) => setDraft({ ...draft, bodyText: e.target.value })} placeholder="Internal note body…" aria-label="Quick note body" className="tp-focus-ring w-full h-20 border border-slate-200 rounded-md px-2 py-1" />
+        <div className="rounded-lg border border-border p-2.5 space-y-1.5 text-xs">
+          <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Note name (e.g. Chased requester — no response)" aria-label="Quick note name" className="tp-focus-ring w-full border border-border rounded-md px-2 py-1" />
+          <textarea value={draft.bodyText} onChange={(e) => setDraft({ ...draft, bodyText: e.target.value })} placeholder="Internal note body…" aria-label="Quick note body" className="tp-focus-ring w-full h-20 border border-border rounded-md px-2 py-1" />
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-1">Show for categories <span className="font-normal normal-case">(none selected = every ticket)</span></p>
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/75 mb-1">Show for categories <span className="font-normal normal-case">(none selected = every ticket)</span></p>
             <div className="flex flex-wrap gap-1">
               {categories.map((c) => (
                 <button
@@ -986,12 +986,12 @@ function QuickNotesSection() {
                   type="button"
                   onClick={() => toggleCategory(c.id)}
                   aria-pressed={draft.internalCategoryIds.includes(c.id)}
-                  className={`tp-focus-ring px-2 py-0.5 rounded-full border text-[11px] ${draft.internalCategoryIds.includes(c.id) ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-500 border-slate-200 hover:border-blue-300'}`}
+                  className={`tp-focus-ring px-2 py-0.5 rounded-full border text-[11px] ${draft.internalCategoryIds.includes(c.id) ? 'bg-blue-600 text-white border-blue-600' : 'bg-card text-muted-foreground border-border hover:border-blue-300 dark:hover:border-blue-500/40'}`}
                 >
                   {c.name}
                 </button>
               ))}
-              {categories.length === 0 && <span className="text-slate-400 italic">No internal categories in this workspace.</span>}
+              {categories.length === 0 && <span className="text-muted-foreground/75 italic">No internal categories in this workspace.</span>}
             </div>
           </div>
           {error && <p className="text-red-500">{error}</p>}
@@ -999,11 +999,11 @@ function QuickNotesSection() {
             <button onClick={save} disabled={busy || !draft.name.trim() || !draft.bodyText.trim()} className="tp-focus-ring px-2.5 py-1 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-60">
               {busy ? <Loader2 className="w-3 h-3 animate-spin inline" aria-hidden="true" /> : (editingId ? 'Save' : 'Create')}
             </button>
-            <button onClick={() => { setDraft(null); setEditingId(null); setError(null); }} className="tp-focus-ring px-2.5 py-1 rounded-md text-slate-500 hover:bg-slate-50">Cancel</button>
+            <button onClick={() => { setDraft(null); setEditingId(null); setError(null); }} className="tp-focus-ring px-2.5 py-1 rounded-md text-muted-foreground hover:bg-muted/50">Cancel</button>
           </div>
         </div>
       ) : (
-        <button onClick={() => setDraft({ name: '', bodyText: '', internalCategoryIds: [] })} className="tp-focus-ring inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700">
+        <button onClick={() => setDraft({ name: '', bodyText: '', internalCategoryIds: [] })} className="tp-focus-ring inline-flex items-center gap-1 text-xs font-medium text-blue-600 dark:text-blue-300 hover:text-blue-700 dark:hover:text-blue-200">
           <Plus className="w-3.5 h-3.5" aria-hidden="true" /> New quick note
         </button>
       )}
@@ -1044,13 +1044,13 @@ function TagsSection() {
         {tags.map((tag) => (
           <li key={tag.id} className="flex items-center gap-2 text-xs">
             <span className={`px-2 py-0.5 rounded-full border font-medium ${TAG_CHIP_TONES[tag.color] || TAG_CHIP_TONES.slate} ${tag.isActive ? '' : 'opacity-40 line-through'}`}>{tag.name}</span>
-            <span className="text-slate-400">{tag.ticketCount} ticket{tag.ticketCount === 1 ? '' : 's'}</span>
+            <span className="text-muted-foreground/75">{tag.ticketCount} ticket{tag.ticketCount === 1 ? '' : 's'}</span>
             <span className="flex-1" />
             <select
               value=""
               onChange={(e) => { if (e.target.value) act(() => settingsAPI.updateTicketTag(tag.id, { color: e.target.value })); }}
               aria-label={`Recolor ${tag.name}`}
-              className="tp-focus-ring text-[10px] border border-slate-200 rounded px-1 py-0.5 text-slate-500"
+              className="tp-focus-ring text-[10px] border border-border rounded px-1 py-0.5 text-muted-foreground"
             >
               <option value="">color…</option>
               {Object.keys(TAG_CHIP_TONES).map((c) => <option key={c} value={c}>{c}</option>)}
@@ -1066,45 +1066,45 @@ function TagsSection() {
                 }}
                 onBlur={() => setMergingId(null)}
                 aria-label={`Merge ${tag.name} into`}
-                className="tp-focus-ring text-[10px] border border-blue-300 rounded px-1 py-0.5 text-blue-700"
+                className="tp-focus-ring text-[10px] border border-blue-300 dark:border-blue-500/40 rounded px-1 py-0.5 text-blue-700 dark:text-blue-200"
               >
                 <option value="">merge into…</option>
                 {tags.filter((t) => t.id !== tag.id && t.isActive).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
               </select>
             ) : (
-              <button onClick={() => setMergingId(tag.id)} className="tp-focus-ring text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 hover:bg-slate-50">Merge</button>
+              <button onClick={() => setMergingId(tag.id)} className="tp-focus-ring text-[10px] px-1.5 py-0.5 rounded border border-border text-muted-foreground hover:bg-muted/50">Merge</button>
             )}
             <button
               onClick={() => act(() => settingsAPI.updateTicketTag(tag.id, { isActive: !tag.isActive }))}
-              className="tp-focus-ring text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 hover:bg-slate-50"
+              className="tp-focus-ring text-[10px] px-1.5 py-0.5 rounded border border-border text-muted-foreground hover:bg-muted/50"
             >
               {tag.isActive ? 'Disable' : 'Enable'}
             </button>
             <button
               onClick={() => act(() => settingsAPI.deleteTicketTag(tag.id))}
               aria-label={`Delete tag ${tag.name}`}
-              className="tp-focus-ring p-1 rounded text-slate-300 hover:text-red-500"
+              className="tp-focus-ring p-1 rounded text-muted-foreground/50 hover:text-red-500"
             >
               <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
             </button>
           </li>
         ))}
-        {tags.length === 0 && <li className="text-xs text-slate-400 italic">No tags yet.</li>}
+        {tags.length === 0 && <li className="text-xs text-muted-foreground/75 italic">No tags yet.</li>}
       </ul>
       {error && <p className="text-xs text-red-500 mb-1.5">{error}</p>}
       {draft ? (
-        <div className="rounded-lg border border-slate-200 p-2.5 flex items-center gap-1.5 text-xs">
-          <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Tag name (e.g. VIP)" aria-label="Tag name" className="tp-focus-ring flex-1 border border-slate-200 rounded-md px-2 py-1" />
-          <select value={draft.color} onChange={(e) => setDraft({ ...draft, color: e.target.value })} aria-label="Tag color" className="tp-focus-ring border border-slate-200 rounded-md px-1.5 py-1">
+        <div className="rounded-lg border border-border p-2.5 flex items-center gap-1.5 text-xs">
+          <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Tag name (e.g. VIP)" aria-label="Tag name" className="tp-focus-ring flex-1 border border-border rounded-md px-2 py-1" />
+          <select value={draft.color} onChange={(e) => setDraft({ ...draft, color: e.target.value })} aria-label="Tag color" className="tp-focus-ring border border-border rounded-md px-1.5 py-1">
             {Object.keys(TAG_CHIP_TONES).map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
           <button onClick={save} disabled={busy || !draft.name.trim()} className="tp-focus-ring px-2.5 py-1 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-60">
             {busy ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" /> : 'Create'}
           </button>
-          <button onClick={() => setDraft(null)} className="tp-focus-ring px-2.5 py-1 rounded-md text-slate-500 hover:bg-slate-50">Cancel</button>
+          <button onClick={() => setDraft(null)} className="tp-focus-ring px-2.5 py-1 rounded-md text-muted-foreground hover:bg-muted/50">Cancel</button>
         </div>
       ) : (
-        <button onClick={() => setDraft({ name: '', color: 'slate' })} className="tp-focus-ring inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700">
+        <button onClick={() => setDraft({ name: '', color: 'slate' })} className="tp-focus-ring inline-flex items-center gap-1 text-xs font-medium text-blue-600 dark:text-blue-300 hover:text-blue-700 dark:hover:text-blue-200">
           <Plus className="w-3.5 h-3.5" aria-hidden="true" /> New tag
         </button>
       )}
@@ -1158,7 +1158,7 @@ function CategoryGroupSection() {
           const mapped = links.filter((l) => l.categoryId === cat.id).map((l) => l.groupId);
           return (
             <div key={cat.id} className="flex flex-wrap items-center gap-1.5 text-xs">
-              <span className="w-56 truncate font-semibold text-slate-600" title={cat.name}>{cat.name}</span>
+              <span className="w-56 truncate font-semibold text-muted-foreground" title={cat.name}>{cat.name}</span>
               {groups.map((g) => (
                 <button
                   key={g.id}
@@ -1166,13 +1166,13 @@ function CategoryGroupSection() {
                   onClick={() => toggle(cat.id, g.id)}
                   aria-pressed={mapped.includes(g.id)}
                   className={`tp-focus-ring px-2 py-0.5 rounded-full border text-[11px] ${
-                    mapped.includes(g.id) ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-400 border-slate-200 hover:border-indigo-300'
+                    mapped.includes(g.id) ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-card text-muted-foreground/75 border-border hover:border-indigo-300 dark:hover:border-indigo-500/40'
                   }`}
                 >
                   {g.name}
                 </button>
               ))}
-              {mapped.length === 0 && <span className="text-[10px] text-slate-300 italic">all groups</span>}
+              {mapped.length === 0 && <span className="text-[10px] text-muted-foreground/50 italic">all groups</span>}
             </div>
           );
         })}
@@ -1233,21 +1233,21 @@ function TrustedDomainsSection() {
     >
       <div className="flex flex-wrap items-center gap-1.5">
         {domains.map((d) => (
-          <span key={d} className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-semibold text-slate-700">
+          <span key={d} className="inline-flex items-center gap-1 rounded-full border border-border bg-muted/50 px-2 py-0.5 text-xs font-semibold text-foreground/85">
             {d}
             <button
               type="button"
               aria-label={`Remove ${d}`}
               onClick={() => persist(domains.filter((x) => x !== d))}
               disabled={busy}
-              className="text-slate-400 hover:text-red-600"
+              className="text-muted-foreground/75 hover:text-red-600 dark:hover:text-red-300"
             >
               ×
             </button>
           </span>
         ))}
         {loaded && domains.length === 0 && (
-          <span className="text-xs italic text-slate-400">No trusted domains yet — external flagging is off.</span>
+          <span className="text-xs italic text-muted-foreground/75">No trusted domains yet — external flagging is off.</span>
         )}
       </div>
       <div className="mt-3 flex items-center gap-2">
@@ -1257,18 +1257,18 @@ function TrustedDomainsSection() {
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addDomain(); } }}
           placeholder="bgcengineering.ca"
-          className="h-9 w-64 rounded-lg border border-slate-200 px-3 text-sm outline-none focus:ring-2 focus:ring-blue-200"
+          className="h-9 w-64 rounded-lg border border-border px-3 text-sm outline-none focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-500/30"
         />
         <button
           type="button"
           onClick={addDomain}
           disabled={busy || !draft.trim()}
-          className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-slate-900 px-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+          className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-foreground px-3 text-sm font-semibold text-background hover:bg-foreground/90 disabled:opacity-50"
         >
           {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Plus className="h-4 w-4" aria-hidden="true" />}
           Add domain
         </button>
-        {saved && <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600"><Check className="h-3.5 w-3.5" aria-hidden="true" /> Saved</span>}
+        {saved && <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600 dark:text-emerald-300"><Check className="h-3.5 w-3.5" aria-hidden="true" /> Saved</span>}
       </div>
     </SectionCard>
   );
@@ -1321,7 +1321,7 @@ export function QueueCardsSection() {
       hint="The six stat cards at the top of the Tickets page. Pick which six show for this workspace — e.g. swap a slot for “Tickets this month” to see the month's intake at a glance. Each card is a one-click filter and its count always matches what clicking it shows."
     >
       {cards === null ? (
-        <p className="text-xs text-slate-400 italic">Loading…</p>
+        <p className="text-xs text-muted-foreground/75 italic">Loading…</p>
       ) : (
         <>
           {/* Live mini preview */}
@@ -1330,25 +1330,25 @@ export function QueueCardsSection() {
               const seg = QUEUE_CARD_REGISTRY[key];
               const Icon = seg.Icon;
               return (
-                <div key={`${key}-${i}`} className="flex items-center gap-1.5 rounded-lg border border-slate-100 bg-white px-2 py-1.5 shadow-subtle min-w-0">
+                <div key={`${key}-${i}`} className="flex items-center gap-1.5 rounded-lg border border-border/60 bg-card px-2 py-1.5 shadow-subtle min-w-0">
                   <span className={`h-6 w-6 rounded-md inline-flex items-center justify-center flex-shrink-0 ${seg.tile}`}>
                     <Icon className="w-3.5 h-3.5" aria-hidden="true" />
                   </span>
-                  <span className="text-[10px] font-medium text-slate-500 truncate">{seg.label}</span>
+                  <span className="text-[10px] font-medium text-muted-foreground truncate">{seg.label}</span>
                 </div>
               );
             })}
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
             {cards.map((key, i) => (
-              <label key={i} className="flex items-center gap-1.5 text-xs text-slate-500">
-                <span className="w-4 text-[10px] font-bold text-slate-300 tabular-nums">{i + 1}</span>
+              <label key={i} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <span className="w-4 text-[10px] font-bold text-muted-foreground/50 tabular-nums">{i + 1}</span>
                 <select
                   value={key}
                   disabled={busy}
                   onChange={(e) => setSlot(i, e.target.value)}
                   aria-label={`Card slot ${i + 1}`}
-                  className="tp-focus-ring flex-1 border border-slate-200 rounded-md px-1.5 py-1 text-slate-700 disabled:opacity-60"
+                  className="tp-focus-ring flex-1 border border-border rounded-md px-1.5 py-1 text-foreground/85 disabled:opacity-60"
                 >
                   {QUEUE_CARD_KEYS
                     .filter((k) => k === key || !cards.includes(k))
@@ -1361,12 +1361,12 @@ export function QueueCardsSection() {
             <button
               onClick={() => persist([...DEFAULT_QUEUE_CARDS])}
               disabled={busy || isDefault}
-              className="tp-focus-ring inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-slate-700 disabled:opacity-50"
+              className="tp-focus-ring inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground/85 disabled:opacity-50"
             >
               <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" /> Restore defaults
             </button>
-            {busy && <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400" aria-hidden="true" />}
-            {saved && <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600"><Check className="w-3.5 h-3.5" aria-hidden="true" /> Saved</span>}
+            {busy && <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground/75" aria-hidden="true" />}
+            {saved && <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600 dark:text-emerald-300"><Check className="w-3.5 h-3.5" aria-hidden="true" /> Saved</span>}
             {error && <span className="text-xs text-red-500">{error}</span>}
           </div>
         </>
@@ -1504,7 +1504,7 @@ export function TicketFormSection() {
           value={field.defaultValue ?? '2'}
           onChange={(e) => patchField(field.key, { defaultValue: e.target.value })}
           aria-label="Default priority"
-          className="tp-focus-ring border border-slate-200 rounded-md px-1.5 py-0.5 text-[11px] text-slate-600"
+          className="tp-focus-ring border border-border rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground"
         >
           {[1, 2, 3, 4].map((p) => <option key={p} value={String(p)}>Default: {PRIORITY_LABELS[p]}</option>)}
         </select>
@@ -1516,7 +1516,7 @@ export function TicketFormSection() {
           value={field.defaultValue ?? ''}
           onChange={(e) => patchField(field.key, { defaultValue: e.target.value || null })}
           aria-label="Default type"
-          className="tp-focus-ring border border-slate-200 rounded-md px-1.5 py-0.5 text-[11px] text-slate-600"
+          className="tp-focus-ring border border-border rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground"
         >
           <option value="">Default: workspace default type</option>
           {activeTypes.map((t) => <option key={t.id} value={t.name}>Default: {t.name}</option>)}
@@ -1524,7 +1524,7 @@ export function TicketFormSection() {
       );
     }
     if (kind === 'source') {
-      return <span className="text-[10px] text-slate-400 italic">default set above</span>;
+      return <span className="text-[10px] text-muted-foreground/75 italic">default set above</span>;
     }
     return null;
   };
@@ -1536,30 +1536,30 @@ export function TicketFormSection() {
       hint="What the Ticket Pulse composer (/tickets/new) shows and requires, per workspace. Applies to Ticket Pulse's own composer only — FreshService's forms and fields are untouched. Requester and Subject are always shown and required; hidden fields are hidden, never deleted."
     >
       {!form ? (
-        <p className="text-xs text-slate-400 italic">{error || 'Loading…'}</p>
+        <p className="text-xs text-muted-foreground/75 italic">{error || 'Loading…'}</p>
       ) : (
         <>
           {/* Workspace defaults — prominent, above the field list */}
-          <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2.5 grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="mb-3 rounded-lg border border-border bg-muted/35 px-3 py-2.5 grid grid-cols-1 sm:grid-cols-2 gap-3">
             <label className="block text-xs">
-              <span className="font-bold text-slate-600">Default source</span>
+              <span className="font-bold text-muted-foreground">Default source</span>
               <select
                 value={form.defaultSource ?? 103}
                 onChange={(e) => patch((prev) => ({ ...prev, defaultSource: Number(e.target.value) }))}
                 aria-label="Default source"
-                className="tp-focus-ring mt-1 w-full border border-slate-200 rounded-md px-2 py-1.5 text-slate-700 bg-white"
+                className="tp-focus-ring mt-1 w-full border border-border rounded-md px-2 py-1.5 text-foreground/85 bg-card"
               >
                 {SOURCE_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
               </select>
-              <span className="block mt-1 text-[10px] text-slate-400">Preselected in the composer; also applied when a staff-logged create omits a source.</span>
+              <span className="block mt-1 text-[10px] text-muted-foreground/75">Preselected in the composer; also applied when a staff-logged create omits a source.</span>
             </label>
             <label className="block text-xs">
-              <span className="font-bold text-slate-600">Default group</span>
+              <span className="font-bold text-muted-foreground">Default group</span>
               <select
                 value={groupValue}
                 onChange={(e) => setGroupChoice(e.target.value)}
                 aria-label="Default group"
-                className="tp-focus-ring mt-1 w-full border border-slate-200 rounded-md px-2 py-1.5 text-slate-700 bg-white"
+                className="tp-focus-ring mt-1 w-full border border-border rounded-md px-2 py-1.5 text-foreground/85 bg-card"
               >
                 <option value="">No default group</option>
                 {groups.some((g) => g.origin === 'local') && (
@@ -1577,20 +1577,20 @@ export function TicketFormSection() {
                   </optgroup>
                 )}
               </select>
-              <span className="block mt-1 text-[10px] text-slate-400">
+              <span className="block mt-1 text-[10px] text-muted-foreground/75">
                 Preselected in the composer and applied when the composer leaves group empty. An internal group here is the workspace default group (shared with email/API intake).
               </span>
             </label>
           </div>
 
           {/* Composer behavior defaults */}
-          <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-slate-600">
+          <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
             <label className="flex items-center gap-1.5 cursor-pointer">
               <input
                 type="checkbox"
                 checked={form.defaults?.notifyRequester !== false}
                 onChange={(e) => patch((prev) => ({ ...prev, defaults: { ...prev.defaults, notifyRequester: e.target.checked } }))}
-                className="tp-focus-ring rounded border-slate-300 text-blue-600"
+                className="tp-focus-ring rounded border-input text-blue-600 dark:text-blue-300"
               />
               Email the requester by default
             </label>
@@ -1599,7 +1599,7 @@ export function TicketFormSection() {
                 type="checkbox"
                 checked={form.defaults?.aiClassify !== false}
                 onChange={(e) => patch((prev) => ({ ...prev, defaults: { ...prev.defaults, aiClassify: e.target.checked } }))}
-                className="tp-focus-ring rounded border-slate-300 text-indigo-600"
+                className="tp-focus-ring rounded border-input text-indigo-600 dark:text-indigo-300"
               />
               Classify &amp; assess with AI by default
             </label>
@@ -1609,7 +1609,7 @@ export function TicketFormSection() {
                 value={form.defaults?.assignMode || 'none'}
                 onChange={(e) => patch((prev) => ({ ...prev, defaults: { ...prev.defaults, assignMode: e.target.value } }))}
                 aria-label="Default assignment mode"
-                className="tp-focus-ring border border-slate-200 rounded-md px-1.5 py-0.5 text-slate-600"
+                className="tp-focus-ring border border-border rounded-md px-1.5 py-0.5 text-muted-foreground"
               >
                 <option value="none">Leave unassigned</option>
                 <option value="ai">AI recommends an assignee</option>
@@ -1629,7 +1629,7 @@ export function TicketFormSection() {
                       onClick={() => moveField(field.key, -1)}
                       disabled={i === 0}
                       aria-label={`Move ${field.label} up`}
-                      className="tp-focus-ring p-0.5 rounded text-slate-300 hover:text-slate-500 disabled:opacity-30"
+                      className="tp-focus-ring p-0.5 rounded text-muted-foreground/50 hover:text-muted-foreground disabled:opacity-30"
                     >
                       <ArrowUp className="w-3 h-3" aria-hidden="true" />
                     </button>
@@ -1637,14 +1637,14 @@ export function TicketFormSection() {
                       onClick={() => moveField(field.key, 1)}
                       disabled={i === form.fields.length - 1}
                       aria-label={`Move ${field.label} down`}
-                      className="tp-focus-ring p-0.5 rounded text-slate-300 hover:text-slate-500 disabled:opacity-30"
+                      className="tp-focus-ring p-0.5 rounded text-muted-foreground/50 hover:text-muted-foreground disabled:opacity-30"
                     >
                       <ArrowDown className="w-3 h-3" aria-hidden="true" />
                     </button>
                   </span>
-                  <span className={`w-28 font-semibold ${field.visible ? 'text-slate-700' : 'text-slate-400'}`}>{field.label}</span>
+                  <span className={`w-28 font-semibold ${field.visible ? 'text-foreground/85' : 'text-muted-foreground/75'}`}>{field.label}</span>
                   {locked ? (
-                    <span className="text-[10px] text-slate-400 border border-slate-200 rounded-full px-1.5 py-px">Always shown · required</span>
+                    <span className="text-[10px] text-muted-foreground/75 border border-border rounded-full px-1.5 py-px">Always shown · required</span>
                   ) : (
                     <>
                       <button
@@ -1652,20 +1652,20 @@ export function TicketFormSection() {
                         aria-pressed={!field.visible}
                         aria-label={field.visible ? `Hide ${field.label}` : `Show ${field.label}`}
                         title={field.visible ? 'Hide from the composer (the API can still set it)' : 'Show in the composer'}
-                        className="tp-focus-ring inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 hover:bg-slate-50"
+                        className="tp-focus-ring inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border border-border text-muted-foreground hover:bg-muted/50"
                       >
                         {field.visible
                           ? <><Eye className="w-3 h-3" aria-hidden="true" /> Shown</>
                           : <><EyeOff className="w-3 h-3" aria-hidden="true" /> Hidden</>}
                       </button>
                       {meta.requirable && (
-                        <label className="flex items-center gap-1 text-[11px] text-slate-500 cursor-pointer" title={meta.composerOnlyRequired ? 'Composer-only: files upload after create, so the API cannot enforce this' : 'Required in the composer and on the public API create'}>
+                        <label className="flex items-center gap-1 text-[11px] text-muted-foreground cursor-pointer" title={meta.composerOnlyRequired ? 'Composer-only: files upload after create, so the API cannot enforce this' : 'Required in the composer and on the public API create'}>
                           <input
                             type="checkbox"
                             checked={field.required}
                             disabled={!field.visible}
                             onChange={(e) => patchField(field.key, { required: e.target.checked })}
-                            className="tp-focus-ring rounded border-slate-300 text-blue-600"
+                            className="tp-focus-ring rounded border-input text-blue-600 dark:text-blue-300"
                           />
                           Required
                         </label>
@@ -1688,11 +1688,11 @@ export function TicketFormSection() {
             <button
               onClick={restoreDefaults}
               disabled={busy}
-              className="tp-focus-ring inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-slate-700 disabled:opacity-50"
+              className="tp-focus-ring inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground/85 disabled:opacity-50"
             >
               <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" /> Restore defaults
             </button>
-            {saved && <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600"><Check className="w-3.5 h-3.5" aria-hidden="true" /> Saved</span>}
+            {saved && <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600 dark:text-emerald-300"><Check className="w-3.5 h-3.5" aria-hidden="true" /> Saved</span>}
           </div>
         </>
       )}
@@ -1737,11 +1737,11 @@ export function AdditionalRequestersSection() {
       title="Additional requesters"
       hint='A ticket has one requester plus an optional "Also for" list (additional requesters). They always receive every reply to the requester; this decides whether lifecycle mails reach them too.'
     >
-      <div className="rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2.5">
+      <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-sm font-semibold text-slate-700">Also notify additional requesters</p>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-sm font-semibold text-foreground/85">Also notify additional requesters</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
               When on, ticket-created, status-change and resolution emails that go to the requester are cc&apos;d to the ticket&apos;s &quot;Also for&quot; addresses. Satisfaction surveys stay requester-only.
             </p>
           </div>
@@ -1752,9 +1752,9 @@ export function AdditionalRequestersSection() {
             aria-label={`Also notify additional requesters ${enabled ? 'on' : 'off'}`}
             onClick={toggle}
             disabled={enabled === null || busy}
-            className={`tp-focus-ring relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-60 ${enabled ? 'bg-blue-600' : 'bg-slate-300'}`}
+            className={`tp-focus-ring relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-60 ${enabled ? 'bg-blue-600' : 'bg-muted-foreground/40'}`}
           >
-            <span className="absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform" style={{ transform: enabled ? 'translateX(16px)' : 'translateX(0)' }} aria-hidden="true" />
+            <span className="absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-card shadow transition-transform" style={{ transform: enabled ? 'translateX(16px)' : 'translateX(0)' }} aria-hidden="true" />
           </button>
         </div>
         {enabled === true && (
@@ -1762,7 +1762,7 @@ export function AdditionalRequestersSection() {
             Lifecycle mails now carry the additional requesters in Cc (never duplicating the requester).
           </p>
         )}
-        {error && <p className="text-xs text-red-600 mt-1.5" role="alert">{error}</p>}
+        {error && <p className="text-xs text-red-600 dark:text-red-300 mt-1.5" role="alert">{error}</p>}
       </div>
     </SectionCard>
   );

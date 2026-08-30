@@ -58,18 +58,18 @@ export function statusNamesForBase(defs, baseOrBases) {
 // JIT needs them literal). Tones follow the soft "subtle bg + colored text"
 // pill style from tech-detail/constants.js.
 export const STATUS_TONE_BY_COLOR = {
-  slate: 'bg-slate-100 text-slate-500',
-  orange: 'bg-orange-50 text-orange-700',
-  violet: 'bg-violet-50 text-violet-700',
-  red: 'bg-rose-50 text-rose-600',
-  blue: 'bg-blue-50 text-blue-700',
-  emerald: 'bg-emerald-50 text-emerald-700',
-  amber: 'bg-amber-50 text-amber-700',
-  cyan: 'bg-cyan-50 text-cyan-700',
-  pink: 'bg-pink-50 text-pink-700',
+  slate: 'bg-muted text-muted-foreground',
+  orange: 'bg-orange-50 dark:bg-orange-500/15 text-orange-700 dark:text-orange-200',
+  violet: 'bg-violet-50 dark:bg-violet-500/15 text-violet-700 dark:text-violet-200',
+  red: 'bg-rose-50 dark:bg-rose-500/15 text-rose-600 dark:text-rose-300',
+  blue: 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200',
+  emerald: 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200',
+  amber: 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200',
+  cyan: 'bg-cyan-50 dark:bg-cyan-500/15 text-cyan-700 dark:text-cyan-200',
+  pink: 'bg-pink-50 dark:bg-pink-500/15 text-pink-700 dark:text-pink-200',
 };
 export const STATUS_DOT_BY_COLOR = {
-  slate: 'bg-slate-400',
+  slate: 'bg-muted-foreground/60',
   orange: 'bg-orange-500',
   violet: 'bg-violet-500',
   red: 'bg-rose-500',
@@ -101,5 +101,5 @@ export function statusToneFromDefs(defs, name) {
 
 /** Facet-dot class for a def (canonical seed colors included). */
 export function statusDotClass(def) {
-  return STATUS_DOT_BY_COLOR[def?.color] || 'bg-slate-300';
+  return STATUS_DOT_BY_COLOR[def?.color] || 'bg-muted-foreground/40';
 }

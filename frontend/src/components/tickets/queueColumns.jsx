@@ -77,7 +77,7 @@ export function BypassBadge({ bypass }) {
       onClick={(e) => e.stopPropagation()}
       title={title}
       aria-label={title}
-      className="tp-focus-ring flex-shrink-0 inline-flex items-center h-5 w-5 rounded-md bg-amber-50 border border-amber-200 text-amber-600 hover:bg-amber-100 transition-colors"
+      className="tp-focus-ring flex-shrink-0 inline-flex items-center h-5 w-5 rounded-md bg-amber-50 dark:bg-amber-500/15 border border-amber-200 dark:border-amber-500/30 text-amber-600 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-500/20 transition-colors"
     >
       <CornerUpRight className="w-3 h-3 m-auto" aria-hidden="true" />
     </Link>
@@ -112,11 +112,11 @@ function renderRequester(ticket, ctx) {
       style={ctx.cellStyle('requester')}
       title={[ticket.requester?.name, office].filter(Boolean).join(' · ') || undefined}
     >
-      <span className="block w-full text-xs font-medium text-slate-700 truncate">
+      <span className="block w-full text-xs font-medium text-foreground/85 truncate">
         {ticket.requester?.name || 'Unknown requester'}
       </span>
       {office && (
-        <span className="block w-full text-[10px] text-slate-400 truncate">{office}</span>
+        <span className="block w-full text-[10px] text-muted-foreground/75 truncate">{office}</span>
       )}
     </span>
   );
@@ -134,11 +134,11 @@ function renderCategory(ticket, ctx) {
     >
       {subLabel ? (
         <>
-          <span className="block w-full text-xs font-medium text-slate-700 truncate">{subLabel}</span>
-          {catLabel && <span className="block w-full text-[10px] text-slate-400 truncate">in {catLabel}</span>}
+          <span className="block w-full text-xs font-medium text-foreground/85 truncate">{subLabel}</span>
+          {catLabel && <span className="block w-full text-[10px] text-muted-foreground/75 truncate">in {catLabel}</span>}
         </>
       ) : (
-        <span className="block w-full text-xs text-slate-600 truncate">{catLabel || '—'}</span>
+        <span className="block w-full text-xs text-muted-foreground truncate">{catLabel || '—'}</span>
       )}
     </span>
   );
@@ -156,17 +156,17 @@ function renderAssignee(ticket, ctx) {
     <>
       <span className="relative flex-shrink-0">
         <PersonAvatar name={ticket.ai.techName} photoUrl={technicians.find((t) => t.id === ticket.ai.techId)?.photoUrl} size="h-6 w-6" textSize="text-[9px]" />
-        <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-violet-600 ring-2 ring-white inline-flex items-center justify-center" aria-hidden="true">
+        <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-violet-600 ring-2 ring-card inline-flex items-center justify-center" aria-hidden="true">
           <Sparkles className="w-[7px] h-[7px] text-white" />
         </span>
       </span>
       <span className="flex flex-col min-w-0 flex-1 leading-tight">
-        <span className="text-[9px] font-bold uppercase tracking-wider text-violet-600">
+        <span className="text-[9px] font-bold uppercase tracking-wider text-violet-600 dark:text-violet-300">
           Suggested{suggestedPct !== null ? ` · ${suggestedPct}%` : ''}
         </span>
         {ticket.ai.techName
-          ? <AgentFirstName name={ticket.ai.techName} className="text-xs font-semibold text-slate-800" />
-          : <span className="truncate text-xs font-semibold text-slate-800">AI pick</span>}
+          ? <AgentFirstName name={ticket.ai.techName} className="text-xs font-semibold text-foreground" />
+          : <span className="truncate text-xs font-semibold text-foreground">AI pick</span>}
       </span>
       {ticket.ai.count > 1 && (
         <span className="text-[9px] font-medium text-violet-400 flex-shrink-0">+{ticket.ai.count - 1}</span>
@@ -193,7 +193,7 @@ function renderAssignee(ticket, ctx) {
             onClick={(e) => e.stopPropagation()}
             onDoubleClick={(e) => e.stopPropagation()}
             title={viewerSuggestedTitle}
-            className="flex items-center gap-2 min-w-0 w-full pl-1 pr-2 py-1 rounded-full border border-dashed border-violet-300 bg-violet-50/60"
+            className="flex items-center gap-2 min-w-0 w-full pl-1 pr-2 py-1 rounded-full border border-dashed border-violet-300 dark:border-violet-500/40 bg-violet-50/60 dark:bg-violet-500/10"
           >
             {suggestedChipBody}
           </span>
@@ -233,12 +233,12 @@ function renderAssignee(ticket, ctx) {
             title="AI is choosing the best person for this ticket — click to watch live. A manual assignment overrides the pick; category & priority detection still finish."
             className="tp-focus-ring tp-ai-think flex items-center gap-2 min-w-0 w-full pl-1 pr-2 py-1 rounded-full text-left"
           >
-            <span className="h-6 w-6 rounded-full bg-violet-100 inline-flex items-center justify-center flex-shrink-0">
-              <Sparkles className="w-3 h-3 text-violet-600 tp-ai-twinkle" aria-hidden="true" />
+            <span className="h-6 w-6 rounded-full bg-violet-100 dark:bg-violet-500/20 inline-flex items-center justify-center flex-shrink-0">
+              <Sparkles className="w-3 h-3 text-violet-600 dark:text-violet-300 tp-ai-twinkle" aria-hidden="true" />
             </span>
             <span className="flex flex-col min-w-0 leading-tight">
-              <span className="text-[9px] font-bold uppercase tracking-wider text-violet-600">AI choosing…</span>
-              <span className="text-xs italic text-slate-400 truncate">{aiProgressLabel(ctx.aiProgress) || 'best person for this'}</span>
+              <span className="text-[9px] font-bold uppercase tracking-wider text-violet-600 dark:text-violet-300">AI choosing…</span>
+              <span className="text-xs italic text-muted-foreground/75 truncate">{aiProgressLabel(ctx.aiProgress) || 'best person for this'}</span>
             </span>
           </button>
         ) : (
@@ -246,12 +246,12 @@ function renderAssignee(ticket, ctx) {
             title="AI is choosing the best person for this ticket"
             className="tp-ai-think flex items-center gap-2 min-w-0 w-full pl-1 pr-2 py-1 rounded-full"
           >
-            <span className="h-6 w-6 rounded-full bg-violet-100 inline-flex items-center justify-center flex-shrink-0">
-              <Sparkles className="w-3 h-3 text-violet-600 tp-ai-twinkle" aria-hidden="true" />
+            <span className="h-6 w-6 rounded-full bg-violet-100 dark:bg-violet-500/20 inline-flex items-center justify-center flex-shrink-0">
+              <Sparkles className="w-3 h-3 text-violet-600 dark:text-violet-300 tp-ai-twinkle" aria-hidden="true" />
             </span>
             <span className="flex flex-col min-w-0 leading-tight">
-              <span className="text-[9px] font-bold uppercase tracking-wider text-violet-600">AI choosing…</span>
-              <span className="text-xs italic text-slate-400 truncate">{aiProgressLabel(ctx.aiProgress) || 'best person for this'}</span>
+              <span className="text-[9px] font-bold uppercase tracking-wider text-violet-600 dark:text-violet-300">AI choosing…</span>
+              <span className="text-xs italic text-muted-foreground/75 truncate">{aiProgressLabel(ctx.aiProgress) || 'best person for this'}</span>
             </span>
           </span>
         )
@@ -260,14 +260,14 @@ function renderAssignee(ticket, ctx) {
           <button
             onClick={() => ctx.setAiTicket(ticket)}
             title={`AI suggests ${ticket.ai.techName || 'a technician'}${suggestedPct !== null ? ` — ${suggestedPct}% match` : ''}${ticket.ai.count > 1 ? ` (+${ticket.ai.count - 1} more candidate${ticket.ai.count - 1 === 1 ? '' : 's'})` : ''} · awaiting your approval`}
-            className="tp-focus-ring group flex items-center gap-2 min-w-0 w-full pl-1 pr-2 py-1 rounded-full border border-dashed border-violet-300 bg-violet-50/60 hover:bg-violet-50 transition-colors text-left"
+            className="tp-focus-ring group flex items-center gap-2 min-w-0 w-full pl-1 pr-2 py-1 rounded-full border border-dashed border-violet-300 dark:border-violet-500/40 bg-violet-50/60 dark:bg-violet-500/10 hover:bg-violet-50 dark:hover:bg-violet-500/15 transition-colors text-left"
           >
             {suggestedChipBody}
           </button>
         ) : (
           <span
             title={viewerSuggestedTitle}
-            className="flex items-center gap-2 min-w-0 w-full pl-1 pr-2 py-1 rounded-full border border-dashed border-violet-300 bg-violet-50/60"
+            className="flex items-center gap-2 min-w-0 w-full pl-1 pr-2 py-1 rounded-full border border-dashed border-violet-300 dark:border-violet-500/40 bg-violet-50/60 dark:bg-violet-500/10"
           >
             {suggestedChipBody}
           </span>
@@ -278,7 +278,7 @@ function renderAssignee(ticket, ctx) {
             {ticket.assignedTech ? (
               <>
                 <PersonAvatar name={ticket.assignedTech.name} photoUrl={ticket.assignedTech.photoUrl} />
-                <AgentFirstName name={ticket.assignedTech.name} className="text-xs text-slate-600" />
+                <AgentFirstName name={ticket.assignedTech.name} className="text-xs text-muted-foreground" />
               </>
             ) : (
               <UnassignedBadge variant="muted" />
@@ -294,8 +294,8 @@ function renderAssignee(ticket, ctx) {
                 aria-label={ticket.assignedTech ? 'AI suggestion (already assigned)' : 'Review AI suggestion'}
                 className={`tp-focus-ring p-1 rounded-md flex-shrink-0 ${
                   ticket.assignedTech
-                    ? 'text-slate-300 hover:text-slate-500 hover:bg-slate-50'
-                    : 'text-indigo-500 hover:bg-indigo-50'
+                    ? 'text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted/50'
+                    : 'text-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-500/15'
                 }`}
               >
                 <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
@@ -307,7 +307,7 @@ function renderAssignee(ticket, ctx) {
                   ? `Already assigned to ${ticket.assignedTech.name} — AI suggested ${ticket.ai.techName || 'someone'} (informational)`
                   : viewerSuggestedTitle}
                 aria-label="AI suggestion — waiting on a reviewer's approval"
-                className={`p-1 rounded-md flex-shrink-0 ${ticket.assignedTech ? 'text-slate-300' : 'text-indigo-400'}`}
+                className={`p-1 rounded-md flex-shrink-0 ${ticket.assignedTech ? 'text-muted-foreground/50' : 'text-indigo-400'}`}
               >
                 <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
               </span>
@@ -318,7 +318,7 @@ function renderAssignee(ticket, ctx) {
                 onClick={() => ctx.setAiTicket(ticket)}
                 title="AI run queued for business hours"
                 aria-label="AI run queued"
-                className="tp-focus-ring p-1 rounded-md text-indigo-400 hover:bg-indigo-50 flex-shrink-0"
+                className="tp-focus-ring p-1 rounded-md text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-500/15 flex-shrink-0"
               >
                 <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
               </button>
@@ -336,7 +336,7 @@ function renderAssignee(ticket, ctx) {
               onClick={() => ctx.setAiTicket(ticket)}
               title="Ask AI to assign"
               aria-label="Ask AI to assign"
-              className="tp-focus-ring p-1 rounded-md text-slate-300 hover:text-indigo-500 hover:bg-indigo-50 flex-shrink-0"
+              className="tp-focus-ring p-1 rounded-md text-muted-foreground/50 hover:text-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-500/15 flex-shrink-0"
             >
               <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
             </button>
@@ -382,12 +382,12 @@ function renderDue(ticket, ctx) {
   return (
     <span className={`${ctx.cell('due')} ${ctx.cellPad}`} style={ctx.cellStyle('due')}>
       {removedLike
-        ? <span className="text-xs text-slate-300">—</span>
+        ? <span className="text-xs text-muted-foreground/50">—</span>
         : resolvedLike
-          ? <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold border bg-emerald-50 text-emerald-700 border-emerald-200">Done</span>
+          ? <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold border bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 border-emerald-200 dark:border-emerald-500/30">Done</span>
           : ticket.dueBy
             ? <SlaChip value={ticket.dueBy} paused={baseStatusOf(statusDefs, ticket.status) === 'Pending'} calendarAware={ctx.slaCalendarAware} className="!px-1.5 !text-[10px]" />
-            : <span className="text-xs text-slate-300">—</span>}
+            : <span className="text-xs text-muted-foreground/50">—</span>}
     </span>
   );
 }
@@ -399,7 +399,7 @@ function renderLastActivity(ticket, ctx) {
       style={ctx.cellStyle('lastActivity')}
       title={ticket.lastActivityAt ? new Date(ticket.lastActivityAt).toLocaleString() : ''}
     >
-      <span className="text-xs text-slate-400 whitespace-nowrap transition-opacity group-hover:opacity-0">
+      <span className="text-xs text-muted-foreground/75 whitespace-nowrap transition-opacity group-hover:opacity-0">
         {timeAgo(ticket.lastActivityAt || ticket.updatedAt)}
       </span>
       <Link
@@ -408,7 +408,7 @@ function renderLastActivity(ticket, ctx) {
         onClick={(e) => { e.stopPropagation(); if (isModifiedClick(e)) return; e.preventDefault(); ctx.onOpenFull(ticket.id); }}
         title="Open full ticket"
         aria-label={`Open ${ticket.displayRef}`}
-        className="tp-focus-ring absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-md text-slate-400 hover:text-blue-600 hover:bg-blue-50"
+        className="tp-focus-ring absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-md text-muted-foreground/75 hover:text-blue-600 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-500/15"
       >
         <ChevronRight className="w-4 h-4" aria-hidden="true" />
       </Link>
@@ -431,11 +431,11 @@ function renderCreatedAt(ticket, ctx) {
     >
       {dateLabel ? (
         <>
-          <span className="block w-full text-xs text-slate-600 truncate">{dateLabel}</span>
-          <span className="block w-full text-[10px] text-slate-400 truncate">{timeAgoShort(ticket.createdAt)}</span>
+          <span className="block w-full text-xs text-muted-foreground truncate">{dateLabel}</span>
+          <span className="block w-full text-[10px] text-muted-foreground/75 truncate">{timeAgoShort(ticket.createdAt)}</span>
         </>
       ) : (
-        <span className="text-xs text-slate-300">—</span>
+        <span className="text-xs text-muted-foreground/50">—</span>
       )}
     </span>
   );
@@ -446,8 +446,8 @@ function renderSource(ticket, ctx) {
   return (
     <span className={`${ctx.cell('source')} ${ctx.cellPad}`} style={ctx.cellStyle('source')} title={label || undefined}>
       {label
-        ? <span className="text-xs text-slate-600 truncate">{label}</span>
-        : <span className="text-xs text-slate-300">—</span>}
+        ? <span className="text-xs text-muted-foreground truncate">{label}</span>
+        : <span className="text-xs text-muted-foreground/50">—</span>}
     </span>
   );
 }
@@ -461,8 +461,8 @@ function renderDepartment(ticket, ctx) {
   return (
     <span className={`${ctx.cell('department')} ${ctx.cellPad}`} style={ctx.cellStyle('department')} title={dept || undefined}>
       {dept
-        ? <span className="text-xs text-slate-600 truncate">{dept}</span>
-        : <span className="text-xs text-slate-300">—</span>}
+        ? <span className="text-xs text-muted-foreground truncate">{dept}</span>
+        : <span className="text-xs text-muted-foreground/50">—</span>}
     </span>
   );
 }
@@ -473,8 +473,8 @@ function renderGroup(ticket, ctx) {
   return (
     <span className={`${ctx.cell('group')} ${ctx.cellPad}`} style={ctx.cellStyle('group')} title={name || undefined}>
       {name
-        ? <span className="text-xs text-indigo-600 font-medium truncate">{name}</span>
-        : <span className="text-xs text-slate-300">—</span>}
+        ? <span className="text-xs text-indigo-600 dark:text-indigo-300 font-medium truncate">{name}</span>
+        : <span className="text-xs text-muted-foreground/50">—</span>}
     </span>
   );
 }
@@ -551,10 +551,10 @@ export function InlinePriorityPicker({ ticket, onChanged, withLabel = false }) {
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={`Priority ${currentLabel} — change`}
-        className="tp-focus-ring rounded-md p-1 -m-1 hover:bg-blue-100/60 inline-flex max-w-full min-w-0 items-center"
+        className="tp-focus-ring rounded-md p-1 -m-1 hover:bg-blue-100/60 dark:hover:bg-blue-500/15 inline-flex max-w-full min-w-0 items-center"
       >
         {busy
-          ? <Loader2 className="w-3 h-3 animate-spin text-slate-400" aria-hidden="true" />
+          ? <Loader2 className="w-3 h-3 animate-spin text-muted-foreground/75" aria-hidden="true" />
           : <PriorityDot priority={ticket.priority} withLabel={withLabel} />}
       </button>
       {open && panelPos && createPortal(
@@ -572,7 +572,7 @@ export function InlinePriorityPicker({ ticket, onChanged, withLabel = false }) {
               role="option"
               aria-selected={ticket.priority === p}
               onClick={() => pick(p)}
-              className={`tp-focus-ring px-2 py-1 text-xs rounded-md hover:bg-blue-50 text-left ${ticket.priority === p ? 'bg-blue-50' : ''}`}
+              className={`tp-focus-ring px-2 py-1 text-xs rounded-md hover:bg-blue-50 dark:hover:bg-blue-500/15 text-left ${ticket.priority === p ? 'bg-blue-50 dark:bg-blue-500/15' : ''}`}
             >
               <PriorityDot priority={p} withLabel />
             </button>
@@ -994,12 +994,12 @@ export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onR
         aria-haspopup="dialog"
         title="Choose and reorder the list's columns (applies on large screens)"
         className={`tp-focus-ring relative inline-flex items-center gap-1.5 text-sm rounded-lg px-2.5 min-h-[44px] py-2 border transition-colors ${
-          customized ? 'bg-blue-50 text-blue-700 border-blue-200 font-medium' : 'bg-white text-slate-700 border-input hover:border-blue-300'
+          customized ? 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 border-blue-200 dark:border-blue-500/30 font-medium' : 'bg-card text-foreground/85 border-input hover:border-blue-300 dark:hover:border-blue-500/40'
         }`}
       >
-        <Columns3 className={`w-4 h-4 ${customized ? 'text-blue-500' : 'text-slate-400'}`} aria-hidden="true" />
+        <Columns3 className={`w-4 h-4 ${customized ? 'text-blue-500' : 'text-muted-foreground/75'}`} aria-hidden="true" />
         Columns
-        <ChevronDown className={`w-3.5 h-3.5 ${customized ? 'text-blue-500' : 'text-slate-400'}`} aria-hidden="true" />
+        <ChevronDown className={`w-3.5 h-3.5 ${customized ? 'text-blue-500' : 'text-muted-foreground/75'}`} aria-hidden="true" />
         {customized && <span aria-hidden="true" className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-blue-500" />}
       </button>
       {open && (
@@ -1008,7 +1008,7 @@ export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onR
           aria-label="Customize columns"
           className="absolute top-full mt-1 z-30 right-0 w-64 tp-card rounded-lg shadow-soft p-2 animate-scaleIn"
         >
-          <p className="px-2 pb-1.5 text-[11px] text-slate-400 border-b border-slate-100">
+          <p className="px-2 pb-1.5 text-[11px] text-muted-foreground/75 border-b border-border/60">
             Drag to reorder · applies on large screens (smaller screens keep the essentials)
           </p>
           <ul className="max-h-72 overflow-y-auto settings-scrollbar -mx-0.5 mt-1">
@@ -1022,16 +1022,16 @@ export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onR
                   key={key}
                   onDragOver={(e) => { if (dragKey && dragKey !== key && !pinned) e.preventDefault(); }}
                   onDrop={(e) => { e.preventDefault(); dropOn(key); }}
-                  className={`transition-opacity ${dragging ? 'opacity-40' : dragKey && !pinned ? 'hover:bg-blue-50/40' : ''}`}
+                  className={`transition-opacity ${dragging ? 'opacity-40' : dragKey && !pinned ? 'hover:bg-blue-50/40 dark:hover:bg-blue-500/10' : ''}`}
                 >
-                  <label className="flex items-center gap-2 px-1.5 py-1.5 rounded-md hover:bg-blue-50 cursor-pointer text-sm text-slate-700">
+                  <label className="flex items-center gap-2 px-1.5 py-1.5 rounded-md hover:bg-blue-50 dark:hover:bg-blue-500/15 cursor-pointer text-sm text-foreground/85">
                     <span
                       draggable={!pinned}
                       onDragStart={(e) => { if (pinned) return; setDragKey(key); e.dataTransfer.effectAllowed = 'move'; }}
                       onDragEnd={() => setDragKey(null)}
                       title={pinned ? undefined : 'Drag to reorder'}
                       aria-label={pinned ? undefined : `Reorder ${col.label} column`}
-                      className={pinned ? 'w-3.5 flex-shrink-0' : 'cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 flex-shrink-0'}
+                      className={pinned ? 'w-3.5 flex-shrink-0' : 'cursor-grab active:cursor-grabbing text-muted-foreground/50 hover:text-muted-foreground flex-shrink-0'}
                     >
                       {!pinned && <GripVertical className="w-3.5 h-3.5" aria-hidden="true" />}
                     </span>
@@ -1041,10 +1041,10 @@ export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onR
                       disabled={Boolean(col.mandatory)}
                       onChange={() => toggle(key)}
                       aria-label={`${col.label} column`}
-                      className="tp-focus-ring rounded border-slate-300 text-blue-600 disabled:opacity-50"
+                      className="tp-focus-ring rounded border-input text-blue-600 dark:text-blue-300 disabled:opacity-50"
                     />
                     <span className="truncate flex-1">{col.label}</span>
-                    {col.mandatory && <span className="text-[10px] text-slate-400 flex-shrink-0">Always shown</span>}
+                    {col.mandatory && <span className="text-[10px] text-muted-foreground/75 flex-shrink-0">Always shown</span>}
                   </label>
                 </li>
               );
@@ -1052,12 +1052,12 @@ export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onR
           </ul>
           {/* Footer: column-set reset (QC4) beside the width reset (QR3) —
               two different customizations, two explicit ways back. */}
-          <div className="mt-1.5 flex items-stretch gap-1 border-t border-slate-100 pt-1">
+          <div className="mt-1.5 flex items-stretch gap-1 border-t border-border/60 pt-1">
             <button
               onClick={reset}
               disabled={!customized}
               title="Restore the default column set and order"
-              className="tp-focus-ring flex-1 inline-flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs font-semibold text-slate-500 hover:text-blue-700 hover:bg-blue-50 rounded-md disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-slate-500"
+              className="tp-focus-ring flex-1 inline-flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs font-semibold text-muted-foreground hover:text-blue-700 dark:hover:text-blue-200 hover:bg-blue-50 dark:hover:bg-blue-500/15 rounded-md disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
             >
               <RotateCcw className="w-3 h-3" aria-hidden="true" />
               Reset columns
@@ -1066,7 +1066,7 @@ export function QueueColumnsMenu({ value, onChange, hasCustomWidths = false, onR
               onClick={onResetWidths}
               disabled={!hasCustomWidths}
               title="Clear every column width you've dragged (both list layouts)"
-              className="tp-focus-ring flex-1 inline-flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs font-semibold text-slate-500 hover:text-blue-700 hover:bg-blue-50 rounded-md disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-slate-500"
+              className="tp-focus-ring flex-1 inline-flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs font-semibold text-muted-foreground hover:text-blue-700 dark:hover:text-blue-200 hover:bg-blue-50 dark:hover:bg-blue-500/15 rounded-md disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
             >
               <MoveHorizontal className="w-3 h-3" aria-hidden="true" />
               Reset widths

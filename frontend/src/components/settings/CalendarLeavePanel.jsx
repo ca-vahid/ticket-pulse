@@ -274,12 +274,12 @@ export default function CalendarLeavePanel() {
   return (
     <div className="space-y-5">
       <div className="flex items-center gap-3">
-        <div className="p-2 bg-sky-100 rounded-lg">
-          <CalendarDays className="w-5 h-5 text-sky-700" />
+        <div className="p-2 bg-sky-100 dark:bg-sky-500/20 rounded-lg">
+          <CalendarDays className="w-5 h-5 text-sky-700 dark:text-sky-200" />
         </div>
         <div>
-          <h3 className="text-lg font-semibold text-gray-900">Shared Calendar Leave</h3>
-          <p className="text-sm text-gray-500">Sync Accounting shared mailbox calendar entries into availability.</p>
+          <h3 className="text-lg font-semibold text-foreground">Shared Calendar Leave</h3>
+          <p className="text-sm text-muted-foreground">Sync Accounting shared mailbox calendar entries into availability.</p>
         </div>
         <button onClick={() => runPreview(false)} disabled={busy} className="ml-auto inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-sm">
           {busy ? <Loader className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
@@ -296,13 +296,13 @@ export default function CalendarLeavePanel() {
       </div>
 
       {status && (
-        <div className={`p-3 rounded-lg border text-sm ${status.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-red-50 border-red-200 text-red-800'}`}>
+        <div className={`p-3 rounded-lg border text-sm ${status.ok ? 'bg-emerald-50 dark:bg-emerald-500/15 border-emerald-200 dark:border-emerald-500/30 text-emerald-800 dark:text-emerald-200' : 'bg-red-50 dark:bg-red-500/15 border-red-200 dark:border-red-500/30 text-red-800 dark:text-red-200'}`}>
           {status.text}
         </div>
       )}
 
       {loadingInitial && (
-        <div className="rounded-lg border border-sky-100 bg-sky-50 px-4 py-3 text-sm text-sky-800 flex items-center gap-2">
+        <div className="rounded-lg border border-sky-100 dark:border-sky-500/20 bg-sky-50 dark:bg-sky-500/15 px-4 py-3 text-sm text-sky-800 dark:text-sky-200 flex items-center gap-2">
           <Loader className="h-4 w-4 animate-spin" />
           Loading aliases, detection rules, and saved calendar review history...
         </div>
@@ -310,33 +310,33 @@ export default function CalendarLeavePanel() {
 
       {reviewSummary && (
         <div className="grid gap-3 md:grid-cols-5">
-          <div className="rounded-lg border bg-white p-3">
-            <div className="text-xs font-medium text-gray-500">Needs Review</div>
-            <div className="mt-1 text-2xl font-semibold text-gray-900">{reviewSummary.reviewNeeded || 0}</div>
+          <div className="rounded-lg border bg-card p-3">
+            <div className="text-xs font-medium text-muted-foreground">Needs Review</div>
+            <div className="mt-1 text-2xl font-semibold text-foreground">{reviewSummary.reviewNeeded || 0}</div>
           </div>
-          <div className="rounded-lg border bg-white p-3">
-            <div className="text-xs font-medium text-gray-500">Manual Fixes</div>
-            <div className="mt-1 text-2xl font-semibold text-gray-900">{reviewSummary.manual || 0}</div>
+          <div className="rounded-lg border bg-card p-3">
+            <div className="text-xs font-medium text-muted-foreground">Manual Fixes</div>
+            <div className="mt-1 text-2xl font-semibold text-foreground">{reviewSummary.manual || 0}</div>
           </div>
-          <div className="rounded-lg border bg-white p-3">
-            <div className="text-xs font-medium text-gray-500">Saved Events</div>
-            <div className="mt-1 text-2xl font-semibold text-gray-900">{reviewSummary.classificationCount || 0}</div>
+          <div className="rounded-lg border bg-card p-3">
+            <div className="text-xs font-medium text-muted-foreground">Saved Events</div>
+            <div className="mt-1 text-2xl font-semibold text-foreground">{reviewSummary.classificationCount || 0}</div>
           </div>
-          <div className="rounded-lg border bg-white p-3">
-            <div className="text-xs font-medium text-gray-500">Aliases / Rules</div>
-            <div className="mt-1 text-2xl font-semibold text-gray-900">{reviewSummary.aliasCount || 0} / {reviewSummary.ruleCount || 0}</div>
+          <div className="rounded-lg border bg-card p-3">
+            <div className="text-xs font-medium text-muted-foreground">Aliases / Rules</div>
+            <div className="mt-1 text-2xl font-semibold text-foreground">{reviewSummary.aliasCount || 0} / {reviewSummary.ruleCount || 0}</div>
           </div>
-          <div className="rounded-lg border bg-white p-3">
-            <div className="text-xs font-medium text-gray-500">Last Sync</div>
-            <div className="mt-1 text-sm font-semibold text-gray-900">{formatDateTime(reviewSummary.lastSyncAt)}</div>
+          <div className="rounded-lg border bg-card p-3">
+            <div className="text-xs font-medium text-muted-foreground">Last Sync</div>
+            <div className="mt-1 text-sm font-semibold text-foreground">{formatDateTime(reviewSummary.lastSyncAt)}</div>
           </div>
         </div>
       )}
 
       {!loadingInitial && !configured && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+        <div className="rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 p-4 text-sm text-amber-900 dark:text-amber-200">
           <div className="font-semibold">No shared-calendar source configured for this workspace.</div>
-          <p className="mt-1 text-amber-800">
+          <p className="mt-1 text-amber-800 dark:text-amber-200">
             This workspace doesn&apos;t pull leave from a shared mailbox calendar. If it uses the
             Vacation Tracker instead, you can leave this blank. To enable, enter this workspace&apos;s
             own mailbox and Graph Group ID below, then Save — values are never shared between workspaces.
@@ -344,41 +344,41 @@ export default function CalendarLeavePanel() {
         </div>
       )}
 
-      <div className="bg-white border rounded-lg p-4 grid md:grid-cols-2 gap-3">
+      <div className="bg-card border rounded-lg p-4 grid md:grid-cols-2 gap-3">
         <label className="text-sm">
-          <span className="block font-medium text-gray-700 mb-1">Mailbox</span>
+          <span className="block font-medium text-foreground/85 mb-1">Mailbox</span>
           <input className="w-full border rounded-lg px-3 py-2" value={config.mailbox || ''} onChange={(e) => setConfig({ ...config, mailbox: e.target.value })} />
         </label>
         <label className="text-sm">
-          <span className="block font-medium text-gray-700 mb-1">Graph Group ID</span>
+          <span className="block font-medium text-foreground/85 mb-1">Graph Group ID</span>
           <input className="w-full border rounded-lg px-3 py-2 font-mono text-xs" value={config.graphGroupId || ''} onChange={(e) => setConfig({ ...config, graphGroupId: e.target.value })} />
         </label>
         <label className="text-sm">
-          <span className="block font-medium text-gray-700 mb-1">Timezone</span>
+          <span className="block font-medium text-foreground/85 mb-1">Timezone</span>
           <input className="w-full border rounded-lg px-3 py-2" value={config.timezone || ''} onChange={(e) => setConfig({ ...config, timezone: e.target.value })} />
         </label>
         <div className="flex items-end gap-3">
           <label className="text-sm flex-1">
-            <span className="block font-medium text-gray-700 mb-1">Window</span>
+            <span className="block font-medium text-foreground/85 mb-1">Window</span>
             <div className="flex gap-2">
               <input type="number" className="w-full border rounded-lg px-3 py-2" value={config.lookbackDays || 7} onChange={(e) => setConfig({ ...config, lookbackDays: Number(e.target.value) })} />
               <input type="number" className="w-full border rounded-lg px-3 py-2" value={config.horizonDays || 90} onChange={(e) => setConfig({ ...config, horizonDays: Number(e.target.value) })} />
             </div>
           </label>
-          <button onClick={saveConfig} disabled={busy} className="px-3 py-2 rounded-lg bg-gray-900 text-white text-sm">Save</button>
+          <button onClick={saveConfig} disabled={busy} className="px-3 py-2 rounded-lg bg-foreground text-background text-sm">Save</button>
         </div>
       </div>
 
       <div className="grid lg:grid-cols-2 gap-5">
-        <div className="bg-white border rounded-lg p-4 space-y-3">
-          <h4 className="font-semibold text-gray-900">Aliases</h4>
+        <div className="bg-card border rounded-lg p-4 space-y-3">
+          <h4 className="font-semibold text-foreground">Aliases</h4>
           <div className="flex gap-2">
             <input className="border rounded-lg px-3 py-2 text-sm flex-1" placeholder="Alias, e.g. Ben" value={newAlias.alias} onChange={(e) => setNewAlias({ ...newAlias, alias: e.target.value })} />
             <select className="border rounded-lg px-2 py-2 text-sm" value={newAlias.technicianId} onChange={(e) => setNewAlias({ ...newAlias, technicianId: e.target.value })} disabled={newAlias.isIgnored}>
               <option value="">Technician</option>
               {technicians.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
-            <label className="flex items-center gap-1 text-xs text-gray-600">
+            <label className="flex items-center gap-1 text-xs text-muted-foreground">
               <input type="checkbox" checked={newAlias.isIgnored} onChange={(e) => setNewAlias({ ...newAlias, isIgnored: e.target.checked })} />
               Ignore
             </label>
@@ -388,15 +388,15 @@ export default function CalendarLeavePanel() {
             {aliases.map((a) => (
               <div key={a.id} className="py-2 flex items-center gap-2">
                 <span className="font-medium">{a.alias}</span>
-                <span className="text-gray-500">{a.isIgnored ? 'ignored' : a.technician?.name || 'unmatched'}</span>
+                <span className="text-muted-foreground">{a.isIgnored ? 'ignored' : a.technician?.name || 'unmatched'}</span>
                 <button onClick={async () => { await calendarLeaveAPI.deleteAlias(a.id); await refresh(); }} className="ml-auto text-red-500"><Trash2 className="w-4 h-4" /></button>
               </div>
             ))}
           </div>
         </div>
 
-        <div className="bg-white border rounded-lg p-4 space-y-3">
-          <h4 className="font-semibold text-gray-900">Detection Rules</h4>
+        <div className="bg-card border rounded-lg p-4 space-y-3">
+          <h4 className="font-semibold text-foreground">Detection Rules</h4>
           <div className="grid grid-cols-2 gap-2">
             <input className="border rounded-lg px-3 py-2 text-sm" placeholder="Rule name" value={newRule.name} onChange={(e) => setNewRule({ ...newRule, name: e.target.value })} />
             <input className="border rounded-lg px-3 py-2 text-sm" placeholder="Regex pattern" value={newRule.pattern} onChange={(e) => setNewRule({ ...newRule, pattern: e.target.value })} />
@@ -419,10 +419,10 @@ export default function CalendarLeavePanel() {
               <div key={r.id} className="py-2">
                 <div className="flex items-center gap-2">
                   <span className="font-medium">{r.name}</span>
-                  <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100">{r.category}{r.halfDayPart ? `/${r.halfDayPart}` : ''}</span>
+                  <span className="text-xs px-1.5 py-0.5 rounded bg-muted">{r.category}{r.halfDayPart ? `/${r.halfDayPart}` : ''}</span>
                   <button onClick={async () => { await calendarLeaveAPI.deleteRule(r.id); await refresh(); }} className="ml-auto text-red-500"><Trash2 className="w-4 h-4" /></button>
                 </div>
-                <code className="text-xs text-gray-500 break-all">{r.pattern}</code>
+                <code className="text-xs text-muted-foreground break-all">{r.pattern}</code>
               </div>
             ))}
           </div>
@@ -430,10 +430,10 @@ export default function CalendarLeavePanel() {
       </div>
 
       {(visibleRows || []).length === 0 && (
-        <div className="bg-white border rounded-lg p-4 text-sm text-gray-600">
+        <div className="bg-card border rounded-lg p-4 text-sm text-muted-foreground">
           <div className="flex flex-wrap items-center gap-2">
-            <CheckCircle className="w-4 h-4 text-gray-400" />
-            <span className="font-semibold text-gray-800">Review Queue</span>
+            <CheckCircle className="w-4 h-4 text-muted-foreground/75" />
+            <span className="font-semibold text-foreground">Review Queue</span>
             <span>
               {reviewFilter === 'review' && 'No unresolved review-needed calendar rows.'}
               {reviewFilter === 'manual' && 'No manual calendar fixes saved yet.'}
@@ -442,25 +442,25 @@ export default function CalendarLeavePanel() {
             <button
               type="button"
               onClick={() => loadReviewRows(reviewFilter)}
-              className="ml-auto rounded border border-gray-200 px-2 py-1 text-xs font-medium text-gray-600"
+              className="ml-auto rounded border border-border px-2 py-1 text-xs font-medium text-muted-foreground"
             >
               Refresh Saved Reviews
             </button>
           </div>
-          <p className="mt-2 text-xs text-gray-500">
+          <p className="mt-2 text-xs text-muted-foreground">
             Use Preview or Sync to populate the latest result list. Use the filter on saved rows to switch between unresolved review items, manual fixes, and recent history.
           </p>
         </div>
       )}
 
       {(visibleRows || []).length > 0 && (
-        <div className="bg-white border rounded-lg overflow-hidden">
+        <div className="bg-card border rounded-lg overflow-hidden">
           <div className="px-4 py-3 border-b flex flex-wrap items-center gap-2">
-            <CheckCircle className="w-4 h-4 text-emerald-600" />
+            <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-300" />
             <span className="font-semibold text-sm">{preview ? 'Latest Preview / Sync Result' : 'Saved Review Queue'}</span>
-            <span className="text-xs text-gray-500">{visibleSummary}</span>
+            <span className="text-xs text-muted-foreground">{visibleSummary}</span>
             {preview?.llmApplied > 0 && (
-              <span className="text-xs text-gray-500">
+              <span className="text-xs text-muted-foreground">
                 Haiku {preview.llmFreshCalls || 0} new · {preview.llmCacheHits || 0} cached · {preview.durationMs || 0}ms
               </span>
             )}
@@ -468,7 +468,7 @@ export default function CalendarLeavePanel() {
               <select
                 value={reviewFilter}
                 onChange={(e) => setReviewFilter(e.target.value)}
-                className="rounded border border-gray-200 bg-white px-2 py-1 text-xs"
+                className="rounded border border-border bg-card px-2 py-1 text-xs"
               >
                 <option value="review">Saved review-needed</option>
                 <option value="manual">Saved manual fixes</option>
@@ -477,7 +477,7 @@ export default function CalendarLeavePanel() {
               <button
                 type="button"
                 onClick={() => { setPreview(null); loadReviewRows(reviewFilter); }}
-                className="rounded border border-gray-200 px-2 py-1 text-xs font-medium text-gray-600"
+                className="rounded border border-border px-2 py-1 text-xs font-medium text-muted-foreground"
               >
                 Show Saved
               </button>
@@ -488,21 +488,21 @@ export default function CalendarLeavePanel() {
               const key = row.eventFingerprint || row.subject;
               const rowEdit = reviewEdits[key] || {};
               return (
-                <div key={`${key}-${idx}`} className={`px-4 py-2 text-sm ${row.requiresReview ? 'bg-amber-50' : ''}`}>
+                <div key={`${key}-${idx}`} className={`px-4 py-2 text-sm ${row.requiresReview ? 'bg-amber-50 dark:bg-amber-500/15' : ''}`}>
                   <div className="flex gap-2">
-                    <span className="font-medium text-gray-900">{row.subject}</span>
-                    <span className="ml-auto text-xs text-gray-500">{row.category}{row.halfDayPart ? `/${row.halfDayPart}` : ''}</span>
+                    <span className="font-medium text-foreground">{row.subject}</span>
+                    <span className="ml-auto text-xs text-muted-foreground">{row.category}{row.halfDayPart ? `/${row.halfDayPart}` : ''}</span>
                   </div>
-                  <div className="text-xs text-gray-500">
+                  <div className="text-xs text-muted-foreground">
                     {row.start?.dateTime} · {row.technicianName || row.personAlias || row.nameGuess || 'unmatched'}{row.technicianIsActive === false ? ' (inactive)' : ''} · {row.source === 'llm' && row.llmCached ? 'haiku cache' : row.source} · {Math.round((row.confidence || 0) * 100)}% · {row.reason}
                   </div>
                   {row.requiresReview && (
                     <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <span className="text-xs font-medium text-amber-800">Review {row.personAlias || row.nameGuess || 'entry'}</span>
+                      <span className="text-xs font-medium text-amber-800 dark:text-amber-200">Review {row.personAlias || row.nameGuess || 'entry'}</span>
                       <select
                         value={reviewSelections[key] || ''}
                         onChange={(e) => setReviewSelections(prev => ({ ...prev, [key]: e.target.value }))}
-                        className="rounded border border-amber-200 bg-white px-2 py-1 text-xs"
+                        className="rounded border border-amber-200 dark:border-amber-500/30 bg-card px-2 py-1 text-xs"
                       >
                         <option value="">Map to technician</option>
                         {technicians.map((t) => (
@@ -514,7 +514,7 @@ export default function CalendarLeavePanel() {
                       <select
                         value={rowEdit.category || row.category || 'OFF'}
                         onChange={(e) => setReviewEdits(prev => ({ ...prev, [key]: { ...prev[key], category: e.target.value } }))}
-                        className="rounded border border-gray-200 bg-white px-2 py-1 text-xs"
+                        className="rounded border border-border bg-card px-2 py-1 text-xs"
                       >
                         <option value="OFF">Off</option>
                         <option value="WFH">WFH</option>
@@ -523,7 +523,7 @@ export default function CalendarLeavePanel() {
                       <select
                         value={rowEdit.halfDayPart ?? row.halfDayPart ?? ''}
                         onChange={(e) => setReviewEdits(prev => ({ ...prev, [key]: { ...prev[key], halfDayPart: e.target.value || null } }))}
-                        className="rounded border border-gray-200 bg-white px-2 py-1 text-xs"
+                        className="rounded border border-border bg-card px-2 py-1 text-xs"
                       >
                         <option value="">Full / infer</option>
                         <option value="AM">AM</option>
@@ -533,7 +533,7 @@ export default function CalendarLeavePanel() {
                         type="button"
                         onClick={() => saveReviewAlias(row)}
                         disabled={busy || !reviewSelections[key]}
-                        className="inline-flex items-center gap-1 rounded border border-emerald-200 bg-white px-2 py-1 text-xs font-medium text-emerald-700 disabled:opacity-40"
+                        className="inline-flex items-center gap-1 rounded border border-emerald-200 dark:border-emerald-500/30 bg-card px-2 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-200 disabled:opacity-40"
                       >
                         <UserPlus className="h-3.5 w-3.5" />
                       Map Alias
@@ -542,7 +542,7 @@ export default function CalendarLeavePanel() {
                         type="button"
                         onClick={() => saveManualDecision(row)}
                         disabled={busy || !(reviewSelections[key] || row.technicianId) || row.category === 'IGNORED'}
-                        className="inline-flex items-center gap-1 rounded border border-sky-200 bg-white px-2 py-1 text-xs font-medium text-sky-700 disabled:opacity-40"
+                        className="inline-flex items-center gap-1 rounded border border-sky-200 dark:border-sky-500/30 bg-card px-2 py-1 text-xs font-medium text-sky-700 dark:text-sky-200 disabled:opacity-40"
                       >
                         <CheckCircle className="h-3.5 w-3.5" />
                       Approve Event
@@ -551,7 +551,7 @@ export default function CalendarLeavePanel() {
                         type="button"
                         onClick={() => saveReviewAlias(row, { isIgnored: true })}
                         disabled={busy || !(row.nameGuess || row.personAlias)}
-                        className="inline-flex items-center gap-1 rounded border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-600 disabled:opacity-40"
+                        className="inline-flex items-center gap-1 rounded border border-border bg-card px-2 py-1 text-xs font-medium text-muted-foreground disabled:opacity-40"
                       >
                         <Ban className="h-3.5 w-3.5" />
                       Ignore Name
@@ -560,7 +560,7 @@ export default function CalendarLeavePanel() {
                         type="button"
                         onClick={() => saveManualDecision(row, { isIgnored: true })}
                         disabled={busy}
-                        className="inline-flex items-center gap-1 rounded border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-600 disabled:opacity-40"
+                        className="inline-flex items-center gap-1 rounded border border-border bg-card px-2 py-1 text-xs font-medium text-muted-foreground disabled:opacity-40"
                       >
                         <Ban className="h-3.5 w-3.5" />
                       Ignore Event

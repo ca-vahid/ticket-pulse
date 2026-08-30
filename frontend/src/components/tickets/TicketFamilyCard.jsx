@@ -81,20 +81,20 @@ export default function TicketFamilyCard({ ticketId, canWrite = false, onNavigat
     <div className="tp-card rounded-xl p-3.5">
       <div className="mb-2 flex items-center gap-1.5">
         <GitBranch className="h-3.5 w-3.5 text-violet-500" aria-hidden="true" />
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Parent / child</span>
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/75">Parent / child</span>
       </div>
 
-      {error && <div className="mb-2 rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-[11px] text-red-700" role="alert">{error}</div>}
+      {error && <div className="mb-2 rounded-lg border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 px-2.5 py-1.5 text-[11px] text-red-700 dark:text-red-200" role="alert">{error}</div>}
 
       {/* Parent */}
       <div className="mb-2">
         {parent ? (
-          <div className="flex items-center gap-2 rounded-lg border border-violet-200 bg-violet-50/50 px-2.5 py-1.5">
-            <span className="text-[11px] text-violet-600">Child of</span>
-            <button onClick={() => onNavigate?.(parent.id)} className="tp-focus-ring rounded font-mono text-xs font-bold text-violet-700 hover:underline">{parent.displayRef}</button>
-            <span className="min-w-0 flex-1 truncate text-[11px] text-slate-500">{parent.subject}</span>
+          <div className="flex items-center gap-2 rounded-lg border border-violet-200 dark:border-violet-500/30 bg-violet-50/50 dark:bg-violet-500/10 px-2.5 py-1.5">
+            <span className="text-[11px] text-violet-600 dark:text-violet-300">Child of</span>
+            <button onClick={() => onNavigate?.(parent.id)} className="tp-focus-ring rounded font-mono text-xs font-bold text-violet-700 dark:text-violet-200 hover:underline">{parent.displayRef}</button>
+            <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">{parent.subject}</span>
             {canWrite && (
-              <button onClick={removeParent} disabled={busy} aria-label="Remove parent" className="tp-focus-ring rounded p-0.5 text-slate-400 hover:text-red-500">
+              <button onClick={removeParent} disabled={busy} aria-label="Remove parent" className="tp-focus-ring rounded p-0.5 text-muted-foreground/75 hover:text-red-500">
                 <X className="h-3.5 w-3.5" aria-hidden="true" />
               </button>
             )}
@@ -102,12 +102,12 @@ export default function TicketFamilyCard({ ticketId, canWrite = false, onNavigat
         ) : canWrite && (
           showParentInput ? (
             <div className="flex items-center gap-1.5">
-              <input value={parentRef} onChange={(e) => setParentRef(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') setParent(); }} placeholder="Parent ref (TP-1042 / #231164)" aria-label="Parent ticket ref" className="tp-focus-ring min-w-0 flex-1 rounded-lg border border-slate-200 px-2 py-1 text-xs" />
+              <input value={parentRef} onChange={(e) => setParentRef(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') setParent(); }} placeholder="Parent ref (TP-1042 / #231164)" aria-label="Parent ticket ref" className="tp-focus-ring min-w-0 flex-1 rounded-lg border border-border bg-card px-2 py-1 text-xs" />
               <button onClick={setParent} disabled={busy || !parentRef.trim()} className="tp-focus-ring rounded-lg bg-violet-600 px-2 py-1 text-[11px] font-semibold text-white hover:bg-violet-700 disabled:opacity-50">{busy ? '…' : 'Set'}</button>
-              <button onClick={() => { setShowParentInput(false); setParentRef(''); }} className="tp-focus-ring rounded p-1 text-slate-400 hover:text-slate-600"><X className="h-3.5 w-3.5" aria-hidden="true" /></button>
+              <button onClick={() => { setShowParentInput(false); setParentRef(''); }} className="tp-focus-ring rounded p-1 text-muted-foreground/75 hover:text-muted-foreground"><X className="h-3.5 w-3.5" aria-hidden="true" /></button>
             </div>
           ) : (
-            <button onClick={() => setShowParentInput(true)} className="tp-focus-ring inline-flex items-center gap-1 text-[11px] font-medium text-violet-600 hover:text-violet-700">
+            <button onClick={() => setShowParentInput(true)} className="tp-focus-ring inline-flex items-center gap-1 text-[11px] font-medium text-violet-600 dark:text-violet-300 hover:text-violet-700 dark:hover:text-violet-200">
               <Link2 className="h-3 w-3" aria-hidden="true" /> Set a parent ticket
             </button>
           )
@@ -117,15 +117,15 @@ export default function TicketFamilyCard({ ticketId, canWrite = false, onNavigat
       {/* Children */}
       {children.length > 0 && (
         <ul className="space-y-1">
-          <li className="text-[11px] font-semibold text-slate-400">Children ({children.length})</li>
+          <li className="text-[11px] font-semibold text-muted-foreground/75">Children ({children.length})</li>
           {children.map((c) => (
-            <li key={c.id} className="flex items-center gap-2 rounded-lg border border-slate-100 px-2.5 py-1.5">
-              <button onClick={() => onNavigate?.(c.id)} className="tp-focus-ring rounded font-mono text-xs font-bold text-blue-700 hover:underline">{c.displayRef}</button>
-              <span className="min-w-0 flex-1 truncate text-[11px] text-slate-500">{c.subject}</span>
-              {c.assignee?.name && <span className="hidden truncate text-[10px] text-slate-400 sm:inline">{c.assignee.name}</span>}
+            <li key={c.id} className="flex items-center gap-2 rounded-lg border border-border/60 px-2.5 py-1.5">
+              <button onClick={() => onNavigate?.(c.id)} className="tp-focus-ring rounded font-mono text-xs font-bold text-blue-700 dark:text-blue-200 hover:underline">{c.displayRef}</button>
+              <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">{c.subject}</span>
+              {c.assignee?.name && <span className="hidden truncate text-[10px] text-muted-foreground/75 sm:inline">{c.assignee.name}</span>}
               <StatusPill status={c.status} />
               {canWrite && (
-                <button onClick={() => removeChild(c.id)} disabled={busy} aria-label="Unlink child" className="tp-focus-ring rounded p-0.5 text-slate-400 hover:text-red-500">
+                <button onClick={() => removeChild(c.id)} disabled={busy} aria-label="Unlink child" className="tp-focus-ring rounded p-0.5 text-muted-foreground/75 hover:text-red-500">
                   <X className="h-3.5 w-3.5" aria-hidden="true" />
                 </button>
               )}
@@ -138,12 +138,12 @@ export default function TicketFamilyCard({ ticketId, canWrite = false, onNavigat
       {canWrite && (
         adding ? (
           <div className="mt-2 flex items-center gap-1.5">
-            <input value={childRef} onChange={(e) => setChildRef(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') addChild(); }} placeholder="Child ref (TP-1042 / #231164)" aria-label="Child ticket ref" className="tp-focus-ring min-w-0 flex-1 rounded-lg border border-slate-200 px-2 py-1 text-xs" />
+            <input value={childRef} onChange={(e) => setChildRef(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') addChild(); }} placeholder="Child ref (TP-1042 / #231164)" aria-label="Child ticket ref" className="tp-focus-ring min-w-0 flex-1 rounded-lg border border-border bg-card px-2 py-1 text-xs" />
             <button onClick={addChild} disabled={busy || !childRef.trim()} className="tp-focus-ring rounded-lg bg-blue-600 px-2 py-1 text-[11px] font-semibold text-white hover:bg-blue-700 disabled:opacity-50">{busy ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" /> : 'Add'}</button>
-            <button onClick={() => { setAdding(false); setChildRef(''); }} className="tp-focus-ring rounded p-1 text-slate-400 hover:text-slate-600"><X className="h-3.5 w-3.5" aria-hidden="true" /></button>
+            <button onClick={() => { setAdding(false); setChildRef(''); }} className="tp-focus-ring rounded p-1 text-muted-foreground/75 hover:text-muted-foreground"><X className="h-3.5 w-3.5" aria-hidden="true" /></button>
           </div>
         ) : (
-          <button onClick={() => setAdding(true)} className="tp-focus-ring mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-blue-600 hover:text-blue-700">
+          <button onClick={() => setAdding(true)} className="tp-focus-ring mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-blue-600 dark:text-blue-300 hover:text-blue-700 dark:hover:text-blue-200">
             <Plus className="h-3 w-3" aria-hidden="true" /> Add a child ticket
           </button>
         )

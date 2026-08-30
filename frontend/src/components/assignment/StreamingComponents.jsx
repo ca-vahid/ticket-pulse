@@ -17,7 +17,7 @@ export function CopyBadge({ label, value }) {
   return (
     <button
       onClick={handleCopy}
-      className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-100 hover:bg-gray-200 rounded text-xs text-gray-500 font-mono transition-colors"
+      className="inline-flex items-center gap-1 px-2 py-0.5 bg-muted hover:bg-secondary rounded text-xs text-muted-foreground font-mono transition-colors"
       title={`Copy ${label}`}
     >
       {label} #{value}
@@ -29,12 +29,12 @@ export function CopyBadge({ label, value }) {
 export const mdComponents = {
   table: (props) => (
     <div className="overflow-x-auto my-2">
-      <table className="min-w-full text-xs border-collapse border border-gray-200" {...props} />
+      <table className="min-w-full text-xs border-collapse border border-border" {...props} />
     </div>
   ),
-  thead: (props) => <thead className="bg-gray-50" {...props} />,
-  th: (props) => <th className="border border-gray-200 px-2 py-1 text-left font-semibold text-gray-600" {...props} />,
-  td: (props) => <td className="border border-gray-200 px-2 py-1 text-gray-700" {...props} />,
+  thead: (props) => <thead className="bg-muted/50" {...props} />,
+  th: (props) => <th className="border border-border px-2 py-1 text-left font-semibold text-muted-foreground" {...props} />,
+  td: (props) => <td className="border border-border px-2 py-1 text-foreground/85" {...props} />,
   h1: (props) => <h1 className="text-lg font-bold mt-3 mb-1" {...props} />,
   h2: (props) => <h2 className="text-base font-bold mt-3 mb-1" {...props} />,
   h3: (props) => <h3 className="text-sm font-bold mt-2 mb-1" {...props} />,
@@ -43,34 +43,34 @@ export const mdComponents = {
   ul: (props) => <ul className="list-disc ml-5 my-1 space-y-0.5" {...props} />,
   ol: (props) => <ol className="list-decimal ml-5 my-1 space-y-0.5" {...props} />,
   li: (props) => <li className="text-sm" {...props} />,
-  hr: () => <hr className="my-3 border-gray-200" />,
+  hr: () => <hr className="my-3 border-border" />,
   strong: (props) => <strong className="font-semibold" {...props} />,
   code: ({ children, className, ...props }) => {
     const isBlock = className?.startsWith('language-');
     if (isBlock) {
-      return <pre className="bg-gray-100 rounded p-2 my-1 overflow-x-auto text-xs"><code {...props}>{children}</code></pre>;
+      return <pre className="bg-muted rounded p-2 my-1 overflow-x-auto text-xs"><code {...props}>{children}</code></pre>;
     }
-    return <code className="bg-gray-100 px-1 py-0.5 rounded text-xs font-mono" {...props}>{children}</code>;
+    return <code className="bg-muted px-1 py-0.5 rounded text-xs font-mono" {...props}>{children}</code>;
   },
-  blockquote: (props) => <blockquote className="border-l-4 border-blue-300 pl-3 my-1 text-gray-600 italic" {...props} />,
+  blockquote: (props) => <blockquote className="border-l-4 border-blue-300 dark:border-blue-500/40 pl-3 my-1 text-muted-foreground italic" {...props} />,
 };
 
 /** Richer typography for saved run transcripts (step sections, lists, tools). */
 export const transcriptMdComponents = {
   ...mdComponents,
-  h1: (props) => <h1 className="text-base font-bold text-slate-900 mt-8 mb-3 pb-2 border-b border-slate-200 first:mt-0" {...props} />,
-  h2: (props) => <h2 className="text-sm font-bold text-slate-900 mt-8 mb-3 pb-2 border-b border-slate-200 tracking-tight first:mt-0" {...props} />,
-  h3: (props) => <h3 className="text-sm font-semibold text-slate-800 mt-6 mb-2 first:mt-0" {...props} />,
-  h4: (props) => <h4 className="text-xs font-semibold text-slate-600 mt-5 mb-1.5 uppercase tracking-wide" {...props} />,
-  p: (props) => <p className="my-2.5 text-sm leading-relaxed text-slate-700" {...props} />,
-  ul: (props) => <ul className="list-disc pl-5 my-3 space-y-2 marker:text-slate-400" {...props} />,
-  ol: (props) => <ol className="list-decimal pl-5 my-3 space-y-2 marker:text-slate-500 marker:font-medium" {...props} />,
-  li: (props) => <li className="text-sm leading-relaxed text-slate-700" {...props} />,
-  hr: () => <hr className="my-8 border-slate-200" />,
-  strong: (props) => <strong className="font-semibold text-slate-900" {...props} />,
+  h1: (props) => <h1 className="text-base font-bold text-foreground mt-8 mb-3 pb-2 border-b border-border first:mt-0" {...props} />,
+  h2: (props) => <h2 className="text-sm font-bold text-foreground mt-8 mb-3 pb-2 border-b border-border tracking-tight first:mt-0" {...props} />,
+  h3: (props) => <h3 className="text-sm font-semibold text-foreground mt-6 mb-2 first:mt-0" {...props} />,
+  h4: (props) => <h4 className="text-xs font-semibold text-muted-foreground mt-5 mb-1.5 uppercase tracking-wide" {...props} />,
+  p: (props) => <p className="my-2.5 text-sm leading-relaxed text-foreground/85" {...props} />,
+  ul: (props) => <ul className="list-disc pl-5 my-3 space-y-2 marker:text-muted-foreground/75" {...props} />,
+  ol: (props) => <ol className="list-decimal pl-5 my-3 space-y-2 marker:text-muted-foreground marker:font-medium" {...props} />,
+  li: (props) => <li className="text-sm leading-relaxed text-foreground/85" {...props} />,
+  hr: () => <hr className="my-8 border-border" />,
+  strong: (props) => <strong className="font-semibold text-foreground" {...props} />,
   blockquote: (props) => (
     <blockquote
-      className="border-l-4 border-indigo-400/80 bg-slate-50 pl-4 pr-3 py-2.5 my-4 rounded-r-lg text-slate-700 text-sm not-italic leading-relaxed"
+      className="border-l-4 border-indigo-400/80 bg-muted/50 pl-4 pr-3 py-2.5 my-4 rounded-r-lg text-foreground/85 text-sm not-italic leading-relaxed"
       {...props}
     />
   ),
@@ -80,29 +80,29 @@ export function ToolCallCard({ name, input, result, durationMs }) {
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <div className="my-1.5 sm:my-2 border rounded-lg bg-gray-50 overflow-hidden">
+    <div className="my-1.5 sm:my-2 border rounded-lg bg-muted/50 overflow-hidden">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-2 px-2.5 sm:px-3 py-2 text-left hover:bg-gray-100 transition-colors touch-manipulation min-h-[40px]"
+        className="w-full flex items-center gap-2 px-2.5 sm:px-3 py-2 text-left hover:bg-muted transition-colors touch-manipulation min-h-[40px]"
       >
         <Wrench className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
-        <span className="text-xs font-medium text-blue-700">{name}</span>
+        <span className="text-xs font-medium text-blue-700 dark:text-blue-200">{name}</span>
         {result ? <CheckCircle className="w-3.5 h-3.5 text-green-500" /> : <Loader2 className="w-3.5 h-3.5 text-blue-400 animate-spin" />}
-        {durationMs != null && <span className="text-xs text-gray-400 ml-auto">{durationMs}ms</span>}
-        {expanded ? <ChevronDown className="w-3.5 h-3.5 text-gray-400" /> : <ChevronRight className="w-3.5 h-3.5 text-gray-400" />}
+        {durationMs != null && <span className="text-xs text-muted-foreground/75 ml-auto">{durationMs}ms</span>}
+        {expanded ? <ChevronDown className="w-3.5 h-3.5 text-muted-foreground/75" /> : <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/75" />}
       </button>
       {expanded && (
         <div className="px-3 pb-2 space-y-1">
           {input && (
             <div>
-              <span className="text-xs text-gray-400 font-medium">Input:</span>
-              <pre className="text-xs bg-white rounded p-1.5 border overflow-x-auto max-h-28">{JSON.stringify(input, null, 2)}</pre>
+              <span className="text-xs text-muted-foreground/75 font-medium">Input:</span>
+              <pre className="text-xs bg-card rounded p-1.5 border overflow-x-auto max-h-28">{JSON.stringify(input, null, 2)}</pre>
             </div>
           )}
           {result && (
             <div>
-              <span className="text-xs text-gray-400 font-medium">Result:</span>
-              <pre className="text-xs bg-white rounded p-1.5 border overflow-x-auto max-h-40">{JSON.stringify(result, null, 2)}</pre>
+              <span className="text-xs text-muted-foreground/75 font-medium">Result:</span>
+              <pre className="text-xs bg-card rounded p-1.5 border overflow-x-auto max-h-40">{JSON.stringify(result, null, 2)}</pre>
             </div>
           )}
         </div>
@@ -146,7 +146,7 @@ export function StreamContent({ events, toolCalls, thinkingKb, status, accentCol
       {segments.map((seg, i) => {
         if (seg.type === 'text') {
           return (
-            <div key={i} className="text-xs sm:text-sm text-gray-800 leading-relaxed prose prose-sm max-w-none">
+            <div key={i} className="text-xs sm:text-sm text-foreground leading-relaxed prose prose-sm max-w-none">
               <Markdown remarkPlugins={[remarkGfm]} components={mdComponents}>
                 {seg.content}
               </Markdown>
@@ -167,7 +167,7 @@ export function StreamContent({ events, toolCalls, thinkingKb, status, accentCol
         if (seg.type === 'provider') {
           const isFailure = seg.event.type === 'provider_attempt_failed';
           return (
-            <div key={i} className={`my-2 rounded-lg border px-3 py-2 text-xs flex items-start gap-2 ${isFailure ? 'bg-red-50 border-red-200 text-red-700' : 'bg-blue-50 border-blue-200 text-blue-700'}`}>
+            <div key={i} className={`my-2 rounded-lg border px-3 py-2 text-xs flex items-start gap-2 ${isFailure ? 'bg-red-50 dark:bg-red-500/15 border-red-200 dark:border-red-500/30 text-red-700 dark:text-red-200' : 'bg-blue-50 dark:bg-blue-500/15 border-blue-200 dark:border-blue-500/30 text-blue-700 dark:text-blue-200'}`}>
               {isFailure ? <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" /> : <Zap className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />}
               <span>
                 {seg.event.type === 'provider_fallback_started' ? 'Fallback started' : seg.event.type.replace(/_/g, ' ')}
@@ -181,7 +181,7 @@ export function StreamContent({ events, toolCalls, thinkingKb, status, accentCol
         return null;
       })}
       {status === 'running' && thinkingKb !== null && (
-        <div className="flex items-center gap-2 py-1 text-xs text-gray-400">
+        <div className="flex items-center gap-2 py-1 text-xs text-muted-foreground/75">
           <Loader2 className="w-3 h-3 animate-spin" />
           <span className="font-mono tabular-nums">processing {thinkingKb.toFixed(1)} KB...</span>
         </div>

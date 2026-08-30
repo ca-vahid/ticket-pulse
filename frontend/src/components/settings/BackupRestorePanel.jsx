@@ -97,13 +97,13 @@ function formatCreated(iso) {
 function ScopeChip({ snapshot, workspaceName }) {
   if (snapshot.scope === 'site') {
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-violet-50 text-violet-700 border border-violet-200 whitespace-nowrap">
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-violet-50 dark:bg-violet-500/15 text-violet-700 dark:text-violet-200 border border-violet-200 dark:border-violet-500/30 whitespace-nowrap">
         <Globe className="w-3 h-3" aria-hidden="true" /> Site
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-blue-50 text-blue-700 border border-blue-200 whitespace-nowrap">
+    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 border border-blue-200 dark:border-blue-500/30 whitespace-nowrap">
       {workspaceName || `Workspace ${snapshot.workspaceId ?? '?'}`}
     </span>
   );
@@ -111,11 +111,11 @@ function ScopeChip({ snapshot, workspaceName }) {
 
 function TierChip({ tier }) {
   return tier === 'config_data' ? (
-    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-sky-50 text-sky-700 border border-sky-200 whitespace-nowrap">
+    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-sky-50 dark:bg-sky-500/15 text-sky-700 dark:text-sky-200 border border-sky-200 dark:border-sky-500/30 whitespace-nowrap">
       Config + data
     </span>
   ) : (
-    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-slate-50 text-slate-600 border border-slate-200 whitespace-nowrap">
+    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-muted/50 text-muted-foreground border border-border whitespace-nowrap">
       Config
     </span>
   );
@@ -124,7 +124,7 @@ function TierChip({ tier }) {
 function StatusCell({ snapshot }) {
   if (snapshot.status === 'pending' || snapshot.status === 'running') {
     return (
-      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-blue-600">
+      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-blue-600 dark:text-blue-300">
         <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> Running…
       </span>
     );
@@ -132,7 +132,7 @@ function StatusCell({ snapshot }) {
   if (snapshot.status === 'failed') {
     return (
       <span
-        className="inline-flex items-center gap-1.5 text-xs font-medium text-red-600 cursor-help"
+        className="inline-flex items-center gap-1.5 text-xs font-medium text-red-600 dark:text-red-300 cursor-help"
         title={snapshot.error || 'Snapshot failed'}
       >
         <AlertCircle className="w-3.5 h-3.5" aria-hidden="true" /> Failed
@@ -140,18 +140,18 @@ function StatusCell({ snapshot }) {
     );
   }
   return (
-    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700">
+    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-200">
       <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" /> Completed
     </span>
   );
 }
 
 const ACTION_PILLS = {
-  create: { label: 'Add', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
-  update: { label: 'Update', cls: 'bg-blue-50 text-blue-700 border-blue-200' },
-  skip: { label: 'Skip', cls: 'bg-slate-50 text-slate-500 border-slate-200' },
-  conflict: { label: 'Conflict', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
-  delete: { label: 'Remove', cls: 'bg-red-50 text-red-700 border-red-200' },
+  create: { label: 'Add', cls: 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 border-emerald-200 dark:border-emerald-500/30' },
+  update: { label: 'Update', cls: 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 border-blue-200 dark:border-blue-500/30' },
+  skip: { label: 'Skip', cls: 'bg-muted/50 text-muted-foreground border-border' },
+  conflict: { label: 'Conflict', cls: 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200 border-amber-200 dark:border-amber-500/30' },
+  delete: { label: 'Remove', cls: 'bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200 border-red-200 dark:border-red-500/30' },
 };
 
 function ActionPill({ action }) {
@@ -180,7 +180,7 @@ function normalizeDryRunModule(m) {
 
 function DiffCount({ value, label, cls }) {
   return (
-    <span className={`inline-flex items-baseline gap-1 tabular-nums text-xs ${value > 0 ? cls : 'text-slate-300'}`}>
+    <span className={`inline-flex items-baseline gap-1 tabular-nums text-xs ${value > 0 ? cls : 'text-muted-foreground/50'}`}>
       <span className="font-bold">{value}</span>{label}
     </span>
   );
@@ -190,30 +190,30 @@ function DryRunModuleRow({ row }) {
   const [open, setOpen] = useState(false);
   const hasItems = row.items.length > 0;
   return (
-    <div className="border border-slate-200 rounded-lg overflow-hidden">
+    <div className="border border-border rounded-lg overflow-hidden">
       <button
         type="button"
         onClick={() => hasItems && setOpen((v) => !v)}
         aria-expanded={hasItems ? open : undefined}
-        className={`tp-focus-ring w-full flex items-center gap-2 px-3 py-2 text-left bg-white ${hasItems ? 'hover:bg-slate-50' : 'cursor-default'}`}
+        className={`tp-focus-ring w-full flex items-center gap-2 px-3 py-2 text-left bg-card ${hasItems ? 'hover:bg-muted/50' : 'cursor-default'}`}
       >
         {hasItems
-          ? (open ? <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" aria-hidden="true" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-400 shrink-0" aria-hidden="true" />)
+          ? (open ? <ChevronDown className="w-3.5 h-3.5 text-muted-foreground/75 shrink-0" aria-hidden="true" /> : <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/75 shrink-0" aria-hidden="true" />)
           : <span className="w-3.5" aria-hidden="true" />}
-        <span className="text-sm font-medium text-slate-800 flex-1 min-w-0 truncate">{moduleLabel(row.module)}</span>
+        <span className="text-sm font-medium text-foreground flex-1 min-w-0 truncate">{moduleLabel(row.module)}</span>
         <span className="flex items-center gap-3 shrink-0">
-          <DiffCount value={row.create} label="add" cls="text-emerald-600" />
-          <DiffCount value={row.update} label="update" cls="text-blue-600" />
-          <DiffCount value={row.skip} label="skip" cls="text-slate-400" />
-          <DiffCount value={row.conflict} label="conflict" cls="text-amber-600" />
-          {row.deletes > 0 && <DiffCount value={row.deletes} label="remove" cls="text-red-600" />}
+          <DiffCount value={row.create} label="add" cls="text-emerald-600 dark:text-emerald-300" />
+          <DiffCount value={row.update} label="update" cls="text-blue-600 dark:text-blue-300" />
+          <DiffCount value={row.skip} label="skip" cls="text-muted-foreground/75" />
+          <DiffCount value={row.conflict} label="conflict" cls="text-amber-600 dark:text-amber-300" />
+          {row.deletes > 0 && <DiffCount value={row.deletes} label="remove" cls="text-red-600 dark:text-red-300" />}
         </span>
       </button>
       {open && hasItems && (
-        <ul className="border-t border-slate-100 bg-slate-50/60 max-h-44 overflow-y-auto settings-scrollbar divide-y divide-slate-100">
+        <ul className="border-t border-border/60 bg-muted/30 max-h-44 overflow-y-auto settings-scrollbar divide-y divide-border/60">
           {row.items.map((item, i) => (
             <li key={`${item.key || i}`} className="flex items-center gap-2 px-3 py-1.5">
-              <code className="text-[11px] font-mono text-slate-600 flex-1 min-w-0 truncate">{item.key || item.name || `item ${i + 1}`}</code>
+              <code className="text-[11px] font-mono text-muted-foreground flex-1 min-w-0 truncate">{item.key || item.name || `item ${i + 1}`}</code>
               <ActionPill action={item.action} />
             </li>
           ))}
@@ -346,30 +346,30 @@ function RestoreWizard({ snapshot, currentWorkspace, workspaces, onClose, onRest
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 animate-fadeIn" role="dialog" aria-modal="true" aria-labelledby="restore-wizard-title">
-      <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-[2px]" onClick={busy ? undefined : onClose} aria-hidden="true" />
+      <div className="absolute inset-0 bg-slate-900/40 dark:bg-black/70 backdrop-blur-[2px]" onClick={busy ? undefined : onClose} aria-hidden="true" />
       <div className="relative w-full max-w-2xl tp-card rounded-2xl overflow-hidden shadow-soft animate-scaleIn flex flex-col max-h-[88vh]">
         {/* Header */}
-        <div className="px-5 py-4 border-b border-slate-100 flex items-start gap-3">
-          <span className="h-9 w-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+        <div className="px-5 py-4 border-b border-border/60 flex items-start gap-3">
+          <span className="h-9 w-9 rounded-xl bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-300 flex items-center justify-center shrink-0">
             <ArchiveRestore className="w-5 h-5" aria-hidden="true" />
           </span>
           <div className="min-w-0 flex-1">
-            <h2 id="restore-wizard-title" className="text-sm font-bold text-slate-900">{stepTitle}</h2>
-            <p className="text-xs text-slate-400 mt-0.5">
+            <h2 id="restore-wizard-title" className="text-sm font-bold text-foreground">{stepTitle}</h2>
+            <p className="text-xs text-muted-foreground/75 mt-0.5">
               Snapshot from {formatCreated(snapshot.completedAt || snapshot.createdAt)} · <ScopeChip snapshot={snapshot} workspaceName={workspaceName(snapshot.workspaceId)} /> <TierChip tier={snapshot.tier} />
             </p>
           </div>
           {step < 4 && (
-            <span className="text-[11px] font-semibold text-slate-400 shrink-0 mt-1" aria-label={`Step ${step} of 3`}>Step {step} / 3</span>
+            <span className="text-[11px] font-semibold text-muted-foreground/75 shrink-0 mt-1" aria-label={`Step ${step} of 3`}>Step {step} / 3</span>
           )}
-          <button onClick={onClose} disabled={busy} aria-label="Close restore wizard" className="tp-focus-ring p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100">
+          <button onClick={onClose} disabled={busy} aria-label="Close restore wizard" className="tp-focus-ring p-1 rounded-lg text-muted-foreground/75 hover:text-foreground/85 hover:bg-muted">
             <X className="w-4 h-4" aria-hidden="true" />
           </button>
         </div>
 
         <div className="px-5 py-4 overflow-y-auto settings-scrollbar flex-1 space-y-3">
           {error && (
-            <div className="flex items-start gap-2 p-2.5 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700" role="alert">
+            <div className="flex items-start gap-2 p-2.5 rounded-lg bg-red-50 dark:bg-red-500/15 border border-red-200 dark:border-red-500/30 text-xs text-red-700 dark:text-red-200" role="alert">
               <AlertCircle className="w-3.5 h-3.5 mt-px shrink-0" aria-hidden="true" /> {error}
             </div>
           )}
@@ -379,11 +379,11 @@ function RestoreWizard({ snapshot, currentWorkspace, workspaces, onClose, onRest
             <>
               {isSite && (
                 <label className="block">
-                  <span className="text-xs font-semibold text-slate-600">Restore configuration from</span>
+                  <span className="text-xs font-semibold text-muted-foreground">Restore configuration from</span>
                   <select
                     value={sourceWorkspaceId ?? ''}
                     onChange={(e) => setSourceWorkspaceId(Number(e.target.value))}
-                    className="mt-1 w-full px-3 py-2 border border-input rounded-lg text-sm bg-white tp-focus-ring"
+                    className="mt-1 w-full px-3 py-2 border border-input rounded-lg text-sm bg-card tp-focus-ring"
                   >
                     {sourceWorkspaces.map((ws) => (
                       <option key={ws.id} value={ws.id}>{ws.name}</option>
@@ -393,7 +393,7 @@ function RestoreWizard({ snapshot, currentWorkspace, workspaces, onClose, onRest
               )}
 
               {crossWorkspace && (
-                <div className="flex items-start gap-2 p-2.5 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-700">
+                <div className="flex items-start gap-2 p-2.5 rounded-lg bg-blue-50 dark:bg-blue-500/15 border border-blue-200 dark:border-blue-500/30 text-xs text-blue-700 dark:text-blue-200">
                   <Globe className="w-3.5 h-3.5 mt-px shrink-0" aria-hidden="true" />
                   <span>
                     Copying configuration from <strong>{workspaceName(sourceWorkspaceId)}</strong> into{' '}
@@ -403,9 +403,9 @@ function RestoreWizard({ snapshot, currentWorkspace, workspaces, onClose, onRest
               )}
 
               <fieldset>
-                <legend className="text-xs font-semibold text-slate-600 mb-1.5">Modules</legend>
+                <legend className="text-xs font-semibold text-muted-foreground mb-1.5">Modules</legend>
                 {moduleEntries.length === 0 && (
-                  <p className="text-xs text-slate-400 italic">This snapshot holds no modules for the selected workspace.</p>
+                  <p className="text-xs text-muted-foreground/75 italic">This snapshot holds no modules for the selected workspace.</p>
                 )}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                   {moduleEntries.map((m) => (
@@ -413,8 +413,8 @@ function RestoreWizard({ snapshot, currentWorkspace, workspaces, onClose, onRest
                       key={m.key}
                       className={`flex items-center gap-2 px-2.5 py-2 rounded-lg border text-sm ${
                         m.restorable
-                          ? (selected.has(m.key) ? 'border-blue-300 bg-blue-50/60' : 'border-slate-200 bg-white hover:border-slate-300 cursor-pointer')
-                          : 'border-slate-100 bg-slate-50/60 opacity-70'
+                          ? (selected.has(m.key) ? 'border-blue-300 dark:border-blue-500/40 bg-blue-50/60 dark:bg-blue-500/10' : 'border-border bg-card hover:border-input cursor-pointer')
+                          : 'border-border/60 bg-muted/30 opacity-70'
                       }`}
                     >
                       <input
@@ -425,10 +425,10 @@ function RestoreWizard({ snapshot, currentWorkspace, workspaces, onClose, onRest
                         onChange={() => toggleModule(m.key)}
                         aria-label={`${moduleLabel(m.key)} (${m.count} items)`}
                       />
-                      <span className={`flex-1 min-w-0 truncate ${m.restorable ? 'text-slate-800' : 'text-slate-400'}`}>{moduleLabel(m.key)}</span>
-                      <span className="text-[11px] tabular-nums text-slate-400 shrink-0">{m.count}</span>
+                      <span className={`flex-1 min-w-0 truncate ${m.restorable ? 'text-foreground' : 'text-muted-foreground/75'}`}>{moduleLabel(m.key)}</span>
+                      <span className="text-[11px] tabular-nums text-muted-foreground/75 shrink-0">{m.count}</span>
                       {!m.restorable && (
-                        <span className="text-[10px] font-semibold text-slate-400 border border-slate-200 rounded-full px-1.5 py-px shrink-0">export-only</span>
+                        <span className="text-[10px] font-semibold text-muted-foreground/75 border border-border rounded-full px-1.5 py-px shrink-0">export-only</span>
                       )}
                     </label>
                   ))}
@@ -436,20 +436,20 @@ function RestoreWizard({ snapshot, currentWorkspace, workspaces, onClose, onRest
               </fieldset>
 
               <fieldset>
-                <legend className="text-xs font-semibold text-slate-600 mb-1.5">Apply mode</legend>
+                <legend className="text-xs font-semibold text-muted-foreground mb-1.5">Apply mode</legend>
                 <div className="space-y-1.5">
-                  <label className={`flex items-start gap-2 px-2.5 py-2 rounded-lg border cursor-pointer ${mode === 'merge' ? 'border-blue-300 bg-blue-50/60' : 'border-slate-200 bg-white hover:border-slate-300'}`}>
+                  <label className={`flex items-start gap-2 px-2.5 py-2 rounded-lg border cursor-pointer ${mode === 'merge' ? 'border-blue-300 dark:border-blue-500/40 bg-blue-50/60 dark:bg-blue-500/10' : 'border-border bg-card hover:border-input'}`}>
                     <input type="radio" name="restore-mode" value="merge" checked={mode === 'merge'} onChange={() => setMode('merge')} className="mt-0.5 accent-blue-600 tp-focus-ring" />
                     <span className="text-sm">
-                      <span className="font-semibold text-slate-800">Merge</span>
-                      <span className="block text-xs text-slate-500">Adds & updates, never deletes.</span>
+                      <span className="font-semibold text-foreground">Merge</span>
+                      <span className="block text-xs text-muted-foreground">Adds & updates, never deletes.</span>
                     </span>
                   </label>
-                  <label className={`flex items-start gap-2 px-2.5 py-2 rounded-lg border cursor-pointer ${mode === 'replace' ? 'border-amber-300 bg-amber-50/60' : 'border-slate-200 bg-white hover:border-slate-300'}`}>
+                  <label className={`flex items-start gap-2 px-2.5 py-2 rounded-lg border cursor-pointer ${mode === 'replace' ? 'border-amber-300 dark:border-amber-500/40 bg-amber-50/60 dark:bg-amber-500/10' : 'border-border bg-card hover:border-input'}`}>
                     <input type="radio" name="restore-mode" value="replace" checked={mode === 'replace'} onChange={() => setMode('replace')} className="mt-0.5 accent-amber-600 tp-focus-ring" />
                     <span className="text-sm">
-                      <span className="font-semibold text-slate-800">Replace</span>
-                      <span className="block text-xs text-slate-500">Module becomes exactly the snapshot — removes items not in it.</span>
+                      <span className="font-semibold text-foreground">Replace</span>
+                      <span className="block text-xs text-muted-foreground">Module becomes exactly the snapshot — removes items not in it.</span>
                     </span>
                   </label>
                 </div>
@@ -461,19 +461,19 @@ function RestoreWizard({ snapshot, currentWorkspace, workspaces, onClose, onRest
           {step === 2 && (
             <>
               {mode === 'replace' && totals.deletes > 0 && (
-                <div className="flex items-start gap-2 p-2.5 rounded-lg bg-amber-50 border border-amber-300 text-xs text-amber-800" role="alert">
+                <div className="flex items-start gap-2 p-2.5 rounded-lg bg-amber-50 dark:bg-amber-500/15 border border-amber-300 dark:border-amber-500/40 text-xs text-amber-800 dark:text-amber-200" role="alert">
                   <AlertTriangle className="w-3.5 h-3.5 mt-px shrink-0" aria-hidden="true" />
                   <span>Replace mode will <strong>delete {totals.deletes} item{totals.deletes === 1 ? '' : 's'}</strong> not present in this snapshot.</span>
                 </div>
               )}
               {dryRunRows.length === 0 ? (
-                <p className="text-sm text-slate-400 italic py-4 text-center">The dry run found nothing to change.</p>
+                <p className="text-sm text-muted-foreground/75 italic py-4 text-center">The dry run found nothing to change.</p>
               ) : (
                 <div className="space-y-1.5">
                   {dryRunRows.map((row) => <DryRunModuleRow key={row.module} row={row} />)}
                 </div>
               )}
-              <p className="text-[11px] text-slate-400">
+              <p className="text-[11px] text-muted-foreground/75">
                 Dry run only — nothing has been written yet. {totals.conflict > 0 && `${totals.conflict} conflict${totals.conflict === 1 ? '' : 's'} will keep the existing item unless you chose Replace.`}
               </p>
             </>
@@ -482,20 +482,20 @@ function RestoreWizard({ snapshot, currentWorkspace, workspaces, onClose, onRest
           {/* --- Step 3: confirm --- */}
           {step === 3 && (
             <>
-              <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3 text-sm text-slate-700 space-y-1">
+              <div className="rounded-lg border border-border bg-muted/30 p-3 text-sm text-foreground/85 space-y-1">
                 <p>
                   Restoring <strong>{selected.size} module{selected.size === 1 ? '' : 's'}</strong> into{' '}
                   <strong>{currentWorkspace?.name}</strong> in <strong>{mode === 'replace' ? 'Replace' : 'Merge'}</strong> mode.
                 </p>
-                <p className="text-xs text-slate-500 tabular-nums">
+                <p className="text-xs text-muted-foreground tabular-nums">
                   {totals.create} added · {totals.update} updated · {totals.skip} unchanged
-                  {totals.deletes > 0 && <span className="text-red-600 font-semibold"> · {totals.deletes} removed</span>}
+                  {totals.deletes > 0 && <span className="text-red-600 dark:text-red-300 font-semibold"> · {totals.deletes} removed</span>}
                 </p>
               </div>
               {needsTypedConfirm && (
                 <label className="block">
-                  <span className="text-xs font-semibold text-slate-600">
-                    Type <code className="font-mono text-red-600">RESTORE</code> to confirm
+                  <span className="text-xs font-semibold text-muted-foreground">
+                    Type <code className="font-mono text-red-600 dark:text-red-300">RESTORE</code> to confirm
                     {mode === 'replace' ? ' — Replace mode removes items' : ` — this changes ${totalChanges} items`}.
                   </span>
                   <input
@@ -508,23 +508,23 @@ function RestoreWizard({ snapshot, currentWorkspace, workspaces, onClose, onRest
                   />
                 </label>
               )}
-              <p className="text-[11px] text-slate-400">Every restore is audited (who, what, scope, counts).</p>
+              <p className="text-[11px] text-muted-foreground/75">Every restore is audited (who, what, scope, counts).</p>
             </>
           )}
 
           {/* --- Step 4: success --- */}
           {step === 4 && (
             <div className="py-2 space-y-3">
-              <div className="flex items-center gap-2 text-emerald-700">
+              <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-200">
                 <CheckCircle2 className="w-5 h-5" aria-hidden="true" />
                 <span className="text-sm font-semibold">Restore applied to {currentWorkspace?.name}.</span>
               </div>
               <div className="space-y-1">
                 {(applied || dryRunRows).map((row) => (
-                  <div key={row.module} className="flex items-center gap-2 text-xs text-slate-600">
+                  <div key={row.module} className="flex items-center gap-2 text-xs text-muted-foreground">
                     <Check className="w-3 h-3 text-emerald-500 shrink-0" aria-hidden="true" />
                     <span className="font-medium">{moduleLabel(row.module)}</span>
-                    <span className="text-slate-400 tabular-nums">
+                    <span className="text-muted-foreground/75 tabular-nums">
                       {row.create} added · {row.update} updated{row.deletes > 0 ? ` · ${row.deletes} removed` : ''}
                     </span>
                   </div>
@@ -535,10 +535,10 @@ function RestoreWizard({ snapshot, currentWorkspace, workspaces, onClose, onRest
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-3.5 border-t border-slate-100 bg-slate-50/60 flex items-center justify-end gap-2">
+        <div className="px-5 py-3.5 border-t border-border/60 bg-muted/30 flex items-center justify-end gap-2">
           {step === 1 && (
             <>
-              <button onClick={onClose} className="tp-focus-ring px-3.5 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50">Cancel</button>
+              <button onClick={onClose} className="tp-focus-ring px-3.5 py-2 text-sm font-medium text-muted-foreground bg-card border border-border rounded-lg hover:bg-muted/50">Cancel</button>
               <button
                 onClick={runDryRun}
                 disabled={busy || selected.size === 0}
@@ -551,7 +551,7 @@ function RestoreWizard({ snapshot, currentWorkspace, workspaces, onClose, onRest
           )}
           {step === 2 && (
             <>
-              <button onClick={() => setStep(1)} disabled={busy} className="tp-focus-ring px-3.5 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50">Back</button>
+              <button onClick={() => setStep(1)} disabled={busy} className="tp-focus-ring px-3.5 py-2 text-sm font-medium text-muted-foreground bg-card border border-border rounded-lg hover:bg-muted/50">Back</button>
               <button
                 onClick={() => { setConfirmText(''); setStep(3); }}
                 disabled={busy || totalChanges === 0}
@@ -563,7 +563,7 @@ function RestoreWizard({ snapshot, currentWorkspace, workspaces, onClose, onRest
           )}
           {step === 3 && (
             <>
-              <button onClick={() => setStep(2)} disabled={busy} className="tp-focus-ring px-3.5 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50">Back</button>
+              <button onClick={() => setStep(2)} disabled={busy} className="tp-focus-ring px-3.5 py-2 text-sm font-medium text-muted-foreground bg-card border border-border rounded-lg hover:bg-muted/50">Back</button>
               <button
                 onClick={runRestore}
                 disabled={busy || !confirmOk}
@@ -635,47 +635,47 @@ function ScheduleCard({ schedules, isGlobalAdmin, currentWorkspace, onChanged, o
     <section className="tp-card rounded-xl p-4">
       <div className="flex items-center gap-2 mb-1">
         <Calendar className="w-4 h-4 text-blue-500" aria-hidden="true" />
-        <h3 className="text-sm font-bold text-slate-800">Scheduled backups</h3>
+        <h3 className="text-sm font-bold text-foreground">Scheduled backups</h3>
         {!adding && (
           <button
             onClick={() => setAdding(true)}
-            className="tp-focus-ring ml-auto inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold text-blue-600 border border-blue-200 bg-blue-50 hover:bg-blue-100"
+            className="tp-focus-ring ml-auto inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold text-blue-600 dark:text-blue-300 border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 hover:bg-blue-100 dark:hover:bg-blue-500/20"
           >
             <Plus className="w-3.5 h-3.5" aria-hidden="true" /> Add schedule
           </button>
         )}
       </div>
-      <p className="text-xs text-slate-400 mb-3">Automatic snapshots on a fixed cadence, keeping the most recent N per schedule.</p>
+      <p className="text-xs text-muted-foreground/75 mb-3">Automatic snapshots on a fixed cadence, keeping the most recent N per schedule.</p>
 
       {(schedules || []).length === 0 && !adding && (
-        <p className="text-sm text-slate-400 italic">No schedules yet — nightly config snapshots are a good default.</p>
+        <p className="text-sm text-muted-foreground/75 italic">No schedules yet — nightly config snapshots are a good default.</p>
       )}
 
       <div className="space-y-1.5">
         {(schedules || []).map((s) => (
-          <div key={s.id} className={`flex flex-wrap items-center gap-2 px-3 py-2 rounded-lg border ${s.enabled ? 'border-slate-200 bg-white' : 'border-slate-100 bg-slate-50/70 opacity-70'}`}>
+          <div key={s.id} className={`flex flex-wrap items-center gap-2 px-3 py-2 rounded-lg border ${s.enabled ? 'border-border bg-card' : 'border-border/60 bg-muted/35 opacity-70'}`}>
             <button
               role="switch"
               aria-checked={!!s.enabled}
               aria-label={`${s.enabled ? 'Disable' : 'Enable'} ${scheduleSummary(s)} schedule`}
               onClick={() => toggle(s)}
               disabled={busyId === s.id}
-              className={`tp-focus-ring relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors ${s.enabled ? 'bg-blue-600' : 'bg-slate-300'}`}
+              className={`tp-focus-ring relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors ${s.enabled ? 'bg-blue-600' : 'bg-muted-foreground/40'}`}
             >
-              <span className="absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform" style={{ transform: s.enabled ? 'translateX(16px)' : 'translateX(0)' }} aria-hidden="true" />
+              <span className="absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-card shadow transition-transform" style={{ transform: s.enabled ? 'translateX(16px)' : 'translateX(0)' }} aria-hidden="true" />
             </button>
             {s.scope === 'site'
               ? <ScopeChip snapshot={{ scope: 'site' }} />
               : <ScopeChip snapshot={{ scope: 'workspace', workspaceId: s.workspaceId ?? currentWorkspace?.id }} workspaceName={currentWorkspace?.name} />}
             <TierChip tier={s.tier} />
-            <span className="text-sm text-slate-700 font-medium">{scheduleSummary(s)}</span>
-            <span className="text-xs text-slate-400">({localHourLabel(s.hourUtc)} local)</span>
-            <span className="text-xs text-slate-400 ml-auto">keep last {s.retention ?? '—'}</span>
+            <span className="text-sm text-foreground/85 font-medium">{scheduleSummary(s)}</span>
+            <span className="text-xs text-muted-foreground/75">({localHourLabel(s.hourUtc)} local)</span>
+            <span className="text-xs text-muted-foreground/75 ml-auto">keep last {s.retention ?? '—'}</span>
             <button
               onClick={() => remove(s)}
               disabled={busyId === s.id}
               aria-label={`Delete ${scheduleSummary(s)} schedule`}
-              className="tp-focus-ring p-1 rounded text-slate-300 hover:text-red-500"
+              className="tp-focus-ring p-1 rounded text-muted-foreground/50 hover:text-red-500"
             >
               {busyId === s.id ? <Loader className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />}
             </button>
@@ -684,46 +684,46 @@ function ScheduleCard({ schedules, isGlobalAdmin, currentWorkspace, onChanged, o
       </div>
 
       {adding && (
-        <div className="mt-2 p-3 rounded-lg border border-blue-200 bg-blue-50/40 flex flex-wrap items-end gap-2">
-          <label className="text-xs text-slate-500">
+        <div className="mt-2 p-3 rounded-lg border border-blue-200 dark:border-blue-500/30 bg-blue-50/40 dark:bg-blue-500/10 flex flex-wrap items-end gap-2">
+          <label className="text-xs text-muted-foreground">
             <span className="block font-semibold mb-0.5">Scope</span>
-            <select value={form.scope} onChange={(e) => setForm((f) => ({ ...f, scope: e.target.value }))} className="px-2 py-1.5 border border-input rounded-lg text-sm bg-white tp-focus-ring">
+            <select value={form.scope} onChange={(e) => setForm((f) => ({ ...f, scope: e.target.value }))} className="px-2 py-1.5 border border-input rounded-lg text-sm bg-card tp-focus-ring">
               <option value="workspace">This workspace</option>
               {isGlobalAdmin && <option value="site">Full site</option>}
             </select>
           </label>
-          <label className="text-xs text-slate-500">
+          <label className="text-xs text-muted-foreground">
             <span className="block font-semibold mb-0.5">Tier</span>
-            <select value={form.tier} onChange={(e) => setForm((f) => ({ ...f, tier: e.target.value }))} className="px-2 py-1.5 border border-input rounded-lg text-sm bg-white tp-focus-ring">
+            <select value={form.tier} onChange={(e) => setForm((f) => ({ ...f, tier: e.target.value }))} className="px-2 py-1.5 border border-input rounded-lg text-sm bg-card tp-focus-ring">
               <option value="config">Configuration</option>
               <option value="config_data">Configuration + data</option>
             </select>
           </label>
-          <label className="text-xs text-slate-500">
+          <label className="text-xs text-muted-foreground">
             <span className="block font-semibold mb-0.5">Frequency</span>
-            <select value={form.frequency} onChange={(e) => setForm((f) => ({ ...f, frequency: e.target.value }))} className="px-2 py-1.5 border border-input rounded-lg text-sm bg-white tp-focus-ring">
+            <select value={form.frequency} onChange={(e) => setForm((f) => ({ ...f, frequency: e.target.value }))} className="px-2 py-1.5 border border-input rounded-lg text-sm bg-card tp-focus-ring">
               <option value="daily">Daily</option>
               <option value="weekly">Weekly</option>
             </select>
           </label>
           {form.frequency === 'weekly' && (
-            <label className="text-xs text-slate-500">
+            <label className="text-xs text-muted-foreground">
               <span className="block font-semibold mb-0.5">Weekday</span>
-              <select value={form.weekday} onChange={(e) => setForm((f) => ({ ...f, weekday: Number(e.target.value) }))} className="px-2 py-1.5 border border-input rounded-lg text-sm bg-white tp-focus-ring">
+              <select value={form.weekday} onChange={(e) => setForm((f) => ({ ...f, weekday: Number(e.target.value) }))} className="px-2 py-1.5 border border-input rounded-lg text-sm bg-card tp-focus-ring">
                 {WEEKDAYS.map((d, i) => <option key={d} value={i}>{d}</option>)}
               </select>
             </label>
           )}
-          <label className="text-xs text-slate-500">
+          <label className="text-xs text-muted-foreground">
             <span className="block font-semibold mb-0.5">Hour (UTC)</span>
-            <select value={form.hourUtc} onChange={(e) => setForm((f) => ({ ...f, hourUtc: Number(e.target.value) }))} className="px-2 py-1.5 border border-input rounded-lg text-sm bg-white tp-focus-ring">
+            <select value={form.hourUtc} onChange={(e) => setForm((f) => ({ ...f, hourUtc: Number(e.target.value) }))} className="px-2 py-1.5 border border-input rounded-lg text-sm bg-card tp-focus-ring">
               {Array.from({ length: 24 }, (_, h) => (
                 <option key={h} value={h}>{String(h).padStart(2, '0')}:00</option>
               ))}
             </select>
           </label>
-          <span className="text-xs text-slate-400 pb-2">= {localHourLabel(form.hourUtc)} local</span>
-          <label className="text-xs text-slate-500">
+          <span className="text-xs text-muted-foreground/75 pb-2">= {localHourLabel(form.hourUtc)} local</span>
+          <label className="text-xs text-muted-foreground">
             <span className="block font-semibold mb-0.5">Keep last</span>
             <input
               type="number" min="1" max="90" value={form.retention}
@@ -739,7 +739,7 @@ function ScheduleCard({ schedules, isGlobalAdmin, currentWorkspace, onChanged, o
             >
               {busyId === 'new' ? <Loader className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <Check className="w-3.5 h-3.5" aria-hidden="true" />} Save schedule
             </button>
-            <button onClick={() => { setAdding(false); setForm(EMPTY_SCHEDULE); }} className="tp-focus-ring px-2.5 py-1.5 text-xs text-slate-500 hover:text-slate-800 rounded-lg">Cancel</button>
+            <button onClick={() => { setAdding(false); setForm(EMPTY_SCHEDULE); }} className="tp-focus-ring px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground rounded-lg">Cancel</button>
           </div>
         </div>
       )}
@@ -754,7 +754,7 @@ function StatCard({ dotClass, title, children }) {
     <div className="tp-card rounded-xl p-3.5">
       <div className="flex items-center gap-1.5 mb-1">
         <span className={`inline-block w-2 h-2 rounded-full ${dotClass}`} aria-hidden="true" />
-        <span className="text-[11px] font-bold uppercase tracking-wide text-slate-400">{title}</span>
+        <span className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground/75">{title}</span>
       </div>
       {children}
     </div>
@@ -884,12 +884,12 @@ export default function BackupRestorePanel() {
     <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center gap-3">
-        <div className="p-2 bg-blue-100 rounded-lg">
-          <DatabaseBackup className="w-5 h-5 text-blue-600" aria-hidden="true" />
+        <div className="p-2 bg-blue-100 dark:bg-blue-500/20 rounded-lg">
+          <DatabaseBackup className="w-5 h-5 text-blue-600 dark:text-blue-300" aria-hidden="true" />
         </div>
         <div>
-          <h3 className="text-lg font-semibold text-gray-900">Backup & Restore</h3>
-          <p className="text-sm text-gray-500 max-w-2xl">
+          <h3 className="text-lg font-semibold text-foreground">Backup & Restore</h3>
+          <p className="text-sm text-muted-foreground max-w-2xl">
             Point-in-time snapshots of Ticket Pulse configuration{isGlobalAdmin ? ' — per workspace or the full site' : ''}.
             Restore into this workspace with a reviewed dry-run, or download the archive.
           </p>
@@ -898,12 +898,12 @@ export default function BackupRestorePanel() {
 
       {/* Alerts */}
       {error && (
-        <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700" role="alert">
+        <div className="flex items-start gap-2 p-3 bg-red-50 dark:bg-red-500/15 border border-red-200 dark:border-red-500/30 rounded-lg text-sm text-red-700 dark:text-red-200" role="alert">
           <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" aria-hidden="true" /><span>{error}</span>
         </div>
       )}
       {successMsg && (
-        <div className="flex items-start gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-700">
+        <div className="flex items-start gap-2 p-3 bg-emerald-50 dark:bg-emerald-500/15 border border-emerald-200 dark:border-emerald-500/30 rounded-lg text-sm text-emerald-700 dark:text-emerald-200">
           <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" aria-hidden="true" /><span>{successMsg}</span>
         </div>
       )}
@@ -913,68 +913,68 @@ export default function BackupRestorePanel() {
         <StatCard dotClass="bg-emerald-500" title="Platform recovery">
           <div className="flex items-start gap-2">
             <ShieldCheck className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" aria-hidden="true" />
-            <p className="text-xs text-slate-600">Azure point-in-time restore + vaulted long-term backups</p>
+            <p className="text-xs text-muted-foreground">Azure point-in-time restore + vaulted long-term backups</p>
           </div>
         </StatCard>
         <StatCard dotClass={lastSnapshotStale ? 'bg-amber-400' : 'bg-emerald-500'} title="Last snapshot">
           {lastCompleted ? (
             <div className="flex flex-wrap items-center gap-1.5">
-              <span className={`text-sm font-semibold ${lastSnapshotStale ? 'text-amber-700' : 'text-slate-800'}`}>
+              <span className={`text-sm font-semibold ${lastSnapshotStale ? 'text-amber-700 dark:text-amber-200' : 'text-foreground'}`}>
                 {formatDayTime(lastCompleted.completedAt || lastCompleted.createdAt)}
-                <span className="font-normal text-slate-400"> · {timeAgo(lastCompleted.completedAt || lastCompleted.createdAt)}</span>
+                <span className="font-normal text-muted-foreground/75"> · {timeAgo(lastCompleted.completedAt || lastCompleted.createdAt)}</span>
               </span>
               <ScopeChip snapshot={lastCompleted} workspaceName={workspaceName(lastCompleted.workspaceId)} />
               <TierChip tier={lastCompleted.tier} />
             </div>
           ) : (
-            <p className="text-sm font-semibold text-amber-700">None yet — take one now</p>
+            <p className="text-sm font-semibold text-amber-700 dark:text-amber-200">None yet — take one now</p>
           )}
         </StatCard>
         <StatCard dotClass={enabledSchedules.length ? 'bg-emerald-500' : 'bg-amber-400'} title="Scheduled backups">
           {enabledSchedules.length ? (
-            <p className="text-xs text-slate-600">
-              <span className="text-sm font-semibold text-slate-800">{enabledSchedules.length} enabled</span>
+            <p className="text-xs text-muted-foreground">
+              <span className="text-sm font-semibold text-foreground">{enabledSchedules.length} enabled</span>
               {' — '}{enabledSchedules.slice(0, 2).map(scheduleSummary).join(' · ')}
               {enabledSchedules.length > 2 ? ` · +${enabledSchedules.length - 2} more` : ''}
             </p>
           ) : (
-            <p className="text-sm font-semibold text-slate-500">None — set one below</p>
+            <p className="text-sm font-semibold text-muted-foreground">None — set one below</p>
           )}
         </StatCard>
       </div>
 
       {/* Snapshot-now toolbar */}
       <div className="tp-card rounded-xl p-3.5 flex flex-wrap items-center gap-2">
-        <label className="text-xs text-slate-500 flex items-center gap-1.5">
+        <label className="text-xs text-muted-foreground flex items-center gap-1.5">
           <span className="font-semibold">Scope</span>
           <select
             value={scope}
             onChange={(e) => setScope(e.target.value)}
             aria-label="Snapshot scope"
-            className="px-2 py-1.5 border border-input rounded-lg text-sm bg-white tp-focus-ring"
+            className="px-2 py-1.5 border border-input rounded-lg text-sm bg-card tp-focus-ring"
           >
             <option value="workspace">This workspace</option>
             {isGlobalAdmin && <option value="site">Full site</option>}
           </select>
         </label>
-        <div className="flex items-center rounded-lg border border-slate-200 overflow-hidden" role="group" aria-label="Snapshot tier">
+        <div className="flex items-center rounded-lg border border-border overflow-hidden" role="group" aria-label="Snapshot tier">
           <button
             onClick={() => setTier('config')}
             aria-pressed={tier === 'config'}
-            className={`tp-focus-ring px-2.5 py-1.5 text-xs font-semibold ${tier === 'config' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
+            className={`tp-focus-ring px-2.5 py-1.5 text-xs font-semibold ${tier === 'config' ? 'bg-blue-600 text-white' : 'bg-card text-muted-foreground hover:bg-muted/50'}`}
           >
             Configuration
           </button>
           <button
             onClick={() => setTier('config_data')}
             aria-pressed={tier === 'config_data'}
-            className={`tp-focus-ring px-2.5 py-1.5 text-xs font-semibold border-l border-slate-200 ${tier === 'config_data' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
+            className={`tp-focus-ring px-2.5 py-1.5 text-xs font-semibold border-l border-border ${tier === 'config_data' ? 'bg-blue-600 text-white' : 'bg-card text-muted-foreground hover:bg-muted/50'}`}
           >
             Configuration + data
           </button>
         </div>
         {tier === 'config_data' && (
-          <span className="text-[11px] text-slate-400">Ticket data is export-only — it downloads but restores via platform recovery.</span>
+          <span className="text-[11px] text-muted-foreground/75">Ticket data is export-only — it downloads but restores via platform recovery.</span>
         )}
         <button
           onClick={createSnapshot}
@@ -988,12 +988,12 @@ export default function BackupRestorePanel() {
 
       {/* Snapshot timeline */}
       {loading ? (
-        <div className="flex items-center justify-center py-12 text-gray-400">
+        <div className="flex items-center justify-center py-12 text-muted-foreground/75">
           <Loader className="w-5 h-5 animate-spin mr-2" aria-hidden="true" /> Loading snapshots…
         </div>
       ) : (
         <div className="tp-card rounded-xl overflow-hidden">
-          <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-slate-50/60 px-3 py-2.5">
+          <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-3 py-2.5">
             <div className="flex flex-wrap items-center gap-1" role="group" aria-label="Filter snapshots">
               {FILTERS.map(({ key, label }) => (
                 <button
@@ -1003,19 +1003,19 @@ export default function BackupRestorePanel() {
                   className={`tp-focus-ring px-2.5 py-1 rounded-full text-xs font-semibold border transition-colors ${
                     filter === key
                       ? 'bg-blue-600 text-white border-blue-600'
-                      : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                      : 'bg-card text-muted-foreground border-border hover:border-input hover:bg-muted/50'
                   }`}
                 >
-                  {label} <span className={filter === key ? 'opacity-80' : 'text-slate-400'}>{counts[key]}</span>
+                  {label} <span className={filter === key ? 'opacity-80' : 'text-muted-foreground/75'}>{counts[key]}</span>
                 </button>
               ))}
             </div>
-            <span className="ml-auto hidden md:inline text-xs text-slate-400">{rows.length} shown</span>
+            <span className="ml-auto hidden md:inline text-xs text-muted-foreground/75">{rows.length} shown</span>
           </div>
 
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
-              <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+              <thead className="bg-muted/50 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
                 <tr>
                   <th className="px-3 py-2">Created</th>
                   <th className="px-3 py-2">Scope</th>
@@ -1026,10 +1026,10 @@ export default function BackupRestorePanel() {
                   <th className="px-3 py-2 text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 bg-white">
+              <tbody className="divide-y divide-border/60 bg-card">
                 {rows.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-3 py-8 text-center text-sm text-slate-400">
+                    <td colSpan={7} className="px-3 py-8 text-center text-sm text-muted-foreground/75">
                       {counts.all === 0
                         ? 'No snapshots yet — take your first one with “Snapshot now” above.'
                         : 'No snapshots in this filter.'}
@@ -1040,15 +1040,15 @@ export default function BackupRestorePanel() {
                   const completed = s.status === 'completed';
                   const busy = busySnapshotId === s.id;
                   return (
-                    <tr key={s.id} className="transition-colors hover:bg-slate-50/70">
+                    <tr key={s.id} className="transition-colors hover:bg-muted/35">
                       <td className="px-3 py-2 whitespace-nowrap">
-                        <div className="text-sm text-slate-800">{formatCreated(s.createdAt)}</div>
-                        <div className="text-[11px] text-slate-400">{timeAgo(s.createdAt)}</div>
+                        <div className="text-sm text-foreground">{formatCreated(s.createdAt)}</div>
+                        <div className="text-[11px] text-muted-foreground/75">{timeAgo(s.createdAt)}</div>
                       </td>
                       <td className="px-3 py-2"><ScopeChip snapshot={s} workspaceName={s.manifest?.workspaceName || workspaceName(s.workspaceId)} /></td>
                       <td className="px-3 py-2 hidden sm:table-cell"><TierChip tier={s.tier} /></td>
-                      <td className="px-3 py-2 hidden md:table-cell text-xs text-slate-500 tabular-nums">{s.sizeBytes != null ? formatBytes(s.sizeBytes) : '—'}</td>
-                      <td className="px-3 py-2 hidden lg:table-cell text-xs text-slate-500 truncate max-w-[160px]" title={s.createdByEmail || ''}>
+                      <td className="px-3 py-2 hidden md:table-cell text-xs text-muted-foreground tabular-nums">{s.sizeBytes != null ? formatBytes(s.sizeBytes) : '—'}</td>
+                      <td className="px-3 py-2 hidden lg:table-cell text-xs text-muted-foreground truncate max-w-[160px]" title={s.createdByEmail || ''}>
                         {s.trigger && s.trigger !== 'manual' ? 'Scheduled' : (s.createdByEmail || '—')}
                       </td>
                       <td className="px-3 py-2"><StatusCell snapshot={s} /></td>
@@ -1059,7 +1059,7 @@ export default function BackupRestorePanel() {
                             disabled={!completed || busy}
                             title="Download archive"
                             aria-label={`Download snapshot from ${formatCreated(s.createdAt)}`}
-                            className="tp-focus-ring p-1.5 rounded-lg text-gray-400 hover:text-blue-600 disabled:opacity-40 disabled:hover:text-gray-400"
+                            className="tp-focus-ring p-1.5 rounded-lg text-muted-foreground/75 hover:text-blue-600 dark:hover:text-blue-300 disabled:opacity-40 disabled:hover:text-muted-foreground/75"
                           >
                             {busy ? <Loader className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Download className="w-4 h-4" aria-hidden="true" />}
                           </button>
@@ -1068,7 +1068,7 @@ export default function BackupRestorePanel() {
                             disabled={!completed}
                             title="Restore…"
                             aria-label={`Restore snapshot from ${formatCreated(s.createdAt)}`}
-                            className="tp-focus-ring p-1.5 rounded-lg text-gray-400 hover:text-blue-600 disabled:opacity-40 disabled:hover:text-gray-400"
+                            className="tp-focus-ring p-1.5 rounded-lg text-muted-foreground/75 hover:text-blue-600 dark:hover:text-blue-300 disabled:opacity-40 disabled:hover:text-muted-foreground/75"
                           >
                             <ArchiveRestore className="w-4 h-4" aria-hidden="true" />
                           </button>
@@ -1081,7 +1081,7 @@ export default function BackupRestorePanel() {
                               >
                                 {busy ? 'Deleting…' : 'Delete?'}
                               </button>
-                              <button onClick={() => setConfirmDeleteId(null)} aria-label="Cancel delete" className="tp-focus-ring p-1 rounded text-slate-400 hover:text-slate-700">
+                              <button onClick={() => setConfirmDeleteId(null)} aria-label="Cancel delete" className="tp-focus-ring p-1 rounded text-muted-foreground/75 hover:text-foreground/85">
                                 <X className="w-3.5 h-3.5" aria-hidden="true" />
                               </button>
                             </span>
@@ -1091,7 +1091,7 @@ export default function BackupRestorePanel() {
                               disabled={s.status === 'running' || s.status === 'pending'}
                               title="Delete snapshot"
                               aria-label={`Delete snapshot from ${formatCreated(s.createdAt)}`}
-                              className="tp-focus-ring p-1.5 rounded-lg text-gray-400 hover:text-red-600 disabled:opacity-40 disabled:hover:text-gray-400"
+                              className="tp-focus-ring p-1.5 rounded-lg text-muted-foreground/75 hover:text-red-600 dark:hover:text-red-300 disabled:opacity-40 disabled:hover:text-muted-foreground/75"
                             >
                               <Trash2 className="w-4 h-4" aria-hidden="true" />
                             </button>
@@ -1116,7 +1116,7 @@ export default function BackupRestorePanel() {
         onError={setError}
       />
 
-      <p className="flex items-center gap-1.5 text-[11px] text-slate-400">
+      <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground/75">
         <Clock className="w-3 h-3" aria-hidden="true" />
         Snapshots cover Ticket Pulse–owned configuration. FreshService-born tickets re-sync from FreshService; attachments are protected by blob versioning.
       </p>

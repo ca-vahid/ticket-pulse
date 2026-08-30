@@ -40,7 +40,7 @@ export default function LegendPopover({ showOpen = false }) {
         onMouseLeave={() => setOpen(false)}
         onFocus={() => setOpen(true)}
         onBlur={() => setOpen(false)}
-        className="p-1.5 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+        className="p-1.5 rounded-full text-muted-foreground/75 hover:text-foreground/85 hover:bg-muted transition-colors"
         title="Column legend"
         aria-label="Show column legend"
       >
@@ -49,7 +49,7 @@ export default function LegendPopover({ showOpen = false }) {
 
       {open && pos && createPortal(
         <div
-          className="fixed z-[100] bg-white border border-gray-200 rounded-lg shadow-xl p-3 min-w-[240px] pointer-events-none"
+          className="fixed z-[100] bg-card border border-border rounded-lg shadow-xl p-3 min-w-[240px] pointer-events-none"
           style={{
             // Right-align to the trigger so the popup opens to the left,
             // never spilling off the viewport edge.
@@ -58,17 +58,17 @@ export default function LegendPopover({ showOpen = false }) {
             transform: 'translateX(-100%)',
           }}
         >
-          <div className="text-[10px] uppercase font-bold text-gray-500 mb-2 tracking-wide">Column legend</div>
+          <div className="text-[10px] uppercase font-bold text-muted-foreground mb-2 tracking-wide">Column legend</div>
           <ul className="space-y-1 text-xs">
             {showOpen && (
-              <li><span className="font-semibold text-gray-700">Open</span> <span className="text-gray-500">— all open tickets</span></li>
+              <li><span className="font-semibold text-foreground/85">Open</span> <span className="text-muted-foreground">— all open tickets</span></li>
             )}
-            <li><span className="font-semibold text-blue-600">Today</span> <span className="text-gray-500">— total today</span></li>
-            <li><span className="font-semibold text-purple-600">Self</span> <span className="text-gray-500">— self-picked</span></li>
-            <li><span className="font-semibold text-sky-600">App</span> <span className="text-gray-500">— app assigned</span></li>
-            <li><span className="font-semibold text-orange-600">Asgn</span> <span className="text-gray-500">— coordinator assigned</span></li>
-            <li><span className="font-semibold text-green-600">Done</span> <span className="text-gray-500">— closed</span></li>
-            <li><span className="font-semibold text-yellow-600">⭐ CSAT</span> <span className="text-gray-500">— customer satisfaction</span></li>
+            <li><span className="font-semibold text-blue-600 dark:text-blue-300">Today</span> <span className="text-muted-foreground">— total today</span></li>
+            <li><span className="font-semibold text-purple-600 dark:text-purple-300">Self</span> <span className="text-muted-foreground">— self-picked</span></li>
+            <li><span className="font-semibold text-sky-600 dark:text-sky-300">App</span> <span className="text-muted-foreground">— app assigned</span></li>
+            <li><span className="font-semibold text-orange-600 dark:text-orange-300">Asgn</span> <span className="text-muted-foreground">— coordinator assigned</span></li>
+            <li><span className="font-semibold text-green-600 dark:text-green-300">Done</span> <span className="text-muted-foreground">— closed</span></li>
+            <li><span className="font-semibold text-yellow-600 dark:text-yellow-300">⭐ CSAT</span> <span className="text-muted-foreground">— customer satisfaction</span></li>
           </ul>
         </div>,
         document.body,

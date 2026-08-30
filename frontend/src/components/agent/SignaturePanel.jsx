@@ -73,40 +73,40 @@ export default function SignaturePanel() {
 
   if (loading) {
     return (
-      <div className="flex min-h-[20vh] items-center justify-center rounded-lg border border-slate-200 bg-white">
-        <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
+      <div className="flex min-h-[20vh] items-center justify-center rounded-lg border border-border bg-card">
+        <Loader2 className="h-5 w-5 animate-spin text-blue-600 dark:text-blue-300" />
       </div>
     );
   }
 
   return (
-    <section className="rounded-lg border border-slate-200 bg-white shadow-sm" aria-label="Email signature">
-      <div className="border-b border-slate-200 px-4 py-3">
+    <section className="rounded-lg border border-border bg-card shadow-sm" aria-label="Email signature">
+      <div className="border-b border-border px-4 py-3">
         <div className="flex items-center gap-2">
-          <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-blue-50 text-blue-600"><PenLine className="h-4 w-4" /></span>
+          <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-300"><PenLine className="h-4 w-4" /></span>
           <div className="min-w-0">
-            <h2 className="text-sm font-bold text-slate-900">Email signature</h2>
-            <p className="text-xs text-slate-500">
+            <h2 className="text-sm font-bold text-foreground">Email signature</h2>
+            <p className="text-xs text-muted-foreground">
               Appended to reply emails you send from tickets — never to internal notes.
             </p>
           </div>
-          <label className="ml-auto inline-flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-600">
+          <label className="ml-auto inline-flex cursor-pointer items-center gap-2 text-xs font-semibold text-muted-foreground">
             <input
               type="checkbox"
               checked={enabled}
               onChange={(event) => setEnabled(event.target.checked)}
-              className="h-4 w-4 rounded border-slate-300 text-blue-600"
+              className="h-4 w-4 rounded border-input text-blue-600 dark:text-blue-300"
             />
             Enabled
           </label>
-          {message && <span className="rounded bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">{message}</span>}
+          {message && <span className="rounded bg-emerald-50 dark:bg-emerald-500/15 px-2 py-0.5 text-xs font-semibold text-emerald-700 dark:text-emerald-200">{message}</span>}
         </div>
-        {error && <p className="mt-2 text-sm font-medium text-red-600">{error}</p>}
+        {error && <p className="mt-2 text-sm font-medium text-red-600 dark:text-red-300">{error}</p>}
       </div>
 
       <div className="grid gap-4 p-4 lg:grid-cols-2">
         <div className="space-y-2">
-          <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">Signature</label>
+          <label className="block text-xs font-semibold uppercase tracking-wide text-muted-foreground">Signature</label>
           <RichTextEditor
             value={html}
             onChange={(next) => { setHtml(next.html); setText(next.text); }}
@@ -114,26 +114,26 @@ export default function SignaturePanel() {
             ariaLabel="Signature editor"
             minHeight={140}
           />
-          <p className="text-[11px] text-slate-400">
+          <p className="text-[11px] text-muted-foreground/75">
             Tip: copy your signature from Outlook and paste it here — formatting is preserved.
           </p>
         </div>
         <div className="space-y-2">
-          <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">Preview</label>
-          <div className={`rounded-lg border border-dashed border-slate-200 bg-slate-50/60 p-3 ${enabled ? '' : 'opacity-50'}`} data-testid="signature-preview">
+          <label className="block text-xs font-semibold uppercase tracking-wide text-muted-foreground">Preview</label>
+          <div className={`rounded-lg border border-dashed border-border bg-muted/30 p-3 ${enabled ? '' : 'opacity-50'}`} data-testid="signature-preview">
             {String(html || '').trim()
               ? <SafeHtml html={html} />
-              : <p className="text-sm text-slate-400">Nothing yet — your reply emails go out unsigned.</p>}
+              : <p className="text-sm text-muted-foreground/75">Nothing yet — your reply emails go out unsigned.</p>}
           </div>
           {!enabled && (
-            <p className="text-[11px] font-medium text-amber-600">
+            <p className="text-[11px] font-medium text-amber-600 dark:text-amber-300">
               Disabled — your signature is kept but not appended to emails.
             </p>
           )}
         </div>
       </div>
 
-      <div className="flex justify-end border-t border-slate-200 px-4 py-3">
+      <div className="flex justify-end border-t border-border px-4 py-3">
         <button
           type="button"
           onClick={save}

@@ -28,7 +28,7 @@ export default function TimelineCore({
     return (
       <div className={className || 'flex-1 overflow-y-auto px-5 py-2'}>
         <div className="flex items-center justify-center h-full min-h-[200px]">
-          <p className="text-slate-400 text-sm">{emptyMessage || 'No tickets to display.'}</p>
+          <p className="text-muted-foreground/75 text-sm">{emptyMessage || 'No tickets to display.'}</p>
         </div>
       </div>
     );
@@ -91,7 +91,7 @@ export default function TimelineCore({
 export function TimelineLegend({ techConfigs }) {
   const isMultiTech = techConfigs && techConfigs.length > 1;
   return (
-    <div className="flex flex-wrap items-center gap-4 text-[10px] text-slate-400">
+    <div className="flex flex-wrap items-center gap-4 text-[10px] text-muted-foreground/75">
       {isMultiTech
         ? techConfigs.map((tc) => (
           <div key={tc.id} className="flex items-center gap-1">
@@ -102,7 +102,7 @@ export function TimelineLegend({ techConfigs }) {
         : (
           <>
             <div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" /> Picked</div>
-            <div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-400 inline-block" /> Not picked</div>
+            <div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-muted-foreground/60 inline-block" /> Not picked</div>
           </>
         )}
       <div className="flex items-center gap-1"><Moon className="w-3 h-3 text-indigo-400" /> Overnight</div>

@@ -587,7 +587,7 @@ export default function SummitVote() {
 
   if ((error && !session) || expiredMessage) {
     return (
-      <div className="min-h-screen bg-slate-950 p-4 text-white">
+      <div className="tp-light min-h-screen bg-slate-950 p-4 text-white">
         <div className="mx-auto mt-20 max-w-lg rounded-lg border border-amber-400/30 bg-amber-500/10 p-6">
           <Icons.AlertTriangle className="h-8 w-8 text-amber-300" />
           <h1 className="mt-3 text-xl font-semibold">Voting link expired</h1>
@@ -599,7 +599,7 @@ export default function SummitVote() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white">
+    <div className="tp-light min-h-screen bg-slate-950 text-white">
       <style>{`
         @keyframes voteToastIn {
           from { opacity: 0; transform: translate3d(0, -10px, 0) scale(.98); }

@@ -6,10 +6,10 @@ import {
 } from 'lucide-react';
 
 const CATEGORIES = [
-  { value: 'OFF', label: 'OFF', desc: 'Vacation / PTO / Sick', color: 'bg-amber-100 text-amber-800 border-amber-300' },
-  { value: 'WFH', label: 'WFH', desc: 'Work From Home', color: 'bg-teal-100 text-teal-800 border-teal-300' },
-  { value: 'OTHER', label: 'OTHER', desc: 'Training / Site Visit', color: 'bg-purple-100 text-purple-800 border-purple-300' },
-  { value: 'IGNORED', label: 'IGNORED', desc: 'Don\'t track', color: 'bg-gray-100 text-gray-500 border-gray-300' },
+  { value: 'OFF', label: 'OFF', desc: 'Vacation / PTO / Sick', color: 'bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-200 border-amber-300 dark:border-amber-500/40' },
+  { value: 'WFH', label: 'WFH', desc: 'Work From Home', color: 'bg-teal-100 dark:bg-teal-500/20 text-teal-800 dark:text-teal-200 border-teal-300 dark:border-teal-500/40' },
+  { value: 'OTHER', label: 'OTHER', desc: 'Training / Site Visit', color: 'bg-purple-100 dark:bg-purple-500/20 text-purple-800 dark:text-purple-200 border-purple-300 dark:border-purple-500/40' },
+  { value: 'IGNORED', label: 'IGNORED', desc: 'Don\'t track', color: 'bg-muted text-muted-foreground border-input' },
 ];
 
 export default function VacationTrackerPanel() {
@@ -161,12 +161,12 @@ export default function VacationTrackerPanel() {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3 mb-2">
-        <div className="p-2 bg-amber-100 rounded-lg">
-          <CalendarDays className="w-5 h-5 text-amber-600" />
+        <div className="p-2 bg-amber-100 dark:bg-amber-500/20 rounded-lg">
+          <CalendarDays className="w-5 h-5 text-amber-600 dark:text-amber-300" />
         </div>
         <div>
-          <h3 className="text-lg font-semibold text-gray-900">Vacation Tracker</h3>
-          <p className="text-sm text-gray-500">
+          <h3 className="text-lg font-semibold text-foreground">Vacation Tracker</h3>
+          <p className="text-sm text-muted-foreground">
             Sync leave data from Vacation Tracker to show who is OFF, WFH, or on training.
           </p>
         </div>
@@ -183,7 +183,7 @@ export default function VacationTrackerPanel() {
       </div>
 
       {syncResult && (
-        <div className={`p-3 rounded-lg border text-sm ${syncResult.error ? 'bg-red-50 border-red-200 text-red-800' : 'bg-emerald-50 border-emerald-200 text-emerald-800'}`}>
+        <div className={`p-3 rounded-lg border text-sm ${syncResult.error ? 'bg-red-50 dark:bg-red-500/15 border-red-200 dark:border-red-500/30 text-red-800 dark:text-red-200' : 'bg-emerald-50 dark:bg-emerald-500/15 border-emerald-200 dark:border-emerald-500/30 text-emerald-800 dark:text-emerald-200'}`}>
           {syncResult.error
             ? `Sync failed: ${syncResult.error}`
             : `Sync complete: ${syncResult.leavesProcessed || 0} leave requests processed, ${syncResult.leaveDaysCreated || 0} day records created`}
@@ -191,19 +191,19 @@ export default function VacationTrackerPanel() {
       )}
 
       {/* Tab navigation */}
-      <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
+      <div className="flex gap-1 bg-muted p-1 rounded-lg">
         {tabs.map(({ id, label, Icon }) => (
           <button
             key={id}
             onClick={() => setTab(id)}
             className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-md transition-colors flex-1 justify-center ${
-              tab === id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+              tab === id ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground/85'
             }`}
           >
             <Icon className="w-4 h-4" />
             {label}
             {id === 'user-matching' && unmatched > 0 && (
-              <span className="ml-1 px-1.5 py-0.5 text-[10px] font-medium bg-red-100 text-red-700 rounded-full">{unmatched}</span>
+              <span className="ml-1 px-1.5 py-0.5 text-[10px] font-medium bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-200 rounded-full">{unmatched}</span>
             )}
           </button>
         ))}
@@ -212,21 +212,21 @@ export default function VacationTrackerPanel() {
       {/* Connection Tab */}
       {tab === 'connection' && (
         <div className="space-y-4">
-          <div className="bg-white border border-gray-200 rounded-lg p-4 space-y-4">
+          <div className="bg-card border border-border rounded-lg p-4 space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">API Key</label>
+              <label className="block text-sm font-medium text-foreground/85 mb-1">API Key</label>
               <div className="flex gap-2">
                 <input
                   type="password"
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
                   placeholder={config?.hasApiKey ? '••••••••••••• (saved)' : 'Enter your Vacation Tracker API key'}
-                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+                  className="flex-1 px-3 py-2 border border-input rounded-lg text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
                 />
                 <button
                   onClick={handleTestConnection}
                   disabled={isTesting}
-                  className="flex items-center gap-1.5 px-3 py-2 bg-gray-100 hover:bg-gray-200 disabled:bg-gray-50 text-gray-700 text-sm font-medium rounded-lg border border-gray-300 transition-colors"
+                  className="flex items-center gap-1.5 px-3 py-2 bg-muted hover:bg-secondary disabled:bg-muted/50 text-foreground/85 text-sm font-medium rounded-lg border border-input transition-colors"
                 >
                   {isTesting ? <Loader className="w-4 h-4 animate-spin" /> : <Link2 className="w-4 h-4" />}
                   Test
@@ -243,23 +243,23 @@ export default function VacationTrackerPanel() {
             </div>
 
             {testResult && (
-              <div className={`flex items-center gap-2 p-3 rounded-lg border text-sm ${testResult.success ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
-                {testResult.success ? <CheckCircle className="w-4 h-4 text-emerald-600" /> : <XCircle className="w-4 h-4 text-red-600" />}
-                <span className={testResult.success ? 'text-emerald-800' : 'text-red-800'}>
+              <div className={`flex items-center gap-2 p-3 rounded-lg border text-sm ${testResult.success ? 'bg-emerald-50 dark:bg-emerald-500/15 border-emerald-200 dark:border-emerald-500/30' : 'bg-red-50 dark:bg-red-500/15 border-red-200 dark:border-red-500/30'}`}>
+                {testResult.success ? <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-300" /> : <XCircle className="w-4 h-4 text-red-600 dark:text-red-300" />}
+                <span className={testResult.success ? 'text-emerald-800 dark:text-emerald-200' : 'text-red-800 dark:text-red-200'}>
                   {testResult.success ? 'Connection successful!' : `Connection failed: ${testResult.error || 'Unknown error'}`}
                 </span>
               </div>
             )}
 
             {saveMsg && (
-              <div className={`flex items-center gap-2 p-3 rounded-lg border text-sm ${saveMsg.ok ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
-                {saveMsg.ok ? <CheckCircle className="w-4 h-4 text-emerald-600" /> : <XCircle className="w-4 h-4 text-red-600" />}
-                <span className={saveMsg.ok ? 'text-emerald-800' : 'text-red-800'}>{saveMsg.text}</span>
+              <div className={`flex items-center gap-2 p-3 rounded-lg border text-sm ${saveMsg.ok ? 'bg-emerald-50 dark:bg-emerald-500/15 border-emerald-200 dark:border-emerald-500/30' : 'bg-red-50 dark:bg-red-500/15 border-red-200 dark:border-red-500/30'}`}>
+                {saveMsg.ok ? <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-300" /> : <XCircle className="w-4 h-4 text-red-600 dark:text-red-300" />}
+                <span className={saveMsg.ok ? 'text-emerald-800 dark:text-emerald-200' : 'text-red-800 dark:text-red-200'}>{saveMsg.text}</span>
               </div>
             )}
 
             {config && (
-              <div className="text-xs text-gray-500 flex items-center gap-4 pt-2 border-t border-gray-100">
+              <div className="text-xs text-muted-foreground flex items-center gap-4 pt-2 border-t border-border/60">
                 <span>Status: {config.syncEnabled ? 'Enabled' : 'Disabled'}</span>
                 {config.lastSyncAt && <span>Last sync: {new Date(config.lastSyncAt).toLocaleString()}</span>}
               </div>
@@ -267,9 +267,9 @@ export default function VacationTrackerPanel() {
           </div>
 
           {config?.hasApiKey && (
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-800">
+            <div className="bg-blue-50 dark:bg-blue-500/15 border border-blue-200 dark:border-blue-500/30 rounded-lg p-4 text-sm text-blue-800 dark:text-blue-200">
               <p className="font-medium mb-1">Setup steps:</p>
-              <ol className="list-decimal list-inside space-y-1 text-blue-700">
+              <ol className="list-decimal list-inside space-y-1 text-blue-700 dark:text-blue-200">
                 <li className={leaveTypes.length > 0 ? 'line-through opacity-60' : ''}>
                   Go to <strong>Leave Types</strong> tab and sync, then categorize each type
                 </li>
@@ -287,12 +287,12 @@ export default function VacationTrackerPanel() {
       {tab === 'leave-types' && (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <p className="text-sm text-gray-600">Map each Vacation Tracker leave type to a dashboard category.</p>
+            <p className="text-sm text-muted-foreground">Map each Vacation Tracker leave type to a dashboard category.</p>
             <div className="flex gap-2">
               <button
                 onClick={handleSyncLeaveTypes}
                 disabled={isSyncingTypes}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 disabled:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg border border-gray-300 transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-muted hover:bg-secondary disabled:bg-muted/50 text-foreground/85 text-xs font-medium rounded-lg border border-input transition-colors"
               >
                 {isSyncingTypes ? <Loader className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
                 Fetch from VT
@@ -311,30 +311,30 @@ export default function VacationTrackerPanel() {
           </div>
 
           {leaveTypes.length === 0 ? (
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center">
-              <CalendarDays className="w-10 h-10 text-gray-300 mx-auto mb-3" />
-              <p className="text-gray-500 text-sm">No leave types synced yet. Click &quot;Fetch from VT&quot; to load them.</p>
+            <div className="bg-muted/50 border border-border rounded-lg p-8 text-center">
+              <CalendarDays className="w-10 h-10 text-muted-foreground/50 mx-auto mb-3" />
+              <p className="text-muted-foreground text-sm">No leave types synced yet. Click &quot;Fetch from VT&quot; to load them.</p>
             </div>
           ) : (
-            <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+            <div className="bg-card border border-border rounded-lg overflow-hidden">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="bg-gray-50 border-b border-gray-200">
-                    <th className="text-left px-4 py-2.5 font-medium text-gray-600">Leave Type</th>
-                    <th className="text-left px-4 py-2.5 font-medium text-gray-600">VT Color</th>
-                    <th className="text-left px-4 py-2.5 font-medium text-gray-600">Category</th>
-                    <th className="text-left px-4 py-2.5 font-medium text-gray-600">Active</th>
+                  <tr className="bg-muted/50 border-b border-border">
+                    <th className="text-left px-4 py-2.5 font-medium text-muted-foreground">Leave Type</th>
+                    <th className="text-left px-4 py-2.5 font-medium text-muted-foreground">VT Color</th>
+                    <th className="text-left px-4 py-2.5 font-medium text-muted-foreground">Category</th>
+                    <th className="text-left px-4 py-2.5 font-medium text-muted-foreground">Active</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100">
+                <tbody className="divide-y divide-border/60">
                   {leaveTypes.map((lt) => (
-                    <tr key={lt.id} className="hover:bg-gray-50/50">
-                      <td className="px-4 py-2.5 font-medium text-gray-900">{lt.vtLeaveTypeName}</td>
+                    <tr key={lt.id} className="hover:bg-muted/25">
+                      <td className="px-4 py-2.5 font-medium text-foreground">{lt.vtLeaveTypeName}</td>
                       <td className="px-4 py-2.5">
                         {lt.color && (
                           <div className="flex items-center gap-2">
-                            <div className="w-4 h-4 rounded-full border border-gray-200" style={{ backgroundColor: lt.color }} />
-                            <span className="text-gray-500 text-xs">{lt.color}</span>
+                            <div className="w-4 h-4 rounded-full border border-border" style={{ backgroundColor: lt.color }} />
+                            <span className="text-muted-foreground text-xs">{lt.color}</span>
                           </div>
                         )}
                       </td>
@@ -347,7 +347,7 @@ export default function VacationTrackerPanel() {
                             ));
                             setLeaveTypeDirty(true);
                           }}
-                          className="px-2 py-1 border border-gray-300 rounded text-xs font-medium focus:ring-2 focus:ring-amber-500"
+                          className="px-2 py-1 border border-input rounded text-xs font-medium focus:ring-2 focus:ring-amber-500"
                         >
                           {CATEGORIES.map(c => (
                             <option key={c.value} value={c.value}>{c.label} - {c.desc}</option>
@@ -355,7 +355,7 @@ export default function VacationTrackerPanel() {
                         </select>
                       </td>
                       <td className="px-4 py-2.5">
-                        <span className={`inline-block w-2 h-2 rounded-full ${lt.isActive ? 'bg-emerald-500' : 'bg-gray-300'}`} />
+                        <span className={`inline-block w-2 h-2 rounded-full ${lt.isActive ? 'bg-emerald-500' : 'bg-muted-foreground/40'}`} />
                       </td>
                     </tr>
                   ))}
@@ -370,16 +370,16 @@ export default function VacationTrackerPanel() {
       {tab === 'user-matching' && (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <p className="text-sm text-gray-600">
+            <p className="text-sm text-muted-foreground">
               Match Vacation Tracker users to Ticket Pulse technicians.
-              <span className="ml-2 text-xs text-gray-400">
+              <span className="ml-2 text-xs text-muted-foreground/75">
                 {matched} matched, {unmatched} unmatched of {userMappings.length} users
               </span>
             </p>
             <button
               onClick={handleSyncUsers}
               disabled={isSyncingUsers}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 disabled:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg border border-gray-300 transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-muted hover:bg-secondary disabled:bg-muted/50 text-foreground/85 text-xs font-medium rounded-lg border border-input transition-colors"
             >
               {isSyncingUsers ? <Loader className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
               Sync & Auto-Match
@@ -387,33 +387,33 @@ export default function VacationTrackerPanel() {
           </div>
 
           {userMappings.length === 0 ? (
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center">
-              <Users className="w-10 h-10 text-gray-300 mx-auto mb-3" />
-              <p className="text-gray-500 text-sm">No users synced yet. Click &quot;Sync &amp; Auto-Match&quot; to fetch VT users and auto-match by email.</p>
+            <div className="bg-muted/50 border border-border rounded-lg p-8 text-center">
+              <Users className="w-10 h-10 text-muted-foreground/50 mx-auto mb-3" />
+              <p className="text-muted-foreground text-sm">No users synced yet. Click &quot;Sync &amp; Auto-Match&quot; to fetch VT users and auto-match by email.</p>
             </div>
           ) : (
-            <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+            <div className="bg-card border border-border rounded-lg overflow-hidden">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="bg-gray-50 border-b border-gray-200">
-                    <th className="text-left px-4 py-2.5 font-medium text-gray-600">VT User</th>
-                    <th className="text-left px-4 py-2.5 font-medium text-gray-600">Email</th>
-                    <th className="text-left px-4 py-2.5 font-medium text-gray-600">Status</th>
-                    <th className="text-left px-4 py-2.5 font-medium text-gray-600">Matched Technician</th>
+                  <tr className="bg-muted/50 border-b border-border">
+                    <th className="text-left px-4 py-2.5 font-medium text-muted-foreground">VT User</th>
+                    <th className="text-left px-4 py-2.5 font-medium text-muted-foreground">Email</th>
+                    <th className="text-left px-4 py-2.5 font-medium text-muted-foreground">Status</th>
+                    <th className="text-left px-4 py-2.5 font-medium text-muted-foreground">Matched Technician</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100">
+                <tbody className="divide-y divide-border/60">
                   {userMappings.map((m) => (
-                    <tr key={m.id} className={`hover:bg-gray-50/50 ${m.matchStatus === 'unmatched' ? 'bg-amber-50/30' : ''}`}>
-                      <td className="px-4 py-2.5 font-medium text-gray-900">{m.vtUserName}</td>
-                      <td className="px-4 py-2.5 text-gray-500 text-xs">{m.vtUserEmail}</td>
+                    <tr key={m.id} className={`hover:bg-muted/25 ${m.matchStatus === 'unmatched' ? 'bg-amber-50/30 dark:bg-amber-500/10' : ''}`}>
+                      <td className="px-4 py-2.5 font-medium text-foreground">{m.vtUserName}</td>
+                      <td className="px-4 py-2.5 text-muted-foreground text-xs">{m.vtUserEmail}</td>
                       <td className="px-4 py-2.5">
                         {m.matchStatus === 'unmatched' ? (
-                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium bg-red-100 text-red-700 border border-red-300 rounded">
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-200 border border-red-300 dark:border-red-500/40 rounded">
                             <Unlink className="w-3 h-3" /> Unmatched
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium bg-emerald-100 text-emerald-700 border border-emerald-300 rounded">
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-500/40 rounded">
                             <Link2 className="w-3 h-3" /> {m.matchStatus === 'auto_matched' ? 'Auto' : 'Manual'}
                           </span>
                         )}
@@ -423,7 +423,7 @@ export default function VacationTrackerPanel() {
                           value={m.technicianId || ''}
                           onChange={(e) => handleMatchUser(m.id, e.target.value ? parseInt(e.target.value, 10) : null)}
                           className={`px-2 py-1 border rounded text-xs font-medium focus:ring-2 focus:ring-amber-500 ${
-                            m.matchStatus === 'unmatched' ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                            m.matchStatus === 'unmatched' ? 'border-red-300 dark:border-red-500/40 bg-red-50 dark:bg-red-500/15' : 'border-input'
                           }`}
                         >
                           <option value="">-- Select technician --</option>

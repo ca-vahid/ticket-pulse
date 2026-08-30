@@ -6,16 +6,16 @@ import {
 import { noiseRulesAPI } from '../services/api';
 
 const CATEGORIES = [
-  { value: 'infrastructure', label: 'Infrastructure', color: 'bg-blue-100 text-blue-700' },
-  { value: 'security', label: 'Security', color: 'bg-red-100 text-red-700' },
-  { value: 'monitoring', label: 'Monitoring', color: 'bg-yellow-100 text-yellow-700' },
-  { value: 'vendor', label: 'Vendor', color: 'bg-purple-100 text-purple-700' },
-  { value: 'spam', label: 'Spam', color: 'bg-gray-100 text-gray-700' },
-  { value: 'custom', label: 'Custom', color: 'bg-green-100 text-green-700' },
+  { value: 'infrastructure', label: 'Infrastructure', color: 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200' },
+  { value: 'security', label: 'Security', color: 'bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-200' },
+  { value: 'monitoring', label: 'Monitoring', color: 'bg-yellow-100 dark:bg-yellow-500/20 text-yellow-700 dark:text-yellow-200' },
+  { value: 'vendor', label: 'Vendor', color: 'bg-purple-100 dark:bg-purple-500/20 text-purple-700 dark:text-purple-200' },
+  { value: 'spam', label: 'Spam', color: 'bg-muted text-foreground/85' },
+  { value: 'custom', label: 'Custom', color: 'bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-200' },
 ];
 
 function getCategoryStyle(category) {
-  return CATEGORIES.find(c => c.value === category)?.color || 'bg-gray-100 text-gray-700';
+  return CATEGORIES.find(c => c.value === category)?.color || 'bg-muted text-foreground/85';
 }
 
 function formatTestDate(value) {
@@ -38,11 +38,11 @@ function getSenderLabel(match) {
 
 function getStatusStyle(status) {
   const normalized = String(status || '').toLowerCase();
-  if (normalized === 'open') return 'bg-blue-50 text-blue-700 border-blue-100';
-  if (normalized === 'pending') return 'bg-amber-50 text-amber-700 border-amber-100';
-  if (normalized === 'spam' || normalized === 'deleted') return 'bg-red-50 text-red-700 border-red-100';
-  if (normalized === 'closed') return 'bg-slate-100 text-slate-600 border-slate-200';
-  return 'bg-gray-50 text-gray-600 border-gray-200';
+  if (normalized === 'open') return 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 border-blue-100 dark:border-blue-500/20';
+  if (normalized === 'pending') return 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200 border-amber-100 dark:border-amber-500/20';
+  if (normalized === 'spam' || normalized === 'deleted') return 'bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200 border-red-100 dark:border-red-500/20';
+  if (normalized === 'closed') return 'bg-muted text-muted-foreground border-border';
+  return 'bg-muted/50 text-muted-foreground border-border';
 }
 
 function TestPatternMatches({ testResult }) {
@@ -52,19 +52,19 @@ function TestPatternMatches({ testResult }) {
   if (sampleMatches.length === 0 && fallbackSubjects.length === 0) return null;
 
   return (
-    <div className="mt-2 max-h-60 overflow-y-auto rounded-lg border border-slate-200 bg-white">
+    <div className="mt-2 max-h-60 overflow-y-auto rounded-lg border border-border bg-card">
       {sampleMatches.length > 0 ? (
-        <div className="divide-y divide-slate-100">
+        <div className="divide-y divide-border/60">
           {sampleMatches.map((match, i) => (
             <div key={`${match.ticketId || 'ticket'}-${i}`} className="grid gap-1 px-3 py-2 text-[11px] sm:grid-cols-[7.5rem_minmax(9rem,16rem)_5rem_minmax(0,1fr)] sm:items-start">
-              <div className="font-medium text-slate-500">
+              <div className="font-medium text-muted-foreground">
                 {formatTestDate(match.createdAt)}
-                {match.ticketId && <span className="ml-1 text-slate-400">#{match.ticketId}</span>}
+                {match.ticketId && <span className="ml-1 text-muted-foreground/75">#{match.ticketId}</span>}
               </div>
-              <div className="min-w-0 text-slate-600" title={getSenderLabel(match)}>
-                <div className="truncate font-medium text-slate-700">{match.requesterName || match.requesterEmail || 'Unknown sender'}</div>
+              <div className="min-w-0 text-muted-foreground" title={getSenderLabel(match)}>
+                <div className="truncate font-medium text-foreground/85">{match.requesterName || match.requesterEmail || 'Unknown sender'}</div>
                 {match.requesterName && match.requesterEmail && (
-                  <div className="truncate text-slate-400">{match.requesterEmail}</div>
+                  <div className="truncate text-muted-foreground/75">{match.requesterEmail}</div>
                 )}
               </div>
               <div>
@@ -72,7 +72,7 @@ function TestPatternMatches({ testResult }) {
                   {match.status || 'Unknown'}
                 </span>
               </div>
-              <div className="min-w-0 truncate text-slate-700" title={match.subject || ''}>
+              <div className="min-w-0 truncate text-foreground/85" title={match.subject || ''}>
                 {match.subject || '(no subject)'}
               </div>
             </div>
@@ -81,7 +81,7 @@ function TestPatternMatches({ testResult }) {
       ) : (
         <div className="space-y-0.5 px-3 py-2">
           {fallbackSubjects.map((subject, i) => (
-            <p key={i} className="truncate text-[11px] text-slate-600">{subject}</p>
+            <p key={i} className="truncate text-[11px] text-muted-foreground">{subject}</p>
           ))}
         </div>
       )}
@@ -130,40 +130,40 @@ function RuleRow({ rule, onUpdate, onDelete }) {
   const toggleEnabled = () => onUpdate(rule.id, { isEnabled: !rule.isEnabled });
 
   return (
-    <div className={`border rounded-lg transition-all ${rule.isEnabled ? 'border-gray-200 bg-white' : 'border-gray-100 bg-gray-50 opacity-60'}`}>
+    <div className={`border rounded-lg transition-all ${rule.isEnabled ? 'border-border bg-card' : 'border-border/60 bg-muted/50 opacity-60'}`}>
       <div className="px-4 py-3 flex items-center gap-3">
         <button onClick={toggleEnabled} className="flex-shrink-0" title={rule.isEnabled ? 'Disable rule' : 'Enable rule'}>
           {rule.isEnabled
             ? <ToggleRight className="w-5 h-5 text-green-500" />
-            : <ToggleLeft className="w-5 h-5 text-gray-400" />}
+            : <ToggleLeft className="w-5 h-5 text-muted-foreground/75" />}
         </button>
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-gray-900 truncate">{rule.name}</span>
+            <span className="text-sm font-semibold text-foreground truncate">{rule.name}</span>
             <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${getCategoryStyle(rule.category)}`}>
               {rule.category}
             </span>
             {rule.dedupWindowDays && (
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-indigo-100 text-indigo-700">
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-indigo-100 dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-200">
                 dedup: {rule.dedupWindowDays}d
               </span>
             )}
           </div>
           {rule.description && (
-            <p className="text-xs text-gray-500 mt-0.5 truncate">{rule.description}</p>
+            <p className="text-xs text-muted-foreground mt-0.5 truncate">{rule.description}</p>
           )}
         </div>
 
         <div className="flex items-center gap-2 flex-shrink-0">
-          <span className="text-xs text-gray-400 tabular-nums">{rule.matchCount} matches</span>
-          <button onClick={() => setExpanded(!expanded)} className="p-1 hover:bg-gray-100 rounded">
-            {expanded ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
+          <span className="text-xs text-muted-foreground/75 tabular-nums">{rule.matchCount} matches</span>
+          <button onClick={() => setExpanded(!expanded)} className="p-1 hover:bg-muted rounded">
+            {expanded ? <ChevronUp className="w-4 h-4 text-muted-foreground/75" /> : <ChevronDown className="w-4 h-4 text-muted-foreground/75" />}
           </button>
-          <button onClick={startEdit} className="p-1 hover:bg-blue-50 rounded text-blue-600">
+          <button onClick={startEdit} className="p-1 hover:bg-blue-50 dark:hover:bg-blue-500/15 rounded text-blue-600 dark:text-blue-300">
             <Edit3 className="w-3.5 h-3.5" />
           </button>
-          <button onClick={() => onDelete(rule.id)} className="p-1 hover:bg-red-50 rounded text-red-500">
+          <button onClick={() => onDelete(rule.id)} className="p-1 hover:bg-red-50 dark:hover:bg-red-500/15 rounded text-red-500">
             <Trash2 className="w-3.5 h-3.5" />
           </button>
         </div>
@@ -171,69 +171,69 @@ function RuleRow({ rule, onUpdate, onDelete }) {
 
       {/* Expanded details / edit */}
       {(expanded || isEditing) && (
-        <div className="px-4 pb-3 border-t border-gray-100 pt-3 space-y-3">
+        <div className="px-4 pb-3 border-t border-border/60 pt-3 space-y-3">
           {isEditing ? (
             <>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Name</label>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">Name</label>
                   <input
                     value={editData.name}
                     onChange={e => setEditData(d => ({ ...d, name: e.target.value }))}
-                    className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full px-3 py-1.5 border border-input rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Category</label>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">Category</label>
                   <select
                     value={editData.category}
                     onChange={e => setEditData(d => ({ ...d, category: e.target.value }))}
-                    className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full px-3 py-1.5 border border-input rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   >
                     {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
                   </select>
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Regex Pattern</label>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">Regex Pattern</label>
                 <input
                   value={editData.pattern}
                   onChange={e => setEditData(d => ({ ...d, pattern: e.target.value }))}
-                  className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-1.5 border border-input rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   placeholder="^Some regex pattern"
                 />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Description</label>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">Description</label>
                   <input
                     value={editData.description}
                     onChange={e => setEditData(d => ({ ...d, description: e.target.value }))}
-                    className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full px-3 py-1.5 border border-input rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Dedup Window (days)</label>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">Dedup Window (days)</label>
                   <input
                     type="number"
                     value={editData.dedupWindowDays}
                     onChange={e => setEditData(d => ({ ...d, dedupWindowDays: e.target.value }))}
-                    className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full px-3 py-1.5 border border-input rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     placeholder="Leave empty for always-noise"
                     min="1"
                     max="90"
                   />
-                  <p className="text-[10px] text-gray-400 mt-0.5">If set, only marks as noise when a same-subject ticket exists within this window</p>
+                  <p className="text-[10px] text-muted-foreground/75 mt-0.5">If set, only marks as noise when a same-subject ticket exists within this window</p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
                 <button onClick={saveEdit} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium">
                   <Save className="w-3.5 h-3.5" /> Save
                 </button>
-                <button onClick={() => setIsEditing(false)} className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-xs font-medium">
+                <button onClick={() => setIsEditing(false)} className="flex items-center gap-1.5 px-3 py-1.5 bg-muted hover:bg-secondary text-foreground/85 rounded-lg text-xs font-medium">
                   <X className="w-3.5 h-3.5" /> Cancel
                 </button>
-                <button onClick={handleTest} disabled={isTesting} className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-lg text-xs font-medium">
+                <button onClick={handleTest} disabled={isTesting} className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 dark:bg-amber-500/15 hover:bg-amber-100 dark:hover:bg-amber-500/20 text-amber-700 dark:text-amber-200 rounded-lg text-xs font-medium">
                   <TestTube className="w-3.5 h-3.5" /> {isTesting ? 'Testing...' : 'Test Pattern'}
                 </button>
               </div>
@@ -241,29 +241,29 @@ function RuleRow({ rule, onUpdate, onDelete }) {
           ) : (
             <div className="space-y-2">
               <div>
-                <span className="text-[10px] uppercase font-medium text-gray-400">Pattern</span>
-                <code className="block text-xs font-mono text-gray-700 bg-gray-50 px-2 py-1 rounded mt-0.5 break-all">{rule.pattern}</code>
+                <span className="text-[10px] uppercase font-medium text-muted-foreground/75">Pattern</span>
+                <code className="block text-xs font-mono text-foreground/85 bg-muted/50 px-2 py-1 rounded mt-0.5 break-all">{rule.pattern}</code>
               </div>
               {rule.description && (
                 <div>
-                  <span className="text-[10px] uppercase font-medium text-gray-400">Description</span>
-                  <p className="text-xs text-gray-600 mt-0.5">{rule.description}</p>
+                  <span className="text-[10px] uppercase font-medium text-muted-foreground/75">Description</span>
+                  <p className="text-xs text-muted-foreground mt-0.5">{rule.description}</p>
                 </div>
               )}
-              <button onClick={handleTest} disabled={isTesting} className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-lg text-xs font-medium">
+              <button onClick={handleTest} disabled={isTesting} className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 dark:bg-amber-500/15 hover:bg-amber-100 dark:hover:bg-amber-500/20 text-amber-700 dark:text-amber-200 rounded-lg text-xs font-medium">
                 <TestTube className="w-3.5 h-3.5" /> {isTesting ? 'Testing...' : 'Test Pattern'}
               </button>
             </div>
           )}
 
           {testResult && (
-            <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
+            <div className="bg-muted/50 rounded-lg p-3 border border-border">
               {testResult.error ? (
-                <p className="text-xs text-red-600">{testResult.error}</p>
+                <p className="text-xs text-red-600 dark:text-red-300">{testResult.error}</p>
               ) : (
                 <>
-                  <p className="text-xs font-medium text-gray-700">
-                    Matches <span className="text-blue-600 font-bold">{testResult.matchCount}</span> of {testResult.totalTickets} tickets ({testResult.percentage}%)
+                  <p className="text-xs font-medium text-foreground/85">
+                    Matches <span className="text-blue-600 dark:text-blue-300 font-bold">{testResult.matchCount}</span> of {testResult.totalTickets} tickets ({testResult.percentage}%)
                   </p>
                   <TestPatternMatches testResult={testResult} />
                 </>
@@ -375,10 +375,10 @@ export default function NoiseRulesPanel() {
     <div className="p-6 space-y-4">
       {/* Stats overview */}
       {stats && (
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-5">
+        <div className="bg-card rounded-lg shadow-sm border border-border p-5">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
-              <VolumeX className="w-5 h-5 text-amber-600" />
+            <h2 className="text-base font-semibold text-foreground flex items-center gap-2">
+              <VolumeX className="w-5 h-5 text-amber-600 dark:text-amber-300" />
               Noise Ticket Rules
             </h2>
             <div className="flex items-center gap-2">
@@ -400,21 +400,21 @@ export default function NoiseRulesPanel() {
           </div>
 
           <div className="grid grid-cols-4 gap-4">
-            <div className="bg-gray-50 rounded-lg p-3 text-center">
-              <p className="text-2xl font-bold text-gray-900">{stats.totalTickets?.toLocaleString()}</p>
-              <p className="text-[10px] uppercase font-medium text-gray-500">Total Tickets</p>
+            <div className="bg-muted/50 rounded-lg p-3 text-center">
+              <p className="text-2xl font-bold text-foreground">{stats.totalTickets?.toLocaleString()}</p>
+              <p className="text-[10px] uppercase font-medium text-muted-foreground">Total Tickets</p>
             </div>
-            <div className="bg-green-50 rounded-lg p-3 text-center">
-              <p className="text-2xl font-bold text-green-700">{stats.actionableTickets?.toLocaleString()}</p>
-              <p className="text-[10px] uppercase font-medium text-green-600">Actionable</p>
+            <div className="bg-green-50 dark:bg-green-500/15 rounded-lg p-3 text-center">
+              <p className="text-2xl font-bold text-green-700 dark:text-green-200">{stats.actionableTickets?.toLocaleString()}</p>
+              <p className="text-[10px] uppercase font-medium text-green-600 dark:text-green-300">Actionable</p>
             </div>
-            <div className="bg-amber-50 rounded-lg p-3 text-center">
-              <p className="text-2xl font-bold text-amber-700">{stats.noiseTickets?.toLocaleString()}</p>
-              <p className="text-[10px] uppercase font-medium text-amber-600">Noise</p>
+            <div className="bg-amber-50 dark:bg-amber-500/15 rounded-lg p-3 text-center">
+              <p className="text-2xl font-bold text-amber-700 dark:text-amber-200">{stats.noiseTickets?.toLocaleString()}</p>
+              <p className="text-[10px] uppercase font-medium text-amber-600 dark:text-amber-300">Noise</p>
             </div>
-            <div className="bg-blue-50 rounded-lg p-3 text-center">
-              <p className="text-2xl font-bold text-blue-700">{stats.noisePercentage}%</p>
-              <p className="text-[10px] uppercase font-medium text-blue-600">Noise Rate</p>
+            <div className="bg-blue-50 dark:bg-blue-500/15 rounded-lg p-3 text-center">
+              <p className="text-2xl font-bold text-blue-700 dark:text-blue-200">{stats.noisePercentage}%</p>
+              <p className="text-[10px] uppercase font-medium text-blue-600 dark:text-blue-300">Noise Rate</p>
             </div>
           </div>
         </div>
@@ -422,10 +422,10 @@ export default function NoiseRulesPanel() {
 
       {/* Status message */}
       {status && (
-        <div className={`flex items-center gap-2 p-3 rounded-lg text-sm ${status.success ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+        <div className={`flex items-center gap-2 p-3 rounded-lg text-sm ${status.success ? 'bg-green-50 dark:bg-green-500/15 text-green-700 dark:text-green-200' : 'bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200'}`}>
           {status.success ? <CheckCircle className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
           {status.message}
-          <button onClick={() => setStatus(null)} className="ml-auto p-0.5 hover:bg-white/50 rounded">
+          <button onClick={() => setStatus(null)} className="ml-auto p-0.5 hover:bg-card/50 rounded">
             <X className="w-3.5 h-3.5" />
           </button>
         </div>
@@ -433,54 +433,54 @@ export default function NoiseRulesPanel() {
 
       {/* Add new rule form */}
       {showAddForm && (
-        <div className="bg-white rounded-lg shadow-sm border border-blue-200 p-5 space-y-3">
-          <h3 className="text-sm font-semibold text-gray-900">Add New Noise Rule</h3>
+        <div className="bg-card rounded-lg shadow-sm border border-blue-200 dark:border-blue-500/30 p-5 space-y-3">
+          <h3 className="text-sm font-semibold text-foreground">Add New Noise Rule</h3>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Name</label>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">Name</label>
               <input
                 value={newRule.name}
                 onChange={e => setNewRule(d => ({ ...d, name: e.target.value }))}
-                className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full px-3 py-1.5 border border-input rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 placeholder="e.g., My Custom Alert"
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Category</label>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">Category</label>
               <select
                 value={newRule.category}
                 onChange={e => setNewRule(d => ({ ...d, category: e.target.value }))}
-                className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full px-3 py-1.5 border border-input rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
                 {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
               </select>
             </div>
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Regex Pattern (case-insensitive)</label>
+            <label className="block text-xs font-medium text-muted-foreground mb-1">Regex Pattern (case-insensitive)</label>
             <input
               value={newRule.pattern}
               onChange={e => setNewRule(d => ({ ...d, pattern: e.target.value }))}
-              className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="w-full px-3 py-1.5 border border-input rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               placeholder="^Alert: .+ from server"
             />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Description (optional)</label>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">Description (optional)</label>
               <input
                 value={newRule.description}
                 onChange={e => setNewRule(d => ({ ...d, description: e.target.value }))}
-                className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full px-3 py-1.5 border border-input rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Dedup Window (days, optional)</label>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">Dedup Window (days, optional)</label>
               <input
                 type="number"
                 value={newRule.dedupWindowDays}
                 onChange={e => setNewRule(d => ({ ...d, dedupWindowDays: e.target.value }))}
-                className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full px-3 py-1.5 border border-input rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 placeholder="Leave empty = always noise"
                 min="1" max="90"
               />
@@ -490,7 +490,7 @@ export default function NoiseRulesPanel() {
             <button onClick={handleCreate} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium">
               <Plus className="w-3.5 h-3.5" /> Create Rule
             </button>
-            <button onClick={() => setShowAddForm(false)} className="flex items-center gap-1.5 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-xs font-medium">
+            <button onClick={() => setShowAddForm(false)} className="flex items-center gap-1.5 px-4 py-2 bg-muted hover:bg-secondary text-foreground/85 rounded-lg text-xs font-medium">
               Cancel
             </button>
           </div>
@@ -508,8 +508,8 @@ export default function NoiseRulesPanel() {
           />
         ))}
         {rules.length === 0 && (
-          <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
-            <p className="text-sm text-gray-500">No noise rules configured.</p>
+          <div className="bg-card rounded-lg border border-border p-8 text-center">
+            <p className="text-sm text-muted-foreground">No noise rules configured.</p>
           </div>
         )}
       </div>

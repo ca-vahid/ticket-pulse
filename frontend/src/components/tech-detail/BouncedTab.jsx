@@ -8,10 +8,10 @@ import { TicketRefLink } from '../tickets/ticketUi';
 
 const PRIORITY_LABELS = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Urgent' };
 const PRIORITY_PILL = {
-  1: 'bg-slate-100 text-slate-600',
-  2: 'bg-yellow-100 text-yellow-800',
-  3: 'bg-orange-100 text-orange-800',
-  4: 'bg-red-100 text-red-800',
+  1: 'bg-muted text-muted-foreground',
+  2: 'bg-yellow-100 dark:bg-yellow-500/20 text-yellow-800 dark:text-yellow-200',
+  3: 'bg-orange-100 dark:bg-orange-500/20 text-orange-800 dark:text-orange-200',
+  4: 'bg-red-100 dark:bg-red-500/20 text-red-800 dark:text-red-200',
 };
 
 function formatWhen(d) {
@@ -102,19 +102,19 @@ function getRange({ viewMode, selectedDate, selectedWeek, selectedMonth }) {
  */
 function Owner({ name, photoUrl }) {
   if (!name) {
-    return <span className="text-amber-700 text-[11px] font-medium">Back in queue</span>;
+    return <span className="text-amber-700 dark:text-amber-200 text-[11px] font-medium">Back in queue</span>;
   }
   const initials = name.split(' ').map((n) => n[0]).filter(Boolean).slice(0, 2).join('').toUpperCase() || '?';
   return (
     <span className="inline-flex items-center gap-1.5 min-w-0">
       {photoUrl ? (
-        <img src={photoUrl} alt="" className="h-5 w-5 rounded-full object-cover ring-1 ring-slate-200 flex-shrink-0" />
+        <img src={photoUrl} alt="" className="h-5 w-5 rounded-full object-cover ring-1 ring-border flex-shrink-0" />
       ) : (
-        <span className="h-5 w-5 rounded-full bg-slate-200 text-slate-600 text-[9px] font-bold flex items-center justify-center flex-shrink-0">
+        <span className="h-5 w-5 rounded-full bg-secondary text-muted-foreground text-[9px] font-bold flex items-center justify-center flex-shrink-0">
           {initials}
         </span>
       )}
-      <span className="truncate text-[12px] text-slate-700">{name}</span>
+      <span className="truncate text-[12px] text-foreground/85">{name}</span>
     </span>
   );
 }
@@ -158,57 +158,57 @@ export default function BouncedTab({ technician, viewMode = 'daily', selectedDat
     <div className="space-y-3">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h3 className="text-base font-semibold text-slate-900 flex items-center gap-2">
+          <h3 className="text-base font-semibold text-foreground flex items-center gap-2">
             <RotateCcw className="w-4 h-4 text-red-500" />
             Bounced tickets
             {range?.label && (
-              <span className="text-[11px] font-medium text-slate-400 normal-case">
+              <span className="text-[11px] font-medium text-muted-foreground/75 normal-case">
                 · {range.label}
               </span>
             )}
           </h3>
-          <p className="text-xs text-slate-500 mt-0.5">
+          <p className="text-xs text-muted-foreground mt-0.5">
             Tickets {technician?.name || 'this technician'} picked up and then put back in the queue.
-            <span className="text-slate-400"> Use the date filter at the top of the page to change the range.</span>
+            <span className="text-muted-foreground/75"> Use the date filter at the top of the page to change the range.</span>
           </p>
         </div>
         {rows.length > 0 && (
-          <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-600 shadow-sm">
+          <span className="inline-flex items-center gap-1 rounded-full border border-border bg-muted/50 px-2.5 py-1 text-[11px] font-semibold text-muted-foreground shadow-sm">
             {rows.length} bounced
           </span>
         )}
       </div>
 
       {loading && (
-        <div className="flex items-center justify-center py-12 text-sm text-slate-500">
+        <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
           <Loader2 className="w-4 h-4 animate-spin mr-2" />
           Loading bounced tickets...
         </div>
       )}
 
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex items-start gap-2">
+        <div className="bg-red-50 dark:bg-red-500/15 border border-red-200 dark:border-red-500/30 rounded-lg p-3 flex items-start gap-2">
           <AlertTriangle className="w-4 h-4 text-red-500 mt-0.5" />
-          <p className="text-sm text-red-700">{error}</p>
+          <p className="text-sm text-red-700 dark:text-red-200">{error}</p>
         </div>
       )}
 
       {!loading && !error && rows.length === 0 && (
-        <div className="bg-slate-50 border border-slate-200 rounded-lg py-12 text-center">
-          <RotateCcw className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-          <p className="text-sm text-slate-500">No bounced tickets in this window.</p>
-          <p className="text-xs text-slate-400 mt-0.5">
+        <div className="bg-muted/50 border border-border rounded-lg py-12 text-center">
+          <RotateCcw className="w-10 h-10 text-muted-foreground/50 mx-auto mb-2" />
+          <p className="text-sm text-muted-foreground">No bounced tickets in this window.</p>
+          <p className="text-xs text-muted-foreground/75 mt-0.5">
             This tech hasn&apos;t picked up and rejected any tickets in the selected timeframe.
           </p>
         </div>
       )}
 
       {!loading && !error && rows.length > 0 && (
-        <div className="border border-slate-200 rounded-lg overflow-hidden bg-white">
+        <div className="border border-border rounded-lg overflow-hidden bg-card">
           {/* Column header — pure presentational, mirrors the row grid below.
               Hidden on narrow screens (rows still read fine without it because
               each cell is intrinsically labelled by content/icon). */}
-          <div className="hidden md:grid grid-cols-[110px_minmax(0,1fr)_72px_120px_70px_140px_minmax(0,160px)_70px] items-center gap-3 px-3 py-2 bg-slate-50 border-b border-slate-200 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+          <div className="hidden md:grid grid-cols-[110px_minmax(0,1fr)_72px_120px_70px_140px_minmax(0,160px)_70px] items-center gap-3 px-3 py-2 bg-muted/50 border-b border-border text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/75">
             <span>Ticket</span>
             <span>Title</span>
             <span>Priority</span>
@@ -219,7 +219,7 @@ export default function BouncedTab({ technician, viewMode = 'daily', selectedDat
             <span className="text-right">Actions</span>
           </div>
 
-          <div className="divide-y divide-slate-100">
+          <div className="divide-y divide-border/60">
             {rows.map((row) => {
               const ticket = row.ticket;
               const fsUrl = ticket?.freshserviceTicketId
@@ -230,23 +230,23 @@ export default function BouncedTab({ technician, viewMode = 'daily', selectedDat
               const currentHolderPhoto = ticket?.assignedTech?.photoUrl;
               const isSelfPick = row.startMethod === 'self_picked';
               const priLabel = PRIORITY_LABELS[ticket?.priority];
-              const priClass = PRIORITY_PILL[ticket?.priority] || 'bg-slate-100 text-slate-500';
+              const priClass = PRIORITY_PILL[ticket?.priority] || 'bg-muted text-muted-foreground';
               const categoryLabel = getTicketCategoryLabel(ticket);
 
               return (
                 <div
                   key={row.episodeId}
-                  className="grid grid-cols-[110px_minmax(0,1fr)_72px_120px_70px_140px_minmax(0,160px)_70px] items-center gap-3 px-3 py-2 text-[12px] hover:bg-slate-50/70 transition-colors"
+                  className="grid grid-cols-[110px_minmax(0,1fr)_72px_120px_70px_140px_minmax(0,160px)_70px] items-center gap-3 px-3 py-2 text-[12px] hover:bg-muted/35 transition-colors"
                 >
                   {/* Ticket ID + (only when relevant) self-picked tag stacked beneath */}
                   <div className="flex flex-col gap-0.5 min-w-0">
                     {ticket ? (
                       <TicketRefLink ticket={ticket} state={backState} className="text-[11px] truncate" />
                     ) : (
-                      <span className="font-mono text-[11px] text-slate-500 truncate">#?</span>
+                      <span className="font-mono text-[11px] text-muted-foreground truncate">#?</span>
                     )}
                     {isSelfPick && (
-                      <span className="inline-flex items-center w-fit px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 text-[9px] font-semibold uppercase tracking-wide">
+                      <span className="inline-flex items-center w-fit px-1.5 py-0.5 rounded bg-purple-100 dark:bg-purple-500/20 text-purple-700 dark:text-purple-200 text-[9px] font-semibold uppercase tracking-wide">
                         Self-picked
                       </span>
                     )}
@@ -254,7 +254,7 @@ export default function BouncedTab({ technician, viewMode = 'daily', selectedDat
 
                   {/* Title — dominant, truncated with native tooltip */}
                   <span
-                    className="font-medium text-slate-800 truncate"
+                    className="font-medium text-foreground truncate"
                     title={ticket?.subject || 'Unknown ticket'}
                   >
                     {ticket?.subject || 'Unknown ticket'}
@@ -267,7 +267,7 @@ export default function BouncedTab({ technician, viewMode = 'daily', selectedDat
                         {priLabel}
                       </span>
                     ) : (
-                      <span className="text-slate-300 text-[11px]">—</span>
+                      <span className="text-muted-foreground/50 text-[11px]">—</span>
                     )}
                   </span>
 
@@ -275,24 +275,24 @@ export default function BouncedTab({ technician, viewMode = 'daily', selectedDat
                   <span className="min-w-0">
                     {categoryLabel ? (
                       <span
-                        className="inline-block max-w-full truncate align-middle text-[10px] text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded"
+                        className="inline-block max-w-full truncate align-middle text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded"
                         title={categoryLabel}
                       >
                         {categoryLabel}
                       </span>
                     ) : (
-                      <span className="text-slate-300 text-[11px]">—</span>
+                      <span className="text-muted-foreground/50 text-[11px]">—</span>
                     )}
                   </span>
 
                   {/* Held — small clock icon + duration */}
-                  <span className="inline-flex items-center gap-1 text-slate-500 text-[11px]">
+                  <span className="inline-flex items-center gap-1 text-muted-foreground text-[11px]">
                     <Clock className="w-3 h-3" />
                     {held || '—'}
                   </span>
 
                   {/* Rejected timestamp — short format */}
-                  <span className="text-slate-500 text-[11px] truncate" title={row.endedAt ? new Date(row.endedAt).toLocaleString() : ''}>
+                  <span className="text-muted-foreground text-[11px] truncate" title={row.endedAt ? new Date(row.endedAt).toLocaleString() : ''}>
                     {formatWhen(row.endedAt)}
                   </span>
 
@@ -305,7 +305,7 @@ export default function BouncedTab({ technician, viewMode = 'daily', selectedDat
                       <Link
                         to={`/tickets/${ticket.id}`}
                         state={backState}
-                        className="inline-flex items-center gap-0.5 text-blue-600 hover:text-blue-800 text-[11px] font-medium"
+                        className="inline-flex items-center gap-0.5 text-blue-600 dark:text-blue-300 hover:text-blue-800 dark:hover:text-blue-200 text-[11px] font-medium"
                         onClick={(e) => e.stopPropagation()}
                       >
                         Open
@@ -315,7 +315,7 @@ export default function BouncedTab({ technician, viewMode = 'daily', selectedDat
                         href={fsUrl}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="inline-flex items-center gap-0.5 text-blue-600 hover:text-blue-800 text-[11px] font-medium"
+                        className="inline-flex items-center gap-0.5 text-blue-600 dark:text-blue-300 hover:text-blue-800 dark:hover:text-blue-200 text-[11px] font-medium"
                         onClick={(e) => e.stopPropagation()}
                       >
                         Open <ExternalLink className="w-3 h-3" />

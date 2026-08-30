@@ -69,20 +69,20 @@ export function mergeSatisfaction(csatTickets = [], feedbackTickets = []) {
 
 function SourceChip({ source }) {
   return source === 'ticketpulse' ? (
-    <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700">
+    <span className="inline-flex items-center rounded-full border border-sky-200 dark:border-sky-500/30 bg-sky-50 dark:bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700 dark:text-sky-200">
       Ticket Pulse
     </span>
   ) : (
-    <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">
+    <span className="inline-flex items-center rounded-full border border-border bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
       FreshService
     </span>
   );
 }
 
 function scoreTone(score5) {
-  if (score5 >= 4) return 'text-emerald-600';
-  if (score5 >= 3) return 'text-amber-600';
-  return 'text-rose-600';
+  if (score5 >= 4) return 'text-emerald-600 dark:text-emerald-300';
+  if (score5 >= 3) return 'text-amber-600 dark:text-amber-300';
+  return 'text-rose-600 dark:text-rose-300';
 }
 
 const INITIAL_VISIBLE = 6;
@@ -110,20 +110,20 @@ const SatisfactionPanel = forwardRef(function SatisfactionPanel(
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-slate-400">
+          <h3 className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/75">
             <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" aria-hidden="true" />
             Satisfaction — one view
           </h3>
           {isLoading ? (
-            <div className="mt-2 text-sm text-slate-400">Loading responses…</div>
+            <div className="mt-2 text-sm text-muted-foreground/75">Loading responses…</div>
           ) : merged.count === 0 ? (
-            <div className="mt-2 text-sm text-slate-400">No satisfaction responses yet for this agent.</div>
+            <div className="mt-2 text-sm text-muted-foreground/75">No satisfaction responses yet for this agent.</div>
           ) : (
             <div className="mt-1 flex items-baseline gap-2">
               <span className={`text-3xl font-extrabold tabular-nums ${scoreTone(merged.average)}`}>
                 {merged.average.toFixed(1)}
               </span>
-              <span className="text-sm text-slate-400">/ 5 · {merged.count} response{merged.count === 1 ? '' : 's'}</span>
+              <span className="text-sm text-muted-foreground/75">/ 5 · {merged.count} response{merged.count === 1 ? '' : 's'}</span>
             </div>
           )}
         </div>
@@ -133,13 +133,13 @@ const SatisfactionPanel = forwardRef(function SatisfactionPanel(
             {merged.fsCount > 0 && (
               <div className="flex items-center justify-between gap-3">
                 <SourceChip source="freshservice" />
-                <span className="tabular-nums text-slate-600">{merged.fsCount} · avg {merged.fsAverage.toFixed(1)}/5</span>
+                <span className="tabular-nums text-muted-foreground">{merged.fsCount} · avg {merged.fsAverage.toFixed(1)}/5</span>
               </div>
             )}
             {merged.tpCount > 0 && (
               <div className="flex items-center justify-between gap-3">
                 <SourceChip source="ticketpulse" />
-                <span className="tabular-nums text-slate-600">{merged.tpCount} · avg {merged.tpAverage.toFixed(1)}/5</span>
+                <span className="tabular-nums text-muted-foreground">{merged.tpCount} · avg {merged.tpAverage.toFixed(1)}/5</span>
               </div>
             )}
           </div>
@@ -147,25 +147,25 @@ const SatisfactionPanel = forwardRef(function SatisfactionPanel(
       </div>
 
       {merged.count > 0 && (
-        <div className="mt-3 divide-y divide-slate-100 border-t border-slate-100">
+        <div className="mt-3 divide-y divide-border/60 border-t border-border/60">
           {visible.map((r) => (
             <div key={r.key} className="flex flex-wrap items-start gap-x-3 gap-y-1 py-2.5">
               <span className={`w-12 flex-shrink-0 text-sm font-bold tabular-nums ${scoreTone(r.score5)}`} title={`Original rating: ${r.rawLabel}`}>
-                {Number.isInteger(r.score5) ? r.score5 : r.score5.toFixed(1)}<span className="text-[10px] font-medium text-slate-400">/5</span>
+                {Number.isInteger(r.score5) ? r.score5 : r.score5.toFixed(1)}<span className="text-[10px] font-medium text-muted-foreground/75">/5</span>
               </span>
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-1.5">
                   <TicketRefLink ticket={r.ticket} state={backState} className="text-[11px]" />
-                  <span className="min-w-0 truncate text-[12px] font-medium text-slate-700" title={r.ticket.subject}>
+                  <span className="min-w-0 truncate text-[12px] font-medium text-foreground/85" title={r.ticket.subject}>
                     {r.ticket.subject || ''}
                   </span>
                 </div>
                 {r.comment && (
-                  <p className="mt-1 rounded-lg bg-slate-50 px-2.5 py-1.5 text-[12px] italic text-slate-600">
+                  <p className="mt-1 rounded-lg bg-muted/50 px-2.5 py-1.5 text-[12px] italic text-muted-foreground">
                     “{r.comment}”
                   </p>
                 )}
-                <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-slate-400">
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground/75">
                   {r.requesterName && (
                     <span className="inline-flex items-center gap-1">
                       <PersonAvatar name={r.requesterName} size="h-4 w-4" textSize="text-[8px]" />
@@ -183,7 +183,7 @@ const SatisfactionPanel = forwardRef(function SatisfactionPanel(
               <button
                 type="button"
                 onClick={() => setShowAll((v) => !v)}
-                className="tp-focus-ring rounded px-2 py-1 text-xs font-semibold text-blue-600 hover:text-blue-800"
+                className="tp-focus-ring rounded px-2 py-1 text-xs font-semibold text-blue-600 dark:text-blue-300 hover:text-blue-800 dark:hover:text-blue-200"
               >
                 {showAll ? 'Show fewer' : `Show all ${merged.responses.length} responses`}
               </button>

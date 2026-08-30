@@ -148,38 +148,38 @@ export default function NotificationSettingsPanel({ workspaceId }) {
 
   if (loading) {
     return (
-      <div className="flex min-h-[35vh] items-center justify-center rounded-lg border border-slate-200 bg-white">
-        <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
+      <div className="flex min-h-[35vh] items-center justify-center rounded-lg border border-border bg-card">
+        <Loader2 className="h-5 w-5 animate-spin text-blue-600 dark:text-blue-300" />
       </div>
     );
   }
 
   return (
-    <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
-      <div className="border-b border-slate-200 px-4 py-3">
+    <section className="rounded-lg border border-border bg-card shadow-sm">
+      <div className="border-b border-border px-4 py-3">
         <div className="flex items-center gap-2">
-          <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-blue-50 text-blue-600"><Bell className="h-4 w-4" /></span>
+          <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-300"><Bell className="h-4 w-4" /></span>
           <div className="min-w-0">
-            <h2 className="text-sm font-bold text-slate-900">How you&rsquo;re notified</h2>
-            <p className="text-xs text-slate-500">Delivery channels for priority tickets &amp; your alerts.</p>
+            <h2 className="text-sm font-bold text-foreground">How you&rsquo;re notified</h2>
+            <p className="text-xs text-muted-foreground">Delivery channels for priority tickets &amp; your alerts.</p>
           </div>
-          {message && <span className="ml-auto rounded bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">{message}</span>}
+          {message && <span className="ml-auto rounded bg-emerald-50 dark:bg-emerald-500/15 px-2 py-0.5 text-xs font-semibold text-emerald-700 dark:text-emerald-200">{message}</span>}
         </div>
-        {error && <p className="mt-2 text-sm font-medium text-red-600">{error}</p>}
+        {error && <p className="mt-2 text-sm font-medium text-red-600 dark:text-red-300">{error}</p>}
       </div>
 
       <div className="grid gap-5 p-4 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="space-y-5">
           <div>
-            <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Priority threshold</label>
-            <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1">
+            <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">Priority threshold</label>
+            <div className="inline-flex rounded-lg border border-border bg-muted/50 p-1">
               {THRESHOLDS.map((threshold) => (
                 <button
                   key={threshold.value}
                   type="button"
                   onClick={() => setForm((prev) => ({ ...prev, threshold: threshold.value }))}
                   className={`rounded-md px-3 py-1.5 text-sm font-semibold transition ${
-                    form.threshold === threshold.value ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                    form.threshold === threshold.value ? 'bg-card text-blue-700 dark:text-blue-200 shadow-sm' : 'text-muted-foreground hover:text-foreground'
                   }`}
                 >
                   {threshold.label}
@@ -189,7 +189,7 @@ export default function NotificationSettingsPanel({ workspaceId }) {
           </div>
 
           <div>
-            <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Channels</label>
+            <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">Channels</label>
             <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
               {[
                 { id: 'email', icon: Mail },
@@ -203,11 +203,11 @@ export default function NotificationSettingsPanel({ workspaceId }) {
                   <label
                     key={id}
                     className={`flex min-h-[86px] cursor-pointer flex-col gap-2 rounded-lg border p-3 transition ${
-                      form.channels[id] ? 'border-blue-300 bg-blue-50' : 'border-slate-200 bg-white hover:bg-slate-50'
+                      form.channels[id] ? 'border-blue-300 dark:border-blue-500/40 bg-blue-50 dark:bg-blue-500/15' : 'border-border bg-card hover:bg-muted/50'
                     } ${disabled ? 'cursor-not-allowed opacity-60' : ''}`}
                   >
                     <span className="flex items-center justify-between gap-2">
-                      <span className="inline-flex items-center gap-2 text-sm font-semibold text-slate-800">
+                      <span className="inline-flex items-center gap-2 text-sm font-semibold text-foreground">
                         <Icon className="h-4 w-4" />
                         {channelLabel(id)}
                       </span>
@@ -216,10 +216,10 @@ export default function NotificationSettingsPanel({ workspaceId }) {
                         checked={!!form.channels[id]}
                         disabled={disabled}
                         onChange={(event) => setChannel(id, event.target.checked)}
-                        className="h-4 w-4 rounded border-slate-300 text-blue-600"
+                        className="h-4 w-4 rounded border-input text-blue-600 dark:text-blue-300"
                       />
                     </span>
-                    <span className="text-xs text-slate-500">
+                    <span className="text-xs text-muted-foreground">
                       {providerNote(data?.preferences?.providerStatus, id)}
                       {providerReady && PHONE_CHANNELS.has(id) && !canEnablePhoneChannels ? ' · verify phone first' : null}
                     </span>
@@ -230,17 +230,17 @@ export default function NotificationSettingsPanel({ workspaceId }) {
           </div>
         </div>
 
-        <aside className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+        <aside className="space-y-3 rounded-lg border border-border bg-muted/50 p-3">
           <div className="flex items-center justify-between gap-2">
-            <div className="text-sm font-semibold text-slate-900">Phone</div>
+            <div className="text-sm font-semibold text-foreground">Phone</div>
             <span className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-semibold ${
-              phoneVerified ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+              phoneVerified ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-200' : 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-200'
             }`}>
               {phoneVerified ? <CheckCircle2 className="h-3.5 w-3.5" /> : <ShieldCheck className="h-3.5 w-3.5" />}
               {phoneVerified ? 'Verified' : 'Unverified'}
             </span>
           </div>
-          <div className="text-xs text-slate-500">
+          <div className="text-xs text-muted-foreground">
             Entra: {data?.preferences?.entraMobilePhone || data?.preferences?.entraPhone || 'None'}
           </div>
           <input
@@ -248,22 +248,22 @@ export default function NotificationSettingsPanel({ workspaceId }) {
             value={form.phoneOverride}
             onChange={(event) => setForm((prev) => ({ ...prev, phoneOverride: event.target.value }))}
             placeholder="Override phone"
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400"
+            className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm outline-none focus:border-blue-400"
           />
-          <div className="text-xs text-slate-500">Effective: {effectivePhone || 'None'}</div>
+          <div className="text-xs text-muted-foreground">Effective: {effectivePhone || 'None'}</div>
           <div className="flex gap-2">
             <button
               type="button"
               onClick={requestVerification}
               disabled={verifying || !effectivePhone}
-              className="inline-flex h-9 flex-1 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex h-9 flex-1 items-center justify-center gap-2 rounded-lg border border-border bg-card px-3 text-sm font-semibold text-foreground/85 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
             >
               {verifying ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
               Send code
             </button>
           </div>
           {devCode && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+            <div className="rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-3 py-2 text-xs font-medium text-amber-800 dark:text-amber-200">
               Dev code: {devCode}
             </div>
           )}
@@ -273,13 +273,13 @@ export default function NotificationSettingsPanel({ workspaceId }) {
                 value={verificationCode}
                 onChange={(event) => setVerificationCode(event.target.value)}
                 placeholder="Code"
-                className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400"
+                className="min-w-0 flex-1 rounded-lg border border-border bg-card px-3 py-2 text-sm outline-none focus:border-blue-400"
               />
               <button
                 type="button"
                 onClick={confirmVerification}
                 disabled={verifying || verificationCode.trim().length < 4}
-                className="inline-flex h-9 items-center justify-center rounded-lg bg-slate-900 px-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex h-9 items-center justify-center rounded-lg bg-slate-900 px-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-slate-700 dark:hover:bg-slate-600"
               >
                 Confirm
               </button>
@@ -288,7 +288,7 @@ export default function NotificationSettingsPanel({ workspaceId }) {
         </aside>
       </div>
 
-      <div className="flex justify-end border-t border-slate-200 px-4 py-3">
+      <div className="flex justify-end border-t border-border px-4 py-3">
         <button
           type="button"
           onClick={save}

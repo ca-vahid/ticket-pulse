@@ -138,12 +138,12 @@ export default function GroupsPanel() {
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="p-2 bg-blue-100 rounded-lg">
-            <Users2 className="w-5 h-5 text-blue-600" />
+          <div className="p-2 bg-blue-100 dark:bg-blue-500/20 rounded-lg">
+            <Users2 className="w-5 h-5 text-blue-600 dark:text-blue-300" />
           </div>
           <div>
-            <h3 className="text-lg font-semibold text-gray-900">Groups</h3>
-            <p className="text-sm text-gray-500 max-w-2xl">
+            <h3 className="text-lg font-semibold text-foreground">Groups</h3>
+            <p className="text-sm text-muted-foreground max-w-2xl">
               FreshService groups sync automatically. <strong>Internal groups</strong> are Ticket Pulse–owned
               routing groups with their own membership — use them to route mailboxes and Ticket Pulse tickets
               without a FreshService group.
@@ -161,25 +161,25 @@ export default function GroupsPanel() {
       </div>
 
       {error && (
-        <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+        <div className="flex items-start gap-2 p-3 bg-red-50 dark:bg-red-500/15 border border-red-200 dark:border-red-500/30 rounded-lg text-sm text-red-700 dark:text-red-200">
           <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" /><span>{error}</span>
         </div>
       )}
       {successMsg && (
-        <div className="flex items-start gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-700">
+        <div className="flex items-start gap-2 p-3 bg-emerald-50 dark:bg-emerald-500/15 border border-emerald-200 dark:border-emerald-500/30 rounded-lg text-sm text-emerald-700 dark:text-emerald-200">
           <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" /><span>{successMsg}</span>
         </div>
       )}
 
       {showAdd && (
         <div className="tp-card p-4 space-y-4 animate-scaleIn">
-          <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
-            <Home className="w-4 h-4 text-blue-600" /> New internal group
-            {currentWorkspace?.name && <span className="text-xs font-normal text-gray-500">in {currentWorkspace.name}</span>}
+          <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+            <Home className="w-4 h-4 text-blue-600 dark:text-blue-300" /> New internal group
+            {currentWorkspace?.name && <span className="text-xs font-normal text-muted-foreground">in {currentWorkspace.name}</span>}
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <label className="block">
-              <span className="text-xs font-medium text-gray-600">Name *</span>
+              <span className="text-xs font-medium text-muted-foreground">Name *</span>
               <input
                 autoFocus value={form.name}
                 onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
@@ -188,7 +188,7 @@ export default function GroupsPanel() {
               />
             </label>
             <label className="block">
-              <span className="text-xs font-medium text-gray-600">Description</span>
+              <span className="text-xs font-medium text-muted-foreground">Description</span>
               <input
                 value={form.description}
                 onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
@@ -203,30 +203,30 @@ export default function GroupsPanel() {
               {saving ? <Loader className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />} Create group
             </button>
             <button onClick={() => { setShowAdd(false); setError(null); }}
-              className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900 tp-focus-ring rounded-lg">Cancel</button>
+              className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground tp-focus-ring rounded-lg">Cancel</button>
           </div>
         </div>
       )}
 
       {loading ? (
-        <div className="flex items-center justify-center py-12 text-gray-400">
+        <div className="flex items-center justify-center py-12 text-muted-foreground/75">
           <Loader className="w-5 h-5 animate-spin mr-2" /> Loading groups…
         </div>
       ) : (
         <>
           <section className="space-y-2">
-            <div className="flex items-center gap-2 text-sm font-semibold text-gray-700">
-              <Home className="w-4 h-4 text-blue-600" /> Internal groups
-              <span className="text-xs font-normal text-gray-400">({internal.length})</span>
+            <div className="flex items-center gap-2 text-sm font-semibold text-foreground/85">
+              <Home className="w-4 h-4 text-blue-600 dark:text-blue-300" /> Internal groups
+              <span className="text-xs font-normal text-muted-foreground/75">({internal.length})</span>
             </div>
             {internal.length > 0 && !internal.some((g) => g.isDefault) && (
-              <p className="text-xs text-gray-400 px-1" data-testid="no-default-group-hint">
+              <p className="text-xs text-muted-foreground/75 px-1" data-testid="no-default-group-hint">
                 No default group — tickets created without a group stay ungrouped. Star a group to make
                 it the default for new tickets.
               </p>
             )}
             {internal.length === 0 ? (
-              <p className="text-sm text-gray-400 italic px-1 py-2">
+              <p className="text-sm text-muted-foreground/75 italic px-1 py-2">
                 No internal groups yet. Create one to route mailboxes and Ticket Pulse tickets without a FreshService group.
               </p>
             ) : (
@@ -248,37 +248,37 @@ export default function GroupsPanel() {
                       toggling={togglingId === g.id}
                     />
                     {membersFor === g.id && (
-                      <div className="mt-1 tp-card p-3 border-blue-200 ring-1 ring-blue-100 space-y-2">
+                      <div className="mt-1 tp-card p-3 border-blue-200 dark:border-blue-500/30 ring-1 ring-blue-100 dark:ring-blue-500/30 space-y-2">
                         <div className="flex items-center justify-between">
-                          <span className="text-sm font-semibold text-gray-800">Members ({memberIds.size})</span>
+                          <span className="text-sm font-semibold text-foreground">Members ({memberIds.size})</span>
                           <div className="flex items-center gap-2">
                             <button onClick={() => saveMembers(g.id)} disabled={savingMembers}
                               className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground rounded-lg text-xs font-medium hover:bg-primary/90 disabled:opacity-60 tp-focus-ring">
                               {savingMembers ? <Loader className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} Save
                             </button>
                             <button onClick={() => setMembersFor(null)}
-                              className="px-3 py-1.5 text-xs text-gray-600 hover:text-gray-900 tp-focus-ring rounded-lg">Close</button>
+                              className="px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground tp-focus-ring rounded-lg">Close</button>
                           </div>
                         </div>
                         <div className="relative">
-                          <Search className="w-3.5 h-3.5 text-slate-300 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                          <Search className="w-3.5 h-3.5 text-muted-foreground/50 absolute left-2.5 top-1/2 -translate-y-1/2" />
                           <input value={memberQuery} onChange={(e) => setMemberQuery(e.target.value)}
                             placeholder="Find member…"
-                            className="w-full pl-8 pr-2 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg placeholder:text-slate-400 tp-focus-ring" />
+                            className="w-full pl-8 pr-2 py-1.5 text-xs bg-muted/50 border border-border rounded-lg placeholder:text-muted-foreground/75 tp-focus-ring" />
                         </div>
                         <div className="max-h-56 overflow-y-auto settings-scrollbar space-y-1">
                           {filteredTechs.map((t) => (
                             <label key={t.id}
-                              className={`flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer hover:bg-slate-50 ${memberIds.has(t.id) ? 'bg-blue-50/70' : ''}`}>
+                              className={`flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer hover:bg-muted/50 ${memberIds.has(t.id) ? 'bg-blue-50/70 dark:bg-blue-500/10' : ''}`}>
                               <input type="checkbox" checked={memberIds.has(t.id)} onChange={() => toggleMember(t.id)}
-                                className="rounded border-slate-300 text-primary focus:ring-primary" />
-                              <span className="text-sm text-slate-700">{t.name}</span>
+                                className="rounded border-input text-primary focus:ring-primary" />
+                              <span className="text-sm text-foreground/85">{t.name}</span>
                               {t.origin === 'local' && (
-                                <span className="text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-blue-100 text-blue-600">Local</span>
+                                <span className="text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-500/20 text-blue-600 dark:text-blue-300">Local</span>
                               )}
                             </label>
                           ))}
-                          {filteredTechs.length === 0 && <p className="px-2 py-2 text-xs text-slate-400">No member matches “{memberQuery}”.</p>}
+                          {filteredTechs.length === 0 && <p className="px-2 py-2 text-xs text-muted-foreground/75">No member matches “{memberQuery}”.</p>}
                         </div>
                       </div>
                     )}
@@ -289,10 +289,10 @@ export default function GroupsPanel() {
           </section>
 
           <section className="space-y-2">
-            <div className="flex items-center gap-2 text-sm font-semibold text-gray-700">
-              <Cloud className="w-4 h-4 text-slate-500" /> FreshService groups
-              <span className="text-xs font-normal text-gray-400">({fs.length})</span>
-              <span className="text-xs font-normal text-gray-400">· synced, read-only</span>
+            <div className="flex items-center gap-2 text-sm font-semibold text-foreground/85">
+              <Cloud className="w-4 h-4 text-muted-foreground" /> FreshService groups
+              <span className="text-xs font-normal text-muted-foreground/75">({fs.length})</span>
+              <span className="text-xs font-normal text-muted-foreground/75">· synced, read-only</span>
             </div>
             <div className="space-y-2">
               {fs.map((g) => <GroupRow key={g.id} g={g} readOnly />)}
@@ -307,13 +307,13 @@ export default function GroupsPanel() {
 function OriginBadge({ origin }) {
   if (origin === 'local') {
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-blue-100 text-blue-700 border border-blue-200">
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200 border border-blue-200 dark:border-blue-500/30">
         <Home className="w-3 h-3" /> Internal
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-muted text-muted-foreground border border-border">
       <Cloud className="w-3 h-3" /> FreshService
     </span>
   );
@@ -325,7 +325,7 @@ function GroupRow({
 }) {
   if (editing) {
     return (
-      <div className="tp-card p-3 border-blue-200 ring-1 ring-blue-100">
+      <div className="tp-card p-3 border-blue-200 dark:border-blue-500/30 ring-1 ring-blue-100 dark:ring-blue-500/30">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <input value={editForm.name} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
             placeholder="Name" className="px-3 py-2 border border-input rounded-lg text-sm tp-focus-ring" />
@@ -338,7 +338,7 @@ function GroupRow({
             {saving ? <Loader className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} Save
           </button>
           <button onClick={onCancelEdit}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-600 hover:text-gray-900 tp-focus-ring rounded-lg">
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground tp-focus-ring rounded-lg">
             <X className="w-3.5 h-3.5" /> Cancel
           </button>
         </div>
@@ -348,24 +348,24 @@ function GroupRow({
 
   return (
     <div className={`tp-card p-3 flex items-center gap-3 ${!g.isActive ? 'opacity-60' : ''}`}>
-      <div className="w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center shrink-0">
-        <UsersRound className="w-4 h-4 text-slate-500" />
+      <div className="w-9 h-9 rounded-lg bg-muted flex items-center justify-center shrink-0">
+        <UsersRound className="w-4 h-4 text-muted-foreground" />
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-gray-900 truncate">{g.name}</span>
+          <span className="text-sm font-medium text-foreground truncate">{g.name}</span>
           <OriginBadge origin={g.origin} />
           {g.isDefault && (
             <span
-              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200"
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[11px] font-medium bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200 border border-amber-200 dark:border-amber-500/30"
               title="New tickets created without a group land here"
             >
               <Star className="w-3 h-3 fill-amber-400 text-amber-400" /> Default for new tickets
             </span>
           )}
-          {!g.isActive && <span className="text-[11px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">Inactive</span>}
+          {!g.isActive && <span className="text-[11px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">Inactive</span>}
         </div>
-        <div className="flex items-center gap-3 text-xs text-gray-500 mt-0.5">
+        <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5">
           <span className="inline-flex items-center gap-1"><UsersRound className="w-3 h-3" />{g.memberCount} member{g.memberCount === 1 ? '' : 's'}</span>
           {g.description && <span className="truncate">· {g.description}</span>}
         </div>
@@ -378,20 +378,20 @@ function GroupRow({
               title={g.isDefault ? 'Clear the default group for new tickets' : 'Make this the default group for new tickets'}
               aria-label={g.isDefault ? `Clear ${g.name} as default group` : `Make ${g.name} the default group for new tickets`}
               aria-pressed={g.isDefault === true}
-              className={`p-2 rounded-lg tp-focus-ring ${g.isDefault ? 'text-amber-500 hover:text-amber-600' : 'text-gray-300 hover:text-amber-500'}`}
+              className={`p-2 rounded-lg tp-focus-ring ${g.isDefault ? 'text-amber-500 hover:text-amber-600 dark:hover:text-amber-300' : 'text-muted-foreground/50 hover:text-amber-500'}`}
             >
               <Star className={`w-4 h-4 ${g.isDefault ? 'fill-amber-400' : ''}`} />
             </button>
           )}
           <button onClick={onManageMembers} title="Manage members"
-            className={`px-2.5 py-1.5 rounded-lg text-xs font-medium tp-focus-ring ${membersOpen ? 'bg-blue-100 text-blue-700' : 'text-blue-600 hover:bg-blue-50'}`}>
+            className={`px-2.5 py-1.5 rounded-lg text-xs font-medium tp-focus-ring ${membersOpen ? 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200' : 'text-blue-600 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-500/15'}`}>
             Members
           </button>
-          <button onClick={onStartEdit} title="Edit" className="p-2 text-gray-400 hover:text-blue-600 rounded-lg tp-focus-ring">
+          <button onClick={onStartEdit} title="Edit" className="p-2 text-muted-foreground/75 hover:text-blue-600 dark:hover:text-blue-300 rounded-lg tp-focus-ring">
             <Pencil className="w-4 h-4" />
           </button>
           <button onClick={onToggle} disabled={toggling} title={g.isActive ? 'Deactivate' : 'Reactivate'}
-            className={`p-2 rounded-lg tp-focus-ring ${g.isActive ? 'text-gray-400 hover:text-red-600' : 'text-gray-400 hover:text-emerald-600'}`}>
+            className={`p-2 rounded-lg tp-focus-ring ${g.isActive ? 'text-muted-foreground/75 hover:text-red-600 dark:hover:text-red-300' : 'text-muted-foreground/75 hover:text-emerald-600 dark:hover:text-emerald-300'}`}>
             {toggling ? <Loader className="w-4 h-4 animate-spin" /> : g.isActive ? <PowerOff className="w-4 h-4" /> : <Power className="w-4 h-4" />}
           </button>
         </div>

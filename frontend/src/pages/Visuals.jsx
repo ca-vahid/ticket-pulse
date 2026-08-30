@@ -10,6 +10,8 @@ import {
 import MobileTabBar from '../components/nav/MobileTabBar';
 import SideRail from '../components/nav/SideRail';
 import 'leaflet/dist/leaflet.css';
+import { useTheme } from '../contexts/ThemeContext';
+import { tileLayerFor } from '../utils/mapTiles';
 
 // Office table + resolver live in utils/officeLocations.js (mirrored on the
 // backend so PATCH /visuals/agents/:id/location can say whether a value
@@ -52,7 +54,7 @@ const createAgentIcon = (agent, isManager, scale = 1.0) => {
         border-radius: 50%;
         border: ${borderWidth}px solid ${borderColor};
         overflow: hidden;
-        background: white;
+        background: hsl(var(--card));
         box-shadow: 0 2px 8px rgba(0,0,0,0.3);
         position: relative;
       ">
@@ -124,6 +126,9 @@ function FitBounds({ bounds }) {
 }
 
 export default function Visuals() {
+  // Dark mode (DM9): swap the daylight OSM raster for CARTO dark_matter.
+  const { resolvedTheme } = useTheme();
+  const tiles = tileLayerFor(resolvedTheme);
   const navigate = useNavigate();
   const [agents, setAgents] = useState([]);
   const [selectedAgents, setSelectedAgents] = useState(new Set());
@@ -415,27 +420,27 @@ export default function Visuals() {
           font-weight: bold !important;
         }
       `}</style>
-      <div className="min-h-screen bg-gray-100 flex flex-col pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0 md:pl-[58px]">
+      <div className="min-h-screen bg-muted flex flex-col pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0 md:pl-[58px]">
         {/* Header */}
-        <header className="bg-white shadow-sm border-b border-gray-200">
+        <header className="bg-card shadow-sm border-b border-border">
           <div className="max-w-7xl mx-auto px-3 py-3 sm:px-4">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div className="flex min-w-0 items-center gap-3">
                 <button
                   onClick={() => navigate('/dashboard')}
-                  className="min-h-[40px] min-w-[40px] p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                  className="min-h-[40px] min-w-[40px] p-2 hover:bg-muted rounded-lg transition-colors"
                   title="Back to Dashboard"
                 >
                   <ArrowLeft className="w-5 h-5" />
                 </button>
-                <h1 className="min-w-0 truncate text-lg font-bold text-gray-800 sm:text-2xl">Agent Maps</h1>
+                <h1 className="min-w-0 truncate text-lg font-bold text-foreground sm:text-2xl">Agent Maps</h1>
               </div>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:flex lg:items-center lg:gap-4">
                 {/* Radius Scale Slider */}
-                <div className="flex min-w-0 items-center gap-2 bg-gray-50 px-3 py-2 lg:py-1.5 rounded-lg border border-gray-200">
-                  <Maximize className="w-4 h-4 text-gray-500" />
+                <div className="flex min-w-0 items-center gap-2 bg-muted/50 px-3 py-2 lg:py-1.5 rounded-lg border border-border">
+                  <Maximize className="w-4 h-4 text-muted-foreground" />
                   <div className="flex min-w-0 flex-1 flex-col lg:w-32 lg:flex-none">
-                    <label className="text-[10px] text-gray-500 font-medium leading-none mb-1">Spread Radius</label>
+                    <label className="text-[10px] text-muted-foreground font-medium leading-none mb-1">Spread Radius</label>
                     <input
                       type="range"
                       min="0.1"
@@ -443,20 +448,20 @@ export default function Visuals() {
                       step="0.1"
                       value={radiusScale}
                       onChange={(e) => setRadiusScale(parseFloat(e.target.value))}
-                      className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                      className="w-full h-1.5 bg-secondary rounded-lg appearance-none cursor-pointer accent-blue-600"
                       title={`Radius Scale: ${radiusScale}x`}
                     />
                   </div>
-                  <span className="text-xs text-gray-600 font-medium w-8 text-right">{radiusScale.toFixed(1)}x</span>
+                  <span className="text-xs text-muted-foreground font-medium w-8 text-right">{radiusScale.toFixed(1)}x</span>
                 </div>
 
                 {/* Bubble Size Slider */}
-                <div className="flex min-w-0 items-center gap-2 bg-gray-50 px-3 py-2 lg:py-1.5 rounded-lg border border-gray-200">
-                  <div className="w-4 h-4 flex items-center justify-center text-gray-500">
+                <div className="flex min-w-0 items-center gap-2 bg-muted/50 px-3 py-2 lg:py-1.5 rounded-lg border border-border">
+                  <div className="w-4 h-4 flex items-center justify-center text-muted-foreground">
                     <div className="w-3 h-3 rounded-full border-2 border-current"></div>
                   </div>
                   <div className="flex min-w-0 flex-1 flex-col lg:w-32 lg:flex-none">
-                    <label className="text-[10px] text-gray-500 font-medium leading-none mb-1">Bubble Size</label>
+                    <label className="text-[10px] text-muted-foreground font-medium leading-none mb-1">Bubble Size</label>
                     <input
                       type="range"
                       min="0.5"
@@ -464,14 +469,14 @@ export default function Visuals() {
                       step="0.1"
                       value={bubbleScale}
                       onChange={(e) => setBubbleScale(parseFloat(e.target.value))}
-                      className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                      className="w-full h-1.5 bg-secondary rounded-lg appearance-none cursor-pointer accent-blue-600"
                       title={`Bubble Scale: ${bubbleScale}x`}
                     />
                   </div>
-                  <span className="text-xs text-gray-600 font-medium w-8 text-right">{bubbleScale.toFixed(1)}x</span>
+                  <span className="text-xs text-muted-foreground font-medium w-8 text-right">{bubbleScale.toFixed(1)}x</span>
                 </div>
 
-                <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 sm:col-span-2 lg:border-0 lg:bg-transparent lg:px-0 lg:py-0">
+                <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm text-muted-foreground sm:col-span-2 lg:border-0 lg:bg-transparent lg:px-0 lg:py-0">
                   <Users className="w-4 h-4" />
                   <span>{selectedAgents.size} of {agents.length} agents selected</span>
                 </div>
@@ -483,21 +488,21 @@ export default function Visuals() {
         {/* Main Content */}
         <div className="flex-1 flex flex-col overflow-hidden lg:flex-row">
           {/* Sidebar - Agent List */}
-          <div className={`bg-white border-b border-gray-200 overflow-y-auto transition-all duration-300 lg:border-b-0 lg:border-r ${
+          <div className={`bg-card border-b border-border overflow-y-auto transition-all duration-300 lg:border-b-0 lg:border-r ${
             sidebarCollapsed ? 'max-h-24 lg:max-h-none lg:w-20' : 'max-h-[42vh] lg:max-h-none lg:w-80'
           }`}>
             <div className={`p-3 sm:p-4 ${sidebarCollapsed ? 'lg:px-2' : ''}`}>
               {/* Header with Collapse Toggle */}
               <div className="flex items-center justify-between mb-4">
                 {!sidebarCollapsed && (
-                  <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
+                  <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
                     <Users className="w-5 h-5" />
                   Agents
                   </h2>
                 )}
                 <button
                   onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                  className="p-2 hover:bg-muted rounded-lg transition-colors"
                   title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
                 >
                   {sidebarCollapsed ? (
@@ -510,13 +515,13 @@ export default function Visuals() {
 
               {loading && (
                 <div className="flex items-center justify-center py-8">
-                  <Loader className="w-6 h-6 animate-spin text-blue-600" />
+                  <Loader className="w-6 h-6 animate-spin text-blue-600 dark:text-blue-300" />
                 </div>
               )}
 
               {error && (
-                <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
-                  <p className="text-sm text-red-800">{error}</p>
+                <div className="bg-red-50 dark:bg-red-500/15 border border-red-200 dark:border-red-500/30 rounded-lg p-3 mb-4">
+                  <p className="text-sm text-red-800 dark:text-red-200">{error}</p>
                 </div>
               )}
 
@@ -524,7 +529,7 @@ export default function Visuals() {
                 <>
                   {/* Select/Deselect All */}
                   {!sidebarCollapsed && (
-                    <div className="mb-4 pb-4 border-b border-gray-200">
+                    <div className="mb-4 pb-4 border-b border-border">
                       <button
                         onClick={() => {
                           let newSelected;
@@ -543,7 +548,7 @@ export default function Visuals() {
                           // Save to database
                           saveSelections(newSelected, newManagerId);
                         }}
-                        className="w-full px-3 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                        className="w-full px-3 py-2 text-sm font-medium text-blue-600 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-500/15 rounded-lg transition-colors"
                       >
                         {selectedAgents.size === agents.length ? 'Deselect All' : 'Select All'}
                       </button>
@@ -557,33 +562,33 @@ export default function Visuals() {
                   {!sidebarCollapsed && unplacedAgents.length > 0 && (
                     <section
                       aria-label={`Location not set / unrecognized (${unplacedAgents.length})`}
-                      className="mb-4 rounded-lg border border-amber-200 bg-amber-50/70 p-2.5"
+                      className="mb-4 rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50/70 dark:bg-amber-500/10 p-2.5"
                     >
-                      <h3 className="flex items-center gap-1.5 text-xs font-semibold text-amber-900">
-                        <MapPinOff className="h-3.5 w-3.5 shrink-0 text-amber-600" aria-hidden="true" />
+                      <h3 className="flex items-center gap-1.5 text-xs font-semibold text-amber-900 dark:text-amber-200">
+                        <MapPinOff className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-300" aria-hidden="true" />
                         <span className="truncate">Location not set / unrecognized ({unplacedAgents.length})</span>
                       </h3>
                       <p className="mt-0.5 text-[11px] leading-snug text-amber-800/80">Not on the map until a known city or lat,lng is set.</p>
                       <ul className="mt-2 space-y-1">
                         {unplacedAgents.map((agent) => (
-                          <li key={agent.id} className="flex items-center gap-2 rounded-md bg-white/70 px-1.5 py-1">
+                          <li key={agent.id} className="flex items-center gap-2 rounded-md bg-card/70 px-1.5 py-1">
                             {agent.photoUrl ? (
-                              <img src={agent.photoUrl} alt="" className="h-6 w-6 shrink-0 rounded-full border border-gray-200 object-cover" />
+                              <img src={agent.photoUrl} alt="" className="h-6 w-6 shrink-0 rounded-full border border-border object-cover" />
                             ) : (
                               <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-blue-600" aria-hidden="true">
                                 <span className="text-[9px] font-bold text-white">{getInitials(agent.name)}</span>
                               </div>
                             )}
                             <div className="min-w-0 flex-1">
-                              <p className="truncate text-xs font-medium text-gray-900">{agent.name}</p>
-                              <p className="truncate text-[11px] text-gray-500">
-                                {agent.location ? <>Unrecognized: <span className="text-gray-700">{agent.location}</span></> : 'Not set'}
+                              <p className="truncate text-xs font-medium text-foreground">{agent.name}</p>
+                              <p className="truncate text-[11px] text-muted-foreground">
+                                {agent.location ? <>Unrecognized: <span className="text-foreground/85">{agent.location}</span></> : 'Not set'}
                               </p>
                             </div>
                             <button
                               type="button"
                               onClick={() => editFromTray(agent)}
-                              className="tp-focus-ring shrink-0 rounded-md border border-amber-300 bg-white px-2 py-0.5 text-[11px] font-medium text-amber-900 hover:bg-amber-100"
+                              className="tp-focus-ring shrink-0 rounded-md border border-amber-300 dark:border-amber-500/40 bg-card px-2 py-0.5 text-[11px] font-medium text-amber-900 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-500/20"
                               aria-label={`Edit location for ${agent.name}`}
                             >
                               Edit location
@@ -626,12 +631,12 @@ export default function Visuals() {
                                   src={agent.photoUrl}
                                   alt={agent.name}
                                   className={`w-12 h-12 rounded-full object-cover border-2 ${
-                                    isSelected ? 'border-blue-500' : 'border-gray-300'
+                                    isSelected ? 'border-blue-500' : 'border-input'
                                   }`}
                                 />
                               ) : (
                                 <div className={`w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center border-2 ${
-                                  isSelected ? 'border-blue-400' : 'border-gray-400'
+                                  isSelected ? 'border-blue-400' : 'border-input'
                                 }`}>
                                   <span className="text-xs font-bold text-white">
                                     {getInitials(agent.name)}
@@ -640,7 +645,7 @@ export default function Visuals() {
                               )}
                               {/* Selected indicator */}
                               {isSelected && (
-                                <div className="absolute -top-1 -right-1 w-4 h-4 bg-blue-600 rounded-full border-2 border-white flex items-center justify-center">
+                                <div className="absolute -top-1 -right-1 w-4 h-4 bg-blue-600 rounded-full border-2 border-card flex items-center justify-center">
                                   <span className="text-white text-xs">✓</span>
                                 </div>
                               )}
@@ -661,8 +666,8 @@ export default function Visuals() {
                             id={`visuals-agent-${agent.id}`}
                             className={`border rounded-lg p-2 transition-all ${
                               isSelected
-                                ? 'border-blue-300 bg-blue-50'
-                                : 'border-gray-200 bg-white'
+                                ? 'border-blue-300 dark:border-blue-500/40 bg-blue-50 dark:bg-blue-500/15'
+                                : 'border-border bg-card'
                             } ${isManager ? 'ring-2 ring-yellow-400' : ''}`}
                           >
                             <div className="flex items-start gap-2">
@@ -671,7 +676,7 @@ export default function Visuals() {
                                 type="checkbox"
                                 checked={isSelected}
                                 onChange={() => toggleAgent(agent.id)}
-                                className="mt-1 w-3.5 h-3.5 text-blue-600 rounded focus:ring-blue-500"
+                                className="mt-1 w-3.5 h-3.5 text-blue-600 dark:text-blue-300 rounded focus:ring-blue-500"
                               />
 
                               {/* Photo or Initials */}
@@ -680,7 +685,7 @@ export default function Visuals() {
                                   <img
                                     src={agent.photoUrl}
                                     alt={agent.name}
-                                    className="w-10 h-10 rounded-full object-cover border-2 border-gray-300"
+                                    className="w-10 h-10 rounded-full object-cover border-2 border-input"
                                   />
                                 ) : (
                                   <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center border-2 border-blue-400">
@@ -694,14 +699,14 @@ export default function Visuals() {
                               {/* Info */}
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-1">
-                                  <h3 className="text-sm font-semibold text-gray-900 truncate">
+                                  <h3 className="text-sm font-semibold text-foreground truncate">
                                     {agent.name}
                                   </h3>
                                   {isManager && (
                                     <Crown className="w-3.5 h-3.5 text-yellow-500 fill-yellow-500 flex-shrink-0" />
                                   )}
                                 </div>
-                                <p className="text-xs text-gray-600 truncate">{agent.email}</p>
+                                <p className="text-xs text-muted-foreground truncate">{agent.email}</p>
                             
                                 {/* Location Editor */}
                                 {editingLocationId === agent.id ? (
@@ -715,7 +720,7 @@ export default function Visuals() {
                                           onChange={(e) => setEditingLocationValue(e.target.value)}
                                           placeholder="City or lat,lng"
                                           aria-label="Custom location (city name or lat,lng)"
-                                          className="flex-1 px-2 py-1 text-xs border border-blue-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                          className="flex-1 px-2 py-1 text-xs border border-blue-300 dark:border-blue-500/40 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
                                           autoFocus
                                           onKeyDown={(e) => {
                                             if (e.key === 'Enter') saveLocation(agent.id);
@@ -731,7 +736,7 @@ export default function Visuals() {
                                         </button>
                                         <button
                                           onClick={cancelEditingLocation}
-                                          className="p-1 bg-gray-300 text-gray-700 rounded hover:bg-gray-400"
+                                          className="p-1 bg-muted-foreground/40 text-foreground/85 rounded hover:bg-muted-foreground/60"
                                           title="Cancel"
                                         >
                                           <X className="w-3 h-3" />
@@ -750,7 +755,7 @@ export default function Visuals() {
                                               setEditingLocationValue(value);
                                             }
                                           }}
-                                          className="flex-1 px-2 py-1 text-xs border border-blue-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                          className="flex-1 px-2 py-1 text-xs border border-blue-300 dark:border-blue-500/40 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
                                           autoFocus
                                         >
                                           <option value="">Select location...</option>
@@ -769,7 +774,7 @@ export default function Visuals() {
                                         </button>
                                         <button
                                           onClick={cancelEditingLocation}
-                                          className="p-1 bg-gray-300 text-gray-700 rounded hover:bg-gray-400"
+                                          className="p-1 bg-muted-foreground/40 text-foreground/85 rounded hover:bg-muted-foreground/60"
                                           title="Cancel"
                                         >
                                           <X className="w-3 h-3" />
@@ -781,11 +786,11 @@ export default function Visuals() {
                                       if (!value) return null;
                                       const hit = resolveLocation(value);
                                       return hit ? (
-                                        <p className="text-[11px] text-emerald-700" role="status">
+                                        <p className="text-[11px] text-emerald-700 dark:text-emerald-200" role="status">
                                           Pins at {hit.kind === 'coords' ? hit.key : `${hit.key} (${hit.lat}, ${hit.lng})`}
                                         </p>
                                       ) : (
-                                        <p className="flex items-start gap-1 text-[11px] text-amber-800" role="status">
+                                        <p className="flex items-start gap-1 text-[11px] text-amber-800 dark:text-amber-200" role="status">
                                           <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
                                           <span>{UNRESOLVED_LOCATION_HINT}</span>
                                         </p>
@@ -794,22 +799,22 @@ export default function Visuals() {
                                   </div>
                                 ) : (
                                   <div className="flex items-center gap-1 mt-0.5">
-                                    <p className="text-xs text-gray-500 flex-1">
+                                    <p className="text-xs text-muted-foreground flex-1">
                                       {agent.location || 'No location'}
                                     </p>
                                     <button
                                       onClick={() => startEditingLocation(agent.id, agent.location)}
-                                      className="p-0.5 hover:bg-gray-200 rounded"
+                                      className="p-0.5 hover:bg-secondary rounded"
                                       title="Edit location"
                                       aria-label={`Edit location for ${agent.name}`}
                                     >
-                                      <Edit2 className="w-3 h-3 text-gray-400" />
+                                      <Edit2 className="w-3 h-3 text-muted-foreground/75" />
                                     </button>
                                   </div>
                                 )}
                                 {locationNotice && locationNotice.agentId === agent.id && editingLocationId !== agent.id && (
-                                  <p className="mt-1 flex items-start gap-1 rounded-md border border-amber-200 bg-amber-50 px-1.5 py-1 text-[11px] leading-snug text-amber-900" role="alert">
-                                    <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-amber-600" aria-hidden="true" />
+                                  <p className="mt-1 flex items-start gap-1 rounded-md border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-1.5 py-1 text-[11px] leading-snug text-amber-900 dark:text-amber-200" role="alert">
+                                    <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-amber-600 dark:text-amber-300" aria-hidden="true" />
                                     <span>{locationNotice.text}</span>
                                   </p>
                                 )}
@@ -823,7 +828,7 @@ export default function Visuals() {
                                     disabled={!isSelected}
                                     className="w-3 h-3 text-yellow-500 rounded focus:ring-yellow-500 disabled:opacity-50 disabled:cursor-not-allowed"
                                   />
-                                  <span className={`text-xs ${isSelected ? 'text-gray-700' : 'text-gray-400'}`}>
+                                  <span className={`text-xs ${isSelected ? 'text-foreground/85' : 'text-muted-foreground/75'}`}>
                                 Manager
                                   </span>
                                 </label>
@@ -841,25 +846,25 @@ export default function Visuals() {
           {/* Map Container */}
           <div className="relative min-h-[55vh] flex-1 lg:min-h-0">
             {loading ? (
-              <div className="absolute inset-0 flex items-center justify-center bg-gray-50">
+              <div className="absolute inset-0 flex items-center justify-center bg-muted/50">
                 <div className="text-center">
-                  <Activity className="w-12 h-12 animate-spin mx-auto mb-4 text-blue-600" />
-                  <p className="text-gray-600">Loading map...</p>
+                  <Activity className="w-12 h-12 animate-spin mx-auto mb-4 text-blue-600 dark:text-blue-300" />
+                  <p className="text-muted-foreground">Loading map...</p>
                 </div>
               </div>
             ) : error ? (
-              <div className="absolute inset-0 flex items-center justify-center bg-gray-50">
+              <div className="absolute inset-0 flex items-center justify-center bg-muted/50">
                 <div className="text-center">
-                  <p className="text-red-600 font-semibold mb-2">Error loading map</p>
-                  <p className="text-gray-600">{error}</p>
+                  <p className="text-red-600 dark:text-red-300 font-semibold mb-2">Error loading map</p>
+                  <p className="text-muted-foreground">{error}</p>
                 </div>
               </div>
             ) : selectedAgents.size === 0 ? (
-              <div className="absolute inset-0 flex items-center justify-center bg-gray-50">
+              <div className="absolute inset-0 flex items-center justify-center bg-muted/50">
                 <div className="text-center">
-                  <Users className="w-16 h-16 mx-auto mb-4 text-gray-400" />
-                  <p className="text-gray-600 font-medium">No agents selected</p>
-                  <p className="text-sm text-gray-500 mt-1">Select agents from the sidebar to view them on the map</p>
+                  <Users className="w-16 h-16 mx-auto mb-4 text-muted-foreground/75" />
+                  <p className="text-muted-foreground font-medium">No agents selected</p>
+                  <p className="text-sm text-muted-foreground mt-1">Select agents from the sidebar to view them on the map</p>
                 </div>
               </div>
             ) : (
@@ -873,10 +878,18 @@ export default function Visuals() {
                 zoomDelta={0.5} // Smaller zoom increments (was 1)
                 wheelPxPerZoomLevel={120} // Slower wheel zoom
               >
+                {/* Keyed on the url: react-leaflet tile-layer props are
+                    immutable after mount, so the theme swap must remount. */}
                 <TileLayer
-                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                  key={tiles.url}
+                  attribution={tiles.attribution}
+                  url={tiles.url}
+                  {...(tiles.subdomains ? { subdomains: tiles.subdomains } : {})}
+                  maxZoom={tiles.maxZoom}
                 />
+                {tiles.referenceUrl && (
+                  <TileLayer key={tiles.referenceUrl} url={tiles.referenceUrl} maxZoom={tiles.maxZoom} />
+                )}
               
                 <FitBounds bounds={bounds} />
 
@@ -904,18 +917,18 @@ export default function Visuals() {
                           )}
                           <div className="flex-1">
                             <div className="flex items-center gap-1">
-                              <h3 className="font-semibold text-gray-900">{marker.name}</h3>
+                              <h3 className="font-semibold text-foreground">{marker.name}</h3>
                               {marker.isManager && (
                                 <Crown className="w-4 h-4 text-yellow-500 fill-yellow-500" />
                               )}
                             </div>
-                            <p className="text-xs text-gray-600">{marker.email}</p>
+                            <p className="text-xs text-muted-foreground">{marker.email}</p>
                           </div>
                         </div>
-                        <div className="text-sm text-gray-700">
+                        <div className="text-sm text-foreground/85">
                           <p><strong>Location:</strong> {marker.location || 'Not set'}</p>
                           {marker.isManager && (
-                            <p className="mt-1 text-yellow-700 font-medium">Manager</p>
+                            <p className="mt-1 text-yellow-700 dark:text-yellow-200 font-medium">Manager</p>
                           )}
                         </div>
                       </div>

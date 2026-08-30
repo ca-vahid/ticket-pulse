@@ -68,16 +68,16 @@ function StatusIcon({ status, className = 'w-4 h-4' }) {
   if (status === 'completed') return <CheckCircle className={`${className} text-emerald-500`} />;
   if (status === 'failed') return <XCircle className={`${className} text-red-500`} />;
   if (status === 'started') return <Loader className={`${className} text-blue-500 animate-spin`} />;
-  return <Clock className={`${className} text-gray-400`} />;
+  return <Clock className={`${className} text-muted-foreground/75`} />;
 }
 
 function StatCard({ icon: Icon, label, value, sub, color = 'blue' }) {
   const colors = {
-    blue: 'bg-blue-50 text-blue-700 border-blue-200',
-    emerald: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-    amber: 'bg-amber-50 text-amber-700 border-amber-200',
-    red: 'bg-red-50 text-red-700 border-red-200',
-    gray: 'bg-gray-50 text-gray-700 border-gray-200',
+    blue: 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 border-blue-200 dark:border-blue-500/30',
+    emerald: 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 border-emerald-200 dark:border-emerald-500/30',
+    amber: 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200 border-amber-200 dark:border-amber-500/30',
+    red: 'bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200 border-red-200 dark:border-red-500/30',
+    gray: 'bg-muted/50 text-foreground/85 border-border',
   };
   return (
     <div className={`rounded-lg border px-3 py-2.5 ${colors[color]}`}>
@@ -147,10 +147,10 @@ function TimelineStrip() {
   return (
     <div className="mt-3">
       <div className="flex items-center justify-between mb-1">
-        <span className="text-[10px] text-gray-400">48 hours ago</span>
-        <span className="text-[10px] text-gray-400">Now</span>
+        <span className="text-[10px] text-muted-foreground/75">48 hours ago</span>
+        <span className="text-[10px] text-muted-foreground/75">Now</span>
       </div>
-      <div className="h-3 bg-red-100 rounded-full overflow-hidden relative border border-red-200/50">
+      <div className="h-3 bg-red-100 dark:bg-red-500/20 rounded-full overflow-hidden relative border border-red-200/50">
         {completedLogs.map((l, i) => {
           const left = ((l.start - windowStart) / windowMs) * 100;
           const width = Math.max(((l.end - l.start) / windowMs) * 100, 0.3);
@@ -164,11 +164,11 @@ function TimelineStrip() {
         })}
       </div>
       <div className="flex items-center gap-3 mt-1">
-        <span className="flex items-center gap-1 text-[10px] text-gray-400">
+        <span className="flex items-center gap-1 text-[10px] text-muted-foreground/75">
           <span className="w-2 h-2 bg-emerald-400 rounded-sm inline-block" /> Sync ran
         </span>
-        <span className="flex items-center gap-1 text-[10px] text-gray-400">
-          <span className="w-2 h-2 bg-red-100 border border-red-200 rounded-sm inline-block" /> Gap
+        <span className="flex items-center gap-1 text-[10px] text-muted-foreground/75">
+          <span className="w-2 h-2 bg-red-100 dark:bg-red-500/20 border border-red-200 dark:border-red-500/30 rounded-sm inline-block" /> Gap
         </span>
       </div>
     </div>
@@ -180,13 +180,13 @@ function GapBadge({ minutes }) {
   return (
     <tr>
       <td colSpan={6} className="px-0 py-0">
-        <div className={`flex items-center gap-2 px-4 py-1 ${isLarge ? 'bg-red-50' : 'bg-amber-50'}`}>
-          <div className={`flex-1 border-t ${isLarge ? 'border-red-200' : 'border-amber-200'} border-dashed`} />
+        <div className={`flex items-center gap-2 px-4 py-1 ${isLarge ? 'bg-red-50 dark:bg-red-500/15' : 'bg-amber-50 dark:bg-amber-500/15'}`}>
+          <div className={`flex-1 border-t ${isLarge ? 'border-red-200 dark:border-red-500/30' : 'border-amber-200 dark:border-amber-500/30'} border-dashed`} />
           <span className={`text-[10px] font-medium ${isLarge ? 'text-red-500' : 'text-amber-500'} flex items-center gap-1`}>
             <AlertTriangle className="w-3 h-3" />
             Gap: {formatGap(minutes)}
           </span>
-          <div className={`flex-1 border-t ${isLarge ? 'border-red-200' : 'border-amber-200'} border-dashed`} />
+          <div className={`flex-1 border-t ${isLarge ? 'border-red-200 dark:border-red-500/30' : 'border-amber-200 dark:border-amber-500/30'} border-dashed`} />
         </div>
       </td>
     </tr>
@@ -197,45 +197,45 @@ function LogDetailModal({ log, onClose }) {
   if (!log) return null;
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full max-h-[80vh] overflow-auto" onClick={e => e.stopPropagation()}>
+      <div className="bg-card rounded-xl shadow-2xl max-w-lg w-full max-h-[80vh] overflow-auto" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between p-4 border-b">
           <div className="flex items-center gap-2">
             <StatusIcon status={log.status} className="w-5 h-5" />
-            <h3 className="font-semibold text-gray-900">Sync Log #{log.id}</h3>
+            <h3 className="font-semibold text-foreground">Sync Log #{log.id}</h3>
           </div>
-          <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded"><X className="w-4 h-4" /></button>
+          <button onClick={onClose} className="p-1 hover:bg-muted rounded"><X className="w-4 h-4" /></button>
         </div>
         <div className="p-4 space-y-3 text-sm">
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <span className="text-gray-500 text-xs">Status</span>
+              <span className="text-muted-foreground text-xs">Status</span>
               <p className="font-medium capitalize">{log.status}</p>
             </div>
             <div>
-              <span className="text-gray-500 text-xs">Type</span>
+              <span className="text-muted-foreground text-xs">Type</span>
               <p className="font-medium">{log.syncType}</p>
             </div>
             <div>
-              <span className="text-gray-500 text-xs">Started</span>
+              <span className="text-muted-foreground text-xs">Started</span>
               <p className="font-medium">{new Date(log.startedAt).toLocaleString()}</p>
             </div>
             <div>
-              <span className="text-gray-500 text-xs">Completed</span>
+              <span className="text-muted-foreground text-xs">Completed</span>
               <p className="font-medium">{log.completedAt ? new Date(log.completedAt).toLocaleString() : '—'}</p>
             </div>
             <div>
-              <span className="text-gray-500 text-xs">Duration</span>
+              <span className="text-muted-foreground text-xs">Duration</span>
               <p className="font-medium">{formatDuration(log.startedAt, log.completedAt)}</p>
             </div>
             <div>
-              <span className="text-gray-500 text-xs">Records Processed</span>
+              <span className="text-muted-foreground text-xs">Records Processed</span>
               <p className="font-medium">{log.recordsProcessed}</p>
             </div>
           </div>
           {log.errorMessage && (
             <div>
-              <span className="text-gray-500 text-xs">Error</span>
-              <pre className="mt-1 p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 whitespace-pre-wrap break-words max-h-48 overflow-auto">
+              <span className="text-muted-foreground text-xs">Error</span>
+              <pre className="mt-1 p-3 bg-red-50 dark:bg-red-500/15 border border-red-200 dark:border-red-500/30 rounded-lg text-xs text-red-700 dark:text-red-200 whitespace-pre-wrap break-words max-h-48 overflow-auto">
                 {log.errorMessage}
               </pre>
             </div>
@@ -394,11 +394,11 @@ export default function SyncOperationsPanel() {
   return (
     <div className="p-6 space-y-4">
       {/* Health Overview */}
-      <div className="bg-white rounded-lg shadow-sm p-5 border border-gray-200">
+      <div className="bg-card rounded-lg shadow-sm p-5 border border-border">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-base font-semibold text-gray-900">Sync Health</h2>
+          <h2 className="text-base font-semibold text-foreground">Sync Health</h2>
           {uptime && (
-            <span className="text-[10px] text-gray-400 flex items-center gap-1">
+            <span className="text-[10px] text-muted-foreground/75 flex items-center gap-1">
               <Zap className="w-3 h-3" /> Uptime: {formatRelative(uptime).replace(' ago', '')}
             </span>
           )}
@@ -424,7 +424,7 @@ export default function SyncOperationsPanel() {
         </div>
 
         {stats?.csatPendingCount !== undefined && (
-          <div className="mt-2 flex items-center gap-2 text-[11px] text-gray-500">
+          <div className="mt-2 flex items-center gap-2 text-[11px] text-muted-foreground">
             <Star className="w-3 h-3" />
             <span>{stats.csatPendingCount.toLocaleString()} closed tickets awaiting CSAT response</span>
           </div>
@@ -434,22 +434,22 @@ export default function SyncOperationsPanel() {
       </div>
 
       {/* Log Viewer */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200">
-        <div className="p-4 border-b border-gray-100">
+      <div className="bg-card rounded-lg shadow-sm border border-border">
+        <div className="p-4 border-b border-border/60">
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-base font-semibold text-gray-900">Sync Logs</h2>
+            <h2 className="text-base font-semibold text-foreground">Sync Logs</h2>
             <div className="flex items-center gap-2">
-              <span className="text-xs text-gray-400">{total} total</span>
+              <span className="text-xs text-muted-foreground/75">{total} total</span>
               <button
                 onClick={() => { fetchLogs(false); fetchStats(); }}
-                className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-gray-600"
+                className="p-1.5 hover:bg-muted rounded-lg text-muted-foreground/75 hover:text-muted-foreground"
                 title="Refresh"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
               </button>
               <button
                 onClick={exportCSV}
-                className="flex items-center gap-1 px-2 py-1 text-xs bg-gray-50 hover:bg-gray-100 text-gray-600 rounded-lg border border-gray-200"
+                className="flex items-center gap-1 px-2 py-1 text-xs bg-muted/50 hover:bg-muted text-muted-foreground rounded-lg border border-border"
               >
                 <Download className="w-3 h-3" /> CSV
               </button>
@@ -459,15 +459,15 @@ export default function SyncOperationsPanel() {
           {/* Filters row */}
           <div className="flex flex-wrap items-center gap-2">
             {/* Status pills */}
-            <div className="flex items-center bg-gray-100 rounded-lg p-0.5">
+            <div className="flex items-center bg-muted rounded-lg p-0.5">
               {STATUS_PILLS.map(pill => (
                 <button
                   key={pill.label}
                   onClick={() => setStatusFilter(pill.value)}
                   className={`px-2.5 py-1 text-xs rounded-md transition-colors ${
                     statusFilter === pill.value
-                      ? 'bg-white shadow-sm text-gray-900 font-medium'
-                      : 'text-gray-500 hover:text-gray-700'
+                      ? 'bg-card shadow-sm text-foreground font-medium'
+                      : 'text-muted-foreground hover:text-foreground/85'
                   }`}
                 >
                   {pill.label}
@@ -476,15 +476,15 @@ export default function SyncOperationsPanel() {
             </div>
 
             {/* Date range */}
-            <div className="flex items-center bg-gray-100 rounded-lg p-0.5">
+            <div className="flex items-center bg-muted rounded-lg p-0.5">
               {DATE_RANGES.map(dr => (
                 <button
                   key={dr.value}
                   onClick={() => setDateRange(dr.value)}
                   className={`px-2.5 py-1 text-xs rounded-md transition-colors ${
                     dateRange === dr.value
-                      ? 'bg-white shadow-sm text-gray-900 font-medium'
-                      : 'text-gray-500 hover:text-gray-700'
+                      ? 'bg-card shadow-sm text-foreground font-medium'
+                      : 'text-muted-foreground hover:text-foreground/85'
                   }`}
                 >
                   {dr.label}
@@ -494,13 +494,13 @@ export default function SyncOperationsPanel() {
 
             {/* Search */}
             <div className="relative flex-1 min-w-[140px]">
-              <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+              <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/75" />
               <input
                 type="text"
                 placeholder="Search errors..."
                 value={searchText}
                 onChange={e => setSearchText(e.target.value)}
-                className="w-full pl-7 pr-2 py-1.5 text-xs border border-gray-200 rounded-lg focus:ring-1 focus:ring-blue-400 focus:border-blue-400"
+                className="w-full pl-7 pr-2 py-1.5 text-xs border border-border rounded-lg focus:ring-1 focus:ring-blue-400 focus:border-blue-400"
               />
             </div>
           </div>
@@ -508,16 +508,16 @@ export default function SyncOperationsPanel() {
 
         {/* Log table */}
         {loading ? (
-          <div className="flex items-center justify-center py-12 text-gray-400">
+          <div className="flex items-center justify-center py-12 text-muted-foreground/75">
             <Loader className="w-5 h-5 animate-spin mr-2" /> Loading logs...
           </div>
         ) : logs.length === 0 ? (
-          <div className="text-center py-12 text-gray-400 text-sm">No sync logs found for the selected filters.</div>
+          <div className="text-center py-12 text-muted-foreground/75 text-sm">No sync logs found for the selected filters.</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="text-left text-[11px] text-gray-400 uppercase tracking-wider border-b border-gray-100">
+                <tr className="text-left text-[11px] text-muted-foreground/75 uppercase tracking-wider border-b border-border/60">
                   <th className="px-4 py-2 w-8"></th>
                   <th className="px-3 py-2">Started</th>
                   <th className="px-3 py-2">Duration</th>
@@ -537,18 +537,18 @@ export default function SyncOperationsPanel() {
                     <tr
                       key={l.id}
                       onClick={() => setSelectedLog(l)}
-                      className={`border-b border-gray-50 hover:bg-gray-50 cursor-pointer transition-colors ${
+                      className={`border-b border-border/60 hover:bg-muted/50 cursor-pointer transition-colors ${
                         l.status === 'failed' ? 'border-l-2 border-l-red-400' : ''
                       }`}
                     >
                       <td className="px-4 py-2"><StatusIcon status={l.status} /></td>
-                      <td className="px-3 py-2 text-gray-700 whitespace-nowrap">{formatDateTime(l.startedAt)}</td>
-                      <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{formatDuration(l.startedAt, l.completedAt)}</td>
-                      <td className="px-3 py-2 text-gray-700 text-right tabular-nums">{l.recordsProcessed}</td>
+                      <td className="px-3 py-2 text-foreground/85 whitespace-nowrap">{formatDateTime(l.startedAt)}</td>
+                      <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">{formatDuration(l.startedAt, l.completedAt)}</td>
+                      <td className="px-3 py-2 text-foreground/85 text-right tabular-nums">{l.recordsProcessed}</td>
                       <td className="px-3 py-2">
-                        <span className="px-1.5 py-0.5 text-[10px] rounded bg-gray-100 text-gray-600">{l.syncType}</span>
+                        <span className="px-1.5 py-0.5 text-[10px] rounded bg-muted text-muted-foreground">{l.syncType}</span>
                       </td>
-                      <td className="px-3 py-2 text-gray-400 max-w-[200px] truncate text-xs">{l.errorMessage || '—'}</td>
+                      <td className="px-3 py-2 text-muted-foreground/75 max-w-[200px] truncate text-xs">{l.errorMessage || '—'}</td>
                     </tr>
                   );
                 })}
@@ -556,11 +556,11 @@ export default function SyncOperationsPanel() {
             </table>
 
             {hasMore && (
-              <div className="p-3 text-center border-t border-gray-100">
+              <div className="p-3 text-center border-t border-border/60">
                 <button
                   onClick={() => fetchLogs(true)}
                   disabled={loadingMore}
-                  className="px-4 py-1.5 text-xs text-blue-600 hover:bg-blue-50 rounded-lg transition-colors disabled:opacity-50"
+                  className="px-4 py-1.5 text-xs text-blue-600 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-500/15 rounded-lg transition-colors disabled:opacity-50"
                 >
                   {loadingMore ? (
                     <span className="flex items-center gap-1"><Loader className="w-3 h-3 animate-spin" /> Loading...</span>

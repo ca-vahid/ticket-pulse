@@ -35,22 +35,22 @@ export default function RealtimeHealthCard() {
   const quietDay = today && today.reports === 0;
 
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-4">
+    <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border/60 pb-4">
         <div className="flex items-center gap-2">
-          <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-blue-100 text-blue-700">
+          <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200">
             <Wifi className="h-4 w-4" />
           </span>
           <div>
-            <h3 className="text-sm font-semibold text-slate-950">Realtime health</h3>
-            <p className="text-xs text-slate-500">
+            <h3 className="text-sm font-semibold text-foreground">Realtime health</h3>
+            <p className="text-xs text-muted-foreground">
               How often browsers fall back from the live stream — sampled from ~10% of sessions (dead-end offline is always reported).
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
           {summary && (
-            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
+            <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-semibold text-muted-foreground">
               {summary.activeConnections ?? 0} live connection{(summary.activeConnections ?? 0) === 1 ? '' : 's'}
             </span>
           )}
@@ -58,7 +58,7 @@ export default function RealtimeHealthCard() {
             type="button"
             onClick={load}
             disabled={loading}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-50"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border text-muted-foreground hover:bg-muted/50 disabled:opacity-50"
             title="Refresh"
             aria-label="Refresh realtime health"
           >
@@ -68,28 +68,28 @@ export default function RealtimeHealthCard() {
       </div>
 
       {error ? (
-        <p className="mt-4 text-sm text-red-600">{error}</p>
+        <p className="mt-4 text-sm text-red-600 dark:text-red-300">{error}</p>
       ) : (
         <>
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
-            <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
-              <div className="text-xs font-medium text-slate-500">Downgrades to polling (today)</div>
-              <div className="mt-0.5 text-sm font-semibold text-slate-900">
+            <div className="rounded-lg border border-border bg-muted/30 p-3">
+              <div className="text-xs font-medium text-muted-foreground">Downgrades to polling (today)</div>
+              <div className="mt-0.5 text-sm font-semibold text-foreground">
                 {today?.downgrades ?? 0}
                 {today?.downgradesByTransport && (today.downgradesByTransport.shortpoll || 0) > 0 && (
-                  <span className="ml-1 text-xs font-medium text-slate-500">
+                  <span className="ml-1 text-xs font-medium text-muted-foreground">
                     ({today.downgradesByTransport.shortpoll} to short-poll)
                   </span>
                 )}
               </div>
             </div>
-            <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
-              <div className="text-xs font-medium text-slate-500">Offline transitions</div>
-              <div className="mt-0.5 text-sm font-semibold text-slate-900">{today?.offline ?? 0}</div>
+            <div className="rounded-lg border border-border bg-muted/30 p-3">
+              <div className="text-xs font-medium text-muted-foreground">Offline transitions</div>
+              <div className="mt-0.5 text-sm font-semibold text-foreground">{today?.offline ?? 0}</div>
             </div>
-            <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
-              <div className="text-xs font-medium text-slate-500">Dead-end offline (always reported)</div>
-              <div className={`mt-0.5 text-sm font-semibold ${today?.offlineTerminal ? 'text-red-600' : 'text-slate-900'}`}>
+            <div className="rounded-lg border border-border bg-muted/30 p-3">
+              <div className="text-xs font-medium text-muted-foreground">Dead-end offline (always reported)</div>
+              <div className={`mt-0.5 text-sm font-semibold ${today?.offlineTerminal ? 'text-red-600 dark:text-red-300' : 'text-foreground'}`}>
                 {today?.offlineTerminal ?? 0}
               </div>
             </div>
@@ -97,31 +97,31 @@ export default function RealtimeHealthCard() {
 
           {topUsers.length > 0 && (
             <div className="mt-4">
-              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 Most-affected sessions today (support triage)
               </div>
               <ul className="space-y-1">
                 {topUsers.map((u) => (
-                  <li key={u.user} className="flex items-center justify-between rounded-md border border-slate-200 bg-slate-50/60 px-3 py-1.5 text-xs text-slate-700">
+                  <li key={u.user} className="flex items-center justify-between rounded-md border border-border bg-muted/30 px-3 py-1.5 text-xs text-foreground/85">
                     <span className="font-medium">{u.user}</span>
-                    <span className="text-slate-500">{u.events} event{u.events === 1 ? '' : 's'}</span>
+                    <span className="text-muted-foreground">{u.events} event{u.events === 1 ? '' : 's'}</span>
                   </li>
                 ))}
               </ul>
-              <p className="mt-2 text-[11px] text-slate-400">
+              <p className="mt-2 text-[11px] text-muted-foreground/75">
                 A recurring name usually means a network problem on that person&apos;s side (VPN / SSL-inspecting proxy) — see the realtime support playbook for the IT bypass request.
               </p>
             </div>
           )}
 
           {!loading && quietDay && (
-            <p className="mt-4 text-xs text-slate-500">
+            <p className="mt-4 text-xs text-muted-foreground">
               No degradations reported today — sampled sessions are staying on the live stream.
             </p>
           )}
 
           {yesterday && yesterday.reports > 0 && (
-            <p className="mt-3 text-[11px] text-slate-400">
+            <p className="mt-3 text-[11px] text-muted-foreground/75">
               Yesterday: {yesterday.downgrades} downgrade{yesterday.downgrades === 1 ? '' : 's'}, {yesterday.offline + yesterday.offlineTerminal} offline. Counters reset on server restart.
             </p>
           )}

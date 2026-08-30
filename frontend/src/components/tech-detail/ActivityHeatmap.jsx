@@ -26,10 +26,10 @@ const OVERRIDES = [
 
 // Blue→violet ramp on our tokens. Index 0 is the zero state.
 const HEAT_CLASSES = [
-  'bg-white border border-slate-200',
-  'bg-blue-100',
-  'bg-blue-300',
-  'bg-violet-400',
+  'bg-card border border-border',
+  'bg-blue-100 dark:bg-blue-500/20',
+  'bg-blue-300 dark:bg-blue-500/45',
+  'bg-violet-400 dark:bg-violet-500/60',
   'bg-violet-600',
 ];
 
@@ -81,13 +81,13 @@ function WeekGrid({ countByDay, anchor, todayStr, selectedStr, onSelectDay }) {
             onClick={() => onSelectDay(dateStr)}
             title={`${labelFor(dateStr)} · ${count} handled`}
             className={`tp-focus-ring flex min-w-0 flex-col items-center justify-center rounded-lg py-2 transition-colors ${
-              future ? 'bg-slate-50 opacity-40' : heatClass(count, max)
+              future ? 'bg-muted/50 opacity-40' : heatClass(count, max)
             } ${isSelected ? 'ring-2 ring-blue-500 ring-offset-1' : ''} ${!future ? 'cursor-pointer hover:ring-1 hover:ring-blue-300' : ''}`}
           >
-            <span className={`text-[9px] font-bold uppercase tracking-wide ${count / max >= 0.5 && count > 0 ? 'text-white/80' : 'text-slate-400'}`}>
+            <span className={`text-[9px] font-bold uppercase tracking-wide ${count / max >= 0.5 && count > 0 ? 'text-white/80' : 'text-muted-foreground/75'}`}>
               {dow}
             </span>
-            <span className={`text-sm font-bold tabular-nums ${count === 0 || future ? 'text-slate-300' : count / max >= 0.5 ? 'text-white' : 'text-slate-800'}`}>
+            <span className={`text-sm font-bold tabular-nums ${count === 0 || future ? 'text-muted-foreground/50' : count / max >= 0.5 ? 'text-white' : 'text-foreground'}`}>
               {future ? '' : count}
             </span>
           </button>
@@ -111,7 +111,7 @@ function MonthGrid({ countByDay, anchor, todayStr, selectedStr, onSelectDay }) {
     <div>
       <div className="mb-1 grid grid-cols-7 gap-1">
         {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
-          <div key={d} className="text-center text-[9px] font-bold uppercase tracking-wide text-slate-400">{d}</div>
+          <div key={d} className="text-center text-[9px] font-bold uppercase tracking-wide text-muted-foreground/75">{d}</div>
         ))}
       </div>
       <div className="grid grid-cols-7 gap-1">
@@ -128,9 +128,9 @@ function MonthGrid({ countByDay, anchor, todayStr, selectedStr, onSelectDay }) {
               onClick={() => onSelectDay(dateStr)}
               title={`${labelFor(dateStr)} · ${count} handled`}
               className={`tp-focus-ring flex aspect-square min-w-0 items-center justify-center rounded-md text-[10px] font-semibold tabular-nums transition-colors ${
-                future ? 'bg-slate-50 opacity-40' : heatClass(count, max)
+                future ? 'bg-muted/50 opacity-40' : heatClass(count, max)
               } ${isSelected ? 'ring-2 ring-blue-500 ring-offset-1' : ''} ${
-                count === 0 || future ? 'text-slate-300' : count / max >= 0.5 ? 'text-white' : 'text-slate-700'
+                count === 0 || future ? 'text-muted-foreground/50' : count / max >= 0.5 ? 'text-white' : 'text-foreground/85'
               } ${!future ? 'cursor-pointer hover:ring-1 hover:ring-blue-300' : ''}`}
             >
               {new Date(dateStr + 'T12:00:00').getDate()}
@@ -168,7 +168,7 @@ function WeekColumnsGrid({ countByDay, anchor, weeks, todayStr, selectedStr, onS
         aria-hidden="true"
       >
         {monthLabels.map((label, idx) => (
-          <div key={idx} className="overflow-visible whitespace-nowrap text-[8px] font-semibold uppercase text-slate-400">
+          <div key={idx} className="overflow-visible whitespace-nowrap text-[8px] font-semibold uppercase text-muted-foreground/75">
             {label}
           </div>
         ))}
@@ -192,7 +192,7 @@ function WeekColumnsGrid({ countByDay, anchor, weeks, todayStr, selectedStr, onS
                   title={`${labelFor(dateStr)} · ${count} handled`}
                   aria-label={`${labelFor(dateStr)}: ${count} handled`}
                   className={`tp-focus-ring aspect-square w-full min-w-0 rounded-[3px] transition-colors ${
-                    future ? 'bg-slate-50 opacity-40' : heatClass(count, max)
+                    future ? 'bg-muted/50 opacity-40' : heatClass(count, max)
                   } ${isSelected ? 'ring-2 ring-blue-500' : ''} ${!future ? 'cursor-pointer hover:ring-1 hover:ring-blue-400' : ''}`}
                 />
               );
@@ -249,12 +249,12 @@ export default function ActivityHeatmap({
   return (
     <section className="tp-card rounded-xl p-3" aria-label="Activity heatmap">
       <div className="mb-2 flex items-center justify-between gap-2">
-        <h3 className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-slate-400">
+        <h3 className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/75">
           <Flame className="h-3.5 w-3.5 text-violet-400" aria-hidden="true" />
           Activity
-          <span className="normal-case tracking-normal text-slate-300">· {rangeLabel}</span>
+          <span className="normal-case tracking-normal text-muted-foreground/50">· {rangeLabel}</span>
         </h3>
-        <div className="flex rounded-md bg-slate-100 p-0.5 text-[10px] font-bold">
+        <div className="flex rounded-md bg-muted p-0.5 text-[10px] font-bold">
           {OVERRIDES.map((o) => (
             <button
               key={o.key}
@@ -263,7 +263,7 @@ export default function ActivityHeatmap({
               aria-pressed={override === o.key}
               title={o.key === 'auto' ? 'Follow the page period' : `${{ W: 'Week', M: 'Month', Q: 'Quarter (13 weeks)', Y: 'Year (52 weeks)' }[o.key]} view`}
               className={`tp-focus-ring rounded px-1.5 py-0.5 transition-colors ${
-                override === o.key ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-400 hover:text-slate-600'
+                override === o.key ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground/75 hover:text-muted-foreground'
               }`}
             >
               {o.label}
@@ -273,7 +273,7 @@ export default function ActivityHeatmap({
       </div>
 
       {isLoading ? (
-        <div className="flex h-16 items-center justify-center text-xs text-slate-400">Loading activity…</div>
+        <div className="flex h-16 items-center justify-center text-xs text-muted-foreground/75">Loading activity…</div>
       ) : effective === 'W' ? (
         <WeekGrid countByDay={countByDay} anchor={anchor} todayStr={todayStr} selectedStr={selectedStr} onSelectDay={onSelectDay} />
       ) : effective === 'M' ? (
@@ -289,7 +289,7 @@ export default function ActivityHeatmap({
         />
       )}
 
-      <div className="mt-2 flex items-center justify-end gap-1 text-[9px] text-slate-400">
+      <div className="mt-2 flex items-center justify-end gap-1 text-[9px] text-muted-foreground/75">
         Less
         {HEAT_CLASSES.map((cls) => (
           <span key={cls} className={`inline-block h-2.5 w-2.5 rounded-[3px] ${cls}`} aria-hidden="true" />

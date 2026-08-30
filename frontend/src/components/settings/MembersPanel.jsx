@@ -18,10 +18,10 @@ const COMMON_TIMEZONES = [
 
 function Avatar({ name, photoUrl, size = 'h-8 w-8', dim = false }) {
   return (
-    <div className={`${size} rounded-full bg-slate-100 overflow-hidden flex items-center justify-center shrink-0 ${dim ? 'grayscale opacity-60' : ''}`}>
+    <div className={`${size} rounded-full bg-muted overflow-hidden flex items-center justify-center shrink-0 ${dim ? 'grayscale opacity-60' : ''}`}>
       {photoUrl
         ? <img src={photoUrl} alt="" className="w-full h-full object-cover" />
-        : <span className="text-[10px] font-semibold text-slate-500">{(name || '?').split(' ').map((p) => p[0]).join('').slice(0, 2).toUpperCase()}</span>}
+        : <span className="text-[10px] font-semibold text-muted-foreground">{(name || '?').split(' ').map((p) => p[0]).join('').slice(0, 2).toUpperCase()}</span>}
     </div>
   );
 }
@@ -88,7 +88,7 @@ function DirectoryAdd({ onAdded, onError }) {
   return (
     <div ref={rootRef} className="relative">
       <div className="relative">
-        <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
+        <Search className="w-4 h-4 text-muted-foreground/75 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
         <input
           value={query}
           onChange={(e) => handleChange(e.target.value)}
@@ -96,16 +96,16 @@ function DirectoryAdd({ onAdded, onError }) {
           placeholder="Search your company directory by name or email…"
           className="w-full pl-10 pr-9 py-2.5 border border-input rounded-lg text-sm tp-focus-ring"
         />
-        {searching && <Loader className="w-4 h-4 text-slate-400 animate-spin absolute right-3 top-1/2 -translate-y-1/2" />}
+        {searching && <Loader className="w-4 h-4 text-muted-foreground/75 animate-spin absolute right-3 top-1/2 -translate-y-1/2" />}
       </div>
 
       {open && query.trim().length >= 2 && (
         <div className="absolute z-30 mt-1 w-full tp-card rounded-xl shadow-soft p-1.5 max-h-80 overflow-y-auto settings-scrollbar animate-scaleIn">
           {searching && results.length === 0 && (
-            <div className="px-3 py-4 text-sm text-slate-400 flex items-center gap-2"><Loader className="w-4 h-4 animate-spin" /> Searching directory…</div>
+            <div className="px-3 py-4 text-sm text-muted-foreground/75 flex items-center gap-2"><Loader className="w-4 h-4 animate-spin" /> Searching directory…</div>
           )}
           {!searching && results.length === 0 && (
-            <div className="px-3 py-4 text-sm text-slate-400">No one in the directory matches “{query}”.</div>
+            <div className="px-3 py-4 text-sm text-muted-foreground/75">No one in the directory matches “{query}”.</div>
           )}
           {results.map((p) => {
             const busy = addingEmail === p.email;
@@ -117,22 +117,22 @@ function DirectoryAdd({ onAdded, onError }) {
                 onClick={() => add(p)}
                 disabled={disabled}
                 className={`w-full flex items-center gap-3 px-2.5 py-2 rounded-lg text-left tp-focus-ring ${
-                  p.alreadyMemberActive ? 'opacity-60 cursor-default' : 'hover:bg-blue-50'
+                  p.alreadyMemberActive ? 'opacity-60 cursor-default' : 'hover:bg-blue-50 dark:hover:bg-blue-500/15'
                 }`}
               >
                 <Avatar name={p.name} photoUrl={p.photoUrl} size="h-9 w-9" />
                 <div className="min-w-0 flex-1">
-                  <div className="text-sm font-medium text-gray-900 truncate">{p.name}</div>
-                  <div className="text-xs text-gray-500 truncate">
+                  <div className="text-sm font-medium text-foreground truncate">{p.name}</div>
+                  <div className="text-xs text-muted-foreground truncate">
                     {p.email}{p.jobTitle ? ` · ${p.jobTitle}` : ''}
                   </div>
                 </div>
                 {p.alreadyMemberActive ? (
-                  <span className="text-[11px] font-medium text-slate-400 shrink-0">Already added</span>
+                  <span className="text-[11px] font-medium text-muted-foreground/75 shrink-0">Already added</span>
                 ) : busy ? (
                   <Loader className="w-4 h-4 text-blue-500 animate-spin shrink-0" />
                 ) : (
-                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 shrink-0">
+                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 dark:text-blue-300 shrink-0">
                     {p.alreadyMember ? <><Power className="w-3.5 h-3.5" /> Re-add</> : <><UserPlus className="w-3.5 h-3.5" /> Add</>}
                   </span>
                 )}
@@ -353,13 +353,13 @@ export default function MembersPanel() {
           <div className="flex items-center gap-2.5 min-w-0">
             <Avatar name={t.name} photoUrl={t.photoUrl} dim={!t.isActive} />
             <div className="min-w-0">
-              <div className={`text-sm font-medium truncate ${t.isActive ? 'text-gray-900' : 'text-slate-500'}`}>
+              <div className={`text-sm font-medium truncate ${t.isActive ? 'text-foreground' : 'text-muted-foreground'}`}>
                 {t.name}
                 {t.routingGuidance && (
                   <Brain className="inline-block w-3.5 h-3.5 ml-1.5 -mt-0.5 text-violet-500" aria-label="Has an AI routing note" title={t.routingGuidance} />
                 )}
               </div>
-              <div className="text-xs text-gray-500 truncate">{t.email || '—'}</div>
+              <div className="text-xs text-muted-foreground truncate">{t.email || '—'}</div>
             </div>
           </div>
         );
@@ -369,11 +369,11 @@ export default function MembersPanel() {
       id: 'type',
       header: 'Type',
       cell: ({ getValue }) => (getValue() === 'Local' ? (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 border border-blue-200 dark:border-blue-500/30">
           <Home className="w-3 h-3" aria-hidden="true" /> Local
         </span>
       ) : (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-slate-50 text-slate-500 border border-slate-200">
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-muted/50 text-muted-foreground border border-border">
           <Cloud className="w-3 h-3" aria-hidden="true" /> FreshService
         </span>
       )),
@@ -382,20 +382,20 @@ export default function MembersPanel() {
       id: 'location',
       header: 'Location',
       cell: ({ getValue }) => (getValue() ? (
-        <span className="inline-flex items-center gap-1 text-xs text-gray-600">
-          <MapPin className="w-3 h-3 text-slate-400" aria-hidden="true" />{getValue()}
+        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+          <MapPin className="w-3 h-3 text-muted-foreground/75" aria-hidden="true" />{getValue()}
         </span>
-      ) : <span className="text-xs text-slate-300">—</span>),
+      ) : <span className="text-xs text-muted-foreground/50">—</span>),
     }),
     columnHelper.accessor((t) => (t.isActive ? 0 : 1), {
       id: 'status',
       header: 'Status',
       cell: ({ row }) => (row.original.isActive ? (
-        <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700">
+        <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-200">
           <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500" aria-hidden="true" /> Active
         </span>
       ) : (
-        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-500 border border-slate-200">
+        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-muted text-muted-foreground border border-border">
           Disabled
         </span>
       )),
@@ -409,7 +409,7 @@ export default function MembersPanel() {
       cell: ({ row }) => {
         const t = row.original;
         const email = String(t.email || '').toLowerCase();
-        if (!email) return <span className="text-xs text-slate-300" title="No email — app access is keyed by email">—</span>;
+        if (!email) return <span className="text-xs text-muted-foreground/50" title="No email — app access is keyed by email">—</span>;
         const value = accessByEmail[email] || '';
         const busy = accessBusyEmail === email;
         // Ceiling: a workspace admin cannot touch an existing admin's grant.
@@ -422,8 +422,8 @@ export default function MembersPanel() {
               disabled={busy || lockedAdminRow}
               aria-label={`App access for ${t.name}`}
               title={lockedAdminRow ? 'Global admin only' : 'App access role for this person'}
-              className={`px-2 py-1 rounded-lg border text-xs bg-white tp-focus-ring disabled:opacity-60 ${
-                value ? 'border-blue-200 text-blue-700 font-medium' : 'border-slate-200 text-slate-500'
+              className={`px-2 py-1 rounded-lg border text-xs bg-card tp-focus-ring disabled:opacity-60 ${
+                value ? 'border-blue-200 dark:border-blue-500/30 text-blue-700 dark:text-blue-200 font-medium' : 'border-border text-muted-foreground'
               }`}
             >
               {ACCESS_OPTIONS.map((o) => (
@@ -459,12 +459,12 @@ export default function MembersPanel() {
     <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center gap-3">
-        <div className="p-2 bg-blue-100 rounded-lg">
-          <Users className="w-5 h-5 text-blue-600" />
+        <div className="p-2 bg-blue-100 dark:bg-blue-500/20 rounded-lg">
+          <Users className="w-5 h-5 text-blue-600 dark:text-blue-300" />
         </div>
         <div>
-          <h3 className="text-lg font-semibold text-gray-900">Members</h3>
-          <p className="text-sm text-gray-500 max-w-2xl">
+          <h3 className="text-lg font-semibold text-foreground">Members</h3>
+          <p className="text-sm text-muted-foreground max-w-2xl">
             FreshService members sync automatically (read-only). <strong>Local members</strong> are staff without a
             FreshService license — they can be assigned <strong>Ticket Pulse tickets only</strong> and sign in with
             their Microsoft account.
@@ -474,57 +474,57 @@ export default function MembersPanel() {
 
       {/* What "App access" means + cross-link to the full-list surface (AC3/AC4) */}
       {accessByEmail && (
-        <p className="flex items-start gap-1.5 text-xs text-slate-500 max-w-3xl">
-          <KeyRound className="w-3.5 h-3.5 mt-0.5 text-slate-400 shrink-0" aria-hidden="true" />
+        <p className="flex items-start gap-1.5 text-xs text-muted-foreground max-w-3xl">
+          <KeyRound className="w-3.5 h-3.5 mt-0.5 text-muted-foreground/75 shrink-0" aria-hidden="true" />
           <span>
-            <strong className="font-semibold text-slate-600">App access</strong> sets what this person can open here.
-            <strong className="font-semibold text-slate-600"> Viewer</strong>: Tickets + Approvals, sees AI suggestions but can&rsquo;t approve them.
-            <strong className="font-semibold text-slate-600"> Reviewer</strong>: also approves AI suggestions and manages approval categories (Approvals → Categories).
-            <strong className="font-semibold text-slate-600"> Admin</strong>: everything, including Dashboard, Analytics and Settings.
+            <strong className="font-semibold text-muted-foreground">App access</strong> sets what this person can open here.
+            <strong className="font-semibold text-muted-foreground"> Viewer</strong>: Tickets + Approvals, sees AI suggestions but can&rsquo;t approve them.
+            <strong className="font-semibold text-muted-foreground"> Reviewer</strong>: also approves AI suggestions and manages approval categories (Approvals → Categories).
+            <strong className="font-semibold text-muted-foreground"> Admin</strong>: everything, including Dashboard, Analytics and Settings.
             Technicians without access can still sign in and use the ticket queue.
             The full access list, including non-technician users, is in{' '}
-            <a href="#workspace-access" className="text-blue-600 hover:text-blue-800 underline underline-offset-2 tp-focus-ring rounded">Workspace access</a>.
+            <a href="#workspace-access" className="text-blue-600 dark:text-blue-300 hover:text-blue-800 dark:hover:text-blue-200 underline underline-offset-2 tp-focus-ring rounded">Workspace access</a>.
           </span>
         </p>
       )}
 
       {/* Alerts */}
       {error && (
-        <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+        <div className="flex items-start gap-2 p-3 bg-red-50 dark:bg-red-500/15 border border-red-200 dark:border-red-500/30 rounded-lg text-sm text-red-700 dark:text-red-200">
           <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" /><span>{error}</span>
         </div>
       )}
       {successMsg && (
-        <div className="flex items-start gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-700">
+        <div className="flex items-start gap-2 p-3 bg-emerald-50 dark:bg-emerald-500/15 border border-emerald-200 dark:border-emerald-500/30 rounded-lg text-sm text-emerald-700 dark:text-emerald-200">
           <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" /><span>{successMsg}</span>
         </div>
       )}
 
       {/* Add via directory */}
       <div className="tp-card p-3.5 space-y-2">
-        <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
-          <UserPlus className="w-4 h-4 text-blue-600" /> Add a local member
-          {currentWorkspace?.name && <span className="text-xs font-normal text-gray-500">to {currentWorkspace.name}</span>}
+        <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+          <UserPlus className="w-4 h-4 text-blue-600 dark:text-blue-300" /> Add a local member
+          {currentWorkspace?.name && <span className="text-xs font-normal text-muted-foreground">to {currentWorkspace.name}</span>}
         </div>
         <DirectoryAdd onAdded={(name) => { flash(`${name} added from the directory.`); load(); }} onError={setError} />
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center py-12 text-gray-400">
+        <div className="flex items-center justify-center py-12 text-muted-foreground/75">
           <Loader className="w-5 h-5 animate-spin mr-2" /> Loading members…
         </div>
       ) : (
         <div className="tp-card rounded-xl overflow-hidden">
           {/* Toolbar: search + filter chips with live counts */}
-          <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-slate-50/60 px-3 py-2.5">
+          <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-3 py-2.5">
             <div className="relative w-full sm:w-64">
-              <Search className="w-4 h-4 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" aria-hidden="true" />
+              <Search className="w-4 h-4 text-muted-foreground/75 absolute left-2.5 top-1/2 -translate-y-1/2" aria-hidden="true" />
               <input
                 value={searchQ}
                 onChange={(e) => setSearchQ(e.target.value)}
                 placeholder="Search name, email, location…"
                 aria-label="Search members"
-                className="w-full pl-8 pr-3 py-1.5 border border-input rounded-lg text-sm bg-white tp-focus-ring"
+                className="w-full pl-8 pr-3 py-1.5 border border-input rounded-lg text-sm bg-card tp-focus-ring"
               />
             </div>
             <div className="flex flex-wrap items-center gap-1" role="group" aria-label="Filter members">
@@ -536,21 +536,21 @@ export default function MembersPanel() {
                   className={`tp-focus-ring px-2.5 py-1 rounded-full text-xs font-semibold border transition-colors ${
                     filter === key
                       ? 'bg-blue-600 text-white border-blue-600'
-                      : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                      : 'bg-card text-muted-foreground border-border hover:border-input hover:bg-muted/50'
                   }`}
                 >
-                  {label} <span className={filter === key ? 'opacity-80' : 'text-slate-400'}>{counts[key]}</span>
+                  {label} <span className={filter === key ? 'opacity-80' : 'text-muted-foreground/75'}>{counts[key]}</span>
                 </button>
               ))}
             </div>
-            <span className="ml-auto hidden md:inline text-xs text-slate-400">
+            <span className="ml-auto hidden md:inline text-xs text-muted-foreground/75">
               {rows.length} shown · click a column to sort
             </span>
           </div>
 
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
-              <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+              <thead className="bg-muted/50 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
                 {table.getHeaderGroups().map((hg) => (
                   <tr key={hg.id}>
                     {hg.headers.map((header) => {
@@ -562,7 +562,7 @@ export default function MembersPanel() {
                           <button
                             type="button"
                             onClick={header.column.getToggleSortingHandler()}
-                            className="tp-focus-ring inline-flex items-center gap-1 rounded uppercase tracking-wide hover:text-slate-700"
+                            className="tp-focus-ring inline-flex items-center gap-1 rounded uppercase tracking-wide hover:text-foreground/85"
                           >
                             {flexRender(header.column.columnDef.header, header.getContext())}
                             {sorted === 'asc' ? <ArrowUp className="w-3 h-3" aria-hidden="true" />
@@ -576,10 +576,10 @@ export default function MembersPanel() {
                   </tr>
                 ))}
               </thead>
-              <tbody className="divide-y divide-slate-100 bg-white">
+              <tbody className="divide-y divide-border/60 bg-card">
                 {table.getRowModel().rows.length === 0 && (
                   <tr>
-                    <td colSpan={colSpanAll} className="px-3 py-8 text-center text-sm text-slate-400">
+                    <td colSpan={colSpanAll} className="px-3 py-8 text-center text-sm text-muted-foreground/75">
                       {searchQ ? `No members match “${searchQ}” in this filter.` : 'No members in this filter.'}
                     </td>
                   </tr>
@@ -629,7 +629,7 @@ function MemberTableRow({
 }) {
   return (
     <>
-      <tr className={`transition-colors hover:bg-slate-50/70 ${t.isActive ? '' : 'opacity-70'}`}>
+      <tr className={`transition-colors hover:bg-muted/35 ${t.isActive ? '' : 'opacity-70'}`}>
         {row.getVisibleCells().map((cell) => {
           const hideOnMobile = cell.column.id === 'type' ? 'hidden md:table-cell'
             : cell.column.id === 'location' ? 'hidden lg:table-cell' : '';
@@ -643,17 +643,17 @@ function MemberTableRow({
           <div className="flex items-center justify-end gap-0.5">
             {t.isActive && !guidanceOpen && (
               <button onClick={onOpenGuidance} title={t.routingGuidance ? 'Edit AI routing note' : 'Add AI routing note (e.g. reduced capacity)'}
-                className={`p-1.5 rounded-lg tp-focus-ring ${t.routingGuidance ? 'text-violet-600 hover:text-violet-800' : 'text-gray-400 hover:text-violet-600'}`}>
+                className={`p-1.5 rounded-lg tp-focus-ring ${t.routingGuidance ? 'text-violet-600 dark:text-violet-300 hover:text-violet-800 dark:hover:text-violet-200' : 'text-muted-foreground/75 hover:text-violet-600 dark:hover:text-violet-300'}`}>
                 <Brain className="w-4 h-4" />
               </button>
             )}
             {onStartEdit && t.isActive && !editing && (
-              <button onClick={onStartEdit} title="Edit name / location / timezone" className="p-1.5 text-gray-400 hover:text-blue-600 rounded-lg tp-focus-ring">
+              <button onClick={onStartEdit} title="Edit name / location / timezone" className="p-1.5 text-muted-foreground/75 hover:text-blue-600 dark:hover:text-blue-300 rounded-lg tp-focus-ring">
                 <Pencil className="w-4 h-4" />
               </button>
             )}
             <button onClick={onToggle} disabled={toggling} title={t.isActive ? 'Disable' : 'Re-enable'}
-              className={`p-1.5 rounded-lg tp-focus-ring ${t.isActive ? 'text-gray-400 hover:text-red-600' : 'text-emerald-600 hover:text-emerald-700'}`}>
+              className={`p-1.5 rounded-lg tp-focus-ring ${t.isActive ? 'text-muted-foreground/75 hover:text-red-600 dark:hover:text-red-300' : 'text-emerald-600 dark:text-emerald-300 hover:text-emerald-700 dark:hover:text-emerald-200'}`}>
               {toggling ? <Loader className="w-4 h-4 animate-spin" /> : t.isActive ? <PowerOff className="w-4 h-4" /> : <Power className="w-4 h-4" />}
             </button>
           </div>
@@ -662,7 +662,7 @@ function MemberTableRow({
 
       {/* Expanded editors render as a full-width row directly under the member */}
       {editing && (
-        <tr className="bg-blue-50/40">
+        <tr className="bg-blue-50/40 dark:bg-blue-500/10">
           <td colSpan={colSpanAll} className="px-3 py-3">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <input value={editForm.name} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
@@ -670,7 +670,7 @@ function MemberTableRow({
               <input value={editForm.location} onChange={(e) => setEditForm((f) => ({ ...f, location: e.target.value }))}
                 placeholder="Location" className="px-3 py-2 border border-input rounded-lg text-sm tp-focus-ring" />
               <select value={editForm.timezone} onChange={(e) => setEditForm((f) => ({ ...f, timezone: e.target.value }))}
-                className="px-3 py-2 border border-input rounded-lg text-sm bg-white tp-focus-ring">
+                className="px-3 py-2 border border-input rounded-lg text-sm bg-card tp-focus-ring">
                 {COMMON_TIMEZONES.map((tz) => <option key={tz} value={tz}>{tz}</option>)}
               </select>
             </div>
@@ -679,7 +679,7 @@ function MemberTableRow({
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground rounded-lg text-xs font-medium hover:bg-primary/90 disabled:opacity-60 tp-focus-ring">
                 {saving ? <Loader className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} Save
               </button>
-              <button onClick={onCancelEdit} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-600 hover:text-gray-900 tp-focus-ring rounded-lg">
+              <button onClick={onCancelEdit} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground tp-focus-ring rounded-lg">
                 <X className="w-3.5 h-3.5" /> Cancel
               </button>
             </div>
@@ -687,7 +687,7 @@ function MemberTableRow({
         </tr>
       )}
       {guidanceOpen && (
-        <tr className="bg-violet-50/40">
+        <tr className="bg-violet-50/40 dark:bg-violet-500/10">
           <td colSpan={colSpanAll} className="px-3 py-3">
             <textarea
               value={guidanceDraft}
@@ -695,7 +695,7 @@ function MemberTableRow({
               rows={2}
               maxLength={500}
               placeholder="e.g. Reduced ticket capacity — only recommend for a significantly stronger skill match or their specialty categories."
-              className="w-full px-2.5 py-1.5 border border-violet-200 rounded-lg text-xs tp-focus-ring"
+              className="w-full px-2.5 py-1.5 border border-violet-200 dark:border-violet-500/30 rounded-lg text-xs tp-focus-ring"
               autoFocus
             />
             <div className="flex items-center gap-2 mt-1.5">
@@ -703,8 +703,8 @@ function MemberTableRow({
                 className="inline-flex items-center gap-1 px-2.5 py-1 bg-violet-600 text-white rounded-lg text-[11px] font-semibold hover:bg-violet-700 disabled:opacity-60 tp-focus-ring">
                 {guidanceSaving ? <Loader className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />} Save note
               </button>
-              <button onClick={onCloseGuidance} className="text-[11px] text-gray-500 hover:text-gray-800 tp-focus-ring rounded px-1.5 py-1">Cancel</button>
-              <span className="ml-auto text-[10px] text-gray-400">The AI treats this as a standing instruction from the team lead</span>
+              <button onClick={onCloseGuidance} className="text-[11px] text-muted-foreground hover:text-foreground tp-focus-ring rounded px-1.5 py-1">Cancel</button>
+              <span className="ml-auto text-[10px] text-muted-foreground/75">The AI treats this as a standing instruction from the team lead</span>
             </div>
           </td>
         </tr>

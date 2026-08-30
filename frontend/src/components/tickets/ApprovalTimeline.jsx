@@ -6,11 +6,11 @@ import { PersonAvatar, SafeHtml, formatDayTime, timeAgo } from './ticketUi';
 
 // Per-approver / verdict status → color-coded look (dot, chip, text, header tint).
 const STATUS = {
-  approved: { label: 'Approved', verb: 'Approved', Icon: CheckCircle2, dot: 'bg-emerald-500', chip: 'bg-emerald-50 text-emerald-700 border-emerald-200', text: 'text-emerald-700', head: 'bg-emerald-50/70 border-emerald-100' },
-  rejected: { label: 'Rejected', verb: 'Rejected', Icon: XCircle, dot: 'bg-red-500', chip: 'bg-red-50 text-red-700 border-red-200', text: 'text-red-700', head: 'bg-red-50/70 border-red-100' },
-  info_requested: { label: 'Needs info', verb: 'Clarification requested', Icon: MessageCircleQuestion, dot: 'bg-violet-500', chip: 'bg-violet-50 text-violet-700 border-violet-200', text: 'text-violet-700', head: 'bg-violet-50/70 border-violet-100' },
-  cancelled: { label: 'Cancelled', verb: 'Cancelled', Icon: Ban, dot: 'bg-slate-300', chip: 'bg-slate-100 text-slate-500 border-slate-200', text: 'text-slate-500', head: 'bg-slate-50 border-slate-100' },
-  pending: { label: 'Pending', verb: 'Pending', Icon: Clock, dot: 'bg-amber-400', chip: 'bg-amber-50 text-amber-700 border-amber-200', text: 'text-amber-700', head: 'bg-amber-50/60 border-amber-100' },
+  approved: { label: 'Approved', verb: 'Approved', Icon: CheckCircle2, dot: 'bg-emerald-500', chip: 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 border-emerald-200 dark:border-emerald-500/30', text: 'text-emerald-700 dark:text-emerald-200', head: 'bg-emerald-50/70 dark:bg-emerald-500/10 border-emerald-100 dark:border-emerald-500/20' },
+  rejected: { label: 'Rejected', verb: 'Rejected', Icon: XCircle, dot: 'bg-red-500', chip: 'bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200 border-red-200 dark:border-red-500/30', text: 'text-red-700 dark:text-red-200', head: 'bg-red-50/70 dark:bg-red-500/10 border-red-100 dark:border-red-500/20' },
+  info_requested: { label: 'Needs info', verb: 'Clarification requested', Icon: MessageCircleQuestion, dot: 'bg-violet-500', chip: 'bg-violet-50 dark:bg-violet-500/15 text-violet-700 dark:text-violet-200 border-violet-200 dark:border-violet-500/30', text: 'text-violet-700 dark:text-violet-200', head: 'bg-violet-50/70 dark:bg-violet-500/10 border-violet-100 dark:border-violet-500/20' },
+  cancelled: { label: 'Cancelled', verb: 'Cancelled', Icon: Ban, dot: 'bg-muted-foreground/40', chip: 'bg-muted text-muted-foreground border-border', text: 'text-muted-foreground', head: 'bg-muted/50 border-border/60' },
+  pending: { label: 'Pending', verb: 'Pending', Icon: Clock, dot: 'bg-amber-400', chip: 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200 border-amber-200 dark:border-amber-500/30', text: 'text-amber-700 dark:text-amber-200', head: 'bg-amber-50/60 dark:bg-amber-500/10 border-amber-100 dark:border-amber-500/20' },
 };
 const statusMeta = (s) => STATUS[s] || STATUS.pending;
 
@@ -69,19 +69,19 @@ export default function ApprovalTimeline({
         const canChangeVerdict = decider && (actorIsAdmin || actorEmail === String(decider.approverEmail || '').toLowerCase());
         const flipTo = verdict === 'approved' ? 'rejected' : 'approved';
         return (
-          <li key={head.requestGroupId || head.id} className="rounded-xl border border-slate-200 bg-white shadow-subtle overflow-hidden animate-fadeIn">
+          <li key={head.requestGroupId || head.id} className="rounded-xl border border-border bg-card shadow-subtle overflow-hidden animate-fadeIn">
             {/* Group header — category + overall verdict, tinted to match */}
             <div className={`flex flex-wrap items-center gap-2 px-3.5 py-2.5 border-b ${vMeta.head}`}>
-              <span className="inline-flex items-center justify-center h-6 w-6 rounded-lg bg-white/80 border border-white text-slate-500">
+              <span className="inline-flex items-center justify-center h-6 w-6 rounded-lg bg-card/80 border border-card text-muted-foreground">
                 <Stamp className="w-3.5 h-3.5" aria-hidden="true" />
               </span>
               {category && (
-                <span className="text-sm font-semibold text-slate-800">{category}</span>
+                <span className="text-sm font-semibold text-foreground">{category}</span>
               )}
               <span className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide rounded-full px-2 py-0.5 border ${vMeta.chip}`}>
                 <vMeta.Icon className="w-3 h-3" aria-hidden="true" /> {vMeta.label}
               </span>
-              <span className="ml-auto text-[11px] text-slate-400 whitespace-nowrap" title={new Date(head.createdAt).toLocaleString()}>
+              <span className="ml-auto text-[11px] text-muted-foreground/75 whitespace-nowrap" title={new Date(head.createdAt).toLocaleString()}>
                 {formatDayTime(head.createdAt)}
                 {' · '}{timeAgo(head.createdAt)}
               </span>
@@ -96,28 +96,28 @@ export default function ApprovalTimeline({
                     <div className="flex items-center gap-2.5">
                       <div className="relative flex-shrink-0">
                         <PersonAvatar name={decider.approverName || decider.approverEmail} size="h-8 w-8" textSize="text-[10px]" />
-                        <span className={`absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-white ${vMeta.dot} flex items-center justify-center`}>
+                        <span className={`absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-card ${vMeta.dot} flex items-center justify-center`}>
                           <vMeta.Icon className="w-2 h-2 text-white" aria-hidden="true" />
                         </span>
                       </div>
                       <div className="min-w-0">
-                        <p className="text-sm text-slate-700">
-                          <span className={`font-semibold ${vMeta.text}`}>{vMeta.verb}</span> by <span className="font-semibold text-slate-800">{decider.approverName || decider.approverEmail}</span>
-                          {decider.decidedAt && <span className="text-slate-400" title={new Date(decider.decidedAt).toLocaleString()}> · {formatDayTime(decider.decidedAt)} · {timeAgo(decider.decidedAt)}</span>}
+                        <p className="text-sm text-foreground/85">
+                          <span className={`font-semibold ${vMeta.text}`}>{vMeta.verb}</span> by <span className="font-semibold text-foreground">{decider.approverName || decider.approverEmail}</span>
+                          {decider.decidedAt && <span className="text-muted-foreground/75" title={new Date(decider.decidedAt).toLocaleString()}> · {formatDayTime(decider.decidedAt)} · {timeAgo(decider.decidedAt)}</span>}
                         </p>
-                        <p className="text-[11px] text-slate-400">
+                        <p className="text-[11px] text-muted-foreground/75">
                           Requested by {head.requestedBy}
                           {otherCount > 0 && <> · {otherCount} other approver{otherCount === 1 ? '' : 's'} auto-cancelled</>}
                         </p>
                       </div>
                     </div>
                   ) : (
-                    <p className="text-sm text-slate-500">Cancelled · requested by {head.requestedBy}</p>
+                    <p className="text-sm text-muted-foreground">Cancelled · requested by {head.requestedBy}</p>
                   )}
                   {decider?.decisionNoteHtml && !/^superseded/i.test(decider.decisionNote || '') ? (
-                    <div className="mt-1.5"><SafeHtml html={decider.decisionNoteHtml} className="text-xs text-slate-500" /></div>
+                    <div className="mt-1.5"><SafeHtml html={decider.decisionNoteHtml} className="text-xs text-muted-foreground" /></div>
                   ) : decider?.decisionNote && !/^superseded/i.test(decider.decisionNote) && (
-                    <p className="text-xs text-slate-500 mt-1.5 italic">“{decider.decisionNote}”</p>
+                    <p className="text-xs text-muted-foreground mt-1.5 italic">“{decider.decisionNote}”</p>
                   )}
                 </div>
                 {(canChangeVerdict || canRequesterManage) && (verdict === 'approved' || verdict === 'rejected') && (
@@ -129,8 +129,8 @@ export default function ApprovalTimeline({
                         title={`Change this decision to ${flipTo}`}
                         className={`tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg border disabled:opacity-50 ${
                           flipTo === 'approved'
-                            ? 'bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50'
-                            : 'bg-white text-red-700 border-red-200 hover:bg-red-50'
+                            ? 'bg-card text-emerald-700 dark:text-emerald-200 border-emerald-200 dark:border-emerald-500/30 hover:bg-emerald-50 dark:hover:bg-emerald-500/15'
+                            : 'bg-card text-red-700 dark:text-red-200 border-red-200 dark:border-red-500/30 hover:bg-red-50 dark:hover:bg-red-500/15'
                         }`}
                       >
                         <RefreshCw className="w-3 h-3" aria-hidden="true" /> Change to {flipTo}
@@ -140,7 +140,7 @@ export default function ApprovalTimeline({
                       <button
                         onClick={() => onDeleteRequest?.(head)}
                         disabled={groupBusy}
-                        className="tp-focus-ring inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600"
+                        className="tp-focus-ring inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-lg text-muted-foreground/75 hover:bg-red-50 dark:hover:bg-red-500/15 hover:text-red-600 dark:hover:text-red-300"
                       >
                         <Trash2 className="w-3 h-3" aria-hidden="true" /> Delete
                       </button>
@@ -150,16 +150,16 @@ export default function ApprovalTimeline({
               </div>
             ) : (
               <div className="px-3.5 py-3">
-                <p className="text-xs text-slate-500">
-                Requested by <span className="font-medium text-slate-600">{head.requestedBy}</span>
-                  {rows.length > 1 && <span className="text-slate-400"> · {rows.length} approvers · any one decides</span>}
+                <p className="text-xs text-muted-foreground">
+                Requested by <span className="font-medium text-muted-foreground">{head.requestedBy}</span>
+                  {rows.length > 1 && <span className="text-muted-foreground/75"> · {rows.length} approvers · any one decides</span>}
                 </p>
                 {head.requestNoteHtml ? (
-                  <div className="mt-1 text-xs text-slate-500 border-l-2 border-slate-200 pl-2">
-                    <SafeHtml html={head.requestNoteHtml} className="text-xs text-slate-500" />
+                  <div className="mt-1 text-xs text-muted-foreground border-l-2 border-border pl-2">
+                    <SafeHtml html={head.requestNoteHtml} className="text-xs text-muted-foreground" />
                   </div>
                 ) : head.requestNote && (
-                  <p className="mt-1 text-xs text-slate-500 italic border-l-2 border-slate-200 pl-2">“{head.requestNote}”</p>
+                  <p className="mt-1 text-xs text-muted-foreground italic border-l-2 border-border pl-2">“{head.requestNote}”</p>
                 )}
 
                 {/* Approver rail */}
@@ -176,34 +176,34 @@ export default function ApprovalTimeline({
                         <div className="relative flex flex-col items-center">
                           <div className="relative">
                             <PersonAvatar name={ap.approverName || ap.approverEmail} size="h-8 w-8" textSize="text-[10px]" />
-                            <span className={`absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-white ${sm.dot} flex items-center justify-center`} title={sm.label}>
+                            <span className={`absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-card ${sm.dot} flex items-center justify-center`} title={sm.label}>
                               <sm.Icon className="w-2 h-2 text-white" aria-hidden="true" />
                             </span>
                           </div>
-                          {!last && <span className="flex-1 w-px bg-slate-200 mt-1" aria-hidden="true" />}
+                          {!last && <span className="flex-1 w-px bg-secondary mt-1" aria-hidden="true" />}
                         </div>
 
                         <div className="min-w-0 flex-1 pb-0.5">
                           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                            <span className="text-sm font-medium text-slate-800 truncate">{ap.approverName || ap.approverEmail}</span>
+                            <span className="text-sm font-medium text-foreground truncate">{ap.approverName || ap.approverEmail}</span>
                             <span className={`inline-flex items-center gap-1 text-[10px] font-semibold rounded-full px-1.5 py-0.5 border ${sm.chip}`}>
                               {rowLabel(ap)}
                             </span>
                             {ap.decidedAt && (
-                              <span className="text-[11px] text-slate-400" title={new Date(ap.decidedAt).toLocaleString()}>{formatDayTime(ap.decidedAt)} · {timeAgo(ap.decidedAt)}</span>
+                              <span className="text-[11px] text-muted-foreground/75" title={new Date(ap.decidedAt).toLocaleString()}>{formatDayTime(ap.decidedAt)} · {timeAgo(ap.decidedAt)}</span>
                             )}
                           </div>
                           {ap.status === 'info_requested'
                             ? ap.decisionNote && <p className={`text-xs mt-0.5 ${sm.text}`}>Clarification needed: “{ap.decisionNote}”</p>
-                            : ap.decisionNote && <p className="text-xs text-slate-500 mt-0.5">{ap.decisionNote}</p>}
+                            : ap.decisionNote && <p className="text-xs text-muted-foreground mt-0.5">{ap.decisionNote}</p>}
 
                           {/* Answered clarifications survive resubmits — show the Q&A trail. */}
                           {Array.isArray(ap.clarificationLog) && ap.clarificationLog.some((c) => c?.answer) && (
                             <div className="mt-1.5 space-y-1">
                               {ap.clarificationLog.filter((c) => c?.answer).map((c, i) => (
-                                <div key={i} className="text-[11px] rounded-lg border border-violet-100 bg-violet-50/50 px-2 py-1.5">
-                                  {c.question && <p className="text-violet-700">Asked: “{c.question}”</p>}
-                                  <p className="text-slate-600">Reply: “{c.answer}”</p>
+                                <div key={i} className="text-[11px] rounded-lg border border-violet-100 dark:border-violet-500/20 bg-violet-50/50 dark:bg-violet-500/10 px-2 py-1.5">
+                                  {c.question && <p className="text-violet-700 dark:text-violet-200">Asked: “{c.question}”</p>}
+                                  <p className="text-muted-foreground">Reply: “{c.answer}”</p>
                                 </div>
                               ))}
                             </div>
@@ -219,7 +219,7 @@ export default function ApprovalTimeline({
                                   value={clarifyNote}
                                   onChange={(e) => setClarifyNote(e.target.value)}
                                   placeholder="What extra info do you need from the requester?"
-                                  className="tp-focus-ring w-full text-xs bg-white border border-violet-200 rounded-lg px-2.5 py-1.5 placeholder:text-slate-400 resize-y"
+                                  className="tp-focus-ring w-full text-xs bg-card border border-violet-200 dark:border-violet-500/30 rounded-lg px-2.5 py-1.5 placeholder:text-muted-foreground/75 resize-y"
                                 />
                                 <div className="flex items-center gap-1.5">
                                   <button
@@ -229,7 +229,7 @@ export default function ApprovalTimeline({
                                   >
                                     <Send className="w-3 h-3" aria-hidden="true" /> Send to requester
                                   </button>
-                                  <button onClick={() => { setClarifyingId(null); setClarifyNote(''); }} className="tp-focus-ring px-2 py-1 text-[11px] font-medium rounded-lg text-slate-500 hover:bg-slate-100">Cancel</button>
+                                  <button onClick={() => { setClarifyingId(null); setClarifyNote(''); }} className="tp-focus-ring px-2 py-1 text-[11px] font-medium rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
                                 </div>
                               </div>
                             ) : (
@@ -251,7 +251,7 @@ export default function ApprovalTimeline({
                                 <button
                                   onClick={() => { setClarifyingId(ap.id); setClarifyNote(''); }}
                                   disabled={busy}
-                                  className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-white text-violet-700 border border-violet-200 hover:bg-violet-50 disabled:opacity-50"
+                                  className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-card text-violet-700 dark:text-violet-200 border border-violet-200 dark:border-violet-500/30 hover:bg-violet-50 dark:hover:bg-violet-500/15 disabled:opacity-50"
                                 >
                                   <MessageCircleQuestion className="w-3 h-3" aria-hidden="true" /> Clarify
                                 </button>
@@ -268,7 +268,7 @@ export default function ApprovalTimeline({
                                 value={resubmitNotes[ap.id] || ''}
                                 onChange={(e) => setResubmitNotes((m) => ({ ...m, [ap.id]: e.target.value }))}
                                 placeholder="Reply with the requested info — sent to the approver with the resubmit…"
-                                className="tp-focus-ring w-full text-xs bg-white border border-violet-200 rounded-lg px-2.5 py-1.5 placeholder:text-slate-400 resize-y"
+                                className="tp-focus-ring w-full text-xs bg-card border border-violet-200 dark:border-violet-500/30 rounded-lg px-2.5 py-1.5 placeholder:text-muted-foreground/75 resize-y"
                               />
                               <div className="flex items-center gap-1.5 flex-wrap">
                                 <button
@@ -278,7 +278,7 @@ export default function ApprovalTimeline({
                                 >
                                   <ChevronRight className="w-3 h-3" aria-hidden="true" /> Resubmit for approval
                                 </button>
-                                <span className="text-[11px] text-slate-400">Your reply is kept on the request and emailed to the approver.</span>
+                                <span className="text-[11px] text-muted-foreground/75">Your reply is kept on the request and emailed to the approver.</span>
                               </div>
                             </div>
                           )}
@@ -291,18 +291,18 @@ export default function ApprovalTimeline({
                 {/* Group-level requester actions: cancel keeps an audit record;
                     delete removes it entirely (parent shows a warning first). */}
                 {canRequesterManage && (
-                  <div className="flex items-center gap-1.5 mt-3 pt-3 border-t border-slate-100">
+                  <div className="flex items-center gap-1.5 mt-3 pt-3 border-t border-border/60">
                     <button
                       onClick={() => onCancel(head.id)}
                       disabled={groupBusy}
-                      className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium rounded-lg text-slate-500 border border-slate-200 hover:bg-slate-100 disabled:opacity-50"
+                      className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium rounded-lg text-muted-foreground border border-border hover:bg-muted disabled:opacity-50"
                     >
                       <Ban className="w-3 h-3" aria-hidden="true" /> Cancel request
                     </button>
                     <button
                       onClick={() => onDeleteRequest?.(head)}
                       disabled={groupBusy}
-                      className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium rounded-lg text-slate-500 hover:bg-red-50 hover:text-red-600"
+                      className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium rounded-lg text-muted-foreground hover:bg-red-50 dark:hover:bg-red-500/15 hover:text-red-600 dark:hover:text-red-300"
                     >
                       <Trash2 className="w-3 h-3" aria-hidden="true" /> Delete
                     </button>

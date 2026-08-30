@@ -90,7 +90,10 @@ export function SafeHtml({ html, className = '' }) {
   });
   return (
     <div
-      className={`tp-rich-body text-sm text-slate-700 break-words [&_a]:text-blue-600 [&_a]:underline [&_img]:max-w-full [&_blockquote]:border-l-2 [&_blockquote]:border-slate-200 [&_blockquote]:pl-3 [&_blockquote]:text-slate-500 [&_p]:my-1.5 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 ${className}`}
+      // Dark mode: .tp-rich-body is a WHITE content well (index.css) — the
+      // body colour and the link blue are the light-well values on purpose;
+      // never add a `dark:` text twin here (it would paint the well's text).
+      className={`tp-rich-body text-sm text-foreground/85 break-words [&_a]:text-blue-600 [&_a]:underline [&_img]:max-w-full [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground [&_p]:my-1.5 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 ${className}`}
       // Sanitized above with DOMPurify — the only way to render email HTML faithfully.
       dangerouslySetInnerHTML={{ __html: clean }}
     />
@@ -130,9 +133,9 @@ export function StateChip({ state, className = '' }) {
  * Tones stay in the STATE_CHIP_STYLES family so the dot and the pill agree.
  */
 export const QUEUE_STATE_STYLES = {
-  new: { label: 'New', tone: 'bg-blue-50 text-blue-700', hint: 'unassigned and no agent reply yet' },
-  response_due: { label: 'Response due', tone: 'bg-amber-50 text-amber-700', hint: 'a first response is still owed to the requester' },
-  requester_responded: { label: 'Requester replied', tone: 'bg-sky-50 text-sky-700', hint: 'the last public message came from the requester' },
+  new: { label: 'New', tone: 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200', hint: 'unassigned and no agent reply yet' },
+  response_due: { label: 'Response due', tone: 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200', hint: 'a first response is still owed to the requester' },
+  requester_responded: { label: 'Requester replied', tone: 'bg-sky-50 dark:bg-sky-500/15 text-sky-700 dark:text-sky-200', hint: 'the last public message came from the requester' },
 };
 export const QUEUE_STATE_NOTE = 'First-response history is incomplete for some older FreshService tickets — those show "—" rather than a guess.';
 
@@ -146,7 +149,7 @@ export function QueueStatePill({ state, className = '' }) {
   if (!def) {
     return (
       <span
-        className={`text-xs text-slate-300 ${className}`}
+        className={`text-xs text-muted-foreground/50 ${className}`}
         title={`No state — resolved, closed, paused, or the reply history is unknown. ${QUEUE_STATE_NOTE}`}
         aria-label="No state"
       >
@@ -179,7 +182,7 @@ export function FeaturedFieldChip({ def, value, className = '' }) {
     <span
       title={full}
       data-testid="featured-field-chip"
-      className={`shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full bg-slate-100 border border-slate-200 text-[10px] font-medium text-slate-500 whitespace-nowrap ${className}`}
+      className={`shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full bg-muted border border-border text-[10px] font-medium text-muted-foreground whitespace-nowrap ${className}`}
     >
       {shown}
     </span>
@@ -189,15 +192,15 @@ export function FeaturedFieldChip({ def, value, className = '' }) {
 // Registry color tokens → tile/text tones. Keep keys in sync with the backend
 // ticketTypeService COLORS whitelist.
 export const TYPE_COLOR_TONES = {
-  slate: { tile: 'bg-slate-100 text-slate-600', text: 'text-slate-600' },
-  orange: { tile: 'bg-orange-100 text-orange-600', text: 'text-orange-600' },
-  violet: { tile: 'bg-violet-100 text-violet-600', text: 'text-violet-600' },
-  red: { tile: 'bg-red-100 text-red-600', text: 'text-red-600' },
-  blue: { tile: 'bg-blue-100 text-blue-600', text: 'text-blue-600' },
-  emerald: { tile: 'bg-emerald-100 text-emerald-600', text: 'text-emerald-600' },
-  amber: { tile: 'bg-amber-100 text-amber-700', text: 'text-amber-700' },
-  cyan: { tile: 'bg-cyan-100 text-cyan-600', text: 'text-cyan-600' },
-  pink: { tile: 'bg-pink-100 text-pink-600', text: 'text-pink-600' },
+  slate: { tile: 'bg-muted text-muted-foreground', text: 'text-muted-foreground' },
+  orange: { tile: 'bg-orange-100 dark:bg-orange-500/20 text-orange-600 dark:text-orange-300', text: 'text-orange-600 dark:text-orange-300' },
+  violet: { tile: 'bg-violet-100 dark:bg-violet-500/20 text-violet-600 dark:text-violet-300', text: 'text-violet-600 dark:text-violet-300' },
+  red: { tile: 'bg-red-100 dark:bg-red-500/20 text-red-600 dark:text-red-300', text: 'text-red-600 dark:text-red-300' },
+  blue: { tile: 'bg-blue-100 dark:bg-blue-500/20 text-blue-600 dark:text-blue-300', text: 'text-blue-600 dark:text-blue-300' },
+  emerald: { tile: 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-300', text: 'text-emerald-600 dark:text-emerald-300' },
+  amber: { tile: 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-200', text: 'text-amber-700 dark:text-amber-200' },
+  cyan: { tile: 'bg-cyan-100 dark:bg-cyan-500/20 text-cyan-600 dark:text-cyan-300', text: 'text-cyan-600 dark:text-cyan-300' },
+  pink: { tile: 'bg-pink-100 dark:bg-pink-500/20 text-pink-600 dark:text-pink-300', text: 'text-pink-600 dark:text-pink-300' },
 };
 
 /**
@@ -228,7 +231,7 @@ export function TypePill({ type, full = false }) {
         <Icon className="w-3 h-3" strokeWidth={2.4} />
       </span>
       <span className={full
-        ? 'truncate text-[11px] font-medium text-slate-600'
+        ? 'truncate text-[11px] font-medium text-muted-foreground'
         : `text-[10px] font-bold tracking-widest ${tone.text}`}
       >
         {label}
@@ -240,15 +243,15 @@ export function TypePill({ type, full = false }) {
 // Tag palette (gap plan P1) — named keys map to soft chip tones. Keep in sync
 // with the backend TAG_COLORS whitelist.
 export const TAG_CHIP_TONES = {
-  slate: 'bg-slate-100 text-slate-600 border-slate-200',
-  red: 'bg-red-50 text-red-700 border-red-200',
-  orange: 'bg-orange-50 text-orange-700 border-orange-200',
-  amber: 'bg-amber-50 text-amber-700 border-amber-200',
-  emerald: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-  sky: 'bg-sky-50 text-sky-700 border-sky-200',
-  blue: 'bg-blue-50 text-blue-700 border-blue-200',
-  violet: 'bg-violet-50 text-violet-700 border-violet-200',
-  pink: 'bg-pink-50 text-pink-700 border-pink-200',
+  slate: 'bg-muted text-muted-foreground border-border',
+  red: 'bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200 border-red-200 dark:border-red-500/30',
+  orange: 'bg-orange-50 dark:bg-orange-500/15 text-orange-700 dark:text-orange-200 border-orange-200 dark:border-orange-500/30',
+  amber: 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200 border-amber-200 dark:border-amber-500/30',
+  emerald: 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 border-emerald-200 dark:border-emerald-500/30',
+  sky: 'bg-sky-50 dark:bg-sky-500/15 text-sky-700 dark:text-sky-200 border-sky-200 dark:border-sky-500/30',
+  blue: 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 border-blue-200 dark:border-blue-500/30',
+  violet: 'bg-violet-50 dark:bg-violet-500/15 text-violet-700 dark:text-violet-200 border-violet-200 dark:border-violet-500/30',
+  pink: 'bg-pink-50 dark:bg-pink-500/15 text-pink-700 dark:text-pink-200 border-pink-200 dark:border-pink-500/30',
 };
 
 export function TagChip({ tag, size = 'sm', onRemove = null, className = '' }) {
@@ -290,8 +293,8 @@ export function SlaChip({ value, paused = false, calendarAware = false, classNam
   // no overdue red — the requester (or a third party) holds the ball.
   if (paused) {
     return (
-      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap bg-slate-100 text-slate-500 ${className}`} title="SLA paused while the ticket is pending">
-        <span className="w-1.5 h-1.5 rounded-full bg-slate-400" aria-hidden="true" />
+      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap bg-muted text-muted-foreground ${className}`} title="SLA paused while the ticket is pending">
+        <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/60" aria-hidden="true" />
         Paused
       </span>
     );
@@ -306,10 +309,10 @@ export function SlaChip({ value, paused = false, calendarAware = false, classNam
   // Softer, borderless urgency pills with a leading colored dot (mockup style):
   // red overdue, amber due-soon, green plenty-of-time.
   const tone = info.state === 'over'
-    ? 'bg-red-50 text-red-600'
+    ? 'bg-red-50 dark:bg-red-500/15 text-red-600 dark:text-red-300'
     : info.state === 'warn'
-      ? 'bg-amber-50 text-amber-700'
-      : 'bg-emerald-50 text-emerald-700';
+      ? 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200'
+      : 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200';
   const dot = info.state === 'over' ? 'bg-red-500' : info.state === 'warn' ? 'bg-amber-500' : 'bg-emerald-500';
   return (
     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap ${tone} ${className}`} title={clockTitle}>
@@ -377,7 +380,7 @@ export function SlaTargetChip({ target, metAt = null, status, kind = 'response',
   if (info.state === 'unknown') {
     const title = `${noun} target was ${targetLabel}. The ticket is ${String(status).toLowerCase()} and this timestamp wasn't tracked, so it can't be marked met or missed.`;
     return (
-      <span className={`${base} bg-slate-50 text-slate-400 border-slate-200`} title={title} aria-label={title}>
+      <span className={`${base} bg-muted/50 text-muted-foreground/75 border-border`} title={title} aria-label={title}>
         —
       </span>
     );
@@ -387,7 +390,7 @@ export function SlaTargetChip({ target, metAt = null, status, kind = 'response',
   if (info.state === 'met') {
     return (
       <span
-        className={`${base} bg-emerald-50 text-emerald-700 border-emerald-200`}
+        className={`${base} bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 border-emerald-200 dark:border-emerald-500/30`}
         title={`${verb} ${metLabel} — ${slaSpan(info.deltaMs)} before the ${targetLabel} target`}
       >
         {kind === 'resolution' ? 'Done' : 'Met'}
@@ -396,7 +399,7 @@ export function SlaTargetChip({ target, metAt = null, status, kind = 'response',
   }
   return (
     <span
-      className={`${base} bg-amber-50 text-amber-700 border-amber-200`}
+      className={`${base} bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200 border-amber-200 dark:border-amber-500/30`}
       title={`${verb} ${metLabel} — ${slaSpan(info.deltaMs)} after the ${targetLabel} target`}
     >
       {kind === 'resolution' ? 'Resolved late' : 'Met late'}
@@ -492,7 +495,7 @@ export function initials(name) {
  * slate fallback for unknown labels.
  */
 export function StatusPill({ status, className = '', size = 'md', tone: toneOverride = null }) {
-  const tone = toneOverride || STATUS_COLORS[status] || 'bg-slate-100 text-slate-500';
+  const tone = toneOverride || STATUS_COLORS[status] || 'bg-muted text-muted-foreground';
   // Deleted/Spam are terminal removals — solid red/orange + icon so they read as
   // "removed", not a quiet grey chip. `size='sm'` (dense queue rows) keeps it
   // compact so it fits its column; `md` (headers) is more prominent.
@@ -519,12 +522,12 @@ export function StatusPill({ status, className = '', size = 'md', tone: toneOver
 }
 
 export function PriorityDot({ priority, withLabel = false, title = null }) {
-  const color = PRIORITY_STRIP_COLORS[priority] || 'bg-slate-300';
+  const color = PRIORITY_STRIP_COLORS[priority] || 'bg-muted-foreground/40';
   const label = PRIORITY_LABELS[priority] || `P${priority}`;
   return (
     <span className="inline-flex items-center gap-1.5" title={title || `Priority: ${label}`}>
       <span aria-hidden="true" className={`w-2 h-2 rounded-full ${color}`} />
-      {withLabel && <span className="text-xs font-medium text-slate-600">{label}</span>}
+      {withLabel && <span className="text-xs font-medium text-muted-foreground">{label}</span>}
       {!withLabel && <span className="sr-only">{label} priority</span>}
     </span>
   );
@@ -557,7 +560,7 @@ export function ExternalChip() {
   // unit, never compress letter-by-letter into the category column (QA 08-04 #5).
   return (
     <span
-      className="shrink-0 whitespace-nowrap inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-800 border border-amber-300"
+      className="shrink-0 whitespace-nowrap inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 dark:bg-amber-500/15 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-500/40"
       title="The requester's email domain is outside this workspace's trusted domains (Settings → Ticket Ops → Trusted domains)"
     >
       <Globe className="w-3 h-3" aria-hidden="true" />
@@ -569,14 +572,14 @@ export function ExternalChip() {
 export function OriginChip({ origin }) {
   if (origin === 'ticketpulse') {
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-sky-50 text-sky-700 border border-sky-200">
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-sky-50 dark:bg-sky-500/15 text-sky-700 dark:text-sky-200 border border-sky-200 dark:border-sky-500/30">
         <TicketIcon className="w-3 h-3" aria-hidden="true" />
         Ticket Pulse
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-500 border border-slate-200">
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-muted text-muted-foreground border border-border">
       FreshService
     </span>
   );
@@ -591,16 +594,16 @@ export function assignmentProvenance(ticket) {
   const by = String(ticket.assignedBy || '').trim();
   const name = ticket.assignedTech?.name || '';
   if (ticket.isSelfPicked || (by && name && by === name)) {
-    return { key: 'self', label: 'Self-assigned', Icon: UserRound, cls: 'bg-slate-100 text-slate-600 border-slate-200', title: `${name || 'The assignee'} picked this ticket up` };
+    return { key: 'self', label: 'Self-assigned', Icon: UserRound, cls: 'bg-muted text-muted-foreground border-border', title: `${name || 'The assignee'} picked this ticket up` };
   }
   if (by === 'Ticket Pulse') {
-    return { key: 'ai', label: 'AI-assigned', Icon: Sparkles, cls: 'bg-indigo-50 text-indigo-700 border-indigo-200', title: 'Auto-assigned by the Ticket Pulse AI pipeline' };
+    return { key: 'ai', label: 'AI-assigned', Icon: Sparkles, cls: 'bg-indigo-50 dark:bg-indigo-500/15 text-indigo-700 dark:text-indigo-200 border-indigo-200 dark:border-indigo-500/30', title: 'Auto-assigned by the Ticket Pulse AI pipeline' };
   }
   if (ticket.origin !== 'ticketpulse' && !by) {
-    return { key: 'fs', label: 'Assigned in FreshService', Icon: Cloud, cls: 'bg-sky-50 text-sky-700 border-sky-200', title: 'This assignment came from FreshService' };
+    return { key: 'fs', label: 'Assigned in FreshService', Icon: Cloud, cls: 'bg-sky-50 dark:bg-sky-500/15 text-sky-700 dark:text-sky-200 border-sky-200 dark:border-sky-500/30', title: 'This assignment came from FreshService' };
   }
   if (by) {
-    return { key: 'manual', label: `Assigned by ${by}`, Icon: UserCog, cls: 'bg-blue-50 text-blue-700 border-blue-200', title: `Manually assigned by ${by}` };
+    return { key: 'manual', label: `Assigned by ${by}`, Icon: UserCog, cls: 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 border-blue-200 dark:border-blue-500/30', title: `Manually assigned by ${by}` };
   }
   return null;
 }
@@ -623,20 +626,20 @@ export function MirrorChip({ ticket }) {
   const state = ticket.mirrorState;
   if (state === 'mirrored') {
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200" title="A fallback copy exists in FreshService">
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 border border-emerald-200 dark:border-emerald-500/30" title="A fallback copy exists in FreshService">
         <Cloud className="w-3 h-3" aria-hidden="true" /> Mirrored
       </span>
     );
   }
   if (state === 'error') {
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-red-50 text-red-700 border border-red-200" title={ticket.mirrorError || 'Mirroring to FreshService failed'}>
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200 border border-red-200 dark:border-red-500/30" title={ticket.mirrorError || 'Mirroring to FreshService failed'}>
         <CloudOff className="w-3 h-3" aria-hidden="true" /> Mirror error
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-50 text-slate-500 border border-slate-200" title="Queued for the FreshService fallback mirror (arrives with the mirror phase)">
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-muted/50 text-muted-foreground border border-border" title="Queued for the FreshService fallback mirror (arrives with the mirror phase)">
       <CloudUpload className="w-3 h-3" aria-hidden="true" /> Mirror pending
     </span>
   );
@@ -664,15 +667,15 @@ export function UnassignedBadge({ size = 'h-6 w-6', withLabel = true, labelClass
         aria-hidden="true"
         className={`${size} rounded-full border-[1.5px] border-dashed inline-flex items-center justify-center flex-shrink-0 transition-colors ${
           muted
-            ? 'border-slate-300 text-slate-300'
-            : 'border-slate-300 text-slate-400 group-hover:border-blue-400 group-hover:text-blue-500'
+            ? 'border-input text-muted-foreground/50'
+            : 'border-input text-muted-foreground/75 group-hover:border-blue-400 group-hover:text-blue-500'
         }`}
       >
         <UserPlus className="w-3 h-3" strokeWidth={2.2} />
       </span>
       {withLabel
         ? (
-          <span className={`${labelClass} font-medium truncate ${muted ? 'text-slate-400' : 'text-slate-500 group-hover:text-blue-600'}`}>
+          <span className={`${labelClass} font-medium truncate ${muted ? 'text-muted-foreground/75' : 'text-muted-foreground group-hover:text-blue-600 dark:group-hover:text-blue-300'}`}>
             {muted ? 'Unassigned' : 'Assign'}
           </span>
         )
@@ -683,17 +686,17 @@ export function UnassignedBadge({ size = 'h-6 w-6', withLabel = true, labelClass
 
 export function PersonAvatar({ name, photoUrl, size = 'h-6 w-6', textSize = 'text-[10px]' }) {
   if (photoUrl) {
-    return <img src={photoUrl} alt="" className={`${size} rounded-full object-cover ring-1 ring-slate-200`} />;
+    return <img src={photoUrl} alt="" className={`${size} rounded-full object-cover ring-1 ring-border`} />;
   }
   if (!name) {
     return (
-      <span className={`${size} rounded-full bg-slate-100 text-slate-400 inline-flex items-center justify-center`}>
+      <span className={`${size} rounded-full bg-muted text-muted-foreground/75 inline-flex items-center justify-center`}>
         <UserRound className="w-3.5 h-3.5" aria-hidden="true" />
       </span>
     );
   }
   return (
-    <span className={`${size} rounded-full bg-blue-50 text-blue-700 border border-blue-100 inline-flex items-center justify-center font-semibold ${textSize}`}>
+    <span className={`${size} rounded-full bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 border border-blue-100 dark:border-blue-500/20 inline-flex items-center justify-center font-semibold ${textSize}`}>
       {initials(name)}
     </span>
   );
@@ -724,7 +727,7 @@ export function TicketRefLink({
   ticket,
   label,
   className = 'text-[11px]',
-  linkClassName = 'font-medium text-blue-600 hover:text-blue-800',
+  linkClassName = 'font-medium text-blue-600 dark:text-blue-300 hover:text-blue-800 dark:hover:text-blue-200',
   showFsIcon = true,
   iconClassName = 'h-2.5 w-2.5',
   onNavigate,
@@ -753,7 +756,7 @@ export function TicketRefLink({
           target="_blank"
           rel="noopener noreferrer"
           title="Open in FreshService"
-          className="flex-shrink-0 text-blue-300 hover:text-blue-600"
+          className="flex-shrink-0 text-blue-300 dark:text-blue-500/60 hover:text-blue-600 dark:hover:text-blue-300"
           onClick={(e) => e.stopPropagation()}
         >
           <ExternalLink className={iconClassName} aria-hidden="true" />

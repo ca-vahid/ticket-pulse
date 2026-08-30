@@ -43,7 +43,7 @@ function RecipientGroup({ label, emails, expanded, visibleCount }) {
   const shown = expanded ? emails : emails.slice(0, visibleCount);
   return (
     <span className="min-w-0">
-      <span className="font-semibold text-slate-400">{label}:</span>{' '}
+      <span className="font-semibold text-muted-foreground/75">{label}:</span>{' '}
       <span className="break-all">{shown.join(', ')}</span>
     </span>
   );
@@ -64,13 +64,13 @@ export default function RecipientsLine({ to, cc, className = '', compact = false
   const iconSize = compact ? 'w-3 h-3' : 'w-3.5 h-3.5';
 
   return (
-    <div className={`flex items-start gap-1.5 ${textSize} text-slate-500 ${className}`}>
-      <Mail className={`${iconSize} mt-0.5 flex-none text-slate-400`} aria-hidden="true" />
+    <div className={`flex items-start gap-1.5 ${textSize} text-muted-foreground ${className}`}>
+      <Mail className={`${iconSize} mt-0.5 flex-none text-muted-foreground/75`} aria-hidden="true" />
       <span className="min-w-0 leading-relaxed">
         {toList.length > 0 && (
           <RecipientGroup label="To" emails={toList} expanded={expanded} visibleCount={visibleCount} />
         )}
-        {toList.length > 0 && ccList.length > 0 && <span className="text-slate-300" aria-hidden="true">{' · '}</span>}
+        {toList.length > 0 && ccList.length > 0 && <span className="text-muted-foreground/50" aria-hidden="true">{' · '}</span>}
         {ccList.length > 0 && (
           <RecipientGroup label="Cc" emails={ccList} expanded={expanded} visibleCount={visibleCount} />
         )}
@@ -81,7 +81,7 @@ export default function RecipientsLine({ to, cc, className = '', compact = false
               type="button"
               onClick={() => setExpanded((v) => !v)}
               aria-expanded={expanded}
-              className="tp-focus-ring inline rounded px-0.5 font-semibold text-slate-400 underline decoration-dotted underline-offset-2 hover:text-blue-600"
+              className="tp-focus-ring inline rounded px-0.5 font-semibold text-muted-foreground/75 underline decoration-dotted underline-offset-2 hover:text-blue-600 dark:hover:text-blue-300"
             >
               {expanded ? 'show less' : `+${hiddenCount} more`}
             </button>

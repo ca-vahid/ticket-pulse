@@ -134,7 +134,8 @@ describe('TicketBoard queue UX batch (QA 08-07 #6/#7/#12, Phase 3)', () => {
     );
     const line = screen.getByText('Rita Requester');
     expect(line).toBeInTheDocument();
-    expect(line).toHaveClass('text-[11px]', 'text-slate-400', 'truncate');
+    // Dark mode (DM-B): the muted requester line rides the token, not slate-400.
+    expect(line).toHaveClass('text-[11px]', 'text-muted-foreground/75', 'truncate');
     // No requester on the ticket → no empty line rendered.
     const card2 = screen.getByText('Ticket 2').closest('[role="button"]');
     expect(within(card2).queryByText(/requester/i)).not.toBeInTheDocument();

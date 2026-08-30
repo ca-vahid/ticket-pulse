@@ -52,7 +52,7 @@ export default function PublicApprovalDecision() {
   const alreadyDecided = approval && approval.status !== 'pending';
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-100 via-blue-50 to-slate-100 flex items-center justify-center p-4">
+    <div className="tp-light min-h-screen bg-gradient-to-br from-slate-100 via-blue-50 to-slate-100 flex items-center justify-center p-4">
       <div className="w-full max-w-lg bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden">
         <div className="px-6 py-4 bg-slate-900 text-white flex items-center gap-2.5">
           <ShieldCheck className="w-5 h-5 text-emerald-400" aria-hidden="true" />

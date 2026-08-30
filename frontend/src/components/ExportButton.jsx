@@ -91,8 +91,8 @@ export default function ExportButton({
           className={`
             p-1.5 rounded-l transition-colors
             ${isDisabled 
-      ? 'text-gray-300 cursor-not-allowed' 
-      : 'hover:bg-gray-100 cursor-pointer'
+      ? 'text-muted-foreground/50 cursor-not-allowed' 
+      : 'hover:bg-muted cursor-pointer'
     }
           `}
           title={ticketCount === 0 ? 'No tickets to export' : `Export ${ticketCount} ticket${ticketCount !== 1 ? 's' : ''} as Excel`}
@@ -111,10 +111,10 @@ export default function ExportButton({
           className={`
             p-1 rounded-r transition-colors -ml-1
             ${isDisabled 
-      ? 'text-gray-300 cursor-not-allowed' 
+      ? 'text-muted-foreground/50 cursor-not-allowed' 
       : isOpen
-        ? 'bg-gray-100 cursor-pointer'
-        : 'hover:bg-gray-100 cursor-pointer'
+        ? 'bg-muted cursor-pointer'
+        : 'hover:bg-muted cursor-pointer'
     }
           `}
           title="More export options"
@@ -125,25 +125,25 @@ export default function ExportButton({
 
       {/* Dropdown Menu */}
       {isOpen && !isDisabled && (
-        <div className="absolute right-0 mt-1 w-44 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50">
+        <div className="absolute right-0 mt-1 w-44 bg-card rounded-lg shadow-lg border border-border py-1 z-50">
           <button
             onClick={() => handleExport('xlsx')}
-            className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+            className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-foreground/85 hover:bg-muted/50 transition-colors"
           >
-            <FileSpreadsheet className="w-4 h-4 text-blue-600" />
+            <FileSpreadsheet className="w-4 h-4 text-blue-600 dark:text-blue-300" />
             <div className="text-left">
               <div className="font-medium">Export as Excel</div>
-              <div className="text-xs text-gray-500">{ticketCount} tickets</div>
+              <div className="text-xs text-muted-foreground">{ticketCount} tickets</div>
             </div>
           </button>
           <button
             onClick={() => handleExport('csv')}
-            className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+            className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-foreground/85 hover:bg-muted/50 transition-colors"
           >
-            <FileText className="w-4 h-4 text-green-600" />
+            <FileText className="w-4 h-4 text-green-600 dark:text-green-300" />
             <div className="text-left">
               <div className="font-medium">Export as CSV</div>
-              <div className="text-xs text-gray-500">{ticketCount} tickets</div>
+              <div className="text-xs text-muted-foreground">{ticketCount} tickets</div>
             </div>
           </button>
         </div>

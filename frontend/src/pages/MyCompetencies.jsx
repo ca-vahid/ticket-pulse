@@ -12,11 +12,11 @@ import ItSummitFeedbackPanel from '../components/ItSummitFeedbackPanel';
 import ItSummitCategoriesPanel from '../components/ItSummitCategoriesPanel';
 
 const LEVELS = [
-  { value: '', label: 'No experience', short: '-', rank: 0, className: 'bg-slate-100 text-slate-400 border-slate-200' },
-  { value: 'basic', label: 'Basic', short: '1', rank: 1, className: 'bg-yellow-100 text-yellow-800 border-yellow-200' },
-  { value: 'intermediate', label: 'Comfortable', short: '2', rank: 2, className: 'bg-blue-100 text-blue-800 border-blue-200' },
-  { value: 'advanced', label: 'Advanced', short: '3', rank: 3, className: 'bg-indigo-100 text-indigo-800 border-indigo-200' },
-  { value: 'expert', label: 'Expert / SME', short: '4', rank: 4, className: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
+  { value: '', label: 'No experience', short: '-', rank: 0, className: 'bg-muted text-muted-foreground/75 border-border' },
+  { value: 'basic', label: 'Basic', short: '1', rank: 1, className: 'bg-yellow-100 dark:bg-yellow-500/20 text-yellow-800 dark:text-yellow-200 border-yellow-200 dark:border-yellow-500/30' },
+  { value: 'intermediate', label: 'Comfortable', short: '2', rank: 2, className: 'bg-blue-100 dark:bg-blue-500/20 text-blue-800 dark:text-blue-200 border-blue-200 dark:border-blue-500/30' },
+  { value: 'advanced', label: 'Advanced', short: '3', rank: 3, className: 'bg-indigo-100 dark:bg-indigo-500/20 text-indigo-800 dark:text-indigo-200 border-indigo-200 dark:border-indigo-500/30' },
+  { value: 'expert', label: 'Expert / SME', short: '4', rank: 4, className: 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-200 border-emerald-200 dark:border-emerald-500/30' },
 ];
 
 const levelByValue = Object.fromEntries(LEVELS.map((level) => [level.value, level]));
@@ -397,20 +397,20 @@ export default function MyCompetencies() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-100 bg-[url('/brand/dashboard-background.webp')] bg-cover bg-fixed">
+    <div className="tp-app-backdrop min-h-screen bg-cover bg-fixed">
       <style>{`
         @keyframes slideIn { from { opacity: 0; transform: translate3d(16px, -8px, 0) scale(.98); } to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); } }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes popIn { from { opacity: 0; transform: translateY(10px) scale(.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
-        @keyframes pulseOnce { 0% { box-shadow: inset 0 0 0 0 rgba(37, 99, 235, 0); } 35% { box-shadow: inset 0 0 0 9999px rgba(219, 234, 254, .78); } 100% { box-shadow: inset 0 0 0 0 rgba(37, 99, 235, 0); } }
+        @keyframes pulseOnce { 0% { box-shadow: inset 0 0 0 0 hsl(var(--primary) / 0); } 35% { box-shadow: inset 0 0 0 9999px hsl(var(--primary) / 0.18); } 100% { box-shadow: inset 0 0 0 0 hsl(var(--primary) / 0); } }
       `}</style>
       {message && (
         <div className="fixed right-4 top-20 z-50 w-[min(420px,calc(100vw-2rem))] animate-[slideIn_.24s_ease-out]">
-          <div className={`overflow-hidden rounded-xl border bg-white shadow-2xl shadow-slate-200/70 ${
-            message.type === 'error' ? 'border-red-200'
-              : message.type === 'warning' ? 'border-amber-200'
-                : message.type === 'success' ? 'border-emerald-200'
-                  : 'border-blue-200'
+          <div className={`overflow-hidden rounded-xl border bg-card shadow-2xl shadow-slate-200/70 dark:shadow-black/50 ${
+            message.type === 'error' ? 'border-red-200 dark:border-red-500/30'
+              : message.type === 'warning' ? 'border-amber-200 dark:border-amber-500/30'
+                : message.type === 'success' ? 'border-emerald-200 dark:border-emerald-500/30'
+                  : 'border-blue-200 dark:border-blue-500/30'
           }`}>
             <div className={`h-1 ${
               message.type === 'error' ? 'bg-red-500'
@@ -420,16 +420,16 @@ export default function MyCompetencies() {
             }`} />
             <div className="flex gap-3 p-4">
               <span className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
-                message.type === 'error' ? 'bg-red-50 text-red-600'
-                  : message.type === 'warning' ? 'bg-amber-50 text-amber-600'
-                    : message.type === 'success' ? 'bg-emerald-50 text-emerald-600'
-                      : 'bg-blue-50 text-blue-600'
+                message.type === 'error' ? 'bg-red-50 dark:bg-red-500/15 text-red-600 dark:text-red-300'
+                  : message.type === 'warning' ? 'bg-amber-50 dark:bg-amber-500/15 text-amber-600 dark:text-amber-300'
+                    : message.type === 'success' ? 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-300'
+                      : 'bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-300'
               }`}>
                 {message.type === 'success' ? <CheckCircle2 className="h-5 w-5" /> : message.type === 'error' ? <XCircle className="h-5 w-5" /> : <Clock3 className="h-5 w-5" />}
               </span>
               <div className="min-w-0 flex-1">
-                <div className="font-semibold text-slate-950">{message.title || 'Update'}</div>
-                <div className="mt-1 text-sm leading-5 text-slate-600">{message.text}</div>
+                <div className="font-semibold text-foreground">{message.title || 'Update'}</div>
+                <div className="mt-1 text-sm leading-5 text-muted-foreground">{message.text}</div>
                 {message.actionLabel && (
                   <button
                     type="button"
@@ -437,7 +437,7 @@ export default function MyCompetencies() {
                       message.onAction?.();
                       setMessage(null);
                     }}
-                    className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-slate-950 px-3 py-2 text-xs font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800"
+                    className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-slate-950 px-3 py-2 text-xs font-semibold text-white transition hover:-translate-y-0.5 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600"
                   >
                     <PlusCircle className="h-3.5 w-3.5" />
                     {message.actionLabel}
@@ -447,7 +447,7 @@ export default function MyCompetencies() {
               <button
                 type="button"
                 onClick={() => setMessage(null)}
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground/75 transition hover:bg-muted hover:text-foreground/85"
                 aria-label="Close notification"
               >
                 <X className="h-4 w-4" />
@@ -458,23 +458,23 @@ export default function MyCompetencies() {
       )}
 
       {requestModalOpen && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/35 px-4 backdrop-blur-sm animate-[fadeIn_.18s_ease-out]">
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/35 dark:bg-slate-950/60 px-4 backdrop-blur-sm animate-[fadeIn_.18s_ease-out]">
           <form
             onSubmit={submitRequestForm}
-            className="max-h-[92vh] w-full max-w-3xl animate-[popIn_.2s_ease-out] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
+            className="max-h-[92vh] w-full max-w-3xl animate-[popIn_.2s_ease-out] overflow-hidden rounded-2xl border border-border bg-card shadow-2xl"
           >
-            <div className="flex items-start justify-between gap-3 border-b border-slate-100 p-5">
+            <div className="flex items-start justify-between gap-3 border-b border-border/60 p-5">
               <div>
-                <div className="flex items-center gap-2 text-lg font-semibold text-slate-950">
-                  <Sparkles className="h-5 w-5 text-blue-600" />
+                <div className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                  <Sparkles className="h-5 w-5 text-blue-600 dark:text-blue-300" />
                   Request skill upgrades
                 </div>
-                <p className="mt-1 text-sm text-slate-500">Select multiple subskills and send them as one approval bundle with one optional note.</p>
+                <p className="mt-1 text-sm text-muted-foreground">Select multiple subskills and send them as one approval bundle with one optional note.</p>
               </div>
               <button
                 type="button"
                 onClick={() => setRequestModalOpen(false)}
-                className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground/75 transition hover:bg-muted hover:text-foreground/85"
                 aria-label="Close request dialog"
               >
                 <X className="h-4 w-4" />
@@ -485,11 +485,11 @@ export default function MyCompetencies() {
               <div className="space-y-4">
                 <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_14rem]">
                   <label className="block">
-                    <span className="block text-xs font-semibold uppercase text-slate-500">Top category</span>
+                    <span className="block text-xs font-semibold uppercase text-muted-foreground">Top category</span>
                     <select
                       value={activeRequestGroup?.category?.id ? String(activeRequestGroup.category.id) : ''}
                       onChange={(event) => setRequestForm((current) => ({ ...current, parentId: event.target.value }))}
-                      className="mt-1 h-11 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-medium text-slate-800 outline-none transition focus:border-blue-300 focus:bg-white focus:ring-2 focus:ring-blue-100"
+                      className="mt-1 h-11 w-full rounded-lg border border-border bg-muted/50 px-3 text-sm font-medium text-foreground outline-none transition focus:border-blue-300 dark:focus:border-blue-500/40 focus:bg-card focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
                     >
                       {requestGroups.map((group) => (
                         <option key={group.category.id} value={group.category.id}>{group.category.name}</option>
@@ -497,7 +497,7 @@ export default function MyCompetencies() {
                     </select>
                   </label>
                   <label className="block">
-                    <span className="block text-xs font-semibold uppercase text-slate-500">Requested level</span>
+                    <span className="block text-xs font-semibold uppercase text-muted-foreground">Requested level</span>
                     <select
                       value={requestForm.requestedLevel}
                       onChange={(event) => {
@@ -512,7 +512,7 @@ export default function MyCompetencies() {
                           }),
                         }));
                       }}
-                      className="mt-1 h-11 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-medium text-slate-800 outline-none transition focus:border-blue-300 focus:bg-white focus:ring-2 focus:ring-blue-100"
+                      className="mt-1 h-11 w-full rounded-lg border border-border bg-muted/50 px-3 text-sm font-medium text-foreground outline-none transition focus:border-blue-300 dark:focus:border-blue-500/40 focus:bg-card focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
                     >
                       {LEVELS.filter((level) => level.value).map((level) => (
                         <option key={level.value} value={level.value}>{level.short} {level.label}</option>
@@ -521,10 +521,10 @@ export default function MyCompetencies() {
                   </label>
                 </div>
 
-                <div className="rounded-xl border border-slate-200">
-                  <div className="flex items-center justify-between gap-3 border-b border-slate-100 bg-slate-50 px-3 py-2">
-                    <div className="text-sm font-semibold text-slate-900">{activeRequestGroup?.category?.name || 'Skills'}</div>
-                    <div className="text-xs font-medium text-slate-500">{selectedRequestSkills.length} selected</div>
+                <div className="rounded-xl border border-border">
+                  <div className="flex items-center justify-between gap-3 border-b border-border/60 bg-muted/50 px-3 py-2">
+                    <div className="text-sm font-semibold text-foreground">{activeRequestGroup?.category?.name || 'Skills'}</div>
+                    <div className="text-xs font-medium text-muted-foreground">{selectedRequestSkills.length} selected</div>
                   </div>
                   <div className="max-h-72 overflow-y-auto p-2">
                     {(activeRequestGroup?.skills || []).map((skill) => {
@@ -536,7 +536,7 @@ export default function MyCompetencies() {
                         <label
                           key={skill.id}
                           className={`flex items-start gap-3 rounded-lg border px-3 py-2 transition ${
-                            disabled ? 'border-slate-100 bg-slate-50 text-slate-400' : checked ? 'border-blue-200 bg-blue-50 text-slate-900' : 'border-transparent hover:border-slate-200 hover:bg-slate-50'
+                            disabled ? 'border-border/60 bg-muted/50 text-muted-foreground/75' : checked ? 'border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 text-foreground' : 'border-transparent hover:border-border hover:bg-muted/50'
                           }`}
                         >
                           <input
@@ -552,11 +552,11 @@ export default function MyCompetencies() {
                                   : (current.selectedCategoryIds || []).filter((selectedId) => selectedId !== id),
                               }));
                             }}
-                            className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed"
+                            className="mt-1 h-4 w-4 rounded border-input text-blue-600 dark:text-blue-300 focus:ring-blue-500 disabled:cursor-not-allowed"
                           />
                           <span className="min-w-0 flex-1">
                             <span className="block text-sm font-semibold">{skill.name}</span>
-                            <span className="block text-xs text-slate-500">
+                            <span className="block text-xs text-muted-foreground">
                               {pending
                                 ? `Pending ${levelByValue[pending.requestedLevel || '']?.label || pending.requestedLevel}`
                                 : `Current: ${levelByValue[currentLevel || '']?.label || 'No experience'}`}
@@ -566,7 +566,7 @@ export default function MyCompetencies() {
                       );
                     })}
                     {!activeRequestGroup?.skills?.length && (
-                      <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                      <div className="rounded-lg bg-amber-50 dark:bg-amber-500/15 px-3 py-2 text-sm text-amber-800 dark:text-amber-200">
                         No active skills are available to request in this category.
                       </div>
                     )}
@@ -574,24 +574,24 @@ export default function MyCompetencies() {
                 </div>
 
                 <label className="block">
-                  <span className="block text-xs font-semibold uppercase text-slate-500">Shared note</span>
+                  <span className="block text-xs font-semibold uppercase text-muted-foreground">Shared note</span>
                   <textarea
                     value={requestForm.note}
                     onChange={(event) => setRequestForm((current) => ({ ...current, note: event.target.value }))}
                     placeholder="Optional context for the whole request bundle"
-                    className="mt-1 min-h-[82px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none transition focus:border-blue-300 focus:bg-white focus:ring-2 focus:ring-blue-100"
+                    className="mt-1 min-h-[82px] w-full rounded-lg border border-border bg-muted/50 px-3 py-2 text-sm outline-none transition focus:border-blue-300 dark:focus:border-blue-500/40 focus:bg-card focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
                   />
                 </label>
               </div>
 
-              <aside className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <aside className="rounded-xl border border-border bg-muted/50 p-3">
                 <div className="flex items-center justify-between gap-2">
-                  <div className="text-sm font-semibold text-slate-900">Request cart</div>
+                  <div className="text-sm font-semibold text-foreground">Request cart</div>
                   {selectedRequestSkills.length > 0 && (
                     <button
                       type="button"
                       onClick={() => setRequestForm((current) => ({ ...current, selectedCategoryIds: [] }))}
-                      className="text-xs font-semibold text-slate-500 hover:text-slate-800"
+                      className="text-xs font-semibold text-muted-foreground hover:text-foreground"
                     >
                       Clear
                     </button>
@@ -599,10 +599,10 @@ export default function MyCompetencies() {
                 </div>
                 <div className="mt-3 space-y-2">
                   {selectedRequestSkills.map((skill) => (
-                    <div key={skill.id} className="flex items-start justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+                    <div key={skill.id} className="flex items-start justify-between gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm">
                       <div className="min-w-0">
-                        <div className="truncate font-semibold text-slate-900">{skill.name}</div>
-                        <div className="truncate text-xs text-slate-500">{skill.parentName || 'Top-level skill'}</div>
+                        <div className="truncate font-semibold text-foreground">{skill.name}</div>
+                        <div className="truncate text-xs text-muted-foreground">{skill.parentName || 'Top-level skill'}</div>
                       </div>
                       <button
                         type="button"
@@ -610,7 +610,7 @@ export default function MyCompetencies() {
                           ...current,
                           selectedCategoryIds: (current.selectedCategoryIds || []).filter((selectedId) => selectedId !== skill.id),
                         }))}
-                        className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                        className="rounded-md p-1 text-muted-foreground/75 hover:bg-muted hover:text-foreground/85"
                         aria-label={`Remove ${skill.name}`}
                       >
                         <X className="h-3.5 w-3.5" />
@@ -618,7 +618,7 @@ export default function MyCompetencies() {
                     </div>
                   ))}
                   {selectedRequestSkills.length === 0 && (
-                    <div className="rounded-lg border border-dashed border-slate-300 bg-white px-3 py-6 text-center text-sm text-slate-500">
+                    <div className="rounded-lg border border-dashed border-input bg-card px-3 py-6 text-center text-sm text-muted-foreground">
                       Select one or more skills to build a request.
                     </div>
                   )}
@@ -626,11 +626,11 @@ export default function MyCompetencies() {
               </aside>
             </div>
 
-            <div className="flex flex-col-reverse gap-2 border-t border-slate-100 bg-white p-5 sm:flex-row sm:justify-end">
+            <div className="flex flex-col-reverse gap-2 border-t border-border/60 bg-card p-5 sm:flex-row sm:justify-end">
               <button
                 type="button"
                 onClick={() => setRequestModalOpen(false)}
-                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
+                className="rounded-lg border border-border px-4 py-2 text-sm font-semibold text-muted-foreground transition hover:bg-muted/50"
               >
                 Cancel
               </button>
@@ -649,14 +649,17 @@ export default function MyCompetencies() {
         </div>
       )}
 
-      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 shadow-sm backdrop-blur">
+      <header className="sticky top-0 z-30 border-b border-border bg-card/95 shadow-sm backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-2">
           <div className="flex min-w-0 items-center gap-3">
-            <img src="/brand/logo-wordmark.png" alt="Ticket Pulse" className="h-14 w-auto" />
-            <div className="hidden h-8 w-px bg-slate-200 sm:block" />
+            {/* The wordmark's navy lettering vanishes on the dark header — swap
+                to the colourful square mark in dark mode. */}
+            <img src="/brand/logo-wordmark.png" alt="Ticket Pulse" className="h-14 w-auto dark:hidden" />
+            <img src="/brand/logo-mark.png" alt="Ticket Pulse" className="hidden h-9 w-9 object-contain dark:block" />
+            <div className="hidden h-8 w-px bg-secondary sm:block" />
             <div className="min-w-0">
-              <div className="truncate text-sm font-semibold text-slate-900">My Competencies</div>
-              <div className="truncate text-xs text-slate-500">Review your skills and request competency updates.</div>
+              <div className="truncate text-sm font-semibold text-foreground">My Competencies</div>
+              <div className="truncate text-xs text-muted-foreground">Review your skills and request competency updates.</div>
             </div>
           </div>
           <div className="flex flex-none items-center gap-2">
@@ -666,8 +669,8 @@ export default function MyCompetencies() {
                 onClick={() => setActiveTab((t) => (t === 'summit' ? 'competencies' : 'summit'))}
                 className={`inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-sm font-semibold transition ${
                   activeTab === 'summit'
-                    ? 'border-slate-300 bg-slate-900 text-white hover:bg-slate-800'
-                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                    ? 'border-input bg-slate-900 text-white hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600'
+                    : 'border-border bg-card text-muted-foreground hover:bg-muted/50'
                 }`}
               >
                 <Archive className="h-4 w-4" />
@@ -678,7 +681,7 @@ export default function MyCompetencies() {
               <a
                 href="/dashboard"
                 aria-label="Back to Dashboard"
-                className="inline-flex h-10 items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 text-sm font-semibold text-blue-700 shadow-sm shadow-blue-100/50 transition hover:border-blue-300 hover:bg-blue-100 hover:text-blue-800"
+                className="inline-flex h-10 items-center gap-2 rounded-lg border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 px-3 text-sm font-semibold text-blue-700 dark:text-blue-200 shadow-sm shadow-blue-100/50 dark:shadow-none transition hover:border-blue-300 dark:hover:border-blue-500/40 hover:bg-blue-100 dark:hover:bg-blue-500/20 hover:text-blue-800 dark:hover:text-blue-200"
               >
                 <LayoutDashboard className="h-4 w-4" />
                 <span className="hidden sm:inline">Back to Dashboard</span>
@@ -688,7 +691,7 @@ export default function MyCompetencies() {
             <button
               type="button"
               onClick={handleLogout}
-              className="flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:border-red-200 hover:bg-red-50 hover:text-red-700"
+              className="flex h-10 items-center gap-2 rounded-lg border border-border bg-card px-3 text-sm font-semibold text-foreground/85 transition hover:border-red-200 dark:hover:border-red-500/30 hover:bg-red-50 dark:hover:bg-red-500/15 hover:text-red-700 dark:hover:text-red-200"
             >
               <LogOut className="h-4 w-4" />
               <span className="hidden sm:inline">Logout</span>
@@ -703,14 +706,14 @@ export default function MyCompetencies() {
             header pill (below) rather than a redundant nav bar. */}
         {activeTab === 'summit' && showSummitTab && (
           <div className="space-y-4">
-            <section className="rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
+            <section className="rounded-xl border border-border bg-card p-2 shadow-sm">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
                     onClick={() => setActiveSummitTab('categories')}
                     className={`inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition hover:-translate-y-0.5 ${
-                      activeSummitTab === 'categories' ? 'bg-cyan-600 text-white shadow-sm shadow-cyan-100' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+                      activeSummitTab === 'categories' ? 'bg-cyan-600 text-white shadow-sm shadow-cyan-100 dark:shadow-none' : 'bg-muted/50 text-muted-foreground hover:bg-muted'
                     }`}
                   >
                     <PlusCircle className="h-4 w-4" />
@@ -720,20 +723,20 @@ export default function MyCompetencies() {
                     type="button"
                     onClick={() => setActiveSummitTab('feedback')}
                     className={`inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition hover:-translate-y-0.5 ${
-                      activeSummitTab === 'feedback' ? 'bg-slate-950 text-white shadow-sm shadow-slate-200' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+                      activeSummitTab === 'feedback' ? 'bg-slate-950 text-white shadow-sm shadow-slate-200 dark:bg-slate-700 dark:shadow-none' : 'bg-muted/50 text-muted-foreground hover:bg-muted'
                     }`}
                   >
                     <Sparkles className="h-4 w-4" />
                     What Works / Needs Attention
                   </button>
                 </div>
-                <div className="inline-flex w-fit items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
+                <div className="inline-flex w-fit items-center gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2 text-xs font-semibold text-muted-foreground">
                   <Archive className="h-4 w-4" />
                   Archived read-only
                 </div>
               </div>
             </section>
-            <section className="rounded-xl border border-slate-200 bg-white/95 px-4 py-3 text-sm text-slate-600 shadow-sm">
+            <section className="rounded-xl border border-border bg-card/95 px-4 py-3 text-sm text-muted-foreground shadow-sm">
               IT Summit 2026 is archived. Results remain available for reference, but voting, comments, and new submissions are closed.
             </section>
             {activeSummitTab === 'categories' ? (
@@ -746,35 +749,35 @@ export default function MyCompetencies() {
 
         {loading && (!showSummitTab || activeTab === 'competencies') && (
           <div className="flex min-h-[50vh] items-center justify-center">
-            <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+            <Loader2 className="h-8 w-8 animate-spin text-blue-600 dark:text-blue-300" />
           </div>
         )}
 
         {!loading && error && activeTab === 'competencies' && (
-          <div className="mx-auto max-w-xl rounded-xl border border-amber-200 bg-white p-6 text-center shadow-sm">
+          <div className="mx-auto max-w-xl rounded-xl border border-amber-200 dark:border-amber-500/30 bg-card p-6 text-center shadow-sm">
             <AlertCircle className="mx-auto mb-3 h-10 w-10 text-amber-500" />
-            <h1 className="text-lg font-semibold text-slate-900">Technician profile not linked</h1>
-            <p className="mt-2 text-sm text-slate-600">{error}</p>
-            <p className="mt-3 text-xs text-slate-500">Signed in as {user?.email}. Ask an admin to confirm your SSO email matches your Ticket Pulse technician record.</p>
+            <h1 className="text-lg font-semibold text-foreground">Technician profile not linked</h1>
+            <p className="mt-2 text-sm text-muted-foreground">{error}</p>
+            <p className="mt-3 text-xs text-muted-foreground">Signed in as {user?.email}. Ask an admin to confirm your SSO email matches your Ticket Pulse technician record.</p>
           </div>
         )}
 
         {!loading && data && activeTab === 'competencies' && (
           <div className="space-y-4">
             <section className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_340px]">
-              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex items-center gap-3">
                     {data.technician.photoUrl ? (
-                      <img src={data.technician.photoUrl} alt="" className="h-14 w-14 rounded-full object-cover ring-2 ring-blue-100" />
+                      <img src={data.technician.photoUrl} alt="" className="h-14 w-14 rounded-full object-cover ring-2 ring-blue-100 dark:ring-blue-500/30" />
                     ) : (
-                      <span className="flex h-14 w-14 items-center justify-center rounded-full bg-blue-100 text-lg font-bold text-blue-700">
+                      <span className="flex h-14 w-14 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-500/20 text-lg font-bold text-blue-700 dark:text-blue-200">
                         {initials(data.technician.name)}
                       </span>
                     )}
                     <div>
-                      <h1 className="text-xl font-semibold text-slate-950">{data.technician.name}</h1>
-                      <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-500">
+                      <h1 className="text-xl font-semibold text-foreground">{data.technician.name}</h1>
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                         <span className="flex items-center gap-1"><UserRound className="h-3.5 w-3.5" />{data.technician.email}</span>
                         <span className="flex items-center gap-1"><BriefcaseBusiness className="h-3.5 w-3.5" />{data.technician.workspace?.name}</span>
                       </div>
@@ -784,7 +787,7 @@ export default function MyCompetencies() {
                     <select
                       value={workspaceId}
                       onChange={(event) => fetchData(event.target.value)}
-                      className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700 outline-none focus:border-blue-300 focus:bg-white"
+                      className="rounded-lg border border-border bg-muted/50 px-3 py-2 text-sm font-medium text-foreground/85 outline-none focus:border-blue-300 dark:focus:border-blue-500/40 focus:bg-card"
                     >
                       {data.profiles.map((profile) => (
                         <option key={profile.workspaceId} value={profile.workspaceId}>{profile.workspace.name}</option>
@@ -795,42 +798,42 @@ export default function MyCompetencies() {
               </div>
 
               <div className="grid grid-cols-3 gap-2">
-                <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-                  <div className="text-xs font-semibold uppercase text-slate-500">My skills</div>
-                  <div className="mt-2 text-2xl font-bold text-slate-950">{myMappedCount}</div>
+                <div className="rounded-xl border border-border bg-card p-3 shadow-sm">
+                  <div className="text-xs font-semibold uppercase text-muted-foreground">My skills</div>
+                  <div className="mt-2 text-2xl font-bold text-foreground">{myMappedCount}</div>
                 </div>
-                <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-                  <div className="text-xs font-semibold uppercase text-slate-500">Pending</div>
-                  <div className="mt-2 text-2xl font-bold text-amber-600">{pendingCount}</div>
+                <div className="rounded-xl border border-border bg-card p-3 shadow-sm">
+                  <div className="text-xs font-semibold uppercase text-muted-foreground">Pending</div>
+                  <div className="mt-2 text-2xl font-bold text-amber-600 dark:text-amber-300">{pendingCount}</div>
                 </div>
-                <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-                  <div className="text-xs font-semibold uppercase text-slate-500">Team</div>
-                  <div className="mt-2 text-2xl font-bold text-slate-950">{data.technicians.length}</div>
+                <div className="rounded-xl border border-border bg-card p-3 shadow-sm">
+                  <div className="text-xs font-semibold uppercase text-muted-foreground">Team</div>
+                  <div className="mt-2 text-2xl font-bold text-foreground">{data.technicians.length}</div>
                 </div>
               </div>
             </section>
 
             <>
-              <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+              <section className="rounded-xl border border-border bg-card p-3 shadow-sm">
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                   <div className="relative min-w-0 flex-1">
-                    <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                    <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground/75" />
                     <input
                       value={query}
                       onChange={(event) => setQuery(event.target.value)}
                       placeholder="Search categories and subcategories"
-                      className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm outline-none transition focus:border-blue-300 focus:bg-white focus:ring-2 focus:ring-blue-100"
+                      className="h-10 w-full rounded-lg border border-border bg-muted/50 pl-9 pr-3 text-sm outline-none transition focus:border-blue-300 dark:focus:border-blue-500/40 focus:bg-card focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
                     />
                   </div>
                   <button
                     type="button"
                     onClick={() => openRequestModal()}
-                    className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm shadow-blue-100 transition hover:-translate-y-0.5 hover:bg-blue-700"
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm shadow-blue-100 dark:shadow-none transition hover:-translate-y-0.5 hover:bg-blue-700"
                   >
                     <PlusCircle className="h-4 w-4" />
                   Request skill
                   </button>
-                  <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                     {LEVELS.map((level) => (
                       <span key={level.value || 'none'} className={`rounded-md border px-2 py-1 font-semibold ${level.className}`}>
                         {level.short} {level.label}
@@ -842,35 +845,35 @@ export default function MyCompetencies() {
                   value={note}
                   onChange={(event) => setNote(event.target.value)}
                   placeholder="Optional note for direct cell changes"
-                  className="mt-3 min-h-[48px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none transition focus:border-blue-300 focus:bg-white focus:ring-2 focus:ring-blue-100"
+                  className="mt-3 min-h-[48px] w-full rounded-lg border border-border bg-muted/50 px-3 py-2 text-sm outline-none transition focus:border-blue-300 dark:focus:border-blue-500/40 focus:bg-card focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30"
                 />
-                <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-800">
+                <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-blue-50 dark:bg-blue-500/15 px-3 py-2 text-sm text-blue-800 dark:text-blue-200">
                   <Sparkles className="h-4 w-4" />
                 Additions and level increases are sent for admin approval. Decreases save immediately. Active skills cannot be removed here; downgrade to Basic if needed.
                 </div>
               </section>
 
-              <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
-                <div className="flex flex-col gap-3 border-b border-slate-100 bg-white/95 px-3 py-3 backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+              <section className="rounded-xl border border-border bg-card shadow-sm">
+                <div className="flex flex-col gap-3 border-b border-border/60 bg-card/95 px-3 py-3 backdrop-blur sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Skill matrix</div>
-                    <div className="mt-1 max-w-xl truncate text-sm font-medium text-slate-800">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Skill matrix</div>
+                    <div className="mt-1 max-w-xl truncate text-sm font-medium text-foreground">
                       {myTechId ? `You pinned + ${teammateCount} teammate${teammateCount === 1 ? '' : 's'}` : `${orderedTechnicians.length} team columns`}
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
-                    <div className="hidden h-1.5 w-28 overflow-hidden rounded-full bg-slate-100 sm:block">
+                    <div className="hidden h-1.5 w-28 overflow-hidden rounded-full bg-muted sm:block">
                       <div
                         className="h-full rounded-full bg-blue-500 transition-all duration-200"
                         style={{ width: matrixMaxScrollLeft > 0 ? `${Math.max(8, matrixScrollPercent)}%` : '100%' }}
                       />
                     </div>
-                    <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1 shadow-sm">
+                    <div className="inline-flex rounded-xl border border-border bg-muted/50 p-1 shadow-sm">
                       <button
                         type="button"
                         onClick={() => scrollMatrixBy(-1)}
                         disabled={!canScrollMatrixLeft}
-                        className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-600 transition hover:bg-white hover:text-blue-700 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-35"
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-card hover:text-blue-700 dark:hover:text-blue-200 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-35"
                         aria-label="Scroll skills matrix left"
                         title="Scroll left"
                       >
@@ -880,7 +883,7 @@ export default function MyCompetencies() {
                         type="button"
                         onClick={() => scrollMatrixBy(1)}
                         disabled={!canScrollMatrixRight}
-                        className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-600 transition hover:bg-white hover:text-blue-700 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-35"
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-card hover:text-blue-700 dark:hover:text-blue-200 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-35"
                         aria-label="Scroll skills matrix right"
                         title="Scroll right"
                       >
@@ -895,10 +898,10 @@ export default function MyCompetencies() {
                   className="overflow-x-auto [scrollbar-gutter:stable]"
                 >
                   <table className="min-w-full border-collapse text-sm">
-                    <thead className="bg-slate-50">
+                    <thead className="bg-muted/50">
                       <tr>
                         <th
-                          className="sticky left-0 z-40 bg-slate-50 px-3 py-3 text-left text-xs font-semibold uppercase text-slate-500 shadow-[1px_0_0_rgba(226,232,240,0.9)]"
+                          className="sticky left-0 z-40 bg-muted/50 px-3 py-3 text-left text-xs font-semibold uppercase text-muted-foreground shadow-[1px_0_0_hsl(var(--border))]"
                           style={{ width: MATRIX_CATEGORY_COL_WIDTH, minWidth: MATRIX_CATEGORY_COL_WIDTH }}
                         >
                           Category / subcategory
@@ -908,7 +911,7 @@ export default function MyCompetencies() {
                           return (
                             <th
                               key={tech.id}
-                              className={`px-2 py-2 text-center ${isMe ? 'sticky z-30 border-x border-blue-200 bg-blue-50 shadow-[0_0_0_1px_rgba(59,130,246,0.16),0_8px_20px_rgba(37,99,235,0.08)]' : ''}`}
+                              className={`px-2 py-2 text-center ${isMe ? 'sticky z-30 border-x border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 shadow-[0_0_0_1px_rgba(59,130,246,0.16),0_8px_20px_rgba(37,99,235,0.08)]' : ''}`}
                               style={{
                                 width: MATRIX_TECH_COL_WIDTH,
                                 minWidth: MATRIX_TECH_COL_WIDTH,
@@ -917,13 +920,13 @@ export default function MyCompetencies() {
                             >
                               <div className="flex flex-col items-center gap-1">
                                 {tech.photoUrl ? (
-                                  <img src={tech.photoUrl} alt="" className={`h-8 w-8 rounded-full object-cover ${isMe ? 'ring-2 ring-blue-500 ring-offset-2 ring-offset-blue-50' : ''}`} />
+                                  <img src={tech.photoUrl} alt="" className={`h-8 w-8 rounded-full object-cover ${isMe ? 'ring-2 ring-blue-500 ring-offset-2 ring-offset-blue-50 dark:ring-offset-slate-900' : ''}`} />
                                 ) : (
-                                  <span className={`flex h-8 w-8 items-center justify-center rounded-full text-[10px] font-bold ${isMe ? 'bg-blue-600 text-white ring-2 ring-blue-200' : 'bg-slate-200 text-slate-500'}`}>
+                                  <span className={`flex h-8 w-8 items-center justify-center rounded-full text-[10px] font-bold ${isMe ? 'bg-blue-600 text-white ring-2 ring-blue-200 dark:ring-blue-500/30' : 'bg-secondary text-muted-foreground'}`}>
                                     {initials(tech.name)}
                                   </span>
                                 )}
-                                <span className={`max-w-[64px] truncate text-[10px] font-semibold ${isMe ? 'text-blue-700' : 'text-slate-500'}`}>
+                                <span className={`max-w-[64px] truncate text-[10px] font-semibold ${isMe ? 'text-blue-700 dark:text-blue-200' : 'text-muted-foreground'}`}>
                                   {isMe ? 'You' : tech.name.split(' ')[0]}
                                 </span>
                               </div>
@@ -937,27 +940,27 @@ export default function MyCompetencies() {
                         const pending = pendingByCategory[category.id];
                         const isHighlighted = highlightCategoryId === category.id;
                         return (
-                          <tr key={category.id} className={`border-t border-slate-100 transition-colors duration-300 ${isHighlighted ? 'animate-[pulseOnce_1.8s_ease-out]' : ''} ${category.depth === 0 ? 'bg-slate-50/70' : 'hover:bg-slate-50'}`}>
+                          <tr key={category.id} className={`border-t border-border/60 transition-colors duration-300 ${isHighlighted ? 'animate-[pulseOnce_1.8s_ease-out]' : ''} ${category.depth === 0 ? 'bg-muted/35' : 'hover:bg-muted/50'}`}>
                             <td
-                              className={`sticky left-0 z-30 px-3 py-2 shadow-[1px_0_0_rgba(226,232,240,0.9)] transition-colors duration-300 ${isHighlighted ? 'bg-blue-50' : category.depth === 0 ? 'bg-slate-50' : 'bg-white'} ${category.depth === 0 ? 'font-semibold text-slate-800' : 'text-slate-700'}`}
+                              className={`sticky left-0 z-30 px-3 py-2 shadow-[1px_0_0_hsl(var(--border))] transition-colors duration-300 ${isHighlighted ? 'bg-blue-50 dark:bg-blue-500/15' : category.depth === 0 ? 'bg-muted/50' : 'bg-card'} ${category.depth === 0 ? 'font-semibold text-foreground' : 'text-foreground/85'}`}
                               style={{ width: MATRIX_CATEGORY_COL_WIDTH, minWidth: MATRIX_CATEGORY_COL_WIDTH }}
                             >
                               <div className="flex items-center gap-2">
-                                {category.depth === 1 && <span className="ml-3 h-px w-4 bg-slate-300" />}
+                                {category.depth === 1 && <span className="ml-3 h-px w-4 bg-muted-foreground/40" />}
                                 <span>{category.name}</span>
-                                {category.depth === 1 && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">sub</span>}
-                                {pending && <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">pending</span>}
+                                {category.depth === 1 && <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">sub</span>}
+                                {pending && <span className="rounded bg-amber-100 dark:bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-200">pending</span>}
                               </div>
                             </td>
                             {orderedTechnicians.map((tech) => {
                               const isMe = tech.id === myTechId;
                               const level = mappingMap[tech.id]?.[category.id] || '';
                               const levelInfo = levelByValue[level] || levelByValue[''];
-                              const myCellTone = isHighlighted ? 'bg-blue-100/95' : category.depth === 0 ? 'bg-blue-50/95' : 'bg-blue-50/75';
+                              const myCellTone = isHighlighted ? 'bg-blue-100/95 dark:bg-blue-500/15' : category.depth === 0 ? 'bg-blue-50/95 dark:bg-blue-500/10' : 'bg-blue-50/75 dark:bg-blue-500/10';
                               return (
                                 <td
                                   key={tech.id}
-                                  className={`px-1 py-1 text-center transition-colors duration-300 ${isMe ? `sticky z-20 border-x border-blue-100 shadow-[0_0_0_1px_rgba(59,130,246,0.12)] ${myCellTone}` : ''}`}
+                                  className={`px-1 py-1 text-center transition-colors duration-300 ${isMe ? `sticky z-20 border-x border-blue-100 dark:border-blue-500/20 shadow-[0_0_0_1px_rgba(59,130,246,0.12)] ${myCellTone}` : ''}`}
                                   style={{
                                     width: MATRIX_TECH_COL_WIDTH,
                                     minWidth: MATRIX_TECH_COL_WIDTH,
@@ -969,7 +972,7 @@ export default function MyCompetencies() {
                                       value={pending?.requestedLevel ?? level}
                                       disabled={savingCell === category.id}
                                       onChange={(event) => handleChange(category, event.target.value)}
-                                      className={`h-8 w-16 rounded-lg border text-center text-xs font-bold outline-none transition duration-200 hover:-translate-y-0.5 hover:shadow-sm focus:ring-2 focus:ring-blue-100 ${pending ? 'border-amber-300 bg-amber-50 text-amber-800 ring-1 ring-amber-100' : levelInfo.className}`}
+                                      className={`h-8 w-16 rounded-lg border text-center text-xs font-bold outline-none transition duration-200 hover:-translate-y-0.5 hover:shadow-sm focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30 ${pending ? 'border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/15 text-amber-800 dark:text-amber-200 ring-1 ring-amber-100 dark:ring-amber-500/30' : levelInfo.className}`}
                                       title={pending ? `Pending: ${formatRequest(pending)}` : `${category.name}: ${levelInfo.label}`}
                                     >
                                       {LEVELS.map((option) => (
@@ -995,7 +998,7 @@ export default function MyCompetencies() {
                       })}
                       {categories.length === 0 && (
                         <tr>
-                          <td colSpan={orderedTechnicians.length + 1} className="px-4 py-10 text-center text-sm text-slate-400">
+                          <td colSpan={orderedTechnicians.length + 1} className="px-4 py-10 text-center text-sm text-muted-foreground/75">
                           No matching categories.
                           </td>
                         </tr>
@@ -1006,21 +1009,21 @@ export default function MyCompetencies() {
               </section>
 
               <section className="grid gap-3 lg:grid-cols-2">
-                <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                  <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900"><Clock3 className="h-4 w-4 text-amber-500" /> Pending Requests</h2>
+                <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
+                  <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground"><Clock3 className="h-4 w-4 text-amber-500" /> Pending Requests</h2>
                   <div className="mt-3 space-y-2">
                     {(data.requests || []).filter((request) => request.status === 'pending').map((request) => (
-                      <div key={request.id} className="flex items-start justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm transition hover:border-amber-300 hover:shadow-sm">
+                      <div key={request.id} className="flex items-start justify-between gap-3 rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-3 py-2 text-sm transition hover:border-amber-300 dark:hover:border-amber-500/40 hover:shadow-sm">
                         <div className="min-w-0">
-                          <div className="font-semibold text-slate-900">{request.competencyCategory?.name}</div>
-                          <div className="text-xs text-amber-800">{formatRequest(request)}</div>
-                          {request.note && <div className="mt-1 text-xs text-slate-500">{request.note}</div>}
+                          <div className="font-semibold text-foreground">{request.competencyCategory?.name}</div>
+                          <div className="text-xs text-amber-800 dark:text-amber-200">{formatRequest(request)}</div>
+                          {request.note && <div className="mt-1 text-xs text-muted-foreground">{request.note}</div>}
                         </div>
                         <button
                           type="button"
                           onClick={() => cancelRequest(request)}
                           disabled={cancellingRequestId === request.id}
-                          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-amber-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-amber-800 transition hover:-translate-y-0.5 hover:border-amber-300 hover:bg-amber-100 disabled:cursor-wait disabled:opacity-60"
+                          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-amber-200 dark:border-amber-500/30 bg-card px-2.5 py-1.5 text-xs font-semibold text-amber-800 dark:text-amber-200 transition hover:-translate-y-0.5 hover:border-amber-300 dark:hover:border-amber-500/40 hover:bg-amber-100 dark:hover:bg-amber-500/20 disabled:cursor-wait disabled:opacity-60"
                           title="Cancel this pending request"
                         >
                           {cancellingRequestId === request.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Undo2 className="h-3.5 w-3.5" />}
@@ -1028,27 +1031,27 @@ export default function MyCompetencies() {
                         </button>
                       </div>
                     ))}
-                    {pendingCount === 0 && <p className="text-sm text-slate-500">No pending changes.</p>}
+                    {pendingCount === 0 && <p className="text-sm text-muted-foreground">No pending changes.</p>}
                   </div>
                 </div>
 
-                <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                  <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900"><ShieldCheck className="h-4 w-4 text-emerald-600" /> Recent History</h2>
+                <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
+                  <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground"><ShieldCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-300" /> Recent History</h2>
                   <div className="mt-3 space-y-2">
                     {(data.requests || []).filter((request) => request.status !== 'pending').slice(0, 8).map((request) => (
-                      <div key={request.id} className="flex items-start gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                      <div key={request.id} className="flex items-start gap-2 rounded-lg border border-border px-3 py-2 text-sm">
                         {request.status === 'rejected'
                           ? <XCircle className="mt-0.5 h-4 w-4 text-red-500" />
                           : request.status === 'cancelled'
                             ? <Undo2 className="mt-0.5 h-4 w-4 text-amber-500" />
-                            : <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600" />}
+                            : <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600 dark:text-emerald-300" />}
                         <div>
-                          <div className="font-semibold text-slate-900">{request.competencyCategory?.name}</div>
-                          <div className="text-xs text-slate-500">{request.status.replace('_', ' ')} - {formatRequest(request)}</div>
+                          <div className="font-semibold text-foreground">{request.competencyCategory?.name}</div>
+                          <div className="text-xs text-muted-foreground">{request.status.replace('_', ' ')} - {formatRequest(request)}</div>
                         </div>
                       </div>
                     ))}
-                    {!(data.requests || []).some((request) => request.status !== 'pending') && <p className="text-sm text-slate-500">No history yet.</p>}
+                    {!(data.requests || []).some((request) => request.status !== 'pending') && <p className="text-sm text-muted-foreground">No history yet.</p>}
                   </div>
                 </div>
               </section>

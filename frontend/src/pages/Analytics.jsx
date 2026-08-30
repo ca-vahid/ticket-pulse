@@ -37,6 +37,7 @@ import 'highcharts/modules/heatmap';
 import 'highcharts/modules/sankey';
 import 'highcharts/modules/accessibility';
 import HighchartsReact from 'highcharts-react-official';
+import { chartPalette, useChartPalette, useHighchartsTheme } from '../utils/highchartsTheme';
 import * as XLSX from 'xlsx';
 import AppShell from '../components/AppShell';
 import CategoryFilter from '../components/CategoryFilter';
@@ -70,8 +71,8 @@ const TABS = [
   { id: 'reports', label: 'Reports', Icon: FileText },
 ];
 
-const HEADER_CONTROL_LABEL_CLASS = 'mb-1.5 block text-[10px] font-bold uppercase tracking-normal text-slate-500';
-const HEADER_SELECT_CLASS = 'h-10 w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm outline-none transition-colors hover:border-blue-300 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 sm:w-auto';
+const HEADER_CONTROL_LABEL_CLASS = 'mb-1.5 block text-[10px] font-bold uppercase tracking-normal text-muted-foreground';
+const HEADER_SELECT_CLASS = 'h-10 w-full min-w-0 rounded-xl border border-input bg-card px-3 text-sm text-foreground shadow-sm outline-none transition-colors hover:border-blue-300 dark:hover:border-blue-500/40 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-500/30 sm:w-auto';
 const HEADER_FILTER_CONTROL_CLASS = '[&>button]:h-10 [&>button]:rounded-xl [&>button]:px-3 [&>button]:shadow-sm';
 const HEADER_LEGACY_FILTER_CONTROL_CLASS = '[&>div>button]:h-10 [&>div>button]:rounded-xl [&>div>button]:px-3 [&>div>button]:text-sm [&>div>button]:shadow-sm';
 
@@ -132,8 +133,6 @@ const TEAM_TIMELINE_METRICS = [
   { key: 'wfhDays', label: 'WFH days' },
 ];
 
-const HIGHCHART_COLORS = ['#2563eb', '#059669', '#f59e0b', '#7c3aed', '#dc2626', '#0891b2', '#64748b', '#0f766e', '#c2410c'];
-
 // Team-Safe Distribution columns: [sortKey, header label, metricsGlossary key].
 // The glossary key drives the header's ⓘ hint (QA 08-17 #5).
 const TEAM_TABLE_COLUMNS = [
@@ -193,9 +192,9 @@ const OPS_LABELS = {
 };
 
 const INSIGHT_SEVERITY = {
-  critical: { label: 'Critical', color: '#dc2626', badge: 'border-red-200 bg-red-50 text-red-700' },
-  warning: { label: 'Warning', color: '#f59e0b', badge: 'border-amber-200 bg-amber-50 text-amber-700' },
-  info: { label: 'Info', color: '#2563eb', badge: 'border-blue-200 bg-blue-50 text-blue-700' },
+  critical: { label: 'Critical', color: '#dc2626', badge: 'border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200' },
+  warning: { label: 'Warning', color: '#f59e0b', badge: 'border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200' },
+  info: { label: 'Info', color: '#2563eb', badge: 'border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200' },
 };
 
 function formatNumber(value) {
@@ -272,12 +271,12 @@ function applyTreemapCategoryHover(point, enabled) {
 
   chart.customCategoryHover = {
     point: target,
-    borderColor: target.options?.borderColor || '#334155',
+    borderColor: target.options?.borderColor || chartPalette().treemap.parentBorder,
     borderWidth: target.options?.borderWidth ?? 3,
   };
   target.graphic.animate(
     {
-      stroke: '#2563eb',
+      stroke: chartPalette().blue,
       'stroke-width': 5,
     },
     { duration: 220, easing: 'easeInOutSine' },
@@ -403,10 +402,10 @@ export const ASSIGNMENT_SOURCE_SERIES = [
   { key: 'unknown', name: 'Source unavailable' },
 ];
 
-export function buildAssignmentSourceSeries(teamRows = []) {
+export function buildAssignmentSourceSeries(teamRows = [], colors = ASSIGNMENT_SOURCE_COLORS) {
   return ASSIGNMENT_SOURCE_SERIES.map(({ key, name }) => ({
     name,
-    color: ASSIGNMENT_SOURCE_COLORS[key],
+    color: colors[key] || ASSIGNMENT_SOURCE_COLORS[key],
     data: teamRows.map((row) => ({ y: row[key] || 0, technicianId: row.technicianId })),
   }));
 }
@@ -426,32 +425,32 @@ export function assignmentSourceTooltipHtml(points = [], key = '') {
   if (workflow && workflow.y > 0) notes.push('Assigned at creation / workflow: FreshService set the owner on creation — no person assigned it.');
   if (unknown && unknown.y > 0) notes.push('Source unavailable: activity history not synced yet (or failed) — assigner unknown. Not a technician metric.');
   return [
-    `<span style="font-size:12px;font-weight:700;color:#0f172a">${escape(key)}</span><br/>`,
+    `<span style="font-size:12px;font-weight:700">${escape(key)}</span><br/>`,
     ...lines,
-    `<span style="color:#64748b">Total: <b>${total}</b> tickets</span>`,
-    ...notes.map((note) => `<br/><span style="display:inline-block;max-width:260px;white-space:normal;color:#64748b;font-size:10px;line-height:1.3">${note}</span>`),
+    `<span style="color:hsl(var(--muted-foreground))">Total: <b>${total}</b> tickets</span>`,
+    ...notes.map((note) => `<br/><span style="display:inline-block;max-width:260px;white-space:normal;color:hsl(var(--muted-foreground));font-size:10px;line-height:1.3">${note}</span>`),
   ].join('');
 }
 
 export function StatCard({ title, value, subtitle, icon: Icon = Info, tone = 'blue', delta, info, metric }) {
   const toneClass = {
-    blue: 'border-blue-100 bg-blue-50 text-blue-700',
-    green: 'border-emerald-100 bg-emerald-50 text-emerald-700',
-    amber: 'border-amber-100 bg-amber-50 text-amber-700',
-    red: 'border-red-100 bg-red-50 text-red-700',
-    slate: 'border-slate-100 bg-slate-50 text-slate-700',
-    purple: 'border-purple-100 bg-purple-50 text-purple-700',
-  }[tone] || 'border-blue-100 bg-blue-50 text-blue-700';
+    blue: 'border-blue-100 dark:border-blue-500/20 bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200',
+    green: 'border-emerald-100 dark:border-emerald-500/20 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200',
+    amber: 'border-amber-100 dark:border-amber-500/20 bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200',
+    red: 'border-red-100 dark:border-red-500/20 bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200',
+    slate: 'border-border/60 bg-muted/50 text-foreground/85',
+    purple: 'border-purple-100 dark:border-purple-500/20 bg-purple-50 dark:bg-purple-500/15 text-purple-700 dark:text-purple-200',
+  }[tone] || 'border-blue-100 dark:border-blue-500/20 bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200';
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+    <div className="rounded-lg border border-border bg-card p-3 shadow-sm sm:p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="flex items-center gap-1 text-xs font-semibold uppercase tracking-normal text-slate-500">
+          <p className="flex items-center gap-1 text-xs font-semibold uppercase tracking-normal text-muted-foreground">
             <span className="truncate">{title}</span>
           </p>
-          <p className="mt-1 text-xl font-bold text-slate-900 sm:text-2xl">{value}</p>
-          {subtitle && <p className="mt-1 text-xs text-slate-500">{subtitle}</p>}
+          <p className="mt-1 text-xl font-bold text-foreground sm:text-2xl">{value}</p>
+          {subtitle && <p className="mt-1 text-xs text-muted-foreground">{subtitle}</p>}
         </div>
         <div className="flex shrink-0 items-start gap-1.5">
           {(info || metric) && <MetricHint metric={metric} title={title} info={info} />}
@@ -461,7 +460,7 @@ export function StatCard({ title, value, subtitle, icon: Icon = Info, tone = 'bl
         </div>
       </div>
       {delta !== undefined && delta !== null && (
-        <p className={`mt-3 text-xs font-semibold ${delta > 0 ? 'text-amber-700' : delta < 0 ? 'text-emerald-700' : 'text-slate-500'}`}>
+        <p className={`mt-3 text-xs font-semibold ${delta > 0 ? 'text-amber-700 dark:text-amber-200' : delta < 0 ? 'text-emerald-700 dark:text-emerald-200' : 'text-muted-foreground'}`}>
           {formatPct(delta)} vs previous period
         </p>
       )}
@@ -471,11 +470,11 @@ export function StatCard({ title, value, subtitle, icon: Icon = Info, tone = 'bl
 
 function Panel({ title, subtitle, children, actions }) {
   return (
-    <section className="min-w-0 overflow-hidden rounded-lg border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+    <section className="min-w-0 overflow-hidden rounded-lg border border-border bg-card p-3 shadow-sm sm:p-4">
       <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <h2 className="text-base font-semibold text-slate-900">{title}</h2>
-          {subtitle && <p className="mt-1 text-sm text-slate-500">{subtitle}</p>}
+          <h2 className="text-base font-semibold text-foreground">{title}</h2>
+          {subtitle && <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>}
         </div>
         {actions}
       </div>
@@ -484,7 +483,7 @@ function Panel({ title, subtitle, children, actions }) {
   );
 }
 
-function buildAssignmentMixRows(mix = {}) {
+function buildAssignmentMixRows(mix = {}, colors = ASSIGNMENT_SOURCE_COLORS) {
   const orderedKeys = ['appAssigned', 'coordinatorAssigned', 'selfPicked', 'workflowAssigned', 'unknown'];
   const total = orderedKeys.reduce((sum, key) => sum + (mix[key] || 0), 0);
   return orderedKeys
@@ -494,6 +493,7 @@ function buildAssignmentMixRows(mix = {}) {
       return {
         key,
         ...config,
+        color: colors[key] || config.color,
         value,
         pct: total ? Number(((value / total) * 100).toFixed(1)) : 0,
       };
@@ -522,7 +522,7 @@ function initials(name) {
 }
 
 function EmptyState({ text = 'No data for this range.' }) {
-  return <div className="rounded-lg border border-dashed border-slate-200 p-8 text-center text-sm text-slate-500">{text}</div>;
+  return <div className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">{text}</div>;
 }
 
 function SimpleTable({ columns, rows, maxHeight = 'max-h-80' }) {
@@ -531,12 +531,12 @@ function SimpleTable({ columns, rows, maxHeight = 'max-h-80' }) {
     <>
       <div className={`space-y-2 overflow-auto sm:hidden ${maxHeight}`}>
         {rows.map((row, idx) => (
-          <div key={row.id || row.freshserviceTicketId || row.name || idx} className="rounded-lg border border-slate-200 bg-white p-3">
+          <div key={row.id || row.freshserviceTicketId || row.name || idx} className="rounded-lg border border-border bg-card p-3">
             <div className="space-y-2">
               {columns.map((col) => (
                 <div key={col.key} className="grid grid-cols-[6.5rem_minmax(0,1fr)] gap-2 text-sm">
-                  <span className="text-xs font-semibold uppercase tracking-normal text-slate-500">{col.label}</span>
-                  <span className="min-w-0 break-words text-slate-700">
+                  <span className="text-xs font-semibold uppercase tracking-normal text-muted-foreground">{col.label}</span>
+                  <span className="min-w-0 break-words text-foreground/85">
                     {col.render ? col.render(row) : row[col.key]}
                   </span>
                 </div>
@@ -545,22 +545,22 @@ function SimpleTable({ columns, rows, maxHeight = 'max-h-80' }) {
           </div>
         ))}
       </div>
-      <div className={`hidden overflow-auto rounded-lg border border-slate-200 sm:block ${maxHeight}`}>
-        <table className="min-w-full divide-y divide-slate-200 text-sm">
-          <thead className="sticky top-0 bg-slate-50">
+      <div className={`hidden overflow-auto rounded-lg border border-border sm:block ${maxHeight}`}>
+        <table className="min-w-full divide-y divide-border text-sm">
+          <thead className="sticky top-0 bg-muted/50">
             <tr>
               {columns.map((col) => (
-                <th key={col.key} className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-normal text-slate-500">
+                <th key={col.key} className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-normal text-muted-foreground">
                   {col.label}
                 </th>
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100 bg-white">
+          <tbody className="divide-y divide-border/60 bg-card">
             {rows.map((row, idx) => (
-              <tr key={row.id || row.freshserviceTicketId || row.name || idx} className="hover:bg-slate-50">
+              <tr key={row.id || row.freshserviceTicketId || row.name || idx} className="hover:bg-muted/50">
                 {columns.map((col) => (
-                  <td key={col.key} className="px-3 py-2 text-slate-700">
+                  <td key={col.key} className="px-3 py-2 text-foreground/85">
                     {col.render ? col.render(row) : row[col.key]}
                   </td>
                 ))}
@@ -666,23 +666,23 @@ function insightDrilldownColumns(insight) {
 }
 
 function CategoricalBars({ data, nameKey = 'name', valueKey = 'count', height = 260 }) {
+  const palette = useChartPalette();
   if (!data?.length) return <EmptyState />;
   const options = {
     ...chartBase('bar'),
-    colors: ['#2563eb'],
+    colors: [palette.blue],
     xAxis: {
       categories: data.map((row) => row[nameKey]),
-      labels: { style: { color: '#475569', fontSize: '12px' } },
+      labels: { style: { fontSize: '12px' } },
     },
     yAxis: {
       min: 0,
       allowDecimals: false,
       title: { text: null },
       gridLineDashStyle: 'Dash',
-      gridLineColor: '#e2e8f0',
     },
     legend: { enabled: false },
-    tooltip: { borderColor: '#cbd5e1', pointFormat: '<b>{point.y}</b>' },
+    tooltip: { pointFormat: '<b>{point.y}</b>' },
     plotOptions: {
       ...chartBase('bar').plotOptions,
       bar: { borderRadius: 5 },
@@ -709,40 +709,40 @@ function HotspotRankedBars({ data, totalLabel = 'tickets', compact = false }) {
         return (
           <div
             key={`${row.name}-${index}`}
-            className="rounded-md border border-slate-200 bg-white px-2 py-1.5"
+            className="rounded-md border border-border bg-card px-2 py-1.5"
             title={rowHint}
             aria-label={rowHint}
           >
             <div className="mb-1 flex items-center justify-between gap-2">
               <div className="flex min-w-0 items-center gap-1.5">
-                <span className="inline-flex h-3.5 min-w-3.5 items-center justify-center rounded bg-slate-100 px-1 text-[9px] font-bold leading-none text-slate-600">
+                <span className="inline-flex h-3.5 min-w-3.5 items-center justify-center rounded bg-muted px-1 text-[9px] font-bold leading-none text-muted-foreground">
                   {index + 1}
                 </span>
-                <p className="min-w-0 truncate text-[11px] font-semibold leading-3 text-slate-900" title={row.name}>
+                <p className="min-w-0 truncate text-[11px] font-semibold leading-3 text-foreground" title={row.name}>
                   {row.name}
                 </p>
                 {row.source === 'legacyFallback' && (
-                  <span className="shrink-0 rounded bg-amber-50 px-1 py-0.5 text-[8px] font-bold uppercase tracking-wide text-amber-700">
+                  <span className="shrink-0 rounded bg-amber-50 dark:bg-amber-500/15 px-1 py-0.5 text-[8px] font-bold uppercase tracking-wide text-amber-700 dark:text-amber-200">
                     Legacy
                   </span>
                 )}
                 {row.reviewNeededCount > 0 && (
-                  <span className="shrink-0 rounded bg-orange-50 px-1 py-0.5 text-[8px] font-bold uppercase tracking-wide text-orange-700">
+                  <span className="shrink-0 rounded bg-orange-50 dark:bg-orange-500/15 px-1 py-0.5 text-[8px] font-bold uppercase tracking-wide text-orange-700 dark:text-orange-200">
                     Review
                   </span>
                 )}
                 {row.source === 'unmapped' && (
-                  <span className="shrink-0 rounded bg-slate-100 px-1 py-0.5 text-[8px] font-bold uppercase tracking-wide text-slate-500">
+                  <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[8px] font-bold uppercase tracking-wide text-muted-foreground">
                     Unmapped
                   </span>
                 )}
               </div>
               <div className="flex flex-none items-baseline gap-1.5">
-                <span className="text-[11px] font-bold leading-none text-slate-900">{formatNumber(count)}</span>
-                <span className="text-[9px] font-semibold leading-none text-slate-500">{pct}%</span>
+                <span className="text-[11px] font-bold leading-none text-foreground">{formatNumber(count)}</span>
+                <span className="text-[9px] font-semibold leading-none text-muted-foreground">{pct}%</span>
               </div>
             </div>
-            <div className="h-1 overflow-hidden rounded-full bg-slate-100" aria-hidden="true">
+            <div className="h-1 overflow-hidden rounded-full bg-muted" aria-hidden="true">
               <div
                 className="h-full rounded-full bg-gradient-to-r from-blue-600 to-emerald-500"
                 style={{ width: `${width}%` }}
@@ -760,6 +760,10 @@ function HotspotRankedBars({ data, totalLabel = 'tickets', compact = false }) {
 export function HighchartsBlock({ options, height = '24rem', stabilizeLayout = false }) {
   const chartRef = useRef(null);
   const containerProps = useMemo(() => ({ style: { height: '100%', width: '100%' } }), []);
+  // Dark mode (DM8): the theme is applied via Highcharts.setOptions, which
+  // only reaches charts created afterwards — so the chart is keyed on the
+  // theme counter and remounts (fresh options merge) on every toggle.
+  const themeKey = useHighchartsTheme(Highcharts);
 
   useLayoutEffect(() => {
     if (!stabilizeLayout || typeof window === 'undefined') return undefined;
@@ -804,7 +808,7 @@ export function HighchartsBlock({ options, height = '24rem', stabilizeLayout = f
     // Intentionally NOT keyed on `options`: this settles layout on mount / resize
     // / font-load, but must NOT re-fire on every options change (drill, lens),
     // or its redraw(false) snaps the treemap and kills the morph animation.
-  }, [height, stabilizeLayout]);
+  }, [height, stabilizeLayout, themeKey]);
 
   return (
     <div className="min-w-0" style={{ height }}>
@@ -816,7 +820,7 @@ export function HighchartsBlock({ options, height = '24rem', stabilizeLayout = f
           which would kill the treemap drill/lens morph animation and void the
           stabilizeLayout settle timers above. */}
       <HighchartsReact
-        key={options?.chart?.type || 'chart'}
+        key={`${options?.chart?.type || 'chart'}-${themeKey}`}
         ref={chartRef}
         highcharts={Highcharts}
         options={options}
@@ -882,6 +886,9 @@ function exportAnalyticsWorkbook(payload, activeTab) {
 
 export default function Analytics({ view = 'standard' }) {
   const location = useLocation();
+  // Dark mode (DM8): theme-resolved series palette; every chart-options memo
+  // that names a colour depends on it so a toggle rebuilds the options.
+  const palette = useChartPalette();
   const initialParams = new URLSearchParams(location.search);
   const isCategoryMapPage = view === 'category-map';
   const { currentWorkspace } = useWorkspace();
@@ -1449,15 +1456,15 @@ export default function Analytics({ view = 'standard' }) {
         : categoryMapColorMode === 'demand'
           ? teamCreated
           : row.colorValue;
-      const parentBorderColor = selectedCategoryKey === row.custom?.key ? '#2563eb' : '#334155';
+      const parentBorderColor = selectedCategoryKey === row.custom?.key ? palette.blue : palette.treemap.parentBorder;
       const isHotLeaf = pulseEligible && !parentHasChildren && Number(colorValue) > 0 && Number(colorValue) >= hotThreshold && maxLeafPressure > 0;
       return {
         ...row,
         value: parentHasChildren ? undefined : displayCreated,
         colorValue: parentHasChildren ? undefined : colorValue,
-        color: parentHasChildren ? 'rgba(255,255,255,0.001)' : row.color,
+        color: parentHasChildren ? palette.treemap.parentFill : row.color,
         className: isHotLeaf ? 'cat-cell-hot' : undefined,
-        borderColor: parentHasChildren ? parentBorderColor : (isHotLeaf ? '#ef4444' : row.borderColor),
+        borderColor: parentHasChildren ? parentBorderColor : (isHotLeaf ? palette.treemap.hotBorder : row.borderColor),
         borderWidth: parentHasChildren ? 3 : (isHotLeaf ? 2 : (row.parent && displayCreated <= 4 ? 0.75 : row.borderWidth)),
         custom: {
           ...row.custom,
@@ -1490,29 +1497,14 @@ export default function Analytics({ view = 'standard' }) {
       colorAxis: {
         min: 0,
         max: lensEnabled ? (agentPortfolioLensEnabled ? agentPortfolioColorMax : 100) : undefined,
+        // Ramps live in utils/highchartsTheme (light pastels / dark deeps,
+        // same stops + semantics either way).
         stops: lensEnabled
           ? agentPortfolioLensEnabled
-            ? [
-              [0, '#f8fafc'],
-              [0.16, '#dcfce7'],
-              [0.4, '#bae6fd'],
-              [0.68, '#fde68a'],
-              [1, '#fb7185'],
-            ]
-            : [
-              [0, '#f8fafc'],
-              [0.18, '#dbeafe'],
-              [0.45, '#93c5fd'],
-              [0.72, '#3b82f6'],
-              [1, '#1d4ed8'],
-            ]
-          : [
-            [0, '#dbeafe'],
-            [0.22, '#d1fae5'],
-            [0.48, '#fef9c3'],
-            [0.74, '#fed7aa'],
-            [1, '#fecaca'],
-          ],
+            ? palette.treemap.agentPortfolio
+            : palette.treemap.agentShare
+          : palette.treemap.pressure,
+        labels: { style: { color: palette.dark ? '#9ca9bd' : '#64748b' } },
       },
       accessibility: {
         enabled: true,
@@ -1528,21 +1520,15 @@ export default function Analytics({ view = 'standard' }) {
       breadcrumbs: {
         showFullPath: true,
         format: '{level.name}',
+        // Colours (primary text, tinted hover, foreground select, muted
+        // separator) come from the theme's navigation.breadcrumbs defaults.
         buttonTheme: {
           fill: 'none',
           padding: 2,
           'stroke-width': 0,
-          style: {
-            color: '#2563eb',
-            fontSize: '12px',
-            fontWeight: '700',
-          },
-          states: {
-            hover: { fill: '#eff6ff' },
-            select: { fill: 'none', style: { color: '#0f172a', fontWeight: '800' } },
-          },
+          style: { fontSize: '12px', fontWeight: '700' },
         },
-        separator: { text: '/', style: { color: '#64748b', fontSize: '13px' } },
+        separator: { text: '/', style: { fontSize: '13px' } },
       },
       plotOptions: {
         ...chartBase('treemap').plotOptions,
@@ -1557,7 +1543,7 @@ export default function Analytics({ view = 'standard' }) {
           cluster: { enabled: false },
           borderRadius: 3,
           borderWidth: 1,
-          borderColor: '#64748b',
+          borderColor: palette.treemap.cellBorder,
           cursor: 'pointer',
           states: {
             hover: {
@@ -1631,7 +1617,7 @@ export default function Analytics({ view = 'standard' }) {
               const showAgentShare = Boolean(selectedCategoryAgent && (isParent || (shape.width >= 124 && shape.height >= 70)));
               const showShare = Boolean(sharePct && !showAgentShare && (isParent || (shape.width >= 118 && shape.height >= 64)));
               const metricStyle = showShare
-                ? `font-size:${leafMetricFontSize}px;font-weight:700;color:#334155`
+                ? `font-size:${leafMetricFontSize}px;font-weight:700;color:${palette.treemap.labelMuted}`
                 : `font-size:${leafMetricFontSize}px;font-weight:600`;
               const metric = showAgentShare
                 ? agentPortfolioLensEnabled
@@ -1645,14 +1631,14 @@ export default function Analytics({ view = 'standard' }) {
                   : selectedCategoryAgent
                     ? `${formatNumber(agentCreated)} - ${pctMetric}`
                     : `${formatNumber(created)} - ${pctMetric}`;
-                return `${name} <span style="font-size:${Math.max(8, Math.round(headerFontSize * 0.82))}px;font-weight:800;color:#334155">(${escapeChartText(compactMetric)})</span>`;
+                return `${name} <span style="font-size:${Math.max(8, Math.round(headerFontSize * 0.82))}px;font-weight:800;color:${palette.treemap.labelMuted}">(${escapeChartText(compactMetric)})</span>`;
               }
               return hasRoomForMetric && created
                 ? `<span>${name}</span><br/><span style="${metricStyle}">${escapeChartText(metric)}</span>`
                 : `<span>${name}</span>`;
             },
             style: {
-              color: '#0f172a',
+              color: palette.treemap.label,
               fontSize: `${leafFontSize}px`,
               fontWeight: '700',
               lineHeight: `${leafLineHeight}px`,
@@ -1663,7 +1649,7 @@ export default function Analytics({ view = 'standard' }) {
           levels: [{
             level: 1,
             borderWidth: 3,
-            borderColor: '#334155',
+            borderColor: palette.treemap.parentBorder,
             groupPadding: 2,
             dataLabels: {
               enabled: true,
@@ -1674,7 +1660,7 @@ export default function Analytics({ view = 'standard' }) {
               style: {
                 fontSize: `${headerFontSize}px`,
                 fontWeight: '800',
-                color: '#0f172a',
+                color: palette.treemap.label,
                 lineHeight: `${headerLineHeight}px`,
                 textOutline: 'none',
               },
@@ -1682,7 +1668,7 @@ export default function Analytics({ view = 'standard' }) {
           }, {
             level: 2,
             borderWidth: 1.5,
-            borderColor: '#94a3b8',
+            borderColor: palette.treemap.leafBorder,
             groupPadding: 1,
           }],
           point: {
@@ -1731,6 +1717,7 @@ export default function Analytics({ view = 'standard' }) {
     categoryMapColorMode,
     categoryMapZoomScale,
     categoryTimelineStats.totalByPeriod,
+    palette,
     getCategoryTimelineCount,
     isCategoryMapPage,
     legacyMode,
@@ -1757,22 +1744,22 @@ export default function Analytics({ view = 'standard' }) {
       },
       colorAxis: {
         min: 0,
-        minColor: '#eff6ff',
-        maxColor: '#2563eb',
+        minColor: palette.treemap.heatMin,
+        maxColor: palette.treemap.heatMax,
+        labels: { style: { color: palette.dark ? '#9ca9bd' : '#64748b' } },
       },
       xAxis: {
         categories: periods,
-        labels: { style: { color: '#64748b', fontSize: '11px' } },
+        labels: { style: { fontSize: '11px' } },
       },
       yAxis: {
         categories: names,
         title: { text: null },
         reversed: true,
-        labels: { style: { color: '#475569', fontSize: '11px' } },
+        labels: { style: { fontSize: '11px' } },
       },
       legend: { align: 'right', layout: 'vertical', verticalAlign: 'middle' },
       tooltip: {
-        borderColor: '#cbd5e1',
         formatter() {
           return `<b>${names[this.point.y]}</b><br/>${periods[this.point.x]}: <b>${formatNumber(this.point.value)}</b> created tickets`;
         },
@@ -1781,12 +1768,11 @@ export default function Analytics({ view = 'standard' }) {
         type: 'heatmap',
         name: 'Created tickets',
         borderWidth: 1,
-        borderColor: '#ffffff',
         data,
-        dataLabels: { enabled: periods.length <= 12 && names.length <= 8, color: '#0f172a', style: { textOutline: 'none', fontSize: '10px' } },
+        dataLabels: { enabled: periods.length <= 12 && names.length <= 8, style: { fontSize: '10px' } },
       }],
     };
-  }, [categories?.trend]);
+  }, [categories?.trend, palette]);
 
   const categoryPressureOptions = useMemo(() => ({
     ...chartBase('bubble'),
@@ -1798,18 +1784,15 @@ export default function Analytics({ view = 'standard' }) {
       min: 0,
       title: { text: 'Created tickets' },
       gridLineDashStyle: 'Dash',
-      gridLineColor: '#e2e8f0',
     },
     yAxis: {
       min: 0,
       title: { text: 'P90 resolution hours' },
       gridLineDashStyle: 'Dash',
-      gridLineColor: '#e2e8f0',
     },
     legend: { enabled: false },
     tooltip: {
       useHTML: true,
-      borderColor: '#cbd5e1',
       pointFormatter() {
         return `<b>${this.name}</b><br/>${formatNumber(this.x)} created<br/>${this.y || 0}h p90 resolution<br/>${formatNumber(this.z)} open tickets<br/>${formatNumber(this.reviewNeeded || 0)} review-needed`;
       },
@@ -1819,8 +1802,8 @@ export default function Analytics({ view = 'standard' }) {
       bubble: {
         minSize: 10,
         maxSize: 56,
-        color: '#2563eb',
-        marker: { fillOpacity: 0.55, lineColor: '#1d4ed8', lineWidth: 1 },
+        color: palette.blue,
+        marker: { fillOpacity: 0.55, lineColor: palette.blueDeep, lineWidth: 1 },
         point: {
           events: {
             click() {
@@ -1834,10 +1817,10 @@ export default function Analytics({ view = 'standard' }) {
       name: 'Category pressure',
       data: (categories?.pressure || []).map((row) => ({
         ...row,
-        color: row.overdue > 0 || row.automationFailureRatePct >= 20 ? '#dc2626' : row.reviewNeeded > 0 ? '#f59e0b' : '#2563eb',
+        color: row.overdue > 0 || row.automationFailureRatePct >= 20 ? palette.red : row.reviewNeeded > 0 ? palette.amber : palette.blue,
       })),
     }],
-  }), [categories?.pressure]);
+  }), [categories?.pressure, palette]);
 
   const categorySankeyOptions = useMemo(() => {
     const flowRows = categories?.assignmentFlow || [];
@@ -1846,12 +1829,13 @@ export default function Analytics({ view = 'standard' }) {
     const outcomeNames = new Set(['Automation succeeded', 'Automation failed', 'Rebound', 'No linked automation run']);
     const nodeIds = Array.from(new Set(flowRows.flatMap((row) => [row.from, row.to])));
     const nodes = nodeIds.map((id) => {
-      if (sourceNames.has(id)) return { id, color: '#dbeafe' };
+      const soft = palette.soft;
+      if (sourceNames.has(id)) return { id, color: soft.blue };
       if (outcomeNames.has(id)) {
-        const color = id === 'Automation failed' ? '#fecaca' : id === 'Rebound' ? '#fed7aa' : id === 'Automation succeeded' ? '#d1fae5' : '#e2e8f0';
+        const color = id === 'Automation failed' ? soft.red : id === 'Rebound' ? soft.orange : id === 'Automation succeeded' ? soft.green : soft.slate;
         return { id, color };
       }
-      return { id, color: categoryNames.has(id) ? '#e0f2fe' : '#e2e8f0' };
+      return { id, color: categoryNames.has(id) ? soft.sky : soft.slate };
     });
 
     return {
@@ -1866,7 +1850,6 @@ export default function Analytics({ view = 'standard' }) {
         description: 'Assignment path flow from assignment source, through top category, to automation outcome.',
       },
       tooltip: {
-        borderColor: '#cbd5e1',
         pointFormat: '<b>{point.fromNode.name}</b> → <b>{point.toNode.name}</b>: {point.weight}',
       },
       plotOptions: {
@@ -1882,11 +1865,9 @@ export default function Analytics({ view = 'standard' }) {
             crop: false,
             overflow: 'allow',
             style: {
-              color: '#334155',
               fontSize: '10px',
               fontWeight: '700',
               lineHeight: '12px',
-              textOutline: 'none',
             },
           },
         },
@@ -1898,10 +1879,10 @@ export default function Analytics({ view = 'standard' }) {
         data: flowRows.map((row) => [row.from, row.to, row.weight]),
       }],
     };
-  }, [categories?.assignmentFlow, categories?.rows]);
+  }, [categories?.assignmentFlow, categories?.rows, palette]);
 
   const assignmentMixOptions = useMemo(() => {
-    const rows = buildAssignmentMixRows(overview?.assignmentMix);
+    const rows = buildAssignmentMixRows(overview?.assignmentMix, palette.assignmentSource);
     return {
       ...chartBase('pie'),
       chart: {
@@ -1916,7 +1897,6 @@ export default function Analytics({ view = 'standard' }) {
       },
       tooltip: {
         useHTML: true,
-        borderColor: '#cbd5e1',
         pointFormatter() {
           return `<b>${this.name}</b><br/>${formatNumber(this.y)} tickets · ${this.percentage.toFixed(1)}%`;
         },
@@ -1938,7 +1918,7 @@ export default function Analytics({ view = 'standard' }) {
         data: rows.map((row) => ({ name: row.label, y: row.value, custom: row })),
       }],
     };
-  }, [overview?.assignmentMix]);
+  }, [overview?.assignmentMix, palette]);
 
   const demandTrendOptions = useMemo(() => {
     const rows = demand?.trend || [];
@@ -1950,29 +1930,28 @@ export default function Analytics({ view = 'standard' }) {
       },
       xAxis: {
         categories: rows.map((row) => row.date),
-        labels: { style: { color: '#64748b', fontSize: '11px' } },
+        labels: { style: { fontSize: '11px' } },
       },
       yAxis: {
         min: 0,
         allowDecimals: false,
         title: { text: null },
         gridLineDashStyle: 'Dash',
-        gridLineColor: '#e2e8f0',
       },
-      legend: { itemStyle: { color: '#334155', fontSize: '12px' } },
-      tooltip: { shared: true, borderColor: '#cbd5e1' },
+      legend: { itemStyle: { fontSize: '12px' } },
+      tooltip: { shared: true },
       plotOptions: {
         ...chartBase('area').plotOptions,
         area: { fillOpacity: 0.18, marker: { enabled: rows.length <= 45, radius: 3 } },
         line: { marker: { enabled: rows.length <= 45, radius: 3 }, lineWidth: 2 },
       },
       series: [
-        { type: 'area', name: 'Created', data: rows.map((row) => row.created || 0), color: '#2563eb' },
-        { type: 'area', name: 'Closed / Resolved', data: rows.map((row) => row.resolved || 0), color: '#059669' },
-        { type: 'line', name: 'Net', data: rows.map((row) => row.net || 0), color: '#f59e0b' },
+        { type: 'area', name: 'Created', data: rows.map((row) => row.created || 0), color: palette.blue },
+        { type: 'area', name: 'Closed / Resolved', data: rows.map((row) => row.resolved || 0), color: palette.green },
+        { type: 'line', name: 'Net', data: rows.map((row) => row.net || 0), color: palette.amber },
       ],
     };
-  }, [demand?.trend]);
+  }, [demand?.trend, palette]);
 
   const teamTimelineMetricLabel = TEAM_TIMELINE_METRICS.find((metric) => metric.key === teamTimelineMetric)?.label || 'Tickets';
 
@@ -1987,30 +1966,27 @@ export default function Analytics({ view = 'standard' }) {
     // `if (options[coll])` guard in Chart.update skips falsy collections, so a
     // config that merely omits the key can never clear one (QA 08-17 #4).
     colorAxis: [],
-    colors: ['#2563eb', '#f59e0b', '#8b5cf6', '#059669'],
+    colors: [palette.blue, palette.amber, palette.purple, palette.green],
     xAxis: {
       // Explicit category axis with every agent label shown. `type: 'category'`
       // guarantees agent names (never a numeric fallback axis) and `step: 1`
       // stops Highcharts thinning labels when the roster is long (QA 07-23 #5).
       type: 'category',
       categories: teamRows.map((row) => row.name || 'Unknown agent'),
-      labels: { step: 1, autoRotation: undefined, style: { color: '#475569', fontSize: '12px' } },
-      lineColor: '#cbd5e1',
+      labels: { step: 1, autoRotation: undefined, style: { fontSize: '12px' } },
     },
     yAxis: {
       min: 0,
       allowDecimals: false,
-      title: { text: 'Tickets', style: { color: '#94a3b8', fontSize: '11px' } },
+      title: { text: 'Tickets', style: { fontSize: '11px' } },
       gridLineDashStyle: 'Dash',
-      gridLineColor: '#e2e8f0',
-      labels: { style: { color: '#64748b', fontSize: '11px' } },
+      labels: { style: { fontSize: '11px' } },
     },
-    legend: { itemStyle: { color: '#334155', fontSize: '12px' } },
+    legend: { itemStyle: { fontSize: '12px' } },
     tooltip: {
       shared: true,
       useHTML: true,
-      borderColor: '#cbd5e1',
-      headerFormat: '<span style="font-size:12px;font-weight:700;color:#0f172a">{point.key}</span><br/>',
+      headerFormat: '<span style="font-size:12px;font-weight:700">{point.key}</span><br/>',
       pointFormat: '<span style="color:{series.color}">●</span> {series.name}: <b>{point.y}</b> tickets<br/>',
     },
     plotOptions: {
@@ -2036,7 +2012,7 @@ export default function Analytics({ view = 'standard' }) {
       { name: 'Pending now', data: teamRows.map((row) => ({ y: row.pendingNow || 0, technicianId: row.technicianId })) },
       { name: 'Closed / resolved', data: teamRows.map((row) => ({ y: row.closed || 0, technicianId: row.technicianId })) },
     ],
-  }), [teamRows, toggleTeamSelection]);
+  }), [teamRows, toggleTeamSelection, palette]);
 
   const sourceChartOptions = useMemo(() => ({
     chart: { type: 'bar', backgroundColor: 'transparent', spacing: [8, 8, 8, 8] },
@@ -2050,26 +2026,23 @@ export default function Analytics({ view = 'standard' }) {
     xAxis: {
       type: 'category',
       categories: teamRows.map((row) => row.name || 'Unknown agent'),
-      labels: { step: 1, autoRotation: undefined, style: { color: '#475569', fontSize: '12px' } },
-      lineColor: '#cbd5e1',
+      labels: { step: 1, autoRotation: undefined, style: { fontSize: '12px' } },
     },
     yAxis: {
       min: 0,
       allowDecimals: false,
-      title: { text: 'Tickets', style: { color: '#94a3b8', fontSize: '11px' } },
+      title: { text: 'Tickets', style: { fontSize: '11px' } },
       stackLabels: {
         enabled: true,
-        style: { color: '#334155', fontSize: '10px', textOutline: 'none' },
+        style: { fontSize: '10px' },
       },
       gridLineDashStyle: 'Dash',
-      gridLineColor: '#e2e8f0',
-      labels: { style: { color: '#64748b', fontSize: '11px' } },
+      labels: { style: { fontSize: '11px' } },
     },
-    legend: { itemStyle: { color: '#334155', fontSize: '12px' } },
+    legend: { itemStyle: { fontSize: '12px' } },
     tooltip: {
       shared: true,
       useHTML: true,
-      borderColor: '#cbd5e1',
       formatter() {
         // Category axis: the agent name rides on the points' `key`; `this.x`
         // is the numeric index.
@@ -2092,8 +2065,8 @@ export default function Analytics({ view = 'standard' }) {
         },
       },
     },
-    series: buildAssignmentSourceSeries(teamRows),
-  }), [teamRows, toggleTeamSelection]);
+    series: buildAssignmentSourceSeries(teamRows, palette.assignmentSource),
+  }), [teamRows, toggleTeamSelection, palette]);
 
   const timelineChartOptions = useMemo(() => {
     const visibleIds = new Set(teamRows.map((row) => row.technicianId));
@@ -2106,7 +2079,7 @@ export default function Analytics({ view = 'standard' }) {
     }
     const series = Array.from(rowsByTech.entries()).map(([technicianId, row], index) => ({
       name: row.name,
-      color: HIGHCHART_COLORS[index % HIGHCHART_COLORS.length],
+      color: palette.order[index % palette.order.length],
       data: periods.map((period) => ({
         y: Number(row.byPeriod.get(period)?.[teamTimelineMetric] || 0),
         period,
@@ -2121,24 +2094,21 @@ export default function Analytics({ view = 'standard' }) {
       accessibility: { enabled: true },
       xAxis: {
         categories: periods,
-        labels: { style: { color: '#64748b', fontSize: '11px' } },
-        lineColor: '#cbd5e1',
+        labels: { style: { fontSize: '11px' } },
       },
       yAxis: {
         min: 0,
         allowDecimals: teamTimelineMetric === 'leaveDays' || teamTimelineMetric === 'wfhDays',
         title: { text: null },
         gridLineDashStyle: 'Dash',
-        gridLineColor: '#e2e8f0',
-        labels: { style: { color: '#64748b', fontSize: '11px' } },
+        labels: { style: { fontSize: '11px' } },
       },
       legend: {
         align: 'center',
-        itemStyle: { color: '#334155', fontSize: '12px' },
+        itemStyle: { fontSize: '12px' },
       },
       tooltip: {
         shared: true,
-        borderColor: '#cbd5e1',
         valueDecimals: teamTimelineMetric === 'leaveDays' || teamTimelineMetric === 'wfhDays' ? 1 : 0,
         valueSuffix: teamTimelineMetric === 'leaveDays' || teamTimelineMetric === 'wfhDays' ? ' days' : ' tickets',
       },
@@ -2159,7 +2129,7 @@ export default function Analytics({ view = 'standard' }) {
       },
       series,
     };
-  }, [team?.timeline, teamRows, teamTimelineMetric, toggleTeamSelection]);
+  }, [team?.timeline, teamRows, teamTimelineMetric, toggleTeamSelection, palette]);
 
   // ---- Capacity tab derivations -------------------------------------------
   // Deliberately based on the RAW server payload: team?.technicians arrives
@@ -2199,36 +2169,33 @@ export default function Analytics({ view = 'standard' }) {
     // other per-agent charts so an agent keeps one hue across tabs.
     const series = capacityRows.map((row, index) => ({
       name: row.name || 'Unknown agent',
-      color: HIGHCHART_COLORS[index % HIGHCHART_COLORS.length],
+      color: palette.order[index % palette.order.length],
       data: periods.map((period) => byTech.get(row.technicianId)?.get(period) || 0),
     }));
     return {
       ...base,
       xAxis: {
         categories: periods,
-        labels: { style: { color: '#64748b', fontSize: '11px' } },
-        lineColor: '#cbd5e1',
+        labels: { style: { fontSize: '11px' } },
       },
       yAxis: {
         min: 0,
         allowDecimals: false,
-        title: { text: 'Assigned tickets', style: { color: '#94a3b8', fontSize: '11px' } },
+        title: { text: 'Assigned tickets', style: { fontSize: '11px' } },
         gridLineDashStyle: 'Dash',
-        gridLineColor: '#e2e8f0',
-        labels: { style: { color: '#64748b', fontSize: '11px' } },
+        labels: { style: { fontSize: '11px' } },
         stackLabels: {
           enabled: periods.length <= 26,
-          style: { color: '#334155', fontSize: '10px', textOutline: 'none' },
+          style: { fontSize: '10px' },
         },
       },
-      legend: { itemStyle: { color: '#334155', fontSize: '12px' } },
+      legend: { itemStyle: { fontSize: '12px' } },
       tooltip: {
         shared: true,
         useHTML: true,
-        borderColor: '#cbd5e1',
-        headerFormat: '<span style="font-size:12px;font-weight:700;color:#0f172a">{point.key}</span><br/>',
+        headerFormat: '<span style="font-size:12px;font-weight:700">{point.key}</span><br/>',
         pointFormat: '<span style="color:{series.color}">●</span> {series.name}: <b>{point.y}</b><br/>',
-        footerFormat: '<span style="color:#64748b">Team total: <b>{point.total}</b> tickets</span>',
+        footerFormat: '<span style="color:hsl(var(--muted-foreground))">Team total: <b>{point.total}</b> tickets</span>',
       },
       plotOptions: {
         ...base.plotOptions,
@@ -2241,7 +2208,7 @@ export default function Analytics({ view = 'standard' }) {
       },
       series,
     };
-  }, [capacityRows, team?.timeline]);
+  }, [capacityRows, team?.timeline, palette]);
   // ---- end Capacity tab derivations ---------------------------------------
 
   const resolutionBucketRows = useMemo(() => (
@@ -2262,55 +2229,53 @@ export default function Analytics({ view = 'standard' }) {
 
   const qualityDistributionOptions = useMemo(() => ({
     ...chartBase('column'),
-    colors: ['#2563eb', '#f59e0b'],
+    colors: [palette.blue, palette.amber],
     xAxis: {
       categories: resolutionBucketRows.map((row) => row.name),
-      labels: { style: { color: '#475569', fontSize: '12px' } },
+      labels: { style: { fontSize: '12px' } },
     },
     yAxis: {
       min: 0,
       allowDecimals: false,
       title: { text: null },
       gridLineDashStyle: 'Dash',
-      gridLineColor: '#e2e8f0',
     },
     legend: { enabled: false },
-    tooltip: { borderColor: '#cbd5e1', pointFormat: '<b>{point.y}</b> resolved tickets' },
+    tooltip: { pointFormat: '<b>{point.y}</b> resolved tickets' },
     plotOptions: {
       column: {
         borderRadius: 5,
         colorByPoint: true,
-        colors: ['#059669', '#10b981', '#2563eb', '#f59e0b', '#dc2626'],
+        colors: [palette.green, palette.emerald, palette.blue, palette.amber, palette.red],
       },
     },
     series: [{ name: 'Resolved tickets', data: resolutionBucketRows.map((row) => row.count || 0) }],
-  }), [resolutionBucketRows]);
+  }), [resolutionBucketRows, palette]);
 
   const openAgingOptions = useMemo(() => ({
     ...chartBase('bar'),
-    colors: ['#f59e0b'],
+    colors: [palette.amber],
     xAxis: {
       categories: openAgingRows.map((row) => row.name),
-      labels: { style: { color: '#475569', fontSize: '12px' } },
+      labels: { style: { fontSize: '12px' } },
     },
     yAxis: {
       min: 0,
       allowDecimals: false,
       title: { text: null },
       gridLineDashStyle: 'Dash',
-      gridLineColor: '#e2e8f0',
     },
     legend: { enabled: false },
-    tooltip: { borderColor: '#cbd5e1', pointFormat: '<b>{point.y}</b> open tickets' },
+    tooltip: { pointFormat: '<b>{point.y}</b> open tickets' },
     plotOptions: {
       bar: {
         borderRadius: 5,
         colorByPoint: true,
-        colors: ['#10b981', '#2563eb', '#f59e0b', '#dc2626'],
+        colors: [palette.emerald, palette.blue, palette.amber, palette.red],
       },
     },
     series: [{ name: 'Open tickets', data: openAgingRows.map((row) => row.count || 0) }],
-  }), [openAgingRows]);
+  }), [openAgingRows, palette]);
 
   const csatTrendOptions = useMemo(() => {
     const rows = quality?.csat?.trend || [];
@@ -2319,14 +2284,13 @@ export default function Analytics({ view = 'standard' }) {
       chart: { ...chartBase('line').chart, zoomType: 'x' },
       xAxis: {
         categories: rows.map((row) => row.date),
-        labels: { style: { color: '#64748b', fontSize: '11px' } },
+        labels: { style: { fontSize: '11px' } },
       },
       yAxis: [{
         min: 0,
         max: 4,
         title: { text: null },
         gridLineDashStyle: 'Dash',
-        gridLineColor: '#e2e8f0',
       }, {
         min: 0,
         allowDecimals: false,
@@ -2334,18 +2298,18 @@ export default function Analytics({ view = 'standard' }) {
         opposite: true,
         gridLineWidth: 0,
       }],
-      legend: { itemStyle: { color: '#334155', fontSize: '12px' } },
-      tooltip: { shared: true, borderColor: '#cbd5e1' },
+      legend: { itemStyle: { fontSize: '12px' } },
+      tooltip: { shared: true },
       plotOptions: {
         column: { borderRadius: 4 },
         line: { marker: { enabled: rows.length <= 45, radius: 3 }, lineWidth: 2 },
       },
       series: [
-        { type: 'line', name: 'Average CSAT', data: rows.map((row) => row.average), color: '#7c3aed', tooltip: { valueDecimals: 2 } },
-        { type: 'column', name: 'Responses', data: rows.map((row) => row.responses || 0), color: '#bfdbfe', yAxis: 1 },
+        { type: 'line', name: 'Average CSAT', data: rows.map((row) => row.average), color: palette.violet, tooltip: { valueDecimals: 2 } },
+        { type: 'column', name: 'Responses', data: rows.map((row) => row.responses || 0), color: palette.blueSoft, yAxis: 1 },
       ],
     };
-  }, [quality?.csat?.trend]);
+  }, [quality?.csat?.trend, palette]);
 
   const lowCsatCount = quality?.csat?.lowScoreCount ?? quality?.csat?.lowScoreTickets?.length ?? 0;
   const csatDrilldownRows = (quality?.csat?.lowScoreTickets || []).length
@@ -2367,8 +2331,8 @@ export default function Analytics({ view = 'standard' }) {
 
   const opsFunnelOptions = useMemo(() => ({
     ...chartBase('pie'),
-    colors: HIGHCHART_COLORS,
-    tooltip: { borderColor: '#cbd5e1', pointFormat: '<b>{point.y}</b> runs ({point.percentage:.1f}%)' },
+    colors: palette.order,
+    tooltip: { pointFormat: '<b>{point.y}</b> runs ({point.percentage:.1f}%)' },
     plotOptions: {
       pie: {
         innerSize: '58%',
@@ -2376,7 +2340,7 @@ export default function Analytics({ view = 'standard' }) {
         dataLabels: {
           enabled: true,
           distance: 12,
-          style: { fontSize: '11px', color: '#334155', textOutline: 'none' },
+          style: { fontSize: '11px' },
           format: '{point.name}: {point.y}',
         },
       },
@@ -2385,46 +2349,44 @@ export default function Analytics({ view = 'standard' }) {
       name: 'Pipeline outcomes',
       data: opsFunnelRows.map((row) => ({ name: row.name, y: row.count || 0 })),
     }],
-  }), [opsFunnelRows]);
+  }), [opsFunnelRows, palette]);
 
   const opsTriggerOptions = useMemo(() => ({
     ...chartBase('bar'),
-    colors: ['#2563eb'],
+    colors: [palette.blue],
     xAxis: {
       categories: opsTriggerRows.map((row) => row.name),
-      labels: { style: { color: '#475569', fontSize: '12px' } },
+      labels: { style: { fontSize: '12px' } },
     },
     yAxis: {
       min: 0,
       allowDecimals: false,
       title: { text: null },
       gridLineDashStyle: 'Dash',
-      gridLineColor: '#e2e8f0',
     },
     legend: { enabled: false },
-    tooltip: { borderColor: '#cbd5e1', pointFormat: '<b>{point.y}</b> runs' },
+    tooltip: { pointFormat: '<b>{point.y}</b> runs' },
     plotOptions: { bar: { borderRadius: 5 } },
     series: [{ name: 'Runs', data: opsTriggerRows.map((row) => row.count || 0) }],
-  }), [opsTriggerRows]);
+  }), [opsTriggerRows, palette]);
 
   const opsStepHealthOptions = useMemo(() => {
     const rows = ops?.steps || [];
     return {
       ...chartBase('bar'),
-      colors: ['#059669', '#dc2626', '#64748b'],
+      colors: [palette.green, palette.red, palette.slate],
       xAxis: {
         categories: rows.map((row) => labelFromKey(row.stepName)),
-        labels: { style: { color: '#475569', fontSize: '11px' } },
+        labels: { style: { fontSize: '11px' } },
       },
       yAxis: {
         min: 0,
         allowDecimals: false,
         title: { text: null },
         gridLineDashStyle: 'Dash',
-        gridLineColor: '#e2e8f0',
       },
-      legend: { itemStyle: { color: '#334155', fontSize: '12px' } },
-      tooltip: { shared: true, borderColor: '#cbd5e1', valueSuffix: ' steps' },
+      legend: { itemStyle: { fontSize: '12px' } },
+      tooltip: { shared: true, valueSuffix: ' steps' },
       plotOptions: { series: { stacking: 'normal', borderRadius: 4 } },
       series: [
         { name: 'Completed', data: rows.map((row) => row.completed || 0) },
@@ -2432,32 +2394,31 @@ export default function Analytics({ view = 'standard' }) {
         { name: 'Skipped', data: rows.map((row) => row.skipped || 0) },
       ],
     };
-  }, [ops?.steps]);
+  }, [ops?.steps, palette]);
 
   const opsStepDurationOptions = useMemo(() => {
     const rows = ops?.steps || [];
     return {
       ...chartBase('column'),
-      colors: ['#2563eb', '#f59e0b'],
+      colors: [palette.blue, palette.amber],
       xAxis: {
         categories: rows.map((row) => labelFromKey(row.stepName)),
-        labels: { style: { color: '#475569', fontSize: '11px' } },
+        labels: { style: { fontSize: '11px' } },
       },
       yAxis: {
         min: 0,
-        title: { text: 'ms', style: { color: '#64748b' } },
+        title: { text: 'ms' },
         gridLineDashStyle: 'Dash',
-        gridLineColor: '#e2e8f0',
       },
-      legend: { itemStyle: { color: '#334155', fontSize: '12px' } },
-      tooltip: { shared: true, borderColor: '#cbd5e1', valueSuffix: ' ms' },
+      legend: { itemStyle: { fontSize: '12px' } },
+      tooltip: { shared: true, valueSuffix: ' ms' },
       plotOptions: { column: { borderRadius: 4 } },
       series: [
         { name: 'Average', data: rows.map((row) => row.avgDurationMs || 0) },
         { name: 'P90', data: rows.map((row) => row.p90DurationMs || 0) },
       ],
     };
-  }, [ops?.steps]);
+  }, [ops?.steps, palette]);
 
   const opsTrendOptions = useMemo(() => {
     const pipelineRows = ops?.pipeline?.trend || [];
@@ -2470,28 +2431,27 @@ export default function Analytics({ view = 'standard' }) {
       chart: { ...chartBase('line').chart, zoomType: 'x' },
       xAxis: {
         categories: periods,
-        labels: { style: { color: '#64748b', fontSize: '11px' } },
+        labels: { style: { fontSize: '11px' } },
       },
       yAxis: {
         min: 0,
         allowDecimals: false,
         title: { text: null },
         gridLineDashStyle: 'Dash',
-        gridLineColor: '#e2e8f0',
       },
-      legend: { itemStyle: { color: '#334155', fontSize: '12px' } },
-      tooltip: { shared: true, borderColor: '#cbd5e1' },
+      legend: { itemStyle: { fontSize: '12px' } },
+      tooltip: { shared: true },
       plotOptions: {
         line: { marker: { enabled: periods.length <= 45, radius: 3 }, lineWidth: 2 },
         column: { borderRadius: 4 },
       },
       series: [
-        { type: 'line', name: 'Pipeline runs', data: periods.map((period) => pipelineByPeriod.get(period)?.runs || 0), color: '#7c3aed' },
-        { type: 'line', name: 'Pipeline errors', data: periods.map((period) => pipelineByPeriod.get(period)?.errors || 0), color: '#dc2626' },
-        { type: 'column', name: 'Sync failures', data: periods.map((period) => syncByPeriod.get(period)?.failed || 0), color: '#f59e0b' },
+        { type: 'line', name: 'Pipeline runs', data: periods.map((period) => pipelineByPeriod.get(period)?.runs || 0), color: palette.violet },
+        { type: 'line', name: 'Pipeline errors', data: periods.map((period) => pipelineByPeriod.get(period)?.errors || 0), color: palette.red },
+        { type: 'column', name: 'Sync failures', data: periods.map((period) => syncByPeriod.get(period)?.failed || 0), color: palette.amber },
       ],
     };
-  }, [ops?.pipeline?.trend, ops?.sync?.trend]);
+  }, [ops?.pipeline?.trend, ops?.sync?.trend, palette]);
 
   const opsRoutingAccuracyOptions = useMemo(() => {
     const rows = ops?.routingAccuracy?.weeklyTrend || [];
@@ -2499,22 +2459,21 @@ export default function Analytics({ view = 'standard' }) {
       ...chartBase('column'),
       xAxis: {
         categories: rows.map((row) => row.week),
-        labels: { style: { color: '#64748b', fontSize: '11px' } },
+        labels: { style: { fontSize: '11px' } },
       },
       yAxis: {
         min: 0,
         max: 100,
         title: { text: null },
-        labels: { format: '{value}%', style: { color: '#64748b', fontSize: '11px' } },
+        labels: { format: '{value}%', style: { fontSize: '11px' } },
         gridLineDashStyle: 'Dash',
-        gridLineColor: '#e2e8f0',
       },
       legend: { enabled: false },
-      tooltip: { borderColor: '#cbd5e1', pointFormat: '<b>{point.y}%</b> of auto-assignments held' },
+      tooltip: { pointFormat: '<b>{point.y}%</b> of auto-assignments held' },
       plotOptions: { column: { borderRadius: 4 } },
-      series: [{ name: 'Held', data: rows.map((row) => row.heldPct ?? 0), color: '#2563eb' }],
+      series: [{ name: 'Held', data: rows.map((row) => row.heldPct ?? 0), color: palette.blue }],
     };
-  }, [ops?.routingAccuracy?.weeklyTrend]);
+  }, [ops?.routingAccuracy?.weeklyTrend, palette]);
 
   const insightRows = useMemo(() => insights?.insights || [], [insights?.insights]);
   const selectedInsight = useMemo(() => (
@@ -2535,15 +2494,15 @@ export default function Analytics({ view = 'standard' }) {
 
   const insightSeverityOptions = useMemo(() => ({
     ...chartBase('pie'),
-    colors: insightSeverityRows.map((row) => row.color),
-    tooltip: { borderColor: '#cbd5e1', pointFormat: '<b>{point.y}</b> insights' },
+    colors: insightSeverityRows.map((row) => palette.severity[row.key] || row.color),
+    tooltip: { pointFormat: '<b>{point.y}</b> insights' },
     plotOptions: {
       pie: {
         innerSize: '62%',
         dataLabels: {
           enabled: true,
           distance: 10,
-          style: { fontSize: '11px', color: '#334155', textOutline: 'none' },
+          style: { fontSize: '11px' },
           format: '{point.name}: {point.y}',
         },
       },
@@ -2552,7 +2511,7 @@ export default function Analytics({ view = 'standard' }) {
       name: 'Insights',
       data: insightSeverityRows.filter((row) => row.count > 0).map((row) => ({ name: row.label, y: row.count })),
     }],
-  }), [insightSeverityRows]);
+  }), [insightSeverityRows, palette]);
 
   const renderOverview = () => (
     <div className="space-y-4">
@@ -2574,33 +2533,33 @@ export default function Analytics({ view = 'standard' }) {
               <HighchartsBlock options={assignmentMixOptions} height="100%" />
               <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
                 <div className="text-center">
-                  <p className="text-xl font-bold text-slate-900 sm:text-2xl">
+                  <p className="text-xl font-bold text-foreground sm:text-2xl">
                     {formatNumber(buildAssignmentMixRows(overview?.assignmentMix).reduce((sum, row) => sum + row.value, 0))}
                   </p>
-                  <p className="text-xs font-semibold uppercase tracking-normal text-slate-500">assigned tickets</p>
+                  <p className="text-xs font-semibold uppercase tracking-normal text-muted-foreground">assigned tickets</p>
                 </div>
               </div>
             </div>
             <div className="min-w-0 space-y-2">
               {buildAssignmentMixRows(overview?.assignmentMix).map((row) => (
-                <div key={row.key} className="min-w-0 rounded-lg border border-slate-200 p-3">
+                <div key={row.key} className="min-w-0 rounded-lg border border-border p-3">
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex min-w-0 items-center gap-2">
                       <span className="h-3 w-3 rounded-sm" style={{ backgroundColor: row.color }} />
-                      <p className="truncate text-sm font-semibold text-slate-800">{row.label}</p>
+                      <p className="truncate text-sm font-semibold text-foreground">{row.label}</p>
                     </div>
-                    <p className="shrink-0 text-sm font-bold text-slate-900">{formatNumber(row.value)}</p>
+                    <p className="shrink-0 text-sm font-bold text-foreground">{formatNumber(row.value)}</p>
                   </div>
-                  <p className="mt-1 break-words text-xs text-slate-500">{row.pct}% · {row.description}</p>
+                  <p className="mt-1 break-words text-xs text-muted-foreground">{row.pct}% · {row.description}</p>
                 </div>
               ))}
               {((overview?.assignmentMix?.unknown || 0) > 0 || (overview?.assignmentMix?.workflowAssigned || 0) > 0) && (
-                <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+                <div className="min-w-0 rounded-lg border border-border bg-muted/50 p-3 text-xs text-muted-foreground">
                   <p>
-                    <span className="font-semibold text-slate-800">Assigned at creation / workflow</span> — FreshService put the ticket on its owner when it was created (workflow, automator, email rule or API), so there is no “assigned by” person to credit.
+                    <span className="font-semibold text-foreground">Assigned at creation / workflow</span> — FreshService put the ticket on its owner when it was created (workflow, automator, email rule or API), so there is no “assigned by” person to credit.
                   </p>
                   <p className="mt-1">
-                    <span className="font-semibold text-slate-800">Source unavailable</span> — the ticket’s activity history has not been synced yet, or the sync failed, so the assigner is not known. Neither band is a technician metric; both are excluded from self-pick and coordinator reads.
+                    <span className="font-semibold text-foreground">Source unavailable</span> — the ticket’s activity history has not been synced yet, or the sync failed, so the assigner is not known. Neither band is a technician metric; both are excluded from self-pick and coordinator reads.
                     <MetricHint metric="assignmentMixUnknown" title="Unattributed assignments" className="ml-1 align-middle" />
                   </p>
                 </div>
@@ -2613,13 +2572,13 @@ export default function Analytics({ view = 'standard' }) {
             <div className="space-y-1.5">
               {overview.tagBreakdown.rows.map((row) => (
                 <div key={row.id} className="flex items-center gap-2 text-sm">
-                  <span className="truncate font-medium text-slate-700">{row.name}</span>
-                  <span className="ml-auto shrink-0 tabular-nums text-slate-500">{formatNumber(row.created)} created</span>
-                  <span className="shrink-0 tabular-nums text-xs text-amber-600">{row.open} open</span>
+                  <span className="truncate font-medium text-foreground/85">{row.name}</span>
+                  <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">{formatNumber(row.created)} created</span>
+                  <span className="shrink-0 tabular-nums text-xs text-amber-600 dark:text-amber-300">{row.open} open</span>
                 </div>
               ))}
               {overview.tagBreakdown.untagged > 0 && (
-                <div className="flex items-center gap-2 border-t border-slate-100 pt-1.5 text-xs text-slate-400">
+                <div className="flex items-center gap-2 border-t border-border/60 pt-1.5 text-xs text-muted-foreground/75">
                   <span>Untagged</span>
                   <span className="ml-auto tabular-nums">{formatNumber(overview.tagBreakdown.untagged)}</span>
                 </div>
@@ -2665,7 +2624,7 @@ export default function Analytics({ view = 'standard' }) {
               />
             </div>
           ) : (
-            <p className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+            <p className="mt-3 rounded-lg border border-border bg-muted/50 p-3 text-xs text-muted-foreground">
               First-response analytics unlock at 30% coverage — currently {overview?.firstResponse?.coveragePct ?? 0}% of range tickets carry a first-response timestamp
               (populates from FreshService stats on sync; run a backfill under Settings → Backfill to fill history).
               Origin split: {formatNumber(overview?.originMix?.ticketpulse || 0)} TP-born / {formatNumber(overview?.originMix?.freshservice || 0)} FS-born.
@@ -2720,7 +2679,7 @@ export default function Analytics({ view = 'standard' }) {
             : 'Full selected range view.'}
         actions={(
           <div className="flex flex-wrap items-center gap-2">
-            <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1">
+            <div className="inline-flex rounded-lg border border-border bg-muted/50 p-1">
               {[
                 ['range', 'Range'],
                 ['period', 'Timeline'],
@@ -2736,15 +2695,15 @@ export default function Analytics({ view = 'standard' }) {
                   }}
                   className={`h-8 rounded-md px-3 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-40 ${
                     categoryMapTemporalMode === value
-                      ? 'bg-slate-900 text-white shadow-sm'
-                      : 'text-slate-600 hover:bg-white'
+                      ? 'bg-foreground text-background shadow-sm'
+                      : 'text-muted-foreground hover:bg-card'
                   }`}
                 >
                   {label}
                 </button>
               ))}
             </div>
-            <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1">
+            <div className="inline-flex rounded-lg border border-border bg-muted/50 p-1">
               {[
                 ['pressure', 'Pressure'],
                 ['demand', 'Demand'],
@@ -2756,7 +2715,7 @@ export default function Analytics({ view = 'standard' }) {
                   className={`h-8 rounded-md px-3 text-xs font-bold transition ${
                     categoryMapColorMode === value
                       ? 'bg-blue-600 text-white shadow-sm'
-                      : 'text-slate-600 hover:bg-white'
+                      : 'text-muted-foreground hover:bg-card'
                   }`}
                 >
                   {label}
@@ -2772,7 +2731,7 @@ export default function Analytics({ view = 'standard' }) {
               type="button"
               onClick={() => goToFrame(activeCategoryFrameIndex - 1)}
               disabled={!hasFrames || agentPortfolioLensEnabled}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-card text-foreground/85 hover:bg-muted/50 disabled:opacity-40"
               title="Previous period"
             >
               <SkipBack className="h-4 w-4" />
@@ -2786,7 +2745,7 @@ export default function Analytics({ view = 'standard' }) {
                 setCategoryMapPlaying((playing) => !playing);
               }}
               disabled={!hasFrames || agentPortfolioLensEnabled}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 disabled:opacity-40"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 hover:bg-blue-100 dark:hover:bg-blue-500/20 disabled:opacity-40"
               title={categoryMapPlaying ? 'Pause timeline' : 'Play timeline'}
             >
               {categoryMapPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
@@ -2795,7 +2754,7 @@ export default function Analytics({ view = 'standard' }) {
               type="button"
               onClick={() => goToFrame(activeCategoryFrameIndex + 1)}
               disabled={!hasFrames || agentPortfolioLensEnabled}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-card text-foreground/85 hover:bg-muted/50 disabled:opacity-40"
               title="Next period"
             >
               <SkipForward className="h-4 w-4" />
@@ -2803,7 +2762,7 @@ export default function Analytics({ view = 'standard' }) {
           </div>
 
           <label className="min-w-0">
-            <span className="mb-1 flex items-center justify-between gap-3 text-xs font-semibold text-slate-600">
+            <span className="mb-1 flex items-center justify-between gap-3 text-xs font-semibold text-muted-foreground">
               <span>{activeCategoryPeriod || 'No period data'}</span>
               <span>{hasFrames ? `${activeCategoryFrameIndex + 1} / ${categoryTimelinePeriods.length}` : '0 / 0'}</span>
             </span>
@@ -2819,22 +2778,22 @@ export default function Analytics({ view = 'standard' }) {
           </label>
 
           <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3 lg:w-80">
-            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-              <p className="font-bold text-slate-900">{formatNumber(categories?.summary?.totalCreated || 0)}</p>
-              <p className="font-semibold uppercase tracking-normal text-slate-500">Range</p>
+            <div className="rounded-lg border border-border bg-muted/50 px-3 py-2">
+              <p className="font-bold text-foreground">{formatNumber(categories?.summary?.totalCreated || 0)}</p>
+              <p className="font-semibold uppercase tracking-normal text-muted-foreground">Range</p>
             </div>
-            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-              <p className="font-bold text-slate-900">{agentPortfolioLensEnabled ? '—' : formatNumber(periodTotal)}</p>
-              <p className="font-semibold uppercase tracking-normal text-slate-500">Frame</p>
+            <div className="rounded-lg border border-border bg-muted/50 px-3 py-2">
+              <p className="font-bold text-foreground">{agentPortfolioLensEnabled ? '—' : formatNumber(periodTotal)}</p>
+              <p className="font-semibold uppercase tracking-normal text-muted-foreground">Frame</p>
             </div>
-            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-              <p className="font-bold text-slate-900">{categoryMapColorMode === 'pressure' ? 'Pressure' : 'Demand'}</p>
-              <p className="font-semibold uppercase tracking-normal text-slate-500">Color</p>
+            <div className="rounded-lg border border-border bg-muted/50 px-3 py-2">
+              <p className="font-bold text-foreground">{categoryMapColorMode === 'pressure' ? 'Pressure' : 'Demand'}</p>
+              <p className="font-semibold uppercase tracking-normal text-muted-foreground">Color</p>
             </div>
           </div>
         </div>
         {agentPortfolioLensEnabled && (
-          <p className="mt-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-700">
+          <p className="mt-2 rounded-lg border border-blue-100 dark:border-blue-500/20 bg-blue-50 dark:bg-blue-500/15 px-3 py-2 text-xs text-blue-700 dark:text-blue-200">
             The timeline pauses while the personal-heatmap lens is active (the two would tell conflicting stories).
             Switch the agent lens to <span className="font-semibold">Team share</span> — or clear it — to animate the map again.
           </p>
@@ -2869,7 +2828,7 @@ export default function Analytics({ view = 'standard' }) {
     return (
       <div className="space-y-4">
         {legacyMode && (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          <div className="rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-3 py-2 text-sm text-amber-800 dark:text-amber-200">
             This workspace is still using legacy Freshservice category values. Subcategory hierarchy and canonical coverage metrics stay hidden until this workspace is migrated.
           </div>
         )}
@@ -2894,7 +2853,7 @@ export default function Analytics({ view = 'standard' }) {
               {isCategoryMapPage ? (
                 <Link
                   to="/analytics?tab=categories"
-                  className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 hover:bg-slate-50"
+                  className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-card px-3 text-xs font-bold text-foreground/85 hover:bg-muted/50"
                 >
                   <ArrowLeft className="h-4 w-4" />
                   Analytics
@@ -2903,7 +2862,7 @@ export default function Analytics({ view = 'standard' }) {
                 <>
                   <Link
                     to={categoryMapRoute}
-                    className="inline-flex h-9 items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 text-xs font-bold text-blue-700 hover:bg-blue-100"
+                    className="inline-flex h-9 items-center gap-2 rounded-lg border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 px-3 text-xs font-bold text-blue-700 dark:text-blue-200 hover:bg-blue-100 dark:hover:bg-blue-500/20"
                   >
                     <Maximize2 className="h-4 w-4" />
                     Expand
@@ -2912,14 +2871,14 @@ export default function Analytics({ view = 'standard' }) {
                     href={categoryMapRoute}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-card text-foreground/85 hover:bg-muted/50"
                     title="Open category map in a new tab"
                   >
                     <ExternalLink className="h-4 w-4" />
                   </a>
                 </>
               )}
-              <div className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 shadow-sm">
+              <div className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs font-semibold text-foreground/85 shadow-sm">
                 <span>Live effects</span>
                 <button
                   type="button"
@@ -2927,10 +2886,10 @@ export default function Analytics({ view = 'standard' }) {
                   aria-checked={mapEffectsEnabled}
                   onClick={() => setMapEffectsEnabled((enabled) => !enabled)}
                   className={`relative h-5 w-9 rounded-full transition ${
-                    mapEffectsEnabled ? 'bg-blue-600' : 'bg-slate-300'
+                    mapEffectsEnabled ? 'bg-blue-600' : 'bg-muted-foreground/40'
                   }`}
                 >
-                  <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition ${
+                  <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-card shadow-sm transition ${
                     mapEffectsEnabled ? 'left-4' : 'left-0.5'
                   }`}
                   />
@@ -2940,11 +2899,11 @@ export default function Analytics({ view = 'standard' }) {
           )}
         >
           <div className="mb-3 grid items-start gap-3 xl:grid-cols-[minmax(0,1fr)_22rem]">
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <div className="rounded-lg border border-border bg-muted/50 p-3">
               <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
                 <div>
-                  <p className="text-sm font-bold text-slate-900">Agent Lens</p>
-                  <p className="mt-0.5 text-xs text-slate-500">
+                  <p className="text-sm font-bold text-foreground">Agent Lens</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
                     {selectedCategoryAgent
                       ? agentPortfolioLensEnabled
                         ? `Showing ${firstName(selectedCategoryAgent.name)}'s personal category heatmap.`
@@ -2954,7 +2913,7 @@ export default function Analytics({ view = 'standard' }) {
                 </div>
                 {selectedCategoryAgent && (
                   <div className="flex flex-wrap items-center gap-2">
-                    <div className="inline-flex rounded-lg border border-slate-200 bg-white p-1">
+                    <div className="inline-flex rounded-lg border border-border bg-card p-1">
                       {[
                         ['teamShare', 'Team share'],
                         ['portfolio', 'Personal heatmap'],
@@ -2972,7 +2931,7 @@ export default function Analytics({ view = 'standard' }) {
                           className={`h-8 rounded-md px-3 text-xs font-bold transition ${
                             categoryAgentLensMode === value
                               ? 'bg-blue-600 text-white shadow-sm'
-                              : 'text-slate-600 hover:bg-slate-50'
+                              : 'text-muted-foreground hover:bg-muted/50'
                           }`}
                         >
                           {label}
@@ -2982,7 +2941,7 @@ export default function Analytics({ view = 'standard' }) {
                     <button
                       type="button"
                       onClick={() => setSelectedCategoryAgentId('all')}
-                      className="h-8 rounded-md bg-white px-2.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-100"
+                      className="h-8 rounded-md bg-card px-2.5 text-xs font-semibold text-foreground/85 ring-1 ring-border hover:bg-muted"
                     >
                       Clear
                     </button>
@@ -2990,14 +2949,14 @@ export default function Analytics({ view = 'standard' }) {
                 )}
               </div>
               <div className="relative mt-3">
-                <svg className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+                <svg className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/75" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
                 <input
                   type="search"
                   value={agentLensQuery}
                   onChange={(e) => setAgentLensQuery(e.target.value)}
                   placeholder="Filter members by name…"
                   aria-label="Filter members"
-                  className="tp-focus-ring w-full rounded-lg border border-slate-200 bg-white py-1.5 pl-8 pr-3 text-xs placeholder:text-slate-400"
+                  className="tp-focus-ring w-full rounded-lg border border-border bg-card py-1.5 pl-8 pr-3 text-xs placeholder:text-muted-foreground/75"
                 />
               </div>
               <div className={`mt-2 grid grid-cols-2 gap-2 overflow-y-auto pr-1 [scrollbar-width:thin] sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 ${
@@ -3009,14 +2968,14 @@ export default function Analytics({ view = 'standard' }) {
                   onClick={() => setSelectedCategoryAgentId('all')}
                   className={`flex min-w-0 items-center gap-2 rounded-lg border px-2 py-2 text-left transition ${
                     selectedCategoryAgentId === 'all'
-                      ? 'border-slate-900 bg-slate-900 text-white shadow-sm'
-                      : 'border-slate-200 bg-white text-slate-700 hover:border-blue-200 hover:bg-blue-50/50'
+                      ? 'border-foreground bg-foreground text-background shadow-sm'
+                      : 'border-border bg-card text-foreground/85 hover:border-blue-200 dark:hover:border-blue-500/30 hover:bg-blue-50/50 dark:hover:bg-blue-500/10'
                   }`}
                 >
                   <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${
                     selectedCategoryAgentId === 'all'
-                      ? 'bg-white/15 text-white ring-1 ring-white/25'
-                      : 'bg-slate-100 text-slate-600 ring-1 ring-slate-200'
+                      ? 'bg-background/15 text-background ring-1 ring-background/25'
+                      : 'bg-muted text-muted-foreground ring-1 ring-border'
                   }`}
                   >
                     ALL
@@ -3024,7 +2983,7 @@ export default function Analytics({ view = 'standard' }) {
                   <span className="min-w-0">
                     <span className="block truncate text-xs font-bold">Team</span>
                     <span className={`block truncate text-[10px] font-semibold ${
-                      selectedCategoryAgentId === 'all' ? 'text-slate-200' : 'text-slate-500'
+                      selectedCategoryAgentId === 'all' ? 'text-background/80' : 'text-muted-foreground'
                     }`}
                     >
                       Full map
@@ -3042,11 +3001,11 @@ export default function Analytics({ view = 'standard' }) {
                       title={`${agent.name}: ${formatNumber(agent.totalCreated)} created, ${formatSharePct(agent.teamSharePct)}`}
                       className={`flex min-w-0 items-center gap-2 rounded-lg border px-2 py-2 text-left transition ${
                         selected
-                          ? 'border-blue-300 bg-blue-50 shadow-sm'
-                          : 'border-slate-200 bg-white hover:border-blue-200 hover:bg-blue-50/50'
+                          ? 'border-blue-300 dark:border-blue-500/40 bg-blue-50 dark:bg-blue-500/15 shadow-sm'
+                          : 'border-border bg-card hover:border-blue-200 dark:hover:border-blue-500/30 hover:bg-blue-50/50 dark:hover:bg-blue-500/10'
                       }`}
                     >
-                      <span className="relative flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-slate-100 text-[10px] font-bold text-slate-500 ring-1 ring-slate-200">
+                      <span className="relative flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted text-[10px] font-bold text-muted-foreground ring-1 ring-border">
                         <span>{initials(agent.name)}</span>
                         {agent.photoUrl ? (
                           <img
@@ -3058,8 +3017,8 @@ export default function Analytics({ view = 'standard' }) {
                         ) : null}
                       </span>
                       <span className="min-w-0">
-                        <span className="block truncate text-xs font-bold text-slate-900">{firstName(agent.name)}</span>
-                        <span className="block truncate text-[10px] font-semibold text-slate-500">
+                        <span className="block truncate text-xs font-bold text-foreground">{firstName(agent.name)}</span>
+                        <span className="block truncate text-[10px] font-semibold text-muted-foreground">
                           {formatNumber(agent.totalCreated)} · {formatSharePct(agent.teamSharePct)}
                         </span>
                       </span>
@@ -3067,19 +3026,19 @@ export default function Analytics({ view = 'standard' }) {
                   );
                 })}
                 {agentLensQuery.trim() && filteredAgentRows.length === 0 && (
-                  <p className="col-span-full px-1 py-2 text-xs text-slate-400">No member matches “{agentLensQuery.trim()}”.</p>
+                  <p className="col-span-full px-1 py-2 text-xs text-muted-foreground/75">No member matches “{agentLensQuery.trim()}”.</p>
                 )}
               </div>
             </div>
-            <div className="self-start overflow-hidden rounded-lg border border-slate-200 bg-white p-3 xl:max-h-[16.5rem]">
-              <p className="text-sm font-bold text-slate-900">
+            <div className="self-start overflow-hidden rounded-lg border border-border bg-card p-3 xl:max-h-[16.5rem]">
+              <p className="text-sm font-bold text-foreground">
                 {selectedCategoryAgent
                   ? agentPortfolioLensEnabled
                     ? `${selectedCategoryAgent.name} heatmap mix`
                     : `${selectedCategoryAgent.name} team share`
                   : 'Team category mix'}
               </p>
-              <p className="mt-0.5 text-xs text-slate-500">
+              <p className="mt-0.5 text-xs text-muted-foreground">
                 {selectedCategoryAgent
                   ? `${formatNumber(selectedCategoryAgent.totalCreated)} created tickets in this range.`
                   : 'Choose an agent to see their strongest top categories.'}
@@ -3095,13 +3054,13 @@ export default function Analytics({ view = 'standard' }) {
                       key={row.key || row.id}
                       type="button"
                       onClick={() => setSelectedCategoryKey(row.key || row.id)}
-                      className="w-full rounded-md bg-slate-50 px-2 py-1.5 text-left ring-1 ring-slate-200 hover:bg-blue-50 hover:ring-blue-200"
+                      className="w-full rounded-md bg-muted/50 px-2 py-1.5 text-left ring-1 ring-border hover:bg-blue-50 dark:hover:bg-blue-500/15 hover:ring-blue-200 dark:hover:ring-blue-500/30"
                     >
                       <div className="flex items-center justify-between gap-2 text-xs">
-                        <span className="truncate font-semibold text-slate-800">{row.name}</span>
-                        <span className="shrink-0 font-bold text-slate-900">{formatSharePct(pct)}</span>
+                        <span className="truncate font-semibold text-foreground">{row.name}</span>
+                        <span className="shrink-0 font-bold text-foreground">{formatSharePct(pct)}</span>
                       </div>
-                      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-200">
+                      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-secondary">
                         <div className="h-full rounded-full bg-blue-500" style={{ width: `${Math.min(100, pct)}%` }} />
                       </div>
                     </button>
@@ -3111,11 +3070,11 @@ export default function Analytics({ view = 'standard' }) {
             </div>
           </div>
           {mapFocusCategory && (
-            <div className="mb-3 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
+            <div className="mb-3 rounded-lg border border-border bg-card px-3 py-2 shadow-sm">
               <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-bold text-slate-900">{mapFocusCategory.name}</p>
-                  <p className="mt-0.5 text-xs text-slate-500">
+                  <p className="truncate text-sm font-bold text-foreground">{mapFocusCategory.name}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
                     {hoveredCategory ? 'Map focus' : 'Selected focus'} · {mapFocusType}
                   </p>
                 </div>
@@ -3128,9 +3087,9 @@ export default function Analytics({ view = 'standard' }) {
                     ['Auto fail', `${mapFocusAutoFailureRate}%`],
                     ['Rebounds', formatNumber(mapFocusCategory.automationRebounds || 0)],
                   ].map(([label, value]) => (
-                    <div key={label} className="rounded-md bg-slate-50 px-2 py-1 ring-1 ring-slate-200">
-                      <p className="font-bold text-slate-900">{value}</p>
-                      <p className="text-[10px] font-semibold uppercase tracking-normal text-slate-500">{label}</p>
+                    <div key={label} className="rounded-md bg-muted/50 px-2 py-1 ring-1 ring-border">
+                      <p className="font-bold text-foreground">{value}</p>
+                      <p className="text-[10px] font-semibold uppercase tracking-normal text-muted-foreground">{label}</p>
                     </div>
                   ))}
                 </div>
@@ -3141,11 +3100,11 @@ export default function Analytics({ view = 'standard' }) {
             ? <HighchartsBlock options={categoryHierarchyOptions} height={isCategoryMapPage ? (isMobile ? '34rem' : '78vh') : (isMobile ? '24rem' : '38rem')} stabilizeLayout />
             : <EmptyState />}
           {supplementalCategoryRows.length > 0 && (
-            <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <div className="mt-3 rounded-lg border border-border bg-muted/50 p-3">
               <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
                 <div>
-                  <p className="text-sm font-bold text-slate-900">Small Subcategories</p>
-                  <p className="text-xs text-slate-500">
+                  <p className="text-sm font-bold text-foreground">Small Subcategories</p>
+                  <p className="text-xs text-muted-foreground">
                     Supplemental list for boxes that are too small or too crowded to read cleanly on the map.
                   </p>
                 </div>
@@ -3158,22 +3117,22 @@ export default function Analytics({ view = 'standard' }) {
                     onClick={() => setSelectedCategoryKey(row.key)}
                     className={`rounded-lg border px-3 py-2 text-left transition ${
                       selectedCategory?.key === row.key
-                        ? 'border-blue-300 bg-blue-50'
-                        : 'border-slate-200 bg-white hover:border-blue-200 hover:bg-blue-50/50'
+                        ? 'border-blue-300 dark:border-blue-500/40 bg-blue-50 dark:bg-blue-500/15'
+                        : 'border-border bg-card hover:border-blue-200 dark:hover:border-blue-500/30 hover:bg-blue-50/50 dark:hover:bg-blue-500/10'
                     }`}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-slate-900">{row.subcategoryName || row.name}</p>
-                        <p className="mt-0.5 truncate text-xs text-slate-500">{row.categoryName}</p>
+                        <p className="truncate text-sm font-semibold text-foreground">{row.subcategoryName || row.name}</p>
+                        <p className="mt-0.5 truncate text-xs text-muted-foreground">{row.categoryName}</p>
                       </div>
                       <div className="shrink-0 text-right text-xs">
-                        <p className="font-bold text-slate-900">{formatNumber(row.created)}</p>
-                        <p className="font-semibold text-slate-500">{formatSharePct(row.createdPct || 0)}</p>
+                        <p className="font-bold text-foreground">{formatNumber(row.created)}</p>
+                        <p className="font-semibold text-muted-foreground">{formatSharePct(row.createdPct || 0)}</p>
                       </div>
                     </div>
                     {selectedCategoryAgent && (
-                      <p className="mt-2 rounded-md bg-slate-50 px-2 py-1 text-xs font-semibold text-blue-700 ring-1 ring-slate-200">
+                      <p className="mt-2 rounded-md bg-muted/50 px-2 py-1 text-xs font-semibold text-blue-700 dark:text-blue-200 ring-1 ring-border">
                         {selectedCategoryAgent.name.split(' ')[0]}: {formatNumber(row.agentCount)} · {agentPortfolioLensEnabled
                           ? `${formatSharePct(row.agentPortfolioPct || 0)} of their tickets`
                           : `${formatSharePct(row.agentSharePct || 0)} of this subcategory`}
@@ -3185,11 +3144,11 @@ export default function Analytics({ view = 'standard' }) {
             </div>
           )}
           {selectedCategory && (
-            <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <div className="mt-3 rounded-lg border border-border bg-muted/50 p-3">
               <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-bold text-slate-900">{selectedCategory.name}</p>
-                  <p className="mt-0.5 text-xs text-slate-500">Selected category from the map or pressure chart</p>
+                  <p className="truncate text-sm font-bold text-foreground">{selectedCategory.name}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">Selected category from the map or pressure chart</p>
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4 xl:grid-cols-8">
                   {[
@@ -3202,9 +3161,9 @@ export default function Analytics({ view = 'standard' }) {
                     ['Auto fail', `${selectedCategory.automationFailureRatePct}%`],
                     ['Rebounds', formatNumber(selectedCategory.automationRebounds)],
                   ].map(([label, value]) => (
-                    <div key={label} className="rounded-md bg-white px-2 py-1.5 text-center shadow-sm ring-1 ring-slate-200">
-                      <p className="font-bold text-slate-900">{value}</p>
-                      <p className="text-[10px] font-semibold uppercase tracking-normal text-slate-500">{label}</p>
+                    <div key={label} className="rounded-md bg-card px-2 py-1.5 text-center shadow-sm ring-1 ring-border">
+                      <p className="font-bold text-foreground">{value}</p>
+                      <p className="text-[10px] font-semibold uppercase tracking-normal text-muted-foreground">{label}</p>
                     </div>
                   ))}
                 </div>
@@ -3238,7 +3197,7 @@ export default function Analytics({ view = 'standard' }) {
                   <button
                     type="button"
                     onClick={() => setSelectedCategoryKey(row.key)}
-                    className={`text-left font-semibold ${selectedCategory?.key === row.key ? 'text-blue-700' : 'text-slate-800 hover:text-blue-700'}`}
+                    className={`text-left font-semibold ${selectedCategory?.key === row.key ? 'text-blue-700 dark:text-blue-200' : 'text-foreground hover:text-blue-700 dark:hover:text-blue-200'}`}
                   >
                     {row.name}
                   </button>
@@ -3263,7 +3222,7 @@ export default function Analytics({ view = 'standard' }) {
                 key: 'freshserviceTicketId',
                 label: 'Ticket',
                 render: (row) => (row.id ? (
-                  <a href={`/tickets/${row.id}`} target="_blank" rel="noopener noreferrer" className="tp-focus-ring rounded text-blue-600 hover:underline">
+                  <a href={`/tickets/${row.id}`} target="_blank" rel="noopener noreferrer" className="tp-focus-ring rounded text-blue-600 dark:text-blue-300 hover:underline">
                     {row.displayRef || row.freshserviceTicketId || '—'}
                   </a>
                 ) : (row.freshserviceTicketId || '—')),
@@ -3272,7 +3231,7 @@ export default function Analytics({ view = 'standard' }) {
                 key: 'subject',
                 label: 'Subject',
                 render: (row) => (row.id ? (
-                  <a href={`/tickets/${row.id}`} target="_blank" rel="noopener noreferrer" className="tp-focus-ring rounded hover:text-blue-700 hover:underline">
+                  <a href={`/tickets/${row.id}`} target="_blank" rel="noopener noreferrer" className="tp-focus-ring rounded hover:text-blue-700 dark:hover:text-blue-200 hover:underline">
                     {row.subject}
                   </a>
                 ) : row.subject),
@@ -3297,7 +3256,7 @@ export default function Analytics({ view = 'standard' }) {
         <StatCard title="Open > 24h" value={formatNumber((team?.summary?.openAgeBuckets?.over24h || 0))} subtitle="Current open queue" icon={Clock} tone="red" metric="openOver24h" />
       </div>
       {(team?.summary?.excludedFromDistribution || 0) > 0 && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+        <div className="rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-3 py-2 text-sm text-amber-800 dark:text-amber-200">
           {formatNumber(team.summary.excludedFromDistribution)} range ticket{team.summary.excludedFromDistribution === 1 ? '' : 's'} are excluded from the active-team distribution because they are unassigned or assigned outside the visible active team.
         </div>
       )}
@@ -3312,12 +3271,12 @@ export default function Analytics({ view = 'standard' }) {
               value={teamSearch}
               onChange={(e) => setTeamSearch(e.target.value)}
               placeholder="Search agent..."
-              className="h-9 min-w-0 flex-1 rounded-lg border border-slate-300 px-3 text-sm"
+              className="h-9 min-w-0 flex-1 rounded-lg border border-input px-3 text-sm"
             />
             <select
               value={teamFilter}
               onChange={(e) => setTeamFilter(e.target.value)}
-              className="h-9 rounded-lg border border-slate-300 bg-white px-3 text-sm"
+              className="h-9 rounded-lg border border-input bg-card px-3 text-sm"
             >
               <option value="all">All agents</option>
               <option value="onLeave">Has leave in range</option>
@@ -3327,7 +3286,7 @@ export default function Analytics({ view = 'standard' }) {
             <select
               value={teamTimelineMetric}
               onChange={(e) => setTeamTimelineMetric(e.target.value)}
-              className="h-9 rounded-lg border border-slate-300 bg-white px-3 text-sm"
+              className="h-9 rounded-lg border border-input bg-card px-3 text-sm"
               title="Timeline metric"
             >
               {TEAM_TIMELINE_METRICS.map((metric) => (
@@ -3338,17 +3297,17 @@ export default function Analytics({ view = 'standard' }) {
               <button
                 type="button"
                 onClick={() => setSelectedTeamIds([])}
-                className="h-9 rounded-lg border border-slate-300 px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                className="h-9 rounded-lg border border-input px-3 text-sm font-semibold text-foreground/85 hover:bg-muted/50"
               >
                 Clear selected
               </button>
             )}
           </div>
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <div className="rounded-lg border border-border bg-muted/50 p-3">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div className="min-w-0">
-                <p className="text-sm font-bold text-slate-900">Agent focus</p>
-                <p className="text-xs text-slate-500">
+                <p className="text-sm font-bold text-foreground">Agent focus</p>
+                <p className="text-xs text-muted-foreground">
                   {selectedTeamIds.length
                     ? `${selectedTeamIds.length} focused agent${selectedTeamIds.length === 1 ? '' : 's'} driving the charts and table.`
                     : `${formatNumber(teamPickerRows.length)} matching active agents included.`}
@@ -3358,21 +3317,21 @@ export default function Analytics({ view = 'standard' }) {
                 <button
                   type="button"
                   onClick={() => focusTopAgents('openNow')}
-                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                  className="rounded-lg border border-input bg-card px-3 py-1.5 text-xs font-semibold text-foreground/85 hover:bg-muted"
                 >
                   Top open
                 </button>
                 <button
                   type="button"
                   onClick={() => focusTopAgents('assignedPerAvailableDay')}
-                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                  className="rounded-lg border border-input bg-card px-3 py-1.5 text-xs font-semibold text-foreground/85 hover:bg-muted"
                 >
                   Top load rate
                 </button>
                 <button
                   type="button"
                   onClick={() => setShowTeamPicker((value) => !value)}
-                  className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700 hover:bg-blue-100"
+                  className="rounded-lg border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 px-3 py-1.5 text-xs font-bold text-blue-700 dark:text-blue-200 hover:bg-blue-100 dark:hover:bg-blue-500/20"
                 >
                   {showTeamPicker ? 'Hide selector' : 'Choose agents'}
                 </button>
@@ -3386,7 +3345,7 @@ export default function Analytics({ view = 'standard' }) {
                     key={row.technicianId}
                     type="button"
                     onClick={() => toggleTeamSelection(row.technicianId)}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-blue-200 bg-white px-2.5 py-1 text-xs font-semibold text-blue-700 shadow-sm hover:bg-blue-50"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-blue-200 dark:border-blue-500/30 bg-card px-2.5 py-1 text-xs font-semibold text-blue-700 dark:text-blue-200 shadow-sm hover:bg-blue-50 dark:hover:bg-blue-500/15"
                     title={`Remove ${row.name} from focused agents`}
                   >
                     {row.name}
@@ -3407,14 +3366,14 @@ export default function Analytics({ view = 'standard' }) {
                       onClick={() => toggleTeamSelection(row.technicianId)}
                       className={`rounded-lg border p-3 text-left transition-colors ${
                         selected
-                          ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-100'
-                          : 'border-slate-200 bg-white hover:border-blue-200 hover:bg-white'
+                          ? 'border-blue-500 bg-blue-50 dark:bg-blue-500/15 ring-2 ring-blue-100 dark:ring-blue-500/30'
+                          : 'border-border bg-card hover:border-blue-200 dark:hover:border-blue-500/30 hover:bg-card'
                       }`}
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <p className="truncate text-sm font-bold text-slate-900">{row.name}</p>
-                          <p className="mt-0.5 text-xs text-slate-500">{row.assigned} assigned · {row.openNow} open · {row.pendingNow || 0} pending</p>
+                          <p className="truncate text-sm font-bold text-foreground">{row.name}</p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">{row.assigned} assigned · {row.openNow} open · {row.pendingNow || 0} pending</p>
                         </div>
                         {(() => {
                           const active = (row.openNow || 0) + (row.pendingNow || 0);
@@ -3422,9 +3381,9 @@ export default function Analytics({ view = 'standard' }) {
                             <span
                               title={metricHintText('agentLoadStatus')}
                               className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                                active >= 30 ? 'bg-red-50 text-red-700'
-                                  : active >= 15 ? 'bg-amber-50 text-amber-700'
-                                    : 'bg-emerald-50 text-emerald-700'
+                                active >= 30 ? 'bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200'
+                                  : active >= 15 ? 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200'
+                                    : 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200'
                               }`}
                             >
                               {active >= 30 ? 'High' : active >= 15 ? 'Watch' : 'OK'}
@@ -3441,9 +3400,9 @@ export default function Analytics({ view = 'standard' }) {
                           [row.rejected, 'reject', 'agentRejected'],
                           [row.leaveDays, 'leave', 'agentLeaveDays'],
                         ].map(([value, label, metricKey]) => (
-                          <div key={label} className="rounded bg-slate-100 px-1.5 py-1" title={metricHintText(metricKey)}>
-                            <p className="font-bold text-slate-900">{value}</p>
-                            <p className="text-slate-500" aria-label={`${label}: ${metricHintText(metricKey)}`}>{label}</p>
+                          <div key={label} className="rounded bg-muted px-1.5 py-1" title={metricHintText(metricKey)}>
+                            <p className="font-bold text-foreground">{value}</p>
+                            <p className="text-muted-foreground" aria-label={`${label}: ${metricHintText(metricKey)}`}>{label}</p>
                           </div>
                         ))}
                       </div>
@@ -3453,7 +3412,7 @@ export default function Analytics({ view = 'standard' }) {
               </div>
             )}
           </div>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-muted-foreground">
             Agent focus changes every chart and table below. Chart bars and lines can still be clicked to add or remove a technician.
           </p>
         </div>
@@ -3487,20 +3446,20 @@ export default function Analytics({ view = 'standard' }) {
       <Panel title="Team-Safe Distribution" subtitle="Sortable agent table with context metrics, not public winner/loser framing.">
         <div className="max-h-[31rem] space-y-2 overflow-auto sm:hidden">
           {teamRows.map((row) => (
-            <div key={row.technicianId} className="rounded-lg border border-slate-200 bg-white p-3">
+            <div key={row.technicianId} className="rounded-lg border border-border bg-card p-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-bold text-slate-900">{row.name}</p>
-                  <p className="text-xs text-slate-500">{row.assigned} assigned · {row.openNow} open · {row.pendingNow || 0} pending · {row.closed} closed</p>
-                  <p className="text-xs text-slate-500">{row.availableDays} available days · {row.assignedPerAvailableDay ?? '—'} / available day</p>
+                  <p className="truncate text-sm font-bold text-foreground">{row.name}</p>
+                  <p className="text-xs text-muted-foreground">{row.assigned} assigned · {row.openNow} open · {row.pendingNow || 0} pending · {row.closed} closed</p>
+                  <p className="text-xs text-muted-foreground">{row.availableDays} available days · {row.assignedPerAvailableDay ?? '—'} / available day</p>
                 </div>
                 <button
                   type="button"
                   onClick={() => toggleTeamSelection(row.technicianId)}
                   className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${
                     selectedTeamIds.includes(row.technicianId)
-                      ? 'border-blue-600 bg-blue-50 text-blue-700'
-                      : 'border-slate-200 bg-slate-50 text-slate-600'
+                      ? 'border-blue-600 bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200'
+                      : 'border-border bg-muted/50 text-muted-foreground'
                   }`}
                 >
                   {selectedTeamIds.includes(row.technicianId) ? 'Selected' : 'Focus'}
@@ -3520,29 +3479,29 @@ export default function Analytics({ view = 'standard' }) {
                   ['Avail.', row.availableDays, 'agentAvailableDays'],
                   ['Rate', row.assignedPerAvailableDay ?? '—', 'agentAssignedPerAvailableDay'],
                 ].map(([label, value, metricKey]) => (
-                  <div key={label} className="rounded bg-slate-50 p-2" title={metricHintText(metricKey)}>
-                    <p className="text-slate-500" aria-label={`${label}: ${metricHintText(metricKey)}`}>{label}</p>
-                    <p className="font-bold text-slate-900">{value}</p>
+                  <div key={label} className="rounded bg-muted/50 p-2" title={metricHintText(metricKey)}>
+                    <p className="text-muted-foreground" aria-label={`${label}: ${metricHintText(metricKey)}`}>{label}</p>
+                    <p className="font-bold text-foreground">{value}</p>
                   </div>
                 ))}
               </div>
             </div>
           ))}
         </div>
-        <div className="hidden max-h-[31rem] overflow-auto rounded-lg border border-slate-200 sm:block">
-          <table className="min-w-full divide-y divide-slate-200 text-sm">
-            <thead className="sticky top-0 bg-slate-50">
+        <div className="hidden max-h-[31rem] overflow-auto rounded-lg border border-border sm:block">
+          <table className="min-w-full divide-y divide-border text-sm">
+            <thead className="sticky top-0 bg-muted/50">
               <tr>
                 {TEAM_TABLE_COLUMNS.map(([key, label, metricKey]) => (
                   /* Numbers sit flush under their titles: name stays left,
                      every metric column right-aligns header + cells and the
                      long trailing labels stop wrapping (QA 07-30 #3). */
-                  <th key={key} className={`px-3 py-2 text-xs font-semibold uppercase tracking-normal text-slate-500 whitespace-nowrap ${key === 'name' ? 'text-left' : 'text-right'}`}>
+                  <th key={key} className={`px-3 py-2 text-xs font-semibold uppercase tracking-normal text-muted-foreground whitespace-nowrap ${key === 'name' ? 'text-left' : 'text-right'}`}>
                     <span className={`inline-flex items-center gap-1 ${key === 'name' ? '' : 'flex-row-reverse'}`}>
                       <button
                         type="button"
                         onClick={() => setTeamSortKey(key)}
-                        className={`inline-flex items-center gap-1 hover:text-slate-900 ${key === 'name' ? '' : 'flex-row-reverse'}`}
+                        className={`inline-flex items-center gap-1 hover:text-foreground ${key === 'name' ? '' : 'flex-row-reverse'}`}
                       >
                         {label}
                         {teamSort.key === key && <span>{teamSort.direction === 'desc' ? '↓' : '↑'}</span>}
@@ -3553,29 +3512,29 @@ export default function Analytics({ view = 'standard' }) {
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 bg-white">
+            <tbody className="divide-y divide-border/60 bg-card">
               {teamRows.map((row) => (
-                <tr key={row.technicianId} className="hover:bg-slate-50">
-                  <td className="px-3 py-2 font-semibold text-slate-800">{row.name}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-slate-700">{row.assigned}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-slate-700">{row.openNow}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-slate-700">{row.pendingNow || 0}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-slate-700">{row.selfPicked}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-slate-700">{row.coordinatorAssigned}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-slate-700">{row.appAssigned}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-slate-700">{row.closed}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-slate-700">{row.closeRatePct}%</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-slate-700">{row.avgResolutionHours === null ? '—' : `${row.avgResolutionHours}h`}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-slate-700">{row.csatAverage === null ? '—' : `${row.csatAverage} (${row.csatCount})`}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-slate-700">{row.rejected}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-slate-700">{row.availableDays}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-slate-700">{row.assignedPerAvailableDay ?? '—'}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-slate-700">
+                <tr key={row.technicianId} className="hover:bg-muted/50">
+                  <td className="px-3 py-2 font-semibold text-foreground">{row.name}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-foreground/85">{row.assigned}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-foreground/85">{row.openNow}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-foreground/85">{row.pendingNow || 0}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-foreground/85">{row.selfPicked}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-foreground/85">{row.coordinatorAssigned}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-foreground/85">{row.appAssigned}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-foreground/85">{row.closed}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-foreground/85">{row.closeRatePct}%</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-foreground/85">{row.avgResolutionHours === null ? '—' : `${row.avgResolutionHours}h`}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-foreground/85">{row.csatAverage === null ? '—' : `${row.csatAverage} (${row.csatCount})`}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-foreground/85">{row.rejected}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-foreground/85">{row.availableDays}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-foreground/85">{row.assignedPerAvailableDay ?? '—'}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-foreground/85">
                     <span title={row.leaveTypes?.map((leave) => `${leave.name}: ${leave.days}`).join('\n') || ''}>
                       {row.leaveDays}
                     </span>
                   </td>
-                  <td className="px-3 py-2 text-right tabular-nums text-slate-700">{row.wfhDays || 0}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-foreground/85">{row.wfhDays || 0}</td>
                 </tr>
               ))}
             </tbody>
@@ -3590,7 +3549,7 @@ export default function Analytics({ view = 'standard' }) {
           <button
             type="button"
             onClick={() => setShowAgentDetails((value) => !value)}
-            className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            className="rounded-lg border border-input px-3 py-1.5 text-sm font-semibold text-foreground/85 hover:bg-muted/50"
           >
             {showAgentDetails ? 'Hide details' : 'Show details'}
           </button>
@@ -3599,46 +3558,46 @@ export default function Analytics({ view = 'standard' }) {
         {showAgentDetails ? (
           <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
             {teamRows.map((row) => (
-              <div key={row.technicianId} className="rounded-lg border border-slate-200 bg-white p-4">
+              <div key={row.technicianId} className="rounded-lg border border-border bg-card p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <h3 className="truncate text-sm font-bold text-slate-900">{row.name}</h3>
-                    <p className="text-xs text-slate-500">
+                    <h3 className="truncate text-sm font-bold text-foreground">{row.name}</h3>
+                    <p className="text-xs text-muted-foreground">
                       {row.assigned} assigned · {row.openNow} open · {row.pendingNow || 0} pending · {row.closed} closed
                     </p>
                   </div>
                   <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                    row.openNow >= 30 ? 'bg-red-50 text-red-700'
-                      : row.openNow >= 15 ? 'bg-amber-50 text-amber-700'
-                        : 'bg-emerald-50 text-emerald-700'
+                    row.openNow >= 30 ? 'bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200'
+                      : row.openNow >= 15 ? 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200'
+                        : 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200'
                   }`}>
                     {row.openNow >= 30 ? 'High load' : row.openNow >= 15 ? 'Watch' : 'Normal'}
                   </span>
                 </div>
 
                 <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-                  <div className="rounded bg-slate-50 p-2">
-                    <p className="text-xs text-slate-500">Self</p>
-                    <p className="text-sm font-bold text-slate-900">{row.selfPickRatePct}%</p>
+                  <div className="rounded bg-muted/50 p-2">
+                    <p className="text-xs text-muted-foreground">Self</p>
+                    <p className="text-sm font-bold text-foreground">{row.selfPickRatePct}%</p>
                   </div>
-                  <div className="rounded bg-slate-50 p-2">
-                    <p className="text-xs text-slate-500">Close</p>
-                    <p className="text-sm font-bold text-slate-900">{row.closeRatePct}%</p>
+                  <div className="rounded bg-muted/50 p-2">
+                    <p className="text-xs text-muted-foreground">Close</p>
+                    <p className="text-sm font-bold text-foreground">{row.closeRatePct}%</p>
                   </div>
-                  <div className="rounded bg-slate-50 p-2">
-                    <p className="text-xs text-slate-500">Avg Res.</p>
-                    <p className="text-sm font-bold text-slate-900">{row.avgResolutionHours === null ? '—' : `${row.avgResolutionHours}h`}</p>
+                  <div className="rounded bg-muted/50 p-2">
+                    <p className="text-xs text-muted-foreground">Avg Res.</p>
+                    <p className="text-sm font-bold text-foreground">{row.avgResolutionHours === null ? '—' : `${row.avgResolutionHours}h`}</p>
                   </div>
                 </div>
 
-                <div className="mt-3 space-y-2 text-xs text-slate-600">
-                  <p><span className="font-semibold text-slate-800">Sources:</span> {row.selfPicked} self, {row.coordinatorAssigned} coordinator, {row.appAssigned} app</p>
-                  <p><span className="font-semibold text-slate-800">Rejected:</span> {row.rejected} ({row.rejectionRatePct}%)</p>
-                  <p><span className="font-semibold text-slate-800">Available:</span> {row.availableDays} days, {row.assignedPerAvailableDay ?? '—'} assigned / available day</p>
-                  <p><span className="font-semibold text-slate-800">Leave:</span> {row.leaveDays} days{row.leaveHalfDays ? ` (${row.leaveHalfDays} half-day records)` : ''}</p>
-                  <p><span className="font-semibold text-slate-800">WFH:</span> {row.wfhDays || 0} days</p>
+                <div className="mt-3 space-y-2 text-xs text-muted-foreground">
+                  <p><span className="font-semibold text-foreground">Sources:</span> {row.selfPicked} self, {row.coordinatorAssigned} coordinator, {row.appAssigned} app</p>
+                  <p><span className="font-semibold text-foreground">Rejected:</span> {row.rejected} ({row.rejectionRatePct}%)</p>
+                  <p><span className="font-semibold text-foreground">Available:</span> {row.availableDays} days, {row.assignedPerAvailableDay ?? '—'} assigned / available day</p>
+                  <p><span className="font-semibold text-foreground">Leave:</span> {row.leaveDays} days{row.leaveHalfDays ? ` (${row.leaveHalfDays} half-day records)` : ''}</p>
+                  <p><span className="font-semibold text-foreground">WFH:</span> {row.wfhDays || 0} days</p>
                   <p>
-                    <span className="font-semibold text-slate-800">Top categories:</span>{' '}
+                    <span className="font-semibold text-foreground">Top categories:</span>{' '}
                     {row.topCategories?.length ? row.topCategories.map((cat) => `${cat.name} (${cat.count})`).join(', ') : 'None in range'}
                   </p>
                 </div>
@@ -3721,15 +3680,15 @@ export default function Analytics({ view = 'standard' }) {
         >
           <div className="max-h-[31rem] space-y-2 overflow-auto sm:hidden">
             {capacityRows.map((row) => (
-              <div key={row.technicianId} className="rounded-lg border border-slate-200 bg-white p-3">
-                <p className="truncate text-sm font-bold text-slate-900">{row.name}</p>
-                <p className="mt-0.5 text-xs text-slate-500">
+              <div key={row.technicianId} className="rounded-lg border border-border bg-card p-3">
+                <p className="truncate text-sm font-bold text-foreground">{row.name}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
                   {row.assigned || 0} assigned · {formatSharePct(shareOf(row))} of team · close {closeRateCell(row)}
                 </p>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-muted-foreground">
                   {availableCell(row)} available days · {row.assignedPerAvailableDay ?? '—'} / available day
                 </p>
-                <div className="mt-2 h-1 overflow-hidden rounded-full bg-slate-100" aria-hidden="true">
+                <div className="mt-2 h-1 overflow-hidden rounded-full bg-muted" aria-hidden="true">
                   <div
                     className="h-full rounded-full bg-blue-500"
                     style={{ width: `${row.assigned && capacityTotals.maxAssigned ? Math.max(2, (row.assigned / capacityTotals.maxAssigned) * 100) : 0}%` }}
@@ -3738,9 +3697,9 @@ export default function Analytics({ view = 'standard' }) {
               </div>
             ))}
           </div>
-          <div className="hidden overflow-auto rounded-lg border border-slate-200 sm:block">
-            <table className="min-w-full divide-y divide-slate-200 text-sm">
-              <thead className="sticky top-0 bg-slate-50">
+          <div className="hidden overflow-auto rounded-lg border border-border sm:block">
+            <table className="min-w-full divide-y divide-border text-sm">
+              <thead className="sticky top-0 bg-muted/50">
                 <tr>
                   {[
                     ['name', 'Technician', 'text-left', null],
@@ -3751,7 +3710,7 @@ export default function Analytics({ view = 'standard' }) {
                     ['availableDays', 'Available Days', 'text-right', 'agentAvailableDays'],
                     ['assignedPerAvailableDay', 'Assigned / Avail. Day', 'text-right', 'agentAssignedPerAvailableDay'],
                   ].map(([key, label, align, metricKey]) => (
-                    <th key={key} className={`whitespace-nowrap px-3 py-2 text-xs font-semibold uppercase tracking-normal text-slate-500 ${align}`}>
+                    <th key={key} className={`whitespace-nowrap px-3 py-2 text-xs font-semibold uppercase tracking-normal text-muted-foreground ${align}`}>
                       <span className={`inline-flex items-center gap-1 ${align === 'text-right' ? 'flex-row-reverse' : ''}`}>
                         {label}
                         {metricKey && <MetricHint metric={metricKey} title={label} />}
@@ -3760,33 +3719,33 @@ export default function Analytics({ view = 'standard' }) {
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 bg-white">
+              <tbody className="divide-y divide-border/60 bg-card">
                 {capacityRows.map((row) => (
-                  <tr key={row.technicianId} className="hover:bg-slate-50">
-                    <td className="px-3 py-2 font-semibold text-slate-800">{row.name}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-700">{row.assigned || 0}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-700">{formatSharePct(shareOf(row))}</td>
+                  <tr key={row.technicianId} className="hover:bg-muted/50">
+                    <td className="px-3 py-2 font-semibold text-foreground">{row.name}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-foreground/85">{row.assigned || 0}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-foreground/85">{formatSharePct(shareOf(row))}</td>
                     <td className="w-32 px-3 py-2">
-                      <div className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-100" aria-hidden="true">
+                      <div className="h-1.5 w-24 overflow-hidden rounded-full bg-muted" aria-hidden="true">
                         <div
                           className="h-full rounded-full bg-blue-500"
                           style={{ width: `${row.assigned && capacityTotals.maxAssigned ? Math.max(2, (row.assigned / capacityTotals.maxAssigned) * 100) : 0}%` }}
                         />
                       </div>
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-700">{closeRateCell(row)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-700">
+                    <td className="px-3 py-2 text-right tabular-nums text-foreground/85">{closeRateCell(row)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-foreground/85">
                       <span title={row.leaveTypes?.length ? row.leaveTypes.map((leave) => `${leave.name}: ${leave.days}`).join('\n') : undefined}>
                         {availableCell(row)}
                       </span>
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-700">{row.assignedPerAvailableDay ?? '—'}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-foreground/85">{row.assignedPerAvailableDay ?? '—'}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          <p className="mt-3 text-xs text-slate-500">
+          <p className="mt-3 text-xs text-muted-foreground">
             Leave adjustment: available days = the {formatNumber(rangeBusinessDays)} weekdays in this range minus each
             technician&apos;s approved leave days, so Assigned / Avail. Day compares load fairly for people who were away.
           </p>
@@ -3799,7 +3758,7 @@ export default function Analytics({ view = 'standard' }) {
             <button
               type="button"
               onClick={() => setShowCapacityCoaching((value) => !value)}
-              className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              className="rounded-lg border border-input px-3 py-1.5 text-sm font-semibold text-foreground/85 hover:bg-muted/50"
             >
               {showCapacityCoaching ? 'Hide coaching context' : 'Show coaching context'}
             </button>
@@ -3808,31 +3767,31 @@ export default function Analytics({ view = 'standard' }) {
           {showCapacityCoaching ? (
             <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
               {capacityRows.map((row) => (
-                <div key={row.technicianId} className="rounded-lg border border-slate-200 bg-white p-4">
-                  <h3 className="truncate text-sm font-bold text-slate-900">{row.name}</h3>
-                  <p className="text-xs text-slate-500">
+                <div key={row.technicianId} className="rounded-lg border border-border bg-card p-4">
+                  <h3 className="truncate text-sm font-bold text-foreground">{row.name}</h3>
+                  <p className="text-xs text-muted-foreground">
                     {row.assigned || 0} assigned · {row.closed || 0} closed · {row.openNow || 0} open · {row.pendingNow || 0} pending
                   </p>
                   <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-                    <div className="rounded bg-slate-50 p-2">
-                      <p className="text-xs text-slate-500">Close</p>
-                      <p className="text-sm font-bold text-slate-900">{row.assigned ? `${row.closeRatePct ?? 0}%` : '—'}</p>
+                    <div className="rounded bg-muted/50 p-2">
+                      <p className="text-xs text-muted-foreground">Close</p>
+                      <p className="text-sm font-bold text-foreground">{row.assigned ? `${row.closeRatePct ?? 0}%` : '—'}</p>
                     </div>
-                    <div className="rounded bg-slate-50 p-2">
-                      <p className="text-xs text-slate-500">Rate</p>
-                      <p className="text-sm font-bold text-slate-900">{row.assignedPerAvailableDay ?? '—'}</p>
+                    <div className="rounded bg-muted/50 p-2">
+                      <p className="text-xs text-muted-foreground">Rate</p>
+                      <p className="text-sm font-bold text-foreground">{row.assignedPerAvailableDay ?? '—'}</p>
                     </div>
-                    <div className="rounded bg-slate-50 p-2">
-                      <p className="text-xs text-slate-500">CSAT</p>
-                      <p className="text-sm font-bold text-slate-900">
+                    <div className="rounded bg-muted/50 p-2">
+                      <p className="text-xs text-muted-foreground">CSAT</p>
+                      <p className="text-sm font-bold text-foreground">
                         {row.csatAverage === null || row.csatAverage === undefined ? '—' : row.csatAverage}
                       </p>
-                      <p className="text-[10px] text-slate-500">{formatNumber(row.csatCount || 0)} responses</p>
+                      <p className="text-[10px] text-muted-foreground">{formatNumber(row.csatCount || 0)} responses</p>
                     </div>
                   </div>
-                  <div className="mt-3 space-y-1 text-xs text-slate-600">
-                    <p><span className="font-semibold text-slate-800">Available:</span> {availableCell(row)} days</p>
-                    <p><span className="font-semibold text-slate-800">Leave:</span> {row.leaveDays || 0} days · <span className="font-semibold text-slate-800">WFH:</span> {row.wfhDays || 0} days</p>
+                  <div className="mt-3 space-y-1 text-xs text-muted-foreground">
+                    <p><span className="font-semibold text-foreground">Available:</span> {availableCell(row)} days</p>
+                    <p><span className="font-semibold text-foreground">Leave:</span> {row.leaveDays || 0} days · <span className="font-semibold text-foreground">WFH:</span> {row.wfhDays || 0} days</p>
                   </div>
                 </div>
               ))}
@@ -3843,7 +3802,7 @@ export default function Analytics({ view = 'standard' }) {
         </Panel>
 
         {capacityNotes.length > 0 && (
-          <div className="rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-500 shadow-sm">
+          <div className="rounded-lg border border-border bg-card p-3 text-xs text-muted-foreground shadow-sm">
             {capacityNotes.map((note) => <p key={note}>• {note}</p>)}
           </div>
         )}
@@ -3899,17 +3858,17 @@ export default function Analytics({ view = 'standard' }) {
               {
                 label: 'Older than 7 days',
                 value: quality?.openAging?.over7d || 0,
-                tone: (quality?.openAging?.over7d || 0) > 0 ? 'text-red-700 bg-red-50 border-red-100' : 'text-emerald-700 bg-emerald-50 border-emerald-100',
+                tone: (quality?.openAging?.over7d || 0) > 0 ? 'text-red-700 dark:text-red-200 bg-red-50 dark:bg-red-500/15 border-red-100 dark:border-red-500/20' : 'text-emerald-700 dark:text-emerald-200 bg-emerald-50 dark:bg-emerald-500/15 border-emerald-100 dark:border-emerald-500/20',
               },
               {
                 label: 'Resolution sample',
                 value: quality?.resolution?.seconds?.count || 0,
-                tone: 'text-blue-700 bg-blue-50 border-blue-100',
+                tone: 'text-blue-700 dark:text-blue-200 bg-blue-50 dark:bg-blue-500/15 border-blue-100 dark:border-blue-500/20',
               },
               {
                 label: 'Low CSAT tickets',
                 value: lowCsatCount,
-                tone: lowCsatCount > 0 ? 'text-amber-700 bg-amber-50 border-amber-100' : 'text-emerald-700 bg-emerald-50 border-emerald-100',
+                tone: lowCsatCount > 0 ? 'text-amber-700 dark:text-amber-200 bg-amber-50 dark:bg-amber-500/15 border-amber-100 dark:border-amber-500/20' : 'text-emerald-700 dark:text-emerald-200 bg-emerald-50 dark:bg-emerald-500/15 border-emerald-100 dark:border-emerald-500/20',
               },
             ].map((item) => (
               <div key={item.label} className={`flex items-center justify-between rounded-lg border px-3 py-2 ${item.tone}`}>
@@ -3917,7 +3876,7 @@ export default function Analytics({ view = 'standard' }) {
                 <span className="text-lg font-bold">{formatNumber(item.value)}</span>
               </div>
             ))}
-            <p className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+            <p className="rounded-lg border border-border bg-muted/50 p-3 text-xs text-muted-foreground">
               First-response analytics are intentionally omitted because firstPublicAgentReplyAt is not populated.
             </p>
           </div>
@@ -3936,7 +3895,7 @@ export default function Analytics({ view = 'standard' }) {
       >
         <div className="space-y-3">
           {showingRecentCsatFallback && (
-            <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+            <div className="rounded-lg border border-emerald-100 dark:border-emerald-500/20 bg-emerald-50 dark:bg-emerald-500/15 px-3 py-2 text-sm text-emerald-800 dark:text-emerald-200">
               No low-CSAT tickets found. Showing recent survey responses so this section still validates the source data.
             </div>
           )}
@@ -4116,7 +4075,7 @@ export default function Analytics({ view = 'standard' }) {
           <Panel title="Rules Checked" subtitle="Rules still evaluated; they simply did not meet alert thresholds.">
             <div className="grid gap-2 sm:grid-cols-2">
               {['Demand spike', 'Backlog growth', 'Overdue risk', 'Load imbalance', 'Stale open tickets', 'Sync degradation', 'Resolution coverage', 'CSAT warning'].map((rule) => (
-                <div key={rule} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700">
+                <div key={rule} className="rounded-lg border border-border bg-muted/50 px-3 py-2 text-sm font-semibold text-foreground/85">
                   {rule}
                 </div>
               ))}
@@ -4148,19 +4107,19 @@ export default function Analytics({ view = 'standard' }) {
                       <span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${INSIGHT_SEVERITY[selectedInsight.severity || 'info']?.badge}`}>
                         {INSIGHT_SEVERITY[selectedInsight.severity || 'info']?.label}
                       </span>
-                      <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-semibold text-slate-600">
+                      <span className="rounded-full border border-border bg-muted/50 px-2 py-0.5 text-xs font-semibold text-muted-foreground">
                         {formatNumber(selectedInsight.evidenceCount)} evidence
                       </span>
                     </div>
-                    <h2 className="mt-2 text-lg font-bold text-slate-900">{selectedInsight.title}</h2>
-                    <p className="mt-1 text-sm text-slate-600">{selectedInsight.rule}</p>
+                    <h2 className="mt-2 text-lg font-bold text-foreground">{selectedInsight.title}</h2>
+                    <p className="mt-1 text-sm text-muted-foreground">{selectedInsight.rule}</p>
                   </div>
-                  {selectedInsight.severity === 'critical' ? <ShieldAlert className="h-6 w-6 text-red-600" /> : <Info className="h-6 w-6 text-blue-600" />}
+                  {selectedInsight.severity === 'critical' ? <ShieldAlert className="h-6 w-6 text-red-600 dark:text-red-300" /> : <Info className="h-6 w-6 text-blue-600 dark:text-blue-300" />}
                 </div>
                 {selectedInsight.affected?.length > 0 && (
                   <div className="flex flex-wrap gap-1.5">
                     {selectedInsight.affected.map((label) => (
-                      <span key={label} className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">{label}</span>
+                      <span key={label} className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{label}</span>
                     ))}
                   </div>
                 )}
@@ -4183,8 +4142,8 @@ export default function Analytics({ view = 'standard' }) {
                 key={item.id}
                 type="button"
                 onClick={() => setSelectedInsightId(item.id)}
-                className={`rounded-lg border bg-white p-4 text-left shadow-sm transition-colors ${
-                  selected ? 'border-blue-500 ring-2 ring-blue-100' : 'border-slate-200 hover:bg-slate-50'
+                className={`rounded-lg border bg-card p-4 text-left shadow-sm transition-colors ${
+                  selected ? 'border-blue-500 ring-2 ring-blue-100 dark:ring-blue-500/30' : 'border-border hover:bg-muted/50'
                 }`}
               >
                 <div className="flex items-start gap-3">
@@ -4193,14 +4152,14 @@ export default function Analytics({ view = 'standard' }) {
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-3">
-                      <h3 className="text-sm font-semibold text-slate-900">{item.title}</h3>
-                      <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-semibold text-slate-600">{formatNumber(item.evidenceCount)}</span>
+                      <h3 className="text-sm font-semibold text-foreground">{item.title}</h3>
+                      <span className="rounded-full border border-border bg-muted/50 px-2 py-0.5 text-xs font-semibold text-muted-foreground">{formatNumber(item.evidenceCount)}</span>
                     </div>
-                    <p className="mt-2 line-clamp-2 text-sm text-slate-600">{item.rule}</p>
+                    <p className="mt-2 line-clamp-2 text-sm text-muted-foreground">{item.rule}</p>
                     {item.affected?.length > 0 && (
                       <div className="mt-3 flex flex-wrap gap-1.5">
                         {item.affected.slice(0, 4).map((label) => (
-                          <span key={label} className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">{label}</span>
+                          <span key={label} className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{label}</span>
                         ))}
                       </div>
                     )}
@@ -4237,12 +4196,12 @@ export default function Analytics({ view = 'standard' }) {
     if (!payload[tabKey]) {
       if (!loading && (error || failedSections.includes(tabKey))) {
         return (
-          <div className="space-y-3 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          <div className="space-y-3 rounded-lg border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/15 p-4 text-sm text-red-700 dark:text-red-200">
             <p>{error || 'This section failed to load.'}</p>
             <button
               type="button"
               onClick={fetchAnalytics}
-              className="inline-flex items-center gap-2 rounded-lg border border-red-300 bg-white px-3 py-1.5 font-semibold text-red-700 hover:bg-red-100"
+              className="inline-flex items-center gap-2 rounded-lg border border-red-300 dark:border-red-500/40 bg-card px-3 py-1.5 font-semibold text-red-700 dark:text-red-200 hover:bg-red-100 dark:hover:bg-red-500/20"
             >
               <RefreshCw className="h-4 w-4" />
               Retry
@@ -4251,8 +4210,8 @@ export default function Analytics({ view = 'standard' }) {
         );
       }
       return (
-        <div className="flex min-h-[28rem] items-center justify-center rounded-lg border border-slate-200 bg-white">
-          <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+        <div className="flex min-h-[28rem] items-center justify-center rounded-lg border border-border bg-card">
+          <Loader2 className="h-8 w-8 animate-spin text-blue-600 dark:text-blue-300" />
         </div>
       );
     }
@@ -4271,12 +4230,12 @@ export default function Analytics({ view = 'standard' }) {
     return (
       <>
         {failedSections.length > 0 && !loading && (
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-3 py-2 text-xs font-semibold text-amber-800 dark:text-amber-200">
             <span>Some sections didn’t load ({failedSections.join(', ')}) — the rest is up to date.</span>
             <button
               type="button"
               onClick={fetchAnalytics}
-              className="inline-flex items-center gap-1.5 rounded-md border border-amber-300 bg-white px-2 py-1 text-amber-800 hover:bg-amber-100"
+              className="inline-flex items-center gap-1.5 rounded-md border border-amber-300 dark:border-amber-500/40 bg-card px-2 py-1 text-amber-800 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-500/20"
             >
               <RefreshCw className="h-3.5 w-3.5" />
               Retry
@@ -4298,26 +4257,26 @@ export default function Analytics({ view = 'standard' }) {
         <button
           type="button"
           onClick={fetchAnalytics}
-          className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 sm:h-9 sm:w-9"
+          className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-border bg-card text-foreground/85 hover:bg-muted/50 sm:h-9 sm:w-9"
           title="Refresh analytics"
         >
-          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin text-blue-600' : ''}`} />
+          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin text-blue-600 dark:text-blue-300' : ''}`} />
         </button>
       }
     >
-      <div className="mb-4 rounded-lg border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+      <div className="mb-4 rounded-lg border border-border bg-card p-3 shadow-sm sm:p-4">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <div className="min-w-0">
-            <h1 className="text-lg font-bold text-slate-900 sm:text-xl">
+            <h1 className="text-lg font-bold text-foreground sm:text-xl">
               {isCategoryMapPage ? 'Category Map Explorer' : 'Analytics and Insights'}
             </h1>
-            <p className="mt-1 break-words text-xs text-slate-500 sm:text-sm">
+            <p className="mt-1 break-words text-xs text-muted-foreground sm:text-sm">
               {meta ? `${meta.range.start} to ${meta.range.end} ${meta.range.timezone}` : 'Deterministic analytics from local Ticket Pulse data'}
             </p>
           </div>
 
           <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-end">
-            <span className="hidden h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-400 shadow-sm sm:inline-flex">
+            <span className="hidden h-10 w-10 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground/75 shadow-sm sm:inline-flex">
               <Filter className="h-4 w-4" />
             </span>
             <label className="min-w-0">
@@ -4365,7 +4324,7 @@ export default function Analytics({ view = 'standard' }) {
                 />
               </div>
             )}
-            <label className="inline-flex h-10 min-w-0 items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-700 shadow-sm transition-colors hover:border-blue-300 hover:bg-slate-50 sm:justify-start">
+            <label className="inline-flex h-10 min-w-0 items-center justify-center gap-2 rounded-xl border border-input bg-card px-3 text-sm text-foreground/85 shadow-sm transition-colors hover:border-blue-300 dark:hover:border-blue-500/40 hover:bg-muted/50 sm:justify-start">
               <input
                 type="checkbox"
                 checked={excludeNoise}
@@ -4373,7 +4332,7 @@ export default function Analytics({ view = 'standard' }) {
                   setExcludeNoise(e.target.checked);
                   setGlobalExcludeNoise(e.target.checked);
                 }}
-                className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                className="h-4 w-4 rounded border-input text-blue-600 dark:text-blue-300 focus:ring-blue-500"
               />
               Exclude noise
             </label>
@@ -4381,7 +4340,7 @@ export default function Analytics({ view = 'standard' }) {
               type="button"
               onClick={() => exportAnalyticsWorkbook(payload, activeTab)}
               disabled={Object.keys(payload).length === 0}
-              className="col-span-2 inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 text-sm font-semibold text-blue-700 shadow-sm transition-colors hover:bg-blue-100 disabled:opacity-50 sm:col-span-1"
+              className="col-span-2 inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 px-3 text-sm font-semibold text-blue-700 dark:text-blue-200 shadow-sm transition-colors hover:bg-blue-100 dark:hover:bg-blue-500/20 disabled:opacity-50 sm:col-span-1"
             >
               <Download className="h-4 w-4" />
               Export
@@ -4400,8 +4359,8 @@ export default function Analytics({ view = 'standard' }) {
                   onClick={() => setActiveTab(id)}
                   className={`inline-flex h-9 flex-none items-center gap-2 rounded-lg border px-3 text-sm font-semibold transition-colors ${
                     isActive
-                      ? 'border-slate-900 bg-slate-900 text-white'
-                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                      ? 'border-foreground bg-foreground text-background'
+                      : 'border-border bg-card text-foreground/85 hover:bg-muted/50'
                   }`}
                 >
                   <Icon className="h-4 w-4" />
@@ -4422,8 +4381,8 @@ export default function Analytics({ view = 'standard' }) {
       <Fragment key={activeTab}>{renderActiveTab()}</Fragment>
 
       {meta?.caveats?.length > 0 && (
-        <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4 text-xs text-slate-500 shadow-sm">
-          <p className="mb-2 font-semibold text-slate-700">Data caveats</p>
+        <div className="mt-4 rounded-lg border border-border bg-card p-4 text-xs text-muted-foreground shadow-sm">
+          <p className="mb-2 font-semibold text-foreground/85">Data caveats</p>
           <ul className="grid gap-1 sm:grid-cols-2">
             {meta.caveats.map((caveat) => <li key={caveat}>• {caveat}</li>)}
           </ul>

@@ -328,8 +328,8 @@ const computeDateStyling = (date, options = {}) => {
     switch (variant) {
     case 'cell':
       return {
-        bgClass: 'bg-rose-50/60',
-        borderClass: 'border-rose-200',
+        bgClass: 'bg-rose-50/60 dark:bg-rose-500/10',
+        borderClass: 'border-rose-200 dark:border-rose-500/30',
         indicatorClass: 'bg-rose-500',
         isHoliday: true,
         isCanadian: true,
@@ -338,8 +338,8 @@ const computeDateStyling = (date, options = {}) => {
       };
     case 'box':
       return {
-        bgClass: 'bg-rose-50/40',
-        borderClass: 'border-rose-300',
+        bgClass: 'bg-rose-50/40 dark:bg-rose-500/10',
+        borderClass: 'border-rose-300 dark:border-rose-500/40',
         indicatorClass: 'bg-rose-500',
         isHoliday: true,
         isCanadian: true,
@@ -348,8 +348,8 @@ const computeDateStyling = (date, options = {}) => {
       };
     case 'button':
       return {
-        bgClass: 'bg-rose-100/50',
-        borderClass: 'border-rose-300',
+        bgClass: 'bg-rose-100/50 dark:bg-rose-500/15',
+        borderClass: 'border-rose-300 dark:border-rose-500/40',
         indicatorClass: 'bg-rose-500',
         isHoliday: true,
         isCanadian: true,
@@ -358,8 +358,8 @@ const computeDateStyling = (date, options = {}) => {
       };
     default:
       return {
-        bgClass: 'bg-rose-50/60',
-        borderClass: 'border-rose-200',
+        bgClass: 'bg-rose-50/60 dark:bg-rose-500/10',
+        borderClass: 'border-rose-200 dark:border-rose-500/30',
         indicatorClass: 'bg-rose-500',
         isHoliday: true,
         isCanadian: true,
@@ -373,8 +373,8 @@ const computeDateStyling = (date, options = {}) => {
     switch (variant) {
     case 'cell':
       return {
-        bgClass: 'bg-indigo-50/40',
-        borderClass: 'border-indigo-200',
+        bgClass: 'bg-indigo-50/40 dark:bg-indigo-500/10',
+        borderClass: 'border-indigo-200 dark:border-indigo-500/30',
         indicatorClass: 'bg-indigo-400',
         isHoliday: true,
         isCanadian: false,
@@ -383,8 +383,8 @@ const computeDateStyling = (date, options = {}) => {
       };
     case 'box':
       return {
-        bgClass: 'bg-indigo-50/30',
-        borderClass: 'border-indigo-200',
+        bgClass: 'bg-indigo-50/30 dark:bg-indigo-500/10',
+        borderClass: 'border-indigo-200 dark:border-indigo-500/30',
         indicatorClass: 'bg-indigo-400',
         isHoliday: true,
         isCanadian: false,
@@ -393,8 +393,8 @@ const computeDateStyling = (date, options = {}) => {
       };
     case 'button':
       return {
-        bgClass: 'bg-indigo-50/40',
-        borderClass: 'border-indigo-200',
+        bgClass: 'bg-indigo-50/40 dark:bg-indigo-500/10',
+        borderClass: 'border-indigo-200 dark:border-indigo-500/30',
         indicatorClass: 'bg-indigo-400',
         isHoliday: true,
         isCanadian: false,
@@ -403,8 +403,8 @@ const computeDateStyling = (date, options = {}) => {
       };
     default:
       return {
-        bgClass: 'bg-indigo-50/40',
-        borderClass: 'border-indigo-200',
+        bgClass: 'bg-indigo-50/40 dark:bg-indigo-500/10',
+        borderClass: 'border-indigo-200 dark:border-indigo-500/30',
         indicatorClass: 'bg-indigo-400',
         isHoliday: true,
         isCanadian: false,
@@ -424,11 +424,11 @@ const computeDateStyling = (date, options = {}) => {
     };
     switch (variant) {
     case 'cell':
-      return { ...base, bgClass: 'bg-violet-50/60', borderClass: 'border-violet-200', indicatorClass: 'bg-violet-500' };
+      return { ...base, bgClass: 'bg-violet-50/60 dark:bg-violet-500/10', borderClass: 'border-violet-200 dark:border-violet-500/30', indicatorClass: 'bg-violet-500' };
     case 'box':
-      return { ...base, bgClass: 'bg-violet-50/40', borderClass: 'border-violet-300', indicatorClass: 'bg-violet-500' };
+      return { ...base, bgClass: 'bg-violet-50/40 dark:bg-violet-500/10', borderClass: 'border-violet-300 dark:border-violet-500/40', indicatorClass: 'bg-violet-500' };
     default:
-      return { ...base, bgClass: 'bg-violet-50/50', borderClass: 'border-violet-200', indicatorClass: 'bg-violet-500' };
+      return { ...base, bgClass: 'bg-violet-50/50 dark:bg-violet-500/10', borderClass: 'border-violet-200 dark:border-violet-500/30', indicatorClass: 'bg-violet-500' };
     }
   }
 
@@ -436,8 +436,8 @@ const computeDateStyling = (date, options = {}) => {
     switch (variant) {
     case 'cell':
       return {
-        bgClass: 'bg-slate-50/50',
-        borderClass: 'border-slate-200',
+        bgClass: 'bg-muted/25',
+        borderClass: 'border-border',
         indicatorClass: '',
         isHoliday: false,
         isCanadian: false,
@@ -446,8 +446,8 @@ const computeDateStyling = (date, options = {}) => {
       };
     case 'box':
       return {
-        bgClass: 'bg-slate-50/40',
-        borderClass: 'border-slate-300',
+        bgClass: 'bg-muted/20',
+        borderClass: 'border-input',
         indicatorClass: '',
         isHoliday: false,
         isCanadian: false,
@@ -456,8 +456,8 @@ const computeDateStyling = (date, options = {}) => {
       };
     case 'button':
       return {
-        bgClass: 'bg-slate-100/30',
-        borderClass: 'border-slate-300',
+        bgClass: 'bg-muted/30',
+        borderClass: 'border-input',
         indicatorClass: '',
         isHoliday: false,
         isCanadian: false,
@@ -466,8 +466,8 @@ const computeDateStyling = (date, options = {}) => {
       };
     default:
       return {
-        bgClass: 'bg-slate-50/50',
-        borderClass: 'border-slate-200',
+        bgClass: 'bg-muted/25',
+        borderClass: 'border-border',
         indicatorClass: '',
         isHoliday: false,
         isCanadian: false,

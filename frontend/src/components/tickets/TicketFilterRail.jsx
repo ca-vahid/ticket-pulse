@@ -47,7 +47,7 @@ function Section({ title, icon: Icon, activeCount = 0, onClear, defaultOpen = fa
   // A filter applied from elsewhere (URL, views) pops its section open.
   useEffect(() => { if (activeCount > 0) setOpen(true); }, [activeCount]);
   return (
-    <div className="border-b border-slate-100 last:border-b-0">
+    <div className="border-b border-border/60 last:border-b-0">
       <div className="flex items-center gap-1 w-full px-3 py-2 group">
         <button
           onClick={() => setOpen((v) => !v)}
@@ -55,10 +55,10 @@ function Section({ title, icon: Icon, activeCount = 0, onClear, defaultOpen = fa
           className="tp-focus-ring flex items-center gap-1.5 flex-1 min-w-0 text-left rounded"
         >
           {open
-            ? <ChevronDown className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" aria-hidden="true" />
-            : <ChevronRight className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" aria-hidden="true" />}
-          {Icon && <Icon className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" aria-hidden="true" />}
-          <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 truncate">{title}</span>
+            ? <ChevronDown className="w-3.5 h-3.5 text-muted-foreground/75 flex-shrink-0" aria-hidden="true" />
+            : <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/75 flex-shrink-0" aria-hidden="true" />}
+          {Icon && <Icon className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" aria-hidden="true" />}
+          <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground truncate">{title}</span>
           {activeCount > 0 && (
             <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-blue-600 text-white text-[10px] font-bold">
               {activeCount}
@@ -69,7 +69,7 @@ function Section({ title, icon: Icon, activeCount = 0, onClear, defaultOpen = fa
           <button
             onClick={onClear}
             aria-label={`Clear ${title} filter`}
-            className="tp-focus-ring p-0.5 rounded text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 focus:opacity-100"
+            className="tp-focus-ring p-0.5 rounded text-muted-foreground/50 hover:text-red-500 opacity-0 group-hover:opacity-100 focus:opacity-100"
           >
             <X className="w-3 h-3" aria-hidden="true" />
           </button>
@@ -83,15 +83,15 @@ function Section({ title, icon: Icon, activeCount = 0, onClear, defaultOpen = fa
 /** Checkbox facet row: label + optional adornment + optional count. */
 function Facet({ checked, onToggle, children, count }) {
   return (
-    <label className="flex items-center gap-2 px-1.5 py-[5px] rounded-md hover:bg-blue-50/70 cursor-pointer text-[13px] text-slate-600 min-w-0">
+    <label className="flex items-center gap-2 px-1.5 py-[5px] rounded-md hover:bg-blue-50/70 dark:hover:bg-blue-500/10 cursor-pointer text-[13px] text-muted-foreground min-w-0">
       <input
         type="checkbox"
         checked={checked}
         onChange={onToggle}
-        className="tp-focus-ring rounded border-slate-300 text-blue-600 flex-shrink-0"
+        className="tp-focus-ring rounded border-input text-blue-600 dark:text-blue-300 flex-shrink-0"
       />
       <span className="flex items-center gap-1.5 min-w-0 flex-1 truncate">{children}</span>
-      {count != null && <span className="text-[10px] text-slate-300 tabular-nums flex-shrink-0">{count}</span>}
+      {count != null && <span className="text-[10px] text-muted-foreground/50 tabular-nums flex-shrink-0">{count}</span>}
     </label>
   );
 }
@@ -113,7 +113,7 @@ function DebouncedParamInput({ value, onCommit, type = 'text', placeholder, aria
       onChange={(e) => setDraft(e.target.value)}
       placeholder={placeholder}
       aria-label={ariaLabel}
-      className={`tp-focus-ring w-full px-2 py-1 text-xs bg-slate-50 border border-slate-200 rounded-md placeholder:text-slate-400 ${className}`}
+      className={`tp-focus-ring w-full px-2 py-1 text-xs bg-muted/50 border border-border rounded-md placeholder:text-muted-foreground/75 ${className}`}
     />
   );
 }
@@ -132,7 +132,7 @@ function DebouncedRangePair({ type, gte, lte, onCommit, label }) {
     const t = setTimeout(() => onCommit(draft), 350);
     return () => clearTimeout(t);
   }, [draft]); // eslint-disable-line react-hooks/exhaustive-deps
-  const box = 'tp-focus-ring w-full px-2 py-1 text-xs bg-slate-50 border border-slate-200 rounded-md placeholder:text-slate-400';
+  const box = 'tp-focus-ring w-full px-2 py-1 text-xs bg-muted/50 border border-border rounded-md placeholder:text-muted-foreground/75';
   return (
     <div className="flex items-center gap-1">
       <input
@@ -143,7 +143,7 @@ function DebouncedRangePair({ type, gte, lte, onCommit, label }) {
         aria-label={`${label} minimum`}
         className={box}
       />
-      <span className="text-[10px] text-slate-300 flex-shrink-0" aria-hidden="true">–</span>
+      <span className="text-[10px] text-muted-foreground/50 flex-shrink-0" aria-hidden="true">–</span>
       <input
         type={type}
         value={draft.lte}
@@ -176,7 +176,7 @@ function CustomFieldFacetInput({ def, get, setParams }) {
         value={eq}
         onChange={(e) => setParams({ [eqKey]: e.target.value || null })}
         aria-label={`Filter by ${def.label}`}
-        className="tp-focus-ring w-full px-1.5 py-1 text-xs bg-slate-50 border border-slate-200 rounded-md text-slate-600"
+        className="tp-focus-ring w-full px-1.5 py-1 text-xs bg-muted/50 border border-border rounded-md text-muted-foreground"
       >
         <option value="">Any</option>
         {(def.options || []).map((opt) => <option key={opt} value={opt}>{opt}</option>)}
@@ -191,7 +191,7 @@ function CustomFieldFacetInput({ def, get, setParams }) {
             onClick={() => setParams({ [eqKey]: v || null })}
             aria-pressed={eq === v}
             className={`tp-focus-ring px-1.5 py-0.5 rounded text-[11px] font-medium ${
-              eq === v ? 'bg-blue-100 text-blue-700' : 'text-slate-500 hover:bg-slate-50'
+              eq === v ? 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200' : 'text-muted-foreground hover:bg-muted/50'
             }`}
           >
             {label}
@@ -222,7 +222,7 @@ function CustomFieldFacetInput({ def, get, setParams }) {
 
   return (
     <div className="px-1.5 py-1 min-w-0">
-      <span className="block text-[10px] font-semibold text-slate-400 mb-0.5 truncate" title={def.label}>{def.label}</span>
+      <span className="block text-[10px] font-semibold text-muted-foreground/75 mb-0.5 truncate" title={def.label}>{def.label}</span>
       {control}
     </div>
   );
@@ -240,7 +240,7 @@ function SortableFacet({ id, order, dragKey, setDragKey, onDropOn, children }) {
       style={{ order }}
       onDragOver={(e) => { if (dragKey && dragKey !== id) e.preventDefault(); }}
       onDrop={(e) => { e.preventDefault(); if (dragKey && dragKey !== id) onDropOn(id); }}
-      className={`relative group/facet transition-opacity ${dragging ? 'opacity-40' : dragKey ? 'hover:bg-blue-50/40' : ''}`}
+      className={`relative group/facet transition-opacity ${dragging ? 'opacity-40' : dragKey ? 'hover:bg-blue-50/40 dark:hover:bg-blue-500/10' : ''}`}
     >
       <span
         draggable
@@ -248,7 +248,7 @@ function SortableFacet({ id, order, dragKey, setDragKey, onDropOn, children }) {
         onDragEnd={() => setDragKey(null)}
         title="Drag to reorder"
         aria-label={`Reorder ${id} section`}
-        className="absolute left-0 top-2 z-10 cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 opacity-0 group-hover/facet:opacity-100"
+        className="absolute left-0 top-2 z-10 cursor-grab active:cursor-grabbing text-muted-foreground/50 hover:text-muted-foreground opacity-0 group-hover/facet:opacity-100"
       >
         <GripVertical className="w-3.5 h-3.5" aria-hidden="true" />
       </span>
@@ -546,19 +546,19 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
 
   const body = (
     <>
-      <div className="flex items-center gap-1.5 px-3 py-2.5 border-b border-slate-100">
+      <div className="flex items-center gap-1.5 px-3 py-2.5 border-b border-border/60">
         <ListFilter className="w-4 h-4 text-blue-500" aria-hidden="true" />
-        <span className="text-sm font-bold text-slate-800">Filters</span>
+        <span className="text-sm font-bold text-foreground">Filters</span>
         {activeTotal > 0 && (
           <button
             onClick={clearAll}
-            className="tp-focus-ring text-[11px] font-semibold text-red-500 hover:text-red-700 rounded px-1"
+            className="tp-focus-ring text-[11px] font-semibold text-red-500 hover:text-red-700 dark:hover:text-red-200 rounded px-1"
           >
             Clear all ({activeTotal})
           </button>
         )}
         {mobileOpen ? (
-          <button onClick={onMobileClose} aria-label="Close filters" className="tp-focus-ring ml-auto p-1 rounded-lg text-slate-400 hover:bg-slate-100">
+          <button onClick={onMobileClose} aria-label="Close filters" className="tp-focus-ring ml-auto p-1 rounded-lg text-muted-foreground/75 hover:bg-muted">
             <X className="w-4 h-4" aria-hidden="true" />
           </button>
         ) : (
@@ -566,7 +566,7 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
             onClick={() => setCollapsed(true)}
             aria-label="Collapse filters"
             title="Collapse filters"
-            className="tp-focus-ring ml-auto p-1 rounded-lg text-slate-300 hover:text-slate-500 hover:bg-slate-100"
+            className="tp-focus-ring ml-auto p-1 rounded-lg text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted"
           >
             <ChevronsLeft className="w-4 h-4" aria-hidden="true" />
           </button>
@@ -589,26 +589,26 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
                   key={v.key}
                   onClick={() => applyView(v)}
                   className={`tp-focus-ring w-full flex items-center gap-1.5 text-left px-1.5 py-1 rounded-md text-[13px] ${
-                    viewActive(v) ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-600 hover:bg-slate-50'
+                    viewActive(v) ? 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 font-semibold' : 'text-muted-foreground hover:bg-muted/50'
                   }`}
                 >
-                  {v.icon && <v.icon className="w-3 h-3 text-slate-400 flex-shrink-0" aria-hidden="true" />}
+                  {v.icon && <v.icon className="w-3 h-3 text-muted-foreground/75 flex-shrink-0" aria-hidden="true" />}
                   <span className="flex-1 truncate">{v.label}</span>
-                  {count != null && <span className="text-[10px] text-slate-400 tabular-nums flex-shrink-0">{count.toLocaleString()}</span>}
+                  {count != null && <span className="text-[10px] text-muted-foreground/75 tabular-nums flex-shrink-0">{count.toLocaleString()}</span>}
                 </button>
               );
             })}
 
             {/* Saved views — the user's own + workspace-shared */}
             {savedViews.length > 0 && (
-              <div className="mt-1.5 pt-1.5 border-t border-slate-100 space-y-0.5">
+              <div className="mt-1.5 pt-1.5 border-t border-border/60 space-y-0.5">
                 {savedViews.map((v) => (
                   <div key={v.id} className="group/sv flex items-center gap-1">
                     <button
                       onClick={() => applyView(v)}
                       title={v.shared && !v.mine ? `Shared by ${v.ownerEmail}` : undefined}
                       className={`tp-focus-ring flex-1 min-w-0 flex items-center gap-1.5 text-left px-1.5 py-1 rounded-md text-[13px] ${
-                        viewActive(v) ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-600 hover:bg-slate-50'
+                        viewActive(v) ? 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 font-semibold' : 'text-muted-foreground hover:bg-muted/50'
                       }`}
                     >
                       {v.shared ? <Users className="w-3 h-3 text-indigo-400 flex-shrink-0" aria-hidden="true" /> : <Star className="w-3 h-3 text-amber-400 flex-shrink-0" aria-hidden="true" />}
@@ -618,7 +618,7 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
                       <button
                         onClick={() => toggleShareView(v)}
                         title={v.shared ? 'Unshare from workspace' : 'Share to workspace'}
-                        className={`tp-focus-ring p-0.5 rounded opacity-0 group-hover/sv:opacity-100 focus:opacity-100 ${v.shared ? 'text-indigo-500' : 'text-slate-300 hover:text-indigo-500'}`}
+                        className={`tp-focus-ring p-0.5 rounded opacity-0 group-hover/sv:opacity-100 focus:opacity-100 ${v.shared ? 'text-indigo-500' : 'text-muted-foreground/50 hover:text-indigo-500'}`}
                       >
                         <Users className="w-3.5 h-3.5" aria-hidden="true" />
                       </button>
@@ -636,7 +636,7 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
                           <button
                             onClick={() => setConfirmDeleteView(null)}
                             title="Cancel"
-                            className="tp-focus-ring p-0.5 rounded text-slate-400 hover:text-slate-600"
+                            className="tp-focus-ring p-0.5 rounded text-muted-foreground/75 hover:text-muted-foreground"
                           >
                             <X className="w-3.5 h-3.5" aria-hidden="true" />
                           </button>
@@ -645,7 +645,7 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
                         <button
                           onClick={() => setConfirmDeleteView(v.id)}
                           title="Delete view"
-                          className="tp-focus-ring p-0.5 rounded text-slate-300 hover:text-red-500 opacity-0 group-hover/sv:opacity-100 focus:opacity-100 flex-shrink-0"
+                          className="tp-focus-ring p-0.5 rounded text-muted-foreground/50 hover:text-red-500 opacity-0 group-hover/sv:opacity-100 focus:opacity-100 flex-shrink-0"
                         >
                           <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
                         </button>
@@ -657,7 +657,7 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
             )}
 
             {/* Save current filters */}
-            <div className="mt-1.5 pt-1.5 border-t border-slate-100">
+            <div className="mt-1.5 pt-1.5 border-t border-border/60">
               {savingView ? (
                 <div className="flex items-center gap-1">
                   <input
@@ -666,12 +666,12 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
                     onChange={(e) => setNewViewName(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter') saveCurrentView(); if (e.key === 'Escape') { setSavingView(false); setNewViewName(''); } }}
                     placeholder="View name…"
-                    className="tp-focus-ring flex-1 min-w-0 px-2 py-1 text-xs bg-white border border-input rounded-md placeholder:text-slate-400"
+                    className="tp-focus-ring flex-1 min-w-0 px-2 py-1 text-xs bg-card border border-input rounded-md placeholder:text-muted-foreground/75"
                   />
                   <button onClick={saveCurrentView} disabled={!newViewName.trim()} className="tp-focus-ring p-1 rounded-md bg-primary text-primary-foreground disabled:opacity-50" title="Save view">
                     <Plus className="w-3.5 h-3.5" aria-hidden="true" />
                   </button>
-                  <button onClick={() => { setSavingView(false); setNewViewName(''); }} className="tp-focus-ring p-1 rounded-md text-slate-400 hover:bg-slate-100" title="Cancel">
+                  <button onClick={() => { setSavingView(false); setNewViewName(''); }} className="tp-focus-ring p-1 rounded-md text-muted-foreground/75 hover:bg-muted" title="Cancel">
                     <X className="w-3.5 h-3.5" aria-hidden="true" />
                   </button>
                 </div>
@@ -680,7 +680,7 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
                   onClick={() => setSavingView(true)}
                   disabled={activeTotal === 0}
                   title={activeTotal === 0 ? 'Apply some filters first' : 'Save the current filters as a view'}
-                  className="tp-focus-ring w-full flex items-center gap-1.5 px-1.5 py-1 rounded-md text-[13px] text-blue-600 hover:bg-blue-50 disabled:opacity-40 disabled:hover:bg-transparent"
+                  className="tp-focus-ring w-full flex items-center gap-1.5 px-1.5 py-1 rounded-md text-[13px] text-blue-600 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-500/15 disabled:opacity-40 disabled:hover:bg-transparent"
                 >
                   <Plus className="w-3.5 h-3.5" aria-hidden="true" /> Save current filters…
                 </button>
@@ -715,19 +715,19 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
             defaultOpen
           >
             <div className="relative mb-1">
-              <Search className="w-3 h-3 text-slate-300 absolute left-2 top-1/2 -translate-y-1/2" aria-hidden="true" />
+              <Search className="w-3 h-3 text-muted-foreground/50 absolute left-2 top-1/2 -translate-y-1/2" aria-hidden="true" />
               <input
                 type="search"
                 value={techQuery}
                 onChange={(e) => setTechQuery(e.target.value)}
                 placeholder="Find member…"
                 aria-label="Search members"
-                className="tp-focus-ring w-full pl-6 pr-2 py-1 text-xs bg-slate-50 border border-slate-200 rounded-md placeholder:text-slate-400"
+                className="tp-focus-ring w-full pl-6 pr-2 py-1 text-xs bg-muted/50 border border-border rounded-md placeholder:text-muted-foreground/75"
               />
             </div>
             <div>
               <Facet checked={assignees.includes('unassigned')} onToggle={() => toggleCsv('assignee', 'unassigned')}>
-                <span className="text-slate-400 italic">Unassigned</span>
+                <span className="text-muted-foreground/75 italic">Unassigned</span>
               </Facet>
               {meta?.actor?.technicianId && (
                 <Facet
@@ -751,7 +751,7 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
               {!techQuery.trim() && techs.length > techLimit && (
                 <button
                   onClick={() => setTechLimit((n) => n + TECH_PAGE)}
-                  className="tp-focus-ring w-full text-left px-1.5 py-1 mt-0.5 rounded-md text-[12px] font-medium text-blue-600 hover:bg-blue-50"
+                  className="tp-focus-ring w-full text-left px-1.5 py-1 mt-0.5 rounded-md text-[12px] font-medium text-blue-600 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-500/15"
                 >
                   Show {Math.min(TECH_PAGE, techs.length - techLimit)} more · {techs.length - techLimit} hidden
                 </button>
@@ -765,7 +765,7 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
           <Section title="Priority" activeCount={priorities.length} onClear={() => setParams({ priority: null })} defaultOpen>
             {[4, 3, 2, 1].map((p) => (
               <Facet key={p} checked={priorities.includes(String(p))} onToggle={() => toggleCsv('priority', String(p))}>
-                <span aria-hidden="true" className={`w-2 h-2 rounded-full ${PRIORITY_STRIP_COLORS[p] || 'bg-slate-300'}`} />
+                <span aria-hidden="true" className={`w-2 h-2 rounded-full ${PRIORITY_STRIP_COLORS[p] || 'bg-muted-foreground/40'}`} />
                 {PRIORITY_LABELS[p]}
               </Facet>
             ))}
@@ -780,7 +780,7 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
               <Facet key={t} checked={types.includes(t)} onToggle={() => toggleCsv('type', t)}>{t}</Facet>
             ))}
             <Facet checked={types.includes('none')} onToggle={() => toggleCsv('type', 'none')}>
-              <span className="italic text-slate-400">No type</span>
+              <span className="italic text-muted-foreground/75">No type</span>
             </Facet>
           </Section>
         </SortableFacet>
@@ -793,14 +793,14 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
             onClear={() => setParams({ category: null, subcategory: null })}
           >
             <div className="relative mb-1">
-              <Search className="w-3 h-3 text-slate-300 absolute left-2 top-1/2 -translate-y-1/2" aria-hidden="true" />
+              <Search className="w-3 h-3 text-muted-foreground/50 absolute left-2 top-1/2 -translate-y-1/2" aria-hidden="true" />
               <input
                 type="search"
                 value={catQuery}
                 onChange={(e) => setCatQuery(e.target.value)}
                 placeholder="Find category…"
                 aria-label="Search categories"
-                className="tp-focus-ring w-full pl-6 pr-2 py-1 text-xs bg-slate-50 border border-slate-200 rounded-md placeholder:text-slate-400"
+                className="tp-focus-ring w-full pl-6 pr-2 py-1 text-xs bg-muted/50 border border-border rounded-md placeholder:text-muted-foreground/75"
               />
             </div>
             <div>
@@ -813,7 +813,7 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
                         <button
                           onClick={() => toggleCatExpand(cat.id)}
                           aria-label={`${expandedCats.has(cat.id) ? 'Collapse' : 'Expand'} ${cat.name}`}
-                          className="tp-focus-ring p-0.5 rounded text-slate-300 hover:text-slate-500"
+                          className="tp-focus-ring p-0.5 rounded text-muted-foreground/50 hover:text-muted-foreground"
                         >
                           {expandedCats.has(cat.id)
                             ? <ChevronDown className="w-3 h-3" aria-hidden="true" />
@@ -829,7 +829,7 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
                     {expanded && cat.subcategories.map((sub) => (
                       <div key={sub.id} className="pl-7">
                         <Facet checked={subcategories.includes(String(sub.id))} onToggle={() => toggleCsv('subcategory', String(sub.id))}>
-                          <span className="truncate text-slate-500">{sub.name}</span>
+                          <span className="truncate text-muted-foreground">{sub.name}</span>
                         </Facet>
                       </div>
                     ))}
@@ -837,7 +837,7 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
                 );
               })}
               {catSearching && filteredCategoryTree.length === 0 && (
-                <p className="px-2 py-2 text-xs text-slate-400">No category matches “{catQuery}”.</p>
+                <p className="px-2 py-2 text-xs text-muted-foreground/75">No category matches “{catQuery}”.</p>
               )}
             </div>
           </Section>
@@ -868,14 +868,14 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
             <Section title="Tags" activeCount={tags.length} onClear={() => setParams({ tag: null, tagMode: null })}>
               {tags.length > 1 && (
                 <div className="flex items-center gap-1 mb-1 px-1.5">
-                  <span className="text-[10px] uppercase tracking-wide text-slate-400">Match</span>
+                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground/75">Match</span>
                   {['any', 'all'].map((mode) => (
                     <button
                       key={mode}
                       onClick={() => setParams({ tagMode: mode === 'any' ? null : mode })}
                       aria-pressed={(tagMode || 'any') === mode}
                       className={`tp-focus-ring px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase ${
-                        (tagMode || 'any') === mode ? 'bg-blue-100 text-blue-700' : 'text-slate-400 hover:bg-slate-50'
+                        (tagMode || 'any') === mode ? 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200' : 'text-muted-foreground/75 hover:bg-muted/50'
                       }`}
                     >
                       {mode}
@@ -893,7 +893,7 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
                 </Facet>
               ))}
               <Facet checked={tags.includes('none')} onToggle={() => toggleCsv('tag', 'none')}>
-                <span className="text-slate-400 italic">Untagged</span>
+                <span className="text-muted-foreground/75 italic">Untagged</span>
               </Facet>
             </Section>
           </SortableFacet>
@@ -905,14 +905,14 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
             <Section title="Impact / Urgency" activeCount={impacts.length + urgencies.length} onClear={() => setParams({ impact: null, urgency: null })}>
               {[['impact', impacts], ['urgency', urgencies]].map(([key, active]) => (
                 <div key={key} className="flex items-center gap-1 px-1.5 py-0.5">
-                  <span className="w-14 text-[10px] uppercase tracking-wide text-slate-400">{key}</span>
+                  <span className="w-14 text-[10px] uppercase tracking-wide text-muted-foreground/75">{key}</span>
                   {[1, 2, 3].map((v) => (
                     <button
                       key={v}
                       onClick={() => toggleCsv(key, String(v))}
                       aria-pressed={active.includes(String(v))}
                       className={`tp-focus-ring px-1.5 py-0.5 rounded text-[11px] font-medium ${
-                        active.includes(String(v)) ? 'bg-blue-100 text-blue-700' : 'text-slate-500 hover:bg-slate-50'
+                        active.includes(String(v)) ? 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200' : 'text-muted-foreground hover:bg-muted/50'
                       }`}
                     >
                       {['Low', 'Med', 'High'][v - 1]}
@@ -974,7 +974,7 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
                   key={preset.key}
                   onClick={() => applyPreset(preset)}
                   className={`tp-focus-ring text-left px-1.5 py-1 rounded-md text-xs ${
-                    activePreset === preset.key ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-600 hover:bg-slate-50'
+                    activePreset === preset.key ? 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 font-semibold' : 'text-muted-foreground hover:bg-muted/50'
                   }`}
                 >
                   {preset.label}
@@ -984,19 +984,19 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
                 onClick={() => setShowCalendar((v) => !v)}
                 aria-expanded={showCalendar}
                 className={`tp-focus-ring text-left px-1.5 py-1 rounded-md text-xs ${
-                  showCalendar || (createdFrom && !activePreset) ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-600 hover:bg-slate-50'
+                  showCalendar || (createdFrom && !activePreset) ? 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 font-semibold' : 'text-muted-foreground hover:bg-muted/50'
                 }`}
               >
               Between days…
               </button>
             </div>
             {(createdFrom || createdTo) && (
-              <p className="px-1.5 pb-1 text-[10px] text-slate-400">
+              <p className="px-1.5 pb-1 text-[10px] text-muted-foreground/75">
                 {createdFrom || '…'} → {createdTo || 'today'}
               </p>
             )}
             {showCalendar && (
-              <div className="tp-rail-calendar rounded-lg border border-slate-100 bg-slate-50/60 p-1">
+              <div className="tp-rail-calendar rounded-lg border border-border/60 bg-muted/30 p-1">
                 <DayPicker
                   mode="range"
                   numberOfMonths={1}
@@ -1046,11 +1046,11 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
     return (
       <Drawer.Root open={mobileOpen} onOpenChange={(o) => { if (!o) onMobileClose?.(); }} shouldScaleBackground>
         <Drawer.Portal>
-          <Drawer.Overlay className="lg:hidden fixed inset-0 z-50 bg-slate-900/40" />
-          <Drawer.Content className="lg:hidden fixed inset-x-0 bottom-0 z-50 flex flex-col rounded-t-2xl bg-white shadow-soft max-h-[88vh] focus:outline-none">
+          <Drawer.Overlay className="lg:hidden fixed inset-0 z-50 bg-slate-900/40 dark:bg-black/60" />
+          <Drawer.Content className="lg:hidden fixed inset-x-0 bottom-0 z-50 flex flex-col rounded-t-2xl bg-card shadow-soft max-h-[88vh] focus:outline-none">
             <Drawer.Title className="sr-only">Ticket filters</Drawer.Title>
             <div className="pt-2.5 pb-1 flex justify-center shrink-0" aria-hidden="true">
-              <span className="h-1.5 w-10 rounded-full bg-slate-300" />
+              <span className="h-1.5 w-10 rounded-full bg-muted-foreground/40" />
             </div>
             {body}
             <div className="pb-safe shrink-0" aria-hidden="true" />
@@ -1082,7 +1082,7 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
           aria-label="Expand filters"
           title="Expand filters"
           tabIndex={collapsed ? 0 : -1}
-          className="tp-focus-ring p-1.5 rounded-lg text-slate-400 hover:text-blue-700 hover:bg-blue-50"
+          className="tp-focus-ring p-1.5 rounded-lg text-muted-foreground/75 hover:text-blue-700 dark:hover:text-blue-200 hover:bg-blue-50 dark:hover:bg-blue-500/15"
         >
           <ChevronsRight className="w-4 h-4" aria-hidden="true" />
         </button>
@@ -1090,7 +1090,7 @@ export default function TicketFilterRail({ meta, stats = null, mobileOpen = fals
           onClick={() => setCollapsed(false)}
           aria-label={`Filters${activeTotal ? ` (${activeTotal} active)` : ''}`}
           tabIndex={collapsed ? 0 : -1}
-          className="tp-focus-ring relative p-1.5 rounded-lg text-slate-400 hover:text-blue-700 hover:bg-blue-50"
+          className="tp-focus-ring relative p-1.5 rounded-lg text-muted-foreground/75 hover:text-blue-700 dark:hover:text-blue-200 hover:bg-blue-50 dark:hover:bg-blue-500/15"
         >
           <ListFilter className="w-4 h-4" aria-hidden="true" />
           {activeTotal > 0 && (
@@ -1225,21 +1225,21 @@ export function ActiveFilterBar({ meta }) {
 
   return (
     <div className="sticky top-[64px] z-30 mb-3 animate-fadeIn">
-      <div className="tp-glass rounded-xl border border-blue-200/70 shadow-subtle px-3 py-2 flex flex-wrap items-center gap-1.5">
-        <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-blue-700">
+      <div className="tp-glass rounded-xl border border-blue-200/70 dark:border-blue-500/30 shadow-subtle px-3 py-2 flex flex-wrap items-center gap-1.5">
+        <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-blue-700 dark:text-blue-200">
           <ListFilter className="w-3.5 h-3.5" aria-hidden="true" />
           Filtered view
         </span>
         {chips.map((chip, i) => (
           <span
             key={`${chip.label}-${i}`}
-            className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full bg-white border border-slate-200 text-xs text-slate-700 shadow-subtle"
+            className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full bg-card border border-border text-xs text-foreground/85 shadow-subtle"
           >
             {chip.label}
             <button
               onClick={chip.onRemove}
               aria-label={`Remove filter ${chip.label}`}
-              className="tp-focus-ring rounded-full p-0.5 text-slate-400 hover:text-red-600 hover:bg-red-50"
+              className="tp-focus-ring rounded-full p-0.5 text-muted-foreground/75 hover:text-red-600 dark:hover:text-red-300 hover:bg-red-50 dark:hover:bg-red-500/15"
             >
               <X className="w-3 h-3" aria-hidden="true" />
             </button>

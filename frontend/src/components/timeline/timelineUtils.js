@@ -218,7 +218,7 @@ export function insertMarkersForDay(tickets, dateStr, techConfigs, days) {
         _marker: true, key: `daychange-${ptDate}`,
         label: `${label}${isWkend ? ' (Weekend)' : ''}${holidayLabel}`,
         color: isWkend
-          ? 'bg-slate-400'
+          ? 'bg-muted-foreground/60'
           : hInfo.isCanadian ? 'bg-rose-400' : hInfo.isUS ? 'bg-indigo-400' : 'bg-indigo-300',
       });
     }
@@ -300,7 +300,7 @@ export function buildCombinedTimeline(tickets, techConfigs, days) {
       const h12 = hour === 0 ? '12 AM' : hour < 12 ? `${hour} AM` : hour === 12 ? '12 PM' : `${hour - 12} PM`;
       items.push({
         _marker: true, key: `hour-${hour}`, label: h12,
-        color: hour < 9 ? 'bg-slate-300' : hour < 17 ? 'bg-indigo-300' : 'bg-slate-300',
+        color: hour < 9 ? 'bg-muted-foreground/40' : hour < 17 ? 'bg-indigo-300' : 'bg-muted-foreground/40',
       });
       lastHour = hour;
     }

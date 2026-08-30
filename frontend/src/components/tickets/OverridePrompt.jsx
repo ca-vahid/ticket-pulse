@@ -71,24 +71,24 @@ export function OverridePromptToast({ prompt, state, onReason, onDismiss }) {
       className="fixed bottom-4 right-4 z-[70] w-80 tp-card rounded-xl shadow-soft p-3 animate-slide-in-right"
     >
       {state === 'sent' ? (
-        <p className="flex items-center gap-2 text-sm font-medium text-emerald-700">
+        <p className="flex items-center gap-2 text-sm font-medium text-emerald-700 dark:text-emerald-200">
           <Check className="w-4 h-4 flex-shrink-0" aria-hidden="true" /> Thanks — noted
         </p>
       ) : (
         <>
           <div className="flex items-start gap-2">
-            <span className="h-6 w-6 rounded-full bg-violet-100 text-violet-600 inline-flex items-center justify-center flex-shrink-0">
+            <span className="h-6 w-6 rounded-full bg-violet-100 dark:bg-violet-500/20 text-violet-600 dark:text-violet-300 inline-flex items-center justify-center flex-shrink-0">
               <Sparkles className="w-3 h-3" aria-hidden="true" />
             </span>
-            <p className="flex-1 min-w-0 text-sm font-medium text-slate-700 leading-tight">
+            <p className="flex-1 min-w-0 text-sm font-medium text-foreground/85 leading-tight">
               {count > 1 ? `${count} of these were AI-routed — why the override?` : 'Why the override?'}
-              <span className="block text-[11px] font-normal text-slate-400">helps the AI learn</span>
+              <span className="block text-[11px] font-normal text-muted-foreground/75">helps the AI learn</span>
             </p>
             <button
               onClick={onDismiss}
               aria-label="Skip — don't record a reason"
               title="Skip"
-              className="tp-focus-ring h-6 w-6 inline-flex items-center justify-center rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-50 flex-shrink-0"
+              className="tp-focus-ring h-6 w-6 inline-flex items-center justify-center rounded-md text-muted-foreground/75 hover:text-muted-foreground hover:bg-muted/50 flex-shrink-0"
             >
               <X className="w-3.5 h-3.5" aria-hidden="true" />
             </button>
@@ -98,7 +98,7 @@ export function OverridePromptToast({ prompt, state, onReason, onDismiss }) {
               <button
                 key={code}
                 onClick={() => onReason(code)}
-                className="tp-focus-ring px-2.5 py-1 rounded-full border border-violet-200 bg-violet-50/60 text-xs font-medium text-violet-700 hover:bg-violet-100 transition-colors"
+                className="tp-focus-ring px-2.5 py-1 rounded-full border border-violet-200 dark:border-violet-500/30 bg-violet-50/60 dark:bg-violet-500/10 text-xs font-medium text-violet-700 dark:text-violet-200 hover:bg-violet-100 dark:hover:bg-violet-500/20 transition-colors"
               >
                 {label}
               </button>

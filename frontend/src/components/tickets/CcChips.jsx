@@ -119,15 +119,15 @@ export default function CcChips({
   return (
     <div ref={boxRef} className="relative">
       <div
-        className={`flex flex-wrap items-center gap-1.5 border rounded-lg px-2 py-1.5 bg-white ${
-          invalid ? 'border-red-300' : 'border-input focus-within:ring-2 focus-within:ring-ring'
+        className={`flex flex-wrap items-center gap-1.5 border rounded-lg px-2 py-1.5 bg-card ${
+          invalid ? 'border-red-300 dark:border-red-500/40' : 'border-input focus-within:ring-2 focus-within:ring-ring'
         }`}
       >
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mr-0.5">
-          {prefix}{value.length > 0 && <span className="ml-1 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-blue-100 text-blue-700 text-[10px] font-bold">{value.length}</span>}
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/75 mr-0.5">
+          {prefix}{value.length > 0 && <span className="ml-1 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200 text-[10px] font-bold">{value.length}</span>}
         </span>
         {value.map((email) => (
-          <span key={email} className={`inline-flex items-center gap-1 pl-2 py-0.5 rounded-full bg-blue-50 border border-blue-200 text-xs text-blue-800 ${readOnly ? 'pr-2' : 'pr-1'}`}>
+          <span key={email} className={`inline-flex items-center gap-1 pl-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-500/15 border border-blue-200 dark:border-blue-500/30 text-xs text-blue-800 dark:text-blue-200 ${readOnly ? 'pr-2' : 'pr-1'}`}>
             {email}
             {!readOnly && (
               <button
@@ -135,7 +135,7 @@ export default function CcChips({
                 onClick={() => onChange(value.filter((v) => v !== email))}
                 disabled={disabled}
                 aria-label={`Remove ${email} from ${prefix}`}
-                className="tp-focus-ring rounded-full p-0.5 hover:bg-blue-100 text-blue-500 disabled:opacity-50"
+                className="tp-focus-ring rounded-full p-0.5 hover:bg-blue-100 dark:hover:bg-blue-500/20 text-blue-500 disabled:opacity-50"
               >
                 <X className="w-3 h-3" aria-hidden="true" />
               </button>
@@ -143,7 +143,7 @@ export default function CcChips({
           </span>
         ))}
         {readOnly && value.length === 0 && (
-          <span className="text-xs text-slate-400">{placeholder}</span>
+          <span className="text-xs text-muted-foreground/75">{placeholder}</span>
         )}
         {!readOnly && <span className="relative flex-1 min-w-[140px] flex items-center">
           <input
@@ -161,9 +161,9 @@ export default function CcChips({
             role="combobox"
             aria-autocomplete="list"
             autoComplete="off"
-            className="w-full text-xs py-0.5 outline-none placeholder:text-slate-400 disabled:bg-transparent"
+            className="w-full text-xs py-0.5 bg-transparent text-foreground outline-none placeholder:text-muted-foreground/75"
           />
-          {loading && <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-300 flex-shrink-0" aria-hidden="true" />}
+          {loading && <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground/50 flex-shrink-0" aria-hidden="true" />}
         </span>}
         {invalid &&<span className="text-[10px] text-red-500 w-full">Not a valid email address yet — press Enter once fixed</span>}
       </div>
@@ -179,12 +179,12 @@ export default function CcChips({
               // preventDefault keeps the input focused so onBlur-commit doesn't fire first
               onMouseDown={(e) => { e.preventDefault(); pick(p); }}
               onMouseEnter={() => setActive(i)}
-              className={`w-full text-left px-3 py-1.5 flex items-center gap-2.5 ${i === active ? 'bg-blue-50' : 'hover:bg-blue-50'}`}
+              className={`w-full text-left px-3 py-1.5 flex items-center gap-2.5 ${i === active ? 'bg-blue-50 dark:bg-blue-500/15' : 'hover:bg-blue-50 dark:hover:bg-blue-500/15'}`}
             >
-              <span className="h-6 w-6 rounded-full bg-blue-50 text-blue-700 border border-blue-100 inline-flex items-center justify-center text-[9px] font-semibold flex-shrink-0">{initials(p.name)}</span>
+              <span className="h-6 w-6 rounded-full bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 border border-blue-100 dark:border-blue-500/20 inline-flex items-center justify-center text-[9px] font-semibold flex-shrink-0">{initials(p.name)}</span>
               <span className="min-w-0">
-                <span className="block text-sm text-slate-800 truncate">{p.name || p.email}</span>
-                <span className="block text-xs text-slate-400 truncate flex items-center gap-1">
+                <span className="block text-sm text-foreground truncate">{p.name || p.email}</span>
+                <span className="block text-xs text-muted-foreground/75 truncate flex items-center gap-1">
                   <Building2 className="w-3 h-3 flex-shrink-0" aria-hidden="true" />{p.email}{p.hint ? ` · ${p.hint}` : ''}
                 </span>
               </span>

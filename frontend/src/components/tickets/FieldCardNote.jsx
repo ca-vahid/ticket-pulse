@@ -22,11 +22,11 @@ import { formatDayTime, timeAgo } from './ticketUi';
 export const CF_FILTERING_ENABLED = true;
 
 const ACCENT_TONES = {
-  violet: { bar: 'bg-violet-500', wrap: 'bg-violet-50/60 border-violet-200', icon: 'text-violet-500', chip: 'bg-violet-100 text-violet-700 border-violet-200' },
-  blue: { bar: 'bg-blue-500', wrap: 'bg-blue-50/60 border-blue-200', icon: 'text-blue-500', chip: 'bg-blue-100 text-blue-700 border-blue-200' },
-  emerald: { bar: 'bg-emerald-500', wrap: 'bg-emerald-50/60 border-emerald-200', icon: 'text-emerald-500', chip: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
-  amber: { bar: 'bg-amber-500', wrap: 'bg-amber-50/60 border-amber-200', icon: 'text-amber-500', chip: 'bg-amber-100 text-amber-700 border-amber-200' },
-  slate: { bar: 'bg-slate-400', wrap: 'bg-slate-50/80 border-slate-200', icon: 'text-slate-500', chip: 'bg-slate-100 text-slate-600 border-slate-200' },
+  violet: { bar: 'bg-violet-500', wrap: 'bg-violet-50/60 dark:bg-violet-500/10 border-violet-200 dark:border-violet-500/30', icon: 'text-violet-500', chip: 'bg-violet-100 dark:bg-violet-500/20 text-violet-700 dark:text-violet-200 border-violet-200 dark:border-violet-500/30' },
+  blue: { bar: 'bg-blue-500', wrap: 'bg-blue-50/60 dark:bg-blue-500/10 border-blue-200 dark:border-blue-500/30', icon: 'text-blue-500', chip: 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200 border-blue-200 dark:border-blue-500/30' },
+  emerald: { bar: 'bg-emerald-500', wrap: 'bg-emerald-50/60 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/30', icon: 'text-emerald-500', chip: 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-200 border-emerald-200 dark:border-emerald-500/30' },
+  amber: { bar: 'bg-amber-500', wrap: 'bg-amber-50/60 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/30', icon: 'text-amber-500', chip: 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-200 border-amber-200 dark:border-amber-500/30' },
+  slate: { bar: 'bg-muted-foreground/60', wrap: 'bg-muted/40 border-border', icon: 'text-muted-foreground', chip: 'bg-muted text-muted-foreground border-border' },
 };
 
 export const FIELD_CARD_ACCENTS = Object.keys(ACCENT_TONES);
@@ -70,7 +70,7 @@ export function FieldValueChip({ field, currentValues = null, onCopied = null, c
   const textSize = compact ? 'text-[11px]' : 'text-sm';
 
   if (isEmpty(shown)) {
-    return <span className={`${textSize} text-slate-300 ${overlayCls}`} title={overlayTitle} data-changed={changed || undefined}>—</span>;
+    return <span className={`${textSize} text-muted-foreground/50 ${overlayCls}`} title={overlayTitle} data-changed={changed || undefined}>—</span>;
   }
 
   if (field.type === 'boolean') {
@@ -78,7 +78,7 @@ export function FieldValueChip({ field, currentValues = null, onCopied = null, c
     return (
       <span title={overlayTitle} data-changed={changed || undefined} className={overlayCls ? 'inline-flex' : undefined}>
         <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold border ${
-          yes ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-100 text-slate-500 border-slate-200'
+          yes ? 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 border-emerald-200 dark:border-emerald-500/30' : 'bg-muted text-muted-foreground border-border'
         } ${overlayCls}`}
         >
           {yes ? 'Yes' : 'No'}
@@ -97,7 +97,7 @@ export function FieldValueChip({ field, currentValues = null, onCopied = null, c
         title={overlayTitle ? `${href} — ${overlayTitle}` : href}
         aria-label={`${field.label || field.key} (opens in a new tab)`}
         data-changed={changed || undefined}
-        className={`tp-focus-ring inline-flex max-w-full items-center gap-1 rounded ${textSize} text-blue-600 hover:text-blue-700 hover:underline`}
+        className={`tp-focus-ring inline-flex max-w-full items-center gap-1 rounded ${textSize} text-blue-600 dark:text-blue-300 hover:text-blue-700 dark:hover:text-blue-200 hover:underline`}
       >
         <span className={`truncate ${compact ? 'max-w-[160px]' : 'max-w-[240px]'} ${overlayCls}`}>{href.replace(/^https?:\/\//i, '')}</span>
         <ExternalLink className="w-3 h-3 flex-shrink-0" aria-hidden="true" />
@@ -119,12 +119,12 @@ export function FieldValueChip({ field, currentValues = null, onCopied = null, c
       type="button"
       onClick={copy}
       title={copied ? 'Copied' : 'Click to copy'}
-      className={`tp-focus-ring group/chip inline-flex max-w-full items-center gap-1 rounded text-left ${textSize} text-slate-700 hover:text-slate-900`}
+      className={`tp-focus-ring group/chip inline-flex max-w-full items-center gap-1 rounded text-left ${textSize} text-foreground/85 hover:text-foreground`}
     >
       <span className={`truncate ${overlayCls}`} title={overlayTitle} data-changed={changed || undefined}>{display}</span>
       {copied
         ? <Check className="w-3 h-3 flex-shrink-0 text-emerald-500" aria-hidden="true" />
-        : <Copy className="w-3 h-3 flex-shrink-0 text-slate-300 opacity-0 group-hover/chip:opacity-100 transition-opacity" aria-hidden="true" />}
+        : <Copy className="w-3 h-3 flex-shrink-0 text-muted-foreground/50 opacity-0 group-hover/chip:opacity-100 transition-opacity" aria-hidden="true" />}
     </button>
   );
 }
@@ -153,22 +153,22 @@ export default function FieldCardNote({
       <span className={`absolute inset-y-0 left-0 w-1.5 ${tones.bar}`} aria-hidden="true" />
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <Sparkles className={`w-3.5 h-3.5 ${tones.icon}`} aria-hidden="true" />
-        <span className="text-sm font-bold text-slate-800">{title}</span>
+        <span className="text-sm font-bold text-foreground">{title}</span>
         <span className={`inline-flex items-center gap-1 text-[10px] font-semibold rounded-full px-1.5 py-0.5 border ${tones.chip}`}>
           {payload.workflowName ? `via ${payload.workflowName} · Auto` : 'Auto'}
         </span>
         {entry?.occurredAt && (
-          <span className="ml-auto text-xs text-slate-400 whitespace-nowrap" title={new Date(entry.occurredAt).toLocaleString()}>
+          <span className="ml-auto text-xs text-muted-foreground/75 whitespace-nowrap" title={new Date(entry.occurredAt).toLocaleString()}>
             {timeAgo(entry.occurredAt)}
           </span>
         )}
       </div>
-      {payload.intro && <p className="mt-1 text-xs text-slate-500 break-words">{payload.intro}</p>}
+      {payload.intro && <p className="mt-1 text-xs text-muted-foreground break-words">{payload.intro}</p>}
       {fields.length > 0 && (
         <dl className="mt-2.5 grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2">
           {fields.map((field) => (
             <div key={field.key} className="min-w-0">
-              <dt className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+              <dt className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/75">
                 <span className="truncate">{field.label || field.key}</span>
                 {onEditField && (
                   <button
@@ -176,7 +176,7 @@ export default function FieldCardNote({
                     onClick={() => onEditField(field.key)}
                     aria-label={`Edit ${field.label || field.key}`}
                     title="Edit in the ticket's custom fields"
-                    className="tp-focus-ring p-0.5 rounded text-slate-300 hover:text-slate-600 flex-shrink-0"
+                    className="tp-focus-ring p-0.5 rounded text-muted-foreground/50 hover:text-muted-foreground flex-shrink-0"
                   >
                     <Pencil className="w-3 h-3" aria-hidden="true" />
                   </button>
@@ -191,7 +191,7 @@ export default function FieldCardNote({
                     }}
                     aria-label={`Filter queue by ${field.label || field.key}`}
                     title="Filter queue by this value"
-                    className="tp-focus-ring p-0.5 rounded text-slate-300 hover:text-slate-600 flex-shrink-0"
+                    className="tp-focus-ring p-0.5 rounded text-muted-foreground/50 hover:text-muted-foreground flex-shrink-0"
                   >
                     <ListFilter className="w-3 h-3" aria-hidden="true" />
                   </button>

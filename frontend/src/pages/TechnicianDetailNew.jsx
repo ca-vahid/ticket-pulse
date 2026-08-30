@@ -370,7 +370,7 @@ export default function TechnicianDetailNew() {
 
   if (!technician) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+      <div className="min-h-screen flex items-center justify-center bg-muted/50">
         <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 motion-reduce:animate-none" />
       </div>
     );
@@ -378,9 +378,9 @@ export default function TechnicianDetailNew() {
 
   if (error) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <div className="bg-red-50 border border-red-200 rounded-xl p-5 max-w-sm">
-          <p className="text-red-700 text-sm mb-3">{error}</p>
+      <div className="min-h-screen flex items-center justify-center bg-muted/50">
+        <div className="bg-red-50 dark:bg-red-500/15 border border-red-200 dark:border-red-500/30 rounded-xl p-5 max-w-sm">
+          <p className="text-red-700 dark:text-red-200 text-sm mb-3">{error}</p>
           <button
             onClick={handleBack}
             className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium"
@@ -484,44 +484,44 @@ export default function TechnicianDetailNew() {
   })();
 
   const loadTone = openCount >= 10
-    ? { text: 'Heavy load', cls: 'bg-red-50 text-red-700' }
+    ? { text: 'Heavy load', cls: 'bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200' }
     : openCount >= 5
-      ? { text: 'Medium load', cls: 'bg-amber-50 text-amber-700' }
-      : { text: 'Light load', cls: 'bg-emerald-50 text-emerald-700' };
+      ? { text: 'Medium load', cls: 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200' }
+      : { text: 'Light load', cls: 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200' };
 
   // Stat chip definitions — every one scoped to the selected period
   const chips = [
     {
       key: 'handled', label: `Handled · ${viewMode === 'daily' ? (isToday ? 'today' : periodLabel) : periodLabel}`,
-      value: handledCount, tone: 'text-indigo-600', Icon: Layers,
+      value: handledCount, tone: 'text-indigo-600 dark:text-indigo-300', Icon: Layers,
       sub: `${selfPickedCount} self · ${handledCount - selfPickedCount} routed`,
     },
     {
       key: 'closed', label: 'Closed',
-      value: closedCount, tone: 'text-emerald-600', Icon: CheckCircle2,
+      value: closedCount, tone: 'text-emerald-600 dark:text-emerald-300', Icon: CheckCircle2,
       sub: handledCount > 0 ? `${Math.round((closedCount / handledCount) * 100)}% of handled` : null,
     },
     {
       key: 'open', label: 'Open now',
-      value: openCount, tone: 'text-amber-600', Icon: Inbox,
+      value: openCount, tone: 'text-amber-600 dark:text-amber-300', Icon: Inbox,
       valueSuffix: pendingCount > 0 ? `+${pendingCount} pending` : null,
       sub: 'live snapshot, not period-scoped',
     },
     {
       key: 'self', label: 'Self-picked',
-      value: selfPickedCount, tone: 'text-violet-600', Icon: Hand,
+      value: selfPickedCount, tone: 'text-violet-600 dark:text-violet-300', Icon: Hand,
       sub: handledCount > 0 ? `${Math.round((selfPickedCount / handledCount) * 100)}% of handled` : null,
     },
     {
       key: 'bounced', label: 'Bounced',
-      value: bouncedCount, tone: bouncedCount > 0 ? 'text-red-600' : 'text-slate-400', Icon: RotateCcw,
+      value: bouncedCount, tone: bouncedCount > 0 ? 'text-red-600 dark:text-red-300' : 'text-muted-foreground/75', Icon: RotateCcw,
       sub: bouncedLifetime > 0 ? `${bouncedLifetime} lifetime` : null,
     },
     {
       key: 'satisfaction', label: 'Satisfaction',
       value: satisfaction.count > 0 ? satisfaction.average.toFixed(1) : '—',
       valueSuffix: satisfaction.count > 0 ? '/5' : null,
-      tone: 'text-emerald-600', Icon: Star,
+      tone: 'text-emerald-600 dark:text-emerald-300', Icon: Star,
       sub: `${satisfaction.count} response${satisfaction.count === 1 ? '' : 's'} · FS + TP merged`,
     },
   ];
@@ -550,10 +550,10 @@ export default function TechnicianDetailNew() {
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-muted/50">
       {/* Thin progress bar while re-fetching (navigation between periods) */}
       {isLoading && (
-        <div className="fixed top-0 left-0 right-0 z-50 h-0.5 bg-blue-100 overflow-hidden">
+        <div className="fixed top-0 left-0 right-0 z-50 h-0.5 bg-blue-100 dark:bg-blue-500/20 overflow-hidden">
           <div className="h-full bg-blue-500 animate-pulse w-full motion-reduce:animate-none" />
         </div>
       )}
@@ -590,7 +590,7 @@ export default function TechnicianDetailNew() {
                 <img
                   src={technician.photoUrl}
                   alt={technician.name}
-                  className="h-12 w-12 flex-shrink-0 rounded-full border border-slate-200 object-cover"
+                  className="h-12 w-12 flex-shrink-0 rounded-full border border-border object-cover"
                 />
               ) : (
                 <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-indigo-600">
@@ -598,22 +598,22 @@ export default function TechnicianDetailNew() {
                 </div>
               )}
               <div className="min-w-0">
-                <div className="truncate text-sm font-bold text-slate-900">{technician.name}</div>
+                <div className="truncate text-sm font-bold text-foreground">{technician.name}</div>
                 <span className={`mt-0.5 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${loadTone.cls}`}>
                   {loadTone.text}
                 </span>
               </div>
             </div>
-            <div className="mt-2 space-y-1 text-[11px] text-slate-500">
+            <div className="mt-2 space-y-1 text-[11px] text-muted-foreground">
               {techLocation && (
                 <div className="flex items-center gap-1.5">
-                  <MapPin className="h-3 w-3 text-slate-400" aria-hidden="true" />
+                  <MapPin className="h-3 w-3 text-muted-foreground/75" aria-hidden="true" />
                   <span className="truncate">{techLocation}</span>
                 </div>
               )}
               {timezoneLabel && (
                 <div className="flex items-center gap-1.5">
-                  <Clock className="h-3 w-3 text-slate-400" aria-hidden="true" />
+                  <Clock className="h-3 w-3 text-muted-foreground/75" aria-hidden="true" />
                   <span className="truncate">
                     {timezoneLabel}
                     {(technician.workStartTime || technician.workEndTime) &&
@@ -626,7 +626,7 @@ export default function TechnicianDetailNew() {
 
           {/* Stat chips — click = filter the evidence table (A mechanics) */}
           <nav className="tp-card rounded-xl p-1.5" aria-label="Period stats">
-            <div className="px-2 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-widest text-slate-400">
+            <div className="px-2 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/75">
               {periodLabel}
             </div>
             <div className="space-y-0.5">
@@ -640,17 +640,17 @@ export default function TechnicianDetailNew() {
                     aria-pressed={active}
                     aria-label={`${label}: ${value}${valueSuffix ? ` ${valueSuffix}` : ''}`}
                     className={`tp-focus-ring flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors ${
-                      active ? 'bg-blue-50 ring-1 ring-blue-200' : 'hover:bg-slate-50'
+                      active ? 'bg-blue-50 dark:bg-blue-500/15 ring-1 ring-blue-200 dark:ring-blue-500/30' : 'hover:bg-muted/50'
                     }`}
                   >
-                    <Icon className={`h-4 w-4 flex-shrink-0 ${active ? 'text-blue-600' : 'text-slate-300'}`} aria-hidden="true" />
+                    <Icon className={`h-4 w-4 flex-shrink-0 ${active ? 'text-blue-600 dark:text-blue-300' : 'text-muted-foreground/50'}`} aria-hidden="true" />
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[11px] font-medium text-slate-500">{label}</span>
-                      {sub && <span className="block truncate text-[10px] text-slate-400">{sub}</span>}
+                      <span className="block truncate text-[11px] font-medium text-muted-foreground">{label}</span>
+                      {sub && <span className="block truncate text-[10px] text-muted-foreground/75">{sub}</span>}
                     </span>
                     <span className={`flex-shrink-0 text-lg font-extrabold tabular-nums ${tone}`}>
                       {value}
-                      {valueSuffix && <span className="ml-0.5 text-[10px] font-semibold text-slate-400">{valueSuffix}</span>}
+                      {valueSuffix && <span className="ml-0.5 text-[10px] font-semibold text-muted-foreground/75">{valueSuffix}</span>}
                     </span>
                   </button>
                 );
@@ -661,20 +661,20 @@ export default function TechnicianDetailNew() {
           {/* Category mix — top 3 with % bars */}
           {categoryMix.length > 0 && (
             <div className="tp-card rounded-xl p-3">
-              <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-slate-400">
+              <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/75">
                 Category mix · {periodLabel}
               </h3>
               <div className="space-y-1.5">
                 {categoryMix.map((c, idx) => (
                   <div key={c.label} className="flex items-center gap-2 text-[11px]">
-                    <span className="w-24 truncate text-slate-600" title={c.label}>{c.label}</span>
-                    <span className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
+                    <span className="w-24 truncate text-muted-foreground" title={c.label}>{c.label}</span>
+                    <span className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
                       <span
-                        className={`block h-full rounded-full ${['bg-sky-500', 'bg-indigo-400', 'bg-slate-300'][idx]}`}
+                        className={`block h-full rounded-full ${['bg-sky-500', 'bg-indigo-400', 'bg-muted-foreground/40'][idx]}`}
                         style={{ width: `${Math.max(c.pct, 3)}%` }}
                       />
                     </span>
-                    <span className="w-8 text-right font-bold tabular-nums text-slate-700">{c.pct}%</span>
+                    <span className="w-8 text-right font-bold tabular-nums text-foreground/85">{c.pct}%</span>
                   </div>
                 ))}
               </div>
@@ -684,7 +684,7 @@ export default function TechnicianDetailNew() {
           {/* Timeline Explorer deep link — replaces the old Coverage tab */}
           <Link
             to={`/timeline?techId=${id}`}
-            className="tp-focus-ring group flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-blue-700 shadow-subtle transition-colors hover:border-blue-200 hover:bg-blue-50"
+            className="tp-focus-ring group flex items-center justify-between rounded-xl border border-border bg-card px-3 py-2.5 text-sm font-semibold text-blue-700 dark:text-blue-200 shadow-subtle transition-colors hover:border-blue-200 dark:hover:border-blue-500/30 hover:bg-blue-50 dark:hover:bg-blue-500/15"
           >
             <span className="inline-flex items-center gap-2">
               <Layers className="h-4 w-4" aria-hidden="true" />
@@ -699,7 +699,7 @@ export default function TechnicianDetailNew() {
           {/* Drill-context chip — the dashboard click travels with you */}
           {drillContext && (
             <div className="flex items-center gap-2 text-xs">
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 font-semibold text-blue-700">
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 px-2.5 py-1 font-semibold text-blue-700 dark:text-blue-200">
                 Arrived from Dashboard:
                 <b>{handledCount} handled on {periodLabel}</b>
                 <button

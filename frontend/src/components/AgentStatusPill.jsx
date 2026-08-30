@@ -20,8 +20,8 @@ export default function AgentStatusPill({ leaveBadge, activeLeave, topLoad = fal
   const toneClass = leaveBadge
     ? `${leaveBadge.badgeBg} ${leaveBadge.badgeText} ${leaveBadge.badgeBorder}`
     : topLoad
-      ? 'bg-violet-50 text-violet-700 border-violet-200 font-medium'
-      : 'bg-slate-50 text-slate-500 border-slate-200';
+      ? 'bg-violet-50 dark:bg-violet-500/15 text-violet-700 dark:text-violet-200 border-violet-200 dark:border-violet-500/30 font-medium'
+      : 'bg-muted/50 text-muted-foreground border-border';
 
   return (
     <span

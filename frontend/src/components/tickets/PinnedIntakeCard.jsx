@@ -63,7 +63,7 @@ export default function PinnedIntakeCard({
             <span className={`absolute inset-y-0 left-0 w-1 rounded-l-xl ${tones.bar}`} aria-hidden="true" />
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <Sparkles className={`w-3.5 h-3.5 ${tones.icon}`} aria-hidden="true" />
-              <span className="text-xs font-bold text-slate-800">{payload.title || 'Ticket details'}</span>
+              <span className="text-xs font-bold text-foreground">{payload.title || 'Ticket details'}</span>
               <span className={`inline-flex items-center gap-1 text-[10px] font-semibold rounded-full px-1.5 py-0.5 border ${tones.chip}`}>
                 {payload.workflowName ? `via ${payload.workflowName}` : 'Workflow'}
               </span>
@@ -74,7 +74,7 @@ export default function PinnedIntakeCard({
                     onClick={() => setConfirmingId((cur) => (cur === card.id ? null : card.id))}
                     aria-label="Dismiss card"
                     title="Dismiss this card"
-                    className="tp-focus-ring p-1 rounded text-slate-300 hover:text-slate-600 hover:bg-white/70"
+                    className="tp-focus-ring p-1 rounded text-muted-foreground/50 hover:text-muted-foreground hover:bg-card/70"
                   >
                     <X className="w-3.5 h-3.5" aria-hidden="true" />
                   </button>
@@ -82,23 +82,23 @@ export default function PinnedIntakeCard({
                     <span
                       role="dialog"
                       aria-label="Confirm dismiss"
-                      className="absolute right-0 top-7 z-20 block w-60 rounded-lg border border-slate-200 bg-white p-2.5 shadow-soft text-left"
+                      className="absolute right-0 top-7 z-20 block w-60 rounded-lg border border-border bg-card p-2.5 shadow-soft text-left"
                     >
-                      <span className="block text-xs text-slate-600">
+                      <span className="block text-xs text-muted-foreground">
                         Dismiss this card? It won&apos;t return unless the workflow runs again.
                       </span>
                       <span className="mt-2 flex justify-end gap-1.5">
                         <button
                           type="button"
                           onClick={() => setConfirmingId(null)}
-                          className="tp-focus-ring px-2 py-1 rounded-md text-[11px] font-medium text-slate-500 hover:bg-slate-100"
+                          className="tp-focus-ring px-2 py-1 rounded-md text-[11px] font-medium text-muted-foreground hover:bg-muted"
                         >
                           Keep
                         </button>
                         <button
                           type="button"
                           onClick={() => dismiss(card)}
-                          className="tp-focus-ring px-2 py-1 rounded-md bg-slate-800 text-[11px] font-semibold text-white hover:bg-slate-700"
+                          className="tp-focus-ring px-2 py-1 rounded-md bg-foreground text-[11px] font-semibold text-background hover:bg-foreground/90"
                         >
                           Dismiss
                         </button>
@@ -108,15 +108,15 @@ export default function PinnedIntakeCard({
                 </span>
               )}
             </div>
-            {payload.intro && <p className="mt-0.5 text-[11px] text-slate-500 break-words">{payload.intro}</p>}
+            {payload.intro && <p className="mt-0.5 text-[11px] text-muted-foreground break-words">{payload.intro}</p>}
             {fields.length > 0 && (
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                 {fields.map((field) => (
                   <span
                     key={field.key}
-                    className="inline-flex max-w-full items-center gap-1 rounded-md border border-white/70 bg-white/70 px-1.5 py-0.5"
+                    className="inline-flex max-w-full items-center gap-1 rounded-md border border-card/70 bg-card/70 px-1.5 py-0.5"
                   >
-                    <span className="text-[11px] font-semibold text-slate-500 whitespace-nowrap">{field.label || field.key}:</span>
+                    <span className="text-[11px] font-semibold text-muted-foreground whitespace-nowrap">{field.label || field.key}:</span>
                     <FieldValueChip field={field} currentValues={currentValues} onCopied={onCopied} compact />
                   </span>
                 ))}
@@ -139,16 +139,16 @@ export function PinnedCardChipsRow({ cards = [], currentValues = null, onCopied 
   if (active.length === 0) return null;
   return (
     <div data-testid="pinned-card-chips-row">
-      <span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-1">
+      <span className="block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/75 mb-1">
         Workflow card{active.length === 1 ? '' : 's'}
       </span>
       <div className="flex flex-wrap items-center gap-1.5">
         {active.map((card) => (Array.isArray(card.payload?.fields) ? card.payload.fields : []).map((field) => (
           <span
             key={`${card.id}-${field.key}`}
-            className="inline-flex max-w-full items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5"
+            className="inline-flex max-w-full items-center gap-1 rounded-md border border-border bg-muted/50 px-1.5 py-0.5"
           >
-            <span className="text-[11px] font-semibold text-slate-500 whitespace-nowrap">{field.label || field.key}:</span>
+            <span className="text-[11px] font-semibold text-muted-foreground whitespace-nowrap">{field.label || field.key}:</span>
             <FieldValueChip field={field} currentValues={currentValues} onCopied={onCopied} compact />
           </span>
         )))}
