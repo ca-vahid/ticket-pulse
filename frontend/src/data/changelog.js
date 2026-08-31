@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.8.03-preview';
+export const APP_VERSION = '3.8.04-preview';
 
 export const changelog = [
+  {
+    version: '3.8.04-preview',
+    date: 'August 31, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>🔧 Assignment Review run pages crashed</strong> — opening a full run (“Something went wrong” on /assignments/history/…) hit a one-line regression from the dark-mode sweep: a DOM call that styles links in the ticket description was handed two classes in one string, which the browser rejects. Fixed; the run view loads again.' },
+    ],
+  },
   {
     version: '3.8.03-preview',
     date: 'August 31, 2026',

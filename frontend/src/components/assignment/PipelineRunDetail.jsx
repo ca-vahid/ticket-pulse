@@ -307,7 +307,9 @@ function TicketDetailsCard({ ticket, recommendation }) {
     htmlHostRef.current.querySelectorAll('a[href]').forEach((a) => {
       a.setAttribute('target', '_blank');
       a.setAttribute('rel', 'noopener noreferrer');
-      a.classList.add('text-blue-600 dark:text-blue-300', 'underline', 'underline-offset-2', 'break-words', 'hover:text-blue-800 dark:hover:text-blue-200');
+      // classList.add takes ONE class per argument — a space-separated string throws
+      // InvalidCharacterError and crashes the whole route (QA 08-31, run 22206).
+      a.classList.add('text-blue-600', 'dark:text-blue-300', 'underline', 'underline-offset-2', 'break-words', 'hover:text-blue-800', 'dark:hover:text-blue-200');
     });
   }, [useHtml, safeHtml]);
 
