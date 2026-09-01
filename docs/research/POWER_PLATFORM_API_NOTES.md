@@ -116,7 +116,17 @@ the write-back step is just SharePoint **"Update item"** setting a `TicketPulseR
 1. **JSON escaping in the raw body.** Inserting a dynamic token inside a hand-typed JSON string (`"subject": "@{triggerOutputs()?['body/Title']}"`) does **not** escape quotes/newlines/backslashes in the value — a subject containing `"` produces invalid JSON and a 400. Safe options: (a) build the body as an object expression — `setProperty(...)` chain or `json()` over safely composed parts; (b) run risky free-text fields through `replace(replace(<v>, '\', '\\'), '"', '\"')`; (c) simplest to teach: pass free text through the expression `string(<token>)`? — *not sufficient; do not document (c)*. Recommend (a) for `description`, plain tokens for constrained fields (choice columns, emails).
 2. **Retry policy defaults duplicate POSTs.** Power Automate auto-retries an action on **408, 429, and 5xx** (and connectivity errors). Defaults per the [limits doc](https://learn.microsoft.com/en-us/power-automate/limits-and-config) (page dated 2026-07-17): Low performance profile = up to **2 retries** (exponential, ~5 min scale); Medium/High = up to **12 retries** (exponential, scaling to ~1 h). Older docs/UI describe "exponential, 4 retries" — the profile-based table is the current statement; flag the discrepancy. Configure under action **Settings → Retry policy**: `Default` / `None` / `Exponential Interval` / `Fixed Interval`; limits: ≤ 90 attempts, delay 5 s–1 day (`PT…` ISO 8601). **Because retries re-send the POST, our `Idempotency-Key` header is what makes retries safe — lead with this in the docs.** Our 429s include `Retry-After`, which the retry runtime honors.
 3. **Timeout.** Outbound synchronous request limit = **120 seconds** (limits doc). The action's `Timeout` setting (ISO 8601, e.g. `PT2M`) governs the async-polling pattern overall duration, not the per-request 120 s cap. Our create endpoint responds well under that; no async pattern needed.
-4. **Idempotency key expression.** `workflow()?['run']?['name']` returns the current **run ID** (unique per run; also `workflow().run.name`). It's evaluated once per action execution, so all automatic retries of the action send the same key → at-most-once ticket creation per run. Caveats: a **resubmitted** run gets a *new* run name → new ticket; for at-most-once **per SharePoint item**, prefer `concat('sp-', triggerOutputs()?['body/ID'])` (or item GUID) — also under the 255-char cap. Note (unverified nuance): community posts show `workflow()['run.name']` (single key) failing — the correct form is the nested two-key access.
+4. **Two keys, two jobs — `Idempotency-Key` vs `externalRef`** *(rewritten 2026-08-31, Phase PA — the earlier advice to key `Idempotency-Key` per SharePoint item is WRONG and produces `422`s on resubmission).*
+
+   > **`Idempotency-Key` = per RUN.** Expression: `workflow()?['run']?['name']` (the run ID; also `workflow().run.name`). Evaluated once per action execution, so every automatic retry of the HTTP action (408/429/5xx) re-sends the same key with the same body → the cached response replays, no double ticket. Retry protection, nothing more.
+   >
+   > **`externalRef` = per RECORD** (a body field, not a header). Expression: `concat('sp-projectrequests-', triggerOutputs()?['body/ID'])` — the SharePoint item id, stable forever. Ticket Pulse stores it on the ticket; a later POST with the same `externalRef` (a re-submitted form, a re-run flow, an edited item) **updates the existing ticket** and answers `200` with top-level `resubmitted: true` (`meta.changedFields`, `meta.reopened`, …). A first-seen ref answers `201` exactly as before.
+   >
+   > **Never use the record id for both.** A second run for the same item sends a *different* body (that's the point of a resubmission) under the *same* idempotency key → `422 idempotency_key_reused` — rejected by the idempotency layer before the resubmission logic ever runs. Same key + same body would merely replay the old response (no update). Keep the header per run, the body field per record.
+
+   Nuance (unverified): community posts show `workflow()['run.name']` (single key) failing — the correct form is the nested two-key access. `externalRef` is opaque, ≤200 chars, unique per workspace; `Idempotency-Key` ≤255 chars.
+
+   **Zero-change bridge for existing flows.** ws5's flow already posts `customFields.powerAppRecordId` (stored as `power_app_record_id`). In Ticket Pulse → Settings → Ticket Ops → *API resubmissions*, set "Match on a custom field" to **Power App Record Id**: the ref is derived from that value (stored as `pa-<id>`) and resubmissions match with the payload they send today. Existing ws5 tickets were backfilled (`scripts/backfill-external-ref-ws5.mjs`, lowest ticket id per record wins). Adding `externalRef` to the flow later is still recommended — it is explicit and survives field renames.
 5. **Hiding the API key in run history.** Action **Settings → Secure Inputs** (and optionally Secure Outputs) hides the action's inputs — including the `Authorization` header — from run history; the action shows a lock icon. Docs: [use secure inputs/outputs](https://learn.microsoft.com/en-us/power-automate/guidance/coding-guidelines/use-secure-inputs-outputs-triggers). Trade-off: the body is hidden too, which hurts debugging — suggest enabling after the flow works.
 6. **Storing the key properly.** Best practice: Power Platform **environment variable of data type "Secret"** backed by **Azure Key Vault** ([docs](https://learn.microsoft.com/en-us/power-apps/maker/data-platform/environmentvariables-azure-key-vault-secrets)). Constraints: AKV is the only supported store; same tenant; secret env vars **don't appear in the dynamic-content picker** — retrieve in-flow via Dataverse connector → **"Perform an unbound action"** → `RetrieveEnvironmentVariableSecretValue` (turn on Secure Outputs on that action). Alternative: **Azure Key Vault connector "Get secret"** action (also premium). Simplest acceptable fallback for their team: plain-text env variable + Secure Inputs on the HTTP action.
 7. **Handling 4xx.** Non-retryable errors (400 validation, 401 bad key, 403 scope/IP, 422 idempotency reuse) fail the action. Pattern: a parallel branch or subsequent action with **Configure run after → "has failed"**, then **Parse JSON** on `body('HTTP')` with the problem schema (§6) and act on `code`. `outputs('HTTP')?['statusCode']` gives the status. Our stable `code` values worth listing in docs: `api_key_required`, `rate_limited`, `idempotency_key_reused`, `validation_failed` (check exact list against `apiProblem.js` before publishing).
@@ -137,7 +147,8 @@ Scenario: SharePoint list `ProjectProposalSetup` → new item → Ticket Pulse t
 | URI | `https://ticketpulse.bgcsaas.com/api/v1/tickets` |
 | Header `Content-Type` | `application/json` |
 | Header `Authorization` | `Bearer tpk_…` (from secret env var / Key Vault, see §5.6) |
-| Header `Idempotency-Key` | `concat('sp-proposal-', triggerOutputs()?['body/ID'])` |
+| Header `Idempotency-Key` | `workflow()?['run']?['name']` — per RUN (retry protection; see §5.4) |
+| Body `externalRef` | `concat('sp-projectrequests-', triggerOutputs()?['body/ID'])` — per RECORD (resubmission → update; see §5.4) |
 | Settings → Secure Inputs | On (once tested) |
 | Settings → Retry policy | Default |
 
@@ -150,9 +161,15 @@ Body (dynamic-content placeholders in `«»`; keep free text out of hand-typed s
   "priority": 2,
   "requesterEmail": "«Created By Email»",
   "requesterName": "«Created By DisplayName»",
+  "externalRef": "sp-projectrequests-«ID»",
   "runAiTriage": true
 }
 ```
+
+Response status tells the flow what happened: `201` = created, `200` + `resubmitted: true` = the
+existing ticket for this record was updated (`meta.changedFields` lists what changed; `[]` means
+an identical re-send — nothing written). Branch on `outputs('HTTP')?['statusCode']` if the
+write-back step should skip on updates.
 
 (Category cannot be set on create — either let AI triage classify, or add a follow-up
 `PATCH /api/v1/tickets/@{body('Parse_ticket_response')?['data']?['id']}` with

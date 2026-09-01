@@ -19,6 +19,10 @@ export const AI_OPERATIONS = [
   'requester_sentiment',
   // Analytics Reports narrative (feedback 07-14) — meeting-brief writing.
   'analytics_report',
+  // Autofill intake extraction (Phase AF): multimodal — pasted text + screenshots
+  // → proposed ticket fields. Requires a vision-capable model (see
+  // supportsVision / modelSupportsVision); deliberately NOT on the Haiku tier.
+  'ticket_intake_extract',
 ];
 
 // Sonnet 5 (launched 2026-06-30) is the default; Sonnet 4.6 stays selectable
@@ -55,6 +59,7 @@ export const MODEL_METADATA = [
     supportsTools: true,
     supportsJson: true,
     supportsThinking: false,
+    supportsVision: true,
     costNotes: 'Default quality model for assignment automation. Near-Opus agentic quality at Sonnet cost.',
   },
   {
@@ -66,17 +71,21 @@ export const MODEL_METADATA = [
     supportsTools: true,
     supportsJson: true,
     supportsThinking: false,
+    supportsVision: true,
     costNotes: 'Previous-generation Sonnet; kept selectable for opt-back.',
   },
   {
     provider: AI_PROVIDER_ANTHROPIC,
     model: DEFAULT_RECLASSIFICATION_MODEL,
     label: 'Claude Haiku 4.5',
+    // Explicit allow-list: the cheap tier never sees image-bearing ops
+    // (ticket_intake_extract stays out on purpose).
     operations: ['ticket_reclassification', 'calendar_leave', 'requester_sentiment'],
     supportsStreaming: false,
     supportsTools: false,
     supportsJson: true,
     supportsThinking: false,
+    supportsVision: false,
     costNotes: 'Lower-cost batch and classification model.',
   },
   {
@@ -88,6 +97,7 @@ export const MODEL_METADATA = [
     supportsTools: true,
     supportsJson: true,
     supportsThinking: true,
+    supportsVision: true,
     costNotes: 'Expensive frontier model; use selectively for workflows that justify the extra cost.',
   },
   {
@@ -99,6 +109,8 @@ export const MODEL_METADATA = [
     supportsTools: true,
     supportsJson: true,
     supportsThinking: true,
+    // Text + image input per the OpenAI model page (Responses `input_image`).
+    supportsVision: true,
     costNotes: 'Default OpenAI fallback model (flagship tier, successor to GPT-5.5). Tune reasoning effort instead of selecting a separate pro model.',
   },
   {
@@ -110,6 +122,9 @@ export const MODEL_METADATA = [
     supportsTools: true,
     supportsJson: true,
     supportsThinking: true,
+    // Luna accepts text + image input like Sol (same 5.6 family, per OpenAI's
+    // model page) — the economy tier is a valid autofill fallback.
+    supportsVision: true,
     // Priced Jul 30 2026 after OpenAI's 80% cut: $0.20/M input, $1.20/M output
     // (vs Sonnet 5 $3/$15) — ~90% cheaper on the Accounting workload profile.
     costNotes: 'Economy model for high-volume workspaces (e.g. invoice triage). ~10x cheaper than Sonnet-class; suited to classification and lightweight agentic runs, not the hardest reasoning.',
@@ -190,6 +205,20 @@ export function supportsOperation(model, provider, operation) {
     return normalizedProvider === providerForModel(normalizedModel, normalizedProvider);
   }
   return metadata.operations.includes(operation);
+}
+
+/**
+ * Whether a model can accept image content blocks. Unknown (unregistered)
+ * models are treated as NOT vision-capable: the resolver uses this to refuse
+ * image-bearing calls up front instead of sending them into a provider 400.
+ */
+export function modelSupportsVision(model, provider = null) {
+  const normalizedProvider = normalizeProvider(provider || providerForModel(model) || AI_PROVIDER_ANTHROPIC);
+  const normalizedModel = normalizeAiModel(model, normalizedProvider);
+  const metadata = MODEL_METADATA.find((entry) => (
+    entry.provider === normalizedProvider && entry.model === normalizedModel
+  ));
+  return metadata ? metadata.supportsVision === true : false;
 }
 
 export function getModelMetadata({ provider = null, operation = null } = {}) {

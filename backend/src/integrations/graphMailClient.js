@@ -90,34 +90,12 @@ class GraphMailClient {
         .filter(`receivedDateTime gt ${since.toISOString()}`)
         .orderby('receivedDateTime desc')
         .top(top)
-        .select('id,subject,from,toRecipients,ccRecipients,receivedDateTime,bodyPreview,body,conversationId,internetMessageId,internetMessageHeaders,hasAttachments')
+        .select(INGEST_MESSAGE_SELECT)
         .get();
 
-      const emails = (response.value || []).map((e) => {
-        const headers = {};
-        for (const h of e.internetMessageHeaders || []) {
-          headers[String(h.name || '').toLowerCase()] = h.value;
-        }
-        return {
-          id: e.id,
-          subject: e.subject || '',
-          from: e.from?.emailAddress?.address || '',
-          fromName: e.from?.emailAddress?.name || '',
-          to: (e.toRecipients || []).map((r) => r.emailAddress?.address).filter(Boolean),
-          cc: (e.ccRecipients || []).map((r) => r.emailAddress?.address).filter(Boolean),
-          receivedAt: new Date(e.receivedDateTime),
-          bodyPreview: e.bodyPreview || '',
-          bodyHtml: e.body?.contentType === 'html' ? e.body?.content : null,
-          bodyText: e.body?.contentType === 'text' ? e.body?.content : null,
-          conversationId: e.conversationId,
-          internetMessageId: e.internetMessageId || null,
-          hasAttachments: e.hasAttachments === true,
-          inReplyTo: headers['in-reply-to'] || null,
-          references: headers.references || null,
-          autoSubmitted: headers['auto-submitted'] || null,
-          precedence: headers.precedence || null,
-        };
-      });
+      // Same projection + mapper as the webhook/delta lanes (MB-2): one
+      // place defines what an ingested email looks like.
+      const emails = (response.value || []).map(mapGraphMessageForIngest);
       return emails.reverse(); // oldest first
     } catch (error) {
       logger.error('Graph API: failed to fetch messages for ingest', {
@@ -161,11 +139,75 @@ class GraphMailClient {
   }
 
   /**
+   * Resolve a stored RFC Message-ID to the Graph item id of that message in
+   * the mailbox (any folder — Inbox for requester mail, Sent Items for our own
+   * outbound). `/users/{mb}/messages` spans the whole mailbox; the odata
+   * string literal escapes single quotes by doubling them. Null when the
+   * message isn't there (purged, sent via SendGrid, another mailbox) or the
+   * lookup fails — callers fall back to an unthreaded draft.
+   */
+  async _findMessageIdByInternetMessageId(client, mailbox, internetMessageId) {
+    const id = String(internetMessageId || '').trim();
+    if (!id) return null;
+    try {
+      const response = await client
+        .api(`/users/${mailbox}/messages`)
+        .filter(`internetMessageId eq '${id.replace(/'/g, "''")}'`)
+        .select('id')
+        .top(1)
+        .get();
+      return response?.value?.[0]?.id || null;
+    } catch (error) {
+      logger.debug('Graph API: Message-ID lookup failed (reply will not be header-threaded)', {
+        mailbox, internetMessageId: id, error: error.message,
+      });
+      return null;
+    }
+  }
+
+  /**
    * Send mail FROM a mailbox via draft-then-send, which (unlike /sendMail)
    * lets us capture the internetMessageId for reply threading.
    * Requires Mail.Send application permission.
+   *
+   * Threading (MB-1b) — WHY createReply and not internetMessageHeaders:
+   * Graph only accepts CUSTOM headers on message creation, and they must be
+   * named `x-`/`X-` (message resource doc: "Add custom headers only when
+   * creating a message, and name them starting with 'x-'"). Posting
+   * `In-Reply-To` / `References` through `internetMessageHeaders` is
+   * rejected (InvalidInternetMessageHeader) — there is no JSON path that
+   * sets the standard threading headers directly. The supported way is to
+   * let Exchange do it: `POST /users/{mb}/messages/{id}/createReply` on the
+   * message we are answering produces a draft that already carries
+   * In-Reply-To + References (+ Thread-Index/conversationIndex, which is
+   * what Outlook's conversation view keys on; Gmail keys on References +
+   * subject). Per the createReply doc the draft can then be UPDATED (subject,
+   * body, recipients, replyTo) before /send — so we overwrite everything the
+   * reply pre-fills and keep the headers. The anchor is resolved from the
+   * caller's RFC Message-ID (`inReplyTo`, else the newest `references`)
+   * through a `$filter=internetMessageId eq` lookup across the mailbox
+   * (Inbox for requester mail, Sent Items for our own earlier sends). When no
+   * anchor resolves (SendGrid-era ids, purged mail) we fall back to the
+   * plain draft — the `[TP-n]` subject token and the plus-addressed
+   * Reply-To remain as the inbound matching signals.
+   *
+   * @param {string} mailbox
+   * @param {object} opts
+   * @param {string|string[]} opts.to
+   * @param {string[]} [opts.cc]
+   * @param {string} opts.subject
+   * @param {string} opts.html
+   * @param {Array<{name,contentType,contentBytes}>} [opts.attachments]
+   * @param {string|null} [opts.fromName]
+   * @param {string|null} [opts.replyTo]     - Reply-To address (e.g. `mailbox+tp<n>@domain`)
+   * @param {string|null} [opts.inReplyTo]   - RFC Message-ID (with angle brackets) being answered
+   * @param {string[]}    [opts.references]  - RFC Message-ID chain, oldest first (may be empty)
+   * @returns {{messageId, internetMessageId, conversationId, threadedVia: 'createReply'|null}}
    */
-  async sendMailAsMailbox(mailbox, { to, cc = [], subject, html, attachments = [], fromName = null }) {
+  async sendMailAsMailbox(mailbox, {
+    to, cc = [], subject, html, attachments = [], fromName = null,
+    replyTo = null, inReplyTo = null, references = [],
+  }) {
     const client = this._getClient();
     const recipients = (Array.isArray(to) ? to : [to]).filter(Boolean)
       .map((address) => ({ emailAddress: { address } }));
@@ -175,7 +217,7 @@ class GraphMailClient {
       subject,
       body: { contentType: 'HTML', content: html },
       toRecipients: recipients,
-      ccRecipients: cc.filter(Boolean).map((address) => ({ emailAddress: { address } })),
+      ccRecipients: (Array.isArray(cc) ? cc : []).filter(Boolean).map((address) => ({ emailAddress: { address } })),
     };
     // Best-effort sender display name (Phase EB). Graph sends AS the
     // mailbox, and Exchange typically rewrites arbitrary from-names to the
@@ -187,7 +229,45 @@ class GraphMailClient {
     if (name) {
       draftPayload.from = { emailAddress: { address: mailbox, name } };
     }
-    const draft = await client.api(`/users/${mailbox}/messages`).post(draftPayload);
+    // Reply-To (MB-1c): the plus-addressed ticket token the caller computed
+    // (`patickets+tp1042@…`). Exchange Online delivers plus addresses to the
+    // base mailbox; ingest rung 1.5 reads the tag back off To/Delivered-To.
+    const replyToAddress = String(replyTo || '').trim();
+    if (replyToAddress) {
+      draftPayload.replyTo = [{ emailAddress: { address: replyToAddress } }];
+    }
+
+    // Threading anchor: In-Reply-To first, then the References chain newest
+    // first (bounded — each miss costs a Graph round trip).
+    const anchors = [...new Set([
+      inReplyTo,
+      ...[...(Array.isArray(references) ? references : [])].reverse(),
+    ].map((v) => String(v || '').trim()).filter(Boolean))].slice(0, 3);
+
+    let draft = null;
+    let threadedVia = null;
+    for (const anchor of anchors) {
+      const anchorId = await this._findMessageIdByInternetMessageId(client, mailbox, anchor);
+      if (!anchorId) continue;
+      try {
+        const replyDraft = await client.api(`/users/${mailbox}/messages/${anchorId}/createReply`).post({});
+        // createReply pre-fills subject ("RE: …"), the quoted body and the
+        // original sender as To — overwrite all of it with ours; Exchange
+        // keeps In-Reply-To/References/Thread-Index on the item.
+        const updated = await client.api(`/users/${mailbox}/messages/${replyDraft.id}`).patch(draftPayload);
+        draft = { ...replyDraft, ...(updated && typeof updated === 'object' ? updated : {}), id: replyDraft.id };
+        threadedVia = 'createReply';
+        break;
+      } catch (error) {
+        logger.warn('Graph API: createReply threading failed, falling back to a plain draft', {
+          mailbox, anchor, error: error.message,
+        });
+        draft = null;
+      }
+    }
+    if (!draft) {
+      draft = await client.api(`/users/${mailbox}/messages`).post(draftPayload);
+    }
 
     // Simple file attach caps at ~3 MB per request; larger files need upload
     // sessions, so callers pre-filter (oversized ones stay stored in Ticket Pulse).
@@ -209,11 +289,14 @@ class GraphMailClient {
 
     await client.api(`/users/${mailbox}/messages/${draft.id}/send`).post({});
 
-    logger.info('Graph API: mail sent', { mailbox, to: recipients.map((r) => r.emailAddress.address), subject });
+    logger.info('Graph API: mail sent', {
+      mailbox, to: recipients.map((r) => r.emailAddress.address), subject, threadedVia, replyTo: replyToAddress || null,
+    });
     return {
       messageId: draft.id,
       internetMessageId: draft.internetMessageId || null,
       conversationId: draft.conversationId || null,
+      threadedVia,
     };
   }
 
@@ -337,6 +420,225 @@ class GraphMailClient {
       return { error: error.message || 'Search failed' };
     }
   }
+
+  // ---------------------------------------------------------------------
+  // Change notifications + delta (Mega 08-31 Phase MB-2). Additive helpers;
+  // the subscription manager (services/graphSubscriptionService.js) and the
+  // poller (services/mailboxIngestService.js) are the only callers.
+  // ---------------------------------------------------------------------
+
+  /**
+   * One message by Graph id, in the ingest projection (same $select as the
+   * poller — perf-lane rule: never pull more than the pipeline reads). Null
+   * when the message is gone (404: deleted/moved before we got to it).
+   */
+  async getMessageForIngest(mailbox, messageId) {
+    const client = this._getClient();
+    try {
+      const e = await client
+        .api(`/users/${mailbox}/messages/${encodeURIComponent(messageId)}`)
+        .select(INGEST_MESSAGE_SELECT)
+        .get();
+      return e ? mapGraphMessageForIngest(e) : null;
+    } catch (error) {
+      if (graphErrorStatus(error) === 404) return null;
+      logger.warn('Graph API: failed to fetch message by id for ingest', {
+        mailbox, messageId, error: error.message, code: error.code,
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Inbox delta round: follows @odata.nextLink pages until @odata.deltaLink.
+   * `deltaLink` null = bootstrap round, filtered to receivedDateTime ge
+   * `since` (the ONLY $filter delta supports; it must be on the initial
+   * request and is baked into the returned token from then on). The
+   * projection is deliberately tiny — the caller re-fetches changed messages
+   * by id through getMessageForIngest so every lane shares one mapper.
+   *
+   * Delta emits collection-level events that don't match the filter
+   * (read/unread flips, `@removed` on delete/move) — callers skip `removed`
+   * and dedupe the rest by internetMessageId before fetching.
+   *
+   * Throws with `error.deltaReset = true` when Graph says the token is dead
+   * (410 Gone / syncStateNotFound) so the caller can clear it and bootstrap.
+   */
+  async getInboxDeltaChanges(mailbox, deltaLink = null, { since = null, maxPages = 20, pageSize = 50 } = {}) {
+    const client = this._getClient();
+    const items = [];
+    const url = deltaLink || null;
+    let pages = 0;
+    try {
+      let response;
+      if (!url) {
+        let request = client
+          .api(`/users/${mailbox}/mailFolders/inbox/messages/delta`)
+          .select('id,receivedDateTime,internetMessageId')
+          .header('Prefer', `odata.maxpagesize=${pageSize}`);
+        if (since instanceof Date && !Number.isNaN(since.getTime())) {
+          request = request.filter(`receivedDateTime ge ${since.toISOString()}`);
+        }
+        response = await request.get();
+      } else {
+        response = await client.api(url).header('Prefer', `odata.maxpagesize=${pageSize}`).get();
+      }
+      for (;;) {
+        pages += 1;
+        for (const e of response?.value || []) {
+          items.push({
+            id: e.id,
+            removed: Boolean(e['@removed']),
+            receivedAt: e.receivedDateTime ? new Date(e.receivedDateTime) : null,
+            internetMessageId: e.internetMessageId || null,
+          });
+        }
+        const next = response?.['@odata.nextLink'];
+        const done = response?.['@odata.deltaLink'];
+        if (done || !next || pages >= maxPages) {
+          // Page cap hit without a deltaLink: keep the nextLink as the cursor;
+          // the next round resumes from it (Graph accepts either token form).
+          return { items, deltaLink: done || next || url || null, truncated: !done && Boolean(next) };
+        }
+        response = await client.api(next).header('Prefer', `odata.maxpagesize=${pageSize}`).get();
+      }
+    } catch (error) {
+      const status = graphErrorStatus(error);
+      const code = String(error.code || '');
+      if (status === 410 || /syncStateNotFound|resyncRequired|SyncStateInvalid/i.test(code)) {
+        error.deltaReset = true;
+      }
+      logger.warn('Graph API: inbox delta round failed', {
+        mailbox, bootstrap: !deltaLink, error: error.message, code: error.code, status,
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Create a `created` change-notification subscription on the mailbox's
+   * inbox. lifecycleNotificationUrl MUST be set here — Graph refuses to add
+   * it on PATCH later (delete + recreate is the only path).
+   */
+  async createMailSubscription(mailbox, { notificationUrl, lifecycleNotificationUrl, clientState, expirationDateTime }) {
+    const client = this._getClient();
+    const body = {
+      changeType: 'created',
+      notificationUrl,
+      lifecycleNotificationUrl,
+      resource: `/users/${mailbox}/mailFolders('inbox')/messages`,
+      expirationDateTime: new Date(expirationDateTime).toISOString(),
+      clientState,
+      latestSupportedTlsVersion: 'v1_2',
+    };
+    try {
+      const created = await client.api('/subscriptions').post(body);
+      logger.info('Graph API: mail subscription created', {
+        mailbox, subscriptionId: created?.id, expiresAt: created?.expirationDateTime,
+      });
+      return { id: created?.id || null, expirationDateTime: created?.expirationDateTime || body.expirationDateTime };
+    } catch (error) {
+      logger.warn('Graph API: mail subscription create failed', {
+        mailbox, error: graphErrorMessage(error), code: error.code, status: graphErrorStatus(error),
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Renew (PATCH expirationDateTime). Per the lifecycle doc a single PATCH
+   * both renews AND reauthorizes, and must not be combined with /reauthorize
+   * inside a 10-minute window — so the manager answers reauthorizationRequired
+   * with this call rather than the reauthorize action.
+   */
+  async renewSubscription(subscriptionId, expirationDateTime) {
+    const client = this._getClient();
+    try {
+      const updated = await client
+        .api(`/subscriptions/${encodeURIComponent(subscriptionId)}`)
+        .patch({ expirationDateTime: new Date(expirationDateTime).toISOString() });
+      return {
+        id: updated?.id || subscriptionId,
+        expirationDateTime: updated?.expirationDateTime || new Date(expirationDateTime).toISOString(),
+      };
+    } catch (error) {
+      logger.warn('Graph API: subscription renew failed', {
+        subscriptionId, error: graphErrorMessage(error), code: error.code, status: graphErrorStatus(error),
+      });
+      throw error;
+    }
+  }
+
+  /** Reauthorize without extending expiry (kept for completeness). */
+  async reauthorizeSubscription(subscriptionId) {
+    const client = this._getClient();
+    await client.api(`/subscriptions/${encodeURIComponent(subscriptionId)}/reauthorize`).post({});
+    return { id: subscriptionId };
+  }
+
+  /** Delete; a 404 (already gone) is success. */
+  async deleteSubscription(subscriptionId) {
+    const client = this._getClient();
+    try {
+      await client.api(`/subscriptions/${encodeURIComponent(subscriptionId)}`).delete();
+      return { deleted: true };
+    } catch (error) {
+      if (graphErrorStatus(error) === 404) return { deleted: false, missing: true };
+      logger.warn('Graph API: subscription delete failed', {
+        subscriptionId, error: graphErrorMessage(error), code: error.code, status: graphErrorStatus(error),
+      });
+      throw error;
+    }
+  }
+}
+
+/** Ingest projection shared by the poller, the delta lane and the webhook worker. */
+export const INGEST_MESSAGE_SELECT = 'id,subject,from,toRecipients,ccRecipients,receivedDateTime,bodyPreview,body,conversationId,internetMessageId,internetMessageHeaders,hasAttachments';
+
+/** Graph message → the flat email shape mailboxIngestService consumes. */
+export function mapGraphMessageForIngest(e) {
+  const headers = {};
+  for (const h of e.internetMessageHeaders || []) {
+    headers[String(h.name || '').toLowerCase()] = h.value;
+  }
+  return {
+    id: e.id,
+    subject: e.subject || '',
+    from: e.from?.emailAddress?.address || '',
+    fromName: e.from?.emailAddress?.name || '',
+    to: (e.toRecipients || []).map((r) => r.emailAddress?.address).filter(Boolean),
+    cc: (e.ccRecipients || []).map((r) => r.emailAddress?.address).filter(Boolean),
+    receivedAt: new Date(e.receivedDateTime),
+    bodyPreview: e.bodyPreview || '',
+    bodyHtml: e.body?.contentType === 'html' ? e.body?.content : null,
+    bodyText: e.body?.contentType === 'text' ? e.body?.content : null,
+    conversationId: e.conversationId,
+    internetMessageId: e.internetMessageId || null,
+    hasAttachments: e.hasAttachments === true,
+    inReplyTo: headers['in-reply-to'] || null,
+    references: headers.references || null,
+    autoSubmitted: headers['auto-submitted'] || null,
+    precedence: headers.precedence || null,
+    // Envelope-recipient headers (MB-1c): a reply to our plus-addressed
+    // Reply-To (`mailbox+tp<n>@`) normally shows in toRecipients, but
+    // forwarding/relay hops keep the original in these instead.
+    deliveredTo: headers['delivered-to'] || null,
+    xOriginalTo: headers['x-original-to'] || null,
+  };
+}
+
+/** HTTP status of a microsoft-graph-client error (GraphError.statusCode), if any. */
+export function graphErrorStatus(error) {
+  const raw = error?.statusCode ?? (typeof error?.code === 'number' ? error.code : null);
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+function graphErrorMessage(error) {
+  if (error?.body) {
+    try { return JSON.parse(error.body)?.error?.message || error.message; } catch { /* fall through */ }
+  }
+  return error?.message || String(error);
 }
 
 export default new GraphMailClient();

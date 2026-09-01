@@ -1,6 +1,17 @@
-export const APP_VERSION = '3.8.11-preview';
+export const APP_VERSION = '3.8.12-preview';
 
 export const changelog = [
+  {
+    version: '3.8.12-preview',
+    date: 'September 1, 2026',
+    entries: [
+      { type: 'added', html: '<strong>📨 Requester replies come back into the ticket</strong> — for workspaces that connect a Microsoft 365 mailbox (Settings → Ticket Mailboxes, mode <em>Both</em>), Ticket Pulse now sends <em>every</em> requester-facing email from that mailbox — agent replies <em>and</em> the automatic workflow emails (“we received your request”, assigned, resolved) that used to leave from ticketpulse@ via SendGrid and could not be answered. Replies thread back into the ticket automatically (real Outlook/Gmail conversation threading, a per-ticket reply address, the [TP-n] subject tag, and sender matching as fallbacks), people Cc’d on a reply are added to the ticket, and “Reopen on requester reply” fires. Project Accounting: connect <em>patickets@bgcengineering.ca</em> to switch it on. (QA 08-31 #3)' },
+      { type: 'added', html: '<strong>⚡ Instant mail-in</strong> — Microsoft now pushes new mail to Ticket Pulse the moment it lands (typically 2–15 seconds) instead of waiting for the next poll; polling stays on as a catch-up net. The Ticket Mailboxes page shows which lane each mailbox is on (“Instant (webhook)” or “Polling every 15s”) and when the last notification arrived. Workspaces with several mailboxes can star one as the Primary sender.' },
+      { type: 'added', html: '<strong>✨ Autofill a new ticket from anything you paste</strong> — New ticket → <em>Autofill</em>: paste a Teams chat, a forwarded email, a form, or drop screenshots, and the AI proposes the subject, description, requester, category, priority and type — each with a confidence chip and a checkbox, so you accept only what you agree with. Nothing is created until you press Create ticket; fields you already typed are never overwritten; screenshots can be blurred/cropped before they are sent. The pasted material is kept under the description as “Source material” and screenshots become attachments. (QA 08-31 #2)' },
+      { type: 'added', html: '<strong>🔁 Power Apps resubmissions update the existing ticket</strong> — the public API (<code>POST /api/v1/tickets</code>) accepts an <code>externalRef</code>: submit the same record again and the existing ticket is updated in place (fields replaced, the new description appended as a dated revision, custom fields merged, a before/after note added to the timeline; a Resolved ticket reopens, a Closed one gets a new linked ticket) instead of a duplicate being created. Project Accounting works without any Power App change: the workspace is keyed on the <code>power_app_record_id</code> it already sends, and 96 existing tickets were back-filled. Settings → Ticket Ops → API resubmissions holds the switch. (QA 08-31 #4)' },
+      { type: 'improved', html: '<strong>Legacy inbox polling retired</strong> — the old “Email Monitoring” poller in Assignment settings (never enabled in production) is switched off; Ticket Mailboxes is the single mail-in path. AI Providers settings now list every AI operation, including the new Autofill Intake.' },
+    ],
+  },
   {
     version: '3.8.11-preview',
     date: 'September 1, 2026',

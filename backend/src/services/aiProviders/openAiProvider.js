@@ -5,6 +5,7 @@ import {
   buildAnthropicMessageFromOpenAiResponse,
   convertAnthropicMessagesToOpenAiInput,
   convertAnthropicToolsToOpenAiResponses,
+  convertUserContentBlockToOpenAiPart,
 } from './openAiConverters.js';
 
 function metadataFromResponse(response, usage, maxTokens) {
@@ -163,8 +164,24 @@ class OpenAiProvider {
   }
 
   _jsonModeInput(userMessage) {
-    const content = String(userMessage || '');
-    return /\bjson\b/i.test(content) ? content : `Return JSON only.\n\n${content}`;
+    if (!Array.isArray(userMessage)) {
+      const content = String(userMessage || '');
+      return /\bjson\b/i.test(content) ? content : `Return JSON only.\n\n${content}`;
+    }
+    // Anthropic-style content blocks (text + image) → Responses input parts.
+    // Unknown block types throw: silently stringifying them produced
+    // "[object Object]" prompts before Phase AF.
+    const parts = userMessage.map((block) => convertUserContentBlockToOpenAiPart(block));
+    const mentionsJson = parts.some((part) => part.type === 'input_text' && /\bjson\b/i.test(part.text));
+    if (!mentionsJson) {
+      const firstText = parts.find((part) => part.type === 'input_text');
+      if (firstText) {
+        firstText.text = `Return JSON only.\n\n${firstText.text}`;
+      } else {
+        parts.push({ type: 'input_text', text: 'Return JSON only.' });
+      }
+    }
+    return parts;
   }
 
   _usage(response) {

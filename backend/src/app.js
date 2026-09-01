@@ -13,6 +13,7 @@ import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import routes from './routes/index.js';
 import prisma from './services/prisma.js';
 import scheduledSyncService from './services/scheduledSyncService.js';
+import graphNotificationRoutes from './routes/graphNotifications.routes.js';
 import settingsRepository from './services/settingsRepository.js';
 import availabilityService from './services/availabilityService.js';
 import llmConfigService from './services/llmConfigService.js';
@@ -170,6 +171,12 @@ app.get('/health', async (req, res) => {
     checks,
   });
 });
+
+// Microsoft Graph change-notification webhooks (Mega 08-31 MB-2b): PRE-AUTH,
+// like /api/freshservice-webhooks — Graph carries no session; the per-
+// connection clientState is the credential (checked by the worker). Must sit
+// before the main router so nothing auth-gated runs in front of the 202.
+app.use('/api', graphNotificationRoutes);
 
 // Mount API routes
 // Auth routes are public
@@ -350,6 +357,17 @@ async function initialize() {
       mailboxIngestService.start();
     } catch (e) {
       logger.warn('Mailbox ingest worker failed to start (non-fatal):', e.message);
+    }
+
+    // Graph change notifications for those mailboxes (MB-2): creates/renews
+    // the webhook subscriptions shortly after boot; the 30-min maintenance
+    // tick rides scheduledSyncService. No-op (logged) unless
+    // GRAPH_NOTIFICATIONS_ENABLED=true and the base URL is https.
+    try {
+      const { default: graphSubscriptionService } = await import('./services/graphSubscriptionService.js');
+      graphSubscriptionService.start();
+    } catch (e) {
+      logger.warn('Graph subscription manager failed to start (non-fatal):', e.message);
     }
 
     // Scheduled tickets: activates due payloads through the normal create path.

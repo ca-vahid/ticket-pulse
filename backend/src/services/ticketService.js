@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import sanitizeHtml from 'sanitize-html';
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
-import { ValidationError, NotFoundError, ServiceBusyError } from '../utils/errors.js';
+import { ValidationError, NotFoundError, ServiceBusyError, ConflictError } from '../utils/errors.js';
 import { TICKET_ORIGIN, TICKET_SOURCE, TICKET_SOURCE_LABELS, APP_NATIVE_TRIGGER_SOURCE, AGENT_SELECTABLE_SOURCES, ticketDisplayRef } from '../utils/ticketOrigin.js';
 import noiseRuleService from './noiseRuleService.js';
 import ticketTypeService from './ticketTypeService.js';
@@ -14,6 +14,8 @@ import ticketLifecycleNotificationService from './ticketLifecycleNotificationSer
 import requesterRepository from './requesterRepository.js';
 import sendgridNotificationService from './sendgridNotificationService.js';
 import { resolveFromName, resolveReplyFromName } from './workspaceEmailIdentityService.js';
+import { pickIngestMailbox, pickOutboundMailbox } from './mailboxPicker.js';
+import { plusAddressReplyTo, storeEntryMessageId, threadingHeadersForTicket } from './emailThreadingService.js';
 import { fsConversationEntryId, parseFsConversationId } from '../utils/fsEntryId.js';
 import { isFsReplyAsAgentEnabled } from './fsReplyAsAgentService.js';
 import { createHash } from 'node:crypto';
@@ -222,6 +224,10 @@ const createTicketSchema = z.object({
   notifyRequester: z.boolean().default(true),
   // Recorded on the created audit + seeded into the first reply's Cc.
   ccEmails: emailListSchema.default([]),
+  // Caller's stable per-record key (Mega 08-31 Phase PA): unique per
+  // workspace; a second create with the same ref is a resubmission (the API
+  // route turns the P2002 into an update of the existing ticket).
+  externalRef: z.string().trim().min(1).max(200).optional().nullable(),
 }).refine((v) => v.requesterId || v.requesterEmail, {
   message: 'A requester is required (requesterId or requesterEmail)',
 });
@@ -2398,6 +2404,8 @@ class TicketService {
         mirrorState: 'pending',
         subject: data.subject,
         ...normalizeDescriptionInput(data.description),
+        // Resubmission key (Phase PA) — partial unique (workspace_id, external_ref).
+        ...(data.externalRef ? { externalRef: data.externalRef } : {}),
         status: data.status,
         priority: data.priority,
         ticketType: data.ticketType,
@@ -2448,6 +2456,17 @@ class TicketService {
         } : {}),
       },
       include: TICKET_INCLUDE,
+    }).catch((err) => {
+      // Concurrent create race on the externalRef unique index (Phase PA):
+      // two POSTs with the same ref arrived together — the loser surfaces a
+      // typed 409 the API route turns into the resubmission path.
+      if (data.externalRef && err?.code === 'P2002') {
+        const conflict = new ConflictError(`A ticket with externalRef "${data.externalRef}" already exists in this workspace`);
+        conflict.code = 'external_ref_exists';
+        conflict.externalRef = data.externalRef;
+        throw conflict;
+      }
+      throw err;
     });
 
     // Tags at creation (gap plan 2 P1.3) — validated + audited by setTags.
@@ -3783,10 +3802,8 @@ class TicketService {
     }
     const recipients = parsedTo.data;
 
-    const connection = await prisma.mailboxConnection.findFirst({
-      where: { workspaceId, isEnabled: true, mode: { in: ['send', 'both'] } },
-      orderBy: { id: 'asc' },
-    });
+    // Centralized outbound picker (MB-1g): primary first, then oldest.
+    const connection = await pickOutboundMailbox(workspaceId);
     const { default: graphMailClient } = await import('../integrations/graphMailClient.js');
     if (!connection || !graphMailClient.isConfigured()) {
       throw new ValidationError('Forwarding needs a send-capable workspace mailbox (Settings → Ticket Mailboxes)');
@@ -3885,15 +3902,24 @@ class TicketService {
         contentBytes: a.buffer.toString('base64'),
       }));
 
-    // Graph path: send from the workspace's connected mailbox when available.
+    // Threading anchors (Mega 08-31 Phase MB-1b): In-Reply-To = the newest
+    // stored Message-ID on this ticket (the requester's last inbound mail or
+    // our last send), References = the last <=10 oldest->newest. Both lanes.
+    const threading = await threadingHeadersForTicket(ticket.id);
+
+    // Graph path: send from the workspace's connected mailbox when available
+    // (centralized picker, MB-1g: primary first, then oldest).
+    let replyTo = null;
     try {
-      const connection = await prisma.mailboxConnection.findFirst({
-        where: { workspaceId: ticket.workspaceId, isEnabled: true, mode: { in: ['send', 'both'] } },
-        orderBy: { id: 'asc' },
-      });
+      const connection = await pickOutboundMailbox(ticket.workspaceId);
       if (connection) {
         const { default: graphMailClient } = await import('../integrations/graphMailClient.js');
         if (graphMailClient.isConfigured()) {
+          // Plus-address reply token (MB-1c): `patickets+tp1234@...` — a reply
+          // to this mail lands in the monitored mailbox with the ticket
+          // number in the envelope (ingest rung 1.5). Graph lane only: the
+          // SendGrid sender is not a mailbox we read.
+          replyTo = plusAddressReplyTo(connection.address, ticket);
           const sent = await graphMailClient.sendMailAsMailbox(connection.address, {
             to: [ticket.requester.email],
             cc: ccForSend,
@@ -3901,13 +3927,11 @@ class TicketService {
             html,
             attachments: mailableAttachments,
             fromName,
+            replyTo,
+            inReplyTo: threading.inReplyTo,
+            references: threading.references,
           });
-          if (sent?.internetMessageId) {
-            await prisma.ticketThreadEntry.update({
-              where: { id: entry.id },
-              data: { emailMessageId: sent.internetMessageId },
-            }).catch(() => {});
-          }
+          if (sent?.internetMessageId) await storeEntryMessageId(entry.id, sent.internetMessageId);
           await prisma.notificationDelivery.create({
             data: {
               workspaceId: ticket.workspaceId,
@@ -3940,9 +3964,17 @@ class TicketService {
       // SendGrid/SMTP fallback carries the SAME cc + attachments as Graph —
       // before Phase CC this branch dropped both while the thread entry
       // echoed "+1 Cc", so replies LOOKED sent to the cc'd colleague.
+      // MB-1h: SendGrid mail carries OUR Message-ID (`<tp-<id>-...@<from
+      // domain>>`), stored on the entry exactly like Graph's, so ingest
+      // rung 1 matches replies to SendGrid-sent mail too. Reply-To points
+      // at the workspace's INGEST mailbox (if one is connected) so the
+      // reply loop survives a Graph outage; null when none / FS-born.
+      const ingestMailbox = await pickIngestMailbox(ticket.workspaceId).catch(() => null);
+      const sendgridReplyTo = ingestMailbox ? plusAddressReplyTo(ingestMailbox.address, ticket) : null;
       const result = await sendgridNotificationService.sendEmail({
         to: [ticket.requester.email],
         cc: ccForSend,
+        replyTo: sendgridReplyTo,
         subject,
         html,
         text: `${text}\n\n— ${entry.actorName || 'Ticket Pulse'} · ${ref}`,
@@ -3950,7 +3982,11 @@ class TicketService {
         attachments: mailableAttachments,
         context: 'native_reply',
         workspaceId: ticket.workspaceId,
+        ticketIdForMessageId: ticket.id,
+        inReplyTo: threading.inReplyTo,
+        references: threading.references,
       });
+      if (result?.messageId) await storeEntryMessageId(entry.id, result.messageId);
       await prisma.notificationDelivery.create({
         data: {
           workspaceId: ticket.workspaceId,

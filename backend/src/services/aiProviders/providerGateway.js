@@ -120,6 +120,9 @@ class ProviderGateway {
     runLinks = {},
     emit = null,
     attemptTimeoutMs = null,
+    // Callers whose userMessage carries image blocks set this so the resolver
+    // can refuse non-vision models up front (Phase AF).
+    requiresVision = false,
     call,
     ...callOptions
   }) {
@@ -129,6 +132,7 @@ class ProviderGateway {
       legacyModel,
       preferredModel: callOptions.model,
       preferredProvider: callOptions.provider,
+      requiresVision,
     });
     let lastError = null;
     let attemptNumber = 0;

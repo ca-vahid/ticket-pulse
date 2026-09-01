@@ -96,6 +96,61 @@ Route on the metadata with workflows: condition
 `custom:source_request_type is "Project Setup"` → update-ticket "Category by
 name". The installable **API intake router** workflow template is exactly this.
 
+## Resubmissions — `externalRef` (upsert on `POST /tickets`)
+
+A form that is submitted twice (Power Apps re-submit, an edited SharePoint
+item, a re-run flow) must **update** the ticket it already created, not open a
+duplicate. Send your stable **per-record** key as `externalRef` (opaque,
+≤200 chars, unique per workspace):
+
+| First POST with a ref | `201` — created, `externalRef` stored (read back on every ticket shape). `meta.resubmitted: false`. |
+|---|---|
+| **Later POST, same ref** | `200` + top-level **`resubmitted: true`**. The existing ticket is updated: `subject`/`priority`/`ticketType`/`category`/groups/`ccEmails` replace-if-changed; the new `description` is **appended** as a dated "— Resubmitted … via API key …—" revision block (never replaced; `resubmitStrategy: "replace"` opts out); `customFields` **merge** (unknown keys still auto-provision); a **private** note carries the before/after table; `meta.changedFields` lists what changed. **Status and assignee are never touched.** |
+| Identical re-send | `200`, `meta.changedFields: []` — nothing written, no note. |
+| Matched ticket is **Resolved** | reopened to the workspace's default Open status (`meta.reopened: true`); `reopenOnResubmit: false` leaves it Resolved and creates a linked new ticket instead. |
+| Matched ticket is **Closed** | never reopened: a **new** ticket is created (`201`), linked `related_to` the old one, and the `externalRef` moves to it (`meta.priorExternalRefTicket`, `meta.linkedToTicket`). |
+| Same ref, different workspaces | independent tickets (the key is per workspace). |
+
+AI: a resubmission that changed the subject or description queues a
+**classification-only** AI pass when the ticket is unassigned or its category
+was AI-set (`meta.aiRetriage`) — the full assignment pipeline never re-runs, so
+a resubmission can never bounce a ticket away from its agent.
+
+**`externalRef` ≠ `Idempotency-Key`.** The header is per *run* (retry
+protection: same key + same body replays; same key + *different* body is a
+`422 idempotency_key_reused`). The body field is per *record*. Using the record
+id for both makes every resubmission a 422 before the upsert logic runs.
+
+```json
+{ "subject": "Coyote Landslide — revised", "priority": 3,
+  "requesterEmail": "jdoe@bgcengineering.ca",
+  "externalRef": "sp-projectrequests-1260",
+  "description": "Client moved the start date to October.",
+  "customFields": { "powerAppRecordId": "1260", "clientLocation": "Montreal" } }
+```
+```json
+{ "success": true, "resubmitted": true,
+  "data": { "id": 501, "ref": "TP-1042", "externalRef": "sp-projectrequests-1260", "priority": 3, "…": "…" },
+  "meta": { "resubmitted": true, "ticketRef": "TP-1042",
+            "changedFields": ["priority", "description", "customFields"],
+            "reopened": false, "aiRetriage": { "queued": false }, "matchedBy": "external_ref",
+            "ignoredFields": [], "rejectedCustomFields": [], "provisionedCustomFields": [] } }
+```
+
+`PATCH /tickets/{id}` accepts `externalRef` **set-once** for tickets created
+without one (`409 external_ref_immutable` if a different ref is already set,
+`409 external_ref_taken` if another ticket owns it).
+
+**No sender change needed (bridge).** If the payload already carries a
+per-record value inside `customFields` (ws5 posts `powerAppRecordId` →
+stored key `power_app_record_id`), an admin sets Settings → Ticket Ops →
+**API resubmissions → Match on a custom field** to that field: the ref is
+derived from it (stored as `pa-<value>`, `meta.matchedBy: "custom_field_key"`)
+and resubmissions work with today's payload. A deprecated requester + subject
+heuristic (same API key, Open/Pending, within N days) exists behind a
+workspace toggle for the transition; when more than one ticket fits it creates
+normally and flags `meta.resubmissionAmbiguous` with the candidate refs.
+
 ## Additional requesters / carbon copies (`ccEmails`)
 
 A ticket has ONE primary requester (`requesterEmail`) plus an optional
@@ -182,11 +237,14 @@ Full guide (licensing, escaping, Parse JSON schemas, custom-connector notes):
 2. **HTTP** action (Premium): `POST https://ticketpulse.bgcsaas.com/api/v1/tickets`,
    headers `Content-Type: application/json`,
    `Authorization: Bearer tp_live_…`,
-   `Idempotency-Key: concat('sp-', triggerOutputs()?['body/ID'])` — the
-   per-item key makes Power Automate's automatic retries (and resubmits)
-   at-most-once. Turn on **Settings → Secure Inputs** once tested.
+   `Idempotency-Key: workflow()?['run']?['name']` — per **run**, so Power
+   Automate's automatic retries are at-most-once. Turn on **Settings → Secure
+   Inputs** once tested.
 3. Body: the JSON above with dynamic content (`Title`, `Created By Email`,
-   `Link to item` → `customFields.sharePointItemLink`). Keep free text out of
+   `Link to item` → `customFields.sharePointItemLink`) **plus
+   `"externalRef": concat('sp-projectrequests-', triggerOutputs()?['body/ID'])`**
+   — per **record**, so a re-submitted item updates its ticket (`200`,
+   `resubmitted: true`) instead of creating another. Keep free text out of
    hand-typed JSON strings (quote/newline escaping).
 4. **Parse JSON** over `body('HTTP')`, then SharePoint **"Update item"**
    writing back `ref` (`TP-1042`) and `id`.

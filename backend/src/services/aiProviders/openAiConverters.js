@@ -86,6 +86,32 @@ export function convertAnthropicToolsToOpenAiResponses(tools = []) {
   return { tools: converted, unsupported };
 }
 
+/**
+ * One Anthropic-style user content block → one Responses API input part.
+ * Text → `input_text`; image (base64 or url source) → `input_image` data/URL.
+ * Anything else THROWS — a silently dropped or stringified block would reach
+ * the model as garbage (the pre-Phase-AF "[object Object]" bug).
+ */
+export function convertUserContentBlockToOpenAiPart(block) {
+  if (!block || typeof block !== 'object') {
+    throw new Error('Unsupported OpenAI input block: expected an object');
+  }
+  if (block.type === 'text') {
+    return { type: 'input_text', text: String(block.text ?? '') };
+  }
+  if (block.type === 'image') {
+    const source = block.source || {};
+    if (source.type === 'base64' && source.media_type && source.data) {
+      return { type: 'input_image', image_url: `data:${source.media_type};base64,${source.data}` };
+    }
+    if (source.type === 'url' && source.url) {
+      return { type: 'input_image', image_url: source.url };
+    }
+    throw new Error('Unsupported OpenAI image block: expected a base64 (media_type + data) or url source');
+  }
+  throw new Error(`Unsupported OpenAI input block type: ${block.type || 'unknown'}`);
+}
+
 function convertTextContentToOpenAi(content, role) {
   const text = Array.isArray(content)
     ? content
@@ -132,11 +158,23 @@ export function convertAnthropicMessagesToOpenAiInput(messages = []) {
       continue;
     }
 
-    const textItem = convertTextContentToOpenAi(content, role);
-    if (textItem) input.push(textItem);
+    if (role !== 'assistant' && content.some((block) => block?.type === 'image')) {
+      // Image-bearing user turn: keep text and image parts together, in
+      // order, inside ONE message item (images used to be dropped here).
+      const parts = content
+        .filter((block) => block && (block.type === 'text' || block.type === 'image'))
+        .map((block) => convertUserContentBlockToOpenAiPart(block))
+        .filter((part) => part.type !== 'input_text' || part.text);
+      if (parts.length) {
+        input.push({ type: 'message', role: role === 'system' ? 'developer' : 'user', content: parts });
+      }
+    } else {
+      const textItem = convertTextContentToOpenAi(content, role);
+      if (textItem) input.push(textItem);
+    }
 
     for (const block of content) {
-      if (!block || block.type === 'text') continue;
+      if (!block || block.type === 'text' || block.type === 'image') continue;
       if (block.type === 'tool_use') {
         const replayItem = sanitizeOpenAiResponseInputItem(block.openai_response_item);
         // Foreign (Anthropic-born) tool calls get a minimal function_call:

@@ -25,6 +25,10 @@ const T = {
     type: 'object',
     properties: {
       id: { type: 'integer' }, ref: { type: 'string', example: 'TP-1042' },
+      externalRef: {
+        type: 'string', nullable: true, maxLength: 200, example: 'sp-projectrequests-1260',
+        description: 'The caller’s stable per-RECORD key (set at creation or once via PATCH). A later POST /tickets carrying the same externalRef UPDATES this ticket (200, resubmitted:true) instead of creating a duplicate. null when the ticket was created without one.',
+      },
       origin: { type: 'string', enum: ['ticketpulse', 'freshservice'] },
       subject: { type: 'string' }, status: { type: 'string' }, priority: { type: 'integer', enum: [1, 2, 3, 4] },
       type: { type: 'string', nullable: true },
@@ -110,11 +114,24 @@ const T = {
         type: 'integer',
         description: 'Internal (Ticket Pulse–native) group placement: the `id` of an origin:\'local\' group from GET /groups. When both groupId and internalGroupId are omitted, the workspace’s default internal group — if configured — is applied automatically.',
       },
+      externalRef: {
+        type: 'string', maxLength: 200, example: 'sp-projectrequests-1260',
+        description: 'Your stable per-RECORD key (opaque, ≤200 chars, unique per workspace) — e.g. the SharePoint item id behind a Power Apps form: `concat(\'sp-projectrequests-\', triggerOutputs()?[\'body/ID\'])`. First POST with a ref → 201 (created, ref stored). A LATER POST with the same ref is a RESUBMISSION: the existing ticket is updated in place (description appended as a dated revision, changed fields replaced, custom fields merged, a private diff note added) and the response is 200 with top-level `resubmitted: true`. Status and assignee are never touched; a Resolved ticket is reopened (see reopenOnResubmit); a Closed ticket is left alone and a NEW ticket is created linked to it (201 + meta.priorExternalRefTicket). NOT the same as Idempotency-Key (per RUN, retry protection — same key + different body is a 422).',
+      },
+      reopenOnResubmit: {
+        type: 'boolean', default: true,
+        description: 'Resubmission only: when the matched ticket is Resolved, reopen it (default). false → leave it Resolved and create a NEW ticket linked to it instead. Closed tickets are never reopened either way.',
+      },
+      resubmitStrategy: {
+        type: 'string', enum: ['append', 'replace'], default: 'append',
+        description: 'Resubmission only: how the new description lands. `append` (default) adds a dated “— Resubmitted … —” revision block under the existing text; `replace` overwrites it (the previous text is not recoverable — the description has no history).',
+      },
     },
     example: {
       subject: 'Coyote Landslide', description: 'Created from Power Automate', priority: 2,
       requesterEmail: 'jdoe@bgcengineering.ca', requesterName: 'Jane Doe',
       category: 'Project Setup', subcategory: 'Quebec',
+      externalRef: 'sp-projectrequests-1260',
       customFields: { clientName: 'ACME Inc', powerAppRecordId: '1260' },
     },
   },
@@ -140,6 +157,10 @@ const T = {
         type: 'object',
         additionalProperties: { type: ['string', 'number', 'boolean', 'null'] },
         description: 'Merge custom-field values (a null value clears a key). NO auto-provisioning on update — unknown keys 422 `unknown_custom_fields` listing every offender. Requires the customfields:write scope.',
+      },
+      externalRef: {
+        type: 'string', maxLength: 200,
+        description: 'SET-ONCE: attach a per-record key to a ticket created without one (so future POST /tickets resubmissions find it). Re-sending the same value is a no-op; a different existing ref → 409 `external_ref_immutable`; a ref another ticket owns → 409 `external_ref_taken`.',
       },
     },
   },
@@ -227,6 +248,58 @@ const CREATE_TICKET_META = {
       type: 'array', items: { type: 'string' },
       description: 'Keys for which a new custom-field definition was auto-provisioned (source “api”) by this request.',
     },
+    // Resubmission upsert (Mega 08-31 Phase PA)
+    resubmitted: {
+      type: 'boolean',
+      description: 'true when the request matched an existing ticket and UPDATED it (HTTP 200, top-level `resubmitted: true` too); false on a fresh create (HTTP 201).',
+    },
+    ticketRef: { type: 'string', nullable: true, description: 'Resubmission only: the updated ticket’s ref (TP-1042).' },
+    changedFields: {
+      type: 'array', items: { type: 'string' },
+      description: 'Resubmission only: which fields actually changed (subject, priority, ticketType, category, groupId, internalGroupId, ccEmails, description, customFields, status). [] when the body was identical — nothing was written and no note was added.',
+    },
+    reopened: { type: 'boolean', description: 'Resubmission only: the ticket was Resolved and has been reopened.' },
+    aiRetriage: {
+      type: 'object', properties: { queued: { type: 'boolean' }, mode: { type: 'string', enum: ['classify'] } },
+      description: 'Resubmission only: whether a classification-only AI pass was queued (subject/description changed AND the ticket is unassigned or AI-categorized). The full assignment pipeline never re-runs on a resubmission.',
+    },
+    matchedBy: {
+      type: 'string', enum: ['external_ref', 'custom_field_key', 'subject_heuristic'],
+      description: 'Resubmission only: how the existing ticket was found — the body’s externalRef, the workspace’s configured custom-field key (e.g. power_app_record_id), or the deprecated requester+subject heuristic.',
+    },
+    resubmissionAmbiguous: {
+      type: 'boolean',
+      description: 'Create only: the (deprecated) heuristic saw MORE THAN ONE plausible existing ticket, so a new ticket was created instead of guessing. `resubmissionCandidates` lists their refs. Send externalRef to make matching exact.',
+    },
+    resubmissionCandidates: { type: 'array', items: { type: 'string' } },
+    priorExternalRefTicket: {
+      type: 'object', nullable: true,
+      properties: { id: { type: 'integer' }, ref: { type: 'string' }, status: { type: 'string' }, reason: { type: 'string', enum: ['closed', 'reopen_declined', 'freshservice_owned'] } },
+      description: 'Create only: the externalRef matched a ticket that could not be updated (Closed, or reopenOnResubmit:false on a Resolved one) — this new ticket is linked related_to it and now owns the externalRef.',
+    },
+    linkedToTicket: { type: 'integer', nullable: true, description: 'Create only: id of the prior ticket this successor was linked to.' },
+  },
+};
+
+// Worked 200 for a resubmission (Phase PA): same endpoint, same body shape,
+// different status — the existing ticket was updated, not duplicated.
+const RESUBMITTED_200 = {
+  description: 'Resubmission: the externalRef (or the workspace’s custom-field bridge key) matched an existing ticket, which was UPDATED in place. Top-level `resubmitted: true`; `meta.changedFields` says what changed ([] = identical body, nothing written).',
+  content: {
+    'application/json': {
+      schema: {
+        type: 'object',
+        properties: { success: { type: 'boolean' }, resubmitted: { type: 'boolean', enum: [true] }, data: ref('Ticket'), meta: CREATE_TICKET_META },
+      },
+      example: {
+        success: true, resubmitted: true,
+        data: { id: 501, ref: 'TP-1042', externalRef: 'sp-projectrequests-1260', subject: 'Coyote Landslide', status: 'Open', priority: 3 },
+        meta: {
+          resubmitted: true, ticketRef: 'TP-1042', changedFields: ['priority', 'description'], reopened: false,
+          aiRetriage: { queued: false }, matchedBy: 'external_ref', ignoredFields: [], rejectedCustomFields: [], provisionedCustomFields: [],
+        },
+      },
+    },
   },
 };
 
@@ -273,7 +346,8 @@ export function buildOpenApiSpec(baseUrl) {
         '**Auth:** `Authorization: Bearer tp_live_…` (or `tp_test_…`). Each key carries explicit scopes.',
         '**Errors:** RFC 9457 `application/problem+json` with a stable `code`.',
         '**Every response** carries `X-Request-Id` and `X-RateLimit-*`; `429` includes `Retry-After`.',
-        '**Idempotency:** send `Idempotency-Key: <uuid>` on writes to make retries safe.',
+        '**Idempotency:** send `Idempotency-Key: <uuid>` on writes to make retries safe (per RUN — same key + different body is a 422).',
+        '**Resubmissions:** send `externalRef` (your per-RECORD key) on `POST /tickets` — a re-POST for a known record UPDATES the ticket (200, `resubmitted: true`) instead of creating a duplicate.',
         '**Pagination:** list endpoints support `?cursor=` (keyset) or `?page=&pageSize=` (offset).',
       ].join('\n'),
     },
@@ -312,9 +386,9 @@ export function buildOpenApiSpec(baseUrl) {
       '/meta': { get: op('Enumerations: priorities, statuses, ticket types', null, { tag: 'discovery' }) },
       '/tickets': {
         get: op('List tickets (cursor or offset; filters mirror the queue, incl. cf_* custom-field filters)', 'tickets:read', { tag: 'tickets', responseRef: ref('Ticket'), list: true, parameters: CF_FILTER_PARAMETERS }),
-        post: op('Create a ticket (category by name, custom fields, cc)', 'tickets:write', {
+        post: op('Create a ticket — or update it when externalRef matches (resubmission upsert)', 'tickets:write', {
           tag: 'tickets', body: ref('CreateTicket'), responseRef: ref('Ticket'), status: 201,
-          meta: CREATE_TICKET_META, extraResponses: { 400: CATEGORY_VALIDATION_400 },
+          meta: CREATE_TICKET_META, extraResponses: { 200: RESUBMITTED_200, 400: CATEGORY_VALIDATION_400 },
         }),
       },
       '/tickets/{id}': {
@@ -427,7 +501,8 @@ Both resolve to a single workspace; a credential can never read or write another
 <br><br><b>Conventions</b><br>
 • Errors are <code>application/problem+json</code> (RFC 9457) with a stable <code>code</code>.<br>
 • Every response carries <code>X-Request-Id</code> and <code>X-RateLimit-Limit/Remaining/Reset</code>; <code>429</code> includes <code>Retry-After</code>.<br>
-• Send <code>Idempotency-Key: &lt;uuid&gt;</code> on writes so a retry never double-applies.<br>
+• Send <code>Idempotency-Key: &lt;uuid&gt;</code> on writes so a retry never double-applies (per run; same key + different body → 422).<br>
+• Send <code>externalRef</code> (your per-record key) on <code>POST /tickets</code> — a re-POST for a known record <b>updates</b> the ticket (<code>200</code>, <code>resubmitted: true</code>) instead of duplicating it.<br>
 • Lists page by <code>?cursor=</code> (keyset, use the returned <code>next_cursor</code>) or <code>?page=&amp;pageSize=</code>.
 </div>
 ${sections}
@@ -489,10 +564,11 @@ the ticket is still created.<br>
 <pre>curl -X POST ${baseUrl}/api/v1/tickets \\
   -H "Authorization: Bearer tp_live_xxx" \\
   -H "Content-Type: application/json" \\
-  -H "Idempotency-Key: sp-proposal-1260" \\
+  -H "Idempotency-Key: 08585287-the-flow-run-id" \\
   -d '{
   "subject": "Coyote Landslide",
   "description": "Created from Power Automate",
+  "externalRef": "sp-projectrequests-1260",
   "priority": 2,
   "requesterEmail": "jdoe@bgcengineering.ca",
   "requesterName": "Jane Doe",
@@ -576,7 +652,8 @@ The free “Send an HTTP request” actions (SharePoint, Office 365) only reach 
 <table><tbody>
 <tr><td class="p">Method</td><td><code>POST</code></td></tr>
 <tr><td class="p">URI</td><td><code>${baseUrl}/api/v1/tickets</code></td></tr>
-<tr><td class="p">Headers</td><td><code>Content-Type: application/json</code><br><code>Authorization: Bearer tp_live_…</code> (a plain header row — leave the action's “Authentication” dropdown on <b>None</b>; it has no API-key mode)<br><code>Idempotency-Key: concat('sp-', triggerOutputs()?['body/ID'])</code></td></tr>
+<tr><td class="p">Headers</td><td><code>Content-Type: application/json</code><br><code>Authorization: Bearer tp_live_…</code> (a plain header row — leave the action's “Authentication” dropdown on <b>None</b>; it has no API-key mode)<br><code>Idempotency-Key: workflow()?['run']?['name']</code> — per <b>run</b> (retry protection)</td></tr>
+<tr><td class="p">Body <code>externalRef</code></td><td><code>concat('sp-projectrequests-', triggerOutputs()?['body/ID'])</code> — per <b>record</b>: a re-submitted item <b>updates</b> its ticket (<code>200</code>, <code>resubmitted: true</code>) instead of creating another. See “Resubmissions” below.</td></tr>
 <tr><td class="p">Settings → Secure Inputs</td><td><b>On</b> once the flow works — hides the key (and body) from run history.</td></tr>
 <tr><td class="p">Settings → Retry policy</td><td>Default is fine — see the retry note below.</td></tr>
 </tbody></table>
@@ -606,10 +683,29 @@ containing <code>"</code> or a newline produces invalid JSON and a 400. Keep fre
 <b>Retries &amp; idempotency</b><br>
 Power Automate auto-retries an action on 408, 429 and 5xx (up to 12 times on most plans) — each retry
 <b>re-sends the POST</b>. The <code>Idempotency-Key</code> header is what makes that safe: same key + same body → the
-cached response replays, no duplicate ticket. Key it per <b>source record</b>
-(<code>concat('sp-', triggerOutputs()?['body/ID'])</code>) rather than per run — a resubmitted run then still can't
-double-create. Same key with a <i>different</i> body → <code>422 idempotency_key_reused</code>. Our <code>429</code>s carry
+cached response replays, no duplicate ticket. Key it per <b>run</b> (<code>workflow()?['run']?['name']</code>) — retries
+of one run share it. Same key with a <i>different</i> body → <code>422 idempotency_key_reused</code>. Our <code>429</code>s carry
 <code>Retry-After</code>, which the retry runtime honors.
+<br><br>
+<b>Do not key it per record.</b> A resubmitted form sends a <i>different</i> body for the <i>same</i> record — under a per-record
+idempotency key that is a <code>422</code> before the resubmission logic ever runs. Per-record identity belongs in the body field
+<code>externalRef</code> (next card).
+</div>
+<div class="card">
+<b>Resubmissions — <code>externalRef</code></b><br>
+Send your stable per-record key in the body: <code>"externalRef": "@{concat('sp-projectrequests-', triggerOutputs()?['body/ID'])}"</code>
+(≤200 chars, unique per workspace). First POST for a record → <code>201</code>, ref stored. A later POST with the same ref →
+<code>200</code> with top-level <code>"resubmitted": true</code>: the existing ticket is <b>updated</b> — changed fields replaced,
+the new description <b>appended</b> as a dated “— Resubmitted … —” block (never overwritten), custom fields merged, a private
+diff note added; <code>meta.changedFields</code> lists what changed (<code>[]</code> = identical re-send, nothing written).
+<b>Status and assignee are never touched.</b> A Resolved ticket is reopened (<code>reopenOnResubmit: false</code> opts out); a
+Closed ticket stays closed and a <b>new</b> linked ticket is created (<code>201</code>, <code>meta.priorExternalRefTicket</code>).
+Branch the flow on <code>outputs('HTTP')?['statusCode']</code> (201 create vs 200 update) if the SharePoint write-back should
+only run once.<br><br>
+<b>Already sending <code>customFields.powerAppRecordId</code>?</b> Ask a Ticket Pulse admin to set Settings → Ticket Ops →
+<i>API resubmissions</i> → “Match on a custom field” to that field — resubmissions then match with today's payload
+(<code>meta.matchedBy: "custom_field_key"</code>), no flow change needed. Adding <code>externalRef</code> is still the
+recommended end state.
 </div>
 <div class="card">
 <b>Reading the response</b> — add a <b>Parse JSON</b> action over <code>body('HTTP')</code>:
@@ -619,7 +715,11 @@ double-create. Same key with a <i>different</i> body → <code>422 idempotency_k
     "id": { "type": "integer" }, "ref": { "type": "string" },
     "subject": { "type": "string" }, "status": { "type": "string" },
     "category": { "type": ["string", "null"] }, "createdAt": { "type": "string" } } },
+  "resubmitted": { "type": "boolean" },
   "meta": { "type": "object", "properties": {
+    "resubmitted": { "type": "boolean" },
+    "changedFields": { "type": "array" },
+    "reopened": { "type": "boolean" },
     "ignoredFields": { "type": "array" },
     "rejectedCustomFields": { "type": "array" },
     "provisionedCustomFields": { "type": "array" } } } } }</pre>

@@ -1,5 +1,6 @@
 import config from '../../config/index.js';
 import {
+  modelSupportsVision,
   normalizeAiModel,
   normalizeProvider,
   providerForModel,
@@ -22,6 +23,10 @@ class ProviderModelResolver {
     legacyModel = null,
     preferredProvider = null,
     preferredModel = null,
+    // Set by callers whose userMessage carries image blocks (Phase AF
+    // autofill). Non-vision models are refused here rather than at the
+    // provider, where they would surface as an opaque 400.
+    requiresVision = false,
   }) {
     const setting = await providerSettingsService.getSetting(workspaceId, operation, preferredModel || legacyModel);
     const primaryProvider = normalizeProvider(
@@ -36,7 +41,7 @@ class ProviderModelResolver {
     const fallbackProvider = setting.fallbackProvider
       ? normalizeProvider(setting.fallbackProvider)
       : (primaryProvider === 'anthropic' ? 'openai' : 'anthropic');
-    const fallbackModel = setting.fallbackModel
+    let fallbackModel = setting.fallbackModel
       ? normalizeAiModel(setting.fallbackModel, fallbackProvider, null, operation)
       : null;
 
@@ -45,6 +50,18 @@ class ProviderModelResolver {
     }
     if (fallbackModel && !supportsOperation(fallbackModel, fallbackProvider, operation)) {
       throw new Error(`Fallback model ${fallbackModel} does not support ${operation}`);
+    }
+
+    // Vision gate: a primary that cannot read images is a hard error; a
+    // non-vision fallback is dropped (better one honest attempt than a
+    // guaranteed 400 on the second).
+    let visionFallbackDropped = false;
+    if (requiresVision && !modelSupportsVision(primaryModel, primaryProvider)) {
+      throw new Error(`Model ${primaryModel} does not support image input required by ${operation}`);
+    }
+    if (requiresVision && fallbackModel && !modelSupportsVision(fallbackModel, fallbackProvider)) {
+      fallbackModel = null;
+      visionFallbackDropped = true;
     }
 
     const primaryHealth = await providerHealthService.getStatus(primaryProvider, operation, workspaceId);
@@ -73,6 +90,7 @@ class ProviderModelResolver {
         setting,
         primary: { provider: primaryProvider, model: primaryModel, health: primaryHealth },
         fallback: { provider: fallbackProvider, model: fallbackModel, health: fallbackHealth },
+        visionFallbackDropped,
         attempts,
       };
     }
@@ -104,6 +122,7 @@ class ProviderModelResolver {
       setting,
       primary: { provider: primaryProvider, model: primaryModel, health: primaryHealth },
       fallback: { provider: fallbackProvider, model: fallbackModel, health: fallbackHealth },
+      visionFallbackDropped,
       attempts,
     };
   }

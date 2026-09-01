@@ -5,7 +5,6 @@ import vtRepo from './vacationTrackerRepository.js';
 import calendarLeaveService from './calendarLeaveService.js';
 import syncLogRepository from './syncLogRepository.js';
 import workspaceRepository from './workspaceRepository.js';
-import emailPollingService from './emailPollingService.js';
 import assignmentRepository from './assignmentRepository.js';
 import assignmentDailyReviewService from './assignmentDailyReviewService.js';
 import logger from '../utils/logger.js';
@@ -45,10 +44,13 @@ class ScheduledSyncService {
         this.startEmbeddingBackfillForWorkspace(ws);
       }
 
-      // Start email polling for assignment pipeline
-      await emailPollingService.startAll();
+      // The legacy assignment-pipeline mailbox poller (emailPollingService,
+      // assignment_configs.monitored_mailbox) is retired (MB-1f): inbound
+      // mail is owned by mailboxIngestService (Settings → Ticket Mailboxes),
+      // booted from app.js. Nothing to start here.
 
       this.startHolidayAutoload();
+      this.startGraphSubscriptionMaintenance();
 
       logger.info(`Scheduled sync started for ${workspaces.length} workspace(s)`);
       return true;
@@ -394,8 +396,35 @@ class ScheduledSyncService {
     this.assignmentFastSyncInProgress.delete(wsId);
   }
 
+  /**
+   * Graph mail-subscription maintenance (Mega 08-31 MB-2c): every 30 min
+   * renew (< 48 h left), recreate (expired/removed) or bootstrap the delta
+   * cursor for each ingest mailbox. The service itself is feature-flagged
+   * (GRAPH_NOTIFICATIONS_ENABLED) and no-ops when off; loaded lazily so this
+   * module stays light for tests and dev boxes.
+   */
+  startGraphSubscriptionMaintenance() {
+    this.stopGraphSubscriptionMaintenance();
+    this.graphSubscriptionJob = cron.schedule('*/30 * * * *', async () => {
+      try {
+        const { default: graphSubscriptionService } = await import('./graphSubscriptionService.js');
+        await graphSubscriptionService.ensureSubscriptions();
+      } catch (error) {
+        logger.warn(`Graph subscription maintenance tick failed (non-fatal): ${error.message}`);
+      }
+    }, { scheduled: true });
+  }
+
+  stopGraphSubscriptionMaintenance() {
+    if (this.graphSubscriptionJob) {
+      this.graphSubscriptionJob.stop();
+      this.graphSubscriptionJob = null;
+    }
+  }
+
   stopAll() {
     this.stopHolidayAutoload();
+    this.stopGraphSubscriptionMaintenance();
     if (this.cronJobs.size > 0) {
       logger.info(`Stopping all ${this.cronJobs.size} scheduled sync(s)`);
       for (const [wsId] of this.cronJobs) {

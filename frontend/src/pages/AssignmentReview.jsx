@@ -4343,6 +4343,11 @@ const AI_OPERATION_OPTIONS = [
   { value: 'autoresponse_classification', label: 'Auto-response Classify' },
   { value: 'autoresponse_generation', label: 'Auto-response Generate' },
   { value: 'notification_workflow_generation', label: 'Mail Workflow Generation' },
+  { value: 'ticket_thread_summary', label: 'Thread Summary' },
+  { value: 'requester_sentiment', label: 'Requester Sentiment' },
+  { value: 'analytics_report', label: 'Analytics Report' },
+  // Phase AF (v3.8.14): TicketCreate → Autofill (vision-capable models only).
+  { value: 'ticket_intake_extract', label: 'Autofill Intake' },
 ];
 
 export function AiProviderSettingsPanel({ onAssignmentModelChange }) {
@@ -4595,10 +4600,6 @@ export function AssignmentConfigPanel({ workspaceTimezone = 'America/Los_Angeles
   const [config, setConfig] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [emailTestResult, setEmailTestResult] = useState(null);
-  const [emailTesting, setEmailTesting] = useState(false);
-  const [emailStatus, setEmailStatus] = useState(null);
-  const [polling, setPolling] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
   const fetchConfig = useCallback(async () => {
@@ -4618,7 +4619,6 @@ export function AssignmentConfigPanel({ workspaceTimezone = 'America/Los_Angeles
         priorityAssessmentAfterHoursEnabled: false,
         ...cfg,
       });
-      try { const statusRes = await assignmentAPI.emailStatus(); setEmailStatus(statusRes?.data || null); } catch { /* ignore */ }
     } catch {
       setConfig({ isEnabled: false, autoAssign: false, autoCloseNoise: false, duplicateBurstEnabled: true, dryRunMode: true, llmModel: 'claude-sonnet-5', maxRecommendations: 3, scoringWeights: null, pollForUnassigned: true, pollMaxPerCycle: 5, monitoredMailbox: null, emailPollingEnabled: false, emailPollingIntervalSec: 60, excludedGroupIds: [], observeOnlyGroupIds: [], dailyReviewEnabled: false, dailyReviewRunHour: 18, dailyReviewRunMinute: 5, dailyReviewLookbackDays: 14, dailyReviewPreheatEnabled: false, priorityAssessmentEnabled: true, priorityWritebackEnabled: true, typeWritebackEnabled: false, priorityAssessmentAfterHoursEnabled: false });
     } finally { setLoading(false); }
@@ -4806,59 +4806,21 @@ export function AssignmentConfigPanel({ workspaceTimezone = 'America/Los_Angeles
         </div>
       </ConfigSection>
 
-      {/* Section 6: Email Monitoring */}
+      {/* Section 6: Email Monitoring — retired in v3.8.12; mail-in lives in Settings > Ticket Mailboxes */}
       <ConfigSection icon={Mail} title="Email Monitoring (Office 365)" defaultOpen={false}>
-        <div className="py-3">
-          <h4 className="font-medium text-sm text-foreground mb-1.5">Monitored Mailbox</h4>
-          <p className="text-xs text-muted-foreground mb-2">Shared mailbox to monitor for incoming tickets</p>
-          <div className="flex gap-2">
-            <input type="email" value={config.monitoredMailbox || ''} onChange={(e) => setConfig({ ...config, monitoredMailbox: e.target.value })} placeholder="helpdesk@company.com" className="flex-1 border border-border rounded-lg px-3 py-2 text-sm" />
-            <button
-              onClick={async () => {
-                if (!config.monitoredMailbox) return;
-                setEmailTesting(true); setEmailTestResult(null);
-                try { const res = await assignmentAPI.emailTest(config.monitoredMailbox); setEmailTestResult(res?.data || { success: false, message: 'No response' }); }
-                catch (err) { setEmailTestResult({ success: false, message: err.message }); }
-                finally { setEmailTesting(false); }
-              }}
-              disabled={emailTesting || !config.monitoredMailbox}
-              className="px-3 py-2 border border-border rounded-lg text-sm font-medium hover:bg-muted/50 disabled:opacity-50 flex items-center gap-1"
-            >
-              {emailTesting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />} Test
-            </button>
-          </div>
-          {emailTestResult && (
-            <div className={`mt-2 p-2 rounded-lg text-xs ${emailTestResult.success ? 'bg-green-50 dark:bg-green-500/15 text-green-700 dark:text-green-200' : 'bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200'}`}>
-              {emailTestResult.message}
-            </div>
-          )}
+        <div className="mt-2 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800 dark:border-blue-500/30 dark:bg-blue-500/15 dark:text-blue-100">
+          <div className="font-medium">Moved to Settings &gt; Ticket Mailboxes.</div>
+          <p className="mt-1 text-xs text-blue-700 dark:text-blue-200">
+            The old per-workspace inbox poller is retired. Connect a Microsoft 365 mailbox under Ticket Mailboxes (mode Both) and Ticket Pulse both sends from it and reads requester replies straight into the ticket.
+          </p>
+          <button
+            type="button"
+            onClick={() => { window.location.href = '/settings#ticket-mailboxes'; }}
+            className="mt-2 rounded-lg bg-blue-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-800"
+          >
+            Open Ticket Mailboxes
+          </button>
         </div>
-        <ConfigToggle label="Enable Email Polling" description="Automatically check the mailbox for new emails and trigger assignment" checked={config.emailPollingEnabled} onChange={() => setConfig({ ...config, emailPollingEnabled: !config.emailPollingEnabled })} />
-        <div className="py-3">
-          <h4 className="font-medium text-sm text-foreground mb-1.5">Polling Interval</h4>
-          <select value={config.emailPollingIntervalSec || 60} onChange={(e) => setConfig({ ...config, emailPollingIntervalSec: parseInt(e.target.value) })} className="border border-border rounded-lg px-3 py-2 text-sm">
-            <option value={30}>Every 30 seconds</option>
-            <option value={60}>Every 60 seconds</option>
-            <option value={120}>Every 2 minutes</option>
-            <option value={300}>Every 5 minutes</option>
-          </select>
-        </div>
-        {emailStatus && (
-          <div className="py-3">
-            <div className="flex items-center justify-between bg-muted/50 rounded-lg p-3">
-              <div>
-                <span className={`inline-flex items-center gap-1 text-xs font-medium ${emailStatus.running ? 'text-green-600 dark:text-green-300' : 'text-muted-foreground/75'}`}>
-                  <span className={`w-2 h-2 rounded-full ${emailStatus.running ? 'bg-green-500' : 'bg-muted-foreground/40'}`} />
-                  {emailStatus.running ? 'Polling active' : 'Polling inactive'}
-                </span>
-                {emailStatus.lastCheck && <p className="text-[10px] text-muted-foreground/75 mt-0.5">Last: {formatDateTimeInTimezone(emailStatus.lastCheck, workspaceTimezone)}</p>}
-              </div>
-              <button onClick={async () => { setPolling(true); try { await assignmentAPI.emailPollNow(); const r = await assignmentAPI.emailStatus(); setEmailStatus(r?.data || null); } catch { /* ignore polling refresh errors */ } finally { setPolling(false); } }} disabled={polling} className="px-2.5 py-1 border border-border rounded text-xs font-medium hover:bg-card disabled:opacity-50 flex items-center gap-1">
-                {polling ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />} Poll Now
-              </button>
-            </div>
-          </div>
-        )}
       </ConfigSection>
 
       {/* Section 6: Advanced */}

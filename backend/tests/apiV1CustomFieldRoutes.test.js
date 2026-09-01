@@ -50,7 +50,11 @@ jest.unstable_mockModule('../src/services/oauthClientService.js', () => ({
   issueAccessToken: jest.fn(),
 }));
 jest.unstable_mockModule('../src/services/ticketService.js', () => ({ default: ticketServiceMock }));
-jest.unstable_mockModule('../src/services/customFieldService.js', () => ({ default: customFieldServiceMock }));
+jest.unstable_mockModule('../src/services/customFieldService.js', () => ({
+  default: customFieldServiceMock,
+  // Phase PA: apiV1.routes → ticketResubmissionService imports the named key normalizer too.
+  normalizeFieldKey: (raw) => String(raw ?? '').trim().replace(/([a-z0-9])([A-Z])/g, '$1_$2').replace(/[\s\-.]+/g, '_').toLowerCase(),
+}));
 jest.unstable_mockModule('../src/services/categoryNameResolver.js', () => ({
   resolveCategoryNames: resolveCategoryNamesMock,
 }));

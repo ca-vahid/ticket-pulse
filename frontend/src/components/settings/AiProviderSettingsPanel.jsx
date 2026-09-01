@@ -14,6 +14,11 @@ const AI_OPERATION_OPTIONS = [
   { value: 'autoresponse_classification', label: 'Auto-response Classify' },
   { value: 'autoresponse_generation', label: 'Auto-response Generate' },
   { value: 'notification_workflow_generation', label: 'Mail Workflow Generation' },
+  { value: 'ticket_thread_summary', label: 'Thread Summary' },
+  { value: 'requester_sentiment', label: 'Requester Sentiment' },
+  { value: 'analytics_report', label: 'Analytics Report' },
+  // Phase AF (v3.8.14): TicketCreate → Autofill (vision-capable models only).
+  { value: 'ticket_intake_extract', label: 'Autofill Intake' },
 ];
 
 function ConfigToggle({ label, description, checked, onChange }) {

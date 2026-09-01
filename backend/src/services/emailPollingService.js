@@ -1,3 +1,23 @@
+/**
+ * @deprecated RETIRED (MB-1f, v3.8.12) — do not wire this back up.
+ *
+ * This was the pre-native-ticketing "assignment pipeline" mailbox poller: it
+ * watched `assignment_configs.monitored_mailbox` (it@ / accountspayable@ were
+ * pre-filled in prod, `email_polling_enabled=false` everywhere) and kicked
+ * the AI assignment pipeline when a FreshService notification landed. The
+ * native mailbox pipeline (`MailboxConnection` rows + `mailboxIngestService`,
+ * Settings → Ticket Mailboxes) owns inbound mail now, and running both
+ * against one address would double-ingest.
+ *
+ * Retire-don't-delete: the `assignment_configs.monitored_mailbox` /
+ * `email_polling_enabled` / `email_polling_interval_sec` / `last_email_check_at`
+ * columns stay (no migration) and the config PATCH still persists them, but
+ * nothing reads them — `startAll()` / `startForWorkspace()` are no-ops that
+ * log once, `pollNow()` refuses, and the boot hook in scheduledSyncService +
+ * the assignment.routes start/stop calls are gone. `_poll()` /
+ * `_matchEmailToTicket()` are kept only as reference for the FS-ref subject
+ * heuristics; they are unreachable from the app.
+ */
 import cron from 'node-cron';
 import graphMailClient from '../integrations/graphMailClient.js';
 import assignmentRepository from './assignmentRepository.js';
@@ -5,31 +25,36 @@ import assignmentPipelineService from './assignmentPipelineService.js';
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 
+const RETIRED_MESSAGE = 'Legacy mailbox poller is retired — inbound mail is handled by Settings → Ticket Mailboxes (mailboxIngestService)';
+
 class EmailPollingService {
   constructor() {
     this._jobs = new Map(); // workspaceId -> cronJob
     this._status = new Map(); // workspaceId -> { lastCheck, emailsFound, errors }
+    this._retirementLogged = false;
   }
 
+  _logRetiredOnce(context) {
+    if (this._retirementLogged) return;
+    this._retirementLogged = true;
+    logger.info(`Email polling (legacy): ${RETIRED_MESSAGE}`, context);
+  }
+
+  /** @deprecated No-op since MB-1f — logs the retirement once and returns. */
   async startAll() {
-    if (!graphMailClient.isConfigured()) {
-      logger.info('Email polling: Azure Graph API not configured, skipping');
-      return;
-    }
-
-    const configs = await prisma.assignmentConfig.findMany({
-      where: { emailPollingEnabled: true, monitoredMailbox: { not: null } },
-      include: { workspace: { select: { name: true, slug: true } } },
-    });
-
-    for (const cfg of configs) {
-      this.startForWorkspace(cfg);
-    }
-
-    logger.info(`Email polling started for ${configs.length} workspace(s)`);
+    this._logRetiredOnce({ caller: 'startAll' });
   }
 
+  /** @deprecated No-op since MB-1f — never schedules a poll. */
   startForWorkspace(config) {
+    this._logRetiredOnce({ caller: 'startForWorkspace', workspaceId: config?.workspaceId ?? null });
+  }
+
+  /**
+   * @deprecated Unreachable since MB-1f (startForWorkspace no longer
+   * schedules). Kept verbatim for reference only.
+   */
+  _startForWorkspaceLegacy(config) {
     const wsId = config.workspaceId;
 
     this.stopForWorkspace(wsId);
@@ -85,19 +110,18 @@ class EmailPollingService {
   getStatus(wsId) {
     return {
       running: this._jobs.has(wsId),
+      retired: true,
+      message: RETIRED_MESSAGE,
       ...(this._status.get(wsId) || { lastCheck: null, emailsFound: 0, lastError: null }),
     };
   }
 
   /**
-   * Manually trigger a poll cycle for a workspace.
+   * @deprecated Refuses since MB-1f — the legacy poller never runs.
    */
   async pollNow(wsId) {
-    const config = await assignmentRepository.getConfig(wsId);
-    if (!config?.monitoredMailbox) {
-      return { success: false, message: 'No monitored mailbox configured' };
-    }
-    return this._poll(wsId, config.monitoredMailbox);
+    this._logRetiredOnce({ caller: 'pollNow', workspaceId: wsId });
+    return { success: false, retired: true, message: RETIRED_MESSAGE };
   }
 
   async _poll(wsId, mailbox) {

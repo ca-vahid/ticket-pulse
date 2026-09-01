@@ -537,6 +537,9 @@ export const settingsAPI = {
   // Calendar-aware SLA flag (weekends + holidays pause the clocks)
   getSlaCalendar: () => api.get('/settings/sla-calendar'),
   updateSlaCalendar: (slaCalendarAware) => api.put('/settings/sla-calendar', { slaCalendarAware }),
+  // API resubmission matching (Phase PA): externalRef custom-field bridge key + deprecated heuristic flag
+  getApiResubmission: () => api.get('/settings/api-resubmission'),
+  updateApiResubmission: (data) => api.put('/settings/api-resubmission', data),
   // Ticket-type registry (per-workspace type catalogue)
   getTicketTypes: () => api.get('/settings/ticket-types'),
   createTicketType: (data) => api.post('/settings/ticket-types', data),
@@ -838,6 +841,20 @@ export const ticketsAPI = {
 
   // AI thread summary (on-demand, read-only)
   summarize: async (id) => await apiLongTimeout.post(`/tickets/${id}/summarize`),
+
+  // Autofill intake (Mega 08-31 Phase AF): pasted text + up to 6 screenshots
+  // → PROPOSED ticket fields (never auto-submitted). Multipart; the vision
+  // round-trip can take a while, so it rides the long-timeout client.
+  // 400 = over caps, 429 = per-actor rate limit, 503 = no AI provider.
+  autofillExtract: async (text, images = []) => {
+    const form = new FormData();
+    form.append('text', String(text || ''));
+    for (const file of images) form.append('images', file, file.name);
+    return await apiLongTimeout.post('/tickets/autofill-extract', form, {
+      // Let the browser set the multipart boundary.
+      headers: { 'Content-Type': undefined },
+    });
+  },
 
   // Time tracking
 

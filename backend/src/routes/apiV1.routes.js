@@ -4,7 +4,7 @@ import prisma from '../services/prisma.js';
 import ticketService from '../services/ticketService.js';
 import technicianRepository from '../services/technicianRepository.js';
 import groupRepository from '../services/groupRepository.js';
-import { TICKET_SOURCE } from '../utils/ticketOrigin.js';
+import { TICKET_SOURCE, ticketDisplayRef } from '../utils/ticketOrigin.js';
 import logger from '../utils/logger.js';
 import {
   API_KEY_SCOPES, generateApiKey, hashApiKey, scopeSatisfies,
@@ -15,6 +15,7 @@ import rateLimiter from '../services/apiRateLimitService.js';
 import { withIdempotency } from '../middleware/apiIdempotency.js';
 import { apiProblemHandler, problems, ApiProblem } from '../utils/apiProblem.js';
 import { resolveCategoryNames } from '../services/categoryNameResolver.js';
+import ticketResubmissionService, { normalizeExternalRef } from '../services/ticketResubmissionService.js';
 import { buildOpenApiSpec, renderDocsPage } from './apiV1.openapi.js';
 
 /**
@@ -63,6 +64,8 @@ function ticketShape(t) {
   return {
     id: t.id,
     ref: t.displayRef,
+    // Caller's stable per-record key (Phase PA) — the resubmission upsert key.
+    externalRef: t.externalRef || null,
     origin: t.origin,
     subject: t.subject,
     status: t.status,
@@ -219,7 +222,33 @@ const CREATE_BODY_KEYS = new Set([
   'subject', 'description', 'priority', 'requesterEmail', 'requesterName',
   'runAiTriage', 'category', 'subcategory', 'customFields', 'ccEmails',
   'source', 'ticketType', 'type', 'groupId', 'internalGroupId',
+  // Resubmission upsert (Mega 08-31 Phase PA): externalRef = the caller's
+  // per-RECORD key; reopenOnResubmit/resubmitStrategy tune what happens when
+  // it matches an existing ticket.
+  'externalRef', 'reopenOnResubmit', 'resubmitStrategy',
 ]);
+
+// Resubmission response (Phase PA): 200 + top-level resubmitted:true so Power
+// Automate flows can branch on it without digging into meta.
+function respondResubmitted(res, result, match, extra) {
+  const shaped = ticketShape(result.ticket);
+  res.status(200).json({
+    success: true,
+    resubmitted: true,
+    data: shaped,
+    meta: {
+      resubmitted: true,
+      ticketRef: shaped.ref,
+      changedFields: result.changedFields,
+      reopened: result.reopened === true,
+      aiRetriage: result.aiRetriage || { queued: false },
+      matchedBy: match.matchedBy,
+      ignoredFields: extra.ignoredFields,
+      rejectedCustomFields: result.rejectedCustomFields || [],
+      provisionedCustomFields: result.provisionedCustomFields || [],
+    },
+  });
+}
 
 // customfields:write is demanded ONLY when the payload actually carries
 // custom fields — plain ticket writes keep working with tickets:write alone.
@@ -237,7 +266,36 @@ router.post('/tickets', S('tickets:write'), withIdempotency, asyncHandler(async 
   if (body.customFields !== undefined) assertCustomFieldsWriteScope(req);
   const ignoredFields = Object.keys(body).filter((k) => !CREATE_BODY_KEYS.has(k));
   const ticketType = body.ticketType ?? body.type;
-  const ticket = await ticketService.createTicket(req.workspaceId, {
+  const actor = apiActor(req);
+
+  // Resubmission upsert (Mega 08-31 Phase PA, QA #4): a re-POST for a record
+  // we already have UPDATES that ticket (200 + resubmitted:true) instead of
+  // creating a duplicate. The key is body.externalRef; without one, the
+  // workspace's custom-field bridge key (ws5: power_app_record_id) derives
+  // it; the deprecated requester+subject heuristic only runs when the
+  // workspace flag is on and never on ambiguity.
+  const workspaceSettings = await prisma.workspace.findUnique({
+    where: { id: req.workspaceId },
+    select: { externalRefCustomFieldKey: true, apiResubmissionMatchEnabled: true, apiResubmissionMatchWindowDays: true },
+  });
+  const match = await ticketResubmissionService.deriveExternalRef(req.workspaceId, body, workspaceSettings || {}, { actor });
+  const resubmitCtx = { workspaceId: req.workspaceId, actor, apiKeyName: req.apiKey.name, externalRef: match.ref };
+  let priorTicket = null;
+  let priorReason = null;
+  if (match.ticket) {
+    const result = await ticketResubmissionService.applyResubmission(match.ticket, body, { ...resubmitCtx, matchedBy: match.matchedBy });
+    if (!result.createNew) {
+      logger.info(`API v1: ticket ${result.ticket.displayRef} resubmitted via key "${req.apiKey.name}" (matchedBy=${match.matchedBy}, changed=${result.changedFields.join(',') || 'none'})`);
+      return respondResubmitted(res, result, match, { ignoredFields });
+    }
+    // Closed (or reopenOnResubmit:false): never silently reopen — a NEW
+    // ticket is created below and linked related_to the prior one; the
+    // externalRef moves to the new ticket so the NEXT resubmission lands there.
+    priorTicket = result.priorTicket;
+    priorReason = result.reason;
+  }
+
+  const createInput = {
     subject: body.subject,
     description: body.description || null,
     priority: body.priority || 2,
@@ -264,20 +322,65 @@ router.post('/tickets', S('tickets:write'), withIdempotency, asyncHandler(async 
     // default internal group applies automatically.
     ...(body.groupId !== undefined ? { groupId: body.groupId } : {}),
     ...(body.internalGroupId !== undefined ? { internalGroupId: body.internalGroupId } : {}),
-    // enforceRequired (Mega 08-23 Phase TF): the workspace's required-on-create
-    // custom fields and required built-ins bind the public API too — a create
-    // that omits them 400s with the missing labels listed.
-  }, apiActor(req), { sourceChannel: TICKET_SOURCE.API, enforceRequired: true });
-  logger.info(`API v1: ticket ${ticket.displayRef} created via key "${req.apiKey.name}"`);
+    // externalRef persists on a fresh create (explicit or bridge-derived).
+    // When a prior ticket owns it (Closed successor case) it is moved below.
+    ...(match.ref && !priorTicket ? { externalRef: match.ref } : {}),
+  };
+  // enforceRequired (Mega 08-23 Phase TF): the workspace's required-on-create
+  // custom fields and required built-ins bind the public API too — a create
+  // that omits them 400s with the missing labels listed.
+  let ticket;
+  try {
+    ticket = await ticketService.createTicket(req.workspaceId, createInput, actor, { sourceChannel: TICKET_SOURCE.API, enforceRequired: true });
+  } catch (err) {
+    // Concurrent double-POST with the same externalRef: the loser's create
+    // hit the unique index (P2002 → external_ref_exists). Re-read the winner
+    // and apply the body as a resubmission — one ticket, both callers happy.
+    if (err?.code === 'external_ref_exists' && match.ref) {
+      const winner = await ticketResubmissionService.findByExternalRef(req.workspaceId, match.ref);
+      if (winner) {
+        const result = await ticketResubmissionService.applyResubmission(winner, body, { ...resubmitCtx, matchedBy: 'external_ref' });
+        if (!result.createNew) return respondResubmitted(res, result, { matchedBy: 'external_ref' }, { ignoredFields });
+      }
+      throw problems.conflict(err.message);
+    }
+    throw err;
+  }
+
+  if (priorTicket) {
+    await ticketResubmissionService.linkSuccessor(ticket.id, req.workspaceId, priorTicket.id, actor);
+    if (match.ref) {
+      // Move the ref: prior → null, new → ref (partial unique index allows one owner).
+      try {
+        await prisma.$transaction([
+          prisma.ticket.update({ where: { id: priorTicket.id }, data: { externalRef: null } }),
+          prisma.ticket.update({ where: { id: ticket.id }, data: { externalRef: match.ref } }),
+        ]);
+        ticket.externalRef = match.ref;
+      } catch (err) {
+        logger.warn(`API v1: could not move externalRef "${match.ref}" from ticket ${priorTicket.id} to ${ticket.id}: ${err.message}`);
+      }
+    }
+  }
+  logger.info(`API v1: ticket ${ticket.displayRef} created via key "${req.apiKey.name}"${priorTicket ? ` (successor of ticket ${priorTicket.id}: ${priorReason})` : ''}`);
   res.status(201).json({
     success: true,
     data: ticketShape(ticket),
     // Intake transparency (FR 08-05 #1): what didn't land and what got
     // auto-provisioned. rejected entries are {key, reason}.
     meta: {
+      resubmitted: false,
       ignoredFields,
       rejectedCustomFields: ticket.customFieldIntake?.rejected || [],
       provisionedCustomFields: ticket.customFieldIntake?.provisioned || [],
+      // Heuristic saw >1 plausible ticket → created normally, flagged here
+      // (a silent wrong-ticket update is worse than a duplicate).
+      ...(match.ambiguous ? { resubmissionAmbiguous: true, resubmissionCandidates: match.candidates } : {}),
+      // Closed / reopen-declined prior ticket → this is its linked successor.
+      ...(priorTicket ? {
+        priorExternalRefTicket: { id: priorTicket.id, ref: ticketDisplayRef(priorTicket), status: priorTicket.status, reason: priorReason },
+        linkedToTicket: priorTicket.id,
+      } : {}),
     },
   });
 }));
@@ -318,6 +421,33 @@ router.patch('/tickets/:id', S('tickets:write'), withIdempotency, asyncHandler(a
     fields.internalSubcategoryId = resolved.subcategoryId;
   }
   if (Object.keys(fields).length) await ticketService.updateTicketFields(id, req.workspaceId, fields, actor);
+  // externalRef is SET-ONCE (Phase PA): attach a per-record key to a ticket
+  // that was created without one; a different existing ref is never
+  // overwritten (409 external_ref_immutable) and a ref another ticket owns is
+  // refused (409 external_ref_taken). Re-sending the same value is a no-op.
+  if (body.externalRef !== undefined) {
+    const next = normalizeExternalRef(body.externalRef);
+    if (!next) throw problems.badRequest('externalRef must be a non-empty string of at most 200 characters');
+    const current = await prisma.ticket.findFirst({ where: { id, workspaceId: req.workspaceId }, select: { id: true, externalRef: true } });
+    if (!current) throw problems.notFound(`Ticket ${id} not found in this workspace`);
+    if (current.externalRef && current.externalRef !== next) {
+      throw new ApiProblem({
+        status: 409, code: 'external_ref_immutable', title: 'externalRef already set',
+        detail: `This ticket already carries externalRef "${current.externalRef}"; an externalRef is set once and never overwritten.`,
+      });
+    }
+    if (!current.externalRef) {
+      const taken = await prisma.ticket.findFirst({ where: { workspaceId: req.workspaceId, externalRef: next, NOT: { id } }, select: { id: true } });
+      if (taken) {
+        throw new ApiProblem({
+          status: 409, code: 'external_ref_taken', title: 'externalRef in use',
+          detail: `externalRef "${next}" already identifies ticket ${taken.id} in this workspace.`,
+        });
+      }
+      await prisma.ticket.update({ where: { id }, data: { externalRef: next } });
+      await ticketService._audit(id, 'fields_updated', actor, { changes: { externalRef: { from: null, to: next } } });
+    }
+  }
   if (body.customFields !== undefined) {
     // NO auto-provisioning on PATCH — creation is the intake path that
     // provisions definitions. Unknown keys are a 422 naming every offender

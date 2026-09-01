@@ -14,7 +14,6 @@ import assignmentCorrectionService from '../services/assignmentCorrectionService
 import skillHierarchyService from '../services/skillHierarchyService.js';
 import ticketReclassificationService from '../services/ticketReclassificationService.js';
 import syncService from '../services/syncService.js';
-import emailPollingService from '../services/emailPollingService.js';
 import promptRepository from '../services/promptRepository.js';
 import priorityBackfillService from '../services/priorityBackfillService.js';
 import workspaceWebhookService from '../services/workspaceWebhookService.js';
@@ -227,14 +226,10 @@ router.put('/config', requireAdmin, asyncHandler(async (req, res) => {
 
   const config = await assignmentRepository.upsertConfig(req.workspaceId, data);
 
-  // Restart/stop email poller when config changes
-  if (monitoredMailbox !== undefined || emailPollingEnabled !== undefined || emailPollingIntervalSec !== undefined) {
-    if (config.emailPollingEnabled && config.monitoredMailbox) {
-      emailPollingService.startForWorkspace(config);
-    } else {
-      emailPollingService.stopForWorkspace(req.workspaceId);
-    }
-  }
+  // monitoredMailbox / emailPollingEnabled / emailPollingIntervalSec are still
+  // persisted above (retire-don't-delete, MB-1f) but no longer start or stop
+  // anything: the legacy emailPollingService is retired — inbound mail is
+  // owned by Settings → Ticket Mailboxes (mailboxIngestService).
 
   res.json({ success: true, data: config });
 }));
@@ -1578,18 +1573,20 @@ router.post('/email/test', requireAdmin, asyncHandler(async (req, res) => {
   res.json({ success: true, data: result });
 }));
 
+// Legacy assignment-pipeline mailbox poller — RETIRED (MB-1f). The endpoints
+// stay so older clients don't 404, but they report the retirement instead of
+// touching a poller: inbound mail lives in Settings → Ticket Mailboxes.
+const LEGACY_POLLER_RETIRED = 'Legacy mailbox poller is retired — inbound mail is handled by Settings → Ticket Mailboxes';
+
 router.get('/email/status', requireAdmin, asyncHandler(async (req, res) => {
-  const status = emailPollingService.getStatus(req.workspaceId);
-  res.json({ success: true, data: status });
+  res.json({
+    success: true,
+    data: { running: false, retired: true, message: LEGACY_POLLER_RETIRED, lastCheck: null, emailsFound: 0, lastError: null },
+  });
 }));
 
 router.post('/email/poll-now', requireAdmin, asyncHandler(async (req, res) => {
-  if (!graphMailClient.isConfigured()) {
-    return res.status(400).json({ success: false, message: 'Azure Graph API credentials not configured' });
-  }
-
-  const result = await emailPollingService.pollNow(req.workspaceId);
-  res.json({ success: true, data: result });
+  res.status(410).json({ success: false, retired: true, message: LEGACY_POLLER_RETIRED });
 }));
 
 // ─── Recent Tickets (for manual trigger UI) ─────────────────────────────

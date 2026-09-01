@@ -5,6 +5,7 @@ import emailHealthService from './emailHealthService.js';
 import logger from '../utils/logger.js';
 import { ExternalAPIError, ValidationError } from '../utils/errors.js';
 import { formatSender, sanitizeFromName } from '../utils/emailSender.js';
+import { buildOutboundMessageId, domainOfAddress, normalizeMessageId } from './emailThreadingService.js';
 
 function trim(value) {
   const text = String(value || '').trim();
@@ -116,6 +117,23 @@ function hasSmtpConfig(sendgridConfig) {
   );
 }
 
+/**
+ * RFC 5322 threading headers for the wire (Mega 08-31 Phase MB-1b/1h):
+ * our own Message-ID (so ingest rung 1 can match replies to SendGrid-sent
+ * mail) plus In-Reply-To / References. All optional; returns {} when none.
+ */
+function threadingHeaders({ messageId, inReplyTo, references }) {
+  const headers = {};
+  const mid = normalizeMessageId(messageId);
+  if (mid) headers['Message-ID'] = mid;
+  const irt = normalizeMessageId(inReplyTo);
+  if (irt) headers['In-Reply-To'] = irt;
+  const refs = (Array.isArray(references) ? references : [references])
+    .map(normalizeMessageId).filter(Boolean);
+  if (refs.length > 0) headers.References = refs.join(' ');
+  return headers;
+}
+
 function customArgsToHeaders(customArgs) {
   if (!customArgs || typeof customArgs !== 'object') return {};
   return Object.entries(customArgs).reduce((headers, [key, value]) => {
@@ -142,6 +160,7 @@ async function sendViaSendgridApi({
   textBody,
   customArgs,
   attachments,
+  threading = {},
 }) {
   const personalization = { to: mapEmails(toRecipients) };
   const ccMapped = mapEmails(ccRecipients);
@@ -176,6 +195,10 @@ async function sendViaSendgridApi({
   if (apiAttachments.length > 0) payload.attachments = apiAttachments;
   const normalizedReplyTo = trim(replyTo);
   if (normalizedReplyTo) payload.reply_to = { email: normalizedReplyTo };
+  // Custom headers ride the top-level `headers` map (SendGrid keeps a
+  // caller-supplied Message-ID; custom_args stay on the personalization).
+  const wireHeaders = threadingHeaders(threading);
+  if (Object.keys(wireHeaders).length > 0) payload.headers = wireHeaders;
 
   const response = await axios.post(
     'https://api.sendgrid.com/v3/mail/send',
@@ -192,6 +215,7 @@ async function sendViaSendgridApi({
   return {
     provider: 'sendgrid',
     providerMessageId: response.headers?.['x-message-id'] || null,
+    messageId: wireHeaders['Message-ID'] || null,
     status: 'accepted',
     to: toRecipients,
   };
@@ -210,7 +234,9 @@ async function sendViaSmtp({
   textBody,
   customArgs,
   attachments,
+  threading = {},
 }) {
+  const wireHeaders = threadingHeaders(threading);
   const transporter = nodemailer.createTransport({
     host: sendgridConfig.smtpHost,
     port: sendgridConfig.smtpPort || 587,
@@ -236,6 +262,11 @@ async function sendViaSmtp({
     html: htmlBody || undefined,
     replyTo: trim(replyTo) || undefined,
     headers: customArgsToHeaders(customArgs),
+    // nodemailer sets these as proper headers (and generates a Message-ID
+    // of its own when we pass none).
+    messageId: wireHeaders['Message-ID'] || undefined,
+    inReplyTo: wireHeaders['In-Reply-To'] || undefined,
+    references: wireHeaders.References || undefined,
     // nodemailer attachments: Buffer content + filename + contentType.
     attachments: attachments.length > 0
       ? attachments.map((a) => ({
@@ -249,6 +280,7 @@ async function sendViaSmtp({
   return {
     provider: 'sendgrid_smtp',
     providerMessageId: info.messageId || null,
+    messageId: wireHeaders['Message-ID'] || normalizeMessageId(info.messageId) || null,
     status: 'accepted',
     to: toRecipients,
   };
@@ -268,6 +300,14 @@ export async function sendEmail({
   context = null,
   workspaceId = null,
   attachments: rawAttachments = [],
+  // Threading (Mega 08-31 Phase MB-1b/1h): pass an explicit Message-ID, or a
+  // `ticketIdForMessageId` and one is minted as `<tp-<ticketId>-<random>@<from
+  // domain>>`; In-Reply-To / References ride along when given. The result
+  // echoes `messageId` so callers can store it on the thread entry.
+  messageId = null,
+  ticketIdForMessageId = null,
+  inReplyTo = null,
+  references = [],
 }) {
   const toRecipients = normalizeEmailList(to);
   // Provider guard (Phase CC3): an address may appear in exactly one of
@@ -292,6 +332,13 @@ export async function sendEmail({
 
   const smtpMode = !hasApiConfig(sendgridConfig) && hasSmtpConfig(sendgridConfig);
   const provider = smtpMode ? 'sendgrid_smtp' : 'sendgrid';
+  const fromAddress = trim(from) || (smtpMode ? sendgridConfig.smtpFromEmail : sendgridConfig.fromEmail);
+  const threading = {
+    messageId: normalizeMessageId(messageId)
+      || (ticketIdForMessageId ? buildOutboundMessageId(ticketIdForMessageId, domainOfAddress(fromAddress)) : null),
+    inReplyTo,
+    references,
+  };
   const startedAt = Date.now();
   try {
     const deliveryParams = {
@@ -307,6 +354,7 @@ export async function sendEmail({
       textBody,
       customArgs,
       attachments,
+      threading,
     };
     const result = smtpMode
       ? await sendViaSmtp(deliveryParams)

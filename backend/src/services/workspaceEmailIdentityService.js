@@ -2,6 +2,7 @@ import prisma from './prisma.js';
 import settingsRepository from './settingsRepository.js';
 import logger from '../utils/logger.js';
 import { sanitizeFromName } from '../utils/emailSender.js';
+import { pickOutboundMailbox } from './mailboxPicker.js';
 
 /**
  * Per-workspace outbound sender identity (Phase EB).
@@ -159,13 +160,9 @@ export async function getSenderIdentity(workspaceId) {
       ? prisma.workspaceEmailIdentity.findUnique({ where: { workspaceId: id } })
       : Promise.resolve(null),
     settingsRepository.getSendGridConfig(),
-    id !== null
-      ? prisma.mailboxConnection.findFirst({
-        where: { workspaceId: id, isEnabled: true, mode: { in: ['send', 'both'] } },
-        orderBy: { id: 'asc' },
-        select: { address: true },
-      })
-      : Promise.resolve(null),
+    // Same picker every outbound lane uses (MB-1g), so the Settings view
+    // names the address mail will actually leave from.
+    id !== null ? pickOutboundMailbox(id) : Promise.resolve(null),
   ]);
 
   const overrideFromName = sanitizeFromName(row?.fromName);

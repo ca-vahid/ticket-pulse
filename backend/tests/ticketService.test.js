@@ -68,6 +68,10 @@ jest.unstable_mockModule('../src/services/ticketThreadRepository.js', () => ({ d
 jest.unstable_mockModule('../src/services/ticketLifecycleNotificationService.js', () => ({ default: lifecycleMock }));
 jest.unstable_mockModule('../src/services/requesterRepository.js', () => ({ default: requesterRepositoryMock }));
 jest.unstable_mockModule('../src/services/sendgridNotificationService.js', () => ({ default: sendgridMock }));
+// Graph mailbox lane (Phase MB-1): off by default so the legacy SendGrid
+// assertions hold; individual tests arm isConfigured + a mailbox connection.
+const graphMailClientMock = { isConfigured: jest.fn(() => false), sendMailAsMailbox: jest.fn() };
+jest.unstable_mockModule('../src/integrations/graphMailClient.js', () => ({ default: graphMailClientMock }));
 jest.unstable_mockModule('../src/routes/sse.routes.js', () => ({
   default: {},
   sseManager: { broadcast: sseBroadcastMock },
@@ -287,6 +291,97 @@ describe('ticketService conversation + status + assignment', () => {
     }));
     expect(entry.eventType).toBe('reply');
     expect(email.sent).toBe(true);
+  });
+
+  // Mega 08-31 Phase MB-1b/1c/1g/1h: threading anchors + plus-address
+  // Reply-To on the Graph lane; our own Message-ID on the SendGrid lane.
+  describe('requester reply threading (Phase MB-1)', () => {
+    beforeEach(() => {
+      prismaMock.mailboxConnection = { findFirst: jest.fn().mockResolvedValue(null) };
+      prismaMock.ticketThreadEntry.findMany = jest.fn().mockResolvedValue([
+        { emailMessageId: '<newest@requester>' }, { emailMessageId: '<older@graph>' },
+      ]);
+      prismaMock.ticketThreadEntry.update = jest.fn().mockResolvedValue({});
+      graphMailClientMock.isConfigured.mockReturnValue(false);
+      graphMailClientMock.sendMailAsMailbox.mockReset();
+    });
+    afterEach(() => {
+      delete prismaMock.mailboxConnection;
+      delete prismaMock.ticketThreadEntry.findMany;
+      delete prismaMock.ticketThreadEntry.update;
+    });
+
+    test('Graph lane: picker (primary first), Reply-To plus-address, In-Reply-To/References, Message-ID stored on the entry', async () => {
+      prismaMock.mailboxConnection.findFirst.mockResolvedValue({ id: 3, address: 'patickets@bgcengineering.ca', isPrimary: true });
+      graphMailClientMock.isConfigured.mockReturnValue(true);
+      graphMailClientMock.sendMailAsMailbox.mockResolvedValue({ internetMessageId: '<graph-77@bgcengineering.ca>' });
+
+      const { email } = await ticketService.addReply(501, 1, { bodyText: 'We are on it!' }, actor);
+
+      expect(prismaMock.mailboxConnection.findFirst).toHaveBeenCalledWith({
+        where: { workspaceId: 1, isEnabled: true, mode: { in: ['send', 'both'] } },
+        orderBy: [{ isPrimary: 'desc' }, { id: 'asc' }],
+      });
+      expect(graphMailClientMock.sendMailAsMailbox).toHaveBeenCalledWith('patickets@bgcengineering.ca', expect.objectContaining({
+        to: ['rita@example.com'],
+        subject: expect.stringContaining('[TP-1042]'),
+        replyTo: 'patickets+tp1042@bgcengineering.ca',
+        inReplyTo: '<newest@requester>',
+        references: ['<older@graph>', '<newest@requester>'],
+      }));
+      expect(prismaMock.ticketThreadEntry.update).toHaveBeenCalledWith({
+        where: { id: 9001 }, data: { emailMessageId: '<graph-77@bgcengineering.ca>' },
+      });
+      expect(sendgridMock.sendEmail).not.toHaveBeenCalled();
+      expect(email).toEqual(expect.objectContaining({ sent: true, via: 'msgraph', from: 'patickets@bgcengineering.ca' }));
+    });
+
+    test('SendGrid lane with an INGEST mailbox: Reply-To is the ingest mailbox plus-address (loop survives a Graph outage)', async () => {
+      prismaMock.mailboxConnection.findFirst.mockImplementation(async ({ where }) => (
+        where.mode.in.includes('ingest') ? { id: 4, address: 'patickets@bgcengineering.ca', mode: 'ingest' } : null
+      ));
+      sendgridMock.sendEmail.mockResolvedValue({ provider: 'sendgrid', messageId: '<tp-501-i@bgcengineering.ca>' });
+
+      const { email } = await ticketService.addReply(501, 1, { bodyText: 'We are on it!' }, actor);
+
+      expect(graphMailClientMock.sendMailAsMailbox).not.toHaveBeenCalled();
+      expect(sendgridMock.sendEmail).toHaveBeenCalledWith(expect.objectContaining({ replyTo: 'patickets+tp1042@bgcengineering.ca' }));
+      expect(email.sent).toBe(true);
+    });
+
+    test('SendGrid lane: Reply-To null without an ingest mailbox, threading headers ride along, minted Message-ID is stored on the entry', async () => {
+      sendgridMock.sendEmail.mockResolvedValue({ provider: 'sendgrid', providerMessageId: 'sg-1', messageId: '<tp-501-abc@bgcengineering.ca>' });
+
+      const { email } = await ticketService.addReply(501, 1, { bodyText: 'We are on it!' }, actor);
+
+      expect(graphMailClientMock.sendMailAsMailbox).not.toHaveBeenCalled();
+      expect(sendgridMock.sendEmail).toHaveBeenCalledWith(expect.objectContaining({
+        to: ['rita@example.com'],
+        ticketIdForMessageId: 501,
+        inReplyTo: '<newest@requester>',
+        references: ['<older@graph>', '<newest@requester>'],
+      }));
+      expect(sendgridMock.sendEmail.mock.calls[0][0]).toEqual(expect.objectContaining({ replyTo: null }));
+      expect(prismaMock.ticketThreadEntry.update).toHaveBeenCalledWith({
+        where: { id: 9001 }, data: { emailMessageId: '<tp-501-abc@bgcengineering.ca>' },
+      });
+      expect(email.sent).toBe(true);
+    });
+
+    test('Graph failure falls back to SendGrid with the same threading (and still stores the SendGrid Message-ID)', async () => {
+      prismaMock.mailboxConnection.findFirst.mockResolvedValue({ id: 3, address: 'patickets@bgcengineering.ca' });
+      graphMailClientMock.isConfigured.mockReturnValue(true);
+      graphMailClientMock.sendMailAsMailbox.mockRejectedValue(new Error('Graph 503'));
+      sendgridMock.sendEmail.mockResolvedValue({ provider: 'sendgrid', messageId: '<tp-501-fallback@bgcengineering.ca>' });
+
+      const { email } = await ticketService.addReply(501, 1, { bodyText: 'We are on it!' }, actor);
+
+      expect(sendgridMock.sendEmail).toHaveBeenCalledWith(expect.objectContaining({ inReplyTo: '<newest@requester>' }));
+      expect(prismaMock.ticketThreadEntry.update).toHaveBeenCalledWith(expect.objectContaining({
+        data: { emailMessageId: '<tp-501-fallback@bgcengineering.ca>' },
+      }));
+      expect(email.sent).toBe(true);
+    });
   });
 
   // Phase CC (QA 08-26 #1): the SendGrid branch must SEND the cc, not just
