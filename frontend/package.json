@@ -1,6 +1,6 @@
 {
   "name": "ticket-pulse-frontend",
-  "version": "3.8.10-preview",
+  "version": "3.8.11-preview",
   "type": "module",
   "description": "FreshService Real-Time IT Dashboard - Frontend",
   "scripts": {

@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import DOMPurify from 'dompurify';
 import { Link } from 'react-router-dom';
 import { ExternalLink, Ticket as TicketIcon, Ban, ClipboardList, Cloud, CloudOff, CloudUpload, Globe, Sparkles, UserCog, UserPlus, UserRound, Zap } from 'lucide-react';
@@ -81,19 +82,94 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
   if (node.tagName === 'IMG' && /^cid:/i.test(node.getAttribute('src') || '')) node.remove();
 });
 
+// Near-black inline colours (Phase DW, QA 08-31 #5): Outlook stamps quoted
+// headers and body text with `color:black` / `color:windowtext` /
+// `rgb(0,0,0)`-family values that carry ZERO authorial intent — if they
+// survive, nearly every reply counts as "has author colours" and lands on the
+// paper panel in dark mode. Neutralize them at sanitize time; anything that
+// remains is a real colour choice. Channels are parsed NUMERICALLY (a naive
+// `[0-2]?\d` regex would misread `rgb(20, 20, 20)` splits), ≤29 per channel
+// counts as near-black. `background-color` is deliberately left alone.
+function isNearBlackColor(value) {
+  const v = String(value || '').trim().toLowerCase();
+  if (!v) return false;
+  if (v === 'black' || v === 'windowtext') return true;
+  const hex = v.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/);
+  if (hex) {
+    const h = hex[1];
+    const chans = h.length === 3
+      ? [...h].map((c) => parseInt(c + c, 16))
+      : [h.slice(0, 2), h.slice(2, 4), h.slice(4, 6)].map((c) => parseInt(c, 16));
+    return chans.every((n) => n <= 29);
+  }
+  const rgb = v.match(/^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*(?:,\s*[\d.]+\s*)?\)$/);
+  if (rgb) return Number(rgb[1]) <= 29 && Number(rgb[2]) <= 29 && Number(rgb[3]) <= 29;
+  return false;
+}
+
+// Scoped to SafeHtml's sanitize call only (hooks are global on the DOMPurify
+// singleton — the composer's paste sanitizer must NOT rewrite outgoing HTML).
+let dropNearBlackColors = false;
+DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+  if (!dropNearBlackColors || !node.getAttribute) return;
+  if (node.tagName === 'FONT' && isNearBlackColor(node.getAttribute('color'))) {
+    node.removeAttribute('color');
+  }
+  const style = node.getAttribute('style');
+  if (!style || !/color/i.test(style)) return;
+  // Split/rejoin on ';' is lossless here: we only remove exact `color:`
+  // declarations, whose values can never contain a ';' (unlike e.g. a
+  // background data: URI, which passes through untouched).
+  const kept = style.split(';').filter((decl) => {
+    const i = decl.indexOf(':');
+    if (i < 0) return decl.trim() !== '';
+    if (decl.slice(0, i).trim().toLowerCase() !== 'color') return true;
+    return !isNearBlackColor(decl.slice(i + 1));
+  });
+  const next = kept.join(';');
+  if (next.replace(/[;\s]/g, '') === '') node.removeAttribute('style');
+  else if (next !== style) node.setAttribute('style', next);
+});
+
+// Does the SANITIZED + NEUTRALIZED markup still carry author colours? The
+// `(?:[^"]*[;\s])?` guard requires attr-start / `;` / whitespace right before
+// `color`, so `border-color:` / `outline-color:` never false-positive. (The
+// plan wrote the guard as `(?:^|[;\s])` — but `^` anchors the whole string,
+// never the attr start, so `style="color:red"` would slip through; this is
+// the equivalent that actually matches attr-start.)
+const COLOR_HINT_RE = /style="(?:[^"]*[;\s])?(?:color|background(?:-color)?)\s*:|<font[^>]*\bcolor\s*=|\sbgcolor\s*=|\sbackground\s*="/i;
+
 /** Sanitized HTML rendering for email/description bodies. */
 export function SafeHtml({ html, className = '' }) {
-  const clean = DOMPurify.sanitize(String(html || ''), {
-    FORBID_TAGS: ['style', 'form', 'input', 'button'],
-    FORBID_ATTR: ['onerror', 'onclick', 'onload'],
-    ADD_ATTR: ['target'],
-  });
+  // Memoized: parents re-render often (SSE ticks, composer keystrokes) and
+  // re-sanitizing a long thread body each time was pure waste.
+  const { clean, variantClass } = useMemo(() => {
+    let sanitized;
+    dropNearBlackColors = true;
+    try {
+      sanitized = DOMPurify.sanitize(String(html || ''), {
+        FORBID_TAGS: ['style', 'form', 'input', 'button'],
+        FORBID_ATTR: ['onerror', 'onclick', 'onload'],
+        ADD_ATTR: ['target'],
+      });
+    } finally {
+      dropNearBlackColors = false;
+    }
+    return {
+      clean: sanitized,
+      variantClass: COLOR_HINT_RE.test(sanitized) ? 'tp-rich-body--paper' : 'tp-rich-body--themed',
+    };
+  }, [html]);
   return (
     <div
-      // Dark mode: .tp-rich-body is a WHITE content well (index.css) — the
-      // body colour and the link blue are the light-well values on purpose;
-      // never add a `dark:` text twin here (it would paint the well's text).
-      className={`tp-rich-body text-sm text-foreground/85 break-words [&_a]:text-blue-600 [&_a]:underline [&_img]:max-w-full [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground [&_p]:my-1.5 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 ${className}`}
+      // Dark mode (Phase DW, QA 08-31 #5): conditional rendering. Bodies with
+      // no surviving author colours get `--themed` (fully dark-themed via
+      // index.css); bodies with real inline colours get `--paper` (dimmed
+      // slate panel — never pure white). The base `tp-rich-body` class keeps
+      // the shared layout rules (overflow containment, data tables). Light
+      // mode is unchanged. The `[&_a]` blue is the light value; the themed
+      // dark link colour comes from `.dark .tp-rich-body--themed a` in CSS.
+      className={`tp-rich-body ${variantClass} text-sm text-foreground/85 break-words [&_a]:text-blue-600 [&_a]:underline [&_img]:max-w-full [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground [&_p]:my-1.5 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 ${className}`}
       // Sanitized above with DOMPurify — the only way to render email HTML faithfully.
       dangerouslySetInnerHTML={{ __html: clean }}
     />
