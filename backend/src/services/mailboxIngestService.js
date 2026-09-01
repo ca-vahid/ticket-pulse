@@ -11,6 +11,31 @@ import { sseManager } from '../routes/sse.routes.js';
 const TICK_MS = Number(process.env.MAILBOX_INGEST_TICK_MS || 30 * 1000);
 const FIRST_LOOKBACK_MS = 15 * 60 * 1000; // fresh connections look back 15 minutes
 const MAX_CREATES_PER_SENDER_PER_CYCLE = 3;
+// Poller demotion (MB-2d): a mailbox with a live Graph subscription gets its
+// mail pushed within seconds, so the poller only runs as a delta/catch-up
+// reconciliation every 5 min by default (clamped 1–15 min). Connections
+// without a subscription keep their own pollIntervalSec cadence.
+export const CATCHUP_INTERVAL_MS = Math.min(
+  15 * 60 * 1000,
+  Math.max(60 * 1000, Number(process.env.MAILBOX_CATCHUP_INTERVAL_MS) || 5 * 60 * 1000),
+);
+
+/**
+ * True when the connection's Graph subscription is live: an id, status
+ * 'active' and an expiry still in the future. Anything else (renewing,
+ * error, expired, never created) means the poller is the only inbound lane.
+ */
+export function hasActiveSubscription(connection, now = Date.now()) {
+  if (!connection?.subscriptionId || connection.notificationStatus !== 'active') return false;
+  const expires = connection.subscriptionExpiresAt ? new Date(connection.subscriptionExpiresAt).getTime() : 0;
+  return Number.isFinite(expires) && expires > now;
+}
+
+/** Poll cadence for a connection: catch-up interval when webhooks are live, else its own. */
+export function effectivePollIntervalMs(connection, now = Date.now()) {
+  if (hasActiveSubscription(connection, now)) return CATCHUP_INTERVAL_MS;
+  return Math.max(15, Number(connection?.pollIntervalSec) || 60) * 1000;
+}
 
 const SYSTEM_ACTOR = { email: 'mailbox@ticketpulse.internal', name: 'Ticket Pulse Mail', role: 'system', technicianId: null };
 
@@ -54,11 +79,101 @@ export function emailRecipients(email) {
   return { to_emails: to, cc_emails: cc };
 }
 
+/** Split a recipient header value / list item into bare lowercase addresses. */
+function extractAddresses(raw) {
+  if (raw === null || raw === undefined) return [];
+  const parts = Array.isArray(raw) ? raw : String(raw).split(/[,;]/);
+  const out = [];
+  for (const part of parts) {
+    const s = String(part || '').trim();
+    if (!s) continue;
+    const angle = s.match(/<([^<>]+)>/);
+    const address = (angle ? angle[1] : s).trim().toLowerCase();
+    if (address.includes('@')) out.push(address);
+  }
+  return out;
+}
+
+const PLUS_TAG_RE = /^([^@\s<>+]+)\+tp(\d+)@([^@\s<>]+)$/i;
+
+/**
+ * Plus-address reply token (MB-1c, ingest rung 1.5). Outbound Graph sends
+ * carry `Reply-To: <mailboxLocal>+tp<n>@<domain>`; Exchange Online delivers
+ * plus addresses to the base mailbox, so the tag comes back on the reply's
+ * To (or Cc / Delivered-To / X-Original-To after a relay hop).
+ *
+ * Rules: every candidate recipient is normalized to a bare lowercase address;
+ * only `<local>+tp<digits>@<domain>` shapes count; when the connection's
+ * mailbox address is known the base `<local>@<domain>` MUST equal it (a tag
+ * on some other mailbox's address is not ours); returns distinct native TP
+ * numbers in encounter order (To before Cc before envelope headers).
+ */
+export function plusAddressTicketNumbers(email, mailboxAddress = null) {
+  const base = String(mailboxAddress || '').trim().toLowerCase();
+  const candidates = [
+    ...extractAddresses(email?.to),
+    ...extractAddresses(email?.cc),
+    ...extractAddresses(email?.deliveredTo),
+    ...extractAddresses(email?.xOriginalTo),
+  ];
+  const numbers = [];
+  for (const address of candidates) {
+    const m = address.match(PLUS_TAG_RE);
+    if (!m) continue;
+    if (base && `${m[1]}@${m[3]}`.toLowerCase() !== base) continue;
+    const n = Number(m[2]);
+    if (Number.isInteger(n) && n > 0 && !numbers.includes(n)) numbers.push(n);
+  }
+  return numbers;
+}
+
+// Mirrors ticketService's emailListSchema (`.max(10)`) — the "Also for" cap
+// the manual Cc editor enforces; inbound merges never exceed it.
+export const MAX_CC_EMAILS = 10;
+const EMAIL_SHAPE = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
+
+/**
+ * Inbound Cc merge (MB-1d), pure part. Unions the reply's Cc — and To other
+ * than the mailbox itself — into the ticket's existing ccEmails. Same
+ * normalization as the manual editor (trim, lowercase, dedupe, ≤10):
+ * existing entries keep their order and are never removed; the mailbox
+ * address (and any `mailbox+tag@` variant), every `exclude` address
+ * (requester, known agents), malformed addresses and duplicates are
+ * skipped; new entries append until the cap. Returns the previous/next
+ * lists plus what was added/dropped so the caller can audit + persist.
+ */
+export function mergeInboundCc(existing, email, { mailboxAddress = null, exclude = [] } = {}) {
+  const previous = [...new Set(
+    (Array.isArray(existing) ? existing : []).map((e) => String(e || '').trim().toLowerCase()).filter(Boolean),
+  )];
+  const base = String(mailboxAddress || '').trim().toLowerCase();
+  const [baseLocal, baseDomain] = base.split('@');
+  const isMailbox = (address) => {
+    if (!base) return false;
+    if (address === base) return true;
+    const m = address.match(/^([^@+]+)\+[^@]*@(.+)$/);
+    return Boolean(m) && m[1] === baseLocal && m[2] === baseDomain;
+  };
+  const skip = new Set([
+    ...previous,
+    ...(Array.isArray(exclude) ? exclude : []).map((e) => String(e || '').trim().toLowerCase()).filter(Boolean),
+  ]);
+  const candidates = [];
+  for (const address of [...extractAddresses(email?.to), ...extractAddresses(email?.cc)]) {
+    if (!EMAIL_SHAPE.test(address) || skip.has(address) || isMailbox(address) || candidates.includes(address)) continue;
+    candidates.push(address);
+  }
+  const room = Math.max(0, MAX_CC_EMAILS - previous.length);
+  const added = candidates.slice(0, room);
+  return { previous, next: [...previous, ...added], added, dropped: candidates.slice(room) };
+}
+
 /**
  * Email → ticket ingestion for native ticketing.
  *
  * Matching ladder (per inbound message):
  *  1. In-Reply-To / References ↔ stored thread-entry emailMessageIds
+ *  1.5 `<mailbox>+tp<n>@` plus-address tag on To/Cc/Delivered-To (our Reply-To)
  *  2. "TP-1042" ticket ref in the subject (TP-born tickets)
  *  3. "#12345" FreshService ref in the subject → SKIPPED here (FreshService
  *     receives the same mail itself; ingesting would duplicate the thread)
@@ -70,6 +185,14 @@ class MailboxIngestService {
   constructor() {
     this._timer = null;
     this._running = false;
+    // Connection ids whose next poll must run NOW regardless of cadence
+    // (lifecycle `missed`/`subscriptionRemoved`, a failed webhook fetch).
+    this._catchUpRequested = new Set();
+  }
+
+  /** Force the next tick to reconcile this connection (delta or inbox fetch). */
+  requestCatchUp(connectionId) {
+    if (connectionId) this._catchUpRequested.add(Number(connectionId));
   }
 
   isEnabled() {
@@ -99,10 +222,12 @@ class MailboxIngestService {
         where: { isEnabled: true, mode: { in: ['ingest', 'both'] }, workspace: { isActive: true, nativeTicketingEnabled: true } },
       });
       const due = connections.filter((c) => {
+        if (this._catchUpRequested.has(c.id)) return true;
         const last = c.lastCheckedAt ? new Date(c.lastCheckedAt).getTime() : 0;
-        return now - last >= (c.pollIntervalSec || 60) * 1000;
+        return now - last >= effectivePollIntervalMs(c, now);
       });
       for (const connection of due) {
+        this._catchUpRequested.delete(connection.id);
         await this.pollConnection(connection).catch((err) => {
           logger.warn(`Mailbox poll failed for ${connection.address} (non-fatal): ${err.message}`);
         });
@@ -113,7 +238,32 @@ class MailboxIngestService {
     }
   }
 
+  /**
+   * One reconciliation pass. With a delta cursor (MB-2: bootstrapped by the
+   * subscription manager) the pass is a cheap delta round — ids only, then
+   * fetch-by-id for anything not already ingested. Without one it is the
+   * original "inbox since lastMessageAt" fetch. Both feed the same per-message
+   * pipeline (ingestSingleMessage) the webhook worker uses.
+   */
   async pollConnection(connection) {
+    if (connection.deltaLink) {
+      try {
+        return await this._pollDelta(connection);
+      } catch (err) {
+        if (!err?.deltaReset) throw err;
+        // Token expired/invalid: drop it, fall back to the inbox fetch for this
+        // pass; the subscription manager bootstraps a fresh cursor on its tick.
+        logger.warn(`Mailbox ${connection.address}: delta cursor rejected by Graph — resetting to inbox fetch`);
+        await prisma.mailboxConnection.update({
+          where: { id: connection.id }, data: { deltaLink: null },
+        }).catch(() => {});
+        connection = { ...connection, deltaLink: null };
+      }
+    }
+    return this._pollInbox(connection);
+  }
+
+  async _pollInbox(connection) {
     const since = connection.lastMessageAt
       ? new Date(connection.lastMessageAt)
       : new Date(Date.now() - FIRST_LOOKBACK_MS);
@@ -122,29 +272,11 @@ class MailboxIngestService {
     try {
       emails = await graphMailClient.getInboxMessagesForIngest(connection.address, since, 25);
     } catch (err) {
-      await prisma.mailboxConnection.update({
-        where: { id: connection.id },
-        data: { lastCheckedAt: new Date(), lastError: String(err.message).slice(0, 2000), lastErrorAt: new Date() },
-      }).catch(() => {});
+      await this._recordPollError(connection, err);
       throw err;
     }
 
-    const senderCreates = new Map();
-    let latest = since;
-    const results = { matchedReplies: 0, created: 0, skipped: 0 };
-
-    for (const email of emails) {
-      if (email.receivedAt > latest) latest = email.receivedAt;
-      try {
-        const outcome = await this.processEmail(connection, email, senderCreates);
-        if (outcome === 'reply') results.matchedReplies += 1;
-        else if (outcome === 'created') results.created += 1;
-        else results.skipped += 1;
-      } catch (err) {
-        results.skipped += 1;
-        logger.warn(`Mailbox ingest failed for message ${email.id} (${connection.address}): ${err.message}`);
-      }
-    }
+    const { results, latest } = await this._ingestBatch(connection, emails, since);
 
     await prisma.mailboxConnection.update({
       where: { id: connection.id },
@@ -157,7 +289,98 @@ class MailboxIngestService {
     return results;
   }
 
+  async _pollDelta(connection) {
+    let round;
+    try {
+      round = await graphMailClient.getInboxDeltaChanges(connection.address, connection.deltaLink);
+    } catch (err) {
+      if (!err?.deltaReset) await this._recordPollError(connection, err);
+      throw err;
+    }
+
+    // Delta is collection-level: it also reports read/unread flips and
+    // removals for old mail. Skip removals and anything already ingested
+    // BEFORE spending a Graph GET on it.
+    const emails = [];
+    for (const item of round.items) {
+      if (item.removed || !item.id) continue;
+      if (item.internetMessageId && await this._alreadyIngested(connection, item.internetMessageId)) continue;
+      try {
+        const email = await graphMailClient.getMessageForIngest(connection.address, item.id);
+        if (email) emails.push(email);
+      } catch (err) {
+        logger.warn(`Mailbox ${connection.address}: delta fetch-by-id failed for ${item.id} (non-fatal): ${err.message}`);
+      }
+    }
+    emails.sort((a, b) => (a.receivedAt?.getTime() || 0) - (b.receivedAt?.getTime() || 0));
+
+    const since = connection.lastMessageAt ? new Date(connection.lastMessageAt) : new Date(0);
+    const { results, latest } = await this._ingestBatch(connection, emails, since);
+
+    await prisma.mailboxConnection.update({
+      where: { id: connection.id },
+      data: {
+        lastCheckedAt: new Date(),
+        lastMessageAt: latest,
+        lastError: null,
+        lastErrorAt: null,
+        ...(round.deltaLink ? { deltaLink: round.deltaLink } : {}),
+      },
+    }).catch(() => {});
+
+    if (emails.length > 0) {
+      logger.info(`Mailbox ${connection.address} (delta): ${emails.length} message(s) → ${results.matchedReplies} replies, ${results.created} new tickets, ${results.skipped} skipped`);
+    }
+    return { ...results, delta: true, changes: round.items.length };
+  }
+
+  async _ingestBatch(connection, emails, since) {
+    const senderCreates = new Map();
+    let latest = since;
+    const results = { matchedReplies: 0, created: 0, skipped: 0 };
+    for (const email of emails) {
+      if (email.receivedAt > latest) latest = email.receivedAt;
+      try {
+        const outcome = await this.ingestSingleMessage(connection, email, senderCreates);
+        if (outcome === 'reply') results.matchedReplies += 1;
+        else if (outcome === 'created') results.created += 1;
+        else results.skipped += 1;
+      } catch (err) {
+        results.skipped += 1;
+        logger.warn(`Mailbox ingest failed for message ${email.id} (${connection.address}): ${err.message}`);
+      }
+    }
+    return { results, latest };
+  }
+
+  async _recordPollError(connection, err) {
+    await prisma.mailboxConnection.update({
+      where: { id: connection.id },
+      data: { lastCheckedAt: new Date(), lastError: String(err.message).slice(0, 2000), lastErrorAt: new Date() },
+    }).catch(() => {});
+  }
+
+  /** Dedupe probe shared by the delta lane and the webhook worker. */
+  async _alreadyIngested(connection, internetMessageId) {
+    if (!internetMessageId) return false;
+    const seen = await prisma.ticketThreadEntry.findFirst({
+      where: { emailMessageId: internetMessageId, workspaceId: connection.workspaceId },
+      select: { id: true },
+    });
+    return Boolean(seen);
+  }
+
+  /** Back-compat alias — the pipeline entry point is ingestSingleMessage. */
   async processEmail(connection, email, senderCreates = new Map()) {
+    return this.ingestSingleMessage(connection, email, senderCreates);
+  }
+
+  /**
+   * THE per-message pipeline (poller, delta lane and webhook worker all end
+   * here): loop guards → dedupe by internetMessageId → matching ladder →
+   * reply ingest or new ticket. Returns 'reply' | 'created' | 'skipped'.
+   */
+  async ingestSingleMessage(connection, email, senderCreates = new Map()) {
     const loopReason = looksLikeLoopMail(email, connection.address);
     if (loopReason) {
       logger.debug(`Mailbox ingest skipping message (${loopReason}): ${email.subject}`);
@@ -165,15 +388,9 @@ class MailboxIngestService {
     }
 
     // Dedupe: has this exact message already been ingested?
-    if (email.internetMessageId) {
-      const seen = await prisma.ticketThreadEntry.findFirst({
-        where: { emailMessageId: email.internetMessageId, workspaceId: connection.workspaceId },
-        select: { id: true },
-      });
-      if (seen) return 'skipped';
-    }
+    if (await this._alreadyIngested(connection, email.internetMessageId)) return 'skipped';
 
-    const match = await this.matchEmailToTicket(connection.workspaceId, email);
+    const match = await this.matchEmailToTicket(connection.workspaceId, email, connection.address);
     if (match?.skip) return 'skipped';
     if (match?.ticket) {
       await this.ingestReply(connection, match.ticket, email, match.via);
@@ -193,7 +410,7 @@ class MailboxIngestService {
     return 'created';
   }
 
-  async matchEmailToTicket(workspaceId, email) {
+  async matchEmailToTicket(workspaceId, email, mailboxAddress = null) {
     // 1. Threading headers ↔ our stored Message-IDs
     const refs = referencedMessageIds(email);
     if (refs.length > 0) {
@@ -206,6 +423,32 @@ class MailboxIngestService {
         const ticket = await prisma.ticket.findUnique({ where: { id: entry.ticketId } });
         if (ticket) return { ticket, via: 'threading_headers' };
       }
+    }
+
+    // 1b. Workflow/lifecycle emails (ticket.created acks — the highest-volume
+    // lane) have NO thread entry: their outbound Message-ID lives only in
+    // notification_deliveries.provider_message_id (Graph lane). Match the
+    // same angle-bracketed ids there (plus the bare form, in case a lane
+    // stores the id without brackets) — one query, ticket_id links directly.
+    if (refs.length > 0) {
+      const bare = refs.map((r) => r.replace(/^<|>$/g, ''));
+      const delivery = await prisma.notificationDelivery.findFirst({
+        where: { workspaceId, providerMessageId: { in: [...new Set([...refs, ...bare])] } },
+        select: { ticketId: true },
+        orderBy: { id: 'desc' },
+      });
+      if (delivery?.ticketId) {
+        const ticket = await prisma.ticket.findUnique({ where: { id: delivery.ticketId } });
+        if (ticket) return { ticket, via: 'notification_delivery' };
+      }
+    }
+
+    // 1.5 Plus-address tag on the recipient (`mailbox+tp1042@…`, our Reply-To)
+    for (const nativeNumber of plusAddressTicketNumbers(email, mailboxAddress)) {
+      const ticket = await prisma.ticket.findFirst({
+        where: { workspaceId, nativeNumber, origin: TICKET_ORIGIN.TICKETPULSE },
+      });
+      if (ticket) return { ticket, via: 'plus_address' };
     }
 
     const subject = String(email.subject || '');
@@ -323,7 +566,27 @@ class MailboxIngestService {
       }).catch(() => {});
     }
 
-    await prisma.ticket.update({ where: { id: ticket.id }, data: { updatedAt: now, lastRealActivityAt: now } });
+    // Inbound Cc merge (MB-1d): whoever the requester looped in mid-thread
+    // keeps receiving agent replies. TP-born only — FS-born ccEmails are
+    // FreshService-owned. Non-fatal: a merge failure never loses the reply.
+    const ccMerge = ticket.origin === TICKET_ORIGIN.TICKETPULSE
+      ? await this._mergeReplyCc(connection, ticket, email).catch((err) => {
+        logger.warn(`Inbound Cc merge failed for ${ticketDisplayRef(ticket)} (non-fatal): ${err.message}`);
+        return null;
+      })
+      : null;
+    const ccAdded = Boolean(ccMerge?.added?.length);
+
+    await prisma.ticket.update({
+      where: { id: ticket.id },
+      data: {
+        updatedAt: now,
+        lastRealActivityAt: now,
+        // The FS fallback copy carries ccEmails as cc_emails — same mirror
+        // churn the manual "Also for" editor triggers.
+        ...(ccAdded ? { ccEmails: ccMerge.next, mirrorState: 'pending' } : {}),
+      },
+    });
     await ticketActivityRepository.create({
       ticketId: ticket.id,
       activityType: 'requester_reply',
@@ -331,9 +594,32 @@ class MailboxIngestService {
       performedAt: now,
       details: { via, emailMessageId: email.internetMessageId, source: 'email_inbound' },
     }).catch(() => {});
+    if (ccAdded) {
+      // Same audit shape the manual Cc editor writes (ticketService
+      // updateTicket → _audit 'cc_changed' {from, to}) so the activity
+      // timeline renders "additional requesters changed" for both paths.
+      await ticketActivityRepository.create({
+        ticketId: ticket.id,
+        activityType: 'cc_changed',
+        performedBy: SYSTEM_ACTOR.name,
+        performedAt: now,
+        details: {
+          source: 'email_inbound',
+          actorEmail: SYSTEM_ACTOR.email,
+          from: ccMerge.previous,
+          to: ccMerge.next,
+          added: ccMerge.added,
+          ...(ccMerge.dropped.length ? { droppedOverCap: ccMerge.dropped } : {}),
+          via: 'inbound_reply',
+          replyFrom: email.from,
+          entryId: entry.id,
+        },
+      }).catch(() => {});
+    }
 
     if (ticket.origin === TICKET_ORIGIN.TICKETPULSE) {
       await mirrorService.enqueueThreadEntry(ticket.workspaceId, ticket.id, entry.id);
+      if (ccAdded) await mirrorService.enqueueFieldSync?.(ticket.workspaceId, ticket.id)?.catch?.(() => {});
     }
 
     // Workflow trigger: "Requester replied" (drives the seeded reopen workflow).
@@ -370,6 +656,36 @@ class MailboxIngestService {
 
     logger.info(`Inbound email matched ${ticketDisplayRef(ticket)} via ${via} (from ${email.from})`);
     return entry;
+  }
+
+  /**
+   * Resolve the exclusions for the inbound Cc merge (MB-1d) and run it:
+   * the mailbox itself (handled inside mergeInboundCc), the ticket's
+   * requester (they are the To of every reply) and known agent addresses in
+   * the workspace (agents read the thread in-app; cc'ing them would echo
+   * every reply back into the mailbox). Returns null when nothing changes.
+   */
+  async _mergeReplyCc(connection, ticket, email) {
+    const probe = mergeInboundCc(ticket.ccEmails, email, { mailboxAddress: connection.address });
+    if (probe.added.length === 0 && probe.dropped.length === 0) return null;
+
+    const exclude = [];
+    let requesterEmail = ticket.requester?.email || null;
+    if (!requesterEmail && ticket.requesterId) {
+      const requester = await prisma.requester.findUnique({ where: { id: ticket.requesterId }, select: { email: true } });
+      requesterEmail = requester?.email || null;
+    }
+    if (requesterEmail) exclude.push(requesterEmail);
+
+    const candidates = [...probe.added, ...probe.dropped];
+    const agents = await prisma.technician.findMany({
+      where: { workspaceId: ticket.workspaceId, email: { in: candidates, mode: 'insensitive' } },
+      select: { email: true },
+    });
+    for (const agent of agents) if (agent?.email) exclude.push(agent.email);
+
+    const merged = mergeInboundCc(ticket.ccEmails, email, { mailboxAddress: connection.address, exclude });
+    return merged.added.length ? merged : null;
   }
 
   async createTicketFromEmail(connection, email) {

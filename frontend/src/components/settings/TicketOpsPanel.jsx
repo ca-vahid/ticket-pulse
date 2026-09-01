@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, Archive, ArrowDown, ArrowUp, CalendarClock, Check, Eye, EyeOff, FileText, FormInput, Globe as GlobeGlyph, LayoutGrid, Layers, Loader2, Pencil, Plus, RefreshCw, RotateCcw, Sparkles, Star, StickyNote, Tag as TagGlyph, Timer, Trash2, Users, Wand2 } from 'lucide-react';
+import { AlertTriangle, Archive, ArrowDown, ArrowUp, CalendarClock, Check, Eye, EyeOff, FileText, FormInput, Globe as GlobeGlyph, LayoutGrid, Layers, Loader2, Pencil, Plus, RefreshCw, Repeat, RotateCcw, Sparkles, Star, StickyNote, Tag as TagGlyph, Timer, Trash2, Users, Wand2 } from 'lucide-react';
 import { settingsAPI, ticketsAPI, workspaceAPI } from '../../services/api';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 import { SOURCE_OPTIONS, TAG_CHIP_TONES, TYPE_COLOR_TONES } from '../tickets/ticketUi';
@@ -1768,6 +1768,154 @@ export function AdditionalRequestersSection() {
   );
 }
 
+// ------------------------------------------------ API resubmissions (Phase PA)
+
+/**
+ * Workspace-level resubmission matching for POST /api/v1/tickets (Mega 08-31
+ * Phase PA, QA #4): a Power Apps / Power Automate form that is re-submitted
+ * should UPDATE the existing ticket, not create a duplicate. `externalRef` in
+ * the payload is the first-class key; this card covers senders that don't
+ * send one yet — the custom-field bridge (derive the ref from a field they
+ * already post, e.g. Power App Record Id) and the deprecated requester+subject
+ * heuristic (default off, window-bounded, never matches on ambiguity).
+ */
+export function ApiResubmissionSection() {
+  const [cfg, setCfg] = useState(null); // null = loading
+  const [fields, setFields] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState(null);
+  const [windowDraft, setWindowDraft] = useState('');
+
+  const unwrap = (res) => res.data?.data ?? res.data ?? {};
+  useEffect(() => {
+    settingsAPI.getApiResubmission()
+      .then((res) => { const c = unwrap(res); setCfg(c); setWindowDraft(String(c.apiResubmissionMatchWindowDays ?? 7)); })
+      .catch(() => { setCfg({ apiResubmissionMatchEnabled: false, apiResubmissionMatchWindowDays: 7, externalRefCustomFieldKey: null }); setWindowDraft('7'); });
+    settingsAPI.getCustomFields().then((res) => setFields(res.data?.data || res.data || [])).catch(() => {});
+  }, []);
+
+  const persist = async (patch) => {
+    if (!cfg || busy) return;
+    setBusy(true); setError(null); setSaved(false);
+    try {
+      const res = await settingsAPI.updateApiResubmission(patch);
+      const next = unwrap(res);
+      setCfg(next);
+      setWindowDraft(String(next.apiResubmissionMatchWindowDays ?? 7));
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e) { setError(e.response?.data?.message || e.message); }
+    setBusy(false);
+  };
+
+  const commitWindow = () => {
+    const days = Number(windowDraft);
+    if (!cfg || !Number.isInteger(days) || days < 1 || days > 90) { setWindowDraft(String(cfg?.apiResubmissionMatchWindowDays ?? 7)); return; }
+    if (days !== cfg.apiResubmissionMatchWindowDays) persist({ apiResubmissionMatchWindowDays: days });
+  };
+
+  const heuristicOn = cfg?.apiResubmissionMatchEnabled === true;
+  const bridgeKey = cfg?.externalRefCustomFieldKey || '';
+  const bridgeField = fields.find((f) => f.key === bridgeKey) || null;
+
+  return (
+    <SectionCard
+      icon={Repeat}
+      title="API resubmissions (Power Apps / integrations)"
+      hint='Treat a resubmitted Power Apps / API request as an update to the existing ticket instead of a new one. Senders that include externalRef in POST /api/v1/tickets always match exactly; the options here cover payloads that do not carry one yet. Status and assignee are never changed by a resubmission.'
+    >
+      {cfg === null ? (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> Loading…</div>
+      ) : (
+        <div className="space-y-3">
+          <div className="rounded-lg border border-border bg-muted/35 px-3 py-2.5">
+            <label htmlFor="api-resubmission-key" className="text-xs font-bold text-foreground/85">Match on a custom field</label>
+            <p className="text-[11px] text-muted-foreground mt-0.5 max-w-lg">
+              Derive the record key from a field the sender already posts (e.g. <span className="font-semibold text-muted-foreground">Power App Record Id</span>).
+              A re-POST carrying the same value updates the earlier ticket — no change needed on the Power Apps side.
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <select
+                id="api-resubmission-key"
+                value={bridgeKey}
+                onChange={(e) => persist({ externalRefCustomFieldKey: e.target.value || null })}
+                disabled={busy}
+                className="tp-focus-ring h-9 min-w-[16rem] rounded-lg border border-input bg-card px-3 text-sm text-foreground disabled:opacity-60"
+              >
+                <option value="">Off — match on externalRef only</option>
+                {fields.map((f) => (
+                  <option key={f.id ?? f.key} value={f.key}>{f.label} ({f.key})</option>
+                ))}
+                {bridgeKey && !bridgeField && <option value={bridgeKey}>{bridgeKey} (retired field)</option>}
+              </select>
+              {bridgeKey && (
+                <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700 dark:bg-blue-500/15 dark:text-blue-200">
+                  refs stored as pa-&lt;value&gt;
+                </span>
+              )}
+            </div>
+            {fields.length === 0 && (
+              <p className="mt-1.5 text-[11px] italic text-muted-foreground/75">No custom fields yet — they appear here once a sender posts customFields or you add one below.</p>
+            )}
+          </div>
+
+          <div className="rounded-lg border border-border bg-muted/35 px-3 py-2.5">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-bold text-foreground/85">
+                  Also match by requester + subject
+                  <span className="ml-2 inline-flex items-center rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:bg-amber-500/15 dark:text-amber-200">Transition only</span>
+                </p>
+                <p className="text-[11px] text-muted-foreground mt-0.5 max-w-lg">
+                  Fallback for senders with neither externalRef nor a matching custom field: same requester, identical subject, still Open/Pending,
+                  created by the same API key within the window. When more than one ticket fits, a new ticket is created and the response is flagged
+                  ambiguous — never a guess. Turn off once the sender includes externalRef.
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={heuristicOn}
+                aria-label={`Requester and subject matching ${heuristicOn ? 'on' : 'off'}`}
+                onClick={() => persist({ apiResubmissionMatchEnabled: !heuristicOn })}
+                disabled={busy}
+                className={`tp-focus-ring relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-60 ${heuristicOn ? 'bg-blue-600' : 'bg-muted-foreground/40'}`}
+              >
+                <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-card shadow-subtle transition-transform ${heuristicOn ? 'translate-x-4' : 'translate-x-0.5'}`} />
+              </button>
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              <label htmlFor="api-resubmission-window" className="text-[11px] font-semibold text-muted-foreground">Window</label>
+              <input
+                id="api-resubmission-window"
+                type="number"
+                min={1}
+                max={90}
+                value={windowDraft}
+                onChange={(e) => setWindowDraft(e.target.value)}
+                onBlur={commitWindow}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitWindow(); } }}
+                disabled={busy || !heuristicOn}
+                className="tp-focus-ring h-8 w-20 rounded-lg border border-input bg-card px-2 text-sm text-foreground disabled:opacity-50"
+              />
+              <span className="text-[11px] text-muted-foreground">days (1–90)</span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 text-[11px]">
+            {saved && <span className="inline-flex items-center gap-1 font-semibold text-emerald-600 dark:text-emerald-300"><Check className="h-3.5 w-3.5" aria-hidden="true" /> Saved</span>}
+            {error && <span className="inline-flex items-center gap-1 font-semibold text-red-600 dark:text-red-300"><AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" /> {error}</span>}
+            <span className="text-muted-foreground/75">
+              Matches return <code className="rounded bg-muted px-1">200 resubmitted:true</code> with the changed fields; a fresh create stays <code className="rounded bg-muted px-1">201</code>. Full contract: <code className="rounded bg-muted px-1">/api/v1/docs</code>.
+            </span>
+          </div>
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
 export default function TicketOpsPanel() {
   return (
     <div className="space-y-4 animate-fadeIn">
@@ -1785,6 +1933,9 @@ export default function TicketOpsPanel() {
       <TicketFormSection />
       <AdditionalRequestersSection />
       <CustomFieldsSection />
+      {/* API resubmissions right under Custom fields: its picker lists the
+          definitions the card above manages (Phase PA). */}
+      <ApiResubmissionSection />
       <CreateTemplatesSection />
     </div>
   );

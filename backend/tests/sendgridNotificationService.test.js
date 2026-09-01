@@ -323,3 +323,67 @@ describe('sendgridNotificationService', () => {
     })).rejects.toThrow('SendGrid is not configured');
   });
 });
+
+// Mega 08-31 Phase MB-1b/1h: our own Message-ID (rung-1 anchor for replies to
+// SendGrid-sent mail) + In-Reply-To / References on both provider paths.
+describe('sendgridNotificationService threading headers (Phase MB-1h)', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  test('API path: mints <tp-<ticketId>-…@<from domain>> when given ticketIdForMessageId, sends it + In-Reply-To/References as headers, echoes messageId', async () => {
+    settingsRepositoryMock.getSendGridConfig.mockResolvedValue({ apiKey: 'SG.test', fromEmail: 'ticketpulse@bgcengineering.ca' });
+    axiosPostMock.mockResolvedValue({ headers: { 'x-message-id': 'sg-1' } });
+
+    const result = await sendEmail({
+      to: 'rita@example.com', subject: 'Re: Laptop [TP-1042]', html: '<p>On it</p>',
+      ticketIdForMessageId: 501, inReplyTo: '<in@requester>', references: ['<a@x>', 'in@requester'],
+    });
+
+    expect(result.messageId).toMatch(/^<tp-501-[a-z0-9.]+@bgcengineering\.ca>$/);
+    expect(result.providerMessageId).toBe('sg-1');
+    const payload = axiosPostMock.mock.calls[0][1];
+    expect(payload.headers).toEqual({
+      'Message-ID': result.messageId,
+      'In-Reply-To': '<in@requester>',
+      References: '<a@x> <in@requester>',
+    });
+    expect(payload.reply_to).toBeUndefined();
+  });
+
+  test('API path: an explicit messageId wins over minting; the from override drives the minted domain', async () => {
+    settingsRepositoryMock.getSendGridConfig.mockResolvedValue({ apiKey: 'SG.test', fromEmail: 'ticketpulse@bgcengineering.ca' });
+    axiosPostMock.mockResolvedValue({ headers: {} });
+
+    const explicit = await sendEmail({ to: 'a@example.com', subject: 'S', text: 'B', messageId: 'custom-1@bgc.ca', ticketIdForMessageId: 9 });
+    expect(explicit.messageId).toBe('<custom-1@bgc.ca>');
+    expect(axiosPostMock.mock.calls[0][1].headers).toEqual({ 'Message-ID': '<custom-1@bgc.ca>' });
+
+    const minted = await sendEmail({ to: 'a@example.com', subject: 'S', text: 'B', from: 'ap@other-domain.com', ticketIdForMessageId: 9 });
+    expect(minted.messageId).toMatch(/@other-domain\.com>$/);
+  });
+
+  test('API path: no threading inputs → no headers key at all (unchanged payload for existing callers)', async () => {
+    settingsRepositoryMock.getSendGridConfig.mockResolvedValue({ apiKey: 'SG.test', fromEmail: 'ticketpulse@bgcengineering.ca' });
+    axiosPostMock.mockResolvedValue({ headers: {} });
+    const result = await sendEmail({ to: 'a@example.com', subject: 'S', text: 'B' });
+    expect(axiosPostMock.mock.calls[0][1]).not.toHaveProperty('headers');
+    expect(result.messageId).toBeNull();
+  });
+
+  test('SMTP path: nodemailer gets messageId / inReplyTo / references natively', async () => {
+    settingsRepositoryMock.getSendGridConfig.mockResolvedValue({
+      apiKey: null, fromEmail: null, smtpConfigured: true, smtpHost: 'smtp.sendgrid.net', smtpPort: 587,
+      smtpUser: 'apikey', smtpPassword: 'smtp-secret', smtpFromEmail: 'ticketpulse@bgcengineering.ca',
+    });
+    sendMailMock.mockResolvedValue({ messageId: '<tp-501-abc@bgcengineering.ca>' });
+
+    const result = await sendEmail({
+      to: 'rita@example.com', subject: 'S', html: '<p>B</p>', ticketIdForMessageId: 501, inReplyTo: 'in@requester', references: ['<a@x>'],
+    });
+
+    const call = sendMailMock.mock.calls[0][0];
+    expect(call.messageId).toMatch(/^<tp-501-[a-z0-9.]+@bgcengineering\.ca>$/);
+    expect(call.inReplyTo).toBe('<in@requester>');
+    expect(call.references).toBe('<a@x>');
+    expect(result.messageId).toBe(call.messageId);
+  });
+});

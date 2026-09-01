@@ -8,11 +8,12 @@ import AppHeader from '../components/AppHeader';
 import MobileTabBar from '../components/nav/MobileTabBar';
 import { ticketsAPI } from '../services/api';
 import CcChips from '../components/tickets/CcChips';
-import RichTextEditor, { isRichContent } from '../components/tickets/RichTextEditor';
+import RichTextEditor, { isRichContent, sanitizeRichHtml } from '../components/tickets/RichTextEditor';
 import StagedFileChip from '../components/tickets/StagedFileChip';
 import ImageMarkupModal from '../components/tickets/ImageMarkupModal';
+import AutofillModal, { matchByName } from '../components/tickets/AutofillModal';
 import { PRIORITY_LABELS, SOURCE_OPTIONS, initials } from '../components/tickets/ticketUi';
-import RequesterTypeahead, { EMAIL_RE } from '../components/tickets/RequesterTypeahead';
+import RequesterTypeahead, { EMAIL_RE, toPickedRequester } from '../components/tickets/RequesterTypeahead';
 import { useTicketTypes } from '../hooks/useTicketTypes';
 
 const MAX_FILES = 5;
@@ -33,6 +34,47 @@ const TYPE_SELECTED_CLASSES = {
 
 const pad2 = (n) => String(n).padStart(2, '0');
 const toLocalDatetimeInput = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+
+const escapeHtml = (s) => String(s ?? '')
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+/** Plain narrative → paragraphs (blank line = new <p>, single newline = <br>). */
+const narrativeToHtml = (text) => String(text || '')
+  .trim()
+  .split(/\n{2,}/)
+  .map((para) => `<p>${escapeHtml(para).replace(/\n/g, '<br>')}</p>`)
+  .join('');
+
+/**
+ * Autofill's category hint may arrive as "Hardware" or "Hardware > Laptop"
+ * (also "/", "›", "→" separators). Resolve it against the workspace tree,
+ * case-insensitively; returns null when the top level has no match.
+ */
+const resolveCategoryHint = (hint, tree) => {
+  if (!hint || !Array.isArray(tree) || !tree.length) return null;
+  const parts = String(hint).split(/\s*(?:>|›|→|\/|»)\s*/).map((p) => p.trim()).filter(Boolean);
+  const topName = matchByName(parts[0], tree.map((c) => c.name));
+  const top = topName ? tree.find((c) => c.name === topName) : null;
+  if (!top) return null;
+  const subName = parts.length > 1 ? matchByName(parts[parts.length - 1], (top.subcategories || []).map((s) => s.name)) : null;
+  const sub = subName ? (top.subcategories || []).find((s) => s.name === subName) : null;
+  return { categoryId: String(top.id), subcategoryId: sub ? String(sub.id) : '' };
+};
+
+/**
+ * Type the text into the requester typeahead exactly as a person would — it
+ * owns its query state and exposes only focus() — so its debounced search
+ * opens with the candidates for the agent to confirm. (Follow-up: expose a
+ * setQuery on the typeahead's imperative handle and drop this.)
+ */
+const typeIntoRequesterSearch = (inputId, text) => {
+  const input = document.getElementById(inputId);
+  if (!input) return false;
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+  if (setter) setter.call(input, text); else input.value = text;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  input.focus();
+  return true;
+};
 
 /**
  * Full-page composer for creating a native (TP-born) ticket — its own route
@@ -97,6 +139,17 @@ export default function TicketCreate() {
   const fileInputRef = useRef(null);
   const pasteCountRef = useRef(0);
 
+  // ---- Autofill (Mega 08-31 Phase AF) ----
+  // touchedRef remembers which fields the AGENT set by hand (or via a
+  // template) so an autofill apply never clobbers them — it only fills gaps.
+  // A field cleared back to empty is untouched again.
+  const [autofillOpen, setAutofillOpen] = useState(false);
+  const [autofillNotice, setAutofillNotice] = useState(null);
+  const touchedRef = useRef(new Set());
+  const markTouched = (key, filled = true) => {
+    if (filled) touchedRef.current.add(key); else touchedRef.current.delete(key);
+  };
+
   // ---- Requester typeahead (shared RequesterTypeahead, Phase ET3) ----
   const [requester, setRequester] = useState(null); // {id?, name, email, hint, jobTitle, department, location, fromDirectory}
   const [rqQuery, setRqQuery] = useState(''); // typed text — a bare valid email is accepted without a pick
@@ -125,18 +178,101 @@ export default function TicketCreate() {
     const template = createTemplates.find((t) => t.id === templateId);
     if (!template) return;
     appliedTemplateRef.current = template;
-    if (template.subject) setSubject(template.subject);
+    // A template is the agent's deliberate pick — autofill treats its fields
+    // as touched too.
+    if (template.subject) { setSubject(template.subject); markTouched('subject'); }
     if (template.description) {
       const html = isRichContent(template.description)
         ? template.description
         : `<p>${String(template.description).replace(/\n/g, '<br>')}</p>`;
       setDescription(html);
       setDescriptionText(String(template.description));
+      markTouched('description');
     }
-    if (template.priority) setPriority(template.priority);
-    if (template.ticketType) setTicketType(template.ticketType);
-    if (template.internalCategoryId) setCategoryId(String(template.internalCategoryId));
+    if (template.priority) { setPriority(template.priority); markTouched('priority'); }
+    if (template.ticketType) { setTicketType(template.ticketType); markTouched('type'); }
+    if (template.internalCategoryId) { setCategoryId(String(template.internalCategoryId)); markTouched('category'); }
     if (template.internalSubcategoryId) setSubcategoryId(String(template.internalSubcategoryId));
+  };
+
+  /**
+   * Land the reviewed autofill proposals on the form (Phase AF). Mirrors
+   * applyCreateTemplate's "only touch what's SET" rule PLUS never overwrites a
+   * field the agent already filled. Requester is resolved through the real
+   * search: auto-picked ONLY on a single exact-email match, otherwise the
+   * typeahead opens pre-filled for the agent to confirm — a fuzzy name is
+   * never silently turned into a person.
+   */
+  const applyAutofill = async ({ result, selected, sourceHtml, sourceText, files: dumpFiles }) => {
+    const touched = touchedRef.current;
+    const want = (key) => Boolean(selected?.[key]) && !touched.has(key);
+    const notices = [];
+
+    if (want('subject') && result.subject) {
+      setSubject(String(result.subject).trim().slice(0, 500));
+    }
+
+    if (want('description') && result.description) {
+      const narrative = String(result.description).trim();
+      const dump = sourceHtml ? sanitizeRichHtml(sourceHtml) : '';
+      const dumpHasContent = Boolean((sourceText || '').trim()) || /<img\b/i.test(dump);
+      // No <hr>/<details> — neither is in the composer's sanitizer allow-list;
+      // a spaced bold heading survives edit/re-sanitize round-trips.
+      const html = narrativeToHtml(narrative) + (dumpHasContent
+        ? `<p><br></p><p><strong>— Source material (pasted) —</strong></p><div>${dump}</div>`
+        : '');
+      setDescription(html);
+      setDescriptionText(dumpHasContent ? `${narrative}\n\n— Source material (pasted) —\n${sourceText || ''}` : narrative);
+    }
+
+    let classified = false;
+    if (want('priority')) {
+      const p = Number(result.priorityHint);
+      if (p >= 1 && p <= 4) { setPriority(p); classified = true; }
+    }
+    if (want('type') && result.typeHint) {
+      const name = matchByName(result.typeHint, activeTypes.map((t) => t.name));
+      if (name) { setTicketType(name); classified = true; }
+    }
+    if (want('category') && result.categoryHint) {
+      const hit = resolveCategoryHint(result.categoryHint, meta?.categoryTree);
+      if (hit) { setCategoryId(hit.categoryId); setSubcategoryId(hit.subcategoryId); classified = true; }
+    }
+    if (classified && aiClassify) {
+      setAiClassify(false);
+      notices.push('AI classification turned off so your accepted values stick — turn it back on if you’d rather let AI decide.');
+    }
+
+    // Screenshots ride along as normal staged attachments (originals, not
+    // the shrunk copies the AI saw).
+    const originals = Array.from(dumpFiles || []);
+    if (originals.length) {
+      const room = Math.max(0, MAX_FILES - files.length);
+      if (originals.length > room) {
+        notices.push(room === 0
+          ? `The form already holds ${MAX_FILES} files — none of the ${originals.length} screenshots were attached.`
+          : `Only ${room} of ${originals.length} screenshots attached — the form holds ${MAX_FILES} files.`);
+      }
+      addFiles(originals);
+    }
+
+    setAutofillOpen(false);
+    setAutofillNotice(notices.length ? notices.join(' ') : null);
+
+    // Requester last: it may hand focus to the typeahead.
+    const requesterHint = String(result.requesterNameOrEmail || '').trim();
+    if (want('requester') && requesterHint && !requester && !rqQuery.trim()) {
+      let picked = null;
+      try {
+        const res = await ticketsAPI.requesterSearch(requesterHint);
+        const known = (res?.data?.requesters || []).filter((p) => String(p.email || '').toLowerCase() === requesterHint.toLowerCase());
+        const directory = (res?.data?.directory || []).filter((p) => String(p.email || '').toLowerCase() === requesterHint.toLowerCase());
+        if (known.length === 1) picked = toPickedRequester(known[0], false);
+        else if (known.length === 0 && directory.length === 1) picked = toPickedRequester(directory[0], true);
+      } catch { /* fall through to the typeahead */ }
+      if (picked) setRequester(picked);
+      else setTimeout(() => typeIntoRequesterSearch('tc-requester', requesterHint), 0);
+    }
   };
 
   useEffect(() => { rqRef.current?.focus(); }, [meta]);
@@ -267,7 +403,16 @@ export default function TicketCreate() {
     setFiles([]);
     setRequester(null);
     setRqQuery('');
+    touchedRef.current = new Set();
+    setAutofillNotice(null);
     setTimeout(() => rqRef.current?.focus(), 0);
+  };
+
+  // What autofill must leave alone right now (shown as "kept as is" rows).
+  const autofillLocked = () => {
+    const keys = Array.from(touchedRef.current);
+    if (requester || rqQuery.trim()) keys.push('requester');
+    return keys;
   };
 
   /**
@@ -530,18 +675,48 @@ export default function TicketCreate() {
                   </label>
                 </div>
 
-                {createTemplates.length > 0 && (
-                  <div>
-                    <label htmlFor="tc-template" className={labelClass}>Start from a template</label>
-                    <select
-                      id="tc-template"
-                      value=""
-                      onChange={(e) => applyCreateTemplate(Number(e.target.value))}
-                      className={fieldClass}
-                    >
-                      <option value="">Choose a template… (optional)</option>
-                      {createTemplates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-                    </select>
+                {/* Starting points: a saved template and/or Autofill from a
+                    paste (Phase AF). Autofill only PROPOSES — the agent
+                    reviews per field and applies; user-typed fields are
+                    never overwritten. */}
+                <div className={`flex gap-3 ${createTemplates.length > 0 ? 'flex-col sm:flex-row sm:items-end' : 'flex-col sm:flex-row sm:items-center sm:justify-between'}`}>
+                  {createTemplates.length > 0 ? (
+                    <div className="min-w-0 flex-1">
+                      <label htmlFor="tc-template" className={labelClass}>Start from a template</label>
+                      <select
+                        id="tc-template"
+                        value=""
+                        onChange={(e) => applyCreateTemplate(Number(e.target.value))}
+                        className={fieldClass}
+                      >
+                        <option value="">Choose a template… (optional)</option>
+                        {createTemplates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                      </select>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground min-w-0">
+                      Got a Teams chat, an email or screenshots? Let AI draft the fields — you review every one.
+                    </p>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setAutofillOpen(true)}
+                    disabled={!meta}
+                    title="Paste a chat, email or screenshots — AI proposes subject, description, requester, category, priority and type for you to review"
+                    className="tp-focus-ring inline-flex items-center justify-center gap-1.5 flex-shrink-0 rounded-lg border border-indigo-200 dark:border-indigo-500/30 bg-indigo-50/70 dark:bg-indigo-500/10 px-3 py-2.5 text-sm font-semibold text-indigo-700 dark:text-indigo-200 hover:bg-indigo-100/80 dark:hover:bg-indigo-500/20 disabled:opacity-50 transition-colors"
+                  >
+                    <Sparkles className="w-4 h-4" aria-hidden="true" />
+                    Autofill
+                  </button>
+                </div>
+
+                {autofillNotice && (
+                  <div className="flex items-start gap-2 -mt-1 px-3 py-2 rounded-lg bg-indigo-50/70 dark:bg-indigo-500/10 border border-indigo-100 dark:border-indigo-500/20 text-[11px] text-indigo-700 dark:text-indigo-200" role="status" data-testid="autofill-notice">
+                    <Sparkles className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" aria-hidden="true" />
+                    <span className="flex-1">{autofillNotice}</span>
+                    <button type="button" onClick={() => setAutofillNotice(null)} aria-label="Dismiss" className="tp-focus-ring rounded p-0.5 hover:bg-indigo-100/80 dark:hover:bg-indigo-500/20">
+                      <X className="w-3 h-3" aria-hidden="true" />
+                    </button>
                   </div>
                 )}
 
@@ -554,7 +729,7 @@ export default function TicketCreate() {
                     minLength={3}
                     maxLength={500}
                     value={subject}
-                    onChange={(e) => setSubject(e.target.value)}
+                    onChange={(e) => { setSubject(e.target.value); markTouched('subject', Boolean(e.target.value.trim())); }}
                     placeholder="Short summary of the issue or request"
                     className={fieldClass}
                   />
@@ -565,7 +740,7 @@ export default function TicketCreate() {
                     <span className={labelClass}>Description{fieldRequired('description') && <span className="text-red-500"> *</span>}</span>
                     <RichTextEditor
                       value={description}
-                      onChange={({ html, text }) => { setDescription(html); setDescriptionText(text); }}
+                      onChange={({ html, text }) => { setDescription(html); setDescriptionText(text); markTouched('description', Boolean(text.trim())); }}
                       placeholder="What happened, where, since when, error messages…"
                       ariaLabel="Description"
                       minHeight={240}
@@ -652,7 +827,7 @@ export default function TicketCreate() {
                             <select
                               value={ticketType ?? ''}
                               disabled={aiDecides}
-                              onChange={(e) => setTicketType(e.target.value)}
+                              onChange={(e) => { setTicketType(e.target.value); markTouched('type'); }}
                               aria-label="Ticket type"
                               className="tp-focus-ring w-full rounded-lg border border-border bg-card px-2 py-2 text-xs font-semibold text-muted-foreground disabled:cursor-not-allowed"
                             >
@@ -669,7 +844,7 @@ export default function TicketCreate() {
                                   key={t.id}
                                   type="button"
                                   disabled={aiDecides}
-                                  onClick={() => setTicketType(t.name)}
+                                  onClick={() => { setTicketType(t.name); markTouched('type'); }}
                                   aria-pressed={ticketType === t.name}
                                   title={t.description || undefined}
                                   className={`tp-focus-ring px-2 py-2 rounded-lg text-xs font-semibold border transition-colors disabled:cursor-not-allowed ${
@@ -694,7 +869,7 @@ export default function TicketCreate() {
                                 key={p}
                                 type="button"
                                 disabled={aiDecides}
-                                onClick={() => setPriority(p)}
+                                onClick={() => { setPriority(p); markTouched('priority'); }}
                                 aria-pressed={priority === p}
                                 className={`tp-focus-ring px-2 py-2 rounded-lg text-xs font-semibold border transition-colors disabled:cursor-not-allowed ${
                                   priority === p
@@ -723,7 +898,7 @@ export default function TicketCreate() {
                             id="tc-category"
                             value={categoryId}
                             disabled={aiDecides}
-                            onChange={(e) => { setCategoryId(e.target.value); setSubcategoryId(''); }}
+                            onChange={(e) => { setCategoryId(e.target.value); setSubcategoryId(''); markTouched('category', Boolean(e.target.value)); }}
                             className={`${fieldClass} disabled:bg-muted/50 disabled:text-muted-foreground/75 disabled:cursor-not-allowed`}
                           >
                             <option value="">{aiDecides ? 'AI will choose' : 'Choose a category'}</option>
@@ -1141,6 +1316,19 @@ export default function TicketCreate() {
             setFiles((prev) => prev.map((f) => (f === editFile ? edited : f)));
             setEditFile(null);
           }}
+        />
+      )}
+
+      {/* Autofill (Phase AF) — mounted only once meta is here so category/type
+          hints always have a vocabulary to resolve against. */}
+      {meta && autofillOpen && (
+        <AutofillModal
+          open
+          onClose={() => setAutofillOpen(false)}
+          onApply={applyAutofill}
+          lockedFields={autofillLocked()}
+          categoryNames={(meta.categoryTree || []).flatMap((c) => [c.name, ...((c.subcategories || []).map((sc) => `${c.name} > ${sc.name}`))])}
+          typeNames={activeTypes.map((t) => t.name)}
         />
       )}
 

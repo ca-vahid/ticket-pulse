@@ -82,6 +82,20 @@ model Workspace {
   // the caller sends neither groupId nor internalGroupId (QA 08-06 #1).
   defaultInternalGroupId  Int?     @map("default_internal_group_id")
   defaultInternalGroup    Group?   @relation("WorkspaceDefaultInternalGroup", fields: [defaultInternalGroupId], references: [id], onDelete: SetNull)
+  // API resubmission matching (Mega 08-31 Phase PA, QA #4). Ticket.externalRef
+  // is the first-class key; these three settings cover senders that don't
+  // send one yet:
+  //  • externalRefCustomFieldKey — zero-sender-change bridge: derive the ref
+  //    from this custom-field value in the create payload (ws5 posts
+  //    powerAppRecordId → stored key 'power_app_record_id').
+  //  • apiResubmissionMatchEnabled (+ window days) — DEPRECATED transition
+  //    heuristic, default OFF: same requester + identical normalized subject +
+  //    open/pending + same API key within N days ⇒ treat as a resubmission.
+  //    Ambiguous (>1 candidate) never matches. Remove once senders send
+  //    externalRef.
+  apiResubmissionMatchEnabled    Boolean @default(false) @map("api_resubmission_match_enabled")
+  apiResubmissionMatchWindowDays Int     @default(7) @map("api_resubmission_match_window_days")
+  externalRefCustomFieldKey      String? @map("external_ref_custom_field_key") @db.VarChar(60)
   isActive                Boolean  @default(true) @map("is_active")
   createdAt               DateTime @default(now()) @map("created_at")
   updatedAt               DateTime @updatedAt @map("updated_at")
@@ -889,17 +903,32 @@ model MailboxConnection {
   defaultInternalGroup   Group?    @relation("MailboxDefaultInternalGroup", fields: [defaultInternalGroupId], references: [id], onDelete: SetNull)
   defaultTicketType      String?   @map("default_ticket_type") @db.VarChar(30) // Incident | Service Request
   isEnabled              Boolean   @default(true) @map("is_enabled")
+  // Outbound picker preference (Mega 08-31 Phase MB-1g): at most one primary
+  // per workspace (partial unique index); the picker orders isPrimary desc,
+  // id asc so multi-mailbox workspaces send deterministically.
+  isPrimary              Boolean   @default(false) @map("is_primary")
   pollIntervalSec        Int       @default(60) @map("poll_interval_sec")
   lastCheckedAt          DateTime? @map("last_checked_at")
   lastMessageAt          DateTime? @map("last_message_at")
   lastError              String?   @map("last_error") @db.Text
   lastErrorAt            DateTime? @map("last_error_at")
+  // Graph change-notification state (Mega 08-31 Phase MB-2): one webhook
+  // subscription per ingest mailbox; clientState is the per-connection secret
+  // Graph echoes on every notification; deltaLink is the poller's catch-up
+  // cursor; notificationStatus = active | renewing | error | disabled.
+  subscriptionId         String?   @map("subscription_id") @db.VarChar(100)
+  subscriptionExpiresAt  DateTime? @map("subscription_expires_at") @db.Timestamptz(6)
+  clientState            String?   @map("client_state") @db.VarChar(100)
+  deltaLink              String?   @map("delta_link") @db.Text
+  notificationStatus     String?   @map("notification_status") @db.VarChar(30)
+  lastNotificationAt     DateTime? @map("last_notification_at") @db.Timestamptz(6)
   createdBy              String?   @map("created_by") @db.VarChar(255)
   createdAt              DateTime  @default(now()) @map("created_at")
   updatedAt              DateTime  @updatedAt @map("updated_at")
 
   @@unique([workspaceId, address])
   @@index([isEnabled])
+  @@index([subscriptionId])
   @@map("mailbox_connections")
 }
 
@@ -1196,7 +1225,17 @@ model Ticket {
 
   // Per-workspace user-defined fields — values keyed by CustomFieldDefinition.key.
   customFields Json? @map("custom_fields")
+  // Caller-supplied stable per-RECORD key (Mega 08-31 Phase PA): a Power Apps
+  // / API sender's own id for the request (e.g. 'sp-projectrequests-1260').
+  // POST /api/v1/tickets with a ref that already exists in the workspace
+  // UPDATES that ticket (resubmission) instead of creating a duplicate.
+  // Opaque, ≤200 chars, unique per workspace (NULLs don't collide).
+  externalRef String? @map("external_ref") @db.VarChar(200)
 
+  // Partial unique index in SQL (WHERE external_ref IS NOT NULL) — one
+  // ticket per (workspace, ref); the P2002 on it is the concurrent-create
+  // race the API route turns into the resubmission path.
+  @@unique([workspaceId, externalRef], map: "uq_tickets_ws_external_ref")
   @@index([workspaceId])
   @@index([workspaceId, lastRealActivityAt(sort: Desc)])
   // Sync health's data-freshness signal (Phase SH): per-workspace
@@ -2667,6 +2706,7 @@ model NotificationDelivery {
   @@index([eventType])
   @@index([notificationType])
   @@index([channel])
+  @@index([workspaceId, providerMessageId], map: "notification_deliveries_ws_provider_message_id_idx")
   @@map("notification_deliveries")
 }
 

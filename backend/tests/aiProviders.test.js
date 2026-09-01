@@ -1,16 +1,19 @@
 import {
+  AI_OPERATIONS,
   AI_PROVIDER_ANTHROPIC,
   AI_PROVIDER_OPENAI,
   DEFAULT_ANTHROPIC_MODEL,
   DEFAULT_OPENAI_MODEL,
   DEFAULT_OPUS_MODEL,
   DEFAULT_RECLASSIFICATION_MODEL,
+  MODEL_METADATA,
   SONNET_4_6_MODEL,
   defaultModelForProvider,
   getDefaultProviderSetting,
   getModelMetadata,
   isAnthropicModel,
   isOpenAiModel,
+  modelSupportsVision,
   normalizeAiModel,
   providerForModel,
   shouldOmitAnthropicTemperature,
@@ -111,5 +114,47 @@ describe('ai provider utilities', () => {
       fallbackProvider: AI_PROVIDER_ANTHROPIC,
       fallbackModel: DEFAULT_ANTHROPIC_MODEL,
     });
+  });
+});
+
+describe('ticket_intake_extract registration (Phase AF)', () => {
+  test('the op is registered and every model that may run it can read images', () => {
+    expect(AI_OPERATIONS).toContain('ticket_intake_extract');
+    const eligible = getModelMetadata({ operation: 'ticket_intake_extract' });
+    expect(eligible.length).toBeGreaterThan(0);
+    for (const entry of eligible) {
+      expect(entry.supportsVision).toBe(true);
+    }
+    // Sonnet 5 / 4.6 / Opus 4.8 and both GPT-5.6 tiers are all eligible.
+    expect(eligible.map((entry) => entry.model)).toEqual(expect.arrayContaining([
+      DEFAULT_ANTHROPIC_MODEL, SONNET_4_6_MODEL, DEFAULT_OPUS_MODEL, DEFAULT_OPENAI_MODEL, 'gpt-5.6-luna',
+    ]));
+  });
+
+  test('Haiku is excluded from the op and marked non-vision', () => {
+    expect(supportsOperation(DEFAULT_RECLASSIFICATION_MODEL, AI_PROVIDER_ANTHROPIC, 'ticket_intake_extract')).toBe(false);
+    expect(getModelMetadata({ operation: 'ticket_intake_extract' }).map((entry) => entry.model))
+      .not.toContain(DEFAULT_RECLASSIFICATION_MODEL);
+    expect(modelSupportsVision(DEFAULT_RECLASSIFICATION_MODEL, AI_PROVIDER_ANTHROPIC)).toBe(false);
+  });
+
+  test('every MODEL_METADATA entry declares supportsVision as a boolean', () => {
+    for (const entry of MODEL_METADATA) {
+      expect(typeof entry.supportsVision).toBe('boolean');
+    }
+  });
+
+  test('modelSupportsVision resolves aliases and treats unknown models as non-vision', () => {
+    expect(modelSupportsVision(DEFAULT_ANTHROPIC_MODEL, AI_PROVIDER_ANTHROPIC)).toBe(true);
+    expect(modelSupportsVision('claude-sonnet-4-6-20260217')).toBe(true); // legacy alias -> 4.6
+    expect(modelSupportsVision(DEFAULT_OPENAI_MODEL, AI_PROVIDER_OPENAI)).toBe(true);
+    expect(modelSupportsVision('gpt-5.6-luna')).toBe(true);
+    expect(modelSupportsVision('gpt-5.5')).toBe(true); // alias -> Sol
+    expect(modelSupportsVision('gpt-4o-custom-unknown', AI_PROVIDER_OPENAI)).toBe(false);
+  });
+
+  test('defaults for the op stay on the Sonnet / Sol tiers', () => {
+    expect(defaultModelForProvider(AI_PROVIDER_ANTHROPIC, 'ticket_intake_extract')).toBe(DEFAULT_ANTHROPIC_MODEL);
+    expect(defaultModelForProvider(AI_PROVIDER_OPENAI, 'ticket_intake_extract')).toBe(DEFAULT_OPENAI_MODEL);
   });
 });

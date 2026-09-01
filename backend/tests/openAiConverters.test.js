@@ -346,3 +346,51 @@ describe('OpenAI Responses converters', () => {
     });
   });
 });
+
+describe('OpenAI Responses converters - image blocks (Phase AF)', () => {
+  test('keeps image and text parts of a user turn together in one message item, in order', async () => {
+    const { convertUserContentBlockToOpenAiPart } = await import('../src/services/aiProviders/openAiConverters.js');
+    const input = convertAnthropicMessagesToOpenAiInput([
+      {
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } },
+          { type: 'text', text: 'What does the screenshot show?' },
+        ],
+      },
+    ]);
+    expect(input).toEqual([{
+      type: 'message',
+      role: 'user',
+      content: [
+        { type: 'input_image', image_url: 'data:image/png;base64,AAAA' },
+        { type: 'input_text', text: 'What does the screenshot show?' },
+      ],
+    }]);
+    expect(convertUserContentBlockToOpenAiPart({ type: 'text', text: 'hi' })).toEqual({ type: 'input_text', text: 'hi' });
+    expect(() => convertUserContentBlockToOpenAiPart({ type: 'audio' })).toThrow(/Unsupported OpenAI input block type: audio/);
+  });
+
+  test('image-bearing user turns still carry tool_result items after the message', () => {
+    const input = convertAnthropicMessagesToOpenAiInput([
+      {
+        role: 'user',
+        content: [
+          { type: 'tool_result', tool_use_id: 'call_1', content: '{}' },
+          { type: 'image', source: { type: 'url', url: 'https://example.com/a.png' } },
+        ],
+      },
+    ]);
+    expect(input).toEqual([
+      { type: 'message', role: 'user', content: [{ type: 'input_image', image_url: 'https://example.com/a.png' }] },
+      { type: 'function_call_output', call_id: 'call_1', output: '{}' },
+    ]);
+  });
+
+  test('text-only user turns are unchanged (single input_text message)', () => {
+    const input = convertAnthropicMessagesToOpenAiInput([
+      { role: 'user', content: [{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }] },
+    ]);
+    expect(input).toEqual([{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'a\nb' }] }]);
+  });
+});

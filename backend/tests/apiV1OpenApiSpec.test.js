@@ -45,9 +45,35 @@ describe('OpenAPI spec — intake enrichment (FR 08-05 Phase 1c)', () => {
   test('the create response documents meta.{ignoredFields,rejectedCustomFields,provisionedCustomFields}', () => {
     const schema = spec.paths['/tickets'].post.responses['201'].content['application/json'].schema;
     const meta = schema.properties.meta;
-    expect(Object.keys(meta.properties)).toEqual(['ignoredFields', 'rejectedCustomFields', 'provisionedCustomFields']);
+    expect(Object.keys(meta.properties)).toEqual(expect.arrayContaining(['ignoredFields', 'rejectedCustomFields', 'provisionedCustomFields']));
     expect(meta.properties.rejectedCustomFields.items.properties).toHaveProperty('key');
     expect(meta.properties.rejectedCustomFields.items.properties).toHaveProperty('reason');
+  });
+
+  // Mega 08-31 Phase PA — the resubmission upsert is part of the documented contract.
+  test('externalRef resubmission upsert: CreateTicket field, 200 response, meta keys, PATCH set-once', () => {
+    const create = schemas.CreateTicket.properties;
+    expect(create.externalRef).toEqual(expect.objectContaining({ type: 'string', maxLength: 200 }));
+    expect(create.externalRef.description).toMatch(/resubmitted: true/i);
+    expect(create.externalRef.description).toMatch(/Idempotency-Key/);
+    expect(create.reopenOnResubmit).toEqual(expect.objectContaining({ type: 'boolean', default: true }));
+    expect(create.resubmitStrategy.enum).toEqual(['append', 'replace']);
+    expect(schemas.CreateTicket.example.externalRef).toBe('sp-projectrequests-1260');
+    expect(schemas.Ticket.properties.externalRef).toEqual(expect.objectContaining({ type: 'string', nullable: true }));
+    expect(schemas.UpdateTicket.properties.externalRef.description).toMatch(/SET-ONCE/);
+
+    const post = spec.paths['/tickets'].post;
+    expect(post.responses['201']).toBeDefined();
+    const ok = post.responses['200'].content['application/json'];
+    expect(ok.schema.properties.resubmitted.enum).toEqual([true]);
+    expect(ok.example.resubmitted).toBe(true);
+    expect(ok.example.meta.matchedBy).toBe('external_ref');
+
+    const meta = post.responses['201'].content['application/json'].schema.properties.meta.properties;
+    for (const key of ['resubmitted', 'changedFields', 'reopened', 'matchedBy', 'resubmissionAmbiguous', 'priorExternalRefTicket', 'aiRetriage']) {
+      expect(meta[key]).toBeDefined();
+    }
+    expect(meta.matchedBy.enum).toEqual(['external_ref', 'custom_field_key', 'subject_heuristic']);
   });
 
   test('validation-error examples: 400 with allowed values on create, 422 unknown_custom_fields on PATCH', () => {
@@ -88,7 +114,13 @@ describe('docs page — sender guide sections', () => {
   test('Power Apps / Power Automate section: HTTP config, idempotency, problem parsing, connector caveat', () => {
     expect(html).toContain('Calling from Power Apps / Power Automate');
     expect(html).toContain('Authorization: Bearer tp_live_');
-    expect(html).toContain("concat('sp-', triggerOutputs()?['body/ID'])");
+    // Two keys, two jobs (Phase PA): Idempotency-Key per RUN, externalRef per RECORD.
+    expect(html).toContain("workflow()?['run']?['name']");
+    expect(html).toContain("concat('sp-projectrequests-', triggerOutputs()?['body/ID'])");
+    expect(html).toContain('Resubmissions');
+    expect(html).toContain('resubmitted: true');
+    expect(html).toMatch(/Do not key it per record/);
+    expect(html).not.toContain("concat('sp-', triggerOutputs()?['body/ID'])");
     expect(html).toContain('Secure Inputs');
     expect(html).toMatch(/HTTP connector is Premium/);
     expect(html).toContain('request_id');

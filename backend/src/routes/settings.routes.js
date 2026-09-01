@@ -756,6 +756,74 @@ router.put(
   }),
 );
 
+// API resubmission matching (Mega 08-31 Phase PA, QA #4) — Workspace-domain
+// settings behind POST /api/v1/tickets' upsert: the custom-field key the
+// externalRef is derived from (zero-sender-change bridge; ws5 →
+// 'power_app_record_id') and the DEPRECATED transition heuristic (requester +
+// subject within N days, default OFF). Same dedicated-route pattern as
+// /sla-calendar — workspace-admin config, not the global workspace whitelist.
+const API_RESUBMISSION_SELECT = {
+  apiResubmissionMatchEnabled: true,
+  apiResubmissionMatchWindowDays: true,
+  externalRefCustomFieldKey: true,
+};
+const apiResubmissionShape = (ws) => ({
+  apiResubmissionMatchEnabled: ws?.apiResubmissionMatchEnabled === true,
+  apiResubmissionMatchWindowDays: Number(ws?.apiResubmissionMatchWindowDays) || 7,
+  externalRefCustomFieldKey: ws?.externalRefCustomFieldKey || null,
+});
+
+router.get(
+  '/api-resubmission',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const ws = await prisma.workspace.findUnique({ where: { id: req.workspaceId }, select: API_RESUBMISSION_SELECT });
+    res.json({ success: true, data: apiResubmissionShape(ws) });
+  }),
+);
+
+router.put(
+  '/api-resubmission',
+  requireWorkspace,
+  requireWorkspaceAccess,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const body = req.body || {};
+    const data = {};
+    if (body.apiResubmissionMatchEnabled !== undefined) data.apiResubmissionMatchEnabled = body.apiResubmissionMatchEnabled === true;
+    if (body.apiResubmissionMatchWindowDays !== undefined) {
+      const days = Number(body.apiResubmissionMatchWindowDays);
+      if (!Number.isInteger(days) || days < 1 || days > 90) {
+        throw new ValidationError('apiResubmissionMatchWindowDays must be a whole number between 1 and 90');
+      }
+      data.apiResubmissionMatchWindowDays = days;
+    }
+    if (body.externalRefCustomFieldKey !== undefined) {
+      const raw = body.externalRefCustomFieldKey;
+      if (raw === null || raw === '') {
+        data.externalRefCustomFieldKey = null;
+      } else {
+        const { normalizeFieldKey } = await import('../services/customFieldService.js');
+        const key = normalizeFieldKey(raw);
+        if (!/^[a-z][a-z0-9_]{1,59}$/.test(key)) throw new ValidationError('externalRefCustomFieldKey must be a custom-field key (snake_case, ≤60 chars)');
+        // Must be one of this workspace's definitions (active or retired) —
+        // a typo here would silently disable the bridge.
+        const { default: customFieldService } = await import('../services/customFieldService.js');
+        const defs = await customFieldService.listDefinitions(req.workspaceId, { includeInactive: true });
+        if (!defs.some((d) => d.key === key)) {
+          throw new ValidationError(`Unknown custom field "${key}" — pick one of this workspace's custom-field definitions`);
+        }
+        data.externalRefCustomFieldKey = key;
+      }
+    }
+    if (!Object.keys(data).length) throw new ValidationError('Nothing to update');
+    const ws = await prisma.workspace.update({ where: { id: req.workspaceId }, data, select: API_RESUBMISSION_SELECT });
+    res.json({ success: true, data: apiResubmissionShape(ws) });
+  }),
+);
+
 // Ticket-type registry: the per-workspace catalogue of ticket types (names,
 // LLM descriptions, FS mapping, pill styling). Read is open to any workspace
 // member AND to agent-role technicians (Phase A1 agent-allowed tier — the

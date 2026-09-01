@@ -252,3 +252,90 @@ describe('OpenAiProvider JSON responses', () => {
     });
   });
 });
+
+describe('OpenAiProvider JSON responses - multimodal input (Phase AF)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    createMock.mockResolvedValue({
+      output_text: '{"ok":true}',
+      output: [],
+      usage: { input_tokens: 5, output_tokens: 2, total_tokens: 7 },
+    });
+  });
+
+  test('maps Anthropic-style image + text blocks to input_image / input_text and prefixes the JSON instruction on the text part only', async () => {
+    const provider = new OpenAiProvider();
+    await provider.sendJson({
+      systemPrompt: 'Extract ticket fields.',
+      userMessage: [
+        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } },
+        { type: 'image', source: { type: 'url', url: 'https://example.com/shot.jpg' } },
+        { type: 'text', text: 'Pasted material here.' },
+      ],
+      model: 'gpt-5.6-sol',
+    });
+
+    const body = createMock.mock.calls[0][0];
+    expect(body.input).toEqual([{
+      role: 'user',
+      content: [
+        { type: 'input_image', image_url: 'data:image/png;base64,AAAA' },
+        { type: 'input_image', image_url: 'https://example.com/shot.jpg' },
+        { type: 'input_text', text: 'Return JSON only.\n\nPasted material here.' },
+      ],
+    }]);
+    // Never the pre-fix "[object Object]".
+    expect(JSON.stringify(body.input)).not.toContain('[object Object]');
+  });
+
+  test('does not double the JSON instruction when the text part already mentions JSON', async () => {
+    const provider = new OpenAiProvider();
+    await provider.sendJson({
+      systemPrompt: 's',
+      userMessage: [
+        { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: 'BBBB' } },
+        { type: 'text', text: 'Return the JSON object described.' },
+      ],
+      model: 'gpt-5.6-sol',
+    });
+    const content = createMock.mock.calls[0][0].input[0].content;
+    expect(content.filter((part) => part.type === 'input_text')).toEqual([
+      { type: 'input_text', text: 'Return the JSON object described.' },
+    ]);
+  });
+
+  test('adds a text part when the array holds only images', async () => {
+    const provider = new OpenAiProvider();
+    await provider.sendJson({
+      systemPrompt: 's',
+      userMessage: [{ type: 'image', source: { type: 'base64', media_type: 'image/webp', data: 'CCCC' } }],
+      model: 'gpt-5.6-sol',
+    });
+    const content = createMock.mock.calls[0][0].input[0].content;
+    expect(content).toEqual([
+      { type: 'input_image', image_url: 'data:image/webp;base64,CCCC' },
+      { type: 'input_text', text: 'Return JSON only.' },
+    ]);
+  });
+
+  test('throws on unknown block types and malformed image sources instead of stringifying them', async () => {
+    const provider = new OpenAiProvider();
+    await expect(provider.sendJson({
+      systemPrompt: 's',
+      userMessage: [{ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'x' } }],
+      model: 'gpt-5.6-sol',
+    })).rejects.toThrow(/Unsupported OpenAI input block type: document/);
+    await expect(provider.sendJson({
+      systemPrompt: 's',
+      userMessage: [{ type: 'image', source: { type: 'base64', media_type: 'image/png' } }],
+      model: 'gpt-5.6-sol',
+    })).rejects.toThrow(/Unsupported OpenAI image block/);
+    expect(createMock).not.toHaveBeenCalled();
+  });
+
+  test('plain-string JSON input keeps the legacy string shape', async () => {
+    const provider = new OpenAiProvider();
+    await provider.sendJson({ systemPrompt: 's', userMessage: 'Classify this', model: 'gpt-5.6-sol' });
+    expect(createMock.mock.calls[0][0].input).toEqual([{ role: 'user', content: 'Return JSON only.\n\nClassify this' }]);
+  });
+});

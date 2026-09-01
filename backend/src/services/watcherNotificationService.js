@@ -1,6 +1,7 @@
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
+import { pickOutboundMailbox } from './mailboxPicker.js';
 
 /**
  * Watcher notifications (T3.6). Watchers subscribe to a CATEGORY (top or sub)
@@ -58,10 +59,8 @@ class WatcherNotificationService {
         '<p style="color:#64748b;font-size:12px">You get this because you watch this category or group in Ticket Pulse.</p>',
       ].join('');
 
-      const connection = await prisma.mailboxConnection.findFirst({
-        where: { workspaceId: ticket.workspaceId, isEnabled: true, mode: { in: ['send', 'both'] } },
-        orderBy: { id: 'asc' },
-      });
+      // Centralized outbound picker (MB-1g): primary first, then oldest.
+      const connection = await pickOutboundMailbox(ticket.workspaceId);
       // Workspace sender identity (Phase EB): guaranteed on SendGrid,
       // best-effort on Graph (Exchange rewrites to the mailbox name).
       const { resolveFromName } = await import('./workspaceEmailIdentityService.js');

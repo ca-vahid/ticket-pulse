@@ -2,7 +2,7 @@ import express from 'express';
 import multer from 'multer';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { requireWorkspace } from '../middleware/workspace.js';
-import { AuthenticationError, AuthorizationError, ValidationError } from '../utils/errors.js';
+import { AppError, AuthenticationError, AuthorizationError, ValidationError } from '../utils/errors.js';
 import ticketService from '../services/ticketService.js';
 import scheduledTicketService from '../services/scheduledTicketService.js';
 import attachmentService, { MAX_ATTACHMENT_BYTES } from '../services/attachmentService.js';
@@ -87,6 +87,151 @@ function parseTicketId(req) {
   if (!Number.isInteger(id) || id <= 0) throw new ValidationError('Invalid ticket id');
   return id;
 }
+
+// ------------------------------------------- autofill intake (Phase AF)
+//
+// POST /autofill-extract — multimodal "Autofill": the agent pastes a dump
+// (Teams chat, email text, screenshots) and the model PROPOSES ticket fields.
+// Declared before any `/:id` route so it is never shadowed. Any workspace
+// member/agent may call it (intake is the agents' job) — NOT admin-gated —
+// but the workspace must have native ticketing on. Own multer instance: the
+// attachment uploader above allows 100 MB files, far too generous for a
+// request that is forwarded to a paid vision model. Caps are duplicated in
+// ticketIntakeExtractService (which is imported lazily, like summarize).
+const AUTOFILL_MAX_TEXT_CHARS = 20000;
+const AUTOFILL_MAX_IMAGES = 6;
+const AUTOFILL_MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const AUTOFILL_MAX_TOTAL_IMAGE_BYTES = 20 * 1024 * 1024;
+const AUTOFILL_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
+const AUTOFILL_RATE = Object.freeze({ perMinute: 10, perHour: 60 });
+
+const autofillUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: AUTOFILL_MAX_IMAGE_BYTES,
+    files: AUTOFILL_MAX_IMAGES,
+    fields: 5,
+    fieldSize: 256 * 1024,
+  },
+  fileFilter(_req, file, cb) {
+    const type = String(file.mimetype || '').toLowerCase();
+    if (!type.startsWith('image/') || !AUTOFILL_IMAGE_TYPES.has(type)) {
+      cb(new ValidationError(`Only JPEG, PNG, GIF or WebP images are accepted (got ${type || 'unknown'})`));
+      return;
+    }
+    cb(null, true);
+  },
+});
+
+/** multer errors carry no statusCode (→ 500); translate them into 400s. */
+function autofillUploadMiddleware(req, res, next) {
+  autofillUpload.array('images', AUTOFILL_MAX_IMAGES)(req, res, (err) => {
+    if (!err) return next();
+    if (err instanceof multer.MulterError) {
+      const messages = {
+        LIMIT_FILE_SIZE: 'Each image must be 5 MB or smaller',
+        LIMIT_FILE_COUNT: `Up to ${AUTOFILL_MAX_IMAGES} images per request`,
+        LIMIT_UNEXPECTED_FILE: `Up to ${AUTOFILL_MAX_IMAGES} images per request, sent as the "images" field`,
+        LIMIT_FIELD_VALUE: `Pasted text is limited to ${AUTOFILL_MAX_TEXT_CHARS.toLocaleString()} characters`,
+        LIMIT_FIELD_COUNT: 'Too many form fields',
+      };
+      return next(new ValidationError(messages[err.code] || `Upload rejected: ${err.message}`));
+    }
+    return next(err);
+  });
+}
+
+class AutofillRateLimitError extends AppError {
+  constructor(message, retryAfterSec) {
+    super(message, 429);
+    this.code = 'rate_limited';
+    this.retryAfterSec = retryAfterSec;
+  }
+}
+
+// Per-actor sliding windows (in-memory; per instance). This is the one
+// endpoint where a client loop burns dollars, so it is limited independently
+// of any global limiter. Bounded: idle actors are pruned on each pass.
+const autofillHits = new Map(); // actorKey -> number[] (timestamps, ascending)
+const AUTOFILL_MAX_TRACKED_ACTORS = 5000;
+
+function autofillRateLimit(req, res, next) {
+  const now = Date.now();
+  const key = String(req.ticketActor?.email || req.ip || 'anonymous').toLowerCase();
+  const hourAgo = now - 60 * 60 * 1000;
+  const minuteAgo = now - 60 * 1000;
+
+  if (autofillHits.size >= AUTOFILL_MAX_TRACKED_ACTORS && !autofillHits.has(key)) {
+    for (const [actor, stamps] of autofillHits) {
+      if (!stamps.length || stamps[stamps.length - 1] < hourAgo) autofillHits.delete(actor);
+    }
+  }
+
+  const stamps = (autofillHits.get(key) || []).filter((t) => t > hourAgo);
+  const lastMinute = stamps.filter((t) => t > minuteAgo);
+
+  let retryAfterSec = 0;
+  if (lastMinute.length >= AUTOFILL_RATE.perMinute) {
+    retryAfterSec = Math.max(1, Math.ceil((lastMinute[0] + 60 * 1000 - now) / 1000));
+  } else if (stamps.length >= AUTOFILL_RATE.perHour) {
+    retryAfterSec = Math.max(1, Math.ceil((stamps[0] + 60 * 60 * 1000 - now) / 1000));
+  }
+
+  if (retryAfterSec > 0) {
+    autofillHits.set(key, stamps);
+    res.set('Retry-After', String(retryAfterSec));
+    return next(new AutofillRateLimitError(
+      `Autofill is limited to ${AUTOFILL_RATE.perMinute} requests per minute and ${AUTOFILL_RATE.perHour} per hour — try again in ${retryAfterSec}s`,
+      retryAfterSec,
+    ));
+  }
+
+  stamps.push(now);
+  autofillHits.set(key, stamps);
+  return next();
+}
+
+/** Test hook: clear the per-actor windows between cases. */
+export function __resetAutofillRateLimitForTests() {
+  autofillHits.clear();
+}
+
+router.post(
+  '/autofill-extract',
+  requireNativeTicketing,
+  autofillRateLimit,
+  autofillUploadMiddleware,
+  asyncHandler(async (req, res) => {
+    const rawText = req.body?.text;
+    const text = typeof rawText === 'string'
+      ? rawText
+      : (rawText === null || rawText === undefined ? '' : String(rawText));
+    if (text.length > AUTOFILL_MAX_TEXT_CHARS) {
+      throw new ValidationError(`Pasted text is limited to ${AUTOFILL_MAX_TEXT_CHARS.toLocaleString()} characters`);
+    }
+    const files = req.files || [];
+    const totalBytes = files.reduce((sum, file) => sum + (file.size || file.buffer?.length || 0), 0);
+    if (totalBytes > AUTOFILL_MAX_TOTAL_IMAGE_BYTES) {
+      throw new ValidationError('Images total more than 20 MB — remove or downscale some');
+    }
+    if (!text.trim() && files.length === 0) {
+      throw new ValidationError('Paste some text or add at least one image');
+    }
+
+    const { default: ticketIntakeExtractService } = await import('../services/ticketIntakeExtractService.js');
+    const result = await ticketIntakeExtractService.extract({
+      workspaceId: req.workspaceId,
+      text,
+      images: files.map((file) => ({
+        mimeType: file.mimetype,
+        buffer: file.buffer,
+        fileName: file.originalname,
+      })),
+      actorEmail: req.ticketActor?.email || null,
+    });
+    res.json({ success: true, data: result.data, meta: result.meta });
+  }),
+);
 
 // ------------------------------------------------------------------- reads
 
@@ -400,12 +545,33 @@ function requireTicketingAdmin(req, _res, next) {
   next();
 }
 
+/**
+ * API shape for a MailboxConnection row (MB-2e): strips the webhook secret
+ * (clientState) and the delta cursor, adds the instant-ingest summary the
+ * Ticket Mailboxes panel renders — `instantIngest` is true only while the
+ * Graph subscription is active and unexpired; otherwise the poller is the
+ * lane and `pollIntervalSec` is the cadence.
+ */
+function presentMailbox(mb) {
+  if (!mb) return mb;
+  const rest = { ...mb };
+  delete rest.clientState;
+  delete rest.deltaLink;
+  const expires = mb.subscriptionExpiresAt ? new Date(mb.subscriptionExpiresAt).getTime() : 0;
+  const ingestCapable = mb.isEnabled && ['ingest', 'both'].includes(mb.mode);
+  return {
+    ...rest,
+    instantIngest: Boolean(ingestCapable && mb.subscriptionId && mb.notificationStatus === 'active' && expires > Date.now()),
+    hasDeltaCursor: Boolean(mb.deltaLink),
+  };
+}
+
 router.get('/mailboxes', requireTicketingAdmin, asyncHandler(async (req, res) => {
   const mailboxes = await prisma.mailboxConnection.findMany({
     where: { workspaceId: req.workspaceId },
     orderBy: { id: 'asc' },
   });
-  res.json({ success: true, data: mailboxes });
+  res.json({ success: true, data: mailboxes.map(presentMailbox) });
 }));
 
 /** Validates the optional mailbox→group/type routing fields (T3.1). */
@@ -457,7 +623,8 @@ router.post('/mailboxes', requireTicketingAdmin, requireNativeTicketing, asyncHa
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(address)) throw new ValidationError('A valid mailbox address is required');
   const mode = ['ingest', 'send', 'both'].includes(req.body?.mode) ? req.body.mode : 'both';
   const routing = await resolveMailboxRouting(req);
-  const mailbox = await prisma.mailboxConnection.create({
+  const wantsPrimary = req.body?.isPrimary === true;
+  let mailbox = await prisma.mailboxConnection.create({
     data: {
       workspaceId: req.workspaceId,
       address,
@@ -471,7 +638,13 @@ router.post('/mailboxes', requireTicketingAdmin, requireNativeTicketing, asyncHa
     if (err.code === 'P2002') throw new ValidationError('That mailbox is already connected to this workspace');
     throw err;
   });
-  res.status(201).json({ success: true, data: mailbox });
+  if (wantsPrimary) {
+    // "Set primary" semantics (MB-1g): exactly one primary per workspace —
+    // the transaction clears the previous one.
+    const { setPrimaryMailbox } = await import('../services/mailboxPicker.js');
+    mailbox = await setPrimaryMailbox(req.workspaceId, mailbox.id, true);
+  }
+  res.status(201).json({ success: true, data: presentMailbox(mailbox) });
 }));
 
 router.patch('/mailboxes/:mailboxId', requireTicketingAdmin, asyncHandler(async (req, res) => {
@@ -483,8 +656,17 @@ router.patch('/mailboxes/:mailboxId', requireTicketingAdmin, asyncHandler(async 
   if (req.body?.isEnabled !== undefined) data.isEnabled = req.body.isEnabled === true;
   if (req.body?.displayName !== undefined) data.displayName = req.body.displayName?.trim() || null;
   if (req.body?.pollIntervalSec !== undefined) data.pollIntervalSec = Math.max(15, Math.min(3600, Number(req.body.pollIntervalSec) || 60));
-  const mailbox = await prisma.mailboxConnection.update({ where: { id }, data });
-  res.json({ success: true, data: mailbox });
+  let mailbox = Object.keys(data).length > 0
+    ? await prisma.mailboxConnection.update({ where: { id }, data })
+    : existing;
+  if (req.body?.isPrimary !== undefined) {
+    // "Set primary" semantics (MB-1g): `true` makes this the workspace's
+    // outbound sender and clears any other primary in one transaction;
+    // `false` just un-stars this row (the picker then falls back to id asc).
+    const { setPrimaryMailbox } = await import('../services/mailboxPicker.js');
+    mailbox = await setPrimaryMailbox(req.workspaceId, id, req.body.isPrimary === true);
+  }
+  res.json({ success: true, data: presentMailbox(mailbox) });
 }));
 
 router.delete('/mailboxes/:mailboxId', requireTicketingAdmin, asyncHandler(async (req, res) => {

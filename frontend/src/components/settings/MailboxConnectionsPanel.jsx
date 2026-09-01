@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
-  AlertCircle, CheckCircle, Inbox, Loader2, Mail, Plus, Send, Trash2, Wifi,
+  AlertCircle, CheckCircle, Inbox, Loader2, Mail, Plus, Send, Star, Trash2, Wifi, Zap,
 } from 'lucide-react';
 import { ticketsAPI } from '../../services/api';
 import { useTicketTypes } from '../../hooks/useTicketTypes';
@@ -11,11 +11,54 @@ const MODE_LABEL = {
   both: 'Ingest + send',
 };
 
+/** "12s ago" / "3m ago" / "2h ago" for the last-notification age. */
+export function relativeAge(iso, now = Date.now()) {
+  if (!iso) return null;
+  const ms = now - new Date(iso).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return 'just now';
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s ago`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  if (h < 48) return `${h}h ago`;
+  return `${Math.round(h / 24)}d ago`;
+}
+
+/**
+ * Inbound-lane status for a mailbox row (Mega 08-31 MB-2e): which lane is
+ * live (Graph webhook vs poller) and, for webhooks, how fresh the last
+ * notification is. Backend computes `instantIngest`; `notificationStatus`
+ * 'error' means the subscription could not be created/renewed and the
+ * poller is carrying the mailbox on its own cadence.
+ */
+export function ingestLane(mb, now = Date.now()) {
+  const ingests = mb.isEnabled && ['ingest', 'both'].includes(mb.mode);
+  if (!ingests) return null;
+  const every = `Polling every ${mb.pollIntervalSec || 60}s`;
+  if (mb.instantIngest) {
+    const age = relativeAge(mb.lastNotificationAt, now);
+    return { tone: 'instant', label: `Instant (webhook) · ${age ? `last notification ${age}` : 'no notification yet'}` };
+  }
+  if (mb.notificationStatus === 'error') return { tone: 'error', label: `Webhook error — ${every.toLowerCase()}` };
+  if (mb.notificationStatus === 'renewing') return { tone: 'muted', label: `Webhook renewing · ${every.toLowerCase()}` };
+  return { tone: 'muted', label: every };
+}
+
+const LANE_CLASS = {
+  instant: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200 border-emerald-200 dark:border-emerald-500/30',
+  error: 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200 border-amber-200 dark:border-amber-500/30',
+  muted: 'bg-muted text-muted-foreground border-border',
+};
+
 /**
  * Settings → Ticket Mailboxes: the workspace's monitored/sending mailboxes for
  * native ticketing. Ingest mailboxes turn inbound email into tickets (and
  * requester replies into thread entries); send mailboxes deliver agent replies
- * from a real address via Microsoft Graph so email threading works.
+ * AND workflow emails from a real address via Microsoft Graph so replies
+ * thread back into the ticket. The starred mailbox is the primary sender
+ * (Mega 08-31 Phase MB-1g/1i) — one per workspace, set through PATCH
+ * { isPrimary }.
  */
 export default function MailboxConnectionsPanel() {
   const [mailboxes, setMailboxes] = useState(null);
@@ -42,6 +85,14 @@ export default function MailboxConnectionsPanel() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  // Keep the inbound-lane pill honest (last-notification age, webhook state)
+  // without a manual reload; light poll, only while the tab is visible.
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (typeof document === 'undefined' || document.visibilityState === 'visible') load();
+    }, 30000);
+    return () => clearInterval(id);
+  }, [load]);
   useEffect(() => {
     ticketsAPI.meta().then((res) => setGroups(res.data?.groups || [])).catch(() => {});
   }, []);
@@ -102,6 +153,19 @@ export default function MailboxConnectionsPanel() {
     }
   };
 
+  const setPrimary = async (mb) => {
+    setError(null);
+    try {
+      await ticketsAPI.updateMailbox(mb.id, { isPrimary: !mb.isPrimary });
+      setNotice(mb.isPrimary
+        ? `${mb.address} is no longer the primary sender.`
+        : `${mb.address} is now the primary sender for replies and workflow emails.`);
+      await load();
+    } catch (err) {
+      setError(err.response?.data?.message || err.message);
+    }
+  };
+
   const changeMode = async (mb, newMode) => {
     try {
       await ticketsAPI.updateMailbox(mb.id, { mode: newMode });
@@ -150,15 +214,25 @@ export default function MailboxConnectionsPanel() {
           <h3 className="text-lg font-semibold text-foreground">Ticket Mailboxes</h3>
           <p className="text-sm text-muted-foreground">
             Connect one or more mailboxes for native ticketing. Inbound mail becomes tickets (or threads
-            onto existing ones); agent replies send from the mailbox via Microsoft Graph.
+            onto existing ones); agent replies and workflow emails send from the mailbox via Microsoft Graph,
+            and replies to them land back in the ticket automatically.
           </p>
         </div>
       </div>
 
-      <div className="p-3 bg-amber-50 dark:bg-amber-500/15 border border-amber-200 dark:border-amber-500/30 rounded-lg text-xs text-amber-800 dark:text-amber-200">
-        Use a <b>new address</b> that FreshService does not already ingest — pointing both systems at the
-        same mailbox would create duplicate tickets. The Azure app registration needs <b>Mail.Read</b> and
-        <b> Mail.Send</b> application permissions for the mailbox.
+      <div className="p-3 bg-amber-50 dark:bg-amber-500/15 border border-amber-200 dark:border-amber-500/30 rounded-lg text-xs text-amber-800 dark:text-amber-200 space-y-1.5" data-testid="mailbox-panel-notice">
+        <p>
+          <b>Connecting a mailbox in Send or Ingest + send mode changes this workspace&apos;s outbound sender.</b>{' '}
+          Agent replies <b>and</b> workflow emails (acknowledgements, status updates, approvals) then leave from that
+          address instead of ticketpulse@ via SendGrid, and requester replies to any of them land back in the ticket
+          thread automatically. Existing conversations pick this up on the next send.
+        </p>
+        <p>
+          Use a <b>new address</b> that FreshService does not already ingest — pointing both systems at the same
+          mailbox would create duplicate tickets. The Azure Graph app registration needs <b>Mail.Read</b> and{' '}
+          <b>Mail.Send</b> application permissions with admin consent for the mailbox (IT can scope the grant to
+          just these mailboxes with Exchange RBAC for Applications).
+        </p>
       </div>
 
       {error && (
@@ -249,7 +323,25 @@ export default function MailboxConnectionsPanel() {
             <div key={mb.id} className="px-4 py-3 flex flex-wrap items-center gap-3">
               <span className={`w-2 h-2 rounded-full flex-shrink-0 ${mb.isEnabled ? (mb.lastError ? 'bg-amber-500' : 'bg-emerald-500') : 'bg-muted-foreground/40'}`} aria-hidden="true" />
               <div className="flex-1 min-w-[200px]">
-                <p className="text-sm font-medium text-foreground">{mb.address}</p>
+                <p className="text-sm font-medium text-foreground flex items-center gap-1.5">
+                  {mb.address}
+                  {mb.isPrimary && (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold uppercase tracking-wide bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200 border border-amber-200 dark:border-amber-500/30" data-testid={`mailbox-primary-badge-${mb.id}`}>
+                      <Star className="w-3 h-3 fill-current" aria-hidden="true" />
+                      Primary sender
+                    </span>
+                  )}
+                </p>
+                {ingestLane(mb) && (
+                  <span
+                    className={`inline-flex items-center gap-1 mt-0.5 mb-0.5 px-1.5 py-0.5 rounded-md text-[11px] font-medium border ${LANE_CLASS[ingestLane(mb).tone]}`}
+                    data-testid={`mailbox-lane-${mb.id}`}
+                    title={mb.subscriptionExpiresAt ? `Webhook subscription renews before ${new Date(mb.subscriptionExpiresAt).toLocaleString()}` : undefined}
+                  >
+                    {ingestLane(mb).tone === 'instant' ? <Zap className="w-3 h-3" aria-hidden="true" /> : null}
+                    {ingestLane(mb).label}
+                  </span>
+                )}
                 <p className="text-xs text-muted-foreground/75">
                   {MODE_LABEL[mb.mode] || mb.mode}
                   {routeLabel(mb) ? <span className="text-sky-600 dark:text-sky-300"> · routes to {routeLabel(mb)}</span> : null}
@@ -306,6 +398,22 @@ export default function MailboxConnectionsPanel() {
                 )}
               </select>
               <button
+                type="button"
+                onClick={() => setPrimary(mb)}
+                aria-pressed={Boolean(mb.isPrimary)}
+                aria-label={mb.isPrimary ? `${mb.address} is the primary sender — click to unset` : `Make ${mb.address} the primary sender`}
+                title={mb.isPrimary
+                  ? 'Primary sender: replies and workflow emails leave from this mailbox'
+                  : 'Make this the primary sender for replies and workflow emails'}
+                className={`p-1.5 rounded-lg border tp-focus-ring ${
+                  mb.isPrimary
+                    ? 'text-amber-600 dark:text-amber-300 bg-amber-50 dark:bg-amber-500/15 border-amber-200 dark:border-amber-500/30'
+                    : 'text-muted-foreground/75 border-transparent hover:text-amber-600 dark:hover:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-500/15'
+                }`}
+              >
+                <Star className={`w-4 h-4 ${mb.isPrimary ? 'fill-current' : ''}`} />
+              </button>
+              <button
                 onClick={() => test(mb)}
                 disabled={testing === mb.id}
                 className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-sky-700 dark:text-sky-200 bg-sky-50 dark:bg-sky-500/15 border border-sky-200 dark:border-sky-500/30 rounded-lg hover:bg-sky-100 dark:hover:bg-sky-500/20"
@@ -335,9 +443,12 @@ export default function MailboxConnectionsPanel() {
         </div>
       )}
 
-      <div className="text-xs text-muted-foreground/75 flex items-center gap-1.5">
-        <Send className="w-3.5 h-3.5" aria-hidden="true" />
-        Replies from Ticket Pulse send from the first enabled send-capable mailbox; without one they fall back to SendGrid.
+      <div className="text-xs text-muted-foreground/75 flex items-start gap-1.5">
+        <Send className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" aria-hidden="true" />
+        <span>
+          Outbound sender for replies and workflow emails: the starred primary mailbox; without a star, the oldest
+          enabled send-capable mailbox; with none connected, SendGrid as ticketpulse@ (replies to those are not read back).
+        </span>
       </div>
     </div>
   );

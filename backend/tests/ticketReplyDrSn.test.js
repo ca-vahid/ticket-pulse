@@ -123,7 +123,7 @@ describe('agent sender name on requester replies (SN1/SN3)', () => {
     expect(sendgridMock.sendEmail).toHaveBeenCalledTimes(1);
     const call = sendgridMock.sendEmail.mock.calls[0][0];
     expect(call.fromName).toBe('Soheil Nasiri');
-    expect(call.replyTo).toBeUndefined();
+    expect(call.replyTo ?? undefined).toBeUndefined(); // SendGrid lane passes null when no ingest mailbox is connected (MB-1)
     expect(formatSender({ name: call.fromName, email: 'ticketpulse@bgcengineering.ca' }))
       .toBe('"Soheil Nasiri" <ticketpulse@bgcengineering.ca>');
   });
@@ -135,7 +135,7 @@ describe('agent sender name on requester replies (SN1/SN3)', () => {
 
     const call = sendgridMock.sendEmail.mock.calls[0][0];
     expect(call.fromName).toBe('Ticket Pulse IT');
-    expect(call.replyTo).toBeUndefined();
+    expect(call.replyTo ?? undefined).toBeUndefined(); // SendGrid lane passes null when no ingest mailbox is connected (MB-1)
   });
 
   test('actor without a usable name → workspace identity fallback', async () => {
