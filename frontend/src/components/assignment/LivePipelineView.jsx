@@ -6,7 +6,7 @@ import remarkGfm from 'remark-gfm';
 import {
   Loader2, CheckCircle, XCircle, AlertTriangle, Brain, MessageSquare,
   Users, Search, MapPin, X, ChevronDown, ChevronRight, Star, Sparkles,
-  FileText,
+  FileText, History, RotateCcw,
 } from 'lucide-react';
 import {
   CopyBadge, mdComponents, StreamContent, cleanTranscript, processStreamEvent,
@@ -678,22 +678,32 @@ export default function LivePipelineView({ ticketId, onComplete, onBack, streamP
   const StatusIcon = statusInfo.icon;
   const showExistingRun = existingRun && !streaming;
   const reasoningText = recommendation?.overallReasoning || existingRun?.recommendation?.overallReasoning || null;
+  // NT-7: this view landed on an already-completed run and is REPLAYING saved
+  // results (no events means nothing streamed in this session). Make that
+  // explicit — QA once believed this replay was a fresh pipeline run.
+  const viewingSavedRun = showExistingRun && events.length === 0 && existingRun?.status === 'completed';
+  const savedRunDate = viewingSavedRun && existingRun?.createdAt
+    ? new Date(existingRun.createdAt).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })
+    : null;
 
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <StatusIcon className={`w-5 h-5 ${statusInfo.color} ${statusInfo.spin ? 'animate-spin' : ''}`} />
-          <span className={`text-sm font-medium ${statusInfo.color}`}>{statusInfo.text}</span>
+          <span className={`text-sm font-medium ${statusInfo.color}`}>
+            {viewingSavedRun && status === 'completed' ? 'Viewing completed run' : statusInfo.text}
+          </span>
           {runId && <CopyBadge label="Run" value={runId} />}
         </div>
         <div className="flex items-center gap-2">
           {showExistingRun && existingRun?.status !== 'queued' && (
             <button
               onClick={startStream}
+              title="Starts a fresh pipeline run using the current published prompt. The existing run is kept for history."
               className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 transition-colors flex items-center gap-1"
             >
-              <Brain className="w-3.5 h-3.5" /> Re-run Analysis
+              <RotateCcw className="w-3.5 h-3.5" /> Re-run with current prompt
             </button>
           )}
           {onBack && (
@@ -703,6 +713,22 @@ export default function LivePipelineView({ ticketId, onComplete, onBack, streamP
           )}
         </div>
       </div>
+
+      {/* NT-7: explicit saved-run notice — landing here does NOT re-run the
+          pipeline; it replays the stored result of an earlier run. */}
+      {viewingSavedRun && (
+        <div className="mb-3 bg-muted/50 border border-border rounded-lg p-3 flex items-start gap-2.5">
+          <History className="w-4 h-4 text-muted-foreground flex-shrink-0 mt-0.5" aria-hidden="true" />
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            <span className="font-semibold text-foreground/85">
+              This is a completed run{savedRunDate ? ` from ${savedRunDate}` : ''}.
+            </span>{' '}
+            You are viewing its saved results — the pipeline has not run again. Use{' '}
+            <span className="font-medium text-foreground/85">Re-run with current prompt</span> to start a fresh
+            analysis with the latest published prompt.
+          </p>
+        </div>
+      )}
 
       {status === 'completed' && !streaming && reasoningText ? (
         // Finished run: lead with the clean formatted reasoning; raw log on demand.

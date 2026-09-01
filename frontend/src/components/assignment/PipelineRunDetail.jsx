@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { assignmentAPI } from '../../services/api';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -115,6 +115,13 @@ const STEP_ICONS = {
   competency: Award,
   workload: BarChart3,
   recommendation: MessageSquare,
+  noise_veto: ShieldCheck,
+};
+
+// Per-step icon tint. Unknown step types fall back to the neutral default,
+// so new pipeline steps render gracefully without a code change.
+const STEP_ICON_CLASSES = {
+  noise_veto: 'text-emerald-600 dark:text-emerald-300',
 };
 
 const STATUS_STYLES = {
@@ -131,6 +138,7 @@ function StepCard({ step }) {
   const statusStyle = STATUS_STYLES[step.status] || STATUS_STYLES.running;
   const StatusIcon = statusStyle.icon;
   const StepIcon = STEP_ICONS[step.stepName] || Brain;
+  const stepIconClass = STEP_ICON_CLASSES[step.stepName] || 'text-muted-foreground';
 
   return (
     <div className={`border rounded-lg ${statusStyle.bg} mb-2`}>
@@ -140,8 +148,8 @@ function StepCard({ step }) {
       >
         <div className="flex items-center gap-3">
           <span className="text-xs font-mono text-muted-foreground/75 w-5">{step.stepNumber}</span>
-          <StepIcon className="w-4 h-4 text-muted-foreground" />
-          <span className="font-medium text-sm capitalize">{step.stepName.replace(/_/g, ' ')}</span>
+          <StepIcon className={`w-4 h-4 ${stepIconClass}`} />
+          <span className="font-medium text-sm capitalize">{String(step.stepName || 'step').replace(/_/g, ' ')}</span>
           <StatusIcon className={`w-4 h-4 ${statusStyle.color} ${step.status === 'running' ? 'animate-spin' : ''}`} />
         </div>
         <div className="flex items-center gap-3 text-xs text-muted-foreground">
@@ -1146,6 +1154,12 @@ function TranscriptSection({ transcript }) {
 
 export default function PipelineRunDetail({ run, onDecide, deciding, onSyncComplete, isAdmin = false, workspaceTimezone = 'America/Los_Angeles' }) {
   const location = useLocation();
+  const navigate = useNavigate();
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
   const [fsDomain, setFsDomain] = useState(null);
   const [freshness, setFreshness] = useState(null);
   const [freshnessLoading, setFreshnessLoading] = useState(false);
@@ -1283,14 +1297,49 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
   const headerCategoryLabel = ticketPulseCategoryLabel(ticket);
   const headerCategoryNeedsReview = ticketCategoryReviewNeeded(ticket);
 
+  // NT-7: re-run is available for ANY run that isn't literally in flight —
+  // noise_dismissed, auto_assigned, rejected, approved, failed, … — not just
+  // pending_review. The backend keeps terminal runs intact for history and
+  // creates a NEW run with the CURRENT published prompt.
+  const isInFlight = run?.status === 'queued' || run?.status === 'running';
+  const canRerun = isAdmin && !isInFlight;
+  const runPromptVersion = run?.promptVersionNumber ?? null;
+  const currentPromptVersion = run?.currentPublishedPromptVersion ?? null;
+  // NT-8: flag runs decided under a prompt that has since been superseded.
+  const promptIsStale = Boolean(runPromptVersion && currentPromptVersion && runPromptVersion < currentPromptVersion);
+
   const handleRerun = async () => {
     if (rerunning) return;
+    const versionLabel = currentPromptVersion ? `v${currentPromptVersion}` : 'the current published version';
+    const confirmed = window.confirm(
+      `This creates a NEW pipeline run using the CURRENT published prompt (${versionLabel}). The existing run is kept for history.`,
+    );
+    if (!confirmed) return;
     setRerunning(true);
     try {
       await assignmentAPI.rerunPipeline(run.id);
-      window.location.reload();
+      // Point the user at the new run: poll until a run newer than this one
+      // appears (the run row is created early, well before the LLM finishes).
+      const ticketId = run.ticketId ?? ticket?.id;
+      const base = location.pathname.includes('/assignments/history') ? '/assignments/history' : '/assignments/run';
+      for (let attempt = 0; attempt < 15; attempt += 1) {
+        if (!mountedRef.current) return;
+        try {
+          const res = await assignmentAPI.getLatestRunForTicket(ticketId);
+          const latest = res?.data;
+          if (latest?.id && latest.id !== run.id) {
+            if (mountedRef.current) {
+              setRerunning(false);
+              navigate(`${base}/${latest.id}`);
+            }
+            return;
+          }
+        } catch { /* transient — keep polling */ }
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+      if (mountedRef.current) window.location.reload();
     } catch {
-      setRerunning(false);
+      if (mountedRef.current) setRerunning(false);
     }
   };
 
@@ -1411,9 +1460,29 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
                   fallback used
                 </span>
               )}
+              {runPromptVersion && (
+                <span
+                  className={`rounded px-1.5 py-0.5 font-semibold ${promptIsStale ? 'bg-violet-50 dark:bg-violet-500/15 text-violet-700 dark:text-violet-200' : 'bg-muted text-muted-foreground'}`}
+                  title={promptIsStale ? `Prompt v${currentPromptVersion} is now published` : 'Prompt version this run used'}
+                >
+                  prompt v{runPromptVersion}
+                </span>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
+            {canRerun && (
+              <button
+                type="button"
+                onClick={handleRerun}
+                disabled={rerunning}
+                title="Creates a new pipeline run for this ticket using the current published prompt. This run is kept for history."
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold border border-input bg-card text-foreground/85 hover:bg-muted disabled:opacity-50 shadow-sm tp-focus-ring"
+              >
+                {rerunning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+                {rerunning ? 'Starting new run…' : 'Re-run'}
+              </button>
+            )}
             {canReassign && (
               <button
                 type="button"
@@ -1442,6 +1511,30 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
           onClose={() => setShowReassignModal(false)}
           onComplete={onSyncComplete}
         />
+      )}
+
+      {/* NT-8: stale-prompt banner — this run was decided under a prompt that
+          has since been superseded by a newer published version. */}
+      {promptIsStale && (
+        <div className="bg-violet-50 dark:bg-violet-500/15 border border-violet-200 dark:border-violet-500/30 rounded-lg p-3 flex items-start gap-2.5">
+          <FileText className="w-5 h-5 text-violet-500 dark:text-violet-300 flex-shrink-0 mt-0.5" aria-hidden="true" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-violet-800 dark:text-violet-200">
+              This run used prompt v{runPromptVersion}; v{currentPromptVersion} is now published — results may differ.
+            </p>
+            {canRerun && (
+              <button
+                type="button"
+                onClick={handleRerun}
+                disabled={rerunning}
+                className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 tp-focus-ring"
+              >
+                {rerunning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+                {rerunning ? 'Starting new run…' : 'Re-run with current prompt'}
+              </button>
+            )}
+          </div>
+        </div>
       )}
 
       {assignmentWasCorrected && (

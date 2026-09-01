@@ -1433,12 +1433,62 @@ class SyncService {
     const ingestRecordedAt = new Date();
     const isWebhookIngest = source === 'freshservice_webhook';
 
+    // NT-10: isNoise durability. The deterministic subject rules re-run on
+    // every sync, but isNoise is also written by the AI pipeline
+    // (noise_dismissed → isNoise=true) and protected by noise vetoes — and a
+    // routine re-sync used to clobber those verdicts with the rule result.
+    // There is no provenance column (schema is frozen this phase), so the
+    // minimal safe rule is: once ANY pipeline run has recorded a decision for
+    // this ticket (decidedAt set — machine or human), routine sync no longer
+    // flips isNoise in either direction; the stored verdict stands. Tickets
+    // with no decided run keep today's behavior (rule verdict wins), and the
+    // lookup only runs when the rule verdict would actually flip the flag.
+    let effectiveIsNoise = isNoise;
+    let effectiveNoiseRuleId = ruleId;
+    let noiseVerdictPreserved = false;
+    if (
+      existingTicket
+      && typeof existingTicket.isNoise === 'boolean'
+      && existingTicket.isNoise !== isNoise
+    ) {
+      try {
+        const decidedRun = await prisma.assignmentPipelineRun.findFirst({
+          where: { ticketId: existingTicket.id, decidedAt: { not: null } },
+          select: { id: true, decision: true },
+        });
+        if (decidedRun) {
+          noiseVerdictPreserved = true;
+          // undefined = "leave the stored value alone" in ticketRepository.upsert
+          effectiveIsNoise = undefined;
+          effectiveNoiseRuleId = undefined;
+          logger.debug('Sync isNoise guard: preserving decided noise verdict', {
+            ticketId: existingTicket.id,
+            freshserviceTicketId: ticket.freshserviceTicketId?.toString?.() || ticket.freshserviceTicketId,
+            storedIsNoise: existingTicket.isNoise,
+            ruleVerdict: isNoise,
+            decidedRunId: decidedRun.id,
+            decidedRunDecision: decidedRun.decision,
+          });
+        }
+      } catch (guardError) {
+        logger.warn('Sync isNoise guard lookup failed — keeping stored verdict to be safe', {
+          ticketId: existingTicket.id,
+          error: guardError.message,
+        });
+        noiseVerdictPreserved = true;
+        effectiveIsNoise = undefined;
+        effectiveNoiseRuleId = undefined;
+      }
+    }
+
     let upsertedTicket = await ticketRepository.upsert({
       ...ticket,
       workspaceId: ticketWorkspaceId,
-      isNoise,
-      noiseRuleMatched: ruleId,
-      ticketCategory: ticket.ticketCategory || normalizedNoiseCategory,
+      isNoise: effectiveIsNoise,
+      noiseRuleMatched: effectiveNoiseRuleId,
+      // Don't stamp a noise category label when the noise flip itself was
+      // suppressed — the rule verdict didn't take effect.
+      ticketCategory: ticket.ticketCategory || (noiseVerdictPreserved ? null : normalizedNoiseCategory),
       freshserviceUpdatedAt: ticket.freshserviceUpdatedAt || null,
       lastIngestSource: source,
       lastIngestedAt: ingestRecordedAt,
@@ -1625,9 +1675,13 @@ class SyncService {
       existingTicket,
       workspaceId: ticketWorkspaceId,
       isNew: !existingTicket,
-      isNoise,
-      noiseRuleMatched: ruleId,
-      noiseRuleCategory: normalizedNoiseCategory,
+      // NT-10: report the verdict that actually landed on the ticket — when a
+      // decided pipeline run froze the flag, that's the stored value, not the
+      // rule result computed above.
+      isNoise: noiseVerdictPreserved ? existingTicket.isNoise : isNoise,
+      noiseRuleMatched: noiseVerdictPreserved ? (existingTicket.noiseRuleMatched ?? null) : ruleId,
+      noiseRuleCategory: noiseVerdictPreserved ? null : normalizedNoiseCategory,
+      noiseVerdictPreserved,
       assignmentClearVerification,
       assignmentChanged,
       statusChanged,

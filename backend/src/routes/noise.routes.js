@@ -40,12 +40,19 @@ router.post(
   '/',
   requireAdmin,
   asyncHandler(async (req, res) => {
-    const { name, pattern, description, category, isEnabled } = req.body;
+    const { name, pattern, description, category, isEnabled, mode } = req.body;
 
     if (!name || !pattern) {
       return res.status(400).json({
         success: false,
         message: 'Name and pattern are required',
+      });
+    }
+
+    if (mode !== undefined && !['noise', 'never_noise'].includes(mode)) {
+      return res.status(400).json({
+        success: false,
+        message: "Mode must be 'noise' or 'never_noise'",
       });
     }
 
@@ -56,6 +63,7 @@ router.post(
         description,
         category,
         isEnabled,
+        mode,
         workspaceId: req.workspaceId,
       });
       logger.info(`Created noise rule: ${name}`);
@@ -80,6 +88,13 @@ router.put(
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) {
       return res.status(400).json({ success: false, message: 'Invalid rule ID' });
+    }
+
+    if (req.body.mode !== undefined && !['noise', 'never_noise'].includes(req.body.mode)) {
+      return res.status(400).json({
+        success: false,
+        message: "Mode must be 'noise' or 'never_noise'",
+      });
     }
 
     try {

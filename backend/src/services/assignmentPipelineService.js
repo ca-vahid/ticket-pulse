@@ -6,6 +6,7 @@ import ticketActivityRepository from './ticketActivityRepository.js';
 import { TOOL_SCHEMAS, executeTool, applyWorkspaceTicketTypes } from './assignmentTools.js';
 import freshServiceActionService from './freshServiceActionService.js';
 import competencyFeedbackService from './competencyFeedbackService.js';
+import noiseRuleService from './noiseRuleService.js';
 import afterHoursUrgentEscalationService from './afterHoursUrgentEscalationService.js';
 import { formatDateInTimezone } from '../utils/timezone.js';
 import { TICKET_ORIGIN } from '../utils/ticketOrigin.js';
@@ -389,20 +390,42 @@ class AssignmentPipelineService {
 
     let escalation = null;
     if (priorityStatus === 'completed' && priorityRun?.decision === 'noise_dismissed') {
-      logger.info('Pipeline after-hours priority assessment dismissed ticket as noise; skipping business-hours queue', {
-        ticketId,
-        workspaceId,
-        triggerSource,
-        priorityRunId,
-      });
-      return {
-        ...priorityRun,
-        afterHoursPriorityRunId: priorityRunId,
-        afterHoursPriorityStatus: priorityStatus,
-        afterHoursAssessedPriority: assessedPriority,
-        afterHoursAssignmentQueued: false,
-        afterHoursQueueSkippedReason: 'noise_dismissed',
-      };
+      // NT-1 never_noise veto, defense-in-depth: the child run already
+      // applies the veto itself (its decision becomes pending_review, so we
+      // would not land here), but never trust a noise dismissal for the
+      // short-circuit without re-checking the deterministic rules.
+      const afterHoursVeto = await this._evaluateNoiseVeto(ticketId, workspaceId);
+      if (afterHoursVeto?.vetoed) {
+        logger.warn('Pipeline after-hours noise dismissal vetoed by never_noise rule — queueing business-hours assignment run anyway', {
+          ticketId,
+          workspaceId,
+          triggerSource,
+          priorityRunId,
+          ruleId: afterHoursVeto.ruleId,
+          ruleName: afterHoursVeto.ruleName,
+        });
+        emit({
+          type: 'noise_veto',
+          ruleId: afterHoursVeto.ruleId,
+          ruleName: afterHoursVeto.ruleName,
+          message: `Noise veto: rule "${afterHoursVeto.ruleName}" — this ticket can never be auto-dismissed.`,
+        });
+      } else {
+        logger.info('Pipeline after-hours priority assessment dismissed ticket as noise; skipping business-hours queue', {
+          ticketId,
+          workspaceId,
+          triggerSource,
+          priorityRunId,
+        });
+        return {
+          ...priorityRun,
+          afterHoursPriorityRunId: priorityRunId,
+          afterHoursPriorityStatus: priorityStatus,
+          afterHoursAssessedPriority: assessedPriority,
+          afterHoursAssignmentQueued: false,
+          afterHoursQueueSkippedReason: 'noise_dismissed',
+        };
+      }
     }
 
     if (priorityStatus === 'completed' && assessedPriority === 'Urgent') {
@@ -1098,6 +1121,16 @@ class AssignmentPipelineService {
       const topRec = recommendation?.recommendations?.[0];
       const isNoise = recommendation && (!recommendation.recommendations || recommendation.recommendations.length === 0);
 
+      // NT-1 deterministic noise veto: when the LLM's verdict is "noise"
+      // (empty recommendations array) but an admin never_noise rule matches
+      // the ticket, the run must NEVER finalize as noise_dismissed — it is
+      // forced to pending_review below and auto-close is suppressed. This is
+      // a hard rule that outranks any prompt/model behavior.
+      let noiseVeto = null;
+      if (isNoise) {
+        noiseVeto = await this._evaluateNoiseVeto(ticketId, workspaceId);
+      }
+
       // Detect "LLM ignored the prompt and re-suggested a prior rejecter" so we
       // don't auto-assign a ticket back to the agent who just bounced it. The
       // preflight check would catch this at the FS layer too, but downgrading
@@ -1164,7 +1197,7 @@ class AssignmentPipelineService {
         }
       }
 
-      const decision = resolvePipelineDecision({
+      let decision = resolvePipelineDecision({
         recommendation,
         triggerSource,
         isPriorityAssessmentOnly,
@@ -1175,9 +1208,45 @@ class AssignmentPipelineService {
         autoAssign: assignmentConfig?.autoAssign,
       });
 
+      // Apply the never_noise veto: the dismissal becomes a pending review
+      // with an explicit trace step so the run detail shows WHY the ticket
+      // survived the AI's noise verdict.
+      let noiseVetoApplied = false;
+      if (decision === 'noise_dismissed' && noiseVeto?.vetoed) {
+        decision = 'pending_review';
+        noiseVetoApplied = true;
+        const vetoMessage = `Noise veto: rule "${noiseVeto.ruleName}" — this ticket can never be auto-dismissed.`;
+        stepCounter++;
+        await assignmentRepository.createPipelineStep({
+          pipelineRunId: runId,
+          stepNumber: stepCounter,
+          stepName: 'noise_veto',
+          status: 'completed',
+          durationMs: 0,
+          output: {
+            kind: 'noise_veto',
+            ruleId: noiseVeto.ruleId,
+            ruleName: noiseVeto.ruleName,
+            message: vetoMessage,
+            llmVerdict: 'noise',
+            forcedDecision: 'pending_review',
+          },
+        }).catch((stepError) => {
+          logger.warn('Pipeline: failed to record noise_veto step', { runId, error: stepError.message });
+        });
+        emit({ type: 'noise_veto', ruleId: noiseVeto.ruleId, ruleName: noiseVeto.ruleName, message: vetoMessage });
+        logger.info('Pipeline noise dismissal vetoed by never_noise rule — forcing pending_review', {
+          runId, ticketId, workspaceId, ruleId: noiseVeto.ruleId, ruleName: noiseVeto.ruleName,
+        });
+      }
+
       const finalStatus = recommendation ? 'completed' : 'failed_schema_validation';
       let errorMessage = recommendation ? null : 'Could not extract structured recommendation from LLM output';
-      if (llmIgnoredRebound) {
+      if (noiseVetoApplied) {
+        // The "Noise veto:" prefix is what the run detail page keys on to
+        // render the veto strip — keep this format stable.
+        errorMessage = `Noise veto: rule "${noiseVeto.ruleName}" — this ticket can never be auto-dismissed. The AI marked it as noise, but the run was held for manual review.`;
+      } else if (llmIgnoredRebound) {
         errorMessage = `LLM re-suggested ${topRec.techName || `tech #${topRec.techId}`}, who already rejected this ticket — downgraded to pending_review for manual handling.`;
       } else if (groupObserved) {
         errorMessage = assignmentConfig?.observeCategoryWritebackEnabled
@@ -1208,7 +1277,7 @@ class AssignmentPipelineService {
       const willTriggerSync =
         decision === 'auto_assigned'
         || decision === 'classified_only'
-        || (decision === 'noise_dismissed' && assignmentConfig?.autoCloseNoise);
+        || (decision === 'noise_dismissed' && assignmentConfig?.autoCloseNoise && !noiseVetoApplied);
 
       const observeApplyCategories = groupObserved && assignmentConfig?.observeCategoryWritebackEnabled === true;
       if (recommendation && groupObserved) {
@@ -1359,7 +1428,7 @@ class AssignmentPipelineService {
         freshServiceActionService.execute(runId, workspaceId, assignmentConfig?.dryRunMode ?? true)
           .catch((err) => logger.warn('FreshService pipeline sync failed', { runId, decision, error: err.message }))
           .then(() => this._broadcastRunUpdate(workspaceId, ticketId, runId, 'synced', decision));
-      } else if (decision === 'noise_dismissed' && assignmentConfig?.autoCloseNoise) {
+      } else if (decision === 'noise_dismissed' && assignmentConfig?.autoCloseNoise && !noiseVetoApplied) {
         freshServiceActionService.execute(runId, workspaceId, assignmentConfig?.dryRunMode ?? true)
           .catch((err) => logger.warn('FreshService auto-close noise failed', { runId, error: err.message }))
           .then(() => this._broadcastRunUpdate(workspaceId, ticketId, runId, 'synced', decision));
@@ -1414,6 +1483,43 @@ class AssignmentPipelineService {
       emit({ type: 'complete', runId });
       this._broadcastRunUpdate(workspaceId, ticketId, runId, 'failed');
       return await assignmentRepository.getPipelineRun(runId);
+    }
+  }
+
+  /**
+   * NT-1: deterministic never_noise veto lookup for a ticket. Loads the
+   * fields the veto rules match against (subject, description, category
+   * name) and delegates to noiseRuleService.evaluateNeverNoise. Fails open
+   * (no veto) on lookup errors — a veto miss keeps existing behavior, and
+   * a DB outage here would have failed the run elsewhere anyway.
+   *
+   * @returns {Promise<{vetoed: boolean, ruleId: number|null, ruleName: string|null}>}
+   */
+  async _evaluateNoiseVeto(ticketId, workspaceId) {
+    try {
+      const ticket = await prisma.ticket.findUnique({
+        where: { id: ticketId },
+        select: {
+          subject: true,
+          description: true,
+          descriptionText: true,
+          category: true,
+          internalCategory: { select: { name: true } },
+        },
+      });
+      if (!ticket) return { vetoed: false, ruleId: null, ruleName: null };
+      return await noiseRuleService.evaluateNeverNoise(workspaceId, {
+        subject: ticket.subject,
+        description: ticket.descriptionText || ticket.description,
+        category: ticket.internalCategory?.name || ticket.category,
+      });
+    } catch (error) {
+      logger.warn('Pipeline never_noise veto check failed — leaving the noise decision unvetoed', {
+        ticketId,
+        workspaceId,
+        error: error.message,
+      });
+      return { vetoed: false, ruleId: null, ruleName: null };
     }
   }
 

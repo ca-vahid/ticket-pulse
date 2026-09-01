@@ -1036,7 +1036,24 @@ router.get('/runs/:id', requireAdmin, asyncHandler(async (req, res) => {
   if (run.workspaceId !== req.workspaceId) {
     return res.status(403).json({ success: false, message: 'Pipeline run belongs to a different workspace' });
   }
-  res.json({ success: true, data: run });
+  // NT-8: prompt-version context so the UI can flag runs that were decided
+  // under a now-stale prompt (run prompt version vs current published one).
+  // Decorative metadata — never fail the run fetch over it.
+  let promptVersionNumber = null;
+  let currentPublishedPromptVersion = null;
+  try {
+    const published = await promptRepository.getPublished(req.workspaceId);
+    currentPublishedPromptVersion = published?.version ?? null;
+    if (run.promptVersionId) {
+      if (published?.id === run.promptVersionId) {
+        promptVersionNumber = published.version;
+      } else {
+        const runVersion = await promptRepository.getVersion(run.promptVersionId).catch(() => null);
+        promptVersionNumber = runVersion?.version ?? null;
+      }
+    }
+  } catch { /* prompt metadata unavailable — run detail still renders */ }
+  res.json({ success: true, data: { ...run, promptVersionNumber, currentPublishedPromptVersion } });
 }));
 
 router.post('/runs/:id/decide', requireReviewer, asyncHandler(async (req, res) => {
@@ -1342,14 +1359,37 @@ router.post('/runs/:id/rerun', requireAdmin, asyncHandler(async (req, res) => {
     return res.status(403).json({ success: false, message: 'Run belongs to a different workspace' });
   }
 
-  // Mark old run as superseded
-  await prisma.assignmentPipelineRun.update({
-    where: { id: runId },
-    data: { status: 'superseded', decision: null },
-  });
+  // NT-7: in-flight runs cannot be re-run — the pipeline would dedupe on the
+  // open run anyway, and superseding it here would orphan a live execution.
+  if (run.status === 'queued' || run.status === 'running') {
+    return res.status(409).json({
+      success: false,
+      message: `Run #${runId} is still ${run.status} — wait for it to finish before re-running`,
+    });
+  }
+
+  // Awaiting-review runs are superseded so the review queue never holds two
+  // pending runs for one ticket (pre-NT-7 behavior, unchanged). Every other
+  // terminal state (noise_dismissed, auto_assigned, approved, rejected,
+  // modified, failed, …) is KEPT intact for history — the re-run simply
+  // creates a NEW run, and runPipeline always fetches the CURRENT published
+  // prompt fresh (promptRepository.getPublished).
+  const supersede = run.status === 'completed' && run.decision === 'pending_review';
+  if (supersede) {
+    await prisma.assignmentPipelineRun.update({
+      where: { id: runId },
+      data: { status: 'superseded', decision: null },
+    });
+  }
 
   // Trigger new pipeline run
-  res.status(202).json({ success: true, message: 'Pipeline re-run triggered, old run superseded' });
+  res.status(202).json({
+    success: true,
+    message: supersede
+      ? 'Pipeline re-run triggered, old run superseded'
+      : 'Pipeline re-run triggered, existing run kept for history',
+    data: { ticketId: run.ticketId, supersededRunId: supersede ? runId : null },
+  });
   assignmentPipelineService.runPipeline(run.ticketId, req.workspaceId, 'manual').catch((error) => {
     logger.error('Pipeline rerun failed', { runId, ticketId: run.ticketId, error: error.message });
   });

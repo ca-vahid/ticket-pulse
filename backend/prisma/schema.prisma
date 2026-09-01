@@ -1247,6 +1247,7 @@ model NoiseRule {
   description     String?   @db.Text
   category        String    @db.VarChar(100)
   isEnabled       Boolean   @default(true) @map("is_enabled")
+  mode            String    @default("noise") @db.VarChar(20) // noise | never_noise (never_noise = hard veto: matching tickets can never be auto-dismissed)
   matchCount      Int       @default(0) @map("match_count")
   dedupWindowDays Int?      @map("dedup_window_days")
   workspaceId     Int       @map("workspace_id")
@@ -1256,6 +1257,7 @@ model NoiseRule {
 
   @@index([isEnabled])
   @@index([workspaceId])
+  @@index([mode])
   @@map("noise_rules")
 }
 

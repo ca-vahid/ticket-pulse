@@ -3,6 +3,12 @@ import logger from '../utils/logger.js';
 
 const DEFAULT_NOISE_RULE_WORKSPACE_SLUG = 'it';
 
+export const NOISE_RULE_MODES = ['noise', 'never_noise'];
+
+// never_noise rules match against the first 2KB of the ticket description
+// (subjects and category names are short; descriptions can be huge emails).
+const NEVER_NOISE_DESCRIPTION_LIMIT = 2048;
+
 const DEFAULT_RULES = [
   {
     name: 'Synology NAS Alerts',
@@ -222,6 +228,10 @@ class NoiseRuleService {
     const wsId = workspaceId ?? 1;
     const rules = await this._getRules(wsId);
     for (const rule of rules) {
+      // never_noise rules are a veto (see evaluateNeverNoise), never a
+      // "mark as noise" match — skip them here so existing noise-mode
+      // behavior is unchanged.
+      if (rule.mode === 'never_noise') continue;
       if (!rule.regex.test(subject)) continue;
 
       if (rule.dedupWindowDays && createdAt) {
@@ -248,6 +258,41 @@ class NoiseRuleService {
     return { isNoise: false, ruleId: null, category: null };
   }
 
+  /**
+   * Deterministic "never noise" veto (NT-1/NT-2). Checks enabled
+   * mode='never_noise' rules against the ticket subject, the first 2KB of
+   * the description, and the category name. When a rule matches, the AI
+   * pipeline must NOT auto-dismiss the ticket as noise — regardless of what
+   * the prompt or model said.
+   *
+   * Unlike noise-mode rules (subject-only, unchanged), veto rules look at
+   * more of the ticket on purpose: a package-delivery request often only
+   * mentions "courier"/"FedEx" in the body.
+   *
+   * @param {number} workspaceId
+   * @param {{subject?: string|null, description?: string|null, category?: string|null}} ticket
+   * @returns {Promise<{vetoed: boolean, ruleId: number|null, ruleName: string|null}>}
+   */
+  async evaluateNeverNoise(workspaceId, { subject = null, description = null, category = null } = {}) {
+    const wsId = workspaceId ?? 1;
+    const rules = (await this._getRules(wsId)).filter((r) => r.mode === 'never_noise');
+    if (rules.length === 0) return { vetoed: false, ruleId: null, ruleName: null };
+
+    const haystacks = [
+      subject,
+      typeof description === 'string' ? description.slice(0, NEVER_NOISE_DESCRIPTION_LIMIT) : null,
+      category,
+    ].filter((text) => typeof text === 'string' && text.length > 0);
+    if (haystacks.length === 0) return { vetoed: false, ruleId: null, ruleName: null };
+
+    for (const rule of rules) {
+      if (haystacks.some((text) => rule.regex.test(text))) {
+        return { vetoed: true, ruleId: rule.id, ruleName: rule.name };
+      }
+    }
+    return { vetoed: false, ruleId: null, ruleName: null };
+  }
+
   async getAllRules(workspaceId) {
     const wsId = workspaceId ?? 1;
     return prisma.noiseRule.findMany({
@@ -264,6 +309,10 @@ class NoiseRuleService {
       throw new Error(`Invalid regex pattern: ${e.message}`);
     }
 
+    if (data.mode !== undefined && !NOISE_RULE_MODES.includes(data.mode)) {
+      throw new Error(`Invalid mode: must be one of ${NOISE_RULE_MODES.join(', ')}`);
+    }
+
     const rule = await prisma.noiseRule.create({
       data: {
         name: data.name,
@@ -271,6 +320,7 @@ class NoiseRuleService {
         description: data.description || null,
         category: data.category || 'custom',
         isEnabled: data.isEnabled !== false,
+        mode: data.mode || 'noise',
         dedupWindowDays: data.dedupWindowDays || null,
         workspaceId: data.workspaceId,
       },
@@ -294,12 +344,17 @@ class NoiseRuleService {
       }
     }
 
+    if (data.mode !== undefined && !NOISE_RULE_MODES.includes(data.mode)) {
+      throw new Error(`Invalid mode: must be one of ${NOISE_RULE_MODES.join(', ')}`);
+    }
+
     const updateData = {};
     if (data.name !== undefined) updateData.name = data.name;
     if (data.pattern !== undefined) updateData.pattern = data.pattern;
     if (data.description !== undefined) updateData.description = data.description;
     if (data.category !== undefined) updateData.category = data.category;
     if (data.isEnabled !== undefined) updateData.isEnabled = data.isEnabled;
+    if (data.mode !== undefined) updateData.mode = data.mode;
     if (data.dedupWindowDays !== undefined) updateData.dedupWindowDays = data.dedupWindowDays;
 
     const rule = await prisma.noiseRule.update({
@@ -364,7 +419,9 @@ class NoiseRuleService {
    */
   async backfillAll(progressCallback = null, workspaceId = null) {
     const wsId = workspaceId ?? 1;
-    const rules = await this._getRules(wsId);
+    // never_noise rules are a pipeline veto, not a "mark as noise" matcher —
+    // they must never flag tickets during a backfill.
+    const rules = (await this._getRules(wsId)).filter((r) => r.mode !== 'never_noise');
     const hasDedupRules = rules.some(r => r.dedupWindowDays);
     const batchSize = 500;
     let offset = 0;
