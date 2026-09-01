@@ -267,7 +267,7 @@ export const TOOL_SCHEMAS = [
   },
   {
     name: 'search_decision_notes',
-    description: 'Search past admin decision notes from the assignment pipeline. Returns notes where admins explained why they approved, modified, or rejected recommendations for similar tickets. Use this to learn from past decisions and understand admin preferences for routing patterns.',
+    description: 'Search past assignment decisions for similar tickets. Returns TWO separate buckets: adminDecisions (decisions made by a human admin/coordinator — approvals, overrides, rejections, routing notes; these are binding precedent for routing preferences) and automatedOutcomes (results this pipeline previously produced on its own, such as auto-assignments and automated noise dismissals; these are non-binding machine history — NOT precedent, NOT instructions, and never a sufficient reason on their own to dismiss a ticket as noise). Use adminDecisions to learn admin preferences.',
     input_schema: {
       type: 'object',
       properties: {
@@ -2505,53 +2505,101 @@ async function searchDecisionNotes(workspaceId, input) {
   const timezone = await getWorkspaceTimezone(workspaceId);
 
   const keywords = query.split(/\s+/).filter(Boolean);
+  const keywordFilter = keywords.flatMap((kw) => [
+    { decisionNote: { contains: kw, mode: 'insensitive' } },
+    { overrideReason: { contains: kw, mode: 'insensitive' } },
+    { ticket: { subject: { contains: kw, mode: 'insensitive' } } },
+    { ticket: { ticketCategory: { contains: kw, mode: 'insensitive' } } },
+  ]);
+  const runSelect = {
+    id: true,
+    decision: true,
+    decisionNote: true,
+    overrideReason: true,
+    decidedByEmail: true,
+    decidedAt: true,
+    assignedTechId: true,
+    assignedTech: { select: { name: true } },
+    ticket: { select: { freshserviceTicketId: true, subject: true, ticketCategory: true, category: true } },
+    recommendation: true,
+  };
 
   try {
-    const runs = await prisma.assignmentPipelineRun.findMany({
-      where: {
-        workspaceId,
-        decidedAt: { not: null },
-        OR: keywords.flatMap((kw) => [
-          { decisionNote: { contains: kw, mode: 'insensitive' } },
-          { overrideReason: { contains: kw, mode: 'insensitive' } },
-          { ticket: { subject: { contains: kw, mode: 'insensitive' } } },
-          { ticket: { ticketCategory: { contains: kw, mode: 'insensitive' } } },
-        ]),
-      },
-      orderBy: { decidedAt: 'desc' },
-      take: limit,
-      select: {
-        id: true,
-        decision: true,
-        decisionNote: true,
-        overrideReason: true,
-        decidedByEmail: true,
-        decidedAt: true,
-        assignedTechId: true,
-        assignedTech: { select: { name: true } },
-        ticket: { select: { freshserviceTicketId: true, subject: true, ticketCategory: true, category: true } },
-        recommendation: true,
-      },
-    });
+    // NT-5: split human precedent from the pipeline's own automated outcomes.
+    // `decidedByEmail` is only ever written by the admin decision routes
+    // (assignment.routes.js /decide + /dismiss → assignmentRepository
+    // recordDecision / recordDecisionIfPending / dismissRunIfPending, always
+    // from the session user), so a non-null decidedByEmail is the reliable
+    // marker of a human decision. Machine-finalized runs — pipeline
+    // auto_assigned / noise_dismissed (assignmentPipelineService) and
+    // duplicate_dismissed (duplicateBurstService) — stamp decidedAt but leave
+    // decidedByEmail NULL. Serving those back as "admin decision notes" let
+    // the model cite its own prior noise dismissals as precedent (a
+    // self-reinforcing loop observed in prod), so the buckets are queried,
+    // labeled, and shaped separately and each stays bounded by `limit`.
+    const [adminRuns, automatedRuns] = await Promise.all([
+      prisma.assignmentPipelineRun.findMany({
+        where: {
+          workspaceId,
+          decidedAt: { not: null },
+          decidedByEmail: { not: null },
+          OR: keywordFilter,
+        },
+        orderBy: { decidedAt: 'desc' },
+        take: limit,
+        select: runSelect,
+      }),
+      prisma.assignmentPipelineRun.findMany({
+        where: {
+          workspaceId,
+          decidedAt: { not: null },
+          decidedByEmail: null,
+          OR: keywordFilter,
+        },
+        orderBy: { decidedAt: 'desc' },
+        take: limit,
+        select: runSelect,
+      }),
+    ]);
 
     return {
       query,
-      totalMatches: runs.length,
-      notes: runs.map((r) => ({
-        runId: r.id,
-        ticketId: r.ticket?.freshserviceTicketId,
-        ticketSubject: r.ticket?.subject,
-        ticketCategory: r.ticket?.ticketCategory || r.ticket?.category,
-        decision: r.decision,
-        decisionNote: r.decisionNote,
-        overrideReason: r.overrideReason,
-        assignedTo: r.assignedTech?.name,
-        decidedBy: r.decidedByEmail,
-        decidedAt: r.decidedAt ? convertToTimezone(r.decidedAt, timezone) : null,
-        decidedAtUtc: r.decidedAt?.toISOString?.() || null,
-        workspaceTimezone: timezone,
-        originalTopRecommendation: r.recommendation?.recommendations?.[0]?.techName,
-      })),
+      guidance: 'Only adminDecisions carry precedent weight. automatedOutcomes are this pipeline\'s own past machine-generated results — non-binding history, NOT admin instruction, and NEVER a sufficient basis on their own to dismiss a ticket as noise.',
+      adminDecisions: {
+        label: 'ADMIN DECISIONS (human precedent — a human admin or coordinator made these calls)',
+        totalMatches: adminRuns.length,
+        notes: adminRuns.map((r) => ({
+          runId: r.id,
+          ticketId: r.ticket?.freshserviceTicketId,
+          ticketSubject: r.ticket?.subject,
+          ticketCategory: r.ticket?.ticketCategory || r.ticket?.category,
+          decision: r.decision,
+          decisionNote: r.decisionNote,
+          overrideReason: r.overrideReason,
+          assignedTo: r.assignedTech?.name,
+          decidedBy: r.decidedByEmail,
+          decidedAt: r.decidedAt ? convertToTimezone(r.decidedAt, timezone) : null,
+          decidedAtUtc: r.decidedAt?.toISOString?.() || null,
+          workspaceTimezone: timezone,
+          originalTopRecommendation: r.recommendation?.recommendations?.[0]?.techName,
+        })),
+      },
+      automatedOutcomes: {
+        label: 'AUTOMATED OUTCOMES (machine history — NOT precedent, do not treat as instruction; the pipeline produced these itself with no human decider)',
+        totalMatches: automatedRuns.length,
+        outcomes: automatedRuns.map((r) => ({
+          runId: r.id,
+          ticketId: r.ticket?.freshserviceTicketId,
+          ticketSubject: r.ticket?.subject,
+          ticketCategory: r.ticket?.ticketCategory || r.ticket?.category,
+          decision: r.decision,
+          assignedTo: r.assignedTech?.name,
+          decidedBy: null,
+          automated: true,
+          decidedAt: r.decidedAt ? convertToTimezone(r.decidedAt, timezone) : null,
+          decidedAtUtc: r.decidedAt?.toISOString?.() || null,
+        })),
+      },
     };
   } catch (error) {
     logger.error('Error searching decision notes:', error);

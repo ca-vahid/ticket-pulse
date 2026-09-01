@@ -1,6 +1,16 @@
-export const APP_VERSION = '3.8.04-preview';
+export const APP_VERSION = '3.8.10-preview';
 
 export const changelog = [
+  {
+    version: '3.8.10-preview',
+    date: 'September 1, 2026',
+    entries: [
+      { type: 'added', html: '<strong>🛡️ “Never noise” rules</strong> — Settings → Noise Rules gains a rule mode. A <em>Never noise</em> rule is a hard veto: any ticket matching it (subject, description or category) can never be auto-dismissed as noise, no matter what the AI decides — the run is held for manual review with a visible “Noise veto” step. IT ships with one for physical packages, the shipping room and couriers (FedEx/UPS/Purolator/DHL). (QA 08-31 #1)' },
+      { type: 'fixed', html: '<strong>🔁 Re-run any finished run</strong> — the Re-run button now appears on every completed run, including <em>Noise Dismissed</em> ones (it used to exist only on pending-review runs, so a dismissed run could not be re-run at all). The confirm dialog states plainly that a <em>new</em> run is created with the <em>current</em> published prompt and the old run is kept. The live pipeline view now says “Viewing completed run … the pipeline has not run again” instead of looking like a fresh analysis, and the run page shows a banner when the run used an older prompt version than the one now published. (QA 08-31 #1)' },
+      { type: 'fixed', html: '<strong>🧠 The AI no longer treats its own past dismissals as admin precedent</strong> — the decision-history lookup used to hand the model every earlier run on a similar subject as “admin decision notes”, including runs the pipeline itself had auto-dismissed. That fed each dismissal into the next one. History is now split into human <em>admin decisions</em> (binding precedent) and <em>automated outcomes</em> (non-binding, never sufficient on their own to call a ticket noise).' },
+      { type: 'fixed', html: '<strong>Prompt and noise-flag safety</strong> — the automatic prompt-template upgrader can no longer replace a customised workspace prompt with the stock default (it now only refreshes untouched scaffolding and records an audit version). FreshService sync no longer flips a ticket’s noise verdict once a pipeline run has decided it.' },
+    ],
+  },
   {
     version: '3.8.04-preview',
     date: 'August 31, 2026',

@@ -2,8 +2,63 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   VolumeX, Plus, Trash2, Edit3, Save, X, CheckCircle, XCircle,
   RefreshCw, TestTube, ChevronDown, ChevronUp, ToggleLeft, ToggleRight,
+  ShieldCheck,
 } from 'lucide-react';
 import { noiseRulesAPI } from '../services/api';
+
+// NT-4: a rule either flags matches AS noise (classic behavior) or acts as a
+// hard veto that protects matches FROM ever being auto-dismissed as noise.
+const RULE_MODES = [
+  {
+    value: 'noise',
+    label: 'Noise',
+    help: 'Tickets matching this pattern are flagged as noise and may be auto-dismissed.',
+  },
+  {
+    value: 'never_noise',
+    label: 'Never noise',
+    help: 'Tickets matching this can never be auto-dismissed as noise, no matter what the AI decides.',
+  },
+];
+
+function RuleModeSelector({ value, onChange, idPrefix }) {
+  const selected = RULE_MODES.find(m => m.value === value) || RULE_MODES[0];
+  return (
+    <div>
+      <label className="block text-xs font-medium text-muted-foreground mb-1">Mode</label>
+      <div role="radiogroup" aria-label="Rule mode" className="flex items-center gap-3">
+        {RULE_MODES.map(m => (
+          <label key={m.value} htmlFor={`${idPrefix}-mode-${m.value}`} className="flex items-center gap-1.5 text-sm text-foreground/85 cursor-pointer">
+            <input
+              id={`${idPrefix}-mode-${m.value}`}
+              type="radio"
+              name={`${idPrefix}-mode`}
+              value={m.value}
+              checked={(value || 'noise') === m.value}
+              onChange={() => onChange(m.value)}
+              className="tp-focus-ring"
+            />
+            {m.value === 'never_noise' && <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-300" aria-hidden="true" />}
+            {m.label}
+          </label>
+        ))}
+      </div>
+      <p className="text-[10px] text-muted-foreground/75 mt-1">{selected.help}</p>
+    </div>
+  );
+}
+
+function NeverNoiseBadge() {
+  return (
+    <span
+      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 border border-emerald-200 dark:border-emerald-500/30"
+      title="Tickets matching this rule can never be auto-dismissed as noise, no matter what the AI decides."
+    >
+      <ShieldCheck className="w-3 h-3" aria-hidden="true" />
+      Never noise
+    </span>
+  );
+}
 
 const CATEGORIES = [
   { value: 'infrastructure', label: 'Infrastructure', color: 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200' },
@@ -102,6 +157,7 @@ function RuleRow({ rule, onUpdate, onDelete }) {
       pattern: rule.pattern,
       description: rule.description || '',
       category: rule.category,
+      mode: rule.mode || 'noise',
       dedupWindowDays: rule.dedupWindowDays || '',
     });
     setIsEditing(true);
@@ -110,7 +166,10 @@ function RuleRow({ rule, onUpdate, onDelete }) {
   const saveEdit = async () => {
     await onUpdate(rule.id, {
       ...editData,
-      dedupWindowDays: editData.dedupWindowDays ? parseInt(editData.dedupWindowDays) : null,
+      // Dedup windows only make sense for noise-flagging rules.
+      dedupWindowDays: editData.mode !== 'never_noise' && editData.dedupWindowDays
+        ? parseInt(editData.dedupWindowDays)
+        : null,
     });
     setIsEditing(false);
   };
@@ -141,6 +200,7 @@ function RuleRow({ rule, onUpdate, onDelete }) {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <span className="text-sm font-semibold text-foreground truncate">{rule.name}</span>
+            {rule.mode === 'never_noise' && <NeverNoiseBadge />}
             <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${getCategoryStyle(rule.category)}`}>
               {rule.category}
             </span>
@@ -160,10 +220,10 @@ function RuleRow({ rule, onUpdate, onDelete }) {
           <button onClick={() => setExpanded(!expanded)} className="p-1 hover:bg-muted rounded">
             {expanded ? <ChevronUp className="w-4 h-4 text-muted-foreground/75" /> : <ChevronDown className="w-4 h-4 text-muted-foreground/75" />}
           </button>
-          <button onClick={startEdit} className="p-1 hover:bg-blue-50 dark:hover:bg-blue-500/15 rounded text-blue-600 dark:text-blue-300">
+          <button onClick={startEdit} title="Edit rule" aria-label={`Edit rule ${rule.name}`} className="p-1 hover:bg-blue-50 dark:hover:bg-blue-500/15 rounded text-blue-600 dark:text-blue-300">
             <Edit3 className="w-3.5 h-3.5" />
           </button>
-          <button onClick={() => onDelete(rule.id)} className="p-1 hover:bg-red-50 dark:hover:bg-red-500/15 rounded text-red-500">
+          <button onClick={() => onDelete(rule.id)} title="Delete rule" aria-label={`Delete rule ${rule.name}`} className="p-1 hover:bg-red-50 dark:hover:bg-red-500/15 rounded text-red-500">
             <Trash2 className="w-3.5 h-3.5" />
           </button>
         </div>
@@ -203,6 +263,11 @@ function RuleRow({ rule, onUpdate, onDelete }) {
                   placeholder="^Some regex pattern"
                 />
               </div>
+              <RuleModeSelector
+                idPrefix={`edit-${rule.id}`}
+                value={editData.mode}
+                onChange={mode => setEditData(d => ({ ...d, mode }))}
+              />
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-muted-foreground mb-1">Description</label>
@@ -212,19 +277,21 @@ function RuleRow({ rule, onUpdate, onDelete }) {
                     className="w-full px-3 py-1.5 border border-input rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
                 </div>
-                <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1">Dedup Window (days)</label>
-                  <input
-                    type="number"
-                    value={editData.dedupWindowDays}
-                    onChange={e => setEditData(d => ({ ...d, dedupWindowDays: e.target.value }))}
-                    className="w-full px-3 py-1.5 border border-input rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="Leave empty for always-noise"
-                    min="1"
-                    max="90"
-                  />
-                  <p className="text-[10px] text-muted-foreground/75 mt-0.5">If set, only marks as noise when a same-subject ticket exists within this window</p>
-                </div>
+                {editData.mode !== 'never_noise' && (
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">Dedup Window (days)</label>
+                    <input
+                      type="number"
+                      value={editData.dedupWindowDays}
+                      onChange={e => setEditData(d => ({ ...d, dedupWindowDays: e.target.value }))}
+                      className="w-full px-3 py-1.5 border border-input rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="Leave empty for always-noise"
+                      min="1"
+                      max="90"
+                    />
+                    <p className="text-[10px] text-muted-foreground/75 mt-0.5">If set, only marks as noise when a same-subject ticket exists within this window</p>
+                  </div>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 <button onClick={saveEdit} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium">
@@ -284,7 +351,7 @@ export default function NoiseRulesPanel() {
   const [showAddForm, setShowAddForm] = useState(false);
   const [isBackfilling, setIsBackfilling] = useState(false);
   const [newRule, setNewRule] = useState({
-    name: '', pattern: '', description: '', category: 'custom', dedupWindowDays: '',
+    name: '', pattern: '', description: '', category: 'custom', mode: 'noise', dedupWindowDays: '',
   });
 
   const fetchData = useCallback(async () => {
@@ -313,11 +380,18 @@ export default function NoiseRulesPanel() {
     try {
       await noiseRulesAPI.create({
         ...newRule,
-        dedupWindowDays: newRule.dedupWindowDays ? parseInt(newRule.dedupWindowDays) : null,
+        dedupWindowDays: newRule.mode !== 'never_noise' && newRule.dedupWindowDays
+          ? parseInt(newRule.dedupWindowDays)
+          : null,
       });
       setShowAddForm(false);
-      setNewRule({ name: '', pattern: '', description: '', category: 'custom', dedupWindowDays: '' });
-      setStatus({ success: true, message: 'Rule created. Run backfill to apply to existing tickets.' });
+      setNewRule({ name: '', pattern: '', description: '', category: 'custom', mode: 'noise', dedupWindowDays: '' });
+      setStatus({
+        success: true,
+        message: newRule.mode === 'never_noise'
+          ? 'Never-noise rule created. Matching tickets are now protected from auto-dismissal.'
+          : 'Rule created. Run backfill to apply to existing tickets.',
+      });
       await fetchData();
     } catch (e) {
       setStatus({ success: false, message: e.message });
@@ -465,6 +539,11 @@ export default function NoiseRulesPanel() {
               placeholder="^Alert: .+ from server"
             />
           </div>
+          <RuleModeSelector
+            idPrefix="new"
+            value={newRule.mode}
+            onChange={mode => setNewRule(d => ({ ...d, mode }))}
+          />
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-muted-foreground mb-1">Description (optional)</label>
@@ -474,17 +553,19 @@ export default function NoiseRulesPanel() {
                 className="w-full px-3 py-1.5 border border-input rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
             </div>
-            <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-1">Dedup Window (days, optional)</label>
-              <input
-                type="number"
-                value={newRule.dedupWindowDays}
-                onChange={e => setNewRule(d => ({ ...d, dedupWindowDays: e.target.value }))}
-                className="w-full px-3 py-1.5 border border-input rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Leave empty = always noise"
-                min="1" max="90"
-              />
-            </div>
+            {newRule.mode !== 'never_noise' && (
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">Dedup Window (days, optional)</label>
+                <input
+                  type="number"
+                  value={newRule.dedupWindowDays}
+                  onChange={e => setNewRule(d => ({ ...d, dedupWindowDays: e.target.value }))}
+                  className="w-full px-3 py-1.5 border border-input rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="Leave empty = always noise"
+                  min="1" max="90"
+                />
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <button onClick={handleCreate} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium">

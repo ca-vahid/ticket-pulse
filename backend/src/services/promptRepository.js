@@ -18,6 +18,30 @@ Use exactly one normalized value:
 
 Always populate \`assessedPriority\`, \`priorityRationale\`, and \`priorityConfidence\` when calling \`submit_recommendation\`. Add concise \`prioritySignals\` when useful. If evidence is thin, choose the best supported value and set confidence to \`low\` or \`medium\`; do not inflate priority just because the requester used vague urgency language.`;
 
+// ── Decision-notes step scaffolding (NT-6) ────────────────────────────────
+// v2: search_decision_notes now returns two labeled buckets — adminDecisions
+// (human precedent) and automatedOutcomes (the pipeline's own past machine
+// results, non-binding). The LEGACY text is kept verbatim so the auto-upgrader
+// can recognize an UNMODIFIED legacy scaffold and swap only that section;
+// admin-edited decision-notes sections are never touched (see NT-9 below —
+// the tool result labels its buckets itself, so old prompt text stays safe).
+const LEGACY_DECISION_NOTES_STEP = `
+
+## Step 5b: Check Decision History (optional but valuable)
+Call **search_decision_notes** with keywords from the ticket (e.g., category name, key terms) to find past admin decisions on similar tickets. Look for:
+- Has an admin left notes about how tickets like this should be routed?
+- Were previous recommendations overridden? Why?
+- Are there routing preferences or patterns the admin has established?
+
+Admin decision notes carry high weight — if an admin has explicitly stated a routing preference, follow it unless circumstances have changed.`;
+
+const DECISION_NOTES_STEP = `
+
+## Step 5b: Check Decision History (optional but valuable)
+Call **search_decision_notes** with keywords from the ticket (e.g., category name, key terms) to find past decisions on similar tickets. The result contains TWO clearly separated buckets — read the labels carefully:
+- \`adminDecisions\` — decisions a human admin or coordinator made (approvals, manual overrides, rejections, routing notes). These are binding precedent: if an admin has explicitly stated a routing preference, follow it unless circumstances have changed.
+- \`automatedOutcomes\` — outcomes this pipeline previously produced on its own (auto-assignments, automated noise dismissals) with no human decider. These are non-binding machine history: NOT precedent and NOT instructions. NEVER dismiss a ticket as noise solely because automatedOutcomes show similar tickets were auto-dismissed before — that is circular reasoning. A noise verdict must be justified by the ticket's own content (and adminDecisions where available).`;
+
 const DEFAULT_SYSTEM_PROMPT = `You are an IT helpdesk ticket assignment assistant. You analyze incoming tickets and recommend the best technician to handle them.
 
 Follow this process EXACTLY in order. Do not skip steps.
@@ -83,13 +107,7 @@ If you find a strong candidate, call **get_tech_ticket_history** on them to conf
 
 You can make multiple search calls if needed — search by keyword, then by category, then check individual tech histories. Take the time to build a thorough understanding.
 
-## Step 5b: Check Decision History (optional but valuable)
-Call **search_decision_notes** with keywords from the ticket (e.g., category name, key terms) to find past admin decisions on similar tickets. Look for:
-- Has an admin left notes about how tickets like this should be routed?
-- Were previous recommendations overridden? Why?
-- Are there routing preferences or patterns the admin has established?
-
-Admin decision notes carry high weight — if an admin has explicitly stated a routing preference, follow it unless circumstances have changed.
+${DECISION_NOTES_STEP.trim()}
 
 ## Step 6: Check Seniority (for complex tickets)
 For HIGH priority or complex tickets, call **get_technician_ad_profile** on your top candidates to check their job title, IT level (IT 1-5), and seniority (Jr/Sr). Prefer senior technicians for complex/critical issues. For routine tickets, this step is optional.
@@ -151,6 +169,50 @@ For noise dismissals (empty recommendations), populate \`closureNoticeHtml\` ins
 - If no agents match, explain why and suggest relaxing criteria
 - Always show your reasoning for each step before moving to the next`;
 
+function normalizePromptWhitespace(text = '') {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Locate the "Check Decision History" section of a prompt (any step number).
+ * Returns { startIdx, endIdx, text } or null when the prompt has no such section.
+ */
+function extractDecisionNotesSection(prompt = '') {
+  const startMatch = prompt.match(/## Step \d+[ab]?:\s*Check Decision History[^\n]*/);
+  if (!startMatch) return null;
+  const startIdx = startMatch.index;
+  const after = prompt.slice(startIdx + startMatch[0].length);
+  const nextSection = after.match(/\n## /);
+  const endIdx = nextSection
+    ? startIdx + startMatch[0].length + nextSection.index
+    : prompt.length;
+  return { startIdx, endIdx, text: prompt.slice(startIdx, endIdx) };
+}
+
+/**
+ * True only when the prompt's decision-history section is the UNMODIFIED
+ * legacy scaffold (whitespace-insensitive). An admin-edited section never
+ * matches, which is what keeps the NT-6 step bump from touching custom text.
+ */
+function hasCanonicalLegacyDecisionNotesStep(prompt = '') {
+  const section = extractDecisionNotesSection(prompt);
+  if (!section) return false;
+  return normalizePromptWhitespace(section.text) === normalizePromptWhitespace(LEGACY_DECISION_NOTES_STEP);
+}
+
+/**
+ * Swap ONLY the decision-history section for the current canonical version.
+ * Falls back to a tail-append when the section header can't be found (so the
+ * guidance is never silently dropped), mirroring replaceAgentBriefingStep.
+ */
+function replaceDecisionNotesStep(prompt) {
+  const section = extractDecisionNotesSection(prompt);
+  if (!section) return prompt.trimEnd() + '\n' + DECISION_NOTES_STEP;
+  const before = prompt.slice(0, section.startIdx).trimEnd();
+  const tail = prompt.slice(section.endIdx);
+  return `${before}\n\n${DECISION_NOTES_STEP.trim()}\n${tail}`;
+}
+
 function needsPromptUpgrade(systemPrompt = '') {
   if (/check_business_hours|deferUntil|get_leaves_today|## Step 1: Check Business Hours|## Your Process|When a new ticket comes in, analyze it thoroughly and recommend the best technician to handle it\./i.test(systemPrompt)) {
     return true;
@@ -159,6 +221,17 @@ function needsPromptUpgrade(systemPrompt = '') {
     return true;
   }
   if (systemPrompt.includes('IT helpdesk ticket assignment assistant') && !systemPrompt.includes('search_decision_notes')) {
+    return true;
+  }
+  // NT-6: decision-notes precedent split (adminDecisions vs automatedOutcomes).
+  // Deliberately narrow: only flag prompts whose "Check Decision History"
+  // section is still the VERBATIM legacy scaffold, so the upgrade swaps that
+  // one section and nothing else. Prompts where the admin edited the section
+  // are never flagged for this — the searchDecisionNotes tool result labels
+  // its buckets itself, so older custom text remains safe (see NT-9).
+  if (systemPrompt.includes('search_decision_notes')
+      && !systemPrompt.includes('automatedOutcomes')
+      && hasCanonicalLegacyDecisionNotesStep(systemPrompt)) {
     return true;
   }
   if (systemPrompt.includes('IT helpdesk ticket assignment assistant') && !systemPrompt.includes('get_requester_site_context')) {
@@ -218,16 +291,6 @@ function needsPromptUpgrade(systemPrompt = '') {
   }
   return false;
 }
-
-const DECISION_NOTES_STEP = `
-
-## Step 5b: Check Decision History (optional but valuable)
-Call **search_decision_notes** with keywords from the ticket (e.g., category name, key terms) to find past admin decisions on similar tickets. Look for:
-- Has an admin left notes about how tickets like this should be routed?
-- Were previous recommendations overridden? Why?
-- Are there routing preferences or patterns the admin has established?
-
-Admin decision notes carry high weight — if an admin has explicitly stated a routing preference, follow it unless circumstances have changed.`;
 
 const AGENT_BRIEFING_STEP = `
 
@@ -333,6 +396,65 @@ function injectAfterHoursWorkflowGuidance(prompt) {
   return `${prompt.trimEnd()}\n\n${AFTER_HOURS_WORKFLOW_NOTE}`;
 }
 
+// ── NT-9: wholesale-replacement safety ─────────────────────────────────────
+// The auto-upgrader used to return DEFAULT_SYSTEM_PROMPT wholesale from two
+// paths, which silently destroyed workspace customizations (fired 4× on ws1
+// historically). Wholesale replacement is now allowed ONLY for prompts that
+// are provably uncustomized default lineage: every meaningful line must appear
+// in the current default prompt or in the registry of known legacy default
+// wordings below. Any line we don't recognize marks the prompt as customized,
+// and a customized prompt is NEVER wholesale-replaced — the safer minimal
+// choice is to keep it as-is (with only targeted section patches applied) and
+// skip the rest of the upgrade.
+const LEGACY_DEFAULT_LINE_FRAGMENTS = [
+  'You are an IT helpdesk ticket assignment assistant.',
+  '## Step 1: Check Business Hours',
+  'Call **check_business_hours** first.',
+  'Use deferUntil if needed.',
+  'Set deferUntil when needed.',
+  'When a new ticket comes in, analyze it thoroughly and recommend the best technician to handle it.',
+  'Note: The pipeline only runs during business hours. After-hours tickets are automatically queued and processed when business hours resume. You do not need to check business hours.',
+  '- You may populate `suggestedInternalCategoryName` and/or `suggestedInternalSubcategoryName` as review notes only. These are not active categories and must not be used as if they already exist.',
+  '- One suggested first step or thing to verify',
+  'Suggested first step or what to verify',
+];
+
+// Step headers get renumbered across default revisions ("## Step 5b:" vs
+// "## Step 4b:"), so numbers are stripped before comparing lines.
+function normalizePromptLine(line = '') {
+  return line.replace(/^\s*## Step \d+[ab]?:/, '## Step:').replace(/\s+/g, ' ').trim();
+}
+
+let knownDefaultLineSet = null;
+function getKnownDefaultLineSet() {
+  if (!knownDefaultLineSet) {
+    knownDefaultLineSet = new Set(
+      [
+        ...DEFAULT_SYSTEM_PROMPT.split('\n'),
+        ...LEGACY_DECISION_NOTES_STEP.split('\n'),
+        ...AGENT_BRIEFING_STEP.split('\n'),
+        ...LEGACY_DEFAULT_LINE_FRAGMENTS,
+      ].map(normalizePromptLine).filter(Boolean),
+    );
+  }
+  return knownDefaultLineSet;
+}
+
+/**
+ * A prompt is "customized" when it contains at least one meaningful line that
+ * is not part of the current default prompt or a known legacy default wording.
+ * Strict on purpose: when in doubt we treat the prompt as customized and skip
+ * the wholesale upgrade rather than risk destroying admin work.
+ */
+function isCustomizedPrompt(prompt = '') {
+  const known = getKnownDefaultLineSet();
+  return prompt
+    .split('\n')
+    .map(normalizePromptLine)
+    .filter(Boolean)
+    .some((line) => !known.has(line));
+}
+
 function finishPromptUpgrade(prompt) {
   prompt = injectAfterHoursWorkflowGuidance(prompt);
   if (prompt && !prompt.includes(PRIORITY_OUTPUT_MARKER)) {
@@ -350,7 +472,16 @@ function finishPromptUpgrade(prompt) {
     || !prompt.includes('get_routing_boundary_context')
     || !prompt.includes(PRIORITY_OUTPUT_MARKER)
   )) {
-    return DEFAULT_SYSTEM_PROMPT;
+    if (!isCustomizedPrompt(prompt)) {
+      // Stale but uncustomized default lineage — safe to refresh wholesale.
+      return DEFAULT_SYSTEM_PROMPT;
+    }
+    // NT-9: the prompt carries admin-authored content we cannot map onto the
+    // new scaffolding. Never wholesale-replace it — return it with only the
+    // targeted patches above applied; getPublished() skips version churn when
+    // nothing actually changed.
+    logger.warn('Prompt auto-upgrade: customized prompt is missing current scaffolding markers; wholesale replacement skipped');
+    return prompt;
   }
   return prompt;
 }
@@ -358,6 +489,16 @@ function finishPromptUpgrade(prompt) {
 function upgradeLegacyPrompt(systemPrompt = '') {
   if (!needsPromptUpgrade(systemPrompt)) {
     return systemPrompt;
+  }
+
+  // NT-6: the prompt still carries the verbatim legacy decision-notes scaffold
+  // — swap ONLY that section for the v2 (adminDecisions vs automatedOutcomes)
+  // text. Edited decision-notes sections never reach this branch (the verbatim
+  // check in needsPromptUpgrade), so custom wording is preserved.
+  if (systemPrompt.includes('search_decision_notes')
+      && !systemPrompt.includes('automatedOutcomes')
+      && hasCanonicalLegacyDecisionNotesStep(systemPrompt)) {
+    return finishPromptUpgrade(replaceDecisionNotesStep(systemPrompt));
   }
 
   // If only missing search_decision_notes, inject the step rather than replacing
@@ -404,7 +545,15 @@ function upgradeLegacyPrompt(systemPrompt = '') {
   }
 
   if (systemPrompt.includes('You are an IT helpdesk ticket assignment assistant.')) {
-    return DEFAULT_SYSTEM_PROMPT;
+    if (!isCustomizedPrompt(systemPrompt)) {
+      // Uncustomized default lineage — refreshing wholesale is lossless.
+      return DEFAULT_SYSTEM_PROMPT;
+    }
+    // NT-9: customized prompt with no targeted patch available. Returning the
+    // prompt unchanged makes the upgrade a no-op; getPublished() detects that
+    // and skips publishing a new version (no churn, no data loss).
+    logger.warn('Prompt auto-upgrade: no safe targeted patch for customized prompt; leaving prompt unchanged');
+    return systemPrompt;
   }
 
   let upgraded = systemPrompt;
@@ -426,6 +575,10 @@ function upgradeLegacyPrompt(systemPrompt = '') {
 
   return finishPromptUpgrade(upgraded.trim());
 }
+
+// getPublished() runs on every pipeline run — warn once per workspace+version
+// when an upgrade is skipped, not on every fetch.
+const upgradeSkipWarnedFor = new Set();
 
 class PromptRepository {
   async getVersions(workspaceId) {
@@ -471,13 +624,41 @@ class PromptRepository {
           publishedAt: new Date(),
         });
       } else if (needsPromptUpgrade(published.systemPrompt)) {
-        const upgraded = await this.createVersion(workspaceId, {
-          systemPrompt: upgradeLegacyPrompt(published.systemPrompt),
-          toolConfig: published.toolConfig,
-          notes: `Auto-upgraded from v${published.version} to refresh assignment review prompt guidance`,
-          createdBy: 'system',
-        });
-        published = await this.publish(upgraded.id, 'system');
+        const upgradedPrompt = upgradeLegacyPrompt(published.systemPrompt);
+        const customized = isCustomizedPrompt(published.systemPrompt);
+        if (
+          upgradedPrompt === published.systemPrompt
+          // Belt-and-braces (NT-9): even if a future upgrade path regresses,
+          // a customized prompt must never be swapped for the stock default.
+          || (customized && upgradedPrompt === DEFAULT_SYSTEM_PROMPT)
+        ) {
+          const skipKey = `${workspaceId}:v${published.version}`;
+          if (!upgradeSkipWarnedFor.has(skipKey)) {
+            upgradeSkipWarnedFor.add(skipKey);
+            logger.warn('Prompt auto-upgrade skipped to preserve customized prompt', {
+              workspaceId,
+              publishedVersion: published.version,
+              customized,
+            });
+          }
+        } else {
+          // Audit trail: the upgrade is a NEW version row (never a mutation of
+          // the admin's version) with an explicit auto-upgrade label + system
+          // author, so it is visible and restorable in the prompt history UI.
+          const fromVersion = published.version;
+          const upgraded = await this.createVersion(workspaceId, {
+            systemPrompt: upgradedPrompt,
+            toolConfig: published.toolConfig,
+            notes: `auto-upgrade: refreshed prompt step scaffolding from v${fromVersion} (system-applied, previous version preserved)`,
+            createdBy: 'system',
+          });
+          published = await this.publish(upgraded.id, 'system');
+          logger.info('Prompt auto-upgrade applied', {
+            workspaceId,
+            fromVersion,
+            toVersion: upgraded.version,
+          });
+        }
       }
 
       return published;
@@ -572,5 +753,5 @@ class PromptRepository {
 }
 
 export { DEFAULT_SYSTEM_PROMPT };
-export { needsPromptUpgrade, upgradeLegacyPrompt };
+export { needsPromptUpgrade, upgradeLegacyPrompt, isCustomizedPrompt };
 export default new PromptRepository();

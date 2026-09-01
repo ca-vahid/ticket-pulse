@@ -118,7 +118,13 @@ search_tickets can search internal category/subcategory.
 submit_recommendation includes taxonomyReviewNeeded when category fit is weak.`;
 
     expect(needsPromptUpgrade(beforeCompetencyGapRule)).toBe(true);
-    expect(upgradeLegacyPrompt(beforeCompetencyGapRule)).toBe(DEFAULT_SYSTEM_PROMPT);
+    // NT-9: this prompt carries custom step text, so the upgrader must NOT
+    // wholesale-replace it with DEFAULT_SYSTEM_PROMPT any more (that behavior
+    // silently destroyed ws1 customizations). Targeted patches only.
+    const upgraded = upgradeLegacyPrompt(beforeCompetencyGapRule);
+    expect(upgraded).not.toBe(DEFAULT_SYSTEM_PROMPT);
+    expect(upgraded).toContain('Call get_ticket_details and search_decision_notes.');
+    expect(upgraded).toContain('get_ticket_categories can return pendingReviewSuggestions.');
   });
 });
 
@@ -191,8 +197,14 @@ Do include:
 
     expect(needsPromptUpgrade(v1_71)).toBe(true);
     const once = upgradeLegacyPrompt(v1_71);
-    expect(needsPromptUpgrade(once)).toBe(false);
+    // NT-9: this prompt has custom step text, so it may legitimately still be
+    // flagged as stale after the targeted patch (the markers it lacks can no
+    // longer be force-injected by wholesale replacement). What MUST hold is
+    // that re-running the upgrader is a no-op — getPublished() relies on that
+    // to skip version churn instead of replacing the customized prompt.
     const twice = upgradeLegacyPrompt(once);
     expect(twice).toBe(once);
+    // The rebound guidance itself must have landed on the first pass.
+    expect(once).toContain('Rebound Context');
   });
 });
