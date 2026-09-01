@@ -377,20 +377,55 @@ code {
     overflow-x: auto;
     white-space: pre-wrap;
   }
-  /* Dark mode: user-supplied email/note HTML carries its own inline colours
-     (mail-client convention) — it renders in a WHITE content well inside the
-     dark shell, never inverted. Light mode is unchanged (no well needed on a
-     white card). */
-  .dark .tp-rich-body {
-    background: #fff;
+  /* Dark mode (Phase DW — QA 08-31 #5 overrules the v3.8.02 white-well
+     convention): email/note HTML renders CONDITIONALLY. SafeHtml stamps
+     `--themed` when the sanitized markup carries no author colours (near-black
+     Outlook `color:black`/`windowtext` is neutralized at sanitize time so it
+     doesn't count) → fully dark-themed, no well. It stamps `--paper` when real
+     inline colours survive → a DIMMED SLATE paper panel, never pure white.
+     Light mode is unchanged (no well needed on a white card).
+     Cascade note: keep the two-class `.dark .tp-rich-body--themed` form —
+     (0,2,0) must out-rank SafeHtml's `text-foreground/85` utility (0,1,0). */
+  .dark .tp-rich-body--themed {
+    background: transparent;
+    color: hsl(var(--card-foreground) / 0.9);
+    color-scheme: dark;
+  }
+  .dark .tp-rich-body--themed a { color: hsl(var(--primary)); }
+  .dark .tp-rich-body--themed blockquote {
+    border-color: hsl(var(--border));
+    color: hsl(var(--muted-foreground));
+  }
+  .dark .tp-rich-body--themed .tp-data-table td,
+  .dark .tp-rich-body--themed .tp-data-table th {
+    border-color: hsl(var(--border));
+  }
+  .dark .tp-rich-body--themed .tp-data-table th {
+    background: hsl(var(--muted) / 0.55);
+  }
+  /* Safety net for structural tags whose colours never resolved against a
+     dark ground — :where() adds zero specificity, so any surviving inline
+     colour (a real author choice) still wins. */
+  .dark .tp-rich-body--themed :where(p, div, span, td, th, li, h1, h2, h3, h4, h5, h6, strong, em) {
+    color: inherit;
+  }
+  .dark .tp-rich-body--paper {
+    background: #dbe2ec;
     color: #0f172a;
     color-scheme: light;
     border-radius: 0.5rem;
     padding: 0.625rem 0.875rem;
-    border: 1px solid hsl(0 0% 100% / 0.08);
+    border: 1px solid hsl(215 25% 55% / 0.35);
+    /* Uniform dim via inset shadow — NEVER `filter:` here (a filter creates a
+       containing block that traps the fixed-positioned .tp-img-ref lightbox
+       chips and the CollapsibleBody fade gradient). */
+    box-shadow: inset 0 0 0 9999px rgb(15 23 42 / 0.04);
   }
-  .dark .tp-rich-body a { color: #1d4ed8; }
-  .dark .tp-rich-body blockquote { border-color: #e2e8f0; color: #64748b; }
+  .dark .tp-rich-body--paper a { color: #1d4ed8; }
+  .dark .tp-rich-body--paper blockquote { border-color: #94a3b8; color: #475569; }
+  /* The light th tint (hsl(210 40% 97%), below) is near-white — too glarey
+     inside the dimmed paper panel; sit it just above the paper tone instead. */
+  .dark .tp-rich-body--paper .tp-data-table th { background: hsl(213 32% 91%); }
 
   /* Data tables born from a clipboard paste (Excel/Word ranges): the composer
      stamps them `tp-data-table` at paste time (QA 08-17 #1), so the RENDERED
@@ -467,9 +502,9 @@ code {
     outline: none;
     box-shadow: 0 0 0 2px rgb(59 130 246 / 0.55);
   }
-  /* Inside the white email well the light chip stays; elsewhere (composer,
-     previews) it takes the dark accent tint. */
-  .dark :not(.tp-rich-body) > .tp-img-ref {
+  /* Inside a PAPER email body (light panel) the light chip stays; everywhere
+     else — themed bodies included (Phase DW) — it takes the dark accent tint. */
+  .dark :not(.tp-rich-body--paper) > .tp-img-ref {
     color: #bfdbfe;
     background: rgb(59 130 246 / 0.15);
     border-color: rgb(59 130 246 / 0.35);

@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.8.10-preview';
+export const APP_VERSION = '3.8.11-preview';
 
 export const changelog = [
+  {
+    version: '3.8.11-preview',
+    date: 'September 1, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>🌙 Dark mode: email bodies no longer glare</strong> — ticket descriptions and conversation entries used to sit in a pure-white “paper” well in dark mode. Now plain and lightly-formatted email (the large majority) renders directly on the dark card in light text, including Outlook-style quoted history. Only messages whose HTML carries its own colours — branded signatures, coloured tables, newsletters — keep a light panel, and it is a dimmed slate rather than white, the same convention Outlook and Gmail use in their dark themes. Also fixed: the reply composer’s body text was tinted blue in dark mode (a link-colour rule had leaked onto the whole editor). Word/Excel attachment previews intentionally stay on a white page. (QA 08-31 #5)' },
+    ],
+  },
   {
     version: '3.8.10-preview',
     date: 'September 1, 2026',

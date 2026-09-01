@@ -329,7 +329,7 @@ const RichTextEditor = forwardRef(function RichTextEditor({
             document.execCommand('insertHTML', false, insert);
             emit();
           }}
-          className="tp-rich-editor tp-focus-ring w-full text-sm text-foreground px-3 py-2.5 rounded-b-lg outline-none overflow-y-auto settings-scrollbar [&_a]:text-blue-600 dark:text-blue-300 [&_a]:underline [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5"
+          className="tp-rich-editor tp-focus-ring w-full text-sm text-foreground px-3 py-2.5 rounded-b-lg outline-none overflow-y-auto settings-scrollbar [&_a]:text-blue-600 dark:[&_a]:text-blue-300 [&_a]:underline [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5"
           style={{ minHeight, maxHeight: 460 }}
         />
       </div>

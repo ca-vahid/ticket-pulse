@@ -1,9 +1,10 @@
 /** @vitest-environment jsdom */
 import '@testing-library/jest-dom/vitest';
-import { afterEach, describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
+import DOMPurify from 'dompurify';
 import {
-  AgentFirstName, ExternalChip, FeaturedFieldChip, MirrorChip, OriginChip, PersonAvatar, PriorityDot, QueueStatePill, SlaChip, SlaTargetChip, StatusPill, formatDay, formatDayTime, initials, slaTargetState, timeAgo, timeAgoShort,
+  AgentFirstName, ExternalChip, FeaturedFieldChip, MirrorChip, OriginChip, PersonAvatar, PriorityDot, QueueStatePill, SafeHtml, SlaChip, SlaTargetChip, StatusPill, formatDay, formatDayTime, initials, slaTargetState, timeAgo, timeAgoShort,
 } from './ticketUi';
 
 afterEach(cleanup);
@@ -246,6 +247,79 @@ describe('ticketUi components', () => {
     expect(chip).toHaveAttribute('title', 'Client Name: Coyote Landslide Geotechnical');
     expect(chip.textContent.length).toBeLessThanOrEqual(24);
     expect(chip.textContent.endsWith('…')).toBe(true);
+  });
+
+  // Phase DW (QA 08-31 #5): dark-mode conditional email rendering.
+  describe('SafeHtml', () => {
+    const bodyOf = (html) => render(<SafeHtml html={html} />).container.firstChild;
+
+    test('neutralizes near-black inline colors (Outlook quote headers) but keeps siblings and real colors', () => {
+      const body = bodyOf(
+        '<p style="color:#000">a</p>' +
+        '<p style="color: black; font-weight: bold">b</p>' +
+        '<p style="color:windowtext">c</p>' +
+        '<p style="color:rgb(0,0,0)">d</p>' +
+        '<p style="color: rgb(20, 20, 20)">e</p>' +
+        '<font color="black">f</font>',
+      );
+      // No `color:` declaration survives anywhere…
+      expect(body.innerHTML).not.toMatch(/(?:^|[;"\s])color\s*:/i);
+      // …but sibling declarations on the same style attr do.
+      expect(body.innerHTML).toContain('font-weight');
+      expect(body.querySelector('font').hasAttribute('color')).toBe(false);
+      // With every color neutralized, the body renders fully themed.
+      expect(body).toHaveClass('tp-rich-body', 'tp-rich-body--themed');
+      expect(body).not.toHaveClass('tp-rich-body--paper');
+    });
+
+    test('keeps genuine author colors (#c00, rgb above the ≤29 threshold) and stamps --paper', () => {
+      const red = bodyOf('<p style="color:#c00">warn</p>');
+      expect(red.innerHTML).toContain('color:#c00');
+      expect(red).toHaveClass('tp-rich-body--paper');
+      cleanup();
+      // rgb(72,72,72) must NOT be misread channel-by-digit as near-black.
+      const gray = bodyOf('<span style="color: rgb(72, 72, 72)">gray</span>');
+      expect(gray.innerHTML).toContain('rgb(72, 72, 72)');
+      expect(gray).toHaveClass('tp-rich-body--paper');
+    });
+
+    test('plain / lightly-formatted HTML stamps --themed', () => {
+      const body = bodyOf('<p>hello <a href="https://x.test">link</a></p><ul><li>item</li></ul>');
+      expect(body).toHaveClass('tp-rich-body', 'tp-rich-body--themed');
+      expect(body).not.toHaveClass('tp-rich-body--paper');
+    });
+
+    test('bgcolor= and <font color> force --paper', () => {
+      const table = bodyOf('<table><tbody><tr><td bgcolor="#ffff00">x</td></tr></tbody></table>');
+      expect(table).toHaveClass('tp-rich-body--paper');
+      cleanup();
+      const font = bodyOf('<font color="#c00">branded</font>');
+      expect(font).toHaveClass('tp-rich-body--paper');
+    });
+
+    test('background-color is left alone by the neutralizer (and forces --paper)', () => {
+      const body = bodyOf('<p style="background-color:#000">inverse chip</p>');
+      expect(body.innerHTML).toContain('background-color:#000');
+      expect(body).toHaveClass('tp-rich-body--paper');
+    });
+
+    test('border-color / outline-color alone do NOT force --paper', () => {
+      const body = bodyOf('<p style="border-color:#c00;border-style:solid;outline-color:#0f0">boxed</p>');
+      expect(body).toHaveClass('tp-rich-body--themed');
+      expect(body).not.toHaveClass('tp-rich-body--paper');
+    });
+
+    test('sanitize is memoized on html (no re-sanitize on unrelated parent re-renders)', () => {
+      const spy = vi.spyOn(DOMPurify, 'sanitize');
+      const { rerender } = render(<SafeHtml html="<p>hi</p>" />);
+      const initialCalls = spy.mock.calls.length;
+      expect(initialCalls).toBeGreaterThan(0);
+      rerender(<SafeHtml html="<p>hi</p>" />);
+      expect(spy.mock.calls.length).toBe(initialCalls);
+      rerender(<SafeHtml html="<p>bye</p>" />);
+      expect(spy.mock.calls.length).toBe(initialCalls + 1);
+      spy.mockRestore();
+    });
   });
 
   test('FeaturedFieldChip: booleans render Yes/No; empty values render nothing', () => {
