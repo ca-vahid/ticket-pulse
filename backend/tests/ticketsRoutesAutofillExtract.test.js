@@ -16,13 +16,22 @@ const prismaMock = {
   $queryRaw: jest.fn(),
 };
 const extractMock = jest.fn();
+const runServiceMock = {
+  record: jest.fn(),
+  assertLinkable: jest.fn(),
+  linkToTicket: jest.fn(),
+  listForTicket: jest.fn(),
+  listRecent: jest.fn(),
+};
+const createTicketMock = jest.fn();
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
 jest.unstable_mockModule('../src/utils/logger.js', () => ({
   default: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() },
 }));
 jest.unstable_mockModule('../src/services/ticketIntakeExtractService.js', () => ({ default: { extract: extractMock } }));
-jest.unstable_mockModule('../src/services/ticketService.js', () => ({ default: {} }));
+jest.unstable_mockModule('../src/services/ticketIntakeRunService.js', () => ({ default: runServiceMock }));
+jest.unstable_mockModule('../src/services/ticketService.js', () => ({ default: { createTicket: createTicketMock } }));
 jest.unstable_mockModule('../src/services/noiseRuleService.js', () => ({ default: { evaluate: jest.fn() } }));
 jest.unstable_mockModule('../src/services/ticketActivityRepository.js', () => ({ default: { create: jest.fn() } }));
 jest.unstable_mockModule('../src/services/ticketThreadRepository.js', () => ({ default: { listForTicket: jest.fn() } }));
@@ -46,6 +55,7 @@ jest.unstable_mockModule('../src/middleware/workspace.js', () => ({
 const { default: ticketsRouter, __resetAutofillRateLimitForTests } = await import('../src/routes/tickets.routes.js');
 
 const AGENT = { email: 'ari@example.com', name: 'Ari Agent', role: 'agent' };
+const ADMIN = { email: 'root@example.com', name: 'Root', role: 'admin' };
 
 function buildApp(sessionUser = AGENT) {
   const app = express();
@@ -71,7 +81,7 @@ const RESULT = {
     sourceSummary: 'Pasted text.',
     confidence: { subject: 0.8, description: 0.7, requester: 0, category: 0, priority: 0, type: 0 },
   },
-  meta: { provider: 'anthropic', model: 'claude-sonnet-5', imageCount: 1, textChars: 12 },
+  meta: { provider: 'anthropic', model: 'claude-sonnet-5', imageCount: 1, textChars: 12, durationMs: 1500, inputTokens: 100, outputTokens: 20 },
 };
 
 beforeEach(() => {
@@ -83,6 +93,9 @@ beforeEach(() => {
   prismaMock.workspaceAccess.findFirst.mockResolvedValue(null);
   prismaMock.workspace.findUnique.mockResolvedValue({ id: 7, nativeTicketingEnabled: true, defaultTimezone: 'America/Los_Angeles', internalDomains: [] });
   extractMock.mockResolvedValue(RESULT);
+  runServiceMock.record.mockResolvedValue(77);
+  runServiceMock.listForTicket.mockResolvedValue([]);
+  runServiceMock.listRecent.mockResolvedValue([]);
 });
 
 describe('POST /api/tickets/autofill-extract (Phase AF)', () => {
@@ -93,10 +106,17 @@ describe('POST /api/tickets/autofill-extract (Phase AF)', () => {
       .attach('images', Buffer.alloc(32, 1), { filename: 'shot.png', contentType: 'image/png' })
       .expect(200);
 
-    expect(res.body).toEqual({ success: true, data: RESULT.data, meta: RESULT.meta });
+    expect(res.body).toEqual({ success: true, data: RESULT.data, meta: { ...RESULT.meta, runId: 77 } });
     expect(extractMock).toHaveBeenCalledTimes(1);
+    // AF2: the run is persisted (never the image bytes are asserted here —
+    // the service strips them) and its id rides back in meta.runId.
+    expect(runServiceMock.record).toHaveBeenCalledTimes(1);
+    const recorded = runServiceMock.record.mock.calls[0][0];
+    expect(recorded).toMatchObject({ workspaceId: 7, text: 'printer jam', data: RESULT.data, meta: RESULT.meta });
+    expect(recorded.actor).toMatchObject({ email: 'ari@example.com' });
+    expect(recorded.images).toHaveLength(1);
     const args = extractMock.mock.calls[0][0];
-    expect(args).toMatchObject({ workspaceId: 7, text: 'printer jam', actorEmail: 'ari@example.com' });
+    expect(args).toMatchObject({ workspaceId: 7, text: 'printer jam', actorEmail: 'ari@example.com', actorTechnicianId: 3 });
     expect(args.images).toHaveLength(1);
     expect(args.images[0]).toMatchObject({ mimeType: 'image/png', fileName: 'shot.png' });
     expect(Buffer.isBuffer(args.images[0].buffer)).toBe(true);
@@ -186,5 +206,72 @@ describe('POST /api/tickets/autofill-extract (Phase AF)', () => {
     extractMock.mockRejectedValue(new ServiceBusyError('No AI provider is configured'));
     const res = await request(buildApp()).post('/api/tickets/autofill-extract').field('text', 'x').expect(503);
     expect(res.body.message).toMatch(/No AI provider/);
+  });
+});
+
+describe('AF2 — intake run persistence + linking', () => {
+  test('meta.runId is null (not an error) when the run could not be recorded', async () => {
+    runServiceMock.record.mockResolvedValue(null);
+    const res = await request(buildApp()).post('/api/tickets/autofill-extract').field('text', 'x').expect(200);
+    expect(res.body.meta.runId).toBeNull();
+  });
+
+  test('GET /api/tickets/intake-runs is admin-gated and lists the workspace runs', async () => {
+    await request(buildApp()).get('/api/tickets/intake-runs').expect(401);
+    expect(runServiceMock.listRecent).not.toHaveBeenCalled();
+
+    runServiceMock.listRecent.mockResolvedValue([{ id: 77, ticketId: null }]);
+    prismaMock.workspaceAccess.findUnique.mockResolvedValue({ role: 'admin' });
+    const res = await request(buildApp(ADMIN)).get('/api/tickets/intake-runs?limit=5').expect(200);
+    expect(res.body).toEqual({ success: true, data: [{ id: 77, ticketId: null }] });
+    expect(runServiceMock.listRecent).toHaveBeenCalledWith(7, '5');
+  });
+
+  test('GET /api/tickets/:id/intake-runs returns the runs for a ticket in the workspace; 404 otherwise', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue(null);
+    await request(buildApp()).get('/api/tickets/900/intake-runs').expect(404);
+    expect(runServiceMock.listForTicket).not.toHaveBeenCalled();
+
+    prismaMock.ticket.findFirst.mockResolvedValue({ id: 900 });
+    runServiceMock.listForTicket.mockResolvedValue([{ id: 77, ticketId: 900 }]);
+    const res = await request(buildApp()).get('/api/tickets/900/intake-runs').expect(200);
+    expect(prismaMock.ticket.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 900, workspaceId: 7 } }));
+    expect(res.body.data).toEqual([{ id: 77, ticketId: 900 }]);
+    await request(buildApp()).get('/api/tickets/abc/intake-runs').expect(400);
+  });
+
+  test('POST /api/tickets with intakeRunId validates the run first, then passes it to createTicket', async () => {
+    runServiceMock.assertLinkable.mockResolvedValue({ id: 77, ticketId: null });
+    createTicketMock.mockResolvedValue({ id: 900, subject: 'S' });
+    const res = await request(buildApp())
+      .post('/api/tickets')
+      .send({ subject: 'ChatGPT account', requesterEmail: 's@example.com', intakeRunId: 77 })
+      .expect(201);
+    expect(res.body.data).toEqual({ id: 900, subject: 'S' });
+    expect(runServiceMock.assertLinkable).toHaveBeenCalledWith(77, 7);
+    expect(createTicketMock).toHaveBeenCalledWith(
+      7,
+      { subject: 'ChatGPT account', requesterEmail: 's@example.com' },
+      expect.objectContaining({ email: 'ari@example.com' }),
+      { enforceRequired: true, intakeRunId: 77 },
+    );
+  });
+
+  test('POST /api/tickets with a foreign/stale intakeRunId is a 400 and creates nothing', async () => {
+    const { ValidationError } = await import('../src/utils/errors.js');
+    runServiceMock.assertLinkable.mockRejectedValue(new ValidationError('Unknown intakeRunId for this workspace'));
+    const res = await request(buildApp())
+      .post('/api/tickets')
+      .send({ subject: 'ChatGPT account', requesterEmail: 's@example.com', intakeRunId: 999 })
+      .expect(400);
+    expect(res.body.message).toMatch(/Unknown intakeRunId/);
+    expect(createTicketMock).not.toHaveBeenCalled();
+  });
+
+  test('POST /api/tickets without intakeRunId is unchanged (no run lookup, no option)', async () => {
+    createTicketMock.mockResolvedValue({ id: 901 });
+    await request(buildApp()).post('/api/tickets').send({ subject: 'Plain', requesterEmail: 's@example.com' }).expect(201);
+    expect(runServiceMock.assertLinkable).not.toHaveBeenCalled();
+    expect(createTicketMock).toHaveBeenCalledWith(7, { subject: 'Plain', requesterEmail: 's@example.com' }, expect.any(Object), { enforceRequired: true });
   });
 });

@@ -29,6 +29,7 @@ import ComposerSignatureStrip from '../components/tickets/ComposerSignatureStrip
 import StagedFileChip from '../components/tickets/StagedFileChip';
 import ImageMarkupModal from '../components/tickets/ImageMarkupModal';
 import TicketAiTab from '../components/tickets/TicketAiTab';
+import AutofillRunCard from '../components/tickets/AutofillRunCard';
 import TicketTasksTab from '../components/tickets/TicketTasksTab';
 import TicketFamilyCard from '../components/tickets/TicketFamilyCard';
 import {
@@ -3016,11 +3017,15 @@ export default function TicketDetail() {
                 )}
 
                 {pageTab === 'ai' && (
-                  <TicketAiTab
-                    ticket={ticket}
-                    technicians={meta?.technicians || []}
-                    canReview={wsRole === 'admin' || wsRole === 'reviewer'}
-                  />
+                  <>
+                    {/* Autofill v2: the intake run that drafted this ticket (renders nothing when there is none). */}
+                    <AutofillRunCard ticketId={ticketId} showAdminLink={wsRole === 'admin'} />
+                    <TicketAiTab
+                      ticket={ticket}
+                      technicians={meta?.technicians || []}
+                      canReview={wsRole === 'admin' || wsRole === 'reviewer'}
+                    />
+                  </>
                 )}
 
                 {pageTab === 'tasks' && (

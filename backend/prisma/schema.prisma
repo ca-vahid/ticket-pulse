@@ -186,8 +186,39 @@ model Workspace {
   emailIdentity                     WorkspaceEmailIdentity?
   queueCardConfig                   QueueCardConfig?
   ticketFormConfig                  TicketFormConfig?
+  ticketIntakeRuns                  TicketIntakeRun[]
 
   @@map("workspaces")
+}
+
+// Autofill v2 (MEGA 09-02 Phase AF2): one row per Autofill extraction — the
+// full proposal the model returned (result), what the resolvers made of it
+// (resolved: requesterMatch / assigneeMatch / conversingAgent / categoryLevel,
+// plus `applied` once linked) and the ticket it produced, if any. Images are
+// never stored. Feeds Settings → AI Usage and the ticket's AI & Routing tab.
+model TicketIntakeRun {
+  id             Int       @id @default(autoincrement())
+  workspaceId    Int       @map("workspace_id")
+  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  ticketId       Int?      @map("ticket_id")
+  ticket         Ticket?   @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  actorEmail     String?   @map("actor_email") @db.VarChar(255)
+  actorName      String?   @map("actor_name") @db.VarChar(255)
+  textChars      Int       @default(0) @map("text_chars")
+  imageCount     Int       @default(0) @map("image_count")
+  provider       String?   @db.VarChar(40)
+  model          String?   @db.VarChar(120)
+  durationMs     Int?      @map("duration_ms")
+  inputTokens    Int?      @map("input_tokens")
+  outputTokens   Int?      @map("output_tokens")
+  requestSummary Json?     @map("request_summary") // { sourceSummary, textPreview (≤500 chars), images: [{name,size,type}] }
+  result         Json // the full `data` the route returned
+  resolved       Json? // { requesterMatch, assigneeMatch, conversingAgent, categoryLevel, applied?, linkedAt? }
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  @@index([workspaceId, createdAt])
+  @@index([ticketId])
+  @@map("ticket_intake_runs")
 }
 
 // Saved analytics reports (feedback 07-14): a deterministic aggregate
@@ -1275,6 +1306,7 @@ model Ticket {
   tasks                    TicketTask[]
   embedding                TicketEmbedding?
   pinnedCards              TicketPinnedCard[]
+  intakeRuns               TicketIntakeRun[]
 
   // Per-workspace user-defined fields — values keyed by CustomFieldDefinition.key.
   customFields Json? @map("custom_fields")

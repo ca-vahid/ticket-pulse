@@ -51,7 +51,11 @@ const narrativeToHtml = (text) => String(text || '')
  */
 const resolveCategoryHint = (hint, tree) => {
   if (!hint || !Array.isArray(tree) || !tree.length) return null;
-  const parts = String(hint).split(/\s*(?:>|›|→|\/|»)\s*/).map((p) => p.trim()).filter(Boolean);
+  // Split on the explicit hierarchy separators first; only treat "/" as a
+  // separator when the hint carries none of them ("AI / SaaS Licensing" and
+  // "Laptop / Desktop …" are single subcategory NAMES, not levels).
+  const raw = String(hint);
+  const parts = (/[>›→»]/.test(raw) ? raw.split(/\s*[>›→»]\s*/) : raw.split(/\s*\/\s*/)).map((p) => p.trim()).filter(Boolean);
   const topName = matchByName(parts[0], tree.map((c) => c.name));
   const top = topName ? tree.find((c) => c.name === topName) : null;
   if (!top) return null;
@@ -145,6 +149,9 @@ export default function TicketCreate() {
   // A field cleared back to empty is untouched again.
   const [autofillOpen, setAutofillOpen] = useState(false);
   const [autofillNotice, setAutofillNotice] = useState(null);
+  // Autofill v2: the intake run that filled this form, so the create call
+  // can link it (AI & Routing shows what the model proposed vs what stuck).
+  const [intakeRunId, setIntakeRunId] = useState(null);
   const touchedRef = useRef(new Set());
   const markTouched = (key, filled = true) => {
     if (filled) touchedRef.current.add(key); else touchedRef.current.delete(key);
@@ -203,26 +210,52 @@ export default function TicketCreate() {
    * typeahead opens pre-filled for the agent to confirm — a fuzzy name is
    * never silently turned into a person.
    */
-  const applyAutofill = async ({ result, selected, sourceHtml, sourceText, files: dumpFiles }) => {
+  const applyAutofill = async ({ result, meta: runMeta, selected, sourceHtml, sourceText, files: dumpFiles }) => {
     const touched = touchedRef.current;
     const want = (key) => Boolean(selected?.[key]) && !touched.has(key);
     const notices = [];
+
+    if (runMeta?.runId != null && Number.isFinite(Number(runMeta.runId))) setIntakeRunId(Number(runMeta.runId));
 
     if (want('subject') && result.subject) {
       setSubject(String(result.subject).trim().slice(0, 500));
     }
 
-    if (want('description') && result.description) {
-      const narrative = String(result.description).trim();
+    // v2: the server builds the structured description (Request / details /
+    // Next step / Discussed with) as HTML + plain text; the v1 narrative
+    // string is still honoured for older responses.
+    const structuredHtml = typeof result.descriptionHtml === 'string' && result.descriptionHtml.trim() ? sanitizeRichHtml(result.descriptionHtml) : '';
+    const structuredText = typeof result.descriptionText === 'string' ? result.descriptionText.trim() : '';
+    const legacyNarrative = typeof result.description === 'string' ? result.description.trim() : '';
+    if (want('description') && (structuredHtml || structuredText || legacyNarrative)) {
+      const narrativeHtml = structuredHtml || narrativeToHtml(structuredText || legacyNarrative);
+      const narrativeText = structuredText || legacyNarrative || String(result.description?.request || '').trim();
       const dump = sourceHtml ? sanitizeRichHtml(sourceHtml) : '';
       const dumpHasContent = Boolean((sourceText || '').trim()) || /<img\b/i.test(dump);
       // No <hr>/<details> — neither is in the composer's sanitizer allow-list;
       // a spaced bold heading survives edit/re-sanitize round-trips.
-      const html = narrativeToHtml(narrative) + (dumpHasContent
+      const html = narrativeHtml + (dumpHasContent
         ? `<p><br></p><p><strong>— Source material (pasted) —</strong></p><div>${dump}</div>`
         : '');
       setDescription(html);
-      setDescriptionText(dumpHasContent ? `${narrative}\n\n— Source material (pasted) —\n${sourceText || ''}` : narrative);
+      setDescriptionText(dumpHasContent ? `${narrativeText}\n\n— Source material (pasted) —\n${sourceText || ''}` : narrativeText);
+    }
+
+    // Assignee (v2): only a clean technician match reaches here (the modal
+    // never ticks an ambiguous one). Lands as an explicit "Assign to…" pick —
+    // AI assignment stays off, exactly as if the agent had chosen them.
+    // (Guarded here too, not just by the modal's locked row: an explicit
+    // "me" / picked member is never overwritten.)
+    const assigneeLocked = assignMode === 'me' || (assignMode === 'pick' && Boolean(assignTechId));
+    if (want('assignee') && !assigneeLocked && result.assigneeMatch?.status === 'matched' && result.assigneeMatch.technician?.id != null) {
+      const tech = result.assigneeMatch.technician;
+      const known = (meta?.technicians || []).some((t) => String(t.id) === String(tech.id));
+      if (known) {
+        setAssignMode('pick');
+        setAssignTechId(String(tech.id));
+      } else {
+        notices.push(`${tech.name || 'The named member'} isn’t on this workspace’s member list — choose the assignee under Assignment.`);
+      }
     }
 
     let classified = false;
@@ -261,7 +294,25 @@ export default function TicketCreate() {
 
     // Requester last: it may hand focus to the typeahead.
     const requesterHint = String(result.requesterNameOrEmail || '').trim();
-    if (want('requester') && requesterHint && !requester && !rqQuery.trim()) {
+    const rqMatch = result.requesterMatch && typeof result.requesterMatch === 'object' ? result.requesterMatch : null;
+    if (want('requester') && !requester && !rqQuery.trim() && rqMatch?.status === 'matched' && rqMatch.candidate?.email) {
+      // v2: the server already resolved the person — select them the same
+      // way the typeahead's own pick does (known requester → id; directory
+      // hit → id-less Entra person, created with the ticket).
+      const c = rqMatch.candidate;
+      const fromDirectory = c.source === 'directory' || c.requesterId == null;
+      setRequester(toPickedRequester({
+        id: fromDirectory ? null : c.requesterId,
+        name: c.name || String(c.email).split('@')[0],
+        email: String(c.email).toLowerCase(),
+        jobTitle: c.jobTitle || null,
+        department: c.department || null,
+      }, fromDirectory));
+    } else if (want('requester') && !requester && !rqQuery.trim() && rqMatch?.status === 'ambiguous') {
+      // Several people fit — open the search pre-filled and let the agent pick.
+      const seed = requesterHint || rqMatch.candidate?.name || rqMatch.candidates?.[0]?.name || '';
+      if (seed) setTimeout(() => typeIntoRequesterSearch('tc-requester', seed), 0);
+    } else if (want('requester') && requesterHint && !requester && !rqQuery.trim()) {
       let picked = null;
       try {
         const res = await ticketsAPI.requesterSearch(requesterHint);
@@ -405,6 +456,7 @@ export default function TicketCreate() {
     setRqQuery('');
     touchedRef.current = new Set();
     setAutofillNotice(null);
+    setIntakeRunId(null);
     setTimeout(() => rqRef.current?.focus(), 0);
   };
 
@@ -412,6 +464,8 @@ export default function TicketCreate() {
   const autofillLocked = () => {
     const keys = Array.from(touchedRef.current);
     if (requester || rqQuery.trim()) keys.push('requester');
+    // An explicit assignment choice ("me", or a picked member) is the agent's.
+    if (assignMode === 'me' || (assignMode === 'pick' && assignTechId)) keys.push('assignee');
     return keys;
   };
 
@@ -519,7 +573,9 @@ export default function TicketCreate() {
       }
 
       setSaveStep('Creating ticket…');
-      const res = await ticketsAPI.create(payload);
+      // Link the Autofill run (v2) so the ticket's AI & Routing tab can show
+      // what was proposed vs what the agent kept.
+      const res = await ticketsAPI.create(intakeRunId != null ? { ...payload, intakeRunId } : payload);
       const created = res.data;
 
       if (files.length > 0) {

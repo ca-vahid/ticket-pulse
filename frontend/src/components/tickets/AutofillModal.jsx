@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Activity, AlertCircle, ArrowLeft, Check, ImagePlus, ShieldCheck, Sparkles, X } from 'lucide-react';
+import { Activity, AlertCircle, ArrowLeft, Building2, Check, ImagePlus, ShieldCheck, Sparkles, UserRound, X } from 'lucide-react';
 import { ticketsAPI } from '../../services/api';
-import RichTextEditor from './RichTextEditor';
+import RichTextEditor, { sanitizeRichHtml } from './RichTextEditor';
 import StagedFileChip from './StagedFileChip';
 import ImageMarkupModal from './ImageMarkupModal';
 import { PRIORITY_LABELS, formatBytes } from './ticketUi';
@@ -36,12 +36,34 @@ export const AUTOFILL_CAPS = Object.freeze({
 
 export const AUTOFILL_FIELDS = [
   { key: 'subject', label: 'Subject', valueKey: 'subject', confKey: 'subject' },
-  { key: 'description', label: 'Description', valueKey: 'description', confKey: 'description' },
+  { key: 'description', label: 'Description', valueKey: 'descriptionHtml', confKey: 'description' },
   { key: 'requester', label: 'Requester', valueKey: 'requesterNameOrEmail', confKey: 'requester' },
   { key: 'category', label: 'Category', valueKey: 'categoryHint', confKey: 'category' },
   { key: 'priority', label: 'Priority', valueKey: 'priorityHint', confKey: 'priority' },
   { key: 'type', label: 'Type', valueKey: 'typeHint', confKey: 'type' },
+  { key: 'assignee', label: 'Assignee', valueKey: 'assigneeMatch', confKey: 'assignee' },
 ];
+
+/**
+ * The value a review row is about (v2 shape, tolerant of the v1 one):
+ * description → the structured HTML, falling back to the plain text or the
+ * old narrative string; assignee → the matched technician's name (or the
+ * hint's, when only a hint came back); everything else is a plain field.
+ */
+export function fieldValue(data, field) {
+  if (!data) return null;
+  if (field.key === 'description') {
+    if (typeof data.descriptionHtml === 'string' && data.descriptionHtml.trim()) return data.descriptionHtml;
+    if (typeof data.descriptionText === 'string' && data.descriptionText.trim()) return data.descriptionText;
+    return typeof data.description === 'string' ? data.description : null;
+  }
+  if (field.key === 'assignee') {
+    return data.assigneeMatch?.technician?.name || data.assigneeHint?.name || null;
+  }
+  return data[field.valueKey];
+}
+
+const matchStatus = (m) => (m && typeof m === 'object' ? String(m.status || 'none') : 'none');
 
 /** 0..1 → high (≥0.75) / medium (≥0.5) / low. Rows pre-check at ≥0.5. */
 export function confidenceTier(value) {
@@ -215,11 +237,23 @@ export default function AutofillModal({
       const data = body.data || {};
       const nextSelected = {};
       for (const f of AUTOFILL_FIELDS) {
-        const value = data[f.valueKey];
+        const value = fieldValue(data, f);
         let ok = hasValue(value) && !locked.has(f.key) && confidenceTier(data.confidence?.[f.confKey]) !== 'low';
         if (ok && f.key === 'category' && categoryNames.length && !matchByName(value, categoryNames)) ok = false;
         if (ok && f.key === 'type' && typeNames.length && !matchByName(value, typeNames)) ok = false;
         if (ok && f.key === 'priority' && !(Number(value) >= 1 && Number(value) <= 4)) ok = false;
+        if (f.key === 'requester' && !locked.has(f.key) && hasValue(value)) {
+          // The server already resolved the person: a clean match is ticked
+          // regardless of the name's confidence; an ambiguous one never is.
+          const status = matchStatus(data.requesterMatch);
+          if (status === 'matched' && data.requesterMatch?.candidate?.email) ok = true;
+          else if (status === 'ambiguous') ok = false;
+        }
+        if (f.key === 'assignee') {
+          // Only a clean technician match may pre-tick — and only when the
+          // model is at least medium-sure the chat really named the handler.
+          ok = ok && matchStatus(data.assigneeMatch) === 'matched' && Boolean(data.assigneeMatch?.technician?.id);
+        }
         nextSelected[f.key] = ok;
       }
       setResult(data);
@@ -252,17 +286,40 @@ export default function AutofillModal({
   const editing = editId !== null ? staged.find((s) => s.id === editId) : null;
 
   const renderValue = (field, value) => {
-    if (!hasValue(value)) return <span className="italic text-muted-foreground/75">Not found in the material</span>;
+    if (!hasValue(value)) {
+      return <span className="italic text-muted-foreground/75">{field.key === 'assignee' ? 'Not named in the material' : 'Not found in the material'}</span>;
+    }
     if (field.key === 'priority') {
       const n = Number(value);
       return PRIORITY_LABELS[n] ? `${PRIORITY_LABELS[n]} (P${n})` : String(value);
     }
     if (field.key === 'description') {
-      const text = String(value);
-      const long = text.length > 360;
+      const isHtml = typeof result?.descriptionHtml === 'string' && result.descriptionHtml.trim() !== '';
+      const text = String(isHtml ? (result.descriptionText || '') : value);
+      const long = (isHtml ? Math.max(text.length, value.length / 2) : text.length) > 360;
+      const discussed = Array.isArray(result?.description?.discussedWith)
+        ? result.description.discussedWith.filter((d) => d && d.name)
+        : [];
       return (
         <>
-          <span className={`whitespace-pre-wrap break-words ${expanded || !long ? '' : 'line-clamp-4'}`}>{text}</span>
+          {isHtml ? (
+            <div
+              data-testid="autofill-description-html"
+              className={`break-words [&_p]:my-0.5 [&_ul]:my-1 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-0 ${expanded || !long ? '' : 'max-h-28 overflow-hidden [mask-image:linear-gradient(to_bottom,black_70%,transparent)]'}`}
+              // Server-built structured HTML, passed through the composer's
+              // sanitizer (same allow-list the description field uses).
+              dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(value) }}
+            />
+          ) : (
+            <span className={`whitespace-pre-wrap break-words ${expanded || !long ? '' : 'line-clamp-4'}`}>{text}</span>
+          )}
+          {/* The server-rendered HTML already carries the 'Discussed with' line — only add it for the text fallback. */}
+          {!value && discussed.length > 0 && (expanded || !long) && (
+            <p className="mt-1 text-[11px] text-muted-foreground" data-testid="autofill-discussed-with">
+              <span className="font-semibold text-foreground/85">Discussed with:</span>{' '}
+              {discussed.map((d) => [d.name, d.role ? `(${d.role})` : null, d.channel ? `via ${d.channel}` : null, d.when || null].filter(Boolean).join(' ')).join(' · ')}
+            </p>
+          )}
           {long && (
             <button type="button" onClick={() => setExpanded((v) => !v)} className="tp-focus-ring mt-1 block text-[11px] font-semibold text-indigo-600 dark:text-indigo-300 hover:underline rounded">
               {expanded ? 'Show less' : 'Show all'}
@@ -271,6 +328,57 @@ export default function AutofillModal({
         </>
       );
     }
+    if (field.key === 'requester') {
+      const match = result?.requesterMatch;
+      const status = matchStatus(match);
+      if (status === 'matched' && match.candidate?.email) {
+        const c = match.candidate;
+        const fromDirectory = c.source === 'directory';
+        return (
+          <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-0.5" data-testid="autofill-requester-match">
+            <span className={`inline-flex h-6 w-6 items-center justify-center rounded-full flex-shrink-0 ${fromDirectory ? 'bg-violet-50 dark:bg-violet-500/15 text-violet-700 dark:text-violet-200' : 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200'}`} aria-hidden="true">
+              {fromDirectory ? <Building2 className="w-3.5 h-3.5" /> : <UserRound className="w-3.5 h-3.5" />}
+            </span>
+            <span className="font-medium">{c.name || c.email}</span>
+            {c.name && <span className="text-muted-foreground">· {c.email}</span>}
+            <span className="text-[11px] text-muted-foreground/75">· matched from {fromDirectory ? 'the directory' : 'known requesters'}</span>
+          </span>
+        );
+      }
+      if (status === 'ambiguous') {
+        const n = Array.isArray(match.candidates) ? match.candidates.length : 0;
+        return (
+          <span data-testid="autofill-requester-match">
+            <span className="break-words">{String(value)}</span>
+            <span className="ml-2 text-muted-foreground">{' '}— {n > 0 ? `${n} people match` : 'several people match'} — pick on the form</span>
+          </span>
+        );
+      }
+      return <span className="break-words">{String(value)}</span>;
+    }
+    if (field.key === 'assignee') {
+      const match = result?.assigneeMatch;
+      const status = matchStatus(match);
+      const reason = result?.assigneeHint?.reason || match?.reason || null;
+      if (status === 'matched' && match.technician) {
+        return (
+          <span data-testid="autofill-assignee-match">
+            <span className="font-medium">{match.technician.name}</span>
+            {reason && <span className="text-muted-foreground"> — from: “{reason}”</span>}
+          </span>
+        );
+      }
+      if (status === 'ambiguous') {
+        const names = (Array.isArray(match.candidates) ? match.candidates : []).map((t) => t?.name).filter(Boolean);
+        return (
+          <span data-testid="autofill-assignee-match">
+            <span className="break-words">{String(value)}</span>
+            <span className="ml-2 text-muted-foreground">{' '}— could be {names.length ? names.join(', ') : 'more than one member'} — pick on the form</span>
+          </span>
+        );
+      }
+      return <span className="break-words">{String(value)}</span>;
+    }
     return <span className="break-words">{String(value)}</span>;
   };
 
@@ -278,9 +386,21 @@ export default function AutofillModal({
     if (locked.has(field.key)) return 'You already filled this in — kept as is.';
     if (!hasValue(value)) return null;
     if (field.key === 'category' && categoryNames.length && !matchByName(value, categoryNames)) return 'No matching category in this workspace — skipped.';
+    if (field.key === 'category' && result?.categoryLevel === 'top') return 'Category only — pick a subcategory on the form.';
     if (field.key === 'type' && typeNames.length && !matchByName(value, typeNames)) return 'No matching type in this workspace — skipped.';
     if (field.key === 'priority' && !(Number(value) >= 1 && Number(value) <= 4)) return 'Not a priority this workspace uses — skipped.';
-    if (field.key === 'requester') return 'Matched against known requesters on apply — a fuzzy name opens the search for you to confirm.';
+    if (field.key === 'requester') {
+      const status = matchStatus(result?.requesterMatch);
+      if (status === 'matched' && result.requesterMatch?.candidate?.email) return 'Selected on the form the moment you apply — no search needed.';
+      if (status === 'ambiguous') return 'The search opens pre-filled so you can pick the right person.';
+      return 'Matched against known requesters on apply — a fuzzy name opens the search for you to confirm.';
+    }
+    if (field.key === 'assignee') {
+      const status = matchStatus(result?.assigneeMatch);
+      if (status === 'matched' && result.assigneeMatch?.technician?.id) return 'Sets “Assign to…” on the form — AI assignment stays off.';
+      if (status === 'ambiguous') return 'Nobody is set — choose the member under Assignment.';
+      return 'No workspace member matches that name — choose under Assignment.';
+    }
     if (field.key === 'description') return 'The pasted source material is appended under this summary so nothing is lost.';
     return null;
   };
@@ -290,10 +410,18 @@ export default function AutofillModal({
     if (field.key === 'category' && categoryNames.length && !matchByName(value, categoryNames)) return true;
     if (field.key === 'type' && typeNames.length && !matchByName(value, typeNames)) return true;
     if (field.key === 'priority' && !(Number(value) >= 1 && Number(value) <= 4)) return true;
+    if (field.key === 'assignee' && !(matchStatus(result?.assigneeMatch) === 'matched' && result?.assigneeMatch?.technician?.id)) return true;
     return false;
   };
 
   const people = Array.isArray(result?.peopleMentioned) ? result.peopleMentioned.filter((p) => p && (p.name || p.email)) : [];
+  // "Run #123 · claude-sonnet-5 · 7.5 s" — discreet, but there when the
+  // agent wants to know what read the paste (and to find it again later).
+  const runStamp = [
+    meta?.runId != null ? `Run #${meta.runId}` : null,
+    meta?.model || null,
+    Number.isFinite(Number(meta?.durationMs)) && meta?.durationMs != null ? `${(Number(meta.durationMs) / 1000).toFixed(1)} s` : null,
+  ].filter(Boolean).join(' · ');
 
   return createPortal(
     <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-6">
@@ -427,7 +555,7 @@ export default function AutofillModal({
               )}
               <ul className="divide-y divide-border/60 rounded-xl border border-border overflow-hidden" aria-label="Proposed fields">
                 {AUTOFILL_FIELDS.map((field) => {
-                  const value = result[field.valueKey];
+                  const value = fieldValue(result, field);
                   const tier = confidenceTier(result.confidence?.[field.confKey]);
                   const disabled = rowDisabled(field, value);
                   const caption = rowCaption(field, value);
@@ -467,7 +595,6 @@ export default function AutofillModal({
               )}
               <p className="text-[11px] text-muted-foreground/75">
                 Nothing is saved yet — Apply fills the form, and every field stays editable before you create the ticket.
-                {meta?.model ? ` Read by ${meta.model}.` : ''}
               </p>
             </div>
           )}
@@ -479,6 +606,11 @@ export default function AutofillModal({
               <button type="button" onClick={reset} className="tp-focus-ring inline-flex items-center justify-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted/50">
                 <ArrowLeft className="w-4 h-4" aria-hidden="true" /> Back
               </button>
+              {runStamp && (
+                <span className="hidden sm:block text-[11px] text-muted-foreground/75 tabular-nums truncate" data-testid="autofill-run-stamp" title="This run is linked to the ticket once you create it — see AI & Routing on the ticket.">
+                  {runStamp}
+                </span>
+              )}
               <span className="hidden sm:block flex-1" />
               <button type="button" onClick={close} className="tp-focus-ring rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted/50">Cancel</button>
               <button

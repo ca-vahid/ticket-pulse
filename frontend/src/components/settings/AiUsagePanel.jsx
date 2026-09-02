@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Activity, Coins, Database, RefreshCw, Zap } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Activity, Coins, Database, RefreshCw, Sparkles, Zap } from 'lucide-react';
 import {
   ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, CartesianGrid,
 } from 'recharts';
-import { aiUsageAPI } from '../../services/api';
+import { aiUsageAPI, ticketsAPI } from '../../services/api';
 import { useChartColors } from '../../utils/highchartsTheme';
+import { formatDayTime } from '../tickets/ticketUi';
 
 const fmtInt = (n) => Number(n || 0).toLocaleString();
 const fmtTok = (n) => {
@@ -84,6 +86,113 @@ function BreakdownTable({ title, rows, keyField, labelField }) {
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+const MATCH_CHIP = {
+  matched: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-200 dark:border-emerald-500/30',
+  ambiguous: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-500/15 dark:text-amber-200 dark:border-amber-500/30',
+  none: 'bg-muted text-muted-foreground border-border',
+};
+const MATCH_LABEL = { matched: 'matched', ambiguous: 'ambiguous', none: 'none' };
+
+function MatchChip({ match }) {
+  const status = match && typeof match === 'object' && MATCH_LABEL[match.status] ? match.status : 'none';
+  return (
+    <span className={`inline-flex items-center rounded-full border px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide ${MATCH_CHIP[status]}`}>
+      {MATCH_LABEL[status]}
+    </span>
+  );
+}
+
+/** The ticket a run ended up on, however the backend chose to attach it. */
+const linkedTicketOf = (run) => {
+  const r = run?.resolved || {};
+  const id = run?.ticketId ?? r.ticketId ?? r.ticket?.id ?? run?.ticket?.id ?? null;
+  const ref = run?.displayRef ?? r.displayRef ?? r.ticket?.displayRef ?? run?.ticket?.displayRef ?? (id != null ? `TP-${id}` : null);
+  return id != null ? { id, ref } : null;
+};
+
+/**
+ * Autofill runs (v2): the workspace's last 50 paste-to-ticket reads — who
+ * ran them, what subject the model proposed, whether the requester /
+ * assignee resolved, the token cost, and the ticket they became. Additive to
+ * the cost report above; the current workspace only (the runs endpoint is
+ * workspace-scoped).
+ */
+export function AutofillRunsTable() {
+  const [runs, setRuns] = useState(null);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let alive = true;
+    ticketsAPI.workspaceIntakeRuns(50)
+      .then((res) => { if (alive) setRuns(Array.isArray(res?.data) ? res.data : []); })
+      .catch((err) => {
+        if (!alive) return;
+        // 404 = backend not deployed yet / feature off — stay quiet.
+        if (err?.response?.status === 404) { setRuns([]); return; }
+        setError(err?.response?.data?.message || err?.message || 'Could not load Autofill runs');
+        setRuns([]);
+      });
+    return () => { alive = false; };
+  }, []);
+
+  if (runs === null && !error) return null;
+
+  return (
+    <div className="tp-card rounded-xl p-4" data-testid="autofill-runs">
+      <div className="flex flex-wrap items-center gap-2 mb-2">
+        <Sparkles className="w-4 h-4 text-indigo-500" aria-hidden="true" />
+        <h3 className="text-sm font-bold text-foreground">Autofill runs</h3>
+        <span className="text-[11px] text-muted-foreground/75">last {Math.min(50, runs?.length || 0)} in this workspace · what each paste proposed and where it landed</span>
+      </div>
+      {error && <p className="text-xs text-red-600 dark:text-red-300">{error}</p>}
+      {!error && runs.length === 0 && <p className="text-xs text-muted-foreground/75">No Autofill runs yet — they appear here once an agent drafts a ticket from a paste.</p>}
+      {!error && runs.length > 0 && (
+        <div className="overflow-x-auto settings-scrollbar">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-[11px] uppercase tracking-wide text-muted-foreground/75 border-b border-border/60">
+                <th scope="col" className="text-left py-1.5 pr-3 font-semibold whitespace-nowrap">When</th>
+                <th scope="col" className="text-left py-1.5 px-3 font-semibold">Who</th>
+                <th scope="col" className="text-left py-1.5 px-3 font-semibold">Subject proposed</th>
+                <th scope="col" className="text-left py-1.5 px-3 font-semibold">Requester</th>
+                <th scope="col" className="text-left py-1.5 px-3 font-semibold">Assignee</th>
+                <th scope="col" className="text-right py-1.5 px-3 font-semibold whitespace-nowrap" title="Input / output tokens">Tokens</th>
+                <th scope="col" className="text-left py-1.5 pl-3 font-semibold">Ticket</th>
+              </tr>
+            </thead>
+            <tbody>
+              {runs.map((run) => {
+                const result = run.result && typeof run.result === 'object' ? run.result : {};
+                const ticket = linkedTicketOf(run);
+                return (
+                  <tr key={run.id} className="border-b border-border/60 last:border-0 align-top" data-testid="autofill-run-row">
+                    <td className="py-1.5 pr-3 whitespace-nowrap text-muted-foreground tabular-nums">
+                      {formatDayTime(run.createdAt)}
+                      <span className="block text-[10px] text-muted-foreground/75">#{run.id}{run.model ? ` · ${run.model}` : ''}</span>
+                    </td>
+                    <td className="py-1.5 px-3 text-foreground/85 whitespace-nowrap">{run.actorName || '—'}</td>
+                    <td className="py-1.5 px-3 text-foreground max-w-[320px]">
+                      <span className="line-clamp-2 break-words">{result.subject || <span className="italic text-muted-foreground/75">—</span>}</span>
+                    </td>
+                    <td className="py-1.5 px-3"><MatchChip match={result.requesterMatch} /></td>
+                    <td className="py-1.5 px-3"><MatchChip match={result.assigneeMatch} /></td>
+                    <td className="py-1.5 px-3 text-right tabular-nums text-muted-foreground whitespace-nowrap">{fmtTok(run.inputTokens)} / {fmtTok(run.outputTokens)}</td>
+                    <td className="py-1.5 pl-3 whitespace-nowrap">
+                      {ticket
+                        ? <Link to={`/tickets/${ticket.id}`} className="tp-focus-ring rounded font-semibold text-blue-600 dark:text-blue-300 hover:underline">{ticket.ref}</Link>
+                        : <span className="text-muted-foreground/75">not created</span>}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -221,6 +330,7 @@ export default function AiUsagePanel() {
             <BreakdownTable title="By operation" rows={report.byOperation} keyField="operation" labelField="Operation" />
           </div>
           <BreakdownTable title="By model" rows={report.byModel} keyField="model" labelField="Model" />
+          <AutofillRunsTable />
 
           <div className="tp-card rounded-xl p-4 flex flex-wrap items-center gap-3">
             <div className="min-w-0">

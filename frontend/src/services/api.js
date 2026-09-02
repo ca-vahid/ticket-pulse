@@ -855,6 +855,10 @@ export const ticketsAPI = {
       headers: { 'Content-Type': undefined },
     });
   },
+  // Autofill v2: the intake runs linked to one ticket (via `intakeRunId` on
+  // create) and, for admins, the workspace's last N runs.
+  intakeRuns: async (ticketId) => await api.get(`/tickets/${ticketId}/intake-runs`),
+  workspaceIntakeRuns: async (limit = 50) => await api.get('/tickets/intake-runs', { params: { limit } }),
 
   // Time tracking
 

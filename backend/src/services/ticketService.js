@@ -2357,6 +2357,9 @@ class TicketService {
   // `notifyRequester:false` (which suppresses EVERY ticket.created workflow).
   async createTicket(workspaceId, input, actor, {
     sourceChannel = TICKET_SOURCE.AGENT, enforceRequired = false, createdVia = null, suppressRequesterAck = false,
+    // AF2: a validated TicketIntakeRun id (the route checks it belongs to the
+    // workspace) — stamped on the created audit and linked after the insert.
+    intakeRunId = null,
   } = {}) {
     const workspace = await this._getWorkspace(workspaceId);
     if (!workspace.nativeTicketingEnabled) {
@@ -2559,6 +2562,7 @@ class TicketService {
       ...(data.ccEmails.length ? { ccEmails: data.ccEmails } : {}),
       ...(data.notifyRequester === false ? { requesterEmailSuppressed: true } : {}),
       ...(suppressRequesterAck ? { requesterAckSuppressed: true } : {}),
+      ...(intakeRunId ? { intakeRunId } : {}),
       // Intake bookkeeping (FR 08-05 #1): which keys were auto-provisioned
       // and which were rejected (with reasons) — the audit trail an admin
       // reads when a sender asks "where did my field go?".
@@ -2578,6 +2582,15 @@ class TicketService {
         },
       });
       await this._audit(ticket.id, 'assigned', actor, { toTechId: assignee.id, note: 'Assigned at creation' });
+    }
+
+    // AF2: link the Autofill run to the ticket it produced and record which
+    // proposals the ticket kept (non-fatal bookkeeping; lazy import so the
+    // create path's module graph is unchanged when no run is involved).
+    if (intakeRunId) {
+      await import('./ticketIntakeRunService.js')
+        .then(({ default: s }) => s.linkToTicket(intakeRunId, workspaceId, ticket))
+        .catch((err) => logger.warn(`Intake run ${intakeRunId} link failed (non-fatal): ${err.message}`));
     }
 
     if (createdVia) ticket.createdVia = createdVia;

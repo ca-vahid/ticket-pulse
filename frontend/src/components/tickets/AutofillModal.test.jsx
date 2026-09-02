@@ -22,18 +22,35 @@ vi.mock('./ImageMarkupModal', () => ({
   ),
 }));
 
+// Autofill v2 response shape: structured description (+ server-built HTML /
+// text), server-side requester + assignee matches, category level.
 const RESULT = {
   subject: 'Laptop won’t boot after Windows update',
-  description: 'User reports a blue screen on boot since this morning’s update. Tried restarting twice.',
+  description: {
+    request: 'Laptop blue-screens on boot since this morning’s Windows update.',
+    details: ['Restarted twice, same result', 'Update KB5031 installed at 8:10'],
+    nextStep: 'Boot to safe mode and roll the update back.',
+    discussedWith: [{ name: 'Sam Manager', role: 'manager', channel: 'Teams', when: 'this morning' }],
+  },
+  descriptionHtml: '<p><strong>Request:</strong> Laptop blue-screens on boot since this morning’s Windows update.</p><ul><li>Restarted twice, same result</li><li>Update KB5031 installed at 8:10</li></ul><p><strong>Next step:</strong> Boot to safe mode and roll the update back.</p>',
+  descriptionText: 'Request: Laptop blue-screens on boot since this morning’s Windows update.\n- Restarted twice, same result\n- Update KB5031 installed at 8:10\nNext step: Boot to safe mode and roll the update back.',
   requesterNameOrEmail: 'jane.doe@acme.com',
+  requesterMatch: { status: 'none', candidate: null, candidates: [], reason: 'no requester or directory user with that email' },
+  conversingAgent: null,
+  assigneeHint: null,
+  assigneeMatch: { status: 'none', technician: null, candidates: [], reason: 'nobody named' },
   categoryHint: 'Hardware',
+  categoryLevel: 'top',
   priorityHint: 3,
   typeHint: 'Incident',
   peopleMentioned: [{ name: 'Sam Manager', email: 'sam@acme.com', role: 'manager' }],
   sourceSummary: 'forwarded Outlook email + 2 screenshots',
-  confidence: { subject: 0.92, description: 0.8, requester: 0.6, category: 0.3, priority: 0.55, type: 0.7 },
+  confidence: { subject: 0.92, description: 0.8, requester: 0.6, category: 0.3, priority: 0.55, type: 0.7, assignee: 0 },
 };
-const okResponse = (data = RESULT) => ({ data: { success: true, data, meta: { provider: 'anthropic', model: 'claude-sonnet-5', imageCount: 2, textChars: 120 } } });
+const SIMON = { requesterId: 41, email: 'sdickinson@acme.com', name: 'Simon Dickinson', source: 'requester' };
+const SOHEIL = { id: 5, name: 'Soheil Nasiri', email: 'soheil@acme.com' };
+const META = { provider: 'anthropic', model: 'claude-sonnet-5', imageCount: 2, textChars: 120, runId: 123, durationMs: 7480, inputTokens: 3100, outputTokens: 610 };
+const okResponse = (data = RESULT, meta = META) => ({ data: { success: true, data, meta } });
 const httpError = (status, message) => Object.assign(new Error(message || `HTTP ${status}`), { response: { status, data: { message } } });
 
 // Real bytes (not a faked .size) — the modal re-wraps pasted blobs under a
@@ -185,8 +202,10 @@ describe('AutofillModal — extract + review', () => {
     await act(async () => { resolve(okResponse()); });
     expect(await screen.findByTestId('autofill-source-summary')).toHaveTextContent('Looks like: forwarded Outlook email + 2 screenshots');
 
-    const rows = within(screen.getByRole('list', { name: 'Proposed fields' })).getAllByRole('listitem');
-    expect(rows).toHaveLength(6);
+    const list = screen.getByRole('list', { name: 'Proposed fields' });
+    // Direct rows only — the structured description carries its own <li> bullets.
+    const rows = within(list).getAllByRole('listitem').filter((li) => li.parentElement === list);
+    expect(rows).toHaveLength(7);
     expect(screen.getByTestId('autofill-row-subject-confidence')).toHaveTextContent('high');
     expect(screen.getByTestId('autofill-row-priority-confidence')).toHaveTextContent('medium');
     expect(screen.getByTestId('autofill-row-category-confidence')).toHaveTextContent('low');
@@ -235,6 +254,15 @@ describe('AutofillModal — extract + review', () => {
     expect(screen.getByLabelText('Type')).toBeChecked();
   });
 
+  test('the run stamp names the run, model and duration in the footer', async () => {
+    ticketsAPI.autofillExtract.mockResolvedValue(okResponse());
+    const { editor } = renderModal();
+    typeText(editor, 'paste');
+    fireEvent.click(submitButton());
+    await screen.findByTestId('autofill-source-summary');
+    expect(screen.getByTestId('autofill-run-stamp')).toHaveTextContent('Run #123 · claude-sonnet-5 · 7.5 s');
+  });
+
   test('Back returns to the paste with the material intact', async () => {
     ticketsAPI.autofillExtract.mockResolvedValue(okResponse());
     const { editor } = renderModal();
@@ -270,5 +298,102 @@ describe('AutofillModal — extract + review', () => {
     typeText(editor, 'paste');
     fireEvent.click(submitButton());
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Text exceeds 20000 characters'));
+  });
+});
+
+// Autofill v2 — the structured result panel: a Request/details/Next-step
+// description instead of a story, the server's requester + assignee matches
+// shown as what WILL happen on apply, and the category level.
+describe('AutofillModal — v2 result panel', () => {
+  async function submitWith(data, props = {}) {
+    ticketsAPI.autofillExtract.mockResolvedValue(okResponse(data));
+    const out = renderModal(props);
+    typeText(out.editor, 'paste');
+    fireEvent.click(submitButton());
+    await screen.findByTestId('autofill-source-summary');
+    return out;
+  }
+
+  test('the Description row renders the structured HTML (bold request line, bullet details, next step) plus the "Discussed with" caption', async () => {
+    await submitWith(RESULT);
+    const html = screen.getByTestId('autofill-description-html');
+    expect(html.querySelector('strong')).toHaveTextContent('Request:');
+    expect(html.querySelectorAll('ul li')).toHaveLength(2);
+    expect(html).toHaveTextContent('Next step: Boot to safe mode and roll the update back.');
+    expect(screen.queryByTestId('autofill-discussed-with')).toBeNull(); // the server HTML already carries the line
+    expect(screen.getByLabelText('Description')).toBeChecked();
+  });
+
+  test('a v1 narrative string still renders as plain text', async () => {
+    await submitWith({ ...RESULT, description: 'Plain story.', descriptionHtml: undefined, descriptionText: undefined });
+    expect(screen.queryByTestId('autofill-description-html')).not.toBeInTheDocument();
+    expect(screen.getByText('Plain story.')).toBeInTheDocument();
+  });
+
+  test('requester matched (known requester) → person chip, pre-checked even at low name confidence, "selected on apply" caption', async () => {
+    await submitWith({ ...RESULT, requesterNameOrEmail: 'Simon', requesterMatch: { status: 'matched', candidate: SIMON, candidates: [SIMON], reason: 'unique first-name match' }, confidence: { ...RESULT.confidence, requester: 0.3 } });
+    const chip = screen.getByTestId('autofill-requester-match');
+    expect(chip).toHaveTextContent('Simon Dickinson');
+    expect(chip).toHaveTextContent('sdickinson@acme.com');
+    expect(chip).toHaveTextContent('matched from known requesters');
+    expect(screen.getByLabelText('Requester')).toBeChecked();
+    expect(screen.getByText('Selected on the form the moment you apply — no search needed.')).toBeInTheDocument();
+  });
+
+  test('requester matched from the directory says so', async () => {
+    await submitWith({ ...RESULT, requesterMatch: { status: 'matched', candidate: { ...SIMON, requesterId: null, source: 'directory' }, candidates: [], reason: 'directory' } });
+    expect(screen.getByTestId('autofill-requester-match')).toHaveTextContent('matched from the directory');
+  });
+
+  test('requester ambiguous → "N people match — pick on the form", unticked but tickable', async () => {
+    await submitWith({ ...RESULT, requesterNameOrEmail: 'Jane', requesterMatch: { status: 'ambiguous', candidate: null, candidates: [SIMON, { ...SIMON, requesterId: 42 }, { ...SIMON, requesterId: 43 }], reason: '3 Janes' }, confidence: { ...RESULT.confidence, requester: 0.9 } });
+    expect(screen.getByTestId('autofill-requester-match')).toHaveTextContent('Jane — 3 people match — pick on the form');
+    expect(screen.getByLabelText('Requester')).not.toBeChecked();
+    expect(screen.getByLabelText('Requester')).not.toBeDisabled();
+    expect(screen.getByText('The search opens pre-filled so you can pick the right person.')).toBeInTheDocument();
+  });
+
+  test('assignee matched → name + the quote it came from, pre-checked at confidence ≥ 0.5', async () => {
+    await submitWith({ ...RESULT, assigneeHint: { name: 'Soheil', reason: 'let me ask Soheil to help' }, assigneeMatch: { status: 'matched', technician: SOHEIL, candidates: [SOHEIL], reason: 'unique first name' }, confidence: { ...RESULT.confidence, assignee: 0.8 } });
+    expect(screen.getByTestId('autofill-assignee-match')).toHaveTextContent('Soheil Nasiri — from: “let me ask Soheil to help”');
+    expect(screen.getByTestId('autofill-row-assignee-confidence')).toHaveTextContent('high');
+    expect(screen.getByLabelText('Assignee')).toBeChecked();
+    expect(screen.getByText('Sets “Assign to…” on the form — AI assignment stays off.')).toBeInTheDocument();
+  });
+
+  test('assignee matched but the model is unsure (< 0.5) → shown, unticked, still tickable', async () => {
+    await submitWith({ ...RESULT, assigneeHint: { name: 'Soheil', reason: 'cc Soheil' }, assigneeMatch: { status: 'matched', technician: SOHEIL, candidates: [SOHEIL], reason: 'unique first name' }, confidence: { ...RESULT.confidence, assignee: 0.4 } });
+    expect(screen.getByLabelText('Assignee')).not.toBeChecked();
+    expect(screen.getByLabelText('Assignee')).not.toBeDisabled();
+    fireEvent.click(screen.getByLabelText('Assignee'));
+    expect(screen.getByLabelText('Assignee')).toBeChecked();
+  });
+
+  test('assignee ambiguous → the candidates are listed, row unticked and disabled', async () => {
+    await submitWith({ ...RESULT, assigneeHint: { name: 'Sam', reason: 'ask Sam' }, assigneeMatch: { status: 'ambiguous', technician: null, candidates: [{ id: 1, name: 'Sam Lee' }, { id: 2, name: 'Sam Patel' }], reason: '2 Sams' }, confidence: { ...RESULT.confidence, assignee: 0.9 } });
+    expect(screen.getByTestId('autofill-assignee-match')).toHaveTextContent('Sam — could be Sam Lee, Sam Patel — pick on the form');
+    expect(screen.getByLabelText('Assignee')).not.toBeChecked();
+    expect(screen.getByLabelText('Assignee')).toBeDisabled();
+  });
+
+  test('assignee none → "Not named in the material", disabled', async () => {
+    await submitWith(RESULT);
+    expect(within(screen.getByTestId('autofill-row-assignee')).getByText('Not named in the material')).toBeInTheDocument();
+    expect(screen.getByLabelText('Assignee')).toBeDisabled();
+  });
+
+  test('categoryLevel "top" → "category only" caption, row still applicable', async () => {
+    await submitWith({ ...RESULT, confidence: { ...RESULT.confidence, category: 0.9 } }, { categoryNames: ['Hardware', 'Hardware > Laptop'] });
+    expect(screen.getByLabelText('Category')).toBeChecked();
+    expect(screen.getByText('Category only — pick a subcategory on the form.')).toBeInTheDocument();
+  });
+
+  test('Apply hands the assignee tick back alongside the rest', async () => {
+    const { onApply } = await submitWith({ ...RESULT, assigneeHint: { name: 'Soheil', reason: 'let me ask Soheil' }, assigneeMatch: { status: 'matched', technician: SOHEIL, candidates: [SOHEIL], reason: 'unique' }, confidence: { ...RESULT.confidence, assignee: 0.9 } });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply to form' }));
+    const payload = onApply.mock.calls[0][0];
+    expect(payload.selected.assignee).toBe(true);
+    expect(payload.result.assigneeMatch.technician.id).toBe(5);
+    expect(payload.meta.runId).toBe(123);
   });
 });

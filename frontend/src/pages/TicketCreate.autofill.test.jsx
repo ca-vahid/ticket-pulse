@@ -16,7 +16,7 @@ const FIELD = (key, extra = {}) => ({ key, visible: true, required: false, defau
 const META = {
   nativeTicketingEnabled: true,
   actor: { technicianId: 7 },
-  technicians: [],
+  technicians: [{ id: 5, name: 'Soheil Nasiri' }, { id: 7, name: 'Me Myself' }],
   categoryTree: [{ id: 1, name: 'Hardware', subcategories: [{ id: 11, name: 'Laptop' }] }, { id: 2, name: 'Accounts', subcategories: [] }],
   categoryGroupLinks: [],
   groups: [],
@@ -31,17 +31,28 @@ const META = {
 };
 
 const JANE = { id: 41, name: 'Jane Doe', email: 'jane.doe@acme.com', jobTitle: 'Analyst' };
+// v2 shape. requesterMatch 'none' = the server found nobody, so the form
+// falls back to its own exact-email search (the v1 behaviour).
 const RESULT = {
   subject: 'Laptop won’t boot after Windows update',
-  description: 'Blue screen on boot since this morning’s update.\n\nRestarted twice, same result.',
+  description: { request: 'Blue screen on boot since this morning’s update.', details: ['Restarted twice, same result'], nextStep: 'Roll back the update.', discussedWith: [] },
+  descriptionHtml: '<p><strong>Request:</strong> Blue screen on boot since this morning’s update.</p><ul><li>Restarted twice, same result</li></ul><p><strong>Next step:</strong> Roll back the update.</p>',
+  descriptionText: 'Request: Blue screen on boot since this morning’s update.\n- Restarted twice, same result\nNext step: Roll back the update.',
   requesterNameOrEmail: 'jane.doe@acme.com',
+  requesterMatch: { status: 'none', candidate: null, candidates: [], reason: 'not found' },
+  conversingAgent: null,
+  assigneeHint: null,
+  assigneeMatch: { status: 'none', technician: null, candidates: [], reason: 'nobody named' },
   categoryHint: 'hardware > laptop',
+  categoryLevel: 'leaf',
   priorityHint: 3,
   typeHint: 'service request',
   peopleMentioned: [],
   sourceSummary: 'Teams chat',
-  confidence: { subject: 0.9, description: 0.9, requester: 0.9, category: 0.8, priority: 0.8, type: 0.8 },
+  confidence: { subject: 0.9, description: 0.9, requester: 0.9, category: 0.8, priority: 0.8, type: 0.8, assignee: 0 },
 };
+const SIMON = { requesterId: 41, email: 'sdickinson@acme.com', name: 'Simon Dickinson', source: 'requester' };
+const SOHEIL_MATCH = { status: 'matched', technician: { id: 5, name: 'Soheil Nasiri', email: 'soheil@acme.com' }, candidates: [], reason: 'unique first name' };
 const ALL = { subject: true, description: true, requester: true, category: true, priority: true, type: true };
 
 const { stub } = vi.hoisted(() => ({ stub: { payload: null, lastLocked: null } }));
@@ -132,7 +143,8 @@ describe('TicketCreate — Autofill apply rules', () => {
 
     expect(subjectInput()).toHaveValue(RESULT.subject);
     const html = screen.getByTestId('rte').dataset.html;
-    expect(html).toContain('<p>Blue screen on boot since this morning’s update.</p><p>Restarted twice, same result.</p>');
+    // v2: the server's structured HTML lands verbatim (sanitized), then the source block.
+    expect(html.startsWith(RESULT.descriptionHtml)).toBe(true);
     expect(html).toContain('<strong>— Source material (pasted) —</strong>');
     expect(html).toContain('<div><p>Hi IT, my laptop bluescreens</p></div>');
     expect(html).not.toContain('<details');
@@ -254,7 +266,8 @@ describe('TicketCreate — Autofill apply rules', () => {
     expect(screen.queryByTestId('autofill-notice')).toHaveTextContent('AI classification turned off'); // classification still applied
   });
 
-  test('the applied subject is what gets created', async () => {
+  test('the applied subject is what gets created, and the run id rides along', async () => {
+    stub.payload.meta = { runId: 123, model: 'claude-sonnet-5', durationMs: 7480 };
     await renderPage();
     openAutofill();
     await applyStub();
@@ -267,5 +280,121 @@ describe('TicketCreate — Autofill apply rules', () => {
     expect(payload.aiClassifyOnly).toBe(false);
     expect(payload.internalCategoryId).toBe(1);
     expect(payload.internalSubcategoryId).toBe(11);
+    expect(payload.intakeRunId).toBe(123);
+    expect(payload.description.startsWith(RESULT.descriptionHtml)).toBe(true);
+  });
+
+  test('no run id (v1 backend) → the create payload has no intakeRunId', async () => {
+    await renderPage();
+    openAutofill();
+    await applyStub();
+    await waitFor(() => expect(requesterInput()).toHaveValue('jane.doe@acme.com'));
+    fireEvent.click(screen.getAllByRole('button', { name: /Create ticket/ })[0]);
+    await waitFor(() => expect(ticketsAPI.create).toHaveBeenCalled());
+    expect(ticketsAPI.create.mock.calls[0][0]).not.toHaveProperty('intakeRunId');
+  });
+});
+
+// Autofill v2 — server-side matches: a matched requester is SELECTED (chip,
+// no click, no search), a directory hit becomes an Entra person, an ambiguous
+// one opens the typeahead, and a matched assignee lands as "Assign to…".
+describe('TicketCreate — Autofill v2 matches', () => {
+  const assigneeSelect = () => screen.getByRole('combobox', { name: 'Member to assign' });
+
+  test('requester matched from known requesters → picked immediately, without a search', async () => {
+    stub.payload.result = { ...RESULT, requesterNameOrEmail: 'Simon', requesterMatch: { status: 'matched', candidate: SIMON, candidates: [SIMON], reason: 'unique' } };
+    await renderPage();
+    openAutofill();
+    await applyStub();
+    const chip = screen.getByTestId('requester-chip');
+    expect(chip).toHaveTextContent('Simon Dickinson');
+    expect(chip).toHaveTextContent('sdickinson@acme.com');
+    expect(chip).not.toHaveTextContent('Entra');
+    expect(ticketsAPI.requesterSearch).not.toHaveBeenCalled();
+    // The known requester's id is what gets created.
+    fireEvent.click(screen.getAllByRole('button', { name: /Create ticket/ })[0]);
+    await waitFor(() => expect(ticketsAPI.create).toHaveBeenCalled());
+    expect(ticketsAPI.create.mock.calls[0][0].requesterId).toBe(41);
+    expect(ticketsAPI.create.mock.calls[0][0].requesterEmail).toBe('sdickinson@acme.com');
+  });
+
+  test('requester matched from the directory → picked as an Entra person (id-less, created with the ticket)', async () => {
+    const dirHit = { requesterId: null, email: 'New.Hire@acme.com', name: 'New Hire', source: 'directory' };
+    stub.payload.result = { ...RESULT, requesterNameOrEmail: 'New Hire', requesterMatch: { status: 'matched', candidate: dirHit, candidates: [dirHit], reason: 'directory' } };
+    await renderPage();
+    openAutofill();
+    await applyStub();
+    const chip = screen.getByTestId('requester-chip');
+    expect(chip).toHaveTextContent('New Hire');
+    expect(chip).toHaveTextContent('Entra');
+    expect(ticketsAPI.requesterSearch).not.toHaveBeenCalled();
+    fireEvent.click(screen.getAllByRole('button', { name: /Create ticket/ })[0]);
+    await waitFor(() => expect(ticketsAPI.create).toHaveBeenCalled());
+    expect(ticketsAPI.create.mock.calls[0][0].requesterId).toBeNull();
+    expect(ticketsAPI.create.mock.calls[0][0].requesterEmail).toBe('new.hire@acme.com');
+  });
+
+  test('requester ambiguous → nobody picked, the typeahead opens pre-filled with the hint', async () => {
+    stub.payload.result = { ...RESULT, requesterNameOrEmail: 'Jane', requesterMatch: { status: 'ambiguous', candidate: null, candidates: [SIMON, { ...SIMON, requesterId: 42 }], reason: '2 match' } };
+    await renderPage();
+    openAutofill();
+    await applyStub();
+    await waitFor(() => expect(requesterInput()).toHaveValue('Jane'));
+    expect(screen.queryByTestId('requester-chip')).not.toBeInTheDocument();
+  });
+
+  test('a requester the agent already chose is left alone even when the server matched someone', async () => {
+    stub.payload.result = { ...RESULT, requesterMatch: { status: 'matched', candidate: SIMON, candidates: [SIMON], reason: 'unique' } };
+    await renderPage();
+    fireEvent.change(requesterInput(), { target: { value: 'bob@acme.com' } });
+    openAutofill();
+    await applyStub();
+    expect(requesterInput()).toHaveValue('bob@acme.com');
+    expect(screen.queryByTestId('requester-chip')).not.toBeInTheDocument();
+  });
+
+  test('assignee ticked → "Assign to…" with that member, AI assignment off, and the create payload carries assignedTechId', async () => {
+    stub.payload.result = { ...RESULT, assigneeHint: { name: 'Soheil', reason: 'let me ask Soheil to help' }, assigneeMatch: SOHEIL_MATCH, confidence: { ...RESULT.confidence, assignee: 0.8 } };
+    stub.payload.selected = { ...ALL, assignee: true };
+    await renderPage();
+    openAutofill();
+    await applyStub();
+    expect(assigneeSelect()).toHaveValue('5');
+    await waitFor(() => expect(requesterInput()).toHaveValue('jane.doe@acme.com'));
+    fireEvent.click(screen.getAllByRole('button', { name: /Create ticket/ })[0]);
+    await waitFor(() => expect(ticketsAPI.create).toHaveBeenCalled());
+    const payload = ticketsAPI.create.mock.calls[0][0];
+    expect(payload.assignedTechId).toBe(5);
+    expect(payload.runAiTriage).toBe(false);
+  });
+
+  test('assignee NOT ticked → assignment untouched', async () => {
+    stub.payload.result = { ...RESULT, assigneeMatch: SOHEIL_MATCH, confidence: { ...RESULT.confidence, assignee: 0.8 } };
+    stub.payload.selected = { ...ALL, assignee: false };
+    await renderPage();
+    openAutofill();
+    await applyStub();
+    expect(assigneeSelect()).toHaveValue('');
+  });
+
+  test('assignee ticked but the member is not on this workspace → nothing set, a notice explains', async () => {
+    stub.payload.result = { ...RESULT, assigneeMatch: { ...SOHEIL_MATCH, technician: { id: 999, name: 'Ghost Tech', email: null } } };
+    stub.payload.selected = { ...ALL, assignee: true };
+    await renderPage();
+    openAutofill();
+    await applyStub();
+    expect(assigneeSelect()).toHaveValue('');
+    expect(screen.getByTestId('autofill-notice')).toHaveTextContent('Ghost Tech isn’t on this workspace’s member list');
+  });
+
+  test('an assignee the agent already picked is reported as locked and kept', async () => {
+    stub.payload.result = { ...RESULT, assigneeMatch: SOHEIL_MATCH, confidence: { ...RESULT.confidence, assignee: 0.9 } };
+    stub.payload.selected = { ...ALL, assignee: true };
+    await renderPage();
+    fireEvent.change(assigneeSelect(), { target: { value: '7' } });
+    openAutofill();
+    expect(stub.lastLocked).toContain('assignee');
+    await applyStub();
+    expect(assigneeSelect()).toHaveValue('7');
   });
 });

@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.8.21-preview';
+export const APP_VERSION = '3.8.22-preview';
 
 export const changelog = [
+  {
+    version: '3.8.22-preview',
+    date: 'September 2, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>✨ Autofill v2 — a ticket, not a story</strong> — the extracted description is now structured like a ticket: a one-line <em>Request</em> (who needs what), factual <em>Details</em> bullets, the agreed <em>Next step</em>, and who it was discussed with — no more turn-by-turn narration. <strong>Requester auto-pick:</strong> when the named person is a known requester or a unique directory match, they are selected outright (no click), with a “matched from directory” chip; several matches open the search pre-filtered. <strong>Assignee from the conversation:</strong> if the material names who will handle it (“let me ask Soheil”), Autofill proposes that technician and Apply sets the assignment. <strong>Subcategory:</strong> the model must now pick the most specific “Top > Sub” whenever a category has subcategories (a bare category is flagged “pick a subcategory”); retired top-level categories are no longer offered. <strong>Run visibility:</strong> every Autofill run is recorded and shown on the ticket’s AI &amp; Routing tab (what was proposed, what was kept, model, duration, tokens) and under Settings → AI Usage → Autofill runs.' },
+    ],
+  },
   {
     version: '3.8.21-preview',
     date: 'September 2, 2026',
