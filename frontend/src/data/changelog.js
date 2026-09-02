@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.8.23-preview';
+export const APP_VERSION = '3.8.24-preview';
 
 export const changelog = [
+  {
+    version: '3.8.24-preview',
+    date: 'September 2, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Approval page</strong> — people photos now load on the public page (the photo links were app-relative and never reached the API from the public host), and the requester’s office is no longer printed twice when the directory repeats it as both department and location.' },
+    ],
+  },
   {
     version: '3.8.23-preview',
     date: 'September 2, 2026',

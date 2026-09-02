@@ -69,3 +69,23 @@ export function isPastDate(value) {
 export function firstName(name) {
   return String(name || '').trim().split(/\s+/)[0] || '';
 }
+
+// The API returns token-scoped photo URLs as app-relative paths (`/api/ticket-approvals/public/…`). The
+// public page is served from the SWA host, which does not proxy /api, so make them absolute against the
+// configured API origin (same-origin in dev, the App Service host in prod).
+const API_ORIGIN = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
+export function absoluteApiUrl(url) {
+  if (!url || typeof url !== 'string') return null;
+  if (/^https?:\/\//i.test(url) || url.startsWith('data:') || url.startsWith('blob:')) return url;
+  return url.startsWith('/') ? `${API_ORIGIN}${url}` : url;
+}
+
+// Directory records often repeat the office in several fields ("Vancouver" as department AND location, or a
+// title that already ends in ", Vancouver"). Build the rail lines without repeating a word the reader saw.
+export function personMetaLines({ title, location, department } = {}) {
+  const norm = (v) => (v || '').trim().toLowerCase();
+  const seen = (v, ...others) => norm(v) && others.some((o) => norm(o).includes(norm(v)));
+  const first = [title, seen(location, title) ? null : location].filter(Boolean).join(' · ');
+  const second = seen(department, title, location) ? '' : (department || '').trim();
+  return [first, second].filter(Boolean);
+}
