@@ -21,6 +21,7 @@ import ApprovalRail from './publicApproval/ApprovalRail';
 import DecisionBox from './publicApproval/DecisionBox';
 import { usePublicTheme } from './publicApproval/usePublicTheme';
 import {
+  absoluteApiUrl,
   STATUS_CHIP,
   classifyLoadError,
   firstName,
@@ -206,7 +207,7 @@ function RequestNote({ approval, workspaceName }) {
   return (
     <section aria-label="Request note" className="tp-approval-note rounded-xl border border-border bg-muted/60 px-4 py-3.5">
       <div className="mb-2 flex items-center gap-2.5 text-xs text-muted-foreground">
-        <PersonAvatar name={approval.requestedByName} photoUrl={approval.requestedByPhotoUrl} size="h-8 w-8" textSize="text-xs" />
+        <PersonAvatar name={approval.requestedByName} photoUrl={absoluteApiUrl(approval.requestedByPhotoUrl)} size="h-8 w-8" textSize="text-xs" />
         <p>
           <span className="font-semibold text-foreground">{approval.requestedByName || 'The agent'}</span>
           {workspaceName ? ` (${workspaceName})` : ''} asks for your approval

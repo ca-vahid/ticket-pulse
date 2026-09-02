@@ -1,12 +1,8 @@
 import { PersonAvatar, PriorityDot, formatDay } from '../../components/tickets/ticketUi';
-import { APPROVER_DOT, approverStatusLabel, isOpenForDecision, sortApprovers } from './approvalMeta';
+import { APPROVER_DOT, absoluteApiUrl, approverStatusLabel, isOpenForDecision, personMetaLines, sortApprovers } from './approvalMeta';
 
 function RailHeading({ children }) {
   return <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">{children}</h3>;
-}
-
-function joinMeta(parts) {
-  return parts.filter(Boolean).join(' · ');
 }
 
 export default function ApprovalRail({ approval, ticket, approvers }) {
@@ -19,13 +15,12 @@ export default function ApprovalRail({ approval, ticket, approvers }) {
       <section aria-labelledby="rail-requested-for">
         <RailHeading><span id="rail-requested-for">Requested for</span></RailHeading>
         <div className="flex items-center gap-3">
-          <PersonAvatar name={requester.name} photoUrl={requester.photoUrl} size="h-11 w-11" textSize="text-sm" />
+          <PersonAvatar name={requester.name} photoUrl={absoluteApiUrl(requester.photoUrl)} size="h-11 w-11" textSize="text-sm" />
           <div className="min-w-0">
             <p className="font-semibold text-foreground">{requester.name || 'Unknown requester'}</p>
-            {joinMeta([requester.title, requester.location]) && (
-              <p className="text-xs text-muted-foreground">{joinMeta([requester.title, requester.location])}</p>
-            )}
-            {requester.department && <p className="text-xs text-muted-foreground">{requester.department}</p>}
+            {personMetaLines(requester).map((line) => (
+              <p key={line} className="text-xs text-muted-foreground">{line}</p>
+            ))}
             {requester.email && (
               <a href={`mailto:${requester.email}`} className="tp-focus-ring block truncate rounded text-xs text-muted-foreground hover:text-primary hover:underline">
                 {requester.email}
@@ -38,7 +33,7 @@ export default function ApprovalRail({ approval, ticket, approvers }) {
       <section aria-labelledby="rail-requested-by">
         <RailHeading><span id="rail-requested-by">Requested by</span></RailHeading>
         <div className="flex items-center gap-3">
-          <PersonAvatar name={approval?.requestedByName} photoUrl={approval?.requestedByPhotoUrl} size="h-8 w-8" textSize="text-xs" />
+          <PersonAvatar name={approval?.requestedByName} photoUrl={absoluteApiUrl(approval?.requestedByPhotoUrl)} size="h-8 w-8" textSize="text-xs" />
           <div className="min-w-0">
             <p className="font-semibold text-foreground">{approval?.requestedByName || approval?.requestedByEmail || 'Agent'}</p>
             <p className="text-xs text-muted-foreground">{ticket?.workspace?.name ? `${ticket.workspace.name} workspace` : 'Ticket Pulse'}</p>
