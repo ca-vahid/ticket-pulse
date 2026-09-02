@@ -31,24 +31,70 @@ function publicBaseUrl() {
 // lists + links, and since Phase C (08-15) the table set too, so a pasted
 // Excel range survives in an approval request description. Mirrors the
 // composer's widened vocabulary (RichTextEditor.jsx / EMAIL_SANITIZE_OPTIONS).
-function sanitizeNoteHtml(html) {
+// Phase AP (09-02): the ONLY class that survives is `tp-data-table` (the
+// composer stamps it on pasted spreadsheet ranges so the public approval page
+// can style them) — every other class is dropped, so no arbitrary hooks.
+const TABLE_CLASS_ALLOW = ['tp-data-table'];
+const NOTE_SANITIZE_OPTIONS = {
+  allowedTags: [
+    'p', 'br', 'b', 'strong', 'i', 'em', 'u', 'ul', 'ol', 'li', 'a', 'span', 'div',
+    'table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th', 'colgroup', 'col', 'caption',
+  ],
+  allowedAttributes: {
+    a: ['href', 'target', 'rel'],
+    table: ['width', 'height', 'border', 'cellpadding', 'cellspacing', 'style', 'align'],
+    td: ['width', 'height', 'colspan', 'rowspan', 'style', 'align', 'valign'],
+    th: ['width', 'height', 'colspan', 'rowspan', 'style', 'align', 'valign'],
+    col: ['width', 'span'],
+  },
+  allowedClasses: {
+    table: TABLE_CLASS_ALLOW, thead: TABLE_CLASS_ALLOW, tbody: TABLE_CLASS_ALLOW,
+    tr: TABLE_CLASS_ALLOW, td: TABLE_CLASS_ALLOW, th: TABLE_CLASS_ALLOW,
+  },
+  allowedSchemes: ['http', 'https', 'mailto'],
+  transformTags: { a: sanitizeHtml.simpleTransform('a', { target: '_blank', rel: 'noreferrer' }) },
+};
+
+export function sanitizeNoteHtml(html) {
+  const clean = sanitizeHtml(String(html || ''), NOTE_SANITIZE_OPTIONS).trim();
+  return clean || null;
+}
+
+/**
+ * Ticket description for the public approval page: the note allow-list plus
+ * headings/blockquote/pre/code/hr and <img> — but ONLY https images. Inline
+ * `cid:` (mail attachments the page can't resolve) and `data:` images are
+ * removed outright rather than left as broken boxes.
+ */
+export function sanitizeDescriptionHtml(html) {
   const clean = sanitizeHtml(String(html || ''), {
-    allowedTags: [
-      'p', 'br', 'b', 'strong', 'i', 'em', 'u', 'ul', 'ol', 'li', 'a', 'span', 'div',
-      'table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th', 'colgroup', 'col', 'caption',
-    ],
-    allowedAttributes: {
-      a: ['href', 'target', 'rel'],
-      table: ['width', 'height', 'border', 'cellpadding', 'cellspacing', 'style', 'align'],
-      td: ['width', 'height', 'colspan', 'rowspan', 'style', 'align', 'valign'],
-      th: ['width', 'height', 'colspan', 'rowspan', 'style', 'align', 'valign'],
-      col: ['width', 'span'],
-    },
-    allowedSchemes: ['http', 'https', 'mailto'],
-    transformTags: { a: sanitizeHtml.simpleTransform('a', { target: '_blank', rel: 'noreferrer' }) },
+    ...NOTE_SANITIZE_OPTIONS,
+    allowedTags: [...NOTE_SANITIZE_OPTIONS.allowedTags, 'h1', 'h2', 'h3', 'h4', 'blockquote', 'pre', 'code', 'hr', 'img'],
+    allowedAttributes: { ...NOTE_SANITIZE_OPTIONS.allowedAttributes, img: ['src', 'alt', 'width', 'height'] },
+    allowedSchemesByTag: { img: ['https'] },
+    // sanitize-html drops a disallowed-scheme src but keeps the tag — drop the tag too.
+    exclusiveFilter: (frame) => frame.tag === 'img' && !frame.attribs?.src,
   }).trim();
   return clean || null;
 }
+
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+const looksLikeEmail = (s) => EMAIL_RE.test(String(s || '').trim());
+
+/** "jane.doe" / "jane_doe" / "jdoe2" → "Jane Doe" / "Jdoe2" — a readable stand-in when no directory name exists. */
+export function prettifyLocalPart(email) {
+  const local = String(email || '').split('@')[0].trim();
+  if (!local) return null;
+  return local
+    .split(/[._\-+]+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ');
+}
+
+const PRIORITY_LABELS = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Urgent' };
+
+const SUPERSEDED_RE = /^Superseded\s+[—–-]\s+(approved|rejected)\s+by\s+(.+)$/i;
 
 async function emitApprovalEvent(eventType, ticketId, extra) {
   try {
@@ -89,7 +135,7 @@ class TicketApprovalService {
   async request(ticketId, workspaceId, { approvalCategoryId, note = null, noteHtml = null, notifyApprover = true }, actor) {
     const ticket = await prisma.ticket.findFirst({
       where: { id: ticketId, workspaceId },
-      include: { requester: { select: { name: true, email: true } } },
+      include: { requester: { select: { name: true, email: true, jobTitle: true, entraJobTitle: true } } },
     });
     if (!ticket) throw new NotFoundError(`Ticket ${ticketId} not found in this workspace`);
 
@@ -157,41 +203,240 @@ class TicketApprovalService {
     };
   }
 
-  /** Public magic-link read: enough context for the decision page, no auth. */
+  /**
+   * Public magic-link read: everything the redesigned /approval/:token page
+   * needs, no auth (Phase AP, 09-02). People are resolved to display names;
+   * sibling approvers are listed WITHOUT their emails or tokens; requester
+   * contact fields follow the workspace's public-status visibility settings.
+   */
   async getByToken(token) {
     const approval = await this._findByToken(token);
-    const ticket = await prisma.ticket.findUnique({
-      where: { id: approval.ticketId },
-      select: {
-        id: true, subject: true, status: true, priority: true, origin: true,
-        nativeNumber: true, freshserviceTicketId: true, createdAt: true,
-        descriptionText: true,
-        requester: { select: { name: true } },
-        workspace: { select: { name: true } },
-      },
-    });
+    const [ticket, category, siblings] = await Promise.all([
+      prisma.ticket.findUnique({
+        where: { id: approval.ticketId },
+        select: {
+          id: true, workspaceId: true, subject: true, status: true, priority: true, origin: true,
+          nativeNumber: true, freshserviceTicketId: true, createdAt: true, dueBy: true,
+          ticketType: true, category: true, subCategory: true,
+          description: true, descriptionText: true,
+          internalCategory: { select: { name: true } },
+          internalSubcategory: { select: { name: true } },
+          requester: {
+            select: {
+              name: true, email: true, jobTitle: true, entraJobTitle: true,
+              department: true, entraDepartment: true, entraOfficeLocation: true, entraCity: true,
+            },
+          },
+          workspace: { select: { name: true, slug: true } },
+        },
+      }),
+      approval.approvalCategoryId
+        ? prisma.approvalCategory.findUnique({
+          where: { id: approval.approvalCategoryId }, select: { name: true, description: true },
+        }).catch(() => null)
+        : Promise.resolve(null),
+      approval.requestGroupId
+        ? prisma.ticketApproval.findMany({
+          where: { requestGroupId: approval.requestGroupId, workspaceId: approval.workspaceId },
+          orderBy: { id: 'asc' },
+          select: { id: true, status: true, approverEmail: true, approverName: true, decidedAt: true, decisionNote: true },
+        }).catch(() => [])
+        : Promise.resolve([]),
+    ]);
+    if (!ticket) throw new NotFoundError('The ticket behind this approval no longer exists');
+
+    // Visibility gates for requester contact detail — reuse the public-status
+    // settings so one Settings card governs every unauthenticated surface.
+    let visibility = { showRequesterEmail: false, enabled: false };
+    try {
+      const { getPublicTicketStatusSettings } = await import('./publicTicketStatusService.js');
+      visibility = await getPublicTicketStatusSettings(ticket.workspaceId);
+    } catch (err) {
+      logger.warn(`Approval page: public-status settings unavailable, defaulting to closed (${err.message})`);
+    }
+
+    let publicStatusUrl = null;
+    if (visibility.enabled) {
+      try {
+        const { ensurePublicTicketStatusLink } = await import('./publicTicketStatusService.js');
+        const link = await ensurePublicTicketStatusLink({ workspaceId: ticket.workspaceId, ticketId: ticket.id });
+        publicStatusUrl = link?.url || null;
+      } catch (err) {
+        logger.warn(`Approval page: public status link unavailable (${err.message})`);
+      }
+    }
+
+    let photosAvailable = false;
+    try {
+      const { default: azureAdService } = await import('./azureAdService.js');
+      photosAvailable = typeof azureAdService?.isConfigured === 'function' && azureAdService.isConfigured();
+    } catch { /* Entra module unavailable → initials */ }
+    const photoUrl = (who) => (photosAvailable
+      ? `/api/ticket-approvals/public/${encodeURIComponent(token)}/photo?who=${who}`
+      : null);
+
+    const names = new Map();
+    const nameFor = async (email) => {
+      const key = String(email || '').trim().toLowerCase();
+      if (!key) return null;
+      if (!names.has(key)) names.set(key, await this._resolvePersonName(key));
+      return names.get(key);
+    };
+
+    const rows = siblings.length > 0 ? siblings : [{
+      id: approval.id, status: approval.status, approverEmail: approval.approverEmail,
+      approverName: approval.approverName, decidedAt: approval.decidedAt, decisionNote: approval.decisionNote,
+    }];
+    const approvers = [];
+    for (const row of rows) {
+      approvers.push({
+        name: row.approverName || await nameFor(row.approverEmail) || prettifyLocalPart(row.approverEmail),
+        status: row.status,
+        isYou: row.approverEmail === approval.approverEmail,
+        decidedAt: row.decidedAt || null,
+      });
+    }
+
+    // Superseded: this row was auto-cancelled because a sibling decided first.
+    // Prefer the decisionNote convention ("Superseded — approved by X"), fall
+    // back to the decided sibling in the same group.
+    let supersededBy = null;
+    let cancelledReason = null;
+    if (approval.status === 'cancelled') {
+      const m = SUPERSEDED_RE.exec(String(approval.decisionNote || '').trim());
+      const decidedSibling = siblings.find((s) => s.id !== approval.id && ['approved', 'rejected'].includes(s.status));
+      if (m) {
+        supersededBy = {
+          name: looksLikeEmail(m[2]) ? (await nameFor(m[2]) || prettifyLocalPart(m[2])) : m[2].trim(),
+          decision: m[1].toLowerCase(),
+          decidedAt: decidedSibling?.decidedAt || approval.decidedAt || null,
+        };
+      } else if (decidedSibling) {
+        supersededBy = {
+          name: decidedSibling.approverName || await nameFor(decidedSibling.approverEmail) || prettifyLocalPart(decidedSibling.approverEmail),
+          decision: decidedSibling.status,
+          decidedAt: decidedSibling.decidedAt || null,
+        };
+      } else {
+        cancelledReason = approval.decisionNote || 'Cancelled by the requester';
+      }
+    }
+
+    // Q&A trail: the JSONB log ({question, askedBy, askedAt, answer, answeredBy,
+    // answeredAt}); while info_requested the live question also sits in
+    // decisionNote — legacy rows asked before the log existed only have that.
+    const rawLog = Array.isArray(approval.clarificationLog) ? approval.clarificationLog : [];
+    const clarificationLog = [];
+    for (const entry of rawLog) {
+      if (!entry || typeof entry !== 'object') continue;
+      clarificationLog.push({
+        question: entry.question || null,
+        askedBy: entry.askedBy || null,
+        askedByName: entry.askedBy ? (await nameFor(entry.askedBy) || prettifyLocalPart(entry.askedBy)) : null,
+        askedAt: entry.askedAt || null,
+        answer: entry.answer || null,
+        answeredBy: entry.answeredBy || null,
+        answeredByName: entry.answeredBy ? (await nameFor(entry.answeredBy) || prettifyLocalPart(entry.answeredBy)) : null,
+        answeredAt: entry.answeredAt || null,
+      });
+    }
+    if (approval.status === 'info_requested' && approval.decisionNote
+      && !clarificationLog.some((c) => c.question === approval.decisionNote && !c.answer)) {
+      clarificationLog.push({
+        question: approval.decisionNote, askedBy: approval.approverEmail,
+        askedByName: approval.approverName || await nameFor(approval.approverEmail) || prettifyLocalPart(approval.approverEmail),
+        askedAt: approval.updatedAt || null, answer: null, answeredBy: null, answeredByName: null, answeredAt: null,
+      });
+    }
+
+    const requestedByName = (await nameFor(approval.requestedBy)) || prettifyLocalPart(approval.requestedBy) || approval.requestedBy;
+    const requester = ticket.requester;
+    const showEmail = visibility.showRequesterEmail === true;
+    const topCat = ticket.internalCategory?.name || ticket.category || null;
+    const subCat = ticket.internalSubcategory?.name || ticket.subCategory || null;
+    const categoryPath = topCat ? (subCat ? `${topCat} › ${subCat}` : topCat) : null;
+    const viewedAt = new Date();
+
+    // View telemetry (non-fatal — the columns arrive with 20260902030000).
+    prisma.ticketApproval.update({
+      where: { id: approval.id },
+      data: { viewCount: { increment: 1 }, lastViewedAt: viewedAt },
+      select: { id: true },
+    }).catch((err) => logger.debug?.(`Approval view counter skipped: ${err.message}`));
+
     return {
       approval: {
         id: approval.id,
         status: approval.status,
         approverEmail: approval.approverEmail,
+        approverName: approval.approverName || null,
         requestedBy: approval.requestedBy,
+        requestedByEmail: approval.requestedBy,
+        requestedByName,
+        requestedByPhotoUrl: looksLikeEmail(approval.requestedBy) ? photoUrl('requestedBy') : null,
         requestNote: approval.requestNote,
         requestNoteHtml: approval.requestNoteHtml || null,
-        decidedAt: approval.decidedAt,
+        createdAt: approval.createdAt,
         expiresAt: approval.expiresAt,
+        decidedAt: approval.decidedAt,
+        decidedVia: approval.decidedVia || null,
+        // While info_requested this holds the open question (also in clarificationLog).
+        decisionNote: approval.decisionNote || null,
+        decisionNoteHtml: approval.decisionNoteHtml || null,
+        category: category ? { name: category.name, description: category.description || null } : null,
+        clarificationLog,
+        supersededBy,
+        cancelledReason,
       },
-      ticket: ticket ? {
+      ticket: {
+        id: ticket.id,
         displayRef: ticketDisplayRef(ticket),
         subject: ticket.subject,
         status: ticket.status,
         priority: ticket.priority,
+        priorityLabel: PRIORITY_LABELS[ticket.priority] || null,
+        ticketType: ticket.ticketType || null,
+        categoryPath,
         createdAt: ticket.createdAt,
-        requesterName: ticket.requester?.name || null,
-        workspaceName: ticket.workspace?.name || null,
-        summary: (ticket.descriptionText || '').slice(0, 500) || null,
-      } : null,
+        dueBy: ticket.dueBy || null,
+        descriptionHtml: ticket.description ? sanitizeDescriptionHtml(ticket.description) : null,
+        descriptionText: ticket.descriptionText || null,
+        requester: requester ? {
+          name: requester.name || null,
+          email: showEmail ? (requester.email || null) : null,
+          title: requester.jobTitle || requester.entraJobTitle || null,
+          department: requester.department || requester.entraDepartment || null,
+          location: requester.entraOfficeLocation || requester.entraCity || null,
+          photoUrl: requester.email ? photoUrl('requester') : null,
+        } : null,
+        workspace: { name: ticket.workspace?.name || null, slug: ticket.workspace?.slug || null },
+        appTicketUrl: `${publicBaseUrl()}/tickets/${ticket.id}`,
+        publicStatusUrl,
+      },
+      approvers,
+      meta: { viewedAt: viewedAt.toISOString() },
     };
+  }
+
+  /**
+   * Which directory address a public photo request refers to — resolved from
+   * the approval row, NEVER from the caller. `who` is 'requester' (the ticket's
+   * requester) or 'requestedBy' (the member who asked for approval).
+   */
+  async photoSubjectEmail(token, who) {
+    const approval = await this._findByToken(token);
+    if (who === 'requestedBy') {
+      return looksLikeEmail(approval.requestedBy) ? approval.requestedBy.trim().toLowerCase() : null;
+    }
+    if (who === 'requester') {
+      const ticket = await prisma.ticket.findUnique({
+        where: { id: approval.ticketId },
+        select: { requester: { select: { email: true } } },
+      });
+      const email = ticket?.requester?.email;
+      return looksLikeEmail(email) ? email.trim().toLowerCase() : null;
+    }
+    throw new ValidationError('who must be "requester" or "requestedBy"');
   }
 
   async decideByToken(token, decision, note = null, noteHtml = null) {
@@ -201,6 +446,11 @@ class TicketApprovalService {
       return this.requestClarification(approval.ticketId, approval.workspaceId, approval.id, note, {
         email: approval.approverEmail, name: approval.approverName, via: 'link',
       });
+    }
+    // Phase AP: a rejection from the link must say why — the requester reads
+    // it in the verdict email and on the ticket.
+    if (String(decision || '').toLowerCase() === 'rejected' && !String(note || '').trim()) {
+      throw new ValidationError('Add a reason for rejecting');
     }
     return this._decide(approval, decision, note, {
       via: 'link',
@@ -357,7 +607,7 @@ class TicketApprovalService {
 
     const ticket = await prisma.ticket.findFirst({
       where: { id: ticketId, workspaceId },
-      include: { requester: { select: { name: true, email: true } } },
+      include: { requester: { select: { name: true, email: true, jobTitle: true, entraJobTitle: true } } },
     });
     let categoryName = null;
     if (approval.approvalCategoryId) {
@@ -615,6 +865,33 @@ class TicketApprovalService {
     return approval;
   }
 
+  /**
+   * Directory name for an email: active Technician first, then Requester.
+   * Null when nobody matches (callers fall back to the prettified local part).
+   * Never throws — a name lookup must not break a decision.
+   */
+  async _resolvePersonName(email) {
+    const key = String(email || '').trim().toLowerCase();
+    if (!looksLikeEmail(key)) return null;
+    try {
+      const tech = await prisma.technician.findFirst({
+        where: { email: { equals: key, mode: 'insensitive' } },
+        orderBy: [{ isActive: 'desc' }, { id: 'asc' }],
+        select: { name: true },
+      });
+      if (tech?.name?.trim()) return tech.name.trim();
+      const requester = await prisma.requester.findFirst({
+        where: { email: { equals: key, mode: 'insensitive' } },
+        orderBy: { id: 'asc' },
+        select: { name: true },
+      });
+      if (requester?.name?.trim() && !looksLikeEmail(requester.name)) return requester.name.trim();
+    } catch (err) {
+      logger.debug?.(`Person name lookup skipped for ${key}: ${err.message}`);
+    }
+    return null;
+  }
+
   async _decide(approval, decision, note, { via, actorLabel, actorEmail = null, changedFrom = null, noteHtml = null }) {
     const normalized = String(decision || '').toLowerCase();
     if (!['approved', 'rejected'].includes(normalized)) {
@@ -628,6 +905,14 @@ class TicketApprovalService {
     if (changedFrom && changedFrom === normalized) {
       throw new ValidationError(`This approval is already ${normalized}`);
     }
+
+    // Phase AP: a magic-link approver has no session name — resolve one from
+    // the directory so the decision reads as a person, not an address.
+    if (!approval.approverName && (!actorLabel || looksLikeEmail(actorLabel))) {
+      const resolved = await this._resolvePersonName(actorEmail || approval.approverEmail);
+      if (resolved) actorLabel = resolved;
+    }
+    if (!actorLabel) actorLabel = approval.approverEmail;
 
     const updated = await prisma.ticketApproval.update({
       where: { id: approval.id },
@@ -749,19 +1034,28 @@ class TicketApprovalService {
     }
 
     const escHtml = (s) => String(s || '').replace(/</g, '&lt;');
+    // Phase AP: the requester of the approval shows as a person, not an address.
+    const requestedByName = escHtml(
+      (await this._resolvePersonName(approval.requestedBy)) || prettifyLocalPart(approval.requestedBy) || approval.requestedBy,
+    );
+    const requesterTitle = ticket.requester?.jobTitle || ticket.requester?.entraJobTitle || null;
+    const requesterLine = ticket.requester?.name
+      ? ` (requested for ${escHtml(ticket.requester.name)}${requesterTitle ? `, ${escHtml(requesterTitle)}` : ''})`
+      : '';
     const clarificationHtml = clarification?.answer
       ? `<div style="border-left:3px solid #8b5cf6;padding:6px 10px;margin:8px 0;background:#f5f3ff">${
         clarification.question ? `<p style="margin:0 0 4px">You asked: “${escHtml(clarification.question)}”</p>` : ''
-      }<p style="margin:0">Reply from ${escHtml(approval.requestedBy)}: “${escHtml(clarification.answer)}”</p></div>`
+      }<p style="margin:0">Reply from ${requestedByName}: “${escHtml(clarification.answer)}”</p></div>`
       : '';
     const html = [
       clarification?.answer
         ? `<p>Your approval was re-requested on ticket <b>${ref}</b> with the clarification you asked for.</p>`
-        : `<p>Your approval was requested on ticket <b>${ref}</b>${ticket.requester?.name ? ` (requested for ${ticket.requester.name})` : ''}.</p>`,
+        : `<p>Your approval was requested on ticket <b>${ref}</b>${requesterLine}.</p>`,
       `<p><b>${(ticket.subject || '').replace(/</g, '&lt;')}</b></p>`,
+      categoryName ? `<p style="color:#475569">Category: <b>${escHtml(categoryName)}</b></p>` : '',
       clarificationHtml,
-      noteHtml ? `<p>Note from ${approval.requestedBy}: ${noteHtml}</p>` : '',
-      `<p><a href="${decisionUrl}">Review and decide</a> (approve or reject with an optional note).</p>`,
+      noteHtml ? `<p>Note from ${requestedByName}: ${noteHtml}</p>` : '',
+      `<p><a href="${decisionUrl}">Review and decide</a> (approve, or reject with a reason).</p>`,
       '<p style="color:#64748b;font-size:12px">This link is personal to you and expires in 30 days.</p>',
     ].join('');
 

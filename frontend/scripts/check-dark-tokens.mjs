@@ -34,10 +34,10 @@ const BASELINE_FILE = join(ROOT, 'scripts', 'dark-tokens-baseline.json');
 export const SWEPT_PATHS = ['src'];
 
 // Light-only by design (they carry `.tp-light`), plus the legacy tech page.
+// PublicApprovalDecision.jsx is token-driven (page-local dark toggle) and is swept.
 export const EXCLUDED_PATHS = [
   'src/pages/Login.jsx',
   'src/pages/WorkspacePicker.jsx',
-  'src/pages/PublicApprovalDecision.jsx',
   'src/pages/PublicTicketEscalation.jsx',
   'src/pages/PublicTicketFeedback.jsx',
   'src/pages/PublicTicketStatus.jsx',

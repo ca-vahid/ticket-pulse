@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.8.22-preview';
+export const APP_VERSION = '3.8.23-preview';
 
 export const changelog = [
+  {
+    version: '3.8.23-preview',
+    date: 'September 2, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>✅ Approval page redesigned</strong> — the page approvers land on from the email is rebuilt: a wide two-column layout with the approval category and a clear status, the ticket ref/subject/dates, <em>who</em> it is for (name, title, location, photo) and <em>who</em> asked (the agent by name and photo, not a raw address), the agent’s note with pasted tables rendered properly (borders, horizontal scroll — no more crushed columns), the full ticket description, ticket facts (priority, type, category, status), the other approvers and their state, the question-and-answer thread, and “what happens next”. Decision box: Approve, Reject (a reason is now required), Ask a question, with keyboard shortcuts; decided, cancelled, superseded and expired states are spelled out with who and when. Follows your system’s light/dark setting with a sun/moon toggle. “View ticket” opens the ticket (public status view where enabled, otherwise the app for signed-in agents).' },
+      { type: 'improved', html: '<strong>Approval emails</strong> — “Note from …” now names the agent instead of showing their email address, and the public approval routes are rate-limited.' },
+    ],
+  },
   {
     version: '3.8.22-preview',
     date: 'September 2, 2026',

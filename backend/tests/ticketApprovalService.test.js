@@ -9,11 +9,18 @@ const prismaMock = {
   },
   ticketThreadEntry: { create: jest.fn() },
   mailboxConnection: { findFirst: jest.fn() },
+  technician: { findFirst: jest.fn() },
+  requester: { findFirst: jest.fn() },
 };
 const activityMock = { create: jest.fn() };
 const sendgridMock = { sendEmail: jest.fn().mockResolvedValue({ status: 'ok' }) };
 const graphMock = { isConfigured: () => false };
 const lifecycleMock = { emitTicketEvent: jest.fn() };
+const publicStatusMock = {
+  getPublicTicketStatusSettings: jest.fn(),
+  ensurePublicTicketStatusLink: jest.fn(),
+};
+const azureAdMock = { isConfigured: jest.fn(() => false), getUserPhoto: jest.fn() };
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
 jest.unstable_mockModule('../src/services/ticketActivityRepository.js', () => ({ default: activityMock }));
@@ -22,8 +29,12 @@ jest.unstable_mockModule('../src/integrations/graphMailClient.js', () => ({ defa
 jest.unstable_mockModule('../src/services/ticketLifecycleNotificationService.js', () => ({ default: lifecycleMock }));
 jest.unstable_mockModule('../src/routes/sse.routes.js', () => ({ default: {}, sseManager: { broadcast: jest.fn() } }));
 jest.unstable_mockModule('../src/utils/logger.js', () => ({ default: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() } }));
+jest.unstable_mockModule('../src/services/publicTicketStatusService.js', () => publicStatusMock);
+jest.unstable_mockModule('../src/services/azureAdService.js', () => ({ default: azureAdMock }));
 
-const { default: ticketApprovalService } = await import('../src/services/ticketApprovalService.js');
+const {
+  default: ticketApprovalService, sanitizeNoteHtml, sanitizeDescriptionHtml, prettifyLocalPart,
+} = await import('../src/services/ticketApprovalService.js');
 
 const ticket = { id: 501, workspaceId: 1, origin: 'ticketpulse', subject: 'New laptop', requester: { name: 'Rita' } };
 
@@ -36,6 +47,12 @@ beforeEach(() => {
   prismaMock.mailboxConnection.findFirst.mockResolvedValue(null); // → sendgrid path
   prismaMock.ticketThreadEntry.create.mockResolvedValue({ id: 9 });
   prismaMock.ticketApproval.updateMany.mockResolvedValue({ count: 1 });
+  prismaMock.ticketApproval.findMany.mockResolvedValue([]);
+  prismaMock.technician.findFirst.mockResolvedValue(null);
+  prismaMock.requester.findFirst.mockResolvedValue(null);
+  publicStatusMock.getPublicTicketStatusSettings.mockResolvedValue({ enabled: false, showRequesterEmail: false, showRequesterName: false });
+  publicStatusMock.ensurePublicTicketStatusLink.mockResolvedValue({ url: null });
+  azureAdMock.isConfigured.mockReturnValue(false);
   let seq = 100;
   prismaMock.ticketApproval.create.mockImplementation(({ data }) => Promise.resolve({ id: ++seq, ...data }));
   prismaMock.ticketApproval.update.mockImplementation(({ where, data }) => Promise.resolve({ id: where.id, ...data }));
@@ -382,5 +399,289 @@ describe('ticketApprovalService.request notifyApprover toggle (QA 07-14 #2)', ()
 
     expect(res.count).toBe(1);
     expect(sendgridMock.sendEmail).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase AP (09-02): public approval page redesign — payload, gating, sanitizer.
+// ---------------------------------------------------------------------------
+
+describe('sanitizeNoteHtml / sanitizeDescriptionHtml (Phase AP class allow-list)', () => {
+  test('a pasted-Excel fragment keeps class="tp-data-table" and its borders, other classes drop', () => {
+    const excel = '<table class="tp-data-table" style="border-collapse:collapse;width:420px" width="420">'
+      + '<thead class="tp-data-table"><tr class="xl-row"><th class="xl65" style="border:1px solid #000">Vendor</th></tr></thead>'
+      + '<tbody><tr><td class="xl66 tp-data-table" style="border:1px solid #cbd5e1;text-align:right">1,250</td></tr></tbody></table>';
+    const out = sanitizeNoteHtml(excel);
+    expect(out).toContain('<table class="tp-data-table"');
+    expect(out).toContain('style="border-collapse:collapse;width:420px"');
+    expect(out).toContain('width="420"');
+    expect(out).toContain('<thead class="tp-data-table">');
+    expect(out).toContain('<th style="border:1px solid #000">');
+    expect(out).toContain('<td class="tp-data-table" style="border:1px solid #cbd5e1;text-align:right">');
+    expect(out).not.toMatch(/xl6\d|xl-row/);
+  });
+
+  test('class is only honoured on the table set', () => {
+    const out = sanitizeNoteHtml('<p class="tp-data-table">x</p><div class="tp-data-table">y</div>');
+    expect(out).toBe('<p>x</p><div>y</div>');
+  });
+
+  test('description sanitizer keeps https images, drops cid:/data: images and scripts', () => {
+    const html = '<h2>Quote</h2><p>See <img src="cid:image001.png@01DA"> and <img src="https://cdn.example.com/q.png" alt="q"></p>'
+      + '<img src="data:image/png;base64,iVBORw0KGgo="><script>alert(1)</script><pre>code</pre>';
+    const out = sanitizeDescriptionHtml(html);
+    expect(out).toContain('<h2>Quote</h2>');
+    expect(out).toContain('<img src="https://cdn.example.com/q.png" alt="q" />');
+    expect(out).not.toContain('cid:');
+    expect(out).not.toContain('data:image');
+    expect(out).not.toContain('<script');
+    expect(out).toContain('<pre>code</pre>');
+    // The stripped images leave no empty <img> husk behind.
+    expect((out.match(/<img/g) || []).length).toBe(1);
+  });
+
+  test('prettifyLocalPart turns an address into a readable name', () => {
+    expect(prettifyLocalPart('jane.doe@x.io')).toBe('Jane Doe');
+    expect(prettifyLocalPart('susan_manager@x.io')).toBe('Susan Manager');
+    expect(prettifyLocalPart('')).toBeNull();
+  });
+});
+
+describe('ticketApprovalService.getByToken (Phase AP payload)', () => {
+  const TOKEN = 'b'.repeat(43);
+  const future = new Date(Date.now() + 86400000);
+  const fullTicket = {
+    id: 501, workspaceId: 1, origin: 'ticketpulse', nativeNumber: 77, freshserviceTicketId: null,
+    subject: 'New laptop', status: 'open', priority: 3, ticketType: 'Service Request',
+    category: 'Legacy cat', subCategory: 'Legacy sub', createdAt: new Date('2026-09-01T10:00:00Z'), dueBy: null,
+    description: '<p>Need a <b>laptop</b></p><img src="cid:img1"><img src="https://cdn.example.com/spec.png">',
+    descriptionText: 'Need a laptop',
+    internalCategory: { name: 'Hardware' }, internalSubcategory: { name: 'Laptop' },
+    requester: {
+      name: 'Rita Requester', email: 'rita@x.io', jobTitle: 'Analyst', entraJobTitle: null,
+      department: 'Finance', entraDepartment: null, entraOfficeLocation: 'Vancouver', entraCity: null,
+    },
+    workspace: { name: 'IT', slug: 'it' },
+  };
+  const row = (over = {}) => ({
+    id: 2, ticketId: 501, workspaceId: 1, status: 'pending', approverEmail: 'bob@x.io', approverName: null,
+    requestedBy: 'jane.doe@x.io', requestGroupId: 'grp-1', approvalCategoryId: 9,
+    requestNote: 'pls', requestNoteHtml: null, decisionNote: null, decisionNoteHtml: null,
+    clarificationLog: null, decidedAt: null, decidedVia: null, expiresAt: future,
+    createdAt: new Date('2026-09-01T09:00:00Z'), updatedAt: new Date('2026-09-01T09:00:00Z'), ...over,
+  });
+
+  beforeEach(() => {
+    prismaMock.ticket.findUnique.mockResolvedValue(fullTicket);
+    prismaMock.approvalCategory.findUnique.mockResolvedValue({ name: 'Laptop purchase', description: 'Hardware over $1k' });
+  });
+
+  test('shapes the contract: resolved names, category path, priority label, sanitized description, no sibling emails', async () => {
+    const decidedAt = new Date('2026-09-01T12:00:00Z');
+    prismaMock.ticketApproval.findUnique.mockResolvedValue(row({
+      status: 'cancelled', decisionNote: 'Superseded — approved by Alice Manager', decidedAt,
+    }));
+    prismaMock.ticketApproval.findMany.mockResolvedValue([
+      { id: 1, status: 'approved', approverEmail: 'alice@x.io', approverName: 'Alice Manager', decidedAt, decisionNote: 'ok' },
+      { id: 2, status: 'cancelled', approverEmail: 'bob@x.io', approverName: null, decidedAt, decisionNote: 'Superseded — approved by Alice Manager' },
+    ]);
+
+    const data = await ticketApprovalService.getByToken(TOKEN);
+
+    expect(data.approval).toMatchObject({
+      id: 2, status: 'cancelled', approverEmail: 'bob@x.io', approverName: null,
+      requestedByEmail: 'jane.doe@x.io', requestedByName: 'Jane Doe', requestedByPhotoUrl: null,
+      category: { name: 'Laptop purchase', description: 'Hardware over $1k' },
+      supersededBy: { name: 'Alice Manager', decision: 'approved', decidedAt },
+      cancelledReason: null, clarificationLog: [],
+    });
+    expect(data.ticket).toMatchObject({
+      id: 501, displayRef: 'TP-77', subject: 'New laptop', priority: 3, priorityLabel: 'High',
+      ticketType: 'Service Request', categoryPath: 'Hardware › Laptop', descriptionText: 'Need a laptop',
+      workspace: { name: 'IT', slug: 'it' }, publicStatusUrl: null,
+    });
+    expect(data.ticket.appTicketUrl).toMatch(/^https?:\/\/.+\/tickets\/501$/);
+    expect(data.ticket.descriptionHtml).toContain('<img src="https://cdn.example.com/spec.png" />');
+    expect(data.ticket.descriptionHtml).not.toContain('cid:');
+    // Requester: name/title/department/location always; email gated (default off); never phone.
+    expect(data.ticket.requester).toEqual({
+      name: 'Rita Requester', email: null, title: 'Analyst', department: 'Finance', location: 'Vancouver', photoUrl: null,
+    });
+    // Approvers: names + status + isYou, and NEVER an address or token.
+    expect(data.approvers).toEqual([
+      { name: 'Alice Manager', status: 'approved', isYou: false, decidedAt },
+      { name: 'Bob', status: 'cancelled', isYou: true, decidedAt },
+    ]);
+    expect(JSON.stringify(data.approvers)).not.toContain('@');
+    expect(JSON.stringify(data)).not.toContain(TOKEN);
+    expect(typeof data.meta.viewedAt).toBe('string');
+    // View telemetry bumped (non-fatal).
+    expect(prismaMock.ticketApproval.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 2 }, data: expect.objectContaining({ viewCount: { increment: 1 } }),
+    }));
+  });
+
+  test('supersededBy falls back to the decided sibling when the note lacks the convention', async () => {
+    const decidedAt = new Date('2026-09-01T12:00:00Z');
+    prismaMock.ticketApproval.findUnique.mockResolvedValue(row({ status: 'cancelled', decisionNote: null, decidedAt }));
+    prismaMock.ticketApproval.findMany.mockResolvedValue([
+      { id: 1, status: 'rejected', approverEmail: 'alice@x.io', approverName: null, decidedAt, decisionNote: 'no' },
+      { id: 2, status: 'cancelled', approverEmail: 'bob@x.io', approverName: null, decidedAt, decisionNote: null },
+    ]);
+    prismaMock.technician.findFirst.mockImplementation(({ where }) => Promise.resolve(
+      where.email.equals === 'alice@x.io' ? { name: 'Alice From Directory' } : null,
+    ));
+    const data = await ticketApprovalService.getByToken(TOKEN);
+    expect(data.approval.supersededBy).toEqual({ name: 'Alice From Directory', decision: 'rejected', decidedAt });
+    expect(data.approvers[0].name).toBe('Alice From Directory');
+  });
+
+  test('a requester-cancelled row carries cancelledReason, not supersededBy', async () => {
+    prismaMock.ticketApproval.findUnique.mockResolvedValue(row({ status: 'cancelled', decisionNote: 'Cancelled by jane.doe@x.io', requestGroupId: null }));
+    const data = await ticketApprovalService.getByToken(TOKEN);
+    expect(data.approval.supersededBy).toBeNull();
+    expect(data.approval.cancelledReason).toBe('Cancelled by jane.doe@x.io');
+    expect(data.approvers).toEqual([{ name: 'Bob', status: 'cancelled', isYou: true, decidedAt: null }]);
+  });
+
+  test('clarificationLog maps the JSONB Q&A and surfaces the open question while info_requested', async () => {
+    prismaMock.ticketApproval.findUnique.mockResolvedValue(row({
+      status: 'info_requested', decisionNote: 'Which model?',
+      clarificationLog: [
+        { question: 'Budget code?', askedBy: 'bob@x.io', askedAt: '2026-08-30T10:00:00.000Z', answer: 'IT-204', answeredBy: 'jane.doe@x.io', answeredAt: '2026-08-30T11:00:00.000Z' },
+        { question: 'Which model?', askedBy: 'bob@x.io', askedAt: '2026-09-01T10:00:00.000Z' },
+      ],
+    }));
+    const data = await ticketApprovalService.getByToken(TOKEN);
+    expect(data.approval.clarificationLog).toEqual([
+      { question: 'Budget code?', askedBy: 'bob@x.io', askedByName: 'Bob', askedAt: '2026-08-30T10:00:00.000Z', answer: 'IT-204', answeredBy: 'jane.doe@x.io', answeredByName: 'Jane Doe', answeredAt: '2026-08-30T11:00:00.000Z' },
+      { question: 'Which model?', askedBy: 'bob@x.io', askedByName: 'Bob', askedAt: '2026-09-01T10:00:00.000Z', answer: null, answeredBy: null, answeredByName: null, answeredAt: null },
+    ]);
+    expect(data.approval.decisionNote).toBe('Which model?');
+  });
+
+  test('legacy info_requested row without a log reconstructs the open question from decisionNote', async () => {
+    prismaMock.ticketApproval.findUnique.mockResolvedValue(row({ status: 'info_requested', decisionNote: 'Which model?', clarificationLog: null }));
+    const data = await ticketApprovalService.getByToken(TOKEN);
+    expect(data.approval.clarificationLog).toHaveLength(1);
+    expect(data.approval.clarificationLog[0]).toMatchObject({ question: 'Which model?', askedBy: 'bob@x.io', answer: null });
+  });
+
+  test('requester email + public status link open up when the workspace settings allow', async () => {
+    prismaMock.ticketApproval.findUnique.mockResolvedValue(row());
+    publicStatusMock.getPublicTicketStatusSettings.mockResolvedValue({ enabled: true, showRequesterEmail: true, showRequesterName: true });
+    publicStatusMock.ensurePublicTicketStatusLink.mockResolvedValue({ url: 'https://app.test/ticket-status/abc' });
+    const data = await ticketApprovalService.getByToken(TOKEN);
+    expect(data.ticket.requester.email).toBe('rita@x.io');
+    expect(data.ticket.publicStatusUrl).toBe('https://app.test/ticket-status/abc');
+    expect(publicStatusMock.ensurePublicTicketStatusLink).toHaveBeenCalledWith({ workspaceId: 1, ticketId: 501 });
+  });
+
+  test('public status link is never minted when the surface is disabled', async () => {
+    prismaMock.ticketApproval.findUnique.mockResolvedValue(row());
+    await ticketApprovalService.getByToken(TOKEN);
+    expect(publicStatusMock.ensurePublicTicketStatusLink).not.toHaveBeenCalled();
+  });
+
+  test('photo URLs appear only when Entra is configured, and point at the token photo route', async () => {
+    prismaMock.ticketApproval.findUnique.mockResolvedValue(row());
+    azureAdMock.isConfigured.mockReturnValue(true);
+    const data = await ticketApprovalService.getByToken(TOKEN);
+    expect(data.approval.requestedByPhotoUrl).toBe(`/api/ticket-approvals/public/${TOKEN}/photo?who=requestedBy`);
+    expect(data.ticket.requester.photoUrl).toBe(`/api/ticket-approvals/public/${TOKEN}/photo?who=requester`);
+  });
+
+  test('categoryPath falls back to the legacy category strings', async () => {
+    prismaMock.ticketApproval.findUnique.mockResolvedValue(row());
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...fullTicket, internalCategory: null, internalSubcategory: null });
+    const data = await ticketApprovalService.getByToken(TOKEN);
+    expect(data.ticket.categoryPath).toBe('Legacy cat › Legacy sub');
+  });
+
+  test('photoSubjectEmail resolves from the row — never from a caller-supplied address', async () => {
+    prismaMock.ticketApproval.findUnique.mockResolvedValue(row());
+    await expect(ticketApprovalService.photoSubjectEmail(TOKEN, 'requestedBy')).resolves.toBe('jane.doe@x.io');
+    await expect(ticketApprovalService.photoSubjectEmail(TOKEN, 'requester')).resolves.toBe('rita@x.io');
+    await expect(ticketApprovalService.photoSubjectEmail(TOKEN, 'attacker@x.io')).rejects.toThrow(/who must be/);
+  });
+});
+
+describe('decideByToken (Phase AP: reject needs a reason, decisions show a person)', () => {
+  const TOKEN = 'c'.repeat(43);
+  const row = (over = {}) => ({
+    id: 2, ticketId: 501, workspaceId: 1, status: 'pending', approverEmail: 'bob@x.io', approverName: null,
+    requestedBy: 'req@x.io', requestGroupId: 'grp-1', expiresAt: new Date(Date.now() + 86400000), ...over,
+  });
+
+  test('rejecting without a note is refused (400) and nothing is written', async () => {
+    prismaMock.ticketApproval.findUnique.mockResolvedValue(row());
+    await expect(ticketApprovalService.decideByToken(TOKEN, 'rejected', '   ')).rejects.toThrow(/Add a reason for rejecting/);
+    expect(prismaMock.ticketApproval.update).not.toHaveBeenCalled();
+  });
+
+  test('rejecting with a note goes through and returns the decided row', async () => {
+    prismaMock.ticketApproval.findUnique.mockResolvedValue(row());
+    const out = await ticketApprovalService.decideByToken(TOKEN, 'rejected', 'No budget this quarter');
+    expect(out.status).toBe('rejected');
+    expect(out.decisionNote).toBe('No budget this quarter');
+  });
+
+  test('approving still needs no note', async () => {
+    prismaMock.ticketApproval.findUnique.mockResolvedValue(row());
+    const out = await ticketApprovalService.decideByToken(TOKEN, 'approved');
+    expect(out.status).toBe('approved');
+  });
+
+  test('a link approver with no name is resolved from the directory so the decision shows a person', async () => {
+    prismaMock.ticketApproval.findUnique.mockResolvedValue(row());
+    prismaMock.technician.findFirst.mockResolvedValue({ name: 'Bob Builder' });
+    const out = await ticketApprovalService.decideByToken(TOKEN, 'approved');
+    expect(out.approverName).toBe('Bob Builder');
+    expect(prismaMock.ticketThreadEntry.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ actorName: 'Bob Builder', bodyText: expect.stringContaining('by Bob Builder') }),
+    }));
+    expect(prismaMock.ticketApproval.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ decisionNote: 'Superseded — approved by Bob Builder' }),
+    }));
+  });
+
+  test('falls back to the Requester directory, then the raw address', async () => {
+    prismaMock.ticketApproval.findUnique.mockResolvedValue(row());
+    prismaMock.requester.findFirst.mockResolvedValue({ name: 'Bob (Requester)' });
+    const out = await ticketApprovalService.decideByToken(TOKEN, 'approved');
+    expect(out.approverName).toBe('Bob (Requester)');
+
+    jest.clearAllMocks();
+    prismaMock.ticketApproval.findUnique.mockResolvedValue(row());
+    prismaMock.ticketApproval.update.mockImplementation(({ where, data }) => Promise.resolve({ id: where.id, ...data }));
+    prismaMock.technician.findFirst.mockRejectedValue(new Error('db down'));
+    const out2 = await ticketApprovalService.decideByToken(TOKEN, 'approved');
+    expect(out2.approverName).toBe('bob@x.io');
+  });
+});
+
+describe('_emailApprover (Phase AP: people, category, requester title)', () => {
+  test('says "Note from <name>", adds the category line and the requester title', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...ticket, requester: { name: 'Rita', email: 'rita@x.io', jobTitle: 'Analyst' } });
+    prismaMock.approvalCategory.findFirst.mockResolvedValue({ id: 9, name: 'Laptop purchase', managerEmails: ['alice@x.io'] });
+    prismaMock.ticketApproval.findFirst.mockResolvedValue(null);
+
+    await ticketApprovalService.request(501, 1, { approvalCategoryId: 9, note: 'Need {{decision.url}} please' }, { email: 'jane.doe@x.io' });
+
+    const email = sendgridMock.sendEmail.mock.calls[0][0];
+    expect(email.html).toContain('Note from Jane Doe:');
+    expect(email.html).not.toContain('Note from jane.doe@x.io');
+    expect(email.html).toContain('Category: <b>Laptop purchase</b>');
+    expect(email.html).toContain('(requested for Rita, Analyst)');
+    // Placeholders still substitute.
+    expect(email.html).toContain('review &amp; decide</a>');
+  });
+
+  test('uses the directory name when the requester is a known technician', async () => {
+    prismaMock.approvalCategory.findFirst.mockResolvedValue({ id: 9, name: 'Laptop purchase', managerEmails: ['alice@x.io'] });
+    prismaMock.ticketApproval.findFirst.mockResolvedValue(null);
+    prismaMock.technician.findFirst.mockResolvedValue({ name: 'Jane Doe-Smith' });
+    await ticketApprovalService.request(501, 1, { approvalCategoryId: 9, note: 'pls' }, { email: 'jdoe@x.io' });
+    expect(sendgridMock.sendEmail.mock.calls[0][0].html).toContain('Note from Jane Doe-Smith:');
   });
 });

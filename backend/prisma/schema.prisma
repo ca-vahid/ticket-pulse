@@ -642,6 +642,9 @@ model TicketApproval {
   decidedVia         String?           @map("decided_via") @db.VarChar(20) // link | app
   tokenHash          String            @unique @map("token_hash") @db.VarChar(64)
   expiresAt          DateTime?         @map("expires_at")
+  // Phase AP (09-02): how often / when the magic-link page was opened.
+  viewCount          Int               @default(0) @map("view_count")
+  lastViewedAt       DateTime?         @map("last_viewed_at")
   createdAt          DateTime          @default(now()) @map("created_at")
   updatedAt          DateTime          @updatedAt @map("updated_at")
 
