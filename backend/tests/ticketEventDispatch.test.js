@@ -57,6 +57,7 @@ describe('emitTicketEvent → engine dispatch', () => {
   const singleEventCases = [
     ['ticket.reply_received', { dedupeStamp: 'fs-conv-77' }],
     ['ticket.note_added', { dedupeStamp: 'note:9001', extra: { entryId: 9001, byEmail: 'cora@example.com' } }],
+    ['ticket.fields_updated', { dedupeStamp: 'fields:501:9001', extra: { actorKind: 'human', source: 'app', changedFields: ['priority'], changedCount: 1 } }],
     ['ticket.public_reply_added', { dedupeStamp: 'reply:9002', extra: { entryId: 9002, byEmail: 'cora@example.com' } }],
     ['approval.requested', { dedupeStamp: 'approval.requested:12:requested', extra: { approvalId: 12 } }],
     ['approval.decided', { dedupeStamp: 'approval.decided:12:approved', extra: { approvalId: 12, status: 'approved' } }],
@@ -119,8 +120,9 @@ describe('emitTicketLifecycleNotifications → engine dispatch (derived events)'
     // Phase 8c: the payload carries the status NAMES and their BASES so
     // conditions can match either ("entered Needs Rework" / "entered any
     // Pending-base status").
+    // TU-10: every lifecycle event also carries its provenance (actorKind/source).
     expect(eventContext.event.extra).toEqual({
-      from: 'Open', to: 'Pending', fromBase: 'Open', toBase: 'Pending',
+      from: 'Open', to: 'Pending', fromBase: 'Open', toBase: 'Pending', actorKind: 'freshservice', source: 'freshservice_sync',
     });
     expect(eventContext.event.dedupeStamp).toBe('Open->Pending:2026-07-06T10:00:00.000Z');
     expect(eventContext.ticket.statusBase).toBe('Open'); // hydrated ticket is still status Open
@@ -158,7 +160,7 @@ describe('emitTicketLifecycleNotifications → engine dispatch (derived events)'
     expect(result.events).toEqual(['ticket.status_changed']);
     const [eventContext] = engineMock.executeForEvent.mock.calls[0];
     expect(eventContext.event.extra).toEqual({
-      from: 'Open', to: 'Needs Rework', fromBase: 'Open', toBase: 'Pending',
+      from: 'Open', to: 'Needs Rework', fromBase: 'Open', toBase: 'Pending', actorKind: 'human', source: 'ticketpulse_native',
     });
     expect(eventContext.ticket.status).toBe('Needs Rework');
     expect(eventContext.ticket.statusBase).toBe('Pending');

@@ -746,6 +746,7 @@ as-is; hand-build a minimal 2.0 file with just <code>POST /tickets</code> (+ <co
 <code>Bearer tp_live_…</code> <b>including the “Bearer ” prefix</b> when creating a connection. Same premium licensing as HTTP.
 </div>
 <h2>Outbound webhooks</h2>
+<p>Events: <code>ticket.created</code>, <code>ticket.status_changed</code>, <code>ticket.assigned</code>, <code>ticket.reply_received</code>, <code>ticket.public_reply_added</code>, <code>ticket.tags_changed</code>, <code>ticket.custom_fields_changed</code>, <code>ticket.fields_updated</code> (field edits by a person / the API / a workflow / FreshService — payload <code>extra</code> carries <code>actorKind</code>, <code>source</code>, <code>changedFields</code> and <code>changes{from,to}</code>), <code>approval.requested</code>, <code>approval.decided</code>.</p>
 <p>Subscribe in <b>Settings → API Keys → Outbound webhooks</b>. Deliveries follow the <a href="https://www.standardwebhooks.com">Standard Webhooks</a> spec — headers <code>webhook-id</code>, <code>webhook-timestamp</code>, <code>webhook-signature</code> (<code>v1,&lt;base64 HMAC-SHA256 of id.timestamp.body&gt;</code>, secret <code>whsec_…</code>). Verify with a constant-time compare and a timestamp tolerance; treat <code>webhook-id</code> as an idempotency key. Legacy <code>X-TicketPulse-Signature</code> headers are sent in parallel during migration. Failed deliveries retry with exponential backoff and are visible (with a redeliver action) in the webhook’s delivery log.</p>
 </body></html>`;
 }

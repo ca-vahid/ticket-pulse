@@ -41,8 +41,10 @@ describe('ticketRepository dual-origin guardrails', () => {
 
       const result = await ticketRepository.upsert(payload);
 
+      // TU-3d: the guarded where also refuses to downgrade Spam/Deleted rows
+      // when the payload carries no explicit spam:false / deleted:false.
       expect(prismaMock.ticket.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-        where: { freshserviceTicketId: BigInt(12345), origin: 'freshservice' },
+        where: { freshserviceTicketId: BigInt(12345), origin: 'freshservice', status: { notIn: ['Spam', 'Deleted'] } },
       }));
       expect(prismaMock.ticket.create).not.toHaveBeenCalled();
       expect(result).toEqual(expect.objectContaining({ id: 1 }));
@@ -75,9 +77,9 @@ describe('ticketRepository dual-origin guardrails', () => {
     });
 
     test('recovers from a concurrent create by retrying the guarded update', async () => {
-      prismaMock.ticket.updateMany
-        .mockResolvedValueOnce({ count: 0 })
-        .mockResolvedValueOnce({ count: 1 });
+      // TU-3e: the repository reads first (no-op detection), so a concurrent
+      // create surfaces as a P2002 on create → ONE guarded updateMany retry.
+      prismaMock.ticket.updateMany.mockResolvedValueOnce({ count: 1 });
       prismaMock.ticket.findUnique
         .mockResolvedValueOnce(null)
         .mockResolvedValueOnce({ id: 4, origin: 'freshservice' });
@@ -87,7 +89,10 @@ describe('ticketRepository dual-origin guardrails', () => {
 
       const result = await ticketRepository.upsert(payload);
 
-      expect(prismaMock.ticket.updateMany).toHaveBeenCalledTimes(2);
+      expect(prismaMock.ticket.updateMany).toHaveBeenCalledTimes(1);
+      expect(prismaMock.ticket.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({ origin: 'freshservice' }),
+      }));
       expect(result).toEqual(expect.objectContaining({ id: 4 }));
     });
   });

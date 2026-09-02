@@ -18,12 +18,33 @@ class GraphMailClient {
     }
 
     const credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
+    this._credential = credential;
     const authProvider = new TokenCredentialAuthenticationProvider(credential, {
       scopes: ['https://graph.microsoft.com/.default'],
     });
 
     this._client = Client.initWithMiddleware({ authProvider });
     return this._client;
+  }
+
+  /**
+   * Application roles granted to the app registration (Phase RL, RL-7):
+   * decoded from the `roles` claim of the client-credentials token — the
+   * same token every Graph call rides, so this is exactly what Exchange
+   * will enforce. Null when the token cannot be fetched/decoded (the caller
+   * treats that as "unknown", never as "granted").
+   */
+  async getAppRoles() {
+    try {
+      this._getClient();
+      const credential = this._credential;
+      if (!credential || typeof credential.getToken !== 'function') return null;
+      const token = await credential.getToken('https://graph.microsoft.com/.default');
+      return decodeTokenRoles(token?.token);
+    } catch (error) {
+      logger.debug('Graph API: app role decode failed', { error: error.message });
+      return null;
+    }
   }
 
   isConfigured() {
@@ -166,9 +187,10 @@ class GraphMailClient {
   }
 
   /**
-   * Send mail FROM a mailbox via draft-then-send, which (unlike /sendMail)
-   * lets us capture the internetMessageId for reply threading.
-   * Requires Mail.Send application permission.
+   * Send mail FROM a mailbox. Anchored replies go draft-then-send via
+   * createReply (needs Mail.ReadWrite — Exchange writes the threading
+   * headers); everything else goes through /sendMail with a minted
+   * Message-ID (Mail.Send only — Phase RL, RL-2).
    *
    * Threading (MB-1b) — WHY createReply and not internetMessageHeaders:
    * Graph only accepts CUSTOM headers on message creation, and they must be
@@ -259,14 +281,56 @@ class GraphMailClient {
         threadedVia = 'createReply';
         break;
       } catch (error) {
-        logger.warn('Graph API: createReply threading failed, falling back to a plain draft', {
-          mailbox, anchor, error: error.message,
+        const status = graphErrorStatus(error);
+        logger.warn(status === 403
+          ? 'Graph API: createReply refused (403 — Mail.ReadWrite not granted), falling back to sendMail without header threading'
+          : 'Graph API: createReply threading failed, falling back to sendMail', {
+          mailbox, anchor, status, error: error.message,
         });
         draft = null;
       }
     }
     if (!draft) {
-      draft = await client.api(`/users/${mailbox}/messages`).post(draftPayload);
+      // No anchor (fresh ack, SendGrid-era ids, purged mail) or createReply
+      // refused (Phase RL, RL-2 — Mail.ReadWrite not granted): send in one
+      // call through `POST /users/{mb}/sendMail`, which needs Mail.Send ONLY.
+      // The draft-then-send path this replaces needed ReadWrite just to park
+      // the draft, so with a Mail.Send-only grant every send 403'd and fell
+      // back to SendGrid as ticketpulse@. We mint the RFC Message-ID
+      // ourselves (Graph honours a caller-supplied internetMessageId) so
+      // ingest rung 1 still threads the reply; the `[TP-n]` subject token
+      // and the plus-addressed Reply-To remain as backup signals.
+      const internetMessageId = mintInternetMessageId(mailbox);
+      const inlineAttachments = attachments
+        .filter((file) => file?.contentBytes)
+        .map((file) => ({
+          '@odata.type': '#microsoft.graph.fileAttachment',
+          name: file.name || 'attachment',
+          contentType: file.contentType || 'application/octet-stream',
+          contentBytes: file.contentBytes,
+        }));
+      try {
+        await client.api(`/users/${mailbox}/sendMail`).post({
+          message: {
+            ...draftPayload,
+            internetMessageId,
+            ...(inlineAttachments.length ? { attachments: inlineAttachments } : {}),
+          },
+          saveToSentItems: true,
+        });
+      } catch (error) {
+        throw tagGraphSendError(error, mailbox, 'sendMail');
+      }
+      logger.info('Graph API: mail sent', {
+        mailbox, to: recipients.map((r) => r.emailAddress.address), subject, threadedVia: null, sentVia: 'sendMail', replyTo: replyToAddress || null,
+      });
+      return {
+        messageId: null,
+        internetMessageId,
+        conversationId: null,
+        threadedVia: null,
+        sentVia: 'sendMail',
+      };
     }
 
     // Simple file attach caps at ~3 MB per request; larger files need upload
@@ -287,16 +351,21 @@ class GraphMailClient {
       }
     }
 
-    await client.api(`/users/${mailbox}/messages/${draft.id}/send`).post({});
+    try {
+      await client.api(`/users/${mailbox}/messages/${draft.id}/send`).post({});
+    } catch (error) {
+      throw tagGraphSendError(error, mailbox, 'send');
+    }
 
     logger.info('Graph API: mail sent', {
-      mailbox, to: recipients.map((r) => r.emailAddress.address), subject, threadedVia, replyTo: replyToAddress || null,
+      mailbox, to: recipients.map((r) => r.emailAddress.address), subject, threadedVia, sentVia: 'draft', replyTo: replyToAddress || null,
     });
     return {
       messageId: draft.id,
       internetMessageId: draft.internetMessageId || null,
       conversationId: draft.conversationId || null,
       threadedVia,
+      sentVia: 'draft',
     };
   }
 
@@ -305,7 +374,14 @@ class GraphMailClient {
    * @param {string} mailbox - Email address to test
    * @returns {Promise<{success: boolean, message: string, recentCount: number}>}
    */
-  async testConnection(mailbox) {
+  async testConnection(mailbox, { mode = 'both' } = {}) {
+    // Phase RL (RL-7): the test proves READ *and* SEND capability. Reading
+    // the inbox exercises Mail.Read against this mailbox; the app token's
+    // roles decide whether sends (Mail.Send) and header-threaded replies
+    // (Mail.ReadWrite → createReply) can work. `null` = could not tell.
+    const roles = await this.getAppRoles();
+    const caps = capabilitiesFromRoles(roles);
+    const wantsSend = ['send', 'both'].includes(mode);
     try {
       const client = this._getClient();
       const response = await client
@@ -316,13 +392,26 @@ class GraphMailClient {
 
       const count = response['@odata.count'] || response.value?.length || 0;
       const latest = response.value?.[0];
+      const canRead = true;
+      const sendProblem = wantsSend && caps.canSend === false;
+      const threadProblem = wantsSend && caps.canThread === false;
+      const message = sendProblem
+        ? `Connected to ${mailbox}, but the app cannot SEND from it — Mail.Send is not granted`
+        : threadProblem
+          ? `Connected to ${mailbox}; sends work but replies cannot be header-threaded — Mail.ReadWrite is not granted`
+          : `Connected successfully to ${mailbox}`;
 
       return {
-        success: true,
-        message: `Connected successfully to ${mailbox}`,
+        success: !sendProblem,
+        message,
         recentCount: count,
         latestSubject: latest?.subject,
         latestReceivedAt: latest?.receivedDateTime,
+        canRead,
+        canSend: caps.canSend,
+        canThread: caps.canThread,
+        roles,
+        mode,
       };
     } catch (error) {
       const msg = error.body ? (() => { try { return JSON.parse(error.body)?.error?.message; } catch { return null; } })() : null;
@@ -332,6 +421,11 @@ class GraphMailClient {
         success: false,
         message: msg || error.message || 'Connection failed',
         code,
+        canRead: false,
+        canSend: caps.canSend,
+        canThread: caps.canThread,
+        roles,
+        mode,
       };
     }
   }
@@ -625,6 +719,64 @@ export function mapGraphMessageForIngest(e) {
     deliveredTo: headers['delivered-to'] || null,
     xOriginalTo: headers['x-original-to'] || null,
   };
+}
+
+/**
+ * Mint an RFC 5322 Message-ID for a sendMail send (Phase RL, RL-2):
+ * `<tp-<epoch>-<random>@<mailbox domain>>` — stored on the thread entry /
+ * delivery so ingest rung 1 recognises the requester's reply.
+ */
+export function mintInternetMessageId(mailbox) {
+  const domain = String(mailbox || '').split('@')[1] || 'ticketpulse.local';
+  const rand = Math.random().toString(36).slice(2, 12) + Math.random().toString(36).slice(2, 8);
+  return `<tp-${Date.now()}-${rand}@${domain}>`;
+}
+
+/** Decode the `roles` claim of a JWT (no signature check — informational). */
+export function decodeTokenRoles(jwt) {
+  const parts = String(jwt || '').split('.');
+  if (parts.length < 2) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1].replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8'));
+    const roles = Array.isArray(payload?.roles) ? payload.roles.map(String) : [];
+    return roles;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * What the granted application roles allow (Phase RL, RL-7). Nulls when
+ * the roles are unknown — the panel shows "could not verify", not a tick.
+ *   canRead   — Mail.Read or Mail.ReadWrite (inbox ingest, anchor lookups)
+ *   canSend   — Mail.Send (sendMail; draft /send too)
+ *   canThread — Mail.ReadWrite (createReply drafts → In-Reply-To/References)
+ */
+export function capabilitiesFromRoles(roles) {
+  if (!Array.isArray(roles)) return { canRead: null, canSend: null, canThread: null };
+  const set = new Set(roles.map((r) => String(r)));
+  const readWrite = set.has('Mail.ReadWrite');
+  return {
+    canRead: set.has('Mail.Read') || readWrite,
+    canSend: set.has('Mail.Send'),
+    canThread: readWrite,
+  };
+}
+
+/**
+ * Tag a Graph send failure so the health telemetry classifies it correctly
+ * (Phase RL, RL-2): a 403 on sendMail / send / createReply is a missing
+ * application permission, never an IP block.
+ */
+function tagGraphSendError(error, mailbox, operation) {
+  const status = graphErrorStatus(error);
+  if (status === 403 || String(error?.code || '').toLowerCase() === 'erroraccessdenied') {
+    error.graphPermissionDenied = true;
+    error.errorClass = 'permission_denied';
+    error.graphOperation = operation;
+    error.message = `Microsoft Graph ${operation} as ${mailbox} was refused (403 access denied): ${graphErrorMessage(error)}`;
+  }
+  return error;
 }
 
 /** HTTP status of a microsoft-graph-client error (GraphError.statusCode), if any. */

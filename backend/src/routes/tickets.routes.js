@@ -566,12 +566,75 @@ function presentMailbox(mb) {
   };
 }
 
+/**
+ * Outbound Graph lane state for the workspace (Phase RL, RL-2): the most
+ * recent msgraph send-health event decides whether the send lane is granted.
+ * `permission_denied` (403 on createReply / sendMail) means every send is
+ * silently falling back to SendGrid as ticketpulse@ — the panel shows that
+ * in red with the exact grant text. Null when Graph has never been tried.
+ */
+async function graphSendLane(workspaceId) {
+  try {
+    const { default: emailHealthService } = await import('../services/emailHealthService.js');
+    return await emailHealthService.getGraphSendLane(workspaceId);
+  } catch (err) {
+    logger.debug(`graphSendLane lookup failed (non-fatal): ${err.message}`);
+    return null;
+  }
+}
+
 router.get('/mailboxes', requireTicketingAdmin, asyncHandler(async (req, res) => {
-  const mailboxes = await prisma.mailboxConnection.findMany({
-    where: { workspaceId: req.workspaceId },
-    orderBy: { id: 'asc' },
+  const [mailboxes, sendLane] = await Promise.all([
+    prisma.mailboxConnection.findMany({
+      where: { workspaceId: req.workspaceId },
+      orderBy: { id: 'asc' },
+    }),
+    graphSendLane(req.workspaceId),
+  ]);
+  res.json({ success: true, data: mailboxes.map(presentMailbox), meta: { sendLane } });
+}));
+
+// ---------------------------------------------------------------- hold queue
+// Phase RL (RL-4): inbound mail the ingest decision table parked for a human.
+// Staff-gated (admins AND agents resolve held replies from the Tickets queue
+// pill); mutations re-run the ordinary ingest paths.
+
+function requireTicketingStaff(req, _res, next) {
+  const actor = req.ticketActor;
+  if (actor.role === 'admin' || actor.workspaceRole === 'admin' || actor.technicianId) return next();
+  return next(new AuthenticationError('Agent or admin access required'));
+}
+
+router.get('/mailboxes/held', requireTicketingStaff, asyncHandler(async (req, res) => {
+  const { default: mailboxHoldService } = await import('../services/mailboxHoldService.js');
+  const status = String(req.query?.status || 'held');
+  const rows = await mailboxHoldService.list(req.workspaceId, { status });
+  const heldCount = status === 'held' ? rows.length : await mailboxHoldService.count(req.workspaceId, 'held');
+  res.json({ success: true, data: rows, meta: { heldCount } });
+}));
+
+router.post('/mailboxes/held/:heldId/attach', requireTicketingStaff, asyncHandler(async (req, res) => {
+  const ticketId = Number(req.body?.ticketId);
+  if (!Number.isInteger(ticketId) || ticketId <= 0) throw new ValidationError('ticketId is required');
+  const { default: mailboxHoldService } = await import('../services/mailboxHoldService.js');
+  const result = await mailboxHoldService.attach(Number(req.params.heldId), ticketId, req.ticketActor, { workspaceId: req.workspaceId });
+  res.json({ success: true, data: result });
+}));
+
+router.post('/mailboxes/held/:heldId/create', requireTicketingStaff, asyncHandler(async (req, res) => {
+  const { default: mailboxHoldService } = await import('../services/mailboxHoldService.js');
+  const result = await mailboxHoldService.createTicket(Number(req.params.heldId), {
+    requesterEmail: req.body?.requesterEmail || null,
+    actor: req.ticketActor,
+    workspaceId: req.workspaceId,
   });
-  res.json({ success: true, data: mailboxes.map(presentMailbox) });
+  res.status(201).json({ success: true, data: result });
+}));
+
+router.post('/mailboxes/held/:heldId/discard', requireTicketingStaff, asyncHandler(async (req, res) => {
+  const { default: mailboxHoldService } = await import('../services/mailboxHoldService.js');
+  const held = await mailboxHoldService.discard(Number(req.params.heldId), req.ticketActor, { workspaceId: req.workspaceId });
+  res.json({ success: true, data: held });
 }));
 
 /** Validates the optional mailbox→group/type routing fields (T3.1). */
@@ -656,6 +719,15 @@ router.patch('/mailboxes/:mailboxId', requireTicketingAdmin, asyncHandler(async 
   if (req.body?.isEnabled !== undefined) data.isEnabled = req.body.isEnabled === true;
   if (req.body?.displayName !== undefined) data.displayName = req.body.displayName?.trim() || null;
   if (req.body?.pollIntervalSec !== undefined) data.pollIntervalSec = Math.max(15, Math.min(3600, Number(req.body.pollIntervalSec) || 60));
+  // Phase RL (RL-4): per-mailbox safety switch + agent Cc intake toggle.
+  if (req.body?.newTicketPolicy !== undefined) {
+    const { NEW_TICKET_POLICIES } = await import('../services/mailboxHoldService.js');
+    if (!NEW_TICKET_POLICIES.includes(req.body.newTicketPolicy)) {
+      throw new ValidationError(`newTicketPolicy must be one of ${NEW_TICKET_POLICIES.join(', ')}`);
+    }
+    data.newTicketPolicy = req.body.newTicketPolicy;
+  }
+  if (req.body?.agentCcIntake !== undefined) data.agentCcIntake = req.body.agentCcIntake === true;
   let mailbox = Object.keys(data).length > 0
     ? await prisma.mailboxConnection.update({ where: { id }, data })
     : existing;
@@ -1172,7 +1244,9 @@ router.post('/mailboxes/:mailboxId/test', requireTicketingAdmin, asyncHandler(as
   if (!graphMailClient.isConfigured()) {
     return res.json({ success: true, data: { success: false, message: 'Azure Graph credentials are not configured on the server' } });
   }
-  const result = await graphMailClient.testConnection(existing.address);
+  // Phase RL (RL-7): the test proves READ and SEND capability — the app
+  // token's roles decide canRead / canSend / canThread for this mode.
+  const result = await graphMailClient.testConnection(existing.address, { mode: existing.mode });
   res.json({ success: true, data: result });
 }));
 

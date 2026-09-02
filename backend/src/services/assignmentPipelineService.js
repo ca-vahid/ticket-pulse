@@ -624,6 +624,9 @@ class AssignmentPipelineService {
         oldStatus: ticket.status,
         newStatus: status,
         note: reason,
+        // Pipeline bookkeeping (TU-1): the AI lane noticed FS moved on.
+        actorKind: 'ai',
+        source: 'assignment_pipeline',
       },
     });
   }

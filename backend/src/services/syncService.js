@@ -139,8 +139,74 @@ export const SYNC_LOCK_STALE_MS = 20 * 60 * 1000;
 /**
  * Service for syncing data from FreshService
  */
+// ---------------------------------------------------------------------------
+// FS actor attribution + pending-writeback guard (MEGA 09-01 Phase RO-1/RO-5)
+// ---------------------------------------------------------------------------
+
+/** How far around the observed change we look for the FS status/assignment event. */
+export const FS_ACTOR_WINDOW_MS = 2 * 60 * 1000;
+/** A TP→FS status write-back protects the local status for at most this long. */
+export const PENDING_WRITEBACK_WINDOW_MS = 10 * 60 * 1000;
+/** Reconcile writers skip an identical status_changed row inside this window. */
+export const DUPLICATE_STATUS_ROW_WINDOW_MS = 10 * 60 * 1000;
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** "Dominic Bautista (FreshService)" — or plain "FreshService" when nobody is known. Never "System". */
+export function fsActorLabel(name) {
+  const clean = String(name || '').trim();
+  return clean ? `${clean} (FreshService)` : 'FreshService';
+}
+
+/**
+ * Pick the FS activity-feed line that explains a status/assignment change.
+ * Accepts raw FS activities ({ actor:{name,id}, content, created_at }) or
+ * cached thread entries ({ actorName, actorFreshserviceId, content,
+ * occurredAt }). Prefers a line naming the new status; latest wins on ties.
+ * Pure — unit-tested directly.
+ */
+export function resolveFsActorFromActivities(activities, {
+  kind = 'status', sinceMs = null, untilMs = null, statusName = null,
+} = {}) {
+  if (!Array.isArray(activities) || activities.length === 0) return null;
+  const pattern = kind === 'assignment' ? /set Agent as /i : /set Status as /i;
+  const statusPattern = statusName && kind !== 'assignment'
+    ? new RegExp(`set Status as ${escapeRegExp(statusName)}(?:\\b|$)`, 'i')
+    : null;
+  let best = null;
+  for (const a of activities) {
+    if (!a) continue;
+    const content = String(a.content || '');
+    if (!pattern.test(content)) continue;
+    const rawAt = a.created_at ?? a.occurredAt ?? null;
+    const at = rawAt ? new Date(rawAt).getTime() : NaN;
+    if (!Number.isFinite(at)) continue;
+    if (sinceMs !== null && at < sinceMs) continue;
+    if (untilMs !== null && at > untilMs) continue;
+    const score = statusPattern && statusPattern.test(content) ? 1 : 0;
+    if (!best || score > best.score || (score === best.score && at > best.at)) {
+      const fsId = a.actor?.id ?? a.actorFreshserviceId ?? null;
+      best = {
+        score,
+        at,
+        name: a.actor?.name ?? a.actorName ?? null,
+        fsId: fsId === null || fsId === undefined ? null : String(fsId),
+        content,
+      };
+    }
+  }
+  if (!best) return null;
+  return { name: best.name || null, fsId: best.fsId, at: new Date(best.at), content: best.content };
+}
+
 class SyncService {
   constructor() {
+    // ticketId -> { status, at (ms), fsUpdatedAt (ms|null) } — statuses Ticket
+    // Pulse just wrote to FreshService (RO-5). Consulted by every FS→TP status
+    // writer so a stale list snapshot can't revert a reopen we just made.
+    this._pendingStatusWritebacks = new Map();
     // workspaceId (or 'backfill:<ws>') -> lock acquisition timestamp (ms)
     this.runningWorkspaces = new Map();
     this.lastSyncTime = null;
@@ -607,6 +673,143 @@ class SyncService {
     }
   }
 
+  // ------------------------------------------------------------------
+  // RO-1 / RO-5 / TU-3 helpers
+  // ------------------------------------------------------------------
+
+  /**
+   * Who did it in FreshService? Looks at this pass's activity feed first, then
+   * the cached status_event / assignment_event thread entries (an earlier pass
+   * may already have stored the line). `since` = the FS updated_at we last
+   * stored — the change we're attributing happened after it (±2 min slack).
+   */
+  async _resolveFsActor(ticketId, activities, { kind = 'status', since = null, statusName = null } = {}) {
+    const untilMs = Date.now() + FS_ACTOR_WINDOW_MS;
+    const sinceBase = since ? new Date(since).getTime() : NaN;
+    const sinceMs = Number.isFinite(sinceBase)
+      ? sinceBase - FS_ACTOR_WINDOW_MS
+      : Date.now() - 24 * 60 * 60 * 1000;
+    let hit = resolveFsActorFromActivities(activities, { kind, sinceMs, untilMs, statusName });
+    if (hit) return hit;
+    try {
+      const rows = await prisma.ticketThreadEntry.findMany({
+        where: {
+          ticketId,
+          source: 'freshservice_activity',
+          eventType: kind === 'assignment' ? 'assignment_event' : 'status_event',
+          occurredAt: { gte: new Date(sinceMs) },
+        },
+        orderBy: { occurredAt: 'desc' },
+        take: 10,
+        select: { actorName: true, actorFreshserviceId: true, content: true, occurredAt: true },
+      });
+      hit = resolveFsActorFromActivities(rows, { kind, sinceMs, untilMs, statusName });
+    } catch { /* attribution is best-effort */ }
+    return hit || null;
+  }
+
+  /** Details block shared by every sync-observed audit row. */
+  _fsActorDetails(fsActor, actorKind = 'freshservice_sync') {
+    return {
+      via: 'freshservice',
+      actorKind,
+      actorName: fsActor?.name || null,
+      actorFsId: fsActor?.fsId || null,
+    };
+  }
+
+  /** Called by ticketService.updateFsTicket right after a confirmed status write. */
+  notePendingStatusWriteback(ticketId, { status, fsUpdatedAt = null } = {}) {
+    if (!ticketId || !status) return;
+    const echo = fsUpdatedAt ? new Date(fsUpdatedAt).getTime() : NaN;
+    this._pendingStatusWritebacks.set(Number(ticketId), {
+      status,
+      at: Date.now(),
+      fsUpdatedAt: Number.isFinite(echo) ? echo : null,
+    });
+  }
+
+  /**
+   * Should an FS→TP status overwrite be held back? True while Ticket Pulse
+   * wrote a status to FreshService (≤10 min ago) and the incoming payload's
+   * FS updated_at is OLDER than that write — i.e. the snapshot predates our
+   * write-back and would revert it. Falls back to the durable fs_write_back
+   * audit row when the in-process marker is gone (restart, other instance).
+   */
+  async _statusWritebackHold(existingTicket, incomingFsUpdatedAt) {
+    const ticketId = Number(existingTicket?.id);
+    if (!ticketId) return null;
+    const now = Date.now();
+    let marker = this._pendingStatusWritebacks.get(ticketId) || null;
+    if (marker && now - marker.at > PENDING_WRITEBACK_WINDOW_MS) {
+      this._pendingStatusWritebacks.delete(ticketId);
+      marker = null;
+    }
+    if (!marker) {
+      try {
+        const row = await prisma.ticketActivity.findFirst({
+          where: {
+            ticketId,
+            activityType: 'fs_write_back',
+            performedAt: { gte: new Date(now - PENDING_WRITEBACK_WINDOW_MS) },
+          },
+          orderBy: { performedAt: 'desc' },
+          select: { performedAt: true, details: true },
+        });
+        const statusChange = row?.details?.changes?.status;
+        if (row && statusChange?.to) {
+          const echo = row.details?.fsUpdatedAt ? new Date(row.details.fsUpdatedAt).getTime() : NaN;
+          marker = {
+            status: statusChange.to,
+            at: new Date(row.performedAt).getTime(),
+            fsUpdatedAt: Number.isFinite(echo) ? echo : null,
+          };
+        }
+      } catch { /* guard is best-effort */ }
+    }
+    if (!marker) return null;
+    const incoming = incomingFsUpdatedAt ? new Date(incomingFsUpdatedAt).getTime() : NaN;
+    const writeStamp = marker.fsUpdatedAt ?? marker.at;
+    // FreshService has caught up (its updated_at is at/after our write) —
+    // whatever it says now is newer truth, release the hold.
+    if (Number.isFinite(incoming) && incoming >= writeStamp) {
+      this._pendingStatusWritebacks.delete(ticketId);
+      return null;
+    }
+    return marker;
+  }
+
+  /**
+   * TU-3d: the reconcile writers used to log the same Open→Spam row every
+   * sweep (86 rows in 3.5 min on one ticket). Skip when the latest
+   * status_changed on the ticket already says the same thing recently.
+   */
+  async _recentDuplicateStatusChange(ticketId, newStatus, note) {
+    try {
+      const last = await prisma.ticketActivity.findFirst({
+        where: { ticketId, activityType: 'status_changed' },
+        orderBy: { performedAt: 'desc' },
+        select: { performedAt: true, details: true },
+      });
+      if (!last) return false;
+      const age = Date.now() - new Date(last.performedAt).getTime();
+      return age <= DUPLICATE_STATUS_ROW_WINDOW_MS
+        && last.details?.newStatus === newStatus
+        && (last.details?.note || null) === (note || null);
+    } catch {
+      return false;
+    }
+  }
+
+  /** Advance the reconcile cursor only — never touches updated_at. */
+  async _touchReconciled(ticketId) {
+    try {
+      await prisma.$executeRaw`UPDATE tickets SET last_reconciled_at = NOW() WHERE id = ${ticketId}`;
+    } catch (error) {
+      logger.debug(`last_reconciled_at touch failed for ticket ${ticketId} (non-fatal): ${error.message}`);
+    }
+  }
+
   /**
    * Write FS-sourced events as TicketActivity rows, deduplicating by timestamp + type.
    */
@@ -624,7 +827,9 @@ class SyncService {
         const key = `${evt.type}:${new Date(evt.timestamp).getTime()}`;
         if (existingSet.has(key)) continue;
 
-        const details = {};
+        // These rows replay FreshService's own activity feed — the actor is
+        // whoever acted in FS (a human or an FS workflow), observed by sync.
+        const details = { via: 'freshservice', actorKind: 'freshservice_sync' };
         if (evt.actorFsId) details.actorFsId = evt.actorFsId;
         if (evt.agentName) details.agentName = evt.agentName;
         if (evt.groupName !== undefined) details.groupName = evt.groupName;
@@ -634,9 +839,9 @@ class SyncService {
           data: {
             ticketId,
             activityType: evt.type,
-            performedBy: evt.actorName || 'Unknown',
+            performedBy: evt.actorName || 'FreshService',
             performedAt: new Date(evt.timestamp),
-            details: Object.keys(details).length > 0 ? details : undefined,
+            details,
           },
         });
       }
@@ -1481,6 +1686,31 @@ class SyncService {
       }
     }
 
+    // RO-5 sync guard: a status Ticket Pulse just wrote to FreshService must
+    // not be reverted by a list snapshot that predates the write. Hold the
+    // local status (and its resolution stamps) until FS's updated_at catches up.
+    let statusHeldForWriteback = false;
+    if (existingTicket && ticket.status !== existingTicket.status) {
+      const hold = await this._statusWritebackHold(existingTicket, ticket.freshserviceUpdatedAt);
+      if (hold) {
+        statusHeldForWriteback = true;
+        ticket = {
+          ...ticket,
+          status: existingTicket.status,
+          resolvedAt: existingTicket.resolvedAt ?? null,
+          closedAt: existingTicket.closedAt ?? null,
+        };
+        logger.info('Sync guard: kept local status pending FreshService write-back echo', {
+          ticketId: existingTicket.id,
+          freshserviceTicketId: ticket.freshserviceTicketId?.toString?.() || ticket.freshserviceTicketId,
+          localStatus: existingTicket.status,
+          snapshotStatus: fsTicket?.status ?? null,
+          writtenStatus: hold.status,
+          source: options.source || 'freshservice_sync',
+        });
+      }
+    }
+
     let upsertedTicket = await ticketRepository.upsert({
       ...ticket,
       workspaceId: ticketWorkspaceId,
@@ -1549,12 +1779,18 @@ class SyncService {
           details.recentLocalAssignment = assignmentClearVerification.recentLocalAssignment;
         }
       }
+      // RO-1: name the FS actor from this pass's assignment_event when known;
+      // otherwise the row is "FreshService" — never "System".
+      const fsAssignActor = await this._resolveFsActor(upsertedTicket.id, activities, {
+        kind: 'assignment',
+        since: existingTicket.freshserviceUpdatedAt || existingTicket.lastRealActivityAt || null,
+      });
       await ticketActivityRepository.create({
         ticketId: upsertedTicket.id,
         activityType: 'assigned',
-        performedBy: 'System',
+        performedBy: fsActorLabel(fsAssignActor?.name),
         performedAt: new Date(),
-        details,
+        details: { ...details, ...this._fsActorDetails(fsAssignActor) },
       });
     }
 
@@ -1580,15 +1816,25 @@ class SyncService {
     }
 
     if (existingTicket && existingTicket.status !== upsertedTicket.status) {
+      // RO-1: "Closed by Dominic Bautista (FreshService)" instead of "System" —
+      // the actor comes from the FS status_event of the same pass (±2 min),
+      // falling back to the cached thread entries, then to plain "FreshService".
+      const fsStatusActor = await this._resolveFsActor(upsertedTicket.id, activities, {
+        kind: 'status',
+        since: existingTicket.freshserviceUpdatedAt || existingTicket.lastRealActivityAt || null,
+        statusName: upsertedTicket.status,
+      });
       await ticketActivityRepository.create({
         ticketId: upsertedTicket.id,
         activityType: 'status_changed',
-        performedBy: 'System',
+        performedBy: fsActorLabel(fsStatusActor?.name),
         performedAt: new Date(),
         details: {
           oldStatus: existingTicket.status,
           newStatus: upsertedTicket.status,
           note: `Status changed from ${existingTicket.status} to ${upsertedTicket.status}`,
+          source: source || 'freshservice_sync',
+          ...this._fsActorDetails(fsStatusActor),
         },
       });
     }
@@ -1661,6 +1907,7 @@ class SyncService {
 
     const assignmentChanged = Boolean(existingTicket && existingTicket.assignedTechId !== upsertedTicket.assignedTechId);
     const statusChanged = Boolean(existingTicket && existingTicket.status !== upsertedTicket.status);
+    if (statusHeldForWriteback && upsertedTicket) upsertedTicket.statusHeldForWriteback = true;
 
     // Instant status sync (FR 08-07 #13): every ingest lane that lands a real
     // status/assignee change — webhook, 60s fast lane, 5-min full sync —
@@ -3870,7 +4117,7 @@ class SyncService {
 
     const ticket = await prisma.ticket.findFirst({
       where: { id: ticketId, workspaceId },
-      select: { id: true, origin: true, freshserviceTicketId: true, status: true, priority: true, resolvedAt: true, createdAt: true },
+      select: { id: true, origin: true, freshserviceTicketId: true, status: true, priority: true, resolvedAt: true, createdAt: true, freshserviceUpdatedAt: true },
     });
     if (!ticket || !ticket.freshserviceTicketId) {
       return { changed: false };
@@ -3921,7 +4168,12 @@ class SyncService {
         activityType: 'status_changed',
         performedBy: 'FreshService',
         performedAt: now,
-        details: { oldStatus: ticket.status, newStatus: fsTerminal, note: `Mirrored back from FreshService — the ticket was ${fsTerminal.toLowerCase()} there.` },
+        details: {
+          oldStatus: ticket.status,
+          newStatus: fsTerminal,
+          note: `Mirrored back from FreshService — the ticket was ${fsTerminal.toLowerCase()} there.`,
+          ...this._fsActorDetails(null, 'freshservice_sync'),
+        },
       });
       await prisma.assignmentPipelineRun.updateMany({
         where: { ticketId: ticket.id, status: 'queued' },
@@ -3957,7 +4209,12 @@ class SyncService {
 
         // Status
         const fsStatusName = getStatusString(Number(fsTicket.status));
-        const statusChanged = fsStatusName !== current.status;
+        let statusChanged = fsStatusName !== current.status;
+        // RO-5: don't revert a status Ticket Pulse just wrote to FS while FS's
+        // updated_at still predates that write.
+        if (statusChanged && await this._statusWritebackHold({ id: ticket.id, status: current.status }, fsTicket.updated_at)) {
+          statusChanged = false;
+        }
         if (statusChanged) {
           patch.status = fsStatusName;
           patch.updatedAt = now;
@@ -3994,15 +4251,21 @@ class SyncService {
 
         const updated = await prisma.ticket.update({ where: { id: ticket.id }, data: patch });
         if (statusChanged) {
+          // Name the human when the cached FS feed knows them; otherwise this
+          // is a reconcile row ("FreshService", kind=reconcile).
+          const fsActor = await this._resolveFsActor(ticket.id, null, {
+            kind: 'status', since: ticket.freshserviceUpdatedAt || null, statusName: fsStatusName,
+          });
           await ticketActivityRepository.create({
             ticketId: ticket.id,
             activityType: 'status_changed',
-            performedBy: 'FreshService',
+            performedBy: fsActorLabel(fsActor?.name),
             performedAt: now,
             details: {
               oldStatus: current.status,
               newStatus: fsStatusName,
               note: `Status reconciled from FreshService on open: ${current.status} → ${fsStatusName}`,
+              ...this._fsActorDetails(fsActor, fsActor ? 'freshservice_sync' : 'reconcile'),
             },
           });
           if (TERMINAL_STATUSES.includes(fsStatusName)) {
@@ -4013,15 +4276,21 @@ class SyncService {
           }
         }
         if (assigneeChanged) {
+          const fsAssignActor = await this._resolveFsActor(ticket.id, null, {
+            kind: 'assignment', since: ticket.freshserviceUpdatedAt || null,
+          });
           await ticketActivityRepository.create({
             ticketId: ticket.id,
             activityType: targetTechId ? 'assigned' : 'status_changed',
-            performedBy: 'FreshService',
+            performedBy: fsActorLabel(fsAssignActor?.name),
             performedAt: now,
             details: {
+              fromTechId: current.assignedTechId ?? null,
+              toTechId: targetTechId,
               note: targetTechId
                 ? `Assignee reconciled from FreshService on open: ${targetTechName}`
                 : 'FreshService shows this ticket unassigned — cleared the stale local assignee',
+              ...this._fsActorDetails(fsAssignActor, fsAssignActor ? 'freshservice_sync' : 'reconcile'),
             },
           });
         }
@@ -4057,13 +4326,17 @@ class SyncService {
       where: { id: ticket.id },
       data: { status: newStatus, updatedAt: new Date() },
     });
-    await ticketActivityRepository.create({
-      ticketId: ticket.id,
-      activityType: 'status_changed',
-      performedBy: 'System',
-      performedAt: new Date(),
-      details: { oldStatus: ticket.status, newStatus, note: reason },
-    });
+    // TU-3d: one row per flip — a Spam/Deleted row that keeps getting
+    // re-observed must not re-log the same transition every open.
+    if (!(await this._recentDuplicateStatusChange(ticket.id, newStatus, reason))) {
+      await ticketActivityRepository.create({
+        ticketId: ticket.id,
+        activityType: 'status_changed',
+        performedBy: 'FreshService',
+        performedAt: new Date(),
+        details: { oldStatus: ticket.status, newStatus, note: reason, ...this._fsActorDetails(null, 'reconcile') },
+      });
+    }
     await prisma.assignmentPipelineRun.updateMany({
       where: { ticketId: ticket.id, status: 'queued' },
       data: { status: 'skipped_stale' },
@@ -4127,8 +4400,11 @@ class SyncService {
         origin: TICKET_ORIGIN.FRESHSERVICE,
         status: { notIn: TERMINAL_STATUSES },
       },
-      select: { id: true, freshserviceTicketId: true, subject: true, status: true },
-      orderBy: { updatedAt: 'asc' },
+      select: { id: true, freshserviceTicketId: true, subject: true, status: true, assignedTechId: true },
+      // Dedicated cursor (TU-3e): never-reconciled rows first, then the stalest
+      // check. updatedAt used to double as the cursor, which meant every
+      // verified ticket got a meaningless updated_at bump each sweep.
+      orderBy: [{ lastReconciledAt: { sort: 'asc', nulls: 'first' } }, { id: 'asc' }],
       take: BATCH_SIZE,
     });
 
@@ -4160,10 +4436,7 @@ class SyncService {
         // reconciliation queue and we don't burn the FS budget on it
         // every 5 minutes.
         if (fsTicket === FORBIDDEN_TICKET) {
-          await prisma.ticket.update({
-            where: { id: ticket.id },
-            data: { updatedAt: new Date() },
-          });
+          await this._touchReconciled(ticket.id);
           forbiddenCount++;
           continue;
         }
@@ -4188,19 +4461,24 @@ class SyncService {
 
           await prisma.ticket.update({
             where: { id: ticket.id },
-            data: { status: newStatus, updatedAt: new Date() },
+            data: { status: newStatus, lastReconciledAt: new Date() },
           });
-          await ticketActivityRepository.create({
-            ticketId: ticket.id,
-            activityType: 'status_changed',
-            performedBy: 'System',
-            performedAt: new Date(),
-            details: {
-              oldStatus: ticket.status,
-              newStatus,
-              note: reason,
-            },
-          });
+          // TU-3d: skip the audit row when the previous sweep already logged
+          // exactly this transition (the 956-identical-rows case).
+          if (!(await this._recentDuplicateStatusChange(ticket.id, newStatus, reason))) {
+            await ticketActivityRepository.create({
+              ticketId: ticket.id,
+              activityType: 'status_changed',
+              performedBy: 'FreshService',
+              performedAt: new Date(),
+              details: {
+                oldStatus: ticket.status,
+                newStatus,
+                note: reason,
+                ...this._fsActorDetails(null, 'reconcile'),
+              },
+            });
+          }
 
           // Clear queued assignment work for tickets that FreshService has
           // already removed/terminalized. Without this, a hard-deleted ticket
@@ -4255,13 +4533,16 @@ class SyncService {
             }
           }
 
-          await prisma.ticket.update({
-            where: { id: ticket.id },
-            data: {
-              updatedAt: new Date(),
-              assignedTechId: newAssignedTechId,
-            },
-          });
+          if ((ticket.assignedTechId ?? null) !== newAssignedTechId) {
+            await prisma.ticket.update({
+              where: { id: ticket.id },
+              data: { assignedTechId: newAssignedTechId, lastReconciledAt: new Date() },
+            });
+          } else {
+            // Verified, nothing drifted: advance the cursor WITHOUT bumping
+            // updated_at (raw SQL sidesteps Prisma's @updatedAt).
+            await this._touchReconciled(ticket.id);
+          }
 
           // Note: any pending_review pipeline run remains pending — the
           // existing "Decided > Manually in FreshService" sub-tab is built

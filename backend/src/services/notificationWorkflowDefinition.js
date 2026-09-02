@@ -26,6 +26,12 @@ export const NOTIFICATION_EVENT_TYPES = [
   'ticket.reply_received',
   'ticket.note_added',
   'ticket.status_changed',
+  // Field edits (MEGA 09-01 Phase TU, TU-5): priority / category / due dates /
+  // custom fields… by a human in TP, the public API (incl. Power Apps), an
+  // API resubmission, the workflow update_ticket node, or (opt-in per
+  // trigger) a human in FreshService via the sync diff. ONE choke point:
+  // ticketService._emitFieldsUpdated; sync/reconcile/mirror/AI never fire it.
+  'ticket.fields_updated',
   'ticket.public_reply_added',
   // Approvals (Phase 6)
   'approval.requested',
@@ -1148,6 +1154,7 @@ function eventLabel(triggerType) {
     'ticket.reply_received': 'Requester replied',
     'ticket.note_added': 'Internal note added',
     'ticket.status_changed': 'Status changed',
+    'ticket.fields_updated': 'Ticket updated (fields)',
     'ticket.public_reply_added': 'Agent replied to requester',
     'approval.requested': 'Approval requested',
     'approval.decided': 'Approval decided',
@@ -1161,7 +1168,7 @@ function eventLabel(triggerType) {
 }
 
 function defaultRecipients(triggerType) {
-  if (triggerType === 'ticket.assigned' || triggerType === 'ticket.reassigned') {
+  if (triggerType === 'ticket.assigned' || triggerType === 'ticket.reassigned' || triggerType === 'ticket.fields_updated') {
     return ['assigned_agent'];
   }
   return ['requester'];
@@ -1181,6 +1188,28 @@ function defaultTemplate(triggerType) {
       subject: 'Ticket reassigned: #{{ ticket.freshserviceTicketId }}',
       html: '<p>Ticket <strong>#{{ ticket.freshserviceTicketId }}</strong> has been reassigned to {{ assignedAgent.name }}.</p><p>{{ ticket.subject }}</p>',
       text: 'Ticket #{{ ticket.freshserviceTicketId }} has been reassigned to {{ assignedAgent.name }}.\n\n{{ ticket.subject }}',
+    };
+  }
+
+  if (triggerType === 'ticket.fields_updated') {
+    return {
+      subject: 'Ticket {{ ticket.displayRef }} updated by {{ event.extra.actorName }}: {{ event.extra.changedFields | join: ", " }}',
+      html: [
+        '<p><strong>{{ event.extra.actorName }}</strong> updated ticket <strong>{{ ticket.displayRef }}</strong> ({{ ticket.subject }}).</p>',
+        '{{ event.extra.changesTableHtml }}',
+        '{% if event.extra.reopened %}<p>The ticket was <strong>reopened</strong> by this update.</p>{% endif %}',
+        '<p><a href="{{ ticket.publicStatusUrl }}">Open the ticket</a></p>',
+      ].join(''),
+      text: [
+        '{{ event.extra.actorName }} updated ticket {{ ticket.displayRef }} ({{ ticket.subject }}).',
+        '',
+        '{{ event.extra.changesText }}',
+        '{% if event.extra.reopened %}',
+        'The ticket was reopened by this update.',
+        '{% endif %}',
+        '',
+        'Open the ticket: {{ ticket.publicStatusUrl }}',
+      ].join('\n'),
     };
   }
 
@@ -1286,7 +1315,7 @@ export function buildDefaultWorkflowDefinition(triggerType, options = {}) {
   const template = scheduleMode === 'after_hours' && triggerType === 'ticket.created'
     ? defaultAfterHoursTemplate()
     : defaultTemplate(triggerType);
-  return {
+  const definition = {
     version: 1,
     metadata: {
       label: eventLabel(triggerType),
@@ -1373,6 +1402,96 @@ export function buildDefaultWorkflowDefinition(triggerType, options = {}) {
       { id: 'template-to-send', source: 'template', target: 'send' },
     ],
   };
+  if (triggerType === 'ticket.note_added') withSystemNoteGuard(definition);
+  if (triggerType === 'ticket.fields_updated') withActorKindGuard(definition);
+  return definition;
+}
+
+/**
+ * "Ticket updated (fields)" (TU-6): the seeded default only reacts to
+ * changes a HUMAN in Ticket Pulse or the public API made — a VISIBLE
+ * `event.actorKind in [human, api]` condition sits between the noise guard
+ * and the recipients, so workflow/system/FreshService-side writes are
+ * excluded by a rule admins can see and edit, not by hidden engine logic.
+ */
+function withActorKindGuard(definition) {
+  const skipNoise = definition.nodes.find((n) => n.id === 'skip-noise');
+  const recipientsEdge = definition.edges.find((e) => e.id === 'condition-true-to-recipients');
+  if (!skipNoise || !recipientsEdge) return definition;
+  definition.nodes.splice(definition.nodes.indexOf(skipNoise) + 1, 0, {
+    id: 'human-or-api',
+    type: 'condition',
+    position: { x: 390, y: 0 },
+    data: {
+      label: 'Changed by a person or the API?',
+      conditionGroup: {
+        logic: 'all',
+        conditions: [{ field: 'event.actorKind', operator: 'in', value: ['human', 'api'] }],
+      },
+    },
+  });
+  recipientsEdge.target = 'human-or-api';
+  definition.edges.push(
+    { id: 'actor-kind-true-to-recipients', source: 'human-or-api', sourceHandle: 'true', target: 'recipients' },
+    { id: 'actor-kind-false-to-stop', source: 'human-or-api', sourceHandle: 'false', target: 'stop-skipped' },
+  );
+  return definition;
+}
+
+/**
+ * "Internal note added" (TU-3g): machine-written notes — the Power Apps /
+ * API resubmission diff, for one — used to mail the assignee like a human
+ * note. The seeded default now carries a VISIBLE `event.systemNote is false`
+ * condition between the noise guard and the recipients, so admins can see
+ * (and remove) the exclusion instead of wondering why nothing fired.
+ */
+function withSystemNoteGuard(definition) {
+  const skipNoise = definition.nodes.find((n) => n.id === 'skip-noise');
+  const recipientsEdge = definition.edges.find((e) => e.id === 'condition-true-to-recipients');
+  if (!skipNoise || !recipientsEdge) return definition;
+  definition.nodes.splice(definition.nodes.indexOf(skipNoise) + 1, 0, {
+    id: 'skip-system-notes',
+    type: 'condition',
+    position: { x: 390, y: 0 },
+    data: {
+      label: 'Skip notes written by the system',
+      conditionGroup: {
+        logic: 'all',
+        conditions: [{ field: 'event.systemNote', operator: 'is_false' }],
+      },
+    },
+  });
+  recipientsEdge.target = 'skip-system-notes';
+  definition.edges.push(
+    { id: 'system-note-true-to-recipients', source: 'skip-system-notes', sourceHandle: 'true', target: 'recipients' },
+    { id: 'system-note-false-to-stop', source: 'skip-system-notes', sourceHandle: 'false', target: 'stop-skipped' },
+  );
+  return definition;
+}
+
+/** Sample `event.extra` for the fields_updated preview (mirrors ticketChangeRenderer output). */
+export function sampleFieldsUpdatedExtra() {
+  const changes = {
+    priority: { from: 2, to: 3, label: 'Priority', fromLabel: 'Medium (2)', toLabel: 'High (3)' },
+    dueBy: { from: '2026-06-01T17:00:00.000Z', to: '2026-05-30T17:00:00.000Z', label: 'Due by', fromLabel: '2026-06-01T17:00:00.000Z', toLabel: '2026-05-30T17:00:00.000Z' },
+    'customFields.client_location': { from: 'Quebec', to: 'Montreal', label: 'Custom field: client_location', fromLabel: 'Quebec', toLabel: 'Montreal' },
+  };
+  const changesList = Object.entries(changes).map(([field, c]) => ({ field, ...c }));
+  return {
+    actorKind: 'human',
+    actorName: 'Cora Coordinator',
+    actorEmail: 'cora@example.com',
+    source: 'app',
+    changedFields: Object.keys(changes),
+    changedCount: changesList.length,
+    reopened: false,
+    changes,
+    changesList,
+    changesTableHtml: `<table><thead><tr><th>Field</th><th>Before</th><th>After</th></tr></thead><tbody>${
+      changesList.map((c) => `<tr><td><strong>${c.label}</strong></td><td>${c.fromLabel}</td><td>${c.toLabel}</td></tr>`).join('')}</tbody></table>`,
+    changesText: changesList.map((c) => `${c.label}: ${c.fromLabel} → ${c.toLabel}`).join('\n'),
+    auditRowId: 9001,
+  };
 }
 
 export function sampleEventContext(triggerType = 'ticket.created') {
@@ -1381,6 +1500,7 @@ export function sampleEventContext(triggerType = 'ticket.created') {
       type: triggerType,
       source: 'preview',
       occurredAt: '2026-05-29T19:00:00.000Z',
+      ...(triggerType === 'ticket.fields_updated' ? { extra: sampleFieldsUpdatedExtra() } : {}),
     },
     workspace: {
       id: 1,
@@ -1557,6 +1677,7 @@ export function notificationVariableCatalog(extraOutputFields = [], { customFiel
     variable('ticket.nativeNumber', 'Native ticket number', 'Ticket', 'Ticket Pulse native number (without the TP- prefix) — blank for FreshService-born tickets.', '1070'),
     variable('ticket.id', 'Internal ticket id', 'Ticket', 'Ticket Pulse internal database id (stable across both origins).', '4821'),
     variable('ticket.origin', 'Ticket origin', 'Ticket', 'Where the ticket was born: ticketpulse or freshservice.', 'ticketpulse'),
+    variable('ticket.createdVia', 'Created via', 'Ticket', 'How the ticket came to exist: app, email, api, freshservice_sync, held_reply (resolved from the mailbox hold queue), agent_cc (agent reply-all with the mailbox in Cc) or forward.', 'email'),
     variable('ticket.subject', 'Subject', 'Ticket', 'Ticket subject line.', 'VPN access problem'),
     variable('ticket.descriptionText', 'Description', 'Ticket', 'Plain-text ticket description.', 'User cannot connect to VPN from home.'),
     variable('ticket.status', 'Status', 'Ticket', 'Ticket status label.', 'Open'),
@@ -1642,6 +1763,16 @@ export function notificationVariableCatalog(extraOutputFields = [], { customFiel
     variable('afterHoursSupport.activeContact.source', 'Active contact source', 'After-hours Support', 'manual, weekly_rotation, roster_fallback, legacy_fallback, or none.', 'manual'),
     variable('event.type', 'Event type', 'Event', 'Workflow trigger event type.', 'ticket.assigned'),
     variable('event.occurredAt', 'Event time', 'Event', 'Timestamp used for this workflow run.', '2026-05-29T18:42:00.000Z'),
+    // "Ticket updated (fields)" payload (TU-6) — rendered by ticketChangeRenderer.
+    variable('event.extra.actorName', 'Updated by (name)', 'Ticket update', 'Who made the field change — the agent, the API key name, "Notification workflow", or the FreshService actor.', 'Cora Coordinator'),
+    variable('event.extra.actorKind', 'Updated by (kind)', 'Ticket update', 'human, api, system, workflow or freshservice.', 'human'),
+    variable('event.extra.source', 'Update source', 'Ticket update', 'app, api:<key name>, api:resubmission, macro:<name>, workflow:<id> or freshservice_sync.', 'app'),
+    variable('event.extra.changedFields', 'Changed fields', 'Ticket update', 'Field keys that changed (custom fields as customFields.<key>). Use {{ event.extra.changedFields | join: ", " }}.', 'priority, dueBy'),
+    variable('event.extra.changedCount', 'Changed field count', 'Ticket update', 'Number of fields in this update (coalesced edits add up).', '2'),
+    variable('event.extra.changesTableHtml', 'Changes table (HTML)', 'Ticket update', 'Ready-made Field / Before / After table for HTML bodies.', '<table>…</table>'),
+    variable('event.extra.changesText', 'Changes (text)', 'Ticket update', 'One "Label: before → after" line per field for plain-text bodies.', 'Priority: Medium (2) → High (3)'),
+    variable('event.extra.changesList', 'Changes (list)', 'Ticket update', 'Array of { field, label, fromLabel, toLabel } for Liquid loops.', ''),
+    variable('event.extra.reopened', 'Reopened by this update', 'Ticket update', 'True when an API resubmission reopened a Resolved ticket.', 'false'),
     variable('state.recipients.to', 'To recipients', 'Recipients', 'Resolved To recipients.', 'requester@example.com'),
     variable('state.recipients.cc', 'Cc recipients', 'Recipients', 'Resolved Cc recipients.', ''),
     variable('state.recipients.bcc', 'Bcc recipients', 'Recipients', 'Resolved Bcc recipients.', ''),

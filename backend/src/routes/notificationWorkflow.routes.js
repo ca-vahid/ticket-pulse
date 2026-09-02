@@ -1298,6 +1298,14 @@ router.get(
         const statuses = await statusService.listStatuses(req.workspaceId);
         if (statuses.length > 0) field.options = statuses.map((s) => s.name);
       }
+      // event.changedFields (TU-7): built-ins + this workspace's custom-field keys.
+      if (spec.dynamicOptions === 'changed-fields') {
+        try {
+          const { default: customFieldService } = await import('../services/customFieldService.js');
+          const definitions = await customFieldService.listDefinitions(req.workspaceId);
+          field.options = [...(spec.options || []), ...definitions.map((d) => `customFields.${d.key}`)];
+        } catch { /* static built-ins stand alone */ }
+      }
       fields.push(field);
     }
     // Custom fields, TYPED from their definitions (FR 08-05 Phase 1b): the

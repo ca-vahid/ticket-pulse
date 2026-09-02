@@ -17,6 +17,16 @@ jsonLogic.add_operation('regex_match', (value, pattern) => {
 // The typed custom-field coercion ops come from the model itself (single
 // source of truth) — register them exactly like the engine does.
 registerCustomFieldConditionOps(jsonLogic);
+// List membership ops (engine-registered; mirrored here, case-insensitive).
+const lowerList = (v) => (Array.isArray(v) ? v : [v]).map((x) => String(x ?? '').toLowerCase());
+jsonLogic.add_operation('list_has_any', (haystack, wanted) => {
+  const have = lowerList(haystack || []);
+  return lowerList(wanted).some((w) => have.includes(w));
+});
+jsonLogic.add_operation('list_has_all', (haystack, wanted) => {
+  const have = lowerList(haystack || []);
+  return lowerList(wanted).every((w) => have.includes(w));
+});
 
 const scope = {
   ticket: {
@@ -314,5 +324,38 @@ describe('ticket.statusBase (Phase 8c custom statuses)', () => {
       logic: 'all',
       conditions: [{ field: 'ticket.statusBase', operator: 'is', value: 'Open' }],
     })).toEqual([]);
+  });
+});
+
+// MEGA 09-01 Phase TU (TU-7): fields_updated condition fields.
+describe('fields_updated condition fields (TU-7)', () => {
+  const eventScope = {
+    event: { extra: { changedFields: ['priority', 'customFields.client_location'], actorKind: 'api', source: 'api:Coreshack intake', changedCount: 2, reopened: true } },
+  };
+  test('catalog shape: list / enum / string / number / boolean with the workspace hook on changedFields', () => {
+    expect(CONDITION_FIELDS['event.changedFields']).toEqual(expect.objectContaining({ type: 'list', path: 'event.extra.changedFields', dynamicOptions: 'changed-fields' }));
+    expect(CONDITION_FIELDS['event.changedFields'].options).toEqual(expect.arrayContaining(['priority', 'dueBy', 'ccEmails']));
+    expect(CONDITION_FIELDS['event.actorKind']).toEqual(expect.objectContaining({ type: 'enum', options: ['human', 'api', 'system', 'workflow', 'freshservice'] }));
+    expect(CONDITION_FIELDS['event.source'].type).toBe('string');
+    expect(CONDITION_FIELDS['event.changedCount'].type).toBe('number');
+    expect(CONDITION_FIELDS['event.reopened'].type).toBe('boolean');
+  });
+  test('has_any / has_none on changedFields, actorKind in, changedCount gte, reopened is_true', () => {
+    const group = {
+      logic: 'all',
+      conditions: [
+        { field: 'event.changedFields', operator: 'has_any', value: ['priority', 'dueBy'] },
+        { field: 'event.changedFields', operator: 'has_none', value: ['subject'] },
+        { field: 'event.actorKind', operator: 'in', value: ['human', 'api'] },
+        { field: 'event.source', operator: 'contains', value: 'api:' },
+        { field: 'event.changedCount', operator: 'gte', value: 2 },
+        { field: 'event.reopened', operator: 'is_true' },
+      ],
+    };
+    expect(validateConditionGroup(group)).toEqual([]);
+    expect(jsonLogic.apply(compileConditionGroup(group), eventScope)).toBe(true);
+    expect(jsonLogic.apply(compileConditionGroup({ logic: 'all', conditions: [{ field: 'event.changedFields', operator: 'has_all', value: ['priority', 'subject'] }] }), eventScope)).toBe(false);
+    // Absent payload (a non-fields event) fails closed on is_true and passes is_false.
+    expect(jsonLogic.apply(compileConditionGroup({ logic: 'all', conditions: [{ field: 'event.reopened', operator: 'is_false' }] }), { event: {} })).toBe(true);
   });
 });

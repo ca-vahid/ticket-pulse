@@ -9,10 +9,14 @@ import { normalizeSubject } from './duplicateBurstService.js';
 import { resolveCategoryNames } from './categoryNameResolver.js';
 import { TICKET_ORIGIN, TICKET_SOURCE, ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { ValidationError } from '../utils/errors.js';
-import { escapeHtml } from '../utils/htmlContent.js';
 import {
   appendRevision, bodyToHtml, descriptionAlreadyContains, formatRevisionDate, htmlToText,
 } from '../utils/descriptionRevisions.js';
+// Diff-note renderers moved to the shared ticketChangeRenderer (TU-5); kept
+// re-exported here for existing importers/tests.
+import { renderDiffNoteHtml, renderDiffNoteText } from './ticketChangeRenderer.js';
+
+export { renderDiffNoteHtml, renderDiffNoteText };
 
 /**
  * API resubmission upsert (Mega 08-31 Phase PA, QA #4).
@@ -288,9 +292,10 @@ class TicketResubmissionService {
       diff.status = { from: ticket.status, to: target };
     }
 
-    // ---- apply scalar/description changes
+    // ---- apply scalar/description changes (emitEvent:false — ONE aggregated
+    // ticket.fields_updated fires below for the whole resubmission, TU-5)
     if (Object.keys(fields).length) {
-      await ticketService.updateTicketFields(ticket.id, workspaceId, fields, actor);
+      await ticketService.updateTicketFields(ticket.id, workspaceId, fields, actor, { emitEvent: false });
       for (const k of Object.keys(fields)) {
         if (k === 'internalSubcategoryId') continue;
         changedFields.push(k === 'internalCategoryId' ? 'category' : k);
@@ -311,7 +316,7 @@ class TicketResubmissionService {
       }
       if (Object.keys(changedValues).length) {
         try {
-          await customFieldService.setValues(ticket.id, workspaceId, changedValues, actor);
+          await customFieldService.setValues(ticket.id, workspaceId, changedValues, actor, { emitEvent: false });
         } catch (err) {
           // A retired definition still owns its key (setValuesAtCreate accepted
           // it) but setValues only knows active ones — merge directly.
@@ -335,16 +340,19 @@ class TicketResubmissionService {
     // ---- private note with the before/after table (NEVER addReply — that emails requester + cc)
     let noteId = null;
     try {
+      // systemNote (TU-3g): the diff note is machine-written — stored with
+      // authorType 'system' and flagged on the note_added event so the
+      // default "Internal note added" workflow skips it visibly.
       const note = await ticketService.addPrivateNote(ticket.id, workspaceId, {
         bodyHtml: renderDiffNoteHtml({ ctx, changedFields, diff, reopened }),
         bodyText: renderDiffNoteText({ ctx, changedFields, diff, reopened }),
-      }, actor);
+      }, actor, [], { systemNote: true });
       noteId = note?.id ?? null;
     } catch (err) {
       logger.warn(`Resubmission note failed for ticket ${ticket.id} (non-fatal): ${err.message}`);
     }
 
-    await ticketService._audit(ticket.id, 'resubmitted', actor, {
+    const auditRow = await ticketService._audit(ticket.id, 'resubmitted', actor, {
       via: 'api_v1',
       matchedBy: ctx.matchedBy || null,
       externalRef: ctx.externalRef || ticket.externalRef || null,
@@ -354,6 +362,16 @@ class TicketResubmissionService {
     // updateTicketFields doesn't touch lastRealActivityAt (only _audit does,
     // best-effort) — bump it explicitly so the ticket surfaces in queue sorts.
     await prisma.ticket.update({ where: { id: ticket.id }, data: { lastRealActivityAt: new Date() } }).catch(() => {});
+
+    // ONE aggregated ticket.fields_updated (TU-5) with the full diff — status
+    // is excluded (changeStatus above already fired ticket.status_changed).
+    // Emitted AFTER the note/audit so a coalesced email reads the final row.
+    const eventDiff = Object.fromEntries(Object.entries(diff).filter(([field]) => field !== 'status'));
+    if (Object.keys(eventDiff).length) {
+      await ticketService._emitFieldsUpdated?.({
+        ticket, changes: eventDiff, actor, source: 'api:resubmission', reopened, auditRowId: auditRow?.id ?? null,
+      });
+    }
 
     // ---- AI re-triage: classification only, and only when it can't bounce an agent
     let aiRetriage = { queued: false };
@@ -379,48 +397,6 @@ class TicketResubmissionService {
       return false;
     }
   }
-}
-
-const FIELD_LABELS = {
-  subject: 'Subject', priority: 'Priority', ticketType: 'Type', category: 'Category', group: 'Group',
-  internalGroup: 'Internal group', ccEmails: 'Also for (cc)', description: 'Description', status: 'Status',
-};
-const PRIORITY_NAMES = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Urgent' };
-function cell(field, v) {
-  if (v === null || v === undefined || v === '') return '—';
-  if (field === 'priority' && PRIORITY_NAMES[v]) return `${PRIORITY_NAMES[v]} (${v})`;
-  return typeof v === 'object' ? JSON.stringify(v) : String(v);
-}
-function labelFor(field) {
-  if (field.startsWith('customFields.')) return `Custom field: ${field.slice('customFields.'.length)}`;
-  return FIELD_LABELS[field] || field;
-}
-function matchedByText(matchedBy) {
-  if (matchedBy === 'external_ref') return 'matched by externalRef';
-  if (matchedBy === 'custom_field_key') return 'matched by the workspace custom-field key';
-  if (matchedBy === 'subject_heuristic') return 'matched by requester + subject (heuristic)';
-  return 'matched';
-}
-
-export function renderDiffNoteHtml({ ctx, changedFields, diff, reopened }) {
-  const head = `<p><strong>Resubmitted via API</strong> — key "${escapeHtml(ctx.apiKeyName || ctx.actor?.name || 'api')}", ${escapeHtml(matchedByText(ctx.matchedBy))}${reopened ? ' · <strong>reopened</strong>' : ''}.</p>`;
-  const rows = Object.entries(diff).map(([field, { from, to }]) => (
-    `<tr><td><strong>${escapeHtml(labelFor(field))}</strong></td><td>${escapeHtml(cell(field, from))}</td><td>${escapeHtml(cell(field, to))}</td></tr>`
-  )).join('');
-  const table = rows
-    ? `<table><thead><tr><th>Field</th><th>Before</th><th>After</th></tr></thead><tbody>${rows}</tbody></table>`
-    : '<p>No field values changed.</p>';
-  const summary = `<p>Changed: ${escapeHtml(changedFields.join(', ') || 'nothing')}.</p>`;
-  return `${head}${table}${summary}`;
-}
-
-export function renderDiffNoteText({ ctx, changedFields, diff, reopened }) {
-  const lines = [`Resubmitted via API — key "${ctx.apiKeyName || ctx.actor?.name || 'api'}", ${matchedByText(ctx.matchedBy)}${reopened ? ' · reopened' : ''}.`];
-  for (const [field, { from, to }] of Object.entries(diff)) {
-    lines.push(`${labelFor(field)}: ${cell(field, from)} → ${cell(field, to)}`);
-  }
-  lines.push(`Changed: ${changedFields.join(', ') || 'nothing'}.`);
-  return lines.join('\n');
 }
 
 export default new TicketResubmissionService();

@@ -146,7 +146,10 @@ const prismaProxy = new Proxy(prismaMock, {
 
 const noiseRuleServiceMock = { evaluate: jest.fn().mockResolvedValue({ isNoise: false, ruleId: null }) };
 const ticketActivityRepositoryMock = { create: jest.fn().mockResolvedValue({}), getByTicketId: jest.fn().mockResolvedValue([]) };
-const lifecycleMock = { emitTicketLifecycleNotifications: jest.fn().mockResolvedValue({ status: 'completed' }) };
+const lifecycleMock = {
+  emitTicketLifecycleNotifications: jest.fn().mockResolvedValue({ status: 'completed' }),
+  emitTicketEvent: jest.fn().mockResolvedValue({ status: 'completed' }),
+};
 const requesterRepositoryMock = {
   findByEmail: jest.fn().mockResolvedValue({ id: 40, name: 'Jane Doe', email: 'jdoe@bgcengineering.ca', department: null, freshserviceId: null }),
   createNative: jest.fn(),
@@ -516,5 +519,31 @@ describe('PATCH /api/v1/tickets/:id — externalRef set-once', () => {
     expect(taken.status).toBe(409);
     expect(taken.body.code).toBe('external_ref_taken');
     expect(db.tickets.get(b.body.data.id).externalRef).toBe('sp-projectrequests-2');
+  });
+});
+
+// MEGA 09-01 Phase TU (TU-5/TU-12): a Power Apps re-POST with a priority + a
+// custom-field change fires exactly ONE ticket.fields_updated (actorKind api,
+// source api:resubmission) — and the diff note it writes is a system note.
+describe('POST /api/v1/tickets resubmission → ONE ticket.fields_updated', () => {
+  test('priority + custom field re-POST → one aggregated fields_updated; the note event is flagged systemNote', async () => {
+    const first = await post(PA);
+    expect(first.status).toBe(201);
+    lifecycleMock.emitTicketEvent.mockClear();
+
+    const second = await post({ ...PA, priority: 3, customFields: { ...PA.customFields, clientLocation: 'Montreal' } });
+    expect(second.status).toBe(200);
+    expect(second.body.data.id).toBe(first.body.data.id);
+
+    const fieldsEvents = lifecycleMock.emitTicketEvent.mock.calls.filter(([type]) => type === 'ticket.fields_updated');
+    expect(fieldsEvents).toHaveLength(1);
+    const [, ticketId, options] = fieldsEvents[0];
+    expect(ticketId).toBe(first.body.data.id);
+    expect(options.extra).toEqual(expect.objectContaining({ actorKind: 'api', source: 'api:resubmission', reopened: false }));
+    expect(options.extra.changedFields).toEqual(expect.arrayContaining(['priority', 'customFields.client_location']));
+    expect(options.extra.changes.priority).toEqual(expect.objectContaining({ from: 2, to: 3 }));
+    const noteEvents = lifecycleMock.emitTicketEvent.mock.calls.filter(([type]) => type === 'ticket.note_added');
+    expect(noteEvents).toHaveLength(1);
+    expect(noteEvents[0][2].extra.systemNote).toBe(true);
   });
 });

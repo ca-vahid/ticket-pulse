@@ -166,6 +166,7 @@ model Workspace {
   groups                            Group[]
   mirrorJobs                        MirrorJob[]
   mailboxConnections                MailboxConnection[]
+  mailboxHeldMessages               MailboxHeldMessage[]
   ticketApprovals                   TicketApproval[]
   approvalCategories                ApprovalCategory[]
   apiKeys                           ApiKey[]
@@ -922,14 +923,62 @@ model MailboxConnection {
   deltaLink              String?   @map("delta_link") @db.Text
   notificationStatus     String?   @map("notification_status") @db.VarChar(30)
   lastNotificationAt     DateTime? @map("last_notification_at") @db.Timestamptz(6)
+  // Phase RL (RL-4): what happens to inbound mail the matching ladder cannot
+  // thread. create = always a ticket (pre-RL); replies_only = never a ticket
+  // (held); hold_unmatched (default) = fresh mail creates, mail with reply
+  // evidence and no known reference is held for review.
+  newTicketPolicy        String    @default("hold_unmatched") @map("new_ticket_policy") @db.VarChar(20)
+  // Phase RL (RL-3 rule 2): an agent's reply-all with this mailbox in Cc
+  // creates a ticket for the external requester. Per-mailbox kill switch.
+  agentCcIntake          Boolean   @default(true) @map("agent_cc_intake")
   createdBy              String?   @map("created_by") @db.VarChar(255)
   createdAt              DateTime  @default(now()) @map("created_at")
   updatedAt              DateTime  @updatedAt @map("updated_at")
+
+  heldMessages           MailboxHeldMessage[]
 
   @@unique([workspaceId, address])
   @@index([isEnabled])
   @@index([subscriptionId])
   @@map("mailbox_connections")
+}
+
+// Phase RL (RL-4): inbound mail the ingest decision table could not safely
+// thread or create from — parked for a human (attach to a ticket / create a
+// ticket / discard). One row per (connection, RFC Message-ID); the mapped
+// Graph email is kept in emailPayload so attach/create re-run the exact
+// ingest paths. Held mail never fires ticket.created.
+model MailboxHeldMessage {
+  id                Int               @id @default(autoincrement())
+  workspaceId       Int               @map("workspace_id")
+  workspace         Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  connectionId      Int               @map("connection_id")
+  connection        MailboxConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  internetMessageId String            @map("internet_message_id") @db.VarChar(255)
+  fromEmail         String?           @map("from_email") @db.VarChar(255)
+  fromName          String?           @map("from_name") @db.VarChar(255)
+  toEmails          Json?             @map("to_emails")
+  ccEmails          Json?             @map("cc_emails")
+  subject           String?           @db.Text
+  snippet           String?           @db.VarChar(500)
+  bodyHtml          String?           @map("body_html") @db.Text
+  emailPayload      Json?             @map("email_payload")
+  receivedAt        DateTime?         @map("received_at") @db.Timestamptz(6)
+  // unknown_reference | agent_reply_no_requester | ambiguous_sender | policy_replies_only
+  reason            String            @db.VarChar(40)
+  bestGuessTicketId Int?              @map("best_guess_ticket_id")
+  candidates        Json?
+  decision          Json?
+  // held | attached | created | discarded
+  status            String            @default("held") @db.VarChar(20)
+  resolvedBy        String?           @map("resolved_by") @db.VarChar(255)
+  resolvedAt        DateTime?         @map("resolved_at") @db.Timestamptz(6)
+  resolvedTicketId  Int?              @map("resolved_ticket_id")
+  createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([connectionId, internetMessageId])
+  @@index([workspaceId, status])
+  @@map("mailbox_held_messages")
 }
 
 model WorkspaceWebhookConfig {
@@ -1127,6 +1176,10 @@ model Ticket {
   // Last REAL activity (message, assignment, status change) — updated_at and
   // freshservice_updated_at both get bumped by system/sync noise; this doesn't.
   lastRealActivityAt                  DateTime? @map("last_real_activity_at")
+  // Reconcile-sweep cursor (TU-3e): when the FS existence/spam check last
+  // verified this row. Replaces updatedAt as the queue order so verified
+  // tickets no longer get a meaningless updated_at bump every sweep.
+  lastReconciledAt                    DateTime? @map("last_reconciled_at")
   lastIngestSource                    String?   @map("last_ingest_source") @db.VarChar(60)
   lastIngestedAt                      DateTime? @map("last_ingested_at")
   lastWebhookIngestedAt               DateTime? @map("last_webhook_ingested_at")
@@ -1238,6 +1291,7 @@ model Ticket {
   @@unique([workspaceId, externalRef], map: "uq_tickets_ws_external_ref")
   @@index([workspaceId])
   @@index([workspaceId, lastRealActivityAt(sort: Desc)])
+  @@index([workspaceId, origin, lastReconciledAt], map: "idx_tickets_ws_origin_last_reconciled")
   // Sync health's data-freshness signal (Phase SH): per-workspace
   // MAX(last_ingested_at) is polled every health check — this keeps it an
   // index probe instead of a per-workspace scan.
@@ -2686,6 +2740,11 @@ model NotificationDelivery {
   fromAddress             String?                      @map("from_address") @db.VarChar(255)
   provider                String?                      @db.VarChar(50)
   providerMessageId       String?                      @map("provider_message_id") @db.VarChar(255)
+  // Phase RL (RL-5): the RFC Message-ID the mail actually left with (Graph
+  // internetMessageId, or the SendGrid lane's minted `<tp-…>` id) — what a
+  // reply's In-Reply-To carries. providerMessageId keeps SendGrid's
+  // x-message-id for support lookups.
+  messageId               String?                      @map("message_id") @db.VarChar(255)
   retryCount              Int                          @default(0) @map("retry_count")
   error                   String?                      @db.Text
   dedupeKey               String                       @unique @map("dedupe_key") @db.VarChar(255)
@@ -2707,6 +2766,7 @@ model NotificationDelivery {
   @@index([notificationType])
   @@index([channel])
   @@index([workspaceId, providerMessageId], map: "notification_deliveries_ws_provider_message_id_idx")
+  @@index([workspaceId, messageId], map: "notification_deliveries_ws_message_id_idx")
   @@map("notification_deliveries")
 }
 

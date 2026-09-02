@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'reac
 import {
   Activity, AlertCircle, ArrowLeft, Bell, BellRing, Bot, Building2, CalendarClock, Check, CheckCircle2,
   CheckSquare, ChevronDown, ChevronLeft, ChevronRight, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Flame, Forward, Hand,
-  GitMerge, History, Image as ImageIcon, Link2, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, Paperclip, Pencil, Phone, Plus,
+  GitMerge, History, Image as ImageIcon, Inbox, Link2, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, Paperclip, Pencil, Phone, Plus,
   RefreshCw, Send, ShieldCheck, Smartphone, Smile, Sparkles, Stamp, StickyNote, Trash2, UserRound, VolumeX, X, XCircle,
 } from 'lucide-react';
 import AttachmentPreviewModal from '../components/tickets/AttachmentPreviewModal';
@@ -37,6 +37,10 @@ import {
   pipelineTriggerLabel, ticketCategoryLabels, ticketSourceLabel, timeAgo,
 } from '../components/tickets/ticketUi';
 import { FRESHSERVICE_DOMAIN } from '../components/tech-detail/constants';
+import {
+  ActorKindChip, activityActorKind, collapseConsecutive, fsActorName, isMachineActivity,
+  readHideMachinePreference, spanLabel, writeHideMachinePreference,
+} from '../components/tickets/activityKind';
 
 // UUID for the composer's Idempotency-Key (Phase DR3). crypto.randomUUID is
 // secure-context only; the fallback is plenty for a per-session nonce.
@@ -98,8 +102,39 @@ const HISTORY_STYLES = {
   task_status_changed: { icon: CheckSquare, tone: 'bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-300' },
   rejected: { icon: X, tone: 'bg-red-100 dark:bg-red-500/20 text-red-600 dark:text-red-300' },
   group_changed: { icon: Building2, tone: 'bg-sky-100 dark:bg-sky-500/20 text-sky-600 dark:text-sky-300' },
+  // Agent-forwarded / Cc'd intake (Phase FW): the original sender became the requester.
+  forwarded_intake: { icon: Inbox, tone: 'bg-violet-100 dark:bg-violet-500/20 text-violet-600 dark:text-violet-300' },
+  forwarded_intake_unparsed: { icon: Inbox, tone: 'bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-300' },
+  agent_cc_intake: { icon: Inbox, tone: 'bg-violet-100 dark:bg-violet-500/20 text-violet-600 dark:text-violet-300' },
+  // Machine bookkeeping rows (TU-1) — chipped and hidden by default.
+  mirror_conflict: { icon: RefreshCw, tone: 'bg-muted text-muted-foreground' },
+  fs_write_back: { icon: ExternalLink, tone: 'bg-sky-100 dark:bg-sky-500/20 text-sky-600 dark:text-sky-300' },
+  custom_fields_changed: { icon: Pencil, tone: 'bg-muted text-muted-foreground' },
+  workflow_updated_ticket: { icon: Bot, tone: 'bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-300' },
+  resubmitted: { icon: RefreshCw, tone: 'bg-indigo-100 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-300' },
   default: { icon: History, tone: 'bg-muted text-muted-foreground' },
 };
+
+// FS activity-feed lines we surface as History rows (RO-2): "Dominic Bautista
+// set Status as Closed" → "Closed by Dominic Bautista in FreshService".
+const FS_EVENT_PATTERNS = {
+  status_event: /set Status as (.+?)\s*$/i,
+  assignment_event: /set Agent as (.+?)\s*$/i,
+  group_event: /set Group as (.+?)(?:\s*,\s*set\s+.*|\s+and\s+set\s+.*)?\s*$/i,
+};
+export function describeFsEvent(entry) {
+  const text = String(entry?.content || entry?.bodyText || '').trim();
+  const pattern = FS_EVENT_PATTERNS[entry?.eventType];
+  if (!pattern) return null;
+  const m = pattern.exec(text);
+  if (!m) return null;
+  const value = m[1].trim();
+  if (entry.eventType === 'status_event') return { kind: 'status', value, verb: value };
+  if (entry.eventType === 'assignment_event') {
+    return { kind: 'assignment', value, verb: /^none$/i.test(value) ? 'Unassigned' : `Assigned to ${value}` };
+  }
+  return { kind: 'group', value, verb: /^none$/i.test(value) ? 'Group cleared' : `Group set to ${value}` };
+}
 
 // Known-tag detector (QA 08-06 #5): plain text carrying angle-bracket tokens
 // like <Processed> renders via the pre-wrap branch with the tokens intact.
@@ -311,6 +346,34 @@ function AttachmentChip({ attachment, onPreview }) {
  * replies sit RIGHT with a blue tint (avatars + role + channel on both sides),
  * internal notes stay full-width amber so they can't be mistaken for either.
  */
+/**
+ * Forwarded / agent-filed intake metadata for a thread entry. Forwards ride
+ * `rawPayload.forwarded` (kind 'forward'); an agent reply-all with the mailbox
+ * in Cc rides `rawPayload.agentIntake` (kind 'agent_cc') on the agent's own
+ * entry - normalised here so the chips read both the same way.
+ */
+export function forwardedMetaOf(entry) {
+  const raw = entry?.rawPayload;
+  if (!raw || typeof raw !== 'object') return null;
+  if (raw.forwarded && typeof raw.forwarded === 'object') return raw.forwarded;
+  const ai = raw.agentIntake;
+  if (ai && typeof ai === 'object' && ai.kind === 'agent_cc') {
+    const requester = ai.requester && typeof ai.requester === 'object' ? ai.requester : (ai.requester ? { email: ai.requester } : null);
+    return {
+      kind: 'agent_cc',
+      byName: entry.actorName || null,
+      byEmail: entry.actorEmail || null,
+      byTechnicianId: ai.technicianId ?? null,
+      receivedAt: entry.occurredAt || entry.createdAt || null,
+      originalFrom: requester,
+      client: ai.client || null,
+      parser: ai.parser || null,
+      hasQuotedOriginal: Boolean(ai.hasQuotedOriginal),
+    };
+  }
+  return null;
+}
+
 export function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, photoFor, onCopy, canDelete = false, onDelete, deleting = false, canEdit = false, onEdit, customFields = null, onEditField = null, onCopied = null, onFilterNavigate = undefined }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   // Inline note editing (FR 08-07 #8): the pencil swaps the note body for the
@@ -347,6 +410,18 @@ export function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, ph
   const viaEmail = entry.source === 'email_inbound' || Boolean(entry.emailMessageId)
     || (entry.incoming === true && isAgentAuthor);
   const apEvent = approvalEventMeta(entry);
+  // Agent-forwarded / Cc'd intake (Phase FW): the entry is the ORIGINAL
+  // sender's message, re-attributed; the forwarding agent rides rawPayload.
+  const forwarded = forwardedMetaOf(entry);
+  const forwardedBy = forwarded?.byName || forwarded?.byEmail || 'an agent';
+  const forwardedTitle = forwarded
+    ? [
+      forwarded.kind === 'agent_cc' ? `Filed by ${forwardedBy} (Cc'd on the original email)` : `Forwarded by ${forwardedBy}`,
+      forwarded.originalFrom?.email ? `Original sender: ${forwarded.originalFrom.name || ''} <${forwarded.originalFrom.email}>`.replace('  ', ' ') : null,
+      forwarded.originalSubject ? `Original subject: ${forwarded.originalSubject}` : null,
+      forwarded.receivedAt ? `Received by mailbox ${new Date(forwarded.receivedAt).toLocaleString()}` : null,
+    ].filter(Boolean).join('\n')
+    : '';
 
   // Workflow-written field cards (structured rawPayload discriminator — never
   // regex): a dedicated interactive card that keeps its timeline position.
@@ -439,6 +514,16 @@ export function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, ph
             </span>
           )}
           {viaEmail && <span className="text-[10px] text-muted-foreground/75">via email</span>}
+          {forwarded && (
+            <span
+              data-testid="forwarded-intake-chip"
+              className="inline-flex items-center gap-1 text-[10px] font-semibold text-violet-800 dark:text-violet-100 bg-violet-100 dark:bg-violet-500/25 border border-violet-300 dark:border-violet-400/40 rounded-full px-1.5 py-0.5"
+              title={forwardedTitle}
+            >
+              <Inbox className="w-2.5 h-2.5" aria-hidden="true" />
+              {forwarded.kind === 'agent_cc' ? `Filed by ${forwardedBy} (Cc)` : `Forwarded by ${forwardedBy}`}
+            </span>
+          )}
           <span className="ml-auto flex items-center gap-1">
             {canEdit && isNote && entry.authorType !== 'system' && !editing && (
               <button
@@ -495,9 +580,14 @@ export function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, ph
                 edited {formatDayTime(entry.editedAt)} · {timeAgo(entry.editedAt)}
               </span>
             )}
-            <span className="text-xs text-muted-foreground/75 whitespace-nowrap" title={new Date(entry.occurredAt).toLocaleString()}>
-              {formatDayTime(entry.occurredAt)}
-              {' · '}{timeAgo(entry.occurredAt)}
+            <span
+              className="text-xs text-muted-foreground/75 whitespace-nowrap"
+              title={forwarded?.originalDate
+                ? `Original message date · received by mailbox ${new Date(forwarded.receivedAt || entry.occurredAt).toLocaleString()}`
+                : new Date(entry.occurredAt).toLocaleString()}
+            >
+              {formatDayTime(forwarded?.originalDate || entry.occurredAt)}
+              {' · '}{timeAgo(forwarded?.originalDate || entry.occurredAt)}
             </span>
           </span>
         </div>
@@ -1093,12 +1183,39 @@ export default function TicketDetail() {
     return map;
   }, [meta?.technicians]);
 
+  // Phase FW: the requester was swapped in from an agent's forward / Cc —
+  // the first thread entry carrying rawPayload.forwarded tells the story.
+  const forwardedIntake = useMemo(() => {
+    const metas = (ticket?.thread || []).map((e) => forwardedMetaOf(e)).filter(Boolean);
+    if (!metas.length) return null;
+    return metas.find((m) => m.kind === 'forwarded_intake' || m.kind === 'forward' || m.kind === 'agent_cc') || metas[0];
+  }, [ticket?.thread]);
+
+  // History tab machine filter (TU-2): remembered per viewer, default ON.
+  const [hideMachine, setHideMachine] = useState(() => readHideMachinePreference());
+  const toggleHideMachine = useCallback(() => {
+    setHideMachine((prev) => {
+      writeHideMachinePreference(!prev);
+      return !prev;
+    });
+  }, []);
+
   const historyItems = useMemo(() => {
     const items = [];
     const humanize = (s) => String(s || '').replace(/_/g, ' ');
+    // Attributed sync rows (RO-1) — used to drop the duplicate FS feed line
+    // for the same transition (±3 min) so a close reads ONCE.
+    const attributedStatus = [];
+    const attributedAssign = [];
     for (const a of ticket?.activities || []) {
       const style = HISTORY_STYLES[a.activityType] || HISTORY_STYLES.default;
       const d = a.details || {};
+      const kind = activityActorKind(a);
+      const fsName = kind === 'freshservice_sync' ? fsActorName(a) : null;
+      if (fsName && a.activityType === 'status_changed' && d.newStatus) {
+        attributedStatus.push({ at: new Date(a.performedAt).getTime(), status: String(d.newStatus).toLowerCase() });
+      }
+      if (fsName && a.activityType === 'assigned') attributedAssign.push({ at: new Date(a.performedAt).getTime() });
       const bits = [];
       if (d.oldStatus && d.newStatus) bits.push(`${d.oldStatus} → ${d.newStatus}`);
       if (d.fromTechId || d.toTechId) {
@@ -1111,17 +1228,32 @@ export default function TicketDetail() {
         if (c && (c.from || c.to)) bits.push(`${name}: ${c.from ? formatDayTime(c.from) : 'not set'} → ${c.to ? formatDayTime(c.to) : 'removed'}`);
       }
       if (d.note) bits.push(d.note);
-      items.push({
-        key: `a-${a.id}`,
-        at: new Date(a.performedAt).getTime(),
-        ...style,
-        title: (
+      const meta = bits.join(' · ') || null;
+      // "Closed by Dominic Bautista in FreshService" for attributed sync rows.
+      const title = fsName && (a.activityType === 'status_changed' || a.activityType === 'assigned')
+        ? (
+          <>
+            <span className="capitalize font-medium">
+              {a.activityType === 'status_changed' && d.newStatus ? d.newStatus : humanize(a.activityType)}
+            </span>
+            <span className="text-muted-foreground"> by {fsName} in FreshService</span>
+          </>
+        )
+        : (
           <>
             <span className="capitalize font-medium">{humanize(a.activityType)}</span>
             {a.performedBy ? <span className="text-muted-foreground"> · {a.performedBy}</span> : null}
           </>
-        ),
-        meta: bits.join(' · ') || null,
+        );
+      items.push({
+        key: `a-${a.id}`,
+        at: new Date(a.performedAt).getTime(),
+        ...style,
+        kind,
+        machine: isMachineActivity(a),
+        sig: `a|${a.activityType}|${a.performedBy || ''}|${meta || ''}`,
+        title,
+        meta,
       });
     }
     for (const ep of ticket?.assignmentEpisodes || []) {
@@ -1157,6 +1289,8 @@ export default function TicketDetail() {
         key: `run-${pr.id}`,
         at: new Date(pr.decidedAt || pr.createdAt).getTime(),
         ...HISTORY_STYLES.ai_triage,
+        kind: 'ai',
+        machine: true,
         title: (
           <>
             <span className="font-medium">{pr.status === 'queued' ? 'AI triage queued' : 'AI run'}</span>
@@ -1170,15 +1304,54 @@ export default function TicketDetail() {
     // as thread entries — history material, deliberately kept out of the
     // conversation. Assignment/status/group events are skipped here because
     // the structured audit rows above already cover them.
+    const NEAR_MS = 3 * 60 * 1000;
     for (const e of ticket?.thread || []) {
-      if (e.source !== 'freshservice_activity' || e.eventType !== 'activity') continue;
+      if (e.source !== 'freshservice_activity') continue;
+      const at = new Date(e.occurredAt).getTime();
+      // RO-2: FS status/assignment/group lines name the human who acted in
+      // FreshService — surfaced unless an attributed audit row already tells
+      // the same story within ±3 min.
+      const fsEvent = describeFsEvent(e);
+      if (fsEvent) {
+        const dup = fsEvent.kind === 'status'
+          ? attributedStatus.some((s) => Math.abs(s.at - at) <= NEAR_MS && s.status === fsEvent.value.toLowerCase())
+          : fsEvent.kind === 'assignment'
+            ? attributedAssign.some((s) => Math.abs(s.at - at) <= NEAR_MS)
+            : false;
+        if (dup) continue;
+        const actor = e.actorName || 'FreshService';
+        const isEcho = /^ticket pulse$/i.test(actor.trim());
+        const style = fsEvent.kind === 'status'
+          ? HISTORY_STYLES.status_changed
+          : fsEvent.kind === 'assignment' ? HISTORY_STYLES.assigned : HISTORY_STYLES.group_changed;
+        items.push({
+          key: `fs-${e.id}`,
+          at,
+          ...style,
+          kind: 'freshservice_sync',
+          machine: isEcho,
+          sig: `fs|${e.eventType}|${actor}|${fsEvent.value}`,
+          title: (
+            <>
+              <span className="font-medium">{fsEvent.verb}</span>
+              <span className="text-muted-foreground"> by {actor} in FreshService</span>
+            </>
+          ),
+          meta: null,
+        });
+        continue;
+      }
+      if (e.eventType !== 'activity') continue;
       const text = String(e.bodyText || e.content || '').trim();
       if (!text) continue;
       items.push({
         key: `sys-${e.id}`,
-        at: new Date(e.occurredAt).getTime(),
+        at,
         icon: Bot,
         tone: 'bg-muted text-muted-foreground',
+        kind: 'freshservice_sync',
+        machine: true,
+        sig: `sys|${e.actorName || ''}|${text}`,
         title: (
           <>
             <span className="font-medium">{e.actorName || 'System'}</span>
@@ -1188,8 +1361,18 @@ export default function TicketDetail() {
         meta: text.length > 220 ? `${text.slice(0, 220)}…` : text,
       });
     }
-    return items.sort((x, y) => y.at - x.at);
+    // Newest first, then fold runs of identical rows into "×N, 10:51–10:54".
+    return collapseConsecutive(items.sort((x, y) => y.at - x.at));
   }, [ticket?.activities, ticket?.assignmentEpisodes, ticket?.pipelineRuns, ticket?.thread, techNameById]);
+
+  const visibleHistory = useMemo(
+    () => (hideMachine ? historyItems.filter((i) => !i.machine) : historyItems),
+    [historyItems, hideMachine],
+  );
+  const hiddenMachineCount = useMemo(
+    () => historyItems.reduce((n, i) => n + (i.machine ? i.count || 1 : 0), 0),
+    [historyItems],
+  );
 
   const subcategories = useMemo(() => {
     const top = (meta?.categoryTree || []).find((c) => c.id === effectiveCategoryId);
@@ -2180,6 +2363,20 @@ export default function TicketDetail() {
                             <span className="truncate">{ticket.requester.email}</span>
                           </button>
                         )}
+                        {forwardedIntake && (
+                          <span
+                            data-testid="requester-forwarded-chip"
+                            className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-violet-50 dark:bg-violet-500/15 border border-violet-200 dark:border-violet-500/30 text-violet-700 dark:text-violet-200"
+                            title={forwardedIntake.receivedAt
+                              ? `Received by mailbox ${new Date(forwardedIntake.receivedAt).toLocaleString()}${forwardedIntake.originalSubject ? ` · original subject: ${forwardedIntake.originalSubject}` : ''}`
+                              : undefined}
+                          >
+                            <Inbox className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
+                            <span className="truncate">
+                              {forwardedIntake.kind === 'agent_cc' ? 'Filed by' : 'Forwarded by'} {forwardedIntake.byName || forwardedIntake.byEmail || 'an agent'}
+                            </span>
+                          </span>
+                        )}
                         {(ticket.requester.entraOfficeLocation || ticket.requester.entraCity) && (
                           <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-muted/50 border border-border text-muted-foreground">
                             <MapPin className="w-3.5 h-3.5 text-muted-foreground/75 flex-shrink-0" aria-hidden="true" />
@@ -2838,23 +3035,49 @@ export default function TicketDetail() {
 
                 {pageTab === 'history' && (
                   <section className="tp-card rounded-xl p-4 sm:p-5" aria-label="Ticket history">
-                    <div className="flex items-center gap-2 mb-4">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 mb-4">
                       <History className="w-4 h-4 text-blue-500" aria-hidden="true" />
                       <h2 className="text-sm font-bold text-foreground">Everything that happened on this ticket</h2>
+                      <label className="ml-auto inline-flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={hideMachine}
+                          onChange={toggleHideMachine}
+                          className="tp-focus-ring h-3.5 w-3.5 rounded border-input accent-primary"
+                        />
+                        Hide machine activity
+                      </label>
+                      {hideMachine && hiddenMachineCount > 0 && (
+                        <span className="text-[11px] text-muted-foreground/75" data-testid="machine-hidden-count">
+                          {hiddenMachineCount} machine {hiddenMachineCount === 1 ? 'event' : 'events'} hidden
+                        </span>
+                      )}
                     </div>
-                    {historyItems.length === 0 ? (
-                      <p className="text-sm text-muted-foreground/75">No recorded events yet.</p>
+                    {visibleHistory.length === 0 ? (
+                      <p className="text-sm text-muted-foreground/75">
+                        {historyItems.length === 0 ? 'No recorded events yet.' : 'Only machine activity on this ticket — untick “Hide machine activity” to see it.'}
+                      </p>
                     ) : (
                       <ol>
-                        {historyItems.map((item, i) => (
+                        {visibleHistory.map((item, i) => (
                           <HistoryEvent
                             key={item.key}
                             icon={item.icon}
                             tone={item.tone}
-                            title={item.title}
+                            title={(
+                              <>
+                                {item.title}
+                                {item.kind ? <ActorKindChip kind={item.kind} className="ml-1.5 align-middle" /> : null}
+                                {item.count > 1 && (
+                                  <span className="text-muted-foreground" data-testid="collapsed-span">
+                                    {' · '}×{item.count}, {spanLabel(item.from, item.to)}
+                                  </span>
+                                )}
+                              </>
+                            )}
                             meta={item.meta}
                             at={item.at}
-                            isLast={i === historyItems.length - 1}
+                            isLast={i === visibleHistory.length - 1}
                           />
                         ))}
                       </ol>

@@ -19,6 +19,7 @@ import { CANONICAL_STATUS_NAMES, baseStatusOf, isTerminalStatus, statusDefsFromM
 import { FRESHSERVICE_DOMAIN } from '../tech-detail/constants';
 import { useWorkspaceRole } from '../nav/navDestinations';
 import { looksLikeRealHtml } from '../../utils/htmlContent';
+import { ActorKindChip, activityActorKind, isMachineActivity, readHideMachinePreference } from './activityKind';
 
 // Known-tag detector (QA 08-06 #5): plain text carrying angle-bracket tokens
 // like <Processed> renders via the plain-text branch with the tokens intact.
@@ -211,7 +212,17 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
     return entries.sort((a, b) => new Date(b.occurredAt) - new Date(a.occurredAt)).slice(0, 8);
   }, [ticket?.thread]);
 
-  const activity = useMemo(() => (ticket?.activities || []).slice(0, 15), [ticket?.activities]);
+  // Peek parity with the History tab (TU-2): same per-viewer "hide machine
+  // activity" preference, same kind chip; 15 most recent VISIBLE rows.
+  const hideMachine = useMemo(() => readHideMachinePreference(), []);
+  const machineHiddenCount = useMemo(
+    () => (hideMachine ? (ticket?.activities || []).filter((a) => isMachineActivity(a)).length : 0),
+    [ticket?.activities, hideMachine],
+  );
+  const activity = useMemo(
+    () => (ticket?.activities || []).filter((a) => !hideMachine || !isMachineActivity(a)).slice(0, 15),
+    [ticket?.activities, hideMachine],
+  );
 
   // ---- AI assignment: pending suggestion + live modal ----
   const [aiOpen, setAiOpen] = useState(false);
@@ -755,20 +766,30 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
           )
         ) : ticket && tab === 'activity' ? (
           activity.length === 0 ? (
-            <p className="text-xs text-muted-foreground/75 text-center py-6">No activity recorded.</p>
+            <p className="text-xs text-muted-foreground/75 text-center py-6">
+              {machineHiddenCount > 0 ? `${machineHiddenCount} machine ${machineHiddenCount === 1 ? 'event' : 'events'} hidden — open the ticket to see them.` : 'No activity recorded.'}
+            </p>
           ) : (
-            <ul className="space-y-1.5">
-              {activity.map((a) => (
-                <li key={a.id} className="flex items-start gap-2 text-xs text-muted-foreground">
-                  <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40 mt-1.5 flex-shrink-0" aria-hidden="true" />
-                  <span className="min-w-0">
-                    <span className="font-medium text-muted-foreground capitalize">{String(a.activityType || '').replace(/_/g, ' ')}</span>
-                    {a.performedBy ? ` · ${a.performedBy}` : ''}
-                    <span className="text-muted-foreground/75"> · {timeAgo(a.performedAt)}</span>
-                  </span>
-                </li>
-              ))}
-            </ul>
+            <>
+              {machineHiddenCount > 0 && (
+                <p className="text-[10px] text-muted-foreground/75 mb-1.5" data-testid="peek-machine-hidden">
+                  {machineHiddenCount} machine {machineHiddenCount === 1 ? 'event' : 'events'} hidden
+                </p>
+              )}
+              <ul className="space-y-1.5">
+                {activity.map((a) => (
+                  <li key={a.id} className="flex items-start gap-2 text-xs text-muted-foreground">
+                    <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40 mt-1.5 flex-shrink-0" aria-hidden="true" />
+                    <span className="min-w-0">
+                      <span className="font-medium text-muted-foreground capitalize">{String(a.activityType || '').replace(/_/g, ' ')}</span>
+                      {a.performedBy ? ` · ${a.performedBy}` : ''}
+                      <span className="text-muted-foreground/75"> · {timeAgo(a.performedAt)}</span>
+                      <ActorKindChip kind={activityActorKind(a)} className="ml-1.5 align-middle" />
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </>
           )
         ) : null}
       </div>

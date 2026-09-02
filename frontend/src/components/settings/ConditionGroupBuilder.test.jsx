@@ -24,7 +24,7 @@ vi.mock('../../contexts/WorkspaceContext', () => ({
   useWorkspaceOptional: () => ({ currentWorkspace: { id: 1 } }),
 }));
 
-import ConditionGroupBuilder, { emptyGroup, invalidateConditionFieldsCache } from './ConditionGroupBuilder';
+import ConditionGroupBuilder, { CG_FIELDS, emptyGroup, invalidateConditionFieldsCache } from './ConditionGroupBuilder';
 
 conditionFieldsMock.mockResolvedValue({
   data: [
@@ -198,5 +198,29 @@ describe('ConditionGroupBuilder', () => {
       expect(await screen.findByRole('option', { name: 'contains' })).toBeInTheDocument();
       expect(screen.getByDisplayValue('x')).toBeInTheDocument();
     });
+  });
+});
+
+// MEGA 09-01 Phase TU (TU-7): the fields_updated condition fields mirror the
+// backend catalog (KEEP IN SYNC with notificationConditionModel.js).
+describe('fields_updated condition fields (TU-7)', () => {
+  test('static catalog carries changedFields (list), actorKind (enum), source, changedCount, reopened', () => {
+    const byValue = Object.fromEntries(CG_FIELDS.map((f) => [f.value, f]));
+    expect(byValue['event.changedFields']).toEqual(expect.objectContaining({ type: 'list' }));
+    expect(byValue['event.changedFields'].options).toEqual(expect.arrayContaining(['priority', 'dueBy', 'ccEmails', 'internalCategoryId']));
+    expect(byValue['event.actorKind']).toEqual(expect.objectContaining({ type: 'enum', options: ['human', 'api', 'system', 'workflow', 'freshservice'] }));
+    expect(byValue['event.source'].type).toBe('string');
+    expect(byValue['event.changedCount'].type).toBe('number');
+    expect(byValue['event.reopened'].type).toBe('boolean');
+  });
+
+  test('a changedFields row renders the list operators and a comma-separated value input', async () => {
+    invalidateConditionFieldsCache();
+    conditionFieldsMock.mockResolvedValueOnce({ data: [] }); // fall back to the static catalog
+    const group = { logic: 'all', conditions: [{ field: 'event.changedFields', operator: 'has_any', value: ['priority'] }] };
+    render(<ConditionGroupBuilder value={group} onChange={vi.fn()} onClear={() => {}} />);
+    expect(await screen.findByRole('option', { name: 'has any of' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'has none of' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Values (comma-separated)')).toHaveValue('priority');
   });
 });

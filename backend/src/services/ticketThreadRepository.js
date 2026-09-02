@@ -40,7 +40,53 @@ export function preservedUpdateData(entry, existingRow) {
   return data;
 }
 
+/**
+ * CSAT survey responses ride the FS conversation feed as incoming entries
+ * (RO-3). They are not a requester asking for help, so they must not reopen
+ * a closed ticket. Heuristic on the FS payload + text — deliberately narrow.
+ */
+export function looksLikeSurveyResponse(entry) {
+  if (!entry) return false;
+  const raw = entry.rawPayload && typeof entry.rawPayload === 'object' ? entry.rawPayload : {};
+  if (raw.survey_result !== undefined || raw.survey_response !== undefined || raw.csat !== undefined) return true;
+  const text = [entry.title, entry.bodyText, entry.content]
+    .map((v) => String(v || '')).join('\n').trim();
+  return /\b(customer satisfaction survey|survey response|survey_result|rate (?:your|the) (?:experience|support)|how would you rate)\b/i.test(text.slice(0, 600));
+}
+
 class TicketThreadRepository {
+  /**
+   * Workspace technicians matched by the batch's sender emails / FS user ids
+   * (RO-3: an agent replying from Outlook is "incoming" to FS but not a
+   * requester). Best-effort: a lookup failure treats nobody as an agent.
+   */
+  async _technicianKeys(entries) {
+    const keys = { emails: new Set(), fsIds: new Set() };
+    try {
+      const workspaceIds = [...new Set(entries.map((e) => e.workspaceId).filter(Boolean))];
+      const emails = [...new Set(entries.map((e) => String(e.actorEmail || '').trim().toLowerCase()).filter(Boolean))];
+      const fsIds = [...new Set(entries
+        .map((e) => e.actorFreshserviceId)
+        .filter((v) => v !== null && v !== undefined)
+        .map((v) => BigInt(v)))];
+      if (!workspaceIds.length || (!emails.length && !fsIds.length)) return keys;
+      const or = [];
+      if (emails.length) or.push({ email: { in: emails, mode: 'insensitive' } });
+      if (fsIds.length) or.push({ freshserviceId: { in: fsIds } });
+      const techs = await prisma.technician.findMany({
+        where: { workspaceId: { in: workspaceIds }, OR: or },
+        select: { email: true, freshserviceId: true },
+      });
+      for (const t of techs || []) {
+        if (t.email) keys.emails.add(String(t.email).trim().toLowerCase());
+        if (t.freshserviceId !== null && t.freshserviceId !== undefined) keys.fsIds.add(String(t.freshserviceId));
+      }
+    } catch (error) {
+      logger.warn('Technician lookup for reply attribution failed (treating senders as requesters)', { error: error.message });
+    }
+    return keys;
+  }
+
   async bulkUpsert(entries = []) {
     if (!Array.isArray(entries) || entries.length === 0) {
       return { upserted: 0 };
@@ -185,6 +231,53 @@ class TicketThreadRepository {
         }
       }
     } catch { /* sentiment is an annotation, never a sync step */ }
+
+    // RO-3: FS-born requester replies reach Ticket Pulse ONLY through this
+    // path (the Graph mailbox ingest covers TP mail-in, the mirror reconcile
+    // covers TP-born FS copies) — so this is where "Requester replied" fires
+    // for them. New customer_reply rows only: not private, not a CSAT survey
+    // response, not an agent replying from Outlook. Stable per-entry stamp =
+    // externalEntryId, so a re-sync can never double-fire.
+    try {
+      const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+      const candidates = keyed.filter((entry) => {
+        if (entry.eventType !== 'customer_reply') return false;
+        if (existingKeys.has(`${entry.ticketId}:${entry.externalEntryId}`)) return false;
+        if (entry.isPrivate === true) return false;
+        const at = entry.occurredAt ? new Date(entry.occurredAt).getTime() : 0;
+        if (!at || at < cutoff) return false;
+        return !looksLikeSurveyResponse(entry);
+      });
+      if (candidates.length) {
+        const agentKeys = await this._technicianKeys(candidates);
+        const { emitTicketEvent } = await import('./ticketLifecycleNotificationService.js');
+        for (const entry of candidates) {
+          const email = String(entry.actorEmail || '').trim().toLowerCase();
+          const fsId = entry.actorFreshserviceId !== null && entry.actorFreshserviceId !== undefined
+            ? String(entry.actorFreshserviceId) : null;
+          const senderIsAgent = (email && agentKeys.emails.has(email)) || (fsId && agentKeys.fsIds.has(fsId));
+          if (senderIsAgent) continue;
+          Promise.resolve(emitTicketEvent('ticket.reply_received', entry.ticketId, {
+            source: 'freshservice_sync',
+            dedupeStamp: entry.externalEntryId,
+            extra: {
+              externalEntryId: entry.externalEntryId,
+              fromEmail: entry.actorEmail || null,
+              fromName: entry.actorName || null,
+              via: 'freshservice',
+              senderIsAgent: false,
+              isSurveyResponse: false,
+            },
+          })).catch((error) => {
+            logger.warn('reply_received dispatch failed for FS-born reply (non-fatal)', {
+              ticketId: entry.ticketId, externalEntryId: entry.externalEntryId, error: error.message,
+            });
+          });
+        }
+      }
+    } catch (error) {
+      logger.warn('reply_received evaluation failed for FS thread batch (non-fatal)', { error: error.message });
+    }
 
     // GREATEST keeps re-syncs of old history from moving the timestamp back.
     for (const [ticketId, at] of latestRealByTicket) {

@@ -14,6 +14,8 @@
  *   Row: { field: '<catalog key>', operator: '<op>', value?: any }
  */
 
+import { BUILTIN_CHANGE_FIELDS, EVENT_ACTOR_KINDS } from './ticketChangeRenderer.js';
+
 const MAX_TOTAL_ROWS = 20;
 const MAX_DEPTH = 2; // root group + one nested level
 
@@ -37,6 +39,11 @@ export const CONDITION_FIELDS = Object.freeze({
   'ticket.statusBase': { label: 'Ticket status base', type: 'enum', path: 'ticket.statusBase', options: ['Open', 'Pending', 'Resolved', 'Closed'] },
   'ticket.priorityLabel': { label: 'Priority', type: 'enum', path: 'ticket.priorityLabel', options: ['Low', 'Medium', 'High', 'Urgent'] },
   'ticket.origin': { label: 'Ticket origin', type: 'enum', path: 'ticket.origin', options: ['ticketpulse', 'freshservice'] },
+  // How the ticket came to exist (Phase RL, RL-6): app form, inbound email,
+  // public API, FreshService sync-in, a hold-queue "Create ticket", an
+  // agent's reply-all with the mailbox in Cc, or a forwarded email. Lets a
+  // "Ticket arrived" ack skip FS sync-ins and hold-queue resolutions.
+  'ticket.createdVia': { label: 'Created via', type: 'enum', path: 'ticket.createdVia', options: ['app', 'email', 'api', 'freshservice_sync', 'held_reply', 'agent_cc', 'forward'] },
   // Arrival channel (QA 07-07 #1) — how the ticket reached the helpdesk.
   'ticket.sourceLabel': { label: 'Ticket source', type: 'enum', path: 'ticket.sourceLabel', options: ['Email', 'Portal', 'Phone', 'Chat', 'API', 'Webhook', 'Agent'] },
   // Ticket type — per-workspace vocabulary (registry-driven), so the builder
@@ -64,6 +71,24 @@ export const CONDITION_FIELDS = Object.freeze({
   'requester.city': { label: 'Requester city', type: 'string', path: 'requester.city' },
   'event.statusFrom': { label: 'Status changed from', type: 'string', path: 'event.extra.from' },
   'event.statusTo': { label: 'Status changed to', type: 'string', path: 'event.extra.to' },
+  // Event provenance flags (MEGA 09-01). Absent = false ("is false" passes),
+  // so workflows built before these fields keep evaluating unchanged.
+  //  - systemNote: the note_added entry was machine-written (API resubmission diff …)
+  //  - senderIsAgent / isSurveyResponse: reply_received provenance from the FS
+  //    conversation sync — the emitter already filters both out, the fields
+  //    make the seeded reopen workflow's guard VISIBLE to admins.
+  'event.systemNote': { label: 'Note was written by the system', type: 'boolean', path: 'event.extra.systemNote' },
+  // "Ticket updated (fields)" payload (MEGA 09-01 Phase TU, TU-7). Options
+  // for changedFields = built-in field keys + this workspace's custom-field
+  // keys as `customFields.<key>` (the /condition-fields route resolves
+  // `dynamicOptions: 'changed-fields'` the way it does ticket statuses).
+  'event.changedFields': { label: 'Changed fields', type: 'list', path: 'event.extra.changedFields', options: [...BUILTIN_CHANGE_FIELDS], dynamicOptions: 'changed-fields' },
+  'event.actorKind': { label: 'Updated by (kind)', type: 'enum', path: 'event.extra.actorKind', options: [...EVENT_ACTOR_KINDS] },
+  'event.source': { label: 'Update source', type: 'string', path: 'event.extra.source' },
+  'event.changedCount': { label: 'Changed field count', type: 'number', path: 'event.extra.changedCount' },
+  'event.reopened': { label: 'Reopened by this update', type: 'boolean', path: 'event.extra.reopened' },
+  'event.senderIsAgent': { label: 'Reply sender is an agent', type: 'boolean', path: 'event.extra.senderIsAgent' },
+  'event.isSurveyResponse': { label: 'Reply is a survey response', type: 'boolean', path: 'event.extra.isSurveyResponse' },
   'availability.isBusinessHours': { label: 'During business hours', type: 'boolean', path: 'availability.isBusinessHours' },
   'availability.isAfterHours': { label: 'After hours', type: 'boolean', path: 'availability.isAfterHours' },
   'availability.isHoliday': { label: 'On a holiday', type: 'boolean', path: 'availability.isHoliday' },

@@ -847,17 +847,56 @@ class MirrorService {
       if (drift.length) {
         conflicts += 1;
         logger.warn(`Mirror conflict on ${ticketDisplayRef(ticket)}: FS copy drifted — ${drift.join(', ')}`);
-        await ticketActivityRepository.create({
-          ticketId: ticket.id,
-          activityType: 'mirror_conflict',
-          performedBy: 'Mirror reconciliation',
-          performedAt: new Date(),
-          details: { drift, freshserviceTicketId: fsId, note: 'FS copy was edited out-of-band; Ticket Pulse remains source of truth' },
-        }).catch(() => {});
+        await this._recordMirrorConflict(ticket.id, { drift, fsId });
       }
     }
 
     return { imported, conflicts };
+  }
+
+  /**
+   * One mirror_conflict row per drift signature (TU-3c). The 3-min sweep used
+   * to re-log the identical drift every pass (116 rows on 27 ws5 tickets);
+   * now a repeat bumps `lastSeenAt` / `count` on the latest row instead.
+   */
+  async _recordMirrorConflict(ticketId, { drift, fsId }) {
+    const now = new Date();
+    try {
+      const last = await prisma.ticketActivity.findFirst({
+        where: { ticketId, activityType: 'mirror_conflict' },
+        orderBy: { performedAt: 'desc' },
+        select: { id: true, details: true },
+      });
+      if (last && JSON.stringify(last.details?.drift ?? null) === JSON.stringify(drift)) {
+        await prisma.ticketActivity.update({
+          where: { id: last.id },
+          data: {
+            details: {
+              ...(last.details || {}),
+              lastSeenAt: now.toISOString(),
+              count: (Number(last.details?.count) || 1) + 1,
+            },
+          },
+        });
+        return { deduped: true, id: last.id };
+      }
+    } catch { /* fall through to a fresh row */ }
+    await ticketActivityRepository.create({
+      ticketId,
+      activityType: 'mirror_conflict',
+      performedBy: 'Mirror reconciliation',
+      performedAt: now,
+      details: {
+        drift,
+        freshserviceTicketId: fsId,
+        note: 'FS copy was edited out-of-band; Ticket Pulse remains source of truth',
+        actorKind: 'mirror',
+        firstSeenAt: now.toISOString(),
+        lastSeenAt: now.toISOString(),
+        count: 1,
+      },
+    }).catch(() => {});
+    return { deduped: false };
   }
 
   // -------------------------------------------------- periodic reconcile

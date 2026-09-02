@@ -1,5 +1,6 @@
 import prisma from './prisma.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
+import { actorKindOf } from '../utils/actorKind.js';
 
 const FIELD_TYPES = ['text', 'number', 'select', 'boolean', 'date'];
 const KEY_PATTERN = /^[a-z][a-z0-9_]{1,59}$/;
@@ -254,8 +255,21 @@ class CustomFieldService {
     return { values: clean, provisioned, rejected };
   }
 
-  /** Validate + merge values into a ticket's customFields JSON. Unknown keys are rejected. */
-  async setValues(ticketId, workspaceId, values, actor) {
+  /**
+   * ticket.fields_updated emitter hook (TU-5). ticketService registers its
+   * `_emitFieldsUpdated` at import time; unset (unit tests, scripts) = no event.
+   */
+  registerFieldsUpdatedEmitter(fn) {
+    this._fieldsUpdatedEmitter = typeof fn === 'function' ? fn : null;
+  }
+
+  /**
+   * Validate + merge values into a ticket's customFields JSON. Unknown keys are rejected.
+   * `emitEvent` (default true) fires ONE ticket.fields_updated for the changed
+   * keys; updateTicketFields / the workflow update node pass false and fold
+   * the diff into their own single event.
+   */
+  async setValues(ticketId, workspaceId, values, actor, { emitEvent = true, eventSource = null } = {}) {
     if (!values || typeof values !== 'object' || Array.isArray(values)) {
       throw new ValidationError('Custom field values must be an object');
     }
@@ -275,16 +289,27 @@ class CustomFieldService {
       else merged[key] = value;
     }
 
-    await prisma.ticket.update({ where: { id: ticket.id }, data: { customFields: merged } });
+    // A custom-field edit is real activity (TU-1): bump the honest timestamp
+    // alongside the value write.
+    const now = new Date();
+    await prisma.ticket.update({ where: { id: ticket.id }, data: { customFields: merged, lastRealActivityAt: now } });
+    let auditRowId = null;
     try {
       const { default: ticketActivityRepository } = await import('./ticketActivityRepository.js');
-      await ticketActivityRepository.create({
+      const actorKind = actorKindOf(actor);
+      const row = await ticketActivityRepository.create({
         ticketId: ticket.id,
         activityType: 'custom_fields_changed',
         performedBy: actor?.name || actor?.email || 'Ticket Pulse',
-        performedAt: new Date(),
-        details: { changes },
+        performedAt: now,
+        details: {
+          changes,
+          source: actorKind === 'api' ? 'api_v1' : actorKind === 'workflow' ? 'workflow' : 'ticketpulse_native',
+          actorEmail: actor?.email || null,
+          actorKind,
+        },
       });
+      auditRowId = row?.id ?? null;
     } catch { /* non-fatal */ }
 
     // Outbound webhook (Custom Fields Activation Phase 2): custom-field edits
@@ -296,7 +321,15 @@ class CustomFieldService {
       .filter((key) => JSON.stringify(changes[key].from ?? null) !== JSON.stringify(changes[key].to ?? null));
     if (changedKeys.length) this._dispatchChangeWebhook(ticket.id, workspaceId, merged, changedKeys);
 
-    return { customFields: merged, changes };
+    // Standalone edit → ONE ticket.fields_updated (TU-5) keyed customFields.<key>.
+    if (emitEvent && changedKeys.length && this._fieldsUpdatedEmitter) {
+      const eventChanges = Object.fromEntries(changedKeys.map((key) => [`customFields.${key}`, changes[key]]));
+      try {
+        await this._fieldsUpdatedEmitter({ ticket, changes: eventChanges, actor, source: eventSource, auditRowId });
+      } catch { /* workflow dispatch never breaks the edit */ }
+    }
+
+    return { customFields: merged, changes, auditRowId };
   }
 
   /** Fire-and-forget ticket.custom_fields_changed dispatch (never throws). */

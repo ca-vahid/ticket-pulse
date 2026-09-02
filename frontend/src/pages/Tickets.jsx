@@ -4,7 +4,7 @@ import { motion } from 'motion/react';
 import {
   Activity, AlertCircle, ArrowDownWideNarrow, ArrowUpNarrowWide, Check,
   ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Download, Inbox,
-  Columns3, ListFilter, Loader2, Plus, RefreshCw, Rows2, Rows4, Search, Settings2, ShieldCheck, Sparkles, UserRound, X,
+  Columns3, ListFilter, Loader2, MailQuestion, Plus, RefreshCw, Rows2, Rows4, Search, Settings2, ShieldCheck, Sparkles, UserRound, X,
 } from 'lucide-react';
 import AppHeader from '../components/AppHeader';
 import MobileTabBar from '../components/nav/MobileTabBar';
@@ -28,6 +28,7 @@ import {
 } from '../components/tickets/queueColumns';
 import { QUEUE_CARD_REGISTRY, normalizeQueueCards } from '../components/tickets/queueCards';
 import { ticketsAPI } from '../services/api';
+import HeldRepliesPanel from '../components/tickets/HeldRepliesPanel';
 import { useAuth } from '../contexts/AuthContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useWorkspaceRole } from '../components/nav/navDestinations';
@@ -209,6 +210,18 @@ export default function Tickets() {
   const [meta, setMeta] = useState(null);
   const [metaError, setMetaError] = useState(null);
   const [stats, setStats] = useState(null);
+  // Unmatched replies (Phase RL, RL-4): held inbound mail waiting for a
+  // human. Staff-only endpoint — a 403 (viewer) simply hides the pill.
+  const [heldCount, setHeldCount] = useState(0);
+  const [showHeld, setShowHeld] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    Promise.resolve()
+      .then(() => ticketsAPI.listHeldMessages('held'))
+      .then((res) => { if (alive) setHeldCount(res?.meta?.heldCount ?? (res?.data || []).length); })
+      .catch(() => { if (alive) setHeldCount(0); });
+    return () => { alive = false; };
+  }, []);
   const [tickets, setTickets] = useState([]);
   const [total, setTotal] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
@@ -1392,6 +1405,30 @@ export default function Tickets() {
                 </Link>
               )}
             </div>
+
+            {/* Unmatched replies pill (Phase RL, RL-4): held inbound mail
+                waiting for attach / create / discard. Hidden when empty. */}
+            {(heldCount > 0 || showHeld) && (
+              <div className="mb-4" data-testid="held-replies-slot">
+                <button
+                  type="button"
+                  onClick={() => setShowHeld((v) => !v)}
+                  aria-expanded={showHeld}
+                  aria-controls="tickets-held-replies"
+                  className="tp-focus-ring inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-200 dark:hover:bg-amber-500/20 text-sm font-medium shadow-subtle"
+                  data-testid="held-replies-pill"
+                >
+                  <MailQuestion className="w-4 h-4" aria-hidden="true" />
+                  {heldCount} unmatched {heldCount === 1 ? 'reply' : 'replies'} waiting for review
+                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showHeld ? 'rotate-180' : ''}`} aria-hidden="true" />
+                </button>
+                {showHeld && (
+                  <div id="tickets-held-replies" className="mt-3 tp-card rounded-xl p-4">
+                    <HeldRepliesPanel onCountChange={setHeldCount} showGuidance />
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Docked filter rail | main column (rail width animates; the grid
                 auto track follows, so collapsing reclaims the space smoothly) */}

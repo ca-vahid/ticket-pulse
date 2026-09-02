@@ -143,6 +143,12 @@ export async function processDelivery(delivery) {
         status: 'sent',
         provider: result.provider || delivery.provider,
         providerMessageId: result.providerMessageId,
+        // Phase RL (RL-5): the RFC Message-ID the mail left with (Graph
+        // internetMessageId / the SendGrid lane's minted `<tp-…>` id) — what
+        // a reply's In-Reply-To carries, so ingest rung 1b can thread replies
+        // to SendGrid-lane acks. providerMessageId keeps SendGrid's
+        // x-message-id, which never appears in a reply header.
+        ...(result.messageId ? { messageId: String(result.messageId).slice(0, 255) } : {}),
         // Audit the actual sender when the transport chose one (Graph lane)
         // and the workflow node did not pin a from address.
         ...(result.from && !delivery.fromAddress ? { fromAddress: result.from } : {}),

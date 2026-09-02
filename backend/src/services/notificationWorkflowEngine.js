@@ -43,6 +43,7 @@ import {
   guardNotificationEmailPayload,
 } from './notificationWorkflowOutputGuard.js';
 import { enrichEventContextWithRequesterProfile } from './requesterProfileService.js';
+import { mergeChangeSets, renderChangeViews } from './ticketChangeRenderer.js';
 import {
   NOTIFICATION_WORKFLOW_LLM_TIMEOUT_CODE,
   NOTIFICATION_WORKFLOW_LLM_TIMEOUT_MS,
@@ -1623,6 +1624,74 @@ function resolveRecipientList(tokens, context, customEmails) {
   return uniqueEmails(values.map((token) => recipientFromToken(token, context, customEmails)));
 }
 
+/**
+ * DB-backed recipient tokens (TU-8). Both are best-effort — a lookup failure
+ * resolves to nobody, never to a failed run.
+ *   last_replying_agent — newest thread entry authored by an agent
+ *   watchers            — category/group watch subscriptions matching the ticket
+ */
+export async function resolveDynamicRecipientTokens(tokens, context) {
+  const wanted = new Set((Array.isArray(tokens) ? tokens : []).map((t) => String(t || '')));
+  const out = {};
+  const ticketId = Number(context?.ticket?.id);
+  if (!Number.isFinite(ticketId) || ticketId <= 0) return out;
+  if (wanted.has('last_replying_agent')) {
+    try {
+      const entry = await prisma.ticketThreadEntry.findFirst({
+        where: { ticketId, authorType: 'agent', actorEmail: { not: null } },
+        orderBy: { occurredAt: 'desc' },
+        select: { actorEmail: true },
+      });
+      out.last_replying_agent = entry?.actorEmail ? [entry.actorEmail] : [];
+    } catch (error) {
+      logger.warn(`last_replying_agent recipient resolution failed (non-fatal): ${error.message}`);
+      out.last_replying_agent = [];
+    }
+  }
+  if (wanted.has('watchers')) {
+    try {
+      const workspaceId = Number(context?.workspace?.id);
+      const catIds = [context?.ticket?.internalCategory?.id, context?.ticket?.internalSubcategory?.id]
+        .map((v) => Number(v)).filter((v) => Number.isFinite(v) && v > 0);
+      const groupId = context?.ticket?.groupId ? String(context.ticket.groupId) : null;
+      const scopeOr = [];
+      if (catIds.length) scopeOr.push({ scopeType: 'category', categoryId: { in: catIds } });
+      if (groupId && /^\d+$/.test(groupId)) scopeOr.push({ scopeType: 'group', groupId: BigInt(groupId) });
+      if (!Number.isFinite(workspaceId) || !scopeOr.length) {
+        out.watchers = [];
+      } else {
+        const subs = await prisma.ticketWatchSubscription.findMany({
+          where: { workspaceId, OR: scopeOr },
+          select: { userEmail: true },
+        });
+        out.watchers = uniqueEmails(subs.map((sub) => sub.userEmail));
+      }
+    } catch (error) {
+      logger.warn(`watchers recipient resolution failed (non-fatal): ${error.message}`);
+      out.watchers = [];
+    }
+  }
+  return out;
+}
+
+/** Emails a recipient_resolver must drop for this event, plus step-output notes. */
+export function recipientExclusions(context) {
+  const event = context?.event || {};
+  const extra = event.extra || {};
+  const emails = [];
+  const output = {};
+  if (event.type === 'ticket.fields_updated' && extra.actorEmail && event.triggerOptions?.notifyActor !== true) {
+    emails.push(String(extra.actorEmail));
+    output.actorExcluded = String(extra.actorEmail);
+  }
+  if (extra.suppressRequesterAck === true) {
+    const requesterEmail = requesterEmailFromContext(context);
+    if (requesterEmail) emails.push(requesterEmail);
+    output.requesterAckSuppressed = 'requester ack suppressed: agent already replied';
+  }
+  return { emails, output };
+}
+
 function workflowVersion(workflow) {
   return workflow.versions?.find((version) => version.version === workflow.publishedVersion)
     || workflow.versions?.[0]
@@ -1904,6 +1973,11 @@ async function executeNode({
       dryRun: dryRun === true || executionMode === 'mock' || executionMode === 'preview',
       // Run scope so setCustomFields values support Liquid ({{ ticket.subject }}).
       scope,
+      // Run state rides the delay/resume machinery — the FS-born status
+      // write-back keeps its retry counter there (RO-5).
+      state,
+      // Producer id for the fields_updated loop guard (TU-5/TU-9).
+      workflowId: workflow?.id ?? null,
     });
   }
 
@@ -2102,14 +2176,22 @@ async function executeNode({
       ...(node.data?.bcc || []),
     ];
     const groupEmails = await resolveInternalGroupEmails(allTokens);
+    // last_replying_agent / watchers (TU-8): DB-backed tokens, resolved once.
+    const dynamic = await resolveDynamicRecipientTokens(allTokens, eventContext);
     const resolveWithGroups = (tokens, fallbackTokens) => {
       const list = Array.isArray(tokens) ? tokens : (fallbackTokens || []);
       const direct = resolveRecipientList(list, eventContext, customEmails);
       const hasGroupToken = list.some((t) => /^internal_group:\d+$/.test(String(t || '')));
-      return hasGroupToken ? uniqueEmails([direct, groupEmails]) : direct;
+      const extra = list.flatMap((t) => dynamic[String(t || '')] || []);
+      return hasGroupToken || extra.length ? uniqueEmails([direct, hasGroupToken ? groupEmails : [], extra]) : direct;
     };
-    const to = resolveWithGroups(node.data?.to || ['requester']);
-    let cc = excludeExistingEmails(resolveWithGroups(node.data?.cc || []), to);
+    // Exclusions: the editing agent on fields_updated (unless the trigger's
+    // notifyActor is on) and the requester when the create carried
+    // suppressRequesterAck (agent already replied — no duplicate ack).
+    const exclusions = recipientExclusions(eventContext);
+    const dropExcluded = (list) => (exclusions.emails.length ? excludeExistingEmails(list, exclusions.emails) : list);
+    const to = dropExcluded(resolveWithGroups(node.data?.to || ['requester']));
+    let cc = dropExcluded(excludeExistingEmails(resolveWithGroups(node.data?.cc || []), to));
     // "Also notify additional requesters" (Phase MR6): when the workspace
     // toggle is ON and this mail is requester-facing (the requester is in
     // To), the ticket's "Also for" list joins the cc — so status/resolution
@@ -2125,14 +2207,18 @@ async function executeNode({
       }
       if (alsoFor.length) cc = uniqueEmails([cc, alsoFor]);
     }
-    const bcc = excludeExistingEmails(resolveWithGroups(node.data?.bcc || []), [...to, ...cc]);
+    const bcc = dropExcluded(excludeExistingEmails(resolveWithGroups(node.data?.bcc || []), [...to, ...cc]));
     const recipients = {
       to,
       cc,
       bcc,
     };
     state.recipients = recipients;
-    return { recipients, ...(alsoFor.length ? { additionalRequesters: alsoFor } : {}) };
+    return {
+      recipients,
+      ...(alsoFor.length ? { additionalRequesters: alsoFor } : {}),
+      ...exclusions.output,
+    };
   }
 
   if (node.type === 'template_render') {
@@ -2810,6 +2896,10 @@ export async function executeDefinition({
   // Delay-node durable resume: { run, state, startNodeIds } — reuses the
   // parked run instead of creating one and continues mid-graph.
   resume = null,
+  // Coalescing (TU-9): park the freshly created run for N minutes BEFORE the
+  // first node so later fields_updated events on the same ticket merge into
+  // it instead of spawning sibling runs.
+  parkMinutes = 0,
 }) {
   const normalizedExecutionMode = normalizeExecutionMode(executionMode, dryRun);
   const effectiveDryRun = dryRun || normalizedExecutionMode === EXECUTION_MODE_PREVIEW || normalizedExecutionMode === EXECUTION_MODE_MOCK;
@@ -2866,6 +2956,29 @@ export async function executeDefinition({
   const queue = resume ? [...(resume.startNodeIds || [])] : [trigger.id];
   const executed = [];
 
+  if (!resume && !effectiveDryRun && Number(parkMinutes) > 0) {
+    const resumeAt = new Date(Date.now() + Number(parkMinutes) * 60 * 1000);
+    await prisma.notificationWorkflowRun.update({
+      where: { id: run.id },
+      data: {
+        status: 'waiting',
+        resumeAt,
+        resumeNodeId: trigger.id,
+        resumeState: safeJson({ state, coalescing: true }),
+      },
+    });
+    workflowAbort.cleanup();
+    return {
+      status: 'waiting',
+      coalescing: true,
+      workflowId: workflow.id,
+      runId: run.id,
+      resumeAt: resumeAt.toISOString(),
+      executionMode: normalizedExecutionMode,
+      steps: [],
+    };
+  }
+
   try {
     while (queue.length > 0) {
       throwIfWorkflowAborted(workflowAbort.signal, workflowAbort.timeoutMs);
@@ -2907,8 +3020,19 @@ export async function executeDefinition({
         // blocking the process. The step completes (the wait STARTED); the run
         // sits in status='waiting' until the resume worker picks it up.
         if (output?.__waitMinutes && !effectiveDryRun) {
-          const resumeTargets = nextNodeIds(normalizedDefinition, node, output);
-          const waitOutput = { waiting: true, waitMinutes: output.__waitMinutes };
+          // __retryNodeId (RO-5): a node asked to be re-run after the wait
+          // (FS write-back failed, attempts left) — resume AT the node, not
+          // after it, and keep the failure visible on the step output.
+          const resumeTargets = output.__retryNodeId
+            ? [output.__retryNodeId]
+            : nextNodeIds(normalizedDefinition, node, output);
+          const waitOutput = {
+            waiting: true,
+            waitMinutes: output.__waitMinutes,
+            ...(output.__retryNodeId
+              ? { retry: true, attempt: output.attempt, maxAttempts: output.maxAttempts, error: output.error }
+              : {}),
+          };
           await finishStep(step, 'completed', waitOutput);
           executed.push({ nodeId: node.id, nodeType: node.type, output: waitOutput });
           if (resumeTargets.length === 0) break; // nothing after the delay — just finish
@@ -3074,6 +3198,7 @@ export async function executeWorkflow(workflow, eventContext, options = {}) {
     executeLlm: mockMode ? true : options.executeLlm === true,
     triggerSource: options.triggerSource,
     routingResult: options.routingResult || null,
+    parkMinutes: Number(options.parkMinutes) > 0 ? Number(options.parkMinutes) : 0,
   });
 }
 
@@ -3116,7 +3241,138 @@ function routingResultForWorkflow({ workflow, timing, variantSelection }) {
  * workflows can set custom statuses; terminal/resolution stamping keys on the
  * status's BASE, never the label.
  */
-async function executeUpdateTicketNode(node, eventContext, { dryRun = false, scope = null } = {}) {
+/** FS-born status write-back (RO-4/RO-5): retry cadence via the delay-resume worker. */
+export const FS_WRITEBACK_MAX_ATTEMPTS = 3;
+export const FS_WRITEBACK_RETRY_MINUTES = 2;
+const FS_WRITEBACK_ACTOR = Object.freeze({ name: 'Notification workflow', email: null, role: 'workflow' });
+
+/**
+ * Write a status to an FS-born ticket THROUGH FreshService (RO-4). FS is
+ * asked first so an FS-side automator that already reopened the ticket reads
+ * as a skip; the write itself is ticketService.updateFsTicket (interactive
+ * client, PUT-first, echo-verified) which also arms the RO-5 sync guard and
+ * audits `fs_write_back`. A failure never touches the local row: attempts
+ * 1..N-1 park the run for a retry (delay-resume, resumed AT this node), the
+ * last one throws so the step shows `failed` in the run detail.
+ */
+export async function applyFsBornStatusWriteback({ node, ticket, setStatus, state = null, eventContext = null }) {
+  const label = String(setStatus).toLowerCase();
+  const what = label === 'open' ? 'reopen' : `status "${setStatus}"`;
+  const attemptsSoFar = Number(state?.__fsWritebackAttempts?.[node.id]) || 0;
+  try {
+    const { default: mirrorService } = await import('./mirrorService.js');
+    const { getStatusString } = await import('../integrations/freshserviceTransformer.js');
+    const client = await mirrorService.getInteractiveClient(ticket.workspaceId);
+    if (!client) throw new Error('FreshService is not configured for this workspace');
+    if (typeof client.fetchTicketSafe === 'function') {
+      const fsTicket = await client.fetchTicketSafe(Number(ticket.freshserviceTicketId));
+      if (fsTicket && typeof fsTicket === 'object' && fsTicket.status !== undefined && fsTicket.status !== null) {
+        const fsStatusName = getStatusString(Number(fsTicket.status));
+        if (fsStatusName === setStatus) {
+          return {
+            skipped: true,
+            reason: `already ${label} in FreshService`,
+            via: 'freshservice_writeback',
+            status: { from: ticket.status, to: setStatus, fs: fsStatusName },
+          };
+        }
+      }
+    }
+    const { default: ticketService } = await import('./ticketService.js');
+    await ticketService.updateFsTicket(ticket.id, ticket.workspaceId, { status: setStatus }, FS_WRITEBACK_ACTOR);
+    try {
+      const { default: ticketActivityRepository } = await import('./ticketActivityRepository.js');
+      await ticketActivityRepository.create({
+        ticketId: ticket.id,
+        activityType: 'workflow_updated_ticket',
+        performedBy: 'Notification workflow',
+        performedAt: new Date(),
+        details: {
+          changes: { status: { from: ticket.status, to: setStatus } },
+          note: node.data?.note || null,
+          eventType: eventContext?.event?.type || null,
+          via: 'freshservice_writeback',
+          actorKind: 'workflow',
+        },
+      });
+    } catch { /* non-fatal */ }
+    import('./emailHealthService.js')
+      .then(({ default: health }) => health.recordSuccess({
+        workspaceId: ticket.workspaceId, channel: 'freshservice_writeback', context: `workflow:${what}`, provider: 'freshservice',
+      }))
+      .catch(() => {});
+    return {
+      applied: true,
+      via: 'freshservice_writeback',
+      status: { from: ticket.status, to: setStatus },
+      attempt: attemptsSoFar + 1,
+    };
+  } catch (error) {
+    const attempt = attemptsSoFar + 1;
+    const message = `Failed to write ${what} to FreshService: ${error.message}`;
+    // One-line signal for the send-health card family (Settings → health).
+    import('./emailHealthService.js')
+      .then(({ default: health }) => health.recordFailure({
+        workspaceId: ticket.workspaceId, channel: 'freshservice_writeback', context: `workflow:${what}`, provider: 'freshservice', error,
+      }))
+      .catch(() => {});
+    logger.warn('Workflow FS status write-back failed', {
+      ticketId: ticket.id, workspaceId: ticket.workspaceId, nodeId: node.id, attempt, error: error.message,
+    });
+    if (attempt < FS_WRITEBACK_MAX_ATTEMPTS && state && typeof state === 'object') {
+      state.__fsWritebackAttempts = { ...(state.__fsWritebackAttempts || {}), [node.id]: attempt };
+      return {
+        __waitMinutes: FS_WRITEBACK_RETRY_MINUTES,
+        __retryNodeId: node.id,
+        failed: true,
+        error: message,
+        attempt,
+        maxAttempts: FS_WRITEBACK_MAX_ATTEMPTS,
+        via: 'freshservice_writeback',
+      };
+    }
+    throw new Error(message);
+  }
+}
+
+/**
+ * ticket.fields_updated from the update_ticket node (TU-5): ONE event per node
+ * execution with actorKind 'workflow' + the producing workflowId, so
+ * executeForEvent can skip the workflow that made the change (loop guard).
+ * Status is excluded (status_changed has its own trigger).
+ */
+async function emitWorkflowFieldsUpdated({ ticket, changes, customFieldResult, workflowId, eventContext }) {
+  try {
+    const merged = {};
+    for (const [field, change] of Object.entries(changes || {})) {
+      if (field === 'status' || !change || typeof change !== 'object') continue;
+      merged[field] = change;
+    }
+    for (const [key, change] of Object.entries(customFieldResult?.changes || {})) {
+      if (JSON.stringify(change?.from ?? null) === JSON.stringify(change?.to ?? null)) continue;
+      merged[`customFields.${key}`] = { from: change.from ?? null, to: change.to ?? null };
+    }
+    if (!Object.keys(merged).length) return null;
+    const { default: ticketService } = await import('./ticketService.js');
+    return await ticketService._emitFieldsUpdated?.({
+      ticket,
+      changes: merged,
+      actor: { name: 'Notification workflow', email: null, role: 'workflow' },
+      actorKind: 'workflow',
+      actorName: 'Notification workflow',
+      source: workflowId ? `workflow:${workflowId}` : 'workflow',
+      workflowId: workflowId || null,
+      auditRowId: customFieldResult?.auditRowId ?? null,
+      reopened: false,
+      ...(eventContext?.event?.type ? {} : {}),
+    });
+  } catch (error) {
+    logger.warn(`update_ticket fields_updated dispatch failed (non-fatal): ${error.message}`);
+    return null;
+  }
+}
+
+async function executeUpdateTicketNode(node, eventContext, { dryRun = false, scope = null, state = null, workflowId = null } = {}) {
   const ticketId = Number(eventContext.ticket?.id);
   let setStatus = node.data?.setStatus || null;
   const setPriority = node.data?.setPriority ? Number(node.data.setPriority) : null;
@@ -3245,8 +3501,9 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false, sco
   if (setCustomFields) {
     try {
       const { default: customFieldService } = await import('./customFieldService.js');
+      // emitEvent:false — this node fires ONE fields_updated for everything it changed.
       customFieldResult = await customFieldService.setValues(
-        ticket.id, ticket.workspaceId, setCustomFields, { name: 'Notification workflow' },
+        ticket.id, ticket.workspaceId, setCustomFields, { name: 'Notification workflow', role: 'workflow' }, { emitEvent: false },
       );
     } catch (error) {
       customFieldResult = { skipped: true, reason: error.message };
@@ -3264,16 +3521,43 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false, sco
     }
   }
 
-  // Field mutations remain TP-born only (FreshService owns FS-born fields).
+  // FS-born status (RO-4): written THROUGH FreshService, never locally —
+  // the sync would revert a local-only flip within a minute. This is what
+  // lets "Reopen on requester reply" work for FreshService-routed workspaces.
+  let fsStatusResult = null;
+  if (setStatus && ticket.origin !== 'ticketpulse') {
+    fsStatusResult = await applyFsBornStatusWriteback({ node, ticket, setStatus, state, eventContext });
+    if (fsStatusResult?.__waitMinutes) return fsStatusResult; // retry park
+  }
+
+  // Other field mutations remain TP-born only (FreshService owns FS-born fields).
   if (ticket.origin !== 'ticketpulse') {
+    // Custom fields are the only FIELD change an FS-born ticket takes here.
+    if (customFieldResult?.changes) {
+      await emitWorkflowFieldsUpdated({ ticket, changes: {}, customFieldResult, workflowId, eventContext });
+    }
+    const extras = {
+      ...(fsStatusResult ? { status: fsStatusResult } : {}),
+      ...(assignment ? { assignment } : {}),
+      ...(customFieldResult ? { customFields: customFieldResult } : {}),
+      ...(tagResult ? { tags: tagResult } : {}),
+      ...(categoryError ? { categoryError } : {}),
+    };
+    if (fsStatusResult?.applied) {
+      return {
+        ...extras,
+        via: 'freshservice_writeback',
+        note: 'FS-born ticket: status written back to FreshService; other fields are FreshService-owned',
+      };
+    }
+    if (fsStatusResult?.skipped && !assignment && !customFieldResult && !tagResult) {
+      return { ...extras, skipped: true, reason: fsStatusResult.reason, via: 'freshservice_writeback' };
+    }
     if (assignment || customFieldResult || tagResult) {
       return {
-        ...(assignment ? { assignment } : {}),
-        ...(customFieldResult ? { customFields: customFieldResult } : {}),
-        ...(tagResult ? { tags: tagResult } : {}),
-        ...(categoryError ? { categoryError } : {}),
+        ...extras,
         skipped: true,
-        reason: 'FS-born ticket: only assignment write-back and TP annotations (custom fields, tags) applied',
+        reason: 'FS-born ticket: only status/assignment write-back and TP annotations (custom fields, tags) applied',
       };
     }
     return {
@@ -3408,6 +3692,9 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false, sco
 
   if (Object.keys(patch).length === 0) {
     if (assignment || customFieldResult || tagResult) {
+      if (customFieldResult?.changes) {
+        await emitWorkflowFieldsUpdated({ ticket, changes: {}, customFieldResult, workflowId, eventContext });
+      }
       return {
         ...(assignment ? { assignment } : {}),
         ...(customFieldResult ? { customFields: customFieldResult } : {}),
@@ -3427,7 +3714,7 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false, sco
       activityType: 'workflow_updated_ticket',
       performedBy: 'Notification workflow',
       performedAt: now,
-      details: { changes, note: node.data?.note || null, eventType: eventContext.event?.type || null },
+      details: { changes, note: node.data?.note || null, eventType: eventContext.event?.type || null, actorKind: 'workflow' },
     });
   } catch { /* non-fatal */ }
   try {
@@ -3447,6 +3734,9 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false, sco
   } catch { /* non-fatal */ }
 
   logger.info('Workflow update_ticket applied', { ticketId: ticket.id, changes });
+  // ONE ticket.fields_updated for the node's field + custom-field changes
+  // (actorKind 'workflow', loop-guarded by workflowId); status excluded.
+  await emitWorkflowFieldsUpdated({ ticket, changes, customFieldResult, workflowId, eventContext });
   return {
     updated: changes,
     ...(assignment ? { assignment } : {}),
@@ -3519,6 +3809,88 @@ async function applyWorkflowTagChanges(prisma, ticket, addNames, removeNames) {
   return { added, removed };
 }
 
+/** Trigger-node options for a fields_updated workflow (defaults per TU-8). */
+export function fieldsUpdatedTriggerOptions(workflow) {
+  const definition = workflow?.publishedDefinition || workflow?.draftDefinition || null;
+  const trigger = (definition?.nodes || []).find((node) => node?.type === 'trigger');
+  const data = trigger?.data || {};
+  const coalesceRaw = data.coalesceMinutes;
+  const coalesceMinutes = coalesceRaw === undefined || coalesceRaw === null || coalesceRaw === ''
+    ? 3
+    : Math.max(0, Math.min(1440, Number(coalesceRaw) || 0));
+  return {
+    coalesceMinutes,
+    includeFreshserviceChanges: data.includeFreshserviceChanges === true,
+    notifyActor: data.notifyActor === true,
+  };
+}
+
+/**
+ * fields_updated gate + coalescing (TU-9) for ONE workflow:
+ *   - loop guard: the workflow that produced the change never re-fires on it;
+ *   - FS opt-in: sync-observed changes need includeFreshserviceChanges;
+ *   - coalescing: a WAITING run of this workflow+ticket whose resumeAt is
+ *     still ahead absorbs the new diff (from = earliest, to = latest) and the
+ *     event is dropped; otherwise the caller parks a new run for
+ *     coalesceMinutes before its first node.
+ */
+export async function fieldsUpdatedGate(workflow, workflowContext) {
+  const extra = workflowContext?.event?.extra || {};
+  const triggerOptions = fieldsUpdatedTriggerOptions(workflow);
+  if (extra.workflowId && Number(extra.workflowId) === Number(workflow.id)) {
+    return { skip: true, reason: 'Loop guard: this workflow produced the change' };
+  }
+  if (extra.actorKind === 'freshservice' && !triggerOptions.includeFreshserviceChanges) {
+    return { skip: true, reason: 'FreshService-side change (includeFreshserviceChanges is off)' };
+  }
+  const ticketId = Number(workflowContext?.ticket?.id);
+  if (triggerOptions.coalesceMinutes > 0 && Number.isFinite(ticketId) && ticketId > 0 && workflow.mockModeEnabled !== true) {
+    let waiting = null;
+    try {
+      waiting = await prisma.notificationWorkflowRun.findFirst({
+        where: {
+          workflowId: workflow.id,
+          ticketId,
+          eventType: 'ticket.fields_updated',
+          status: 'waiting',
+          resumeAt: { gt: new Date() },
+        },
+        orderBy: { resumeAt: 'desc' },
+        select: { id: true, eventContext: true, resumeAt: true },
+      });
+    } catch (error) {
+      logger.warn(`fields_updated coalesce lookup failed (running standalone): ${error.message}`);
+    }
+    if (waiting) {
+      try {
+        const stored = waiting.eventContext && typeof waiting.eventContext === 'object' ? waiting.eventContext : {};
+        const storedExtra = stored.event?.extra || {};
+        const merged = mergeChangeSets(storedExtra.changes || {}, extra.changes || {});
+        const views = renderChangeViews(merged);
+        const mergedExtra = {
+          ...storedExtra,
+          ...views,
+          // Latest actor wins for the headline; the earliest keeps the stamp.
+          actorKind: extra.actorKind || storedExtra.actorKind,
+          actorName: extra.actorName || storedExtra.actorName,
+          actorEmail: extra.actorEmail ?? storedExtra.actorEmail ?? null,
+          source: extra.source || storedExtra.source,
+          reopened: storedExtra.reopened === true || extra.reopened === true,
+          coalescedEvents: (Number(storedExtra.coalescedEvents) || 1) + 1,
+        };
+        await prisma.notificationWorkflowRun.update({
+          where: { id: waiting.id },
+          data: { eventContext: safeAuditJson({ ...stored, event: { ...(stored.event || {}), extra: mergedExtra } }) },
+        });
+        return { coalescedRunId: waiting.id, reason: `Merged into waiting run TP-NWF-${waiting.id}`, triggerOptions };
+      } catch (error) {
+        logger.warn(`fields_updated coalesce merge failed (running standalone): ${error.message}`);
+      }
+    }
+  }
+  return { parkMinutes: workflow.mockModeEnabled === true ? 0 : triggerOptions.coalesceMinutes, triggerOptions };
+}
+
 export async function executeForEvent(eventContext, options = {}) {
   let routedContext = await enrichEventContextWithNotificationPolicy(eventContext);
   routedContext = await enrichEventContextWithRequesterProfile(routedContext);
@@ -3555,11 +3927,26 @@ export async function executeForEvent(eventContext, options = {}) {
       },
       notificationRouting: routingResult,
     };
+    let parkMinutes = 0;
+    if (eventType === 'ticket.fields_updated') {
+      const gate = await fieldsUpdatedGate(workflow, workflowContext);
+      if (gate.skip) {
+        results.push({ status: 'skipped', reason: gate.reason, workflowId: workflow.id, ...(gate.runId ? { runId: gate.runId } : {}) });
+        continue;
+      }
+      if (gate.coalescedRunId) {
+        results.push({ status: 'coalesced', reason: gate.reason, workflowId: workflow.id, runId: gate.coalescedRunId });
+        continue;
+      }
+      parkMinutes = gate.parkMinutes;
+      workflowContext.event.triggerOptions = gate.triggerOptions;
+    }
     try {
       results.push(await executeWorkflow(workflow, routedContext, {
         eventContext: workflowContext,
         routingResult,
         triggerSource: options.triggerSource || routedContext.event?.source || null,
+        parkMinutes,
       }));
     } catch (error) {
       logger.warn('Notification workflow execution failed', {

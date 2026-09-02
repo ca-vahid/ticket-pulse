@@ -5,9 +5,10 @@ const prismaMock = {
   ticketThreadEntry: { findFirst: jest.fn(), create: jest.fn() },
   ticket: { findUnique: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
   requester: { findUnique: jest.fn() },
-  technician: { findMany: jest.fn() },
+  technician: { findFirst: jest.fn(), findMany: jest.fn() },
   notificationDelivery: { findFirst: jest.fn() },
 };
+const holdMock = { holdMessage: jest.fn(), isKnownMessageId: jest.fn() };
 const graphMock = {
   isConfigured: jest.fn(() => true),
   getInboxMessagesForIngest: jest.fn(),
@@ -21,6 +22,8 @@ jest.unstable_mockModule('../src/integrations/graphMailClient.js', () => ({ defa
 jest.unstable_mockModule('../src/services/ticketService.js', () => ({ default: ticketServiceMock }));
 jest.unstable_mockModule('../src/services/mirrorService.js', () => ({ default: mirrorServiceMock }));
 jest.unstable_mockModule('../src/services/ticketActivityRepository.js', () => ({ default: activityMock }));
+// RL-4 hold queue is built in parallel — mocked virtually against its contract.
+jest.unstable_mockModule('../src/services/mailboxHoldService.js', () => ({ default: holdMock }), { virtual: true });
 jest.unstable_mockModule('../src/routes/sse.routes.js', () => ({
   default: {},
   sseManager: { broadcast: jest.fn() },
@@ -56,8 +59,12 @@ beforeEach(() => {
   prismaMock.ticket.findFirst.mockResolvedValue(null);
   prismaMock.ticket.update.mockResolvedValue({});
   prismaMock.requester.findUnique.mockResolvedValue(null);
+  prismaMock.technician.findFirst.mockResolvedValue(null);
   prismaMock.technician.findMany.mockResolvedValue([]);
   prismaMock.notificationDelivery.findFirst.mockResolvedValue(null);
+  holdMock.holdMessage.mockResolvedValue({ id: 31 });
+  holdMock.isKnownMessageId.mockResolvedValue(false);
+  mailboxIngestService._heldMessageIds.clear();
   activityMock.create.mockResolvedValue({});
   mirrorServiceMock.enqueueThreadEntry.mockResolvedValue({});
   mirrorServiceMock.enqueueFieldSync.mockResolvedValue({});
@@ -501,8 +508,11 @@ describe('notification-delivery Message-ID (rung 1b)', () => {
     });
 
     expect(outcome).toBe('reply');
+    // RL-5: one OR query over provider_message_id + message_id (the RFC id
+    // the SendGrid lane stores); falls back to provider-only pre-migration.
+    const ids = ['<ack-42@mailbox.example>', '<older@x>', 'ack-42@mailbox.example', 'older@x'];
     expect(prismaMock.notificationDelivery.findFirst).toHaveBeenCalledWith({
-      where: { workspaceId: 1, providerMessageId: { in: ['<ack-42@mailbox.example>', '<older@x>', 'ack-42@mailbox.example', 'older@x'] } },
+      where: { workspaceId: 1, OR: [{ providerMessageId: { in: ids } }, { messageId: { in: ids } }] },
       select: { ticketId: true },
       orderBy: { id: 'desc' },
     });
@@ -534,5 +544,375 @@ describe('notification-delivery Message-ID (rung 1b)', () => {
     prismaMock.ticket.findFirst.mockResolvedValueOnce({ id: 603, workspaceId: 1, origin: 'ticketpulse', nativeNumber: 1042 });
     await mailboxIngestService.processEmail(connection, { ...baseEmail, subject: 'RE: Projector [TP-1042]' });
     expect(prismaMock.notificationDelivery.findFirst).not.toHaveBeenCalled();
+  });
+});
+
+// Mega 09-01 Phase FW (agent forwards keep the original requester) + RL-3
+// (agent-Cc intake carve-out, reply-evidence hold) — ingest half.
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+
+const fixturesDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'forwards');
+const forwardFixture = (name) => readFileSync(path.join(fixturesDir, name), 'utf8');
+const AGENT = { id: 7, name: 'Alex Agent', email: 'alex.agent@bgcengineering.ca' };
+const RITA = 'rita.requester@customer.example';
+
+describe('agent forwards (Phase FW)', () => {
+  const asAgent = () => prismaMock.technician.findFirst.mockResolvedValue(AGENT);
+  const forwardEmail = (fixture, extra = {}) => ({
+    ...baseEmail,
+    id: 'msg-fw',
+    subject: 'FW: Invoice 4471 still unpaid',
+    from: AGENT.email,
+    fromName: AGENT.name,
+    to: ['helpdesk-pilot@example.com'],
+    cc: [],
+    bodyHtml: forwardFixture(fixture),
+    bodyText: null,
+    bodyPreview: 'Hi team, please open a ticket for Rita',
+    internetMessageId: '<fwd-1@bgcengineering.ca>',
+    ...extra,
+  });
+
+  test('agent + Outlook forward → original sender is the requester, description is the sliced original', async () => {
+    asAgent();
+    const outcome = await mailboxIngestService.processEmail(connection, forwardEmail('outlook-owa.html'));
+
+    expect(outcome).toBe('created');
+    const [ws, input, actor, options] = ticketServiceMock.createTicket.mock.calls[0];
+    expect(ws).toBe(1);
+    expect(actor).toEqual(expect.objectContaining({ role: 'system' }));
+    expect(options).toEqual({ sourceChannel: 1, createdVia: 'forward' });
+    expect(input.requesterEmail).toBe(RITA);
+    expect(input.requesterName).toBe('Rita Requester');
+    expect(input.subject).toBe('Invoice 4471 still unpaid'); // the original subject, no FW:
+    expect(input.description).toMatch(/Invoice <b>4471<\/b> from July/);
+    expect(input.description).not.toMatch(/divRplyFwdMsg|<b>From:<\/b>|please open a ticket/);
+    expect(input.ccEmails).toBeUndefined(); // agents are never Cc'd
+
+    // Original-email entry: actor = the requester, occurredAt = the quoted date, Message-ID kept.
+    const original = prismaMock.ticketThreadEntry.create.mock.calls.map((c) => c[0].data).find((d) => d.eventType === 'original_email');
+    expect(original).toEqual(expect.objectContaining({
+      actorEmail: RITA, actorName: 'Rita Requester', authorType: 'requester', incoming: true,
+      emailMessageId: '<fwd-1@bgcengineering.ca>', externalEntryId: 'graph-msg-fw',
+    }));
+    expect(original.occurredAt.toISOString()).toBe(new Date('September 1, 2026 9:41').toISOString());
+    expect(original.rawPayload.forwarded).toEqual(expect.objectContaining({
+      kind: 'forward', byEmail: AGENT.email, byName: AGENT.name, byTechnicianId: 7,
+      originalFrom: RITA, originalSubject: 'Invoice 4471 still unpaid', client: 'outlook_owa', sliced: true, parser: 'v1',
+      originalTo: ['alex.agent@bgcengineering.ca'], originalCc: ['boss@customer.example', 'pat.peer@customer.example'],
+    }));
+    expect(original.rawPayload.cc_emails).toEqual(['boss@customer.example', 'pat.peer@customer.example']);
+
+    // The agent's covering note → PRIVATE agent entry.
+    const note = prismaMock.ticketThreadEntry.create.mock.calls.map((c) => c[0].data).find((d) => d.eventType === 'note');
+    expect(note).toEqual(expect.objectContaining({
+      actorEmail: AGENT.email, authorType: 'agent', isPrivate: true, visibility: 'private', incoming: false, mirrorState: 'pending',
+    }));
+    expect(note.bodyText).toMatch(/^Hi team, please open a ticket for Rita/);
+    expect(note.bodyText).not.toMatch(/Invoice 4471 from July/);
+
+    expect(activityMock.create).toHaveBeenCalledWith(expect.objectContaining({
+      ticketId: 700,
+      activityType: 'forwarded_intake',
+      performedBy: 'Ticket Pulse Mail',
+      details: expect.objectContaining({ byEmail: AGENT.email, byTechnicianId: 7, originalFrom: RITA, client: 'outlook_owa', sliced: true, entryId: 9001 }),
+    }));
+    // Rung 4 never ran against the agent (no sender+recency lookup for alex@).
+    const recencyCalls = prismaMock.ticket.findFirst.mock.calls.filter((c) => c[0].where?.requester);
+    for (const call of recencyCalls) expect(call[0].where.requester.is.email.equals).toBe(RITA);
+  });
+
+  test('non-agent FW: → unchanged (sender is the requester, no forwarded meta)', async () => {
+    const outcome = await mailboxIngestService.processEmail(connection, forwardEmail('outlook-owa.html', { from: 'someone@customer.example', fromName: 'Some One' }));
+    expect(outcome).toBe('created');
+    const [, input, , options] = ticketServiceMock.createTicket.mock.calls[0];
+    expect(input.requesterEmail).toBe('someone@customer.example');
+    expect(input.subject).toBe('FW: Invoice 4471 still unpaid');
+    expect(options).toEqual({ sourceChannel: 1, createdVia: 'email' });
+    const original = prismaMock.ticketThreadEntry.create.mock.calls[0][0].data;
+    expect(original.rawPayload?.forwarded).toBeUndefined();
+    expect(activityMock.create).not.toHaveBeenCalledWith(expect.objectContaining({ activityType: 'forwarded_intake' }));
+  });
+
+  test('agent + unparseable forward → unchanged + system note + forwarded_intake_unparsed', async () => {
+    asAgent();
+    const outcome = await mailboxIngestService.processEmail(connection, forwardEmail('signature-with-From-line.html', { subject: 'FW: September close date?' }));
+    expect(outcome).toBe('created');
+    const [, input] = ticketServiceMock.createTicket.mock.calls[0];
+    expect(input.requesterEmail).toBe(AGENT.email);
+    expect(input.subject).toBe('FW: September close date?');
+    const note = prismaMock.ticketThreadEntry.create.mock.calls.map((c) => c[0].data).find((d) => d.eventType === 'note');
+    expect(note).toEqual(expect.objectContaining({ isPrivate: true, authorType: 'system' }));
+    expect(note.bodyText).toMatch(/could not identify the original sender \(no header block\)/);
+    expect(activityMock.create).toHaveBeenCalledWith(expect.objectContaining({
+      activityType: 'forwarded_intake_unparsed',
+      details: expect.objectContaining({ byEmail: AGENT.email, reason: 'no_header_block' }),
+    }));
+  });
+
+  test('original sender == the agent → unchanged (agent is the requester) + unparsed note', async () => {
+    asAgent();
+    const html = forwardFixture('outlook-owa.html').replace(/Rita Requester &lt;rita\.requester@customer\.example&gt;/, 'Alex Agent &lt;alex.agent@bgcengineering.ca&gt;');
+    const outcome = await mailboxIngestService.processEmail(connection, forwardEmail('outlook-owa.html', { bodyHtml: html }));
+    expect(outcome).toBe('created');
+    expect(ticketServiceMock.createTicket.mock.calls[0][1].requesterEmail).toBe(AGENT.email);
+    expect(activityMock.create).toHaveBeenCalledWith(expect.objectContaining({
+      activityType: 'forwarded_intake_unparsed', details: expect.objectContaining({ reason: 'original_is_agent' }),
+    }));
+    expect(activityMock.create).not.toHaveBeenCalledWith(expect.objectContaining({ activityType: 'forwarded_intake' }));
+  });
+
+  test('agent forward with a TP-<n> subject → ingestReply with forwarded meta (prefix stripped for rung 2)', async () => {
+    asAgent();
+    prismaMock.ticket.findFirst.mockResolvedValueOnce({ id: 610, workspaceId: 1, origin: 'ticketpulse', nativeNumber: 1204, ccEmails: [] });
+    const outcome = await mailboxIngestService.processEmail(connection, forwardEmail('outlook-owa.html', { subject: 'FW: Invoice 4471 still unpaid [TP-1204]' }));
+
+    expect(outcome).toBe('reply');
+    expect(ticketServiceMock.createTicket).not.toHaveBeenCalled();
+    expect(prismaMock.ticket.findFirst.mock.calls[0][0].where).toEqual({ workspaceId: 1, nativeNumber: 1204, origin: 'ticketpulse' });
+    const entry = prismaMock.ticketThreadEntry.create.mock.calls[0][0].data;
+    expect(entry).toEqual(expect.objectContaining({
+      ticketId: 610, eventType: 'reply', actorEmail: AGENT.email, authorType: 'agent', incoming: true, isPrivate: false,
+      emailMessageId: '<fwd-1@bgcengineering.ca>',
+    }));
+    expect(entry.rawPayload.forwarded).toEqual(expect.objectContaining({ kind: 'forward', byTechnicianId: 7, originalFrom: RITA, sliced: false }));
+    expect(activityMock.create).toHaveBeenCalledWith(expect.objectContaining({
+      activityType: 'requester_reply', details: expect.objectContaining({ via: 'tp_ref', forwardedBy: AGENT.email, originalFrom: RITA }),
+    }));
+  });
+
+  test('rung 4 for an agent forward runs against the ORIGINAL sender, never the agent', async () => {
+    asAgent();
+    prismaMock.ticket.findFirst.mockResolvedValueOnce({ id: 611, workspaceId: 1, origin: 'ticketpulse', nativeNumber: 1300, status: 'Open', ccEmails: [] });
+    const outcome = await mailboxIngestService.processEmail(connection, forwardEmail('outlook-owa.html'));
+    expect(outcome).toBe('reply');
+    const recency = prismaMock.ticket.findFirst.mock.calls.find((c) => c[0].where?.requester);
+    expect(recency[0].where.requester.is.email.equals).toBe(RITA);
+    expect(prismaMock.ticket.findFirst.mock.calls.some((c) => c[0].where?.requester?.is?.email?.equals === AGENT.email)).toBe(false);
+  });
+});
+
+describe('agent Cc intake + hold decisions (Phase RL-3)', () => {
+  const asAgent = () => prismaMock.technician.findFirst.mockResolvedValue(AGENT);
+  const agentReply = (extra = {}) => ({
+    ...baseEmail,
+    id: 'msg-cc',
+    subject: 'RE: Invoice 4471 still unpaid',
+    from: AGENT.email,
+    fromName: AGENT.name,
+    to: [RITA],
+    cc: ['helpdesk-pilot@example.com'],
+    // The agent's Outlook reply quotes Rita's original mail underneath.
+    bodyHtml: forwardFixture('reply-not-forward.html')
+      .replace('Ticket Pulse &lt;patickets@bgcengineering.ca&gt;', 'Rita Requester &lt;rita.requester@customer.example&gt;')
+      .replace('<b>To:</b> Rita Requester &lt;rita.requester@customer.example&gt;', '<b>To:</b> Alex Agent &lt;alex.agent@bgcengineering.ca&gt;'),
+    bodyText: null,
+    bodyPreview: 'Thanks — attached is the remittance.',
+    internetMessageId: '<agent-reply-1@bgcengineering.ca>',
+    inReplyTo: '<never-seen@customer.example>',
+    references: '<never-seen@customer.example>',
+    ...extra,
+  });
+
+  test('agent From + external To + mailbox Cc + unknown References → ticket for the requester, agent text = public agent entry, assigned, ack suppressed', async () => {
+    asAgent();
+    const outcome = await mailboxIngestService.processEmail(connection, agentReply());
+
+    expect(outcome).toBe('created');
+    expect(holdMock.holdMessage).not.toHaveBeenCalled();
+    const [, input, actor, options] = ticketServiceMock.createTicket.mock.calls[0];
+    expect(actor).toEqual(expect.objectContaining({ role: 'system' }));
+    expect(options).toEqual({ sourceChannel: 1, createdVia: 'agent_cc' });
+    expect(input).toEqual(expect.objectContaining({
+      requesterEmail: RITA,
+      requesterName: 'Rita Requester', // from the quoted From: block
+      subject: 'Invoice 4471 still unpaid',
+      assignedTechId: 7,
+      aiClassifyOnly: true,
+      runAiTriage: false,
+      notifyRequester: true, suppressRequesterAck: true,
+    }));
+    expect(input.description).toMatch(/we are looking into invoice 4471/); // the quoted original
+    expect(input.description).not.toMatch(/attached is the remittance/);
+
+    const entries = prismaMock.ticketThreadEntry.create.mock.calls.map((c) => c[0].data);
+    const original = entries.find((d) => d.eventType === 'original_email');
+    expect(original).toEqual(expect.objectContaining({ actorEmail: RITA, authorType: 'requester', incoming: true }));
+    expect(original.emailMessageId).toBeUndefined();
+    const agentEntry = entries.find((d) => d.eventType === 'reply');
+    expect(agentEntry).toEqual(expect.objectContaining({
+      actorEmail: AGENT.email, actorName: AGENT.name, authorType: 'agent', incoming: false, isPrivate: false, visibility: 'public',
+      emailMessageId: '<agent-reply-1@bgcengineering.ca>', externalEntryId: 'graph-msg-cc', mirrorState: 'pending',
+    }));
+    expect(agentEntry.bodyText).toMatch(/^Thanks — attached is the remittance/);
+    expect(agentEntry.rawPayload).toEqual(expect.objectContaining({
+      deliveryState: 'external',
+      to_emails: [RITA], cc_emails: ['helpdesk-pilot@example.com'],
+      agentIntake: expect.objectContaining({ kind: 'agent_cc', technicianId: 7, requester: RITA }),
+    }));
+    expect(activityMock.create).toHaveBeenCalledWith(expect.objectContaining({
+      activityType: 'agent_cc_intake',
+      details: expect.objectContaining({ byTechnicianId: 7, requester: RITA, assigned: true, requesterAckSuppressed: true, viaQuotedFrom: true }),
+    }));
+    // Rung 4 ran against the external recipient, never the agent.
+    const recency = prismaMock.ticket.findFirst.mock.calls.find((c) => c[0].where?.requester);
+    expect(recency[0].where.requester.is.email.equals).toBe(RITA);
+  });
+
+  test('the requester\'s later reply-all (In-Reply-To = the agent mail\'s Message-ID) threads via rung 1', async () => {
+    prismaMock.ticketThreadEntry.findFirst
+      .mockResolvedValueOnce(null) // dedupe
+      .mockResolvedValueOnce({ ticketId: 700 }); // rung 1 hit on the agent entry's emailMessageId
+    prismaMock.ticket.findUnique.mockResolvedValue({ id: 700, workspaceId: 1, origin: 'ticketpulse', nativeNumber: 1100, ccEmails: [] });
+
+    const outcome = await mailboxIngestService.processEmail(connection, {
+      ...baseEmail, id: 'msg-rr', from: RITA, fromName: 'Rita Requester', subject: 'RE: Invoice 4471 still unpaid',
+      to: [AGENT.email], cc: ['helpdesk-pilot@example.com'], inReplyTo: '<agent-reply-1@bgcengineering.ca>',
+      internetMessageId: '<rita-2@customer.example>',
+    });
+    expect(outcome).toBe('reply');
+    expect(prismaMock.ticketThreadEntry.findFirst.mock.calls[1][0].where.emailMessageId).toEqual({ in: ['<agent-reply-1@bgcengineering.ca>'] });
+    const entry = prismaMock.ticketThreadEntry.create.mock.calls[0][0].data;
+    expect(entry).toEqual(expect.objectContaining({ ticketId: 700, authorType: 'requester', incoming: true, actorEmail: RITA }));
+  });
+
+  test('agentCcIntake=false → rule 2 is OFF: held with the address chooser instead', async () => {
+    asAgent();
+    const outcome = await mailboxIngestService.processEmail({ ...connection, agentCcIntake: false }, agentReply());
+    expect(outcome).toBe('held');
+    expect(ticketServiceMock.createTicket).not.toHaveBeenCalled();
+    expect(holdMock.holdMessage).toHaveBeenCalledWith(expect.objectContaining({ id: 1 }), expect.objectContaining({ id: 'msg-cc' }), expect.objectContaining({
+      reason: 'agent_reply_no_requester', candidates: [{ email: RITA }], decision: expect.objectContaining({ rule: 'agent_cc_intake_disabled' }),
+    }));
+  });
+
+  test('agent Bcc (mailbox absent from To/Cc) → held agent_reply_no_requester with the external addresses', async () => {
+    asAgent();
+    const outcome = await mailboxIngestService.processEmail(connection, agentReply({ cc: [] }));
+    expect(outcome).toBe('held');
+    expect(holdMock.holdMessage).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.objectContaining({
+      reason: 'agent_reply_no_requester', candidates: [{ email: RITA }], decision: expect.objectContaining({ rule: 'agent_bcc_mailbox' }),
+    }));
+    expect(ticketServiceMock.createTicket).not.toHaveBeenCalled();
+    // Re-seen by the delta poller → skipped without another hold call.
+    expect(await mailboxIngestService.processEmail(connection, agentReply({ cc: [] }))).toBe('skipped');
+    expect(holdMock.holdMessage).toHaveBeenCalledTimes(1);
+  });
+
+  test('agents-only To (+ mailbox Cc) with reply evidence → held agent_reply_no_requester', async () => {
+    asAgent();
+    prismaMock.technician.findMany.mockResolvedValue([{ email: 'bob.middle@bgcengineering.ca' }]);
+    const outcome = await mailboxIngestService.processEmail(connection, agentReply({ to: ['bob.middle@bgcengineering.ca'], bodyHtml: '<p>Bob, can you take this?</p>' }));
+    expect(outcome).toBe('held');
+    expect(holdMock.holdMessage).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.objectContaining({
+      reason: 'agent_reply_no_requester', decision: expect.objectContaining({ rule: 'agent_reply_no_requester' }),
+    }));
+  });
+
+  test('external sender + unknown reference → held unknown_reference (with a sender best-guess ticket)', async () => {
+    prismaMock.ticket.findFirst
+      .mockResolvedValueOnce(null) // rung 4 (3-day cap)
+      .mockResolvedValueOnce({ id: 655 }); // best guess, no cap
+    const outcome = await mailboxIngestService.processEmail(connection, {
+      ...baseEmail, subject: 'Re: quick question', inReplyTo: '<gone@elsewhere.example>', internetMessageId: '<ext-1@example.com>',
+    });
+    expect(outcome).toBe('held');
+    expect(ticketServiceMock.createTicket).not.toHaveBeenCalled();
+    expect(holdMock.holdMessage).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ internetMessageId: '<ext-1@example.com>' }), expect.objectContaining({
+      reason: 'unknown_reference', bestGuessTicketId: 655,
+      decision: expect.objectContaining({ rule: 'external_reply_unknown', details: expect.objectContaining({ evidence: ['threading_headers', 'subject_prefix'] }) }),
+    }));
+  });
+
+  test('a token-stripped "Re:" with the TP ref still in the quoted body threads via the body scan', async () => {
+    prismaMock.ticket.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: 660, workspaceId: 1, origin: 'ticketpulse', nativeNumber: 1204, ccEmails: [] });
+    const outcome = await mailboxIngestService.processEmail(connection, {
+      ...baseEmail, subject: 'Re: Invoice', bodyText: 'Any news?\n\nFrom: Ticket Pulse\nSubject: Re: Invoice [TP-1204]\n', internetMessageId: '<ext-2@example.com>',
+    });
+    expect(outcome).toBe('reply');
+    expect(activityMock.create).toHaveBeenCalledWith(expect.objectContaining({ activityType: 'requester_reply', details: expect.objectContaining({ via: 'body_ref' }) }));
+    expect(holdMock.holdMessage).not.toHaveBeenCalled();
+  });
+
+  test('newTicketPolicy=create → created despite reply evidence', async () => {
+    const outcome = await mailboxIngestService.processEmail({ ...connection, newTicketPolicy: 'create' }, {
+      ...baseEmail, subject: 'Re: quick question', inReplyTo: '<gone@elsewhere.example>',
+    });
+    expect(outcome).toBe('created');
+    expect(holdMock.holdMessage).not.toHaveBeenCalled();
+    expect(ticketServiceMock.createTicket).toHaveBeenCalledWith(1, expect.objectContaining({ requesterEmail: 'rita@example.com' }), expect.anything(), { sourceChannel: 1, createdVia: 'email' });
+  });
+
+  test('newTicketPolicy=replies_only → fresh external mail is held, not created', async () => {
+    const outcome = await mailboxIngestService.processEmail({ ...connection, newTicketPolicy: 'replies_only' }, baseEmail);
+    expect(outcome).toBe('held');
+    expect(holdMock.holdMessage).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.objectContaining({
+      reason: 'unknown_reference', decision: expect.objectContaining({ rule: 'policy_replies_only' }),
+    }));
+  });
+
+  test('hold service failure: policy=create falls back to creating; default policy skips and remembers the id', async () => {
+    holdMock.holdMessage.mockRejectedValue(new Error('table missing'));
+    const reply = { ...baseEmail, subject: 'Re: quick question', inReplyTo: '<gone@elsewhere.example>', internetMessageId: '<ext-3@example.com>' };
+    expect(await mailboxIngestService.processEmail({ ...connection, newTicketPolicy: 'create' }, reply)).toBe('created');
+    jest.clearAllMocks();
+    holdMock.holdMessage.mockRejectedValue(new Error('table missing'));
+    prismaMock.ticketThreadEntry.findFirst.mockResolvedValue(null);
+    prismaMock.ticket.findFirst.mockResolvedValue(null);
+    prismaMock.technician.findFirst.mockResolvedValue(null);
+    prismaMock.technician.findMany.mockResolvedValue([]);
+    prismaMock.notificationDelivery.findFirst.mockResolvedValue(null);
+    expect(await mailboxIngestService.processEmail(connection, reply)).toBe('skipped');
+    expect(ticketServiceMock.createTicket).not.toHaveBeenCalled();
+    expect(mailboxIngestService._heldMessageIds.has('<ext-3@example.com>')).toBe(true);
+  });
+
+  test('a subsequent agent reply from Outlook (known reference) threads as an agent entry that is never re-sent', async () => {
+    asAgent();
+    prismaMock.ticketThreadEntry.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce({ ticketId: 700 });
+    prismaMock.ticket.findUnique.mockResolvedValue({ id: 700, workspaceId: 1, origin: 'ticketpulse', nativeNumber: 1100, ccEmails: [] });
+    const outcome = await mailboxIngestService.processEmail(connection, agentReply({ inReplyTo: '<rita-2@customer.example>', references: '<agent-reply-1@bgcengineering.ca> <rita-2@customer.example>', internetMessageId: '<agent-reply-2@bgcengineering.ca>' }));
+    expect(outcome).toBe('reply');
+    const entry = prismaMock.ticketThreadEntry.create.mock.calls[0][0].data;
+    expect(entry).toEqual(expect.objectContaining({ authorType: 'agent', incoming: false, actorEmail: AGENT.email, emailMessageId: '<agent-reply-2@bgcengineering.ca>' }));
+    expect(entry.rawPayload).toEqual(expect.objectContaining({ deliveryState: 'external' }));
+    expect(activityMock.create).toHaveBeenCalledWith(expect.objectContaining({ activityType: 'agent_reply', details: expect.objectContaining({ deliveryState: 'external', technicianId: 7 }) }));
+    expect(activityMock.create).not.toHaveBeenCalledWith(expect.objectContaining({ activityType: 'requester_reply' }));
+  });
+});
+
+// RL-4 hand-off: the hold queue's "Create ticket (for <address>)" and
+// "Attach" actions call back into this service with the contract below.
+describe('hold-queue callbacks (RL-4 contract)', () => {
+  test('createTicketFromEmail({kind:fresh, forcedRequester, createdVia:held_reply, heldMessageId, resolvedBy}) → forced requester + createdVia', async () => {
+    const email = { ...baseEmail, id: 'msg-held', internetMessageId: '<held-1@example.com>', to: ['helpdesk-pilot@example.com'] };
+    await mailboxIngestService.createTicketFromEmail(connection, email, {
+      kind: 'fresh', forcedRequester: 'Chosen.Person@Customer.example', createdVia: 'held_reply', heldMessageId: 31, resolvedBy: 'Kirsten (coordinator)',
+    });
+    expect(ticketServiceMock.createTicket).toHaveBeenCalledWith(1, expect.objectContaining({
+      requesterEmail: 'chosen.person@customer.example', requesterName: null, subject: 'Printer on 3rd floor jammed',
+    }), expect.objectContaining({ role: 'system' }), { sourceChannel: 1, createdVia: 'held_reply' });
+    const original = prismaMock.ticketThreadEntry.create.mock.calls[0][0].data;
+    expect(original).toEqual(expect.objectContaining({ eventType: 'original_email', actorEmail: 'rita@example.com', emailMessageId: '<held-1@example.com>' }));
+    expect(original.rawPayload).toEqual({
+      to_emails: ['helpdesk-pilot@example.com'], cc_emails: [],
+      heldReply: { heldMessageId: 31, resolvedBy: 'Kirsten (coordinator)', forcedRequester: 'chosen.person@customer.example' },
+    });
+  });
+
+  test('no forcedRequester → email.from; no createdVia → email', async () => {
+    await mailboxIngestService.createTicketFromEmail(connection, baseEmail, { kind: 'fresh', heldMessageId: 32, resolvedBy: 'x' });
+    expect(ticketServiceMock.createTicket).toHaveBeenCalledWith(1, expect.objectContaining({ requesterEmail: 'rita@example.com', requesterName: 'Rita Requester' }), expect.anything(), { sourceChannel: 1, createdVia: 'email' });
+    expect(prismaMock.ticketThreadEntry.create.mock.calls[0][0].data.rawPayload).toEqual({ heldReply: { heldMessageId: 32, resolvedBy: 'x' } });
+  });
+
+  test('attach → ingestReply(connection, ticket, email, held_reply_attach) with no 5th argument', async () => {
+    const ticket = { id: 720, workspaceId: 1, origin: 'ticketpulse', nativeNumber: 1120, ccEmails: [] };
+    const entry = await mailboxIngestService.ingestReply(connection, ticket, { ...baseEmail, internetMessageId: '<held-2@example.com>' }, 'held_reply_attach');
+    expect(entry).toEqual(expect.objectContaining({ id: 9001, ticketId: 720, authorType: 'requester', incoming: true, emailMessageId: '<held-2@example.com>' }));
+    expect(activityMock.create).toHaveBeenCalledWith(expect.objectContaining({ activityType: 'requester_reply', details: expect.objectContaining({ via: 'held_reply_attach' }) }));
+    expect(mirrorServiceMock.enqueueThreadEntry).toHaveBeenCalledWith(1, 720, 9001);
   });
 });

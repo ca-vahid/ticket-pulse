@@ -13,7 +13,13 @@ vi.mock('../../services/api', () => ({
     removeMailbox: vi.fn(),
     testMailbox: vi.fn(),
     meta: vi.fn().mockResolvedValue({ data: { groups: [] } }),
+    // Phase RL: the panel embeds the hold queue (HeldRepliesPanel).
+    listHeldMessages: vi.fn().mockResolvedValue({ data: [], meta: { heldCount: 0 } }),
+    attachHeldMessage: vi.fn(),
+    createTicketFromHeld: vi.fn(),
+    discardHeldMessage: vi.fn(),
   },
+  searchAPI: { global: vi.fn() },
 }));
 
 vi.mock('../../hooks/useTicketTypes', () => ({

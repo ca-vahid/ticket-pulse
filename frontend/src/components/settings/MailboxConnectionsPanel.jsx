@@ -1,9 +1,43 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
-  AlertCircle, CheckCircle, Inbox, Loader2, Mail, Plus, Send, Star, Trash2, Wifi, Zap,
+  AlertCircle, CheckCircle, Inbox, Loader2, Mail, Plus, Send, ShieldAlert, Star, Trash2, Wifi, XCircle, Zap,
 } from 'lucide-react';
 import { ticketsAPI } from '../../services/api';
 import { useTicketTypes } from '../../hooks/useTicketTypes';
+import HeldRepliesPanel from '../tickets/HeldRepliesPanel';
+
+/** Phase RL (RL-4): what happens to inbound mail the matcher cannot thread. */
+export const NEW_TICKET_POLICY_OPTIONS = [
+  {
+    value: 'hold_unmatched',
+    label: 'Hold unmatched replies (recommended)',
+    help: 'Fresh emails become tickets. Emails that look like replies to a conversation Ticket Pulse does not know are held in "Unmatched replies" for a person to attach, create or discard — a reply can never become a duplicate ticket.',
+  },
+  {
+    value: 'create',
+    label: 'Always create tickets',
+    help: 'Every unmatched email becomes a new ticket, replies included (the pre-September behaviour). Use only when this mailbox never receives replies to mail Ticket Pulse did not send.',
+  },
+  {
+    value: 'replies_only',
+    label: 'Replies only — never create',
+    help: 'This mailbox only threads replies onto existing tickets. Unmatched mail is held for review, never turned into a ticket.',
+  },
+];
+
+/**
+ * RL-7: the three capability checks from the mailbox Test. `null` = the
+ * token roles could not be read (never shown as a tick).
+ */
+export function capabilityChecks(result, mode = 'both') {
+  const wantsSend = ['send', 'both'].includes(mode);
+  const checks = [
+    { key: 'canRead', label: 'Read inbox (Mail.Read)', value: result?.canRead ?? null, required: true },
+    { key: 'canSend', label: 'Send as mailbox (Mail.Send)', value: result?.canSend ?? null, required: wantsSend },
+    { key: 'canThread', label: 'Thread replies (Mail.ReadWrite → createReply)', value: result?.canThread ?? null, required: false },
+  ];
+  return checks;
+}
 
 const MODE_LABEL = {
   ingest: 'Ingest only',
@@ -71,12 +105,16 @@ export default function MailboxConnectionsPanel() {
   const [routeGroup, setRouteGroup] = useState('');
   const [routeType, setRouteType] = useState('');
   const [groups, setGroups] = useState([]);
+  const [sendLane, setSendLane] = useState(null); // RL-2: Graph outbound lane state
+  const [testResult, setTestResult] = useState(null); // RL-7: { mailboxId, ...checks }
+  const [heldCount, setHeldCount] = useState(null);
   const { activeTypes } = useTicketTypes(); // workspace type registry
 
   const load = useCallback(async () => {
     try {
       const res = await ticketsAPI.listMailboxes();
       setMailboxes(res.data || []);
+      setSendLane(res.meta?.sendLane || null);
       setError(null);
     } catch (err) {
       setError(err.response?.data?.message || err.message);
@@ -189,9 +227,11 @@ export default function MailboxConnectionsPanel() {
     setTesting(mb.id);
     setError(null);
     setNotice(null);
+    setTestResult(null);
     try {
       const res = await ticketsAPI.testMailbox(mb.id);
       const result = res.data;
+      setTestResult({ mailboxId: mb.id, mode: mb.mode, ...(result || {}) });
       if (result?.success) {
         setNotice(`${mb.address}: connected${result.latestSubject ? ` — latest message "${result.latestSubject}"` : ''}`);
       } else {
@@ -230,15 +270,66 @@ export default function MailboxConnectionsPanel() {
         <p>
           Use a <b>new address</b> that FreshService does not already ingest — pointing both systems at the same
           mailbox would create duplicate tickets. The Azure Graph app registration needs <b>Mail.Read</b> and{' '}
-          <b>Mail.Send</b> application permissions with admin consent for the mailbox (IT can scope the grant to
-          just these mailboxes with Exchange RBAC for Applications).
+          <b>Mail.Send</b> application permissions with admin consent for the mailbox, plus <b>Mail.ReadWrite</b> for
+          header-threaded replies (IT can scope the grant to just these mailboxes with Exchange RBAC for Applications).
+          Use <b>Test</b> to verify all three.
         </p>
       </div>
+
+      {sendLane?.status === 'not_granted' && (
+        <div className="flex items-start gap-2 p-3 bg-red-50 dark:bg-red-500/15 border border-red-200 dark:border-red-500/30 rounded-lg" role="alert" data-testid="mailbox-send-lane-alert">
+          <ShieldAlert className="w-4 h-4 text-red-600 dark:text-red-300 mt-0.5 flex-shrink-0" aria-hidden="true" />
+          <div className="text-sm text-red-800 dark:text-red-200 space-y-1">
+            <p className="font-semibold">Send lane not granted — falling back to SendGrid as ticketpulse@.</p>
+            <p className="text-xs">
+              Microsoft Graph refused the last send from the workspace mailbox (403 access denied
+              {sendLane.lastEventAt ? `, ${new Date(sendLane.lastEventAt).toLocaleString()}` : ''}). Replies and workflow
+              emails are still delivered, but they leave from ticketpulse@ instead of the mailbox, so the requester&apos;s
+              reply threads only via the Reply-To token.
+            </p>
+            <p className="text-xs font-medium">{sendLane.permissionGrantText || sendLane.hint}</p>
+          </div>
+        </div>
+      )}
+      {sendLane?.status === 'failing' && (
+        <div className="flex items-start gap-2 p-3 bg-amber-50 dark:bg-amber-500/15 border border-amber-200 dark:border-amber-500/30 rounded-lg" role="status" data-testid="mailbox-send-lane-alert">
+          <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-300 mt-0.5 flex-shrink-0" aria-hidden="true" />
+          <span className="text-sm text-amber-800 dark:text-amber-200">
+            The last Graph send from the workspace mailbox failed ({sendLane.errorClass || 'error'}) and fell back to SendGrid. {sendLane.hint}
+          </span>
+        </div>
+      )}
 
       {error && (
         <div className="flex items-start gap-2 p-3 bg-red-50 dark:bg-red-500/15 border border-red-200 dark:border-red-500/30 rounded-lg" role="alert">
           <AlertCircle className="w-4 h-4 text-red-600 dark:text-red-300 mt-0.5 flex-shrink-0" />
           <span className="text-sm text-red-800 dark:text-red-200">{error}</span>
+        </div>
+      )}
+      {testResult && (
+        <div className="p-3 bg-card border border-border rounded-lg" data-testid="mailbox-test-checks">
+          <p className="text-xs font-medium text-muted-foreground mb-1.5">
+            Capability check for {mailboxes?.find((m) => m.id === testResult.mailboxId)?.address || 'mailbox'}
+            {Array.isArray(testResult.roles) ? ` · app roles: ${testResult.roles.length ? testResult.roles.join(', ') : 'none'}` : ' · app roles could not be read'}
+          </p>
+          <ul className="flex flex-wrap gap-2">
+            {capabilityChecks(testResult, testResult.mode).map((c) => {
+              const state = c.value === true ? 'ok' : c.value === false ? (c.required ? 'fail' : 'warn') : 'unknown';
+              const cls = state === 'ok'
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-200 dark:border-emerald-500/30'
+                : state === 'fail'
+                  ? 'bg-red-50 text-red-700 border-red-200 dark:bg-red-500/15 dark:text-red-200 dark:border-red-500/30'
+                  : state === 'warn'
+                    ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-500/15 dark:text-amber-200 dark:border-amber-500/30'
+                    : 'bg-muted text-muted-foreground border-border';
+              return (
+                <li key={c.key} className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium border ${cls}`} data-testid={`mailbox-check-${c.key}`} data-state={state}>
+                  {state === 'ok' ? <CheckCircle className="w-3 h-3" aria-hidden="true" /> : state === 'unknown' ? <AlertCircle className="w-3 h-3" aria-hidden="true" /> : <XCircle className="w-3 h-3" aria-hidden="true" />}
+                  {c.label}{state === 'unknown' ? ' — could not verify' : state === 'warn' ? ' — not granted (sends work, no header threading)' : state === 'fail' ? ' — NOT granted' : ''}
+                </li>
+              );
+            })}
+          </ul>
         </div>
       )}
       {notice && (
@@ -397,6 +488,33 @@ export default function MailboxConnectionsPanel() {
                   <option value={mb.defaultTicketType}>{mb.defaultTicketType}</option>
                 )}
               </select>
+              {['ingest', 'both'].includes(mb.mode) && (
+                <>
+                  <select
+                    value={mb.newTicketPolicy || 'hold_unmatched'}
+                    onChange={(e) => changeRouting(mb, { newTicketPolicy: e.target.value })}
+                    aria-label={`New-ticket policy for ${mb.address}`}
+                    title={NEW_TICKET_POLICY_OPTIONS.find((o) => o.value === (mb.newTicketPolicy || 'hold_unmatched'))?.help}
+                    className="text-xs border border-border rounded-lg px-2 py-1.5"
+                    data-testid={`mailbox-policy-${mb.id}`}
+                  >
+                    {NEW_TICKET_POLICY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                  <label
+                    className="inline-flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer"
+                    title="An agent who replies-all to a requester with this mailbox in Cc creates the ticket for that requester (the agent's reply is the first response and the agent is assigned). Off = such mail is held for review."
+                  >
+                    <input
+                      type="checkbox"
+                      checked={mb.agentCcIntake !== false}
+                      onChange={(e) => changeRouting(mb, { agentCcIntake: e.target.checked })}
+                      aria-label={`Agent Cc intake for ${mb.address}`}
+                      className="h-3.5 w-3.5 rounded border-input"
+                    />
+                    Agent Cc creates tickets
+                  </label>
+                </>
+              )}
               <button
                 type="button"
                 onClick={() => setPrimary(mb)}
@@ -442,6 +560,25 @@ export default function MailboxConnectionsPanel() {
           ))}
         </div>
       )}
+
+      <div className="text-xs text-muted-foreground/75 space-y-1" data-testid="mailbox-policy-help">
+        <p className="font-medium text-muted-foreground">What each new-ticket policy means</p>
+        <ul className="list-disc pl-4 space-y-0.5">
+          {NEW_TICKET_POLICY_OPTIONS.map((o) => <li key={o.value}><b>{o.label}</b> — {o.help}</li>)}
+        </ul>
+        <p>
+          <b>Agent Cc creates tickets</b> — an agent who replies-all to a requester&apos;s direct email with the mailbox in Cc
+          creates the ticket for that requester; the agent&apos;s reply becomes the first response and the agent is assigned.
+          Turn it off to hold such mail for review instead.
+        </p>
+      </div>
+
+      <div className="pt-2 border-t border-border/60" id="unmatched-replies">
+        <HeldRepliesPanel onCountChange={setHeldCount} />
+        {heldCount > 0 && (
+          <p className="sr-only" data-testid="mailbox-held-count">{heldCount} unmatched replies waiting</p>
+        )}
+      </div>
 
       <div className="text-xs text-muted-foreground/75 flex items-start gap-1.5">
         <Send className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" aria-hidden="true" />
