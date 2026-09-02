@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import DOMPurify from 'dompurify';
 import { Link } from 'react-router-dom';
 import { ExternalLink, Ticket as TicketIcon, Ban, ClipboardList, Cloud, CloudOff, CloudUpload, Globe, Sparkles, UserCog, UserPlus, UserRound, Zap } from 'lucide-react';
@@ -1008,8 +1008,11 @@ export function UnassignedBadge({ size = 'h-6 w-6', withLabel = true, labelClass
 }
 
 export function PersonAvatar({ name, photoUrl, size = 'h-6 w-6', textSize = 'text-[10px]' }) {
-  if (photoUrl) {
-    return <img src={photoUrl} alt="" className={`${size} rounded-full object-cover ring-1 ring-border`} />;
+  // A photo URL that fails to load (no directory photo, expired token, offline) must not leave an empty
+  // circle — fall back to initials, exactly as if no photo had been supplied.
+  const [failedUrl, setFailedUrl] = useState(null);
+  if (photoUrl && failedUrl !== photoUrl) {
+    return <img src={photoUrl} alt="" onError={() => setFailedUrl(photoUrl)} className={`${size} rounded-full object-cover ring-1 ring-border`} />;
   }
   if (!name) {
     return (

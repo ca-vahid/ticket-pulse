@@ -473,6 +473,54 @@ code {
     text-align: left;
   }
 
+  /* ── Public approval page (/approval/:token) — page-scoped, no global
+     changes. (1) Backdrop: the token background with two soft primary/violet
+     glows (the mock's radial gradients). (2) The agent's request note often
+     carries a pasted quote table with many columns: inside `.tp-approval-note`
+     the note's own overflow-x-auto wrapper owns the horizontal scroll, and
+     tables keep their natural column widths (`min-width: max-content`
+     overrides the global `.tp-rich-body table { max-width: 100% }` crush),
+     with token-coloured cell borders and a muted header row — both themes. */
+  .tp-approval-backdrop {
+    background:
+      radial-gradient(1200px 600px at 20% -10%, hsl(var(--primary) / 0.12), transparent 60%),
+      radial-gradient(900px 500px at 110% 10%, hsl(262 83% 58% / 0.10), transparent 60%),
+      hsl(var(--background));
+  }
+  .tp-approval-note .tp-rich-body {
+    max-width: none;
+    overflow-x: visible;
+  }
+  .tp-approval-note .tp-rich-body table {
+    max-width: none;
+    min-width: max-content;
+    border-collapse: collapse;
+    margin: 0.5rem 0 0.25rem;
+    font-size: 0.8125rem;
+    border: 1px solid hsl(var(--border));
+    border-radius: 0.5rem;
+  }
+  .tp-approval-note .tp-rich-body table td,
+  .tp-approval-note .tp-rich-body table th {
+    border: 1px solid hsl(var(--border));
+    padding: 0.4rem 0.625rem;
+    white-space: nowrap;
+    text-align: left;
+    vertical-align: top;
+  }
+  .tp-approval-note .tp-rich-body table th {
+    background: hsl(var(--muted));
+    color: hsl(var(--foreground));
+    font-weight: 600;
+  }
+  .dark .tp-approval-note .tp-rich-body--themed table td,
+  .dark .tp-approval-note .tp-rich-body--themed table th {
+    border-color: hsl(var(--border));
+  }
+  .dark .tp-approval-note .tp-rich-body--themed table th {
+    background: hsl(var(--muted) / 0.7);
+  }
+
   /* Composer (RichTextEditor) — same containment as .tp-rich-body, plus
      default table chrome so a pasted Excel range / Outlook signature table is
      visibly editable even when its borders lived in a stripped <style> block.

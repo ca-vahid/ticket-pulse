@@ -1215,6 +1215,25 @@ export const searchAPI = {
 
 /**
  * Public approval magic-link API (no auth — the token is the credential).
+ *
+ * GET  /ticket-approvals/public/:token → { approval, ticket, approvers, meta }
+ *   approval: { id, status ('pending'|'info_requested'|'approved'|'rejected'|'cancelled'),
+ *     approverEmail, approverName, requestedByEmail, requestedByName,
+ *     requestedByPhotoUrl|null, requestNote, requestNoteHtml|null, createdAt,
+ *     expiresAt, decidedAt, decidedVia ('link'|'app'), decisionNote,
+ *     decisionNoteHtml|null, category:{name,description}|null,
+ *     clarificationLog:[{question, askedBy, askedAt, answer|null, answeredBy|null, answeredAt|null}],
+ *     supersededBy:{name,decidedAt}|null, cancelledReason|null }
+ *   ticket: { id, displayRef, subject, status, priority (1-4), priorityLabel,
+ *     ticketType|null, categoryPath|null, createdAt, dueBy|null,
+ *     descriptionHtml|null, descriptionText,
+ *     requester:{name,email|null,title|null,department|null,location|null,photoUrl|null},
+ *     workspace:{name,slug}, appTicketUrl, publicStatusUrl|null }
+ *   approvers: [{ name, status ('pending'|'approved'|'rejected'|'cancelled'|'superseded'), isYou, decidedAt|null }]
+ *   meta: { viewedAt }
+ *   Errors: 404 = unknown token; 400 (message mentions "expired") = past expiresAt.
+ * POST /ticket-approvals/public/:token/decide { decision:'approved'|'rejected'|'clarify', note?, noteHtml? }
+ *   → { status, decidedAt, approverName }. Rejecting requires a note (400 "Add a reason for rejecting").
  */
 export const publicApprovalAPI = {
   get: async (token) => {
@@ -1227,9 +1246,10 @@ export const publicApprovalAPI = {
     return response;
   },
 
-  // Approver bounces it back to the requester for more info (decision='clarify').
-  clarify: async (token, note) => {
-    const response = await api.post(`/ticket-approvals/public/${encodeURIComponent(token)}/decide`, { decision: 'clarify', note });
+  // Approver asks the agent a question (decision='clarify'): the request moves to
+  // `info_requested`, the agent answers by email, and the approver can still decide.
+  clarify: async (token, note, noteHtml = null) => {
+    const response = await api.post(`/ticket-approvals/public/${encodeURIComponent(token)}/decide`, { decision: 'clarify', note, noteHtml });
     return response;
   },
 };

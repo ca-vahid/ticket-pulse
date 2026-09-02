@@ -1,168 +1,527 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { Activity, AlertCircle, CheckCircle2, MessageCircleQuestion, ShieldCheck, XCircle } from 'lucide-react';
+import {
+  Ban,
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  CircleAlert,
+  Clock,
+  Copy,
+  ExternalLink,
+  Link2Off,
+  MessageCircleQuestion,
+  Moon,
+  Sun,
+  XCircle,
+} from 'lucide-react';
 import { publicApprovalAPI } from '../services/api';
-import { SafeHtml } from '../components/tickets/ticketUi';
-import RichTextEditor, { isRichContent } from '../components/tickets/RichTextEditor';
+import { PersonAvatar, SafeHtml, formatDay, formatDayTime } from '../components/tickets/ticketUi';
+import ApprovalRail from './publicApproval/ApprovalRail';
+import DecisionBox from './publicApproval/DecisionBox';
+import { usePublicTheme } from './publicApproval/usePublicTheme';
+import {
+  STATUS_CHIP,
+  classifyLoadError,
+  firstName,
+  isOpenForDecision,
+  isPastDate,
+} from './publicApproval/approvalMeta';
 
 /**
- * Public approval decision page (magic link — no login).
- * Self-contained styling like the other /public token pages.
+ * Public approval decision page (/approval/:token — magic link, no login).
+ *
+ * Token-driven surface: `bg-background` / `bg-card` / `text-foreground` …
+ * theme under the page-local `.dark` stamp (usePublicTheme), so the approver
+ * gets the same light/dark treatment as the app without touching the app's
+ * own theme choice. Page-scoped CSS ("public approval page" block in
+ * index.css) lets pasted quote tables keep their columns and scroll sideways.
  */
+
+// The axios client's response interceptor (services/api.js) resolves with the
+// JSON body itself; tolerate a raw axios response too so a test double or a
+// future client change can't blank the page.
+function unwrapBody(res) {
+  if (res && typeof res === 'object' && res.data && typeof res.data === 'object' && !('approval' in res) && !('status' in res)) return res.data;
+  return res;
+}
+
+const BRAND_MARK_CLASS = 'grid h-[30px] w-[30px] shrink-0 place-items-center rounded-[9px] bg-gradient-to-br from-primary to-violet-600 text-[12px] font-bold text-white shadow-subtle';
+
+function TopBar({ workspaceName, theme, onToggleTheme }) {
+  const dark = theme === 'dark';
+  return (
+    <header className="mb-[18px] flex items-center justify-between gap-3">
+      <div className="flex items-center gap-2.5">
+        <div className={BRAND_MARK_CLASS} aria-hidden="true">TP</div>
+        <div className="leading-tight">
+          <p className="text-[15px] font-semibold text-foreground">Ticket Pulse</p>
+          <p className="text-xs text-muted-foreground">{workspaceName ? `${workspaceName} workspace` : 'Approval request'}</p>
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={onToggleTheme}
+        aria-pressed={dark}
+        aria-label={dark ? 'Switch to light theme' : 'Switch to dark theme'}
+        className="tp-focus-ring inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground"
+      >
+        {dark ? <Sun className="h-3.5 w-3.5" aria-hidden="true" /> : <Moon className="h-3.5 w-3.5" aria-hidden="true" />}
+        {dark ? 'Light' : 'Dark'}
+      </button>
+    </header>
+  );
+}
+
+function Shell({ workspaceName, theme, onToggleTheme, children, bottomPad = true }) {
+  return (
+    <div className="tp-approval-backdrop min-h-screen bg-background text-foreground">
+      <div className={`mx-auto max-w-[1040px] px-5 pt-7 ${bottomPad ? 'pb-[220px] min-[800px]:pb-28' : 'pb-16'}`}>
+        <TopBar workspaceName={workspaceName} theme={theme} onToggleTheme={onToggleTheme} />
+        <main id="approval-main">{children}</main>
+      </div>
+    </div>
+  );
+}
+
+function StatusChip({ status }) {
+  const meta = STATUS_CHIP[status] || STATUS_CHIP.pending;
+  return (
+    <span className={`rounded-full px-2.5 py-[3px] text-[11px] font-bold uppercase tracking-[0.04em] ${meta.className}`}>
+      {meta.label}
+    </span>
+  );
+}
+
+function SectionHeading({ children }) {
+  return <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">{children}</h3>;
+}
+
+function LoadingCard() {
+  return (
+    <div className="tp-card overflow-hidden rounded-2xl shadow-soft" aria-busy="true" aria-label="Loading approval">
+      <div className="border-b border-border px-6 py-5">
+        <div className="flex gap-2"><span className="h-5 w-40 rounded-full bg-muted motion-safe:animate-pulse" /><span className="h-5 w-36 rounded-full bg-muted motion-safe:animate-pulse" /></div>
+        <div className="mt-3 h-3 w-56 rounded bg-muted motion-safe:animate-pulse" />
+        <div className="mt-3 h-7 w-3/4 rounded bg-muted motion-safe:animate-pulse" />
+        <div className="mt-3 h-3 w-1/2 rounded bg-muted motion-safe:animate-pulse" />
+      </div>
+      <div className="grid min-[800px]:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="space-y-3 px-6 py-5">
+          <div className="h-28 rounded-xl bg-muted motion-safe:animate-pulse" />
+          <div className="h-3 w-full rounded bg-muted motion-safe:animate-pulse" />
+          <div className="h-3 w-11/12 rounded bg-muted motion-safe:animate-pulse" />
+          <div className="h-3 w-2/3 rounded bg-muted motion-safe:animate-pulse" />
+        </div>
+        <div className="space-y-4 px-5 py-5">
+          <div className="h-11 rounded-lg bg-muted motion-safe:animate-pulse" />
+          <div className="h-8 w-2/3 rounded-lg bg-muted motion-safe:animate-pulse" />
+          <div className="h-20 rounded-lg bg-muted motion-safe:animate-pulse" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MessageCard({ icon: Icon, tone = 'muted', title, children }) {
+  const toneClass = tone === 'danger'
+    ? 'bg-red-50 text-red-600 dark:bg-red-500/15 dark:text-red-200'
+    : tone === 'warn'
+      ? 'bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-200'
+      : 'bg-muted text-muted-foreground';
+  return (
+    <div className="tp-card mx-auto max-w-lg rounded-2xl px-6 py-10 text-center shadow-soft motion-safe:animate-fadeIn" role="status">
+      <span className={`mx-auto mb-3 grid h-12 w-12 place-items-center rounded-full ${toneClass}`}>
+        <Icon className="h-6 w-6" aria-hidden="true" />
+      </span>
+      <h1 className="text-lg font-bold text-foreground">{title}</h1>
+      <div className="mt-2 text-sm text-muted-foreground">{children}</div>
+    </div>
+  );
+}
+
+/** Decided / cancelled / info-requested banner. `tabIndex=-1` so the page can move focus here after a submit. */
+const DecisionBanner = ({ approval, decidedByYou, bannerRef }) => {
+  const status = approval?.status;
+  let tone = 'bg-muted text-foreground border-border';
+  let Icon = Ban;
+  let title = '';
+  let body = null;
+  const when = approval?.decidedAt ? formatDayTime(approval.decidedAt) : null;
+  const decidedInApp = approval?.decidedVia === 'app' && !decidedByYou;
+
+  if (status === 'approved' || status === 'rejected') {
+    const verb = status === 'approved' ? 'approved' : 'rejected';
+    tone = status === 'approved'
+      ? 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-100 dark:border-emerald-500/25'
+      : 'bg-red-50 text-red-800 border-red-200 dark:bg-red-500/10 dark:text-red-100 dark:border-red-500/25';
+    Icon = status === 'approved' ? CheckCircle2 : XCircle;
+    title = decidedInApp
+      ? `${verb.charAt(0).toUpperCase() + verb.slice(1)} by ${approval.approverName || 'another approver'}${when ? ` on ${when}` : ''} in the app`
+      : `You ${verb} this${when ? ` on ${when}` : ''}`;
+    body = (approval.decisionNoteHtml || approval.decisionNote)
+      ? (
+        <div className="mt-2 rounded-lg border border-border/60 bg-card/70 px-3 py-2 text-sm text-foreground/85">
+          {approval.decisionNoteHtml ? <SafeHtml html={approval.decisionNoteHtml} /> : <p className="whitespace-pre-wrap">{approval.decisionNote}</p>}
+        </div>
+      )
+      : <p className="mt-1 text-sm opacity-80">The requester and the agent have been notified — you can close this page.</p>;
+  } else if (status === 'cancelled') {
+    if (approval.supersededBy?.name) {
+      Icon = CheckCircle2;
+      title = `Superseded — approved by ${approval.supersededBy.name}${approval.supersededBy.decidedAt ? ` on ${formatDayTime(approval.supersededBy.decidedAt)}` : ''}`;
+      body = <p className="mt-1 text-sm opacity-80">Another approver already decided this request, so nothing is needed from you.</p>;
+    } else {
+      title = 'This request was cancelled';
+      body = <p className="mt-1 text-sm opacity-80">{approval.cancelledReason || 'The agent withdrew the request — nothing is needed from you.'}</p>;
+    }
+  } else if (status === 'info_requested') {
+    tone = 'bg-violet-50 text-violet-900 border-violet-200 dark:bg-violet-500/10 dark:text-violet-100 dark:border-violet-500/25';
+    Icon = MessageCircleQuestion;
+    const last = [...(approval.clarificationLog || [])].reverse().find((q) => q?.askedAt);
+    title = `You asked a question${last ? ` on ${formatDayTime(last.askedAt)}` : ''} — you can still decide now`;
+    body = <p className="mt-1 text-sm opacity-80">{`${firstName(approval.requestedByName) || 'The agent'} answers by email and the reply shows up below.`}</p>;
+  } else {
+    return null;
+  }
+
+  return (
+    <div
+      ref={bannerRef}
+      tabIndex={-1}
+      className={`tp-focus-ring mb-5 flex items-start gap-3 rounded-xl border px-4 py-3.5 motion-safe:animate-fadeIn ${tone}`}
+    >
+      <Icon className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
+      <div className="min-w-0 flex-1">
+        <p className="font-semibold">{title}</p>
+        {body}
+      </div>
+    </div>
+  );
+};
+
+function RequestNote({ approval, workspaceName }) {
+  const hasHtml = Boolean(approval?.requestNoteHtml);
+  if (!hasHtml && !approval?.requestNote) return null;
+  return (
+    <section aria-label="Request note" className="tp-approval-note rounded-xl border border-border bg-muted/60 px-4 py-3.5">
+      <div className="mb-2 flex items-center gap-2.5 text-xs text-muted-foreground">
+        <PersonAvatar name={approval.requestedByName} photoUrl={approval.requestedByPhotoUrl} size="h-8 w-8" textSize="text-xs" />
+        <p>
+          <span className="font-semibold text-foreground">{approval.requestedByName || 'The agent'}</span>
+          {workspaceName ? ` (${workspaceName})` : ''} asks for your approval
+        </p>
+      </div>
+      <div className="overflow-x-auto" data-testid="request-note-well">
+        {hasHtml
+          ? <SafeHtml html={approval.requestNoteHtml} className="text-[14px] leading-relaxed" />
+          : <p className="whitespace-pre-wrap text-[14px] leading-relaxed text-foreground/85">{approval.requestNote}</p>}
+      </div>
+    </section>
+  );
+}
+
+const COLLAPSED_MAX = 152; // ≈ 6 lines at 14px / 1.55
+
+function TicketDescription({ ticket }) {
+  const [expanded, setExpanded] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+  const bodyRef = useRef(null);
+  const html = ticket?.descriptionHtml;
+  const text = ticket?.descriptionText;
+
+  useLayoutEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    setOverflows(el.scrollHeight > COLLAPSED_MAX + 8);
+  }, [html, text]);
+
+  if (!html && !text) return null;
+  const collapsed = overflows && !expanded;
+  return (
+    <section aria-labelledby="ticket-description-heading" className="mt-5">
+      <SectionHeading><span id="ticket-description-heading">Ticket description</span></SectionHeading>
+      <div className="relative">
+        <div
+          ref={bodyRef}
+          id="ticket-description-body"
+          className="overflow-hidden text-[14px] leading-[1.55] text-foreground/85"
+          style={collapsed ? { maxHeight: COLLAPSED_MAX } : undefined}
+        >
+          {html
+            ? <SafeHtml html={html} className="text-[14px] leading-[1.55]" />
+            : <p className="whitespace-pre-wrap">{text}</p>}
+        </div>
+        {collapsed && (
+          <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-card to-transparent" />
+        )}
+      </div>
+      {overflows && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          aria-controls="ticket-description-body"
+          className="tp-focus-ring mt-1.5 inline-flex items-center gap-1 rounded text-[13px] font-semibold text-primary hover:underline"
+        >
+          {expanded ? 'Show less' : 'Show full description'}
+          <ChevronDown className={`h-3.5 w-3.5 ${expanded ? 'rotate-180' : ''}`} aria-hidden="true" />
+        </button>
+      )}
+    </section>
+  );
+}
+
+function QuestionThread({ approval }) {
+  const log = Array.isArray(approval?.clarificationLog) ? approval.clarificationLog.filter((q) => q?.question) : [];
+  if (!log.length) return null;
+  const agent = firstName(approval.requestedByName) || 'The agent';
+  return (
+    <section aria-label="Questions and replies" className="mt-[18px] flex flex-col gap-2.5">
+      {log.map((entry, idx) => (
+        <div
+          key={`${entry.askedAt || idx}`}
+          className="rounded-r-[10px] border-l-[3px] border-violet-500 bg-violet-50/70 px-3 py-2 text-[13px] dark:border-violet-400 dark:bg-violet-500/10"
+        >
+          <p className="font-semibold text-foreground">
+            You asked{entry.askedAt ? ` (${formatDay(entry.askedAt)})` : ''}: {entry.question}
+          </p>
+          {entry.answer
+            ? (
+              <p className="mt-1 text-muted-foreground">
+                {(entry.answeredBy ? firstName(entry.answeredBy) : agent)} replied{entry.answeredAt ? ` (${formatDay(entry.answeredAt)})` : ''}: {entry.answer}
+              </p>
+            )
+            : (
+              <p className="mt-1 inline-flex items-center gap-1.5 text-muted-foreground">
+                <Clock className="h-3.5 w-3.5" aria-hidden="true" />
+                Waiting for a reply from {agent}
+              </p>
+            )}
+        </div>
+      ))}
+    </section>
+  );
+}
+
+function HeaderActions({ ticket, copied, onCopy }) {
+  const href = ticket?.publicStatusUrl || ticket?.appTicketUrl;
+  const title = ticket?.publicStatusUrl
+    ? 'Open the ticket status page'
+    : 'Opens the ticket in Ticket Pulse — agents need to be signed in';
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {href && (
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          title={title}
+          className="tp-focus-ring inline-flex items-center gap-2 rounded-[10px] border border-border bg-card px-3.5 py-2 text-[13px] font-semibold text-foreground hover:bg-muted"
+        >
+          <ExternalLink className="h-4 w-4" aria-hidden="true" />
+          View ticket
+        </a>
+      )}
+      {ticket?.displayRef && (
+        <button
+          type="button"
+          onClick={onCopy}
+          className="tp-focus-ring inline-flex items-center gap-2 rounded-[10px] border border-border bg-card px-3.5 py-2 text-[13px] font-semibold text-foreground hover:bg-muted"
+        >
+          {copied ? <Check className="h-4 w-4 text-emerald-600 dark:text-emerald-300" aria-hidden="true" /> : <Copy className="h-4 w-4" aria-hidden="true" />}
+          {copied ? 'Copied' : 'Copy ref'}
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function PublicApprovalDecision() {
   const { token } = useParams();
+  const { theme, toggle } = usePublicTheme();
   const [data, setData] = useState(null);
-  const [error, setError] = useState(null);
+  const [loadError, setLoadError] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [note, setNote] = useState('');
-  const [noteHtml, setNoteHtml] = useState('');
-  const [deciding, setDeciding] = useState(null);
-  const [decided, setDecided] = useState(null);
+  const [decidedByYou, setDecidedByYou] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const bannerRef = useRef(null);
+  const focusBannerRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
+    setIsLoading(true);
     publicApprovalAPI.get(token)
-      .then((res) => { if (!cancelled) { setData(res.data); setError(null); } })
-      .catch((err) => { if (!cancelled) setError(err.response?.data?.message || 'This approval link is not valid.'); })
+      .then((res) => { if (!cancelled) { setData(unwrapBody(res)); setLoadError(null); } })
+      .catch((err) => { if (!cancelled) setLoadError(classifyLoadError(err)); })
       .finally(() => { if (!cancelled) setIsLoading(false); });
     return () => { cancelled = true; };
   }, [token]);
 
-  const decide = async (decision) => {
-    if (decision === 'clarify' && !note.trim()) {
-      setError('Add a note so the requester knows what to provide.');
-      return;
+  // After a submit, the decided banner takes focus so screen readers land on the result.
+  useEffect(() => {
+    if (focusBannerRef.current && bannerRef.current) {
+      focusBannerRef.current = false;
+      bannerRef.current.focus({ preventScroll: false });
     }
-    setDeciding(decision);
-    setError(null);
+  });
+
+  const onDecide = useCallback(async (decision, note, noteHtml) => {
+    const body = unwrapBody(await publicApprovalAPI.decide(token, decision, note, noteHtml)) || {};
+    focusBannerRef.current = true;
+    setDecidedByYou(true);
+    setData((prev) => {
+      if (!prev) return prev;
+      const now = body.decidedAt || new Date().toISOString();
+      if (decision === 'clarify') {
+        return {
+          ...prev,
+          approval: {
+            ...prev.approval,
+            status: 'info_requested',
+            clarificationLog: [
+              ...(prev.approval.clarificationLog || []),
+              { question: note, askedBy: prev.approval.approverName, askedAt: now, answer: null, answeredBy: null, answeredAt: null },
+            ],
+          },
+        };
+      }
+      const status = body.status || decision;
+      return {
+        ...prev,
+        approval: {
+          ...prev.approval,
+          status,
+          decidedAt: now,
+          decidedVia: 'link',
+          decisionNote: note,
+          decisionNoteHtml: noteHtml,
+          approverName: body.approverName || prev.approval.approverName,
+        },
+        approvers: (prev.approvers || []).map((a) => (a.isYou ? { ...a, status, decidedAt: now } : a)),
+      };
+    });
+  }, [token]);
+
+  const onCopy = useCallback(async () => {
+    const ref = data?.ticket?.displayRef;
+    if (!ref) return;
     try {
-      const richHtml = note.trim() && isRichContent(noteHtml) ? noteHtml : null;
-      if (decision === 'clarify') await publicApprovalAPI.clarify(token, note.trim());
-      else await publicApprovalAPI.decide(token, decision, note.trim() || null, richHtml);
-      setDecided(decision);
-    } catch (err) {
-      setError(err.response?.data?.message || 'Could not record your decision.');
-    } finally {
-      setDeciding(null);
+      await navigator.clipboard.writeText(ref);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    } catch {
+      /* clipboard blocked — nothing to show */
     }
-  };
+  }, [data]);
 
   const approval = data?.approval;
   const ticket = data?.ticket;
-  const alreadyDecided = approval && approval.status !== 'pending';
+  const workspaceName = ticket?.workspace?.name || null;
+
+  if (isLoading) {
+    return (
+      <Shell workspaceName={null} theme={theme} onToggleTheme={toggle} bottomPad={false}>
+        <LoadingCard />
+      </Shell>
+    );
+  }
+
+  if (loadError || !approval || !ticket) {
+    const kind = loadError?.kind || 'error';
+    const agent = loadError?.requestedByName;
+    return (
+      <Shell workspaceName={null} theme={theme} onToggleTheme={toggle} bottomPad={false}>
+        {kind === 'expired' ? (
+          <MessageCard icon={Clock} tone="warn" title="This approval link has expired">
+            <p>Approval links stop working after their expiry date to keep requests safe.</p>
+            <p className="mt-1">Ask {agent ? <span className="font-semibold text-foreground">{agent}</span> : 'the agent who sent it'} for a new link — nothing you did was lost.</p>
+          </MessageCard>
+        ) : kind === 'invalid' ? (
+          <MessageCard icon={Link2Off} title="This approval link isn't valid">
+            <p>The link may have been trimmed by your mail client, or the request no longer exists.</p>
+            <p className="mt-1">Open the link from the original email again, or ask the agent who sent it for a fresh one.</p>
+          </MessageCard>
+        ) : (
+          <MessageCard icon={CircleAlert} tone="danger" title="We couldn't load this approval">
+            <p>{loadError?.message || 'Something went wrong on our side.'}</p>
+            <button type="button" onClick={() => window.location.reload()} className="tp-focus-ring mt-3 rounded-[10px] border border-border bg-card px-3.5 py-2 text-[13px] font-semibold text-foreground hover:bg-muted">
+              Try again
+            </button>
+          </MessageCard>
+        )}
+      </Shell>
+    );
+  }
+
+  const expired = approval.status === 'expired' || (isOpenForDecision(approval.status) && isPastDate(approval.expiresAt));
+  if (expired) {
+    return (
+      <Shell workspaceName={workspaceName} theme={theme} onToggleTheme={toggle} bottomPad={false}>
+        <MessageCard icon={Clock} tone="warn" title="This approval link has expired">
+          <p>It expired {formatDay(approval.expiresAt)}. Ask <span className="font-semibold text-foreground">{approval.requestedByName || 'the agent who sent it'}</span> for a new link.</p>
+        </MessageCard>
+      </Shell>
+    );
+  }
+
+  const open = isOpenForDecision(approval.status);
+  const requester = ticket.requester || {};
+  const requesterMeta = [requester.title, requester.location].filter(Boolean).join(', ');
 
   return (
-    <div className="tp-light min-h-screen bg-gradient-to-br from-slate-100 via-blue-50 to-slate-100 flex items-center justify-center p-4">
-      <div className="w-full max-w-lg bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden">
-        <div className="px-6 py-4 bg-slate-900 text-white flex items-center gap-2.5">
-          <ShieldCheck className="w-5 h-5 text-emerald-400" aria-hidden="true" />
-          <div>
-            <p className="text-sm font-bold">Approval requested</p>
-            <p className="text-[11px] text-slate-300">{ticket?.workspaceName ? `${ticket.workspaceName} · ` : ''}Ticket Pulse</p>
+    <Shell workspaceName={workspaceName} theme={theme} onToggleTheme={toggle} bottomPad={open}>
+      {/* No overflow-hidden here: it would turn the card into the scroll container and
+          un-stick the decision box (sticky bottom = the mobile bottom sheet). */}
+      <article className="tp-card rounded-2xl shadow-soft motion-safe:animate-fadeIn" aria-labelledby="approval-subject">
+        <header className="grid items-start gap-4 border-b border-border px-5 py-5 min-[800px]:grid-cols-[minmax(0,1fr)_auto] min-[800px]:px-[26px]">
+          <div className="min-w-0">
+            <div className="mb-2.5 flex flex-wrap gap-2">
+              {approval.category?.name && (
+                <span
+                  title={approval.category.description || undefined}
+                  className="rounded-full bg-blue-50 px-2.5 py-[3px] text-[11px] font-bold uppercase tracking-[0.04em] text-blue-700 dark:bg-blue-500/15 dark:text-blue-200"
+                >
+                  {approval.category.name}
+                </span>
+              )}
+              <StatusChip status={approval.status} />
+            </div>
+            <p className="font-mono text-[13px] text-muted-foreground">
+              {ticket.displayRef}
+              {ticket.createdAt ? ` · created ${formatDay(ticket.createdAt)}` : ''}
+              {ticket.dueBy ? ` · due ${formatDay(ticket.dueBy)}` : ''}
+            </p>
+            <h1 id="approval-subject" className="mb-1.5 mt-1 text-2xl font-bold leading-tight tracking-[-0.01em] text-foreground">
+              {ticket.subject || '(no subject)'}
+            </h1>
+            <p className="text-[13px] text-muted-foreground">
+              Requested for <span className="font-semibold text-foreground">{requester.name || 'unknown requester'}</span>
+              {requesterMeta ? ` · ${requesterMeta}` : ''}
+              {' · sent to you by '}
+              <span className="font-semibold text-foreground">{approval.requestedByName || approval.requestedByEmail || 'an agent'}</span>
+              {approval.createdAt ? ` on ${formatDayTime(approval.createdAt)}` : ''}
+            </p>
           </div>
-        </div>
+          <HeaderActions ticket={ticket} copied={copied} onCopy={onCopy} />
+        </header>
 
-        <div className="p-6">
-          {isLoading ? (
-            <div className="py-10 text-center">
-              <Activity className="w-8 h-8 animate-spin mx-auto text-blue-600" aria-label="Loading" />
+        <div className="grid min-[800px]:grid-cols-[minmax(0,1fr)_320px]">
+          <section
+            aria-label="Approval request"
+            className="min-w-0 border-b border-border px-5 py-5 min-[800px]:border-b-0 min-[800px]:border-r min-[800px]:px-[26px]"
+          >
+            <div aria-live="polite" aria-atomic="true">
+              <DecisionBanner approval={approval} decidedByYou={decidedByYou} bannerRef={bannerRef} />
             </div>
-          ) : error && !data ? (
-            <div className="py-8 text-center">
-              <AlertCircle className="w-9 h-9 text-red-400 mx-auto mb-2" aria-hidden="true" />
-              <p className="text-slate-700 font-medium">{error}</p>
-            </div>
-          ) : (
-            <>
-              <p className="text-xs font-mono font-bold text-slate-400 mb-1">{ticket?.displayRef}</p>
-              <h1 className="text-lg font-bold text-slate-900 leading-snug">{ticket?.subject || '(no subject)'}</h1>
-              <p className="text-xs text-slate-500 mt-1">
-                {ticket?.requesterName ? `Requested for ${ticket.requesterName} · ` : ''}
-                status {ticket?.status}
-              </p>
-              {(approval?.requestNoteHtml || approval?.requestNote) && (
-                <div className="mt-3 p-3 bg-blue-50 border border-blue-100 rounded-lg text-sm text-slate-700">
-                  <span className="font-semibold">{approval.requestedBy}:</span>{' '}
-                  {approval.requestNoteHtml
-                    ? <SafeHtml html={approval.requestNoteHtml} className="inline-block text-sm text-slate-700" />
-                    : approval.requestNote}
-                </div>
-              )}
-              {ticket?.summary && (
-                <p className="mt-3 text-sm text-slate-600 whitespace-pre-wrap border-l-2 border-slate-200 pl-3">{ticket.summary}</p>
-              )}
-
-              <div className="mt-5">
-                {decided === 'clarify' ? (
-                  <div className="p-4 rounded-xl text-center font-semibold bg-violet-50 text-violet-700 border border-violet-200">
-                    <MessageCircleQuestion className="w-6 h-6 mx-auto mb-1" aria-hidden="true" />
-                    Sent back to the requester for more information.
-                    <p className="text-xs font-normal mt-1 opacity-80">They’ll add the details and resubmit — you can close this page.</p>
-                  </div>
-                ) : decided || alreadyDecided ? (
-                  <div className={`p-4 rounded-xl text-center font-semibold ${
-                    (decided || approval.status) === 'approved'
-                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                      : (decided || approval.status) === 'rejected'
-                        ? 'bg-red-50 text-red-700 border border-red-200'
-                        : 'bg-slate-50 text-slate-600 border border-slate-200'
-                  }`}>
-                    {(decided || approval.status) === 'approved' && <CheckCircle2 className="w-6 h-6 mx-auto mb-1" aria-hidden="true" />}
-                    {(decided || approval.status) === 'rejected' && <XCircle className="w-6 h-6 mx-auto mb-1" aria-hidden="true" />}
-                    This request {decided ? `is now ${decided}` : `was already ${approval.status}`}.
-                    <p className="text-xs font-normal mt-1 opacity-80">The team has been notified — you can close this page.</p>
-                  </div>
-                ) : (
-                  <>
-                    <label htmlFor="approval-note" className="block text-xs font-semibold text-slate-500 mb-1">
-                      Optional note
-                    </label>
-                    <div className="mb-3">
-                      <RichTextEditor
-                        value={noteHtml}
-                        onChange={({ html, text }) => { setNoteHtml(html); setNote(text); }}
-                        placeholder="Context for your decision…"
-                        ariaLabel="Decision note"
-                        minHeight={72}
-                      />
-                    </div>
-                    {error && (
-                      <p className="text-sm text-red-600 mb-3" role="alert">{error}</p>
-                    )}
-                    <div className="grid grid-cols-2 gap-2.5">
-                      <button
-                        onClick={() => decide('approved')}
-                        disabled={Boolean(deciding)}
-                        className="py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-bold text-sm"
-                      >
-                        {deciding === 'approved' ? 'Saving…' : 'Approve'}
-                      </button>
-                      <button
-                        onClick={() => decide('rejected')}
-                        disabled={Boolean(deciding)}
-                        className="py-3 rounded-xl bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white font-bold text-sm"
-                      >
-                        {deciding === 'rejected' ? 'Saving…' : 'Reject'}
-                      </button>
-                    </div>
-                    <button
-                      onClick={() => decide('clarify')}
-                      disabled={Boolean(deciding)}
-                      className="w-full mt-2.5 py-2.5 rounded-xl bg-white border border-violet-200 text-violet-700 hover:bg-violet-50 disabled:opacity-60 font-semibold text-sm inline-flex items-center justify-center gap-1.5"
-                    >
-                      <MessageCircleQuestion className="w-4 h-4" aria-hidden="true" />
-                      {deciding === 'clarify' ? 'Sending…' : 'Request clarification'}
-                    </button>
-                    <p className="text-[11px] text-slate-400 mt-3 text-center">
-                      This link was sent to {approval?.approverEmail} and expires {approval?.expiresAt ? new Date(approval.expiresAt).toLocaleDateString() : 'in 30 days'}.
-                    </p>
-                  </>
-                )}
-              </div>
-            </>
-          )}
+            <RequestNote approval={approval} workspaceName={workspaceName} />
+            <TicketDescription ticket={ticket} />
+            <QuestionThread approval={approval} />
+            {open && <DecisionBox approval={approval} onDecide={onDecide} />}
+          </section>
+          <ApprovalRail approval={approval} ticket={ticket} approvers={data.approvers} />
         </div>
-      </div>
-    </div>
+      </article>
+    </Shell>
   );
 }

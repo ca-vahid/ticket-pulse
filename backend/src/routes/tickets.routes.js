@@ -419,28 +419,39 @@ router.get('/requester-stats', asyncHandler(async (req, res) => {
 
 // Requester profile photo from Entra, lazily fetched with an in-memory cache
 // (nulls cached too — most requesters have no photo and Graph 404s are slow).
+// Shared with the public approval page's photo route (Phase AP) — one cache.
 const requesterPhotoCache = new Map(); // email -> { photo, at }
 const PHOTO_TTL_MS = 12 * 60 * 60 * 1000;
 const PHOTO_CACHE_MAX = 500;
 
-router.get('/requester-photo', asyncHandler(async (req, res) => {
-  const email = String(req.query.email || '').trim().toLowerCase();
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
-    return res.json({ success: true, data: { photo: null } });
-  }
-  const cached = requesterPhotoCache.get(email);
-  if (cached && Date.now() - cached.at < PHOTO_TTL_MS) {
-    return res.json({ success: true, data: { photo: cached.photo } });
-  }
+/** Entra photo as a data URI (or null), memoised for 12h per address. */
+export async function getCachedUserPhoto(email) {
+  const key = String(email || '').trim().toLowerCase();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(key)) return null;
+  const cached = requesterPhotoCache.get(key);
+  if (cached && Date.now() - cached.at < PHOTO_TTL_MS) return cached.photo;
   let photo = null;
   try {
     const { default: azureAdService } = await import('../services/azureAdService.js');
-    photo = await azureAdService.getUserPhoto(email); // data URI or null
+    photo = await azureAdService.getUserPhoto(key); // data URI or null
   } catch { /* Entra unconfigured/unreachable — cache the null */ }
   if (requesterPhotoCache.size >= PHOTO_CACHE_MAX) {
     requesterPhotoCache.delete(requesterPhotoCache.keys().next().value);
   }
-  requesterPhotoCache.set(email, { photo, at: Date.now() });
+  requesterPhotoCache.set(key, { photo: photo || null, at: Date.now() });
+  return photo || null;
+}
+
+/** Split a `data:image/...;base64,...` URI into { contentType, buffer } (null when malformed). */
+export function decodePhotoDataUri(dataUri) {
+  const m = /^data:(image\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=\s]+)$/i.exec(String(dataUri || ''));
+  if (!m) return null;
+  const buffer = Buffer.from(m[2].replace(/\s+/g, ''), 'base64');
+  return buffer.length > 0 ? { contentType: m[1].toLowerCase(), buffer } : null;
+}
+
+router.get('/requester-photo', asyncHandler(async (req, res) => {
+  const photo = await getCachedUserPhoto(req.query.email);
   res.json({ success: true, data: { photo } });
 }));
 
@@ -1840,10 +1851,79 @@ router.delete('/:id/approvals/:approvalId', asyncHandler(async (req, res) => {
  */
 export const ticketApprovalPublicRouter = express.Router();
 
+// Light in-memory rate limit (Phase AP): 60 requests / minute per client IP
+// per token prefix. Enough for a human plus the page's photo fetches; stops
+// token-guessing sweeps and reload storms. Problem-style 429 body.
+export const PUBLIC_APPROVAL_RATE_LIMIT = { windowMs: 60 * 1000, max: 60 };
+const publicApprovalHits = new Map(); // `${ip}:${tokenPrefix}` -> { count, resetAt }
+
+export function publicApprovalRateLimit(req, res, next) {
+  const now = Date.now();
+  const ip = String(req.ip || req.socket?.remoteAddress || 'unknown');
+  const prefix = String(req.params?.token || '').slice(0, 12);
+  const key = `${ip}:${prefix}`;
+  let entry = publicApprovalHits.get(key);
+  if (!entry || entry.resetAt <= now) {
+    entry = { count: 0, resetAt: now + PUBLIC_APPROVAL_RATE_LIMIT.windowMs };
+    publicApprovalHits.set(key, entry);
+  }
+  entry.count += 1;
+  // Opportunistic pruning keeps the map bounded without a timer.
+  if (publicApprovalHits.size > 5000) {
+    for (const [k, v] of publicApprovalHits) if (v.resetAt <= now) publicApprovalHits.delete(k);
+  }
+  const remaining = Math.max(0, PUBLIC_APPROVAL_RATE_LIMIT.max - entry.count);
+  res.setHeader('X-RateLimit-Limit', String(PUBLIC_APPROVAL_RATE_LIMIT.max));
+  res.setHeader('X-RateLimit-Remaining', String(remaining));
+  if (entry.count > PUBLIC_APPROVAL_RATE_LIMIT.max) {
+    const retryAfterSec = Math.max(1, Math.ceil((entry.resetAt - now) / 1000));
+    res.setHeader('Retry-After', String(retryAfterSec));
+    return res.status(429).json({
+      success: false,
+      type: 'about:blank',
+      title: 'Too many requests',
+      status: 429,
+      detail: `Slow down — this approval link allows ${PUBLIC_APPROVAL_RATE_LIMIT.max} requests per minute. Try again in ${retryAfterSec}s.`,
+      retryAfter: retryAfterSec,
+      error: 'rate_limited',
+    });
+  }
+  return next();
+}
+
+/** Test/ops hook — clears the limiter's counters. */
+export function resetPublicApprovalRateLimit() {
+  publicApprovalHits.clear();
+}
+
+ticketApprovalPublicRouter.use('/:token', publicApprovalRateLimit);
+
 ticketApprovalPublicRouter.get('/:token', asyncHandler(async (req, res) => {
   const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');
   const data = await ticketApprovalService.getByToken(req.params.token);
+  res.setHeader('Cache-Control', 'no-store');
   res.json({ success: true, data });
+}));
+
+// Directory photo for the people on the page. The address is resolved from the
+// approval row server-side — `who` picks WHICH person, never an email.
+ticketApprovalPublicRouter.get('/:token/photo', asyncHandler(async (req, res) => {
+  const who = String(req.query.who || '').trim();
+  if (!['requester', 'requestedBy'].includes(who)) {
+    throw new ValidationError('who must be "requester" or "requestedBy"');
+  }
+  const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');
+  const email = await ticketApprovalService.photoSubjectEmail(req.params.token, who);
+  const decoded = email ? decodePhotoDataUri(await getCachedUserPhoto(email)) : null;
+  if (!decoded) {
+    res.setHeader('Cache-Control', 'private, max-age=600');
+    return res.status(404).json({ success: false, error: 'No photo available' });
+  }
+  res.setHeader('Content-Type', decoded.contentType);
+  res.setHeader('Content-Length', String(decoded.buffer.length));
+  res.setHeader('Cache-Control', 'private, max-age=3600');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  return res.end(decoded.buffer);
 }));
 
 ticketApprovalPublicRouter.post('/:token/decide', asyncHandler(async (req, res) => {
@@ -1851,7 +1931,10 @@ ticketApprovalPublicRouter.post('/:token/decide', asyncHandler(async (req, res) 
   const approval = await ticketApprovalService.decideByToken(
     req.params.token, req.body?.decision, req.body?.note || null, req.body?.noteHtml || null,
   );
-  res.json({ success: true, data: { status: approval.status, decidedAt: approval.decidedAt } });
+  res.json({
+    success: true,
+    data: { status: approval.status, decidedAt: approval.decidedAt || null, approverName: approval.approverName || null },
+  });
 }));
 
 /**
