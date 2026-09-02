@@ -218,20 +218,43 @@ router.post(
       throw new ValidationError('Paste some text or add at least one image');
     }
 
+    const images = files.map((file) => ({
+      mimeType: file.mimetype,
+      buffer: file.buffer,
+      fileName: file.originalname,
+    }));
     const { default: ticketIntakeExtractService } = await import('../services/ticketIntakeExtractService.js');
     const result = await ticketIntakeExtractService.extract({
       workspaceId: req.workspaceId,
       text,
-      images: files.map((file) => ({
-        mimeType: file.mimetype,
-        buffer: file.buffer,
-        fileName: file.originalname,
-      })),
+      images,
       actorEmail: req.ticketActor?.email || null,
+      actorTechnicianId: req.ticketActor?.technicianId || null,
     });
-    res.json({ success: true, data: result.data, meta: result.meta });
+    // AF2: persist what the model returned (never the images). The id comes
+    // back as meta.runId so the create form can link the run to the ticket it
+    // produces (POST / with intakeRunId).
+    const { default: ticketIntakeRunService } = await import('../services/ticketIntakeRunService.js');
+    const runId = await ticketIntakeRunService.record({
+      workspaceId: req.workspaceId,
+      actor: req.ticketActor,
+      text,
+      images,
+      data: result.data,
+      meta: result.meta,
+    });
+    res.json({ success: true, data: result.data, meta: { ...result.meta, runId } });
   }),
 );
+
+// GET /intake-runs?limit=50 — recent Autofill runs for the workspace
+// (Settings → AI Usage). Admin-gated: runs carry pasted-text previews and the
+// model's proposal for anyone's request. Declared before `/:id`.
+router.get('/intake-runs', requireTicketingAdmin, asyncHandler(async (req, res) => {
+  const { default: ticketIntakeRunService } = await import('../services/ticketIntakeRunService.js');
+  const runs = await ticketIntakeRunService.listRecent(req.workspaceId, req.query.limit);
+  res.json({ success: true, data: runs });
+}));
 
 // ------------------------------------------------------------------- reads
 
@@ -1286,11 +1309,35 @@ router.get('/:id', asyncHandler(async (req, res) => {
 
 // --------------------------------------------------------------- mutations
 
+// GET /:id/intake-runs — the Autofill runs that produced this ticket (AI &
+// Routing tab). Same gate as any ticket read: the ticket must belong to the
+// workspace the actor is in.
+router.get('/:id/intake-runs', asyncHandler(async (req, res) => {
+  const ticketId = parseTicketId(req);
+  const ticket = await prisma.ticket.findFirst({ where: { id: ticketId, workspaceId: req.workspaceId }, select: { id: true } });
+  if (!ticket) throw new AppError('Ticket not found', 404);
+  const { default: ticketIntakeRunService } = await import('../services/ticketIntakeRunService.js');
+  const runs = await ticketIntakeRunService.listForTicket(ticketId, req.workspaceId);
+  res.json({ success: true, data: runs });
+}));
+
 router.post('/', requireNativeTicketing, asyncHandler(async (req, res) => {
+  const { intakeRunId, ...body } = req.body || {};
+  // AF2: an Autofill run id links the proposal to the ticket it produces.
+  // Validated BEFORE the create so a stale/foreign id is a 400, not a ticket
+  // with a dangling link.
+  let linkRunId = null;
+  if (intakeRunId !== undefined && intakeRunId !== null && intakeRunId !== '') {
+    const { default: ticketIntakeRunService } = await import('../services/ticketIntakeRunService.js');
+    linkRunId = (await ticketIntakeRunService.assertLinkable(intakeRunId, req.workspaceId)).id;
+  }
   // enforceRequired: the interactive composer binds the workspace's ticket-form
   // required fields (built-ins + custom) — automated intakes stay exempt
   // (contract in ticketFormConfigService).
-  const ticket = await ticketService.createTicket(req.workspaceId, req.body || {}, req.ticketActor, { enforceRequired: true });
+  const ticket = await ticketService.createTicket(req.workspaceId, body, req.ticketActor, {
+    enforceRequired: true,
+    ...(linkRunId ? { intakeRunId: linkRunId } : {}),
+  });
   res.status(201).json({ success: true, data: ticket });
 }));
 
