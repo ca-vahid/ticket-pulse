@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { ExternalLink, Ticket as TicketIcon, Ban, ClipboardList, Cloud, CloudOff, CloudUpload, Globe, Sparkles, UserCog, UserPlus, UserRound, Zap } from 'lucide-react';
 import { PRIORITY_STRIP_COLORS, PRIORITY_LABELS, STATUS_COLORS, FRESHSERVICE_DOMAIN } from '../tech-detail/constants';
 import { useTicketTypes } from '../../hooks/useTicketTypes';
+import { useTheme } from '../../contexts/ThemeContext';
 
 export { PRIORITY_STRIP_COLORS, PRIORITY_LABELS, STATUS_COLORS };
 
@@ -82,14 +83,107 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
   if (node.tagName === 'IMG' && /^cid:/i.test(node.getAttribute('src') || '')) node.remove();
 });
 
-// Near-black inline colours (Phase DW, QA 08-31 #5): Outlook stamps quoted
-// headers and body text with `color:black` / `color:windowtext` /
-// `rgb(0,0,0)`-family values that carry ZERO authorial intent — if they
-// survive, nearly every reply counts as "has author colours" and lands on the
-// paper panel in dark mode. Neutralize them at sanitize time; anything that
-// remains is a real colour choice. Channels are parsed NUMERICALLY (a naive
-// `[0-2]?\d` regex would misread `rgb(20, 20, 20)` splits), ≤29 per channel
-// counts as near-black. `background-color` is deliberately left alone.
+// ---------------------------------------------------------------------------
+// Inline-colour neutraliser (Phase DW v3.8.11 → v2, QA 09-01 #6).
+//
+// Email HTML arrives soaked in colours that carry ZERO authorial intent —
+// Outlook stamps quoted headers `color:black`/`windowtext`, disclaimers get a
+// grey `#A6A6A6` footer, hyperlinks carry the Office default `#0563C1`, cells
+// get `bgcolor="#ffffff"`. If those survive, nearly every body counts as
+// "has author colours" and lands on the dimmed PAPER panel in dark mode
+// (FS #240242: its only surviving colour was the grey footer). Rules:
+//
+//   LIGHT mode — exactly the v3.8.11 behaviour: only near-black text colours
+//   (`black`, `windowtext`, every channel ≤ 29) are dropped. Nothing else is
+//   touched (there is no well on a white card, so the variant is moot).
+//
+//   DARK mode — every colour is classified with isNonAuthorialColor():
+//   keywords, anything on/inside a link, Office defaults, ANY grayscale
+//   (max−min ≤ 24 at any lightness), white/near-white → dropped, not counted.
+//   Authorial TEXT colours are MAPPED, never switched: dark ones (navy
+//   signatures `#0C1975`, `#1F497D`) are rewritten to the same hue at 70%
+//   lightness so they read on the dark ground; light ones (`#EE0000`,
+//   `#5B9BD5`) stay verbatim. Neither counts. ONLY saturated BACKGROUNDS
+//   (`bgcolor`, `background(-color)`) are paper triggers — a coloured table
+//   was designed against its own ground and must keep it. The legacy
+//   `background="x.png"` image attribute is always stripped.
+//
+// Hooks are global on the DOMPurify singleton, so everything below is gated
+// by `neutralizeMode`, set only around SafeHtml's sanitize call (the
+// composer's paste sanitizer must NOT rewrite outgoing HTML).
+// ---------------------------------------------------------------------------
+
+const NAMED_COLORS = {
+  black: [0, 0, 0], white: [255, 255, 255], gray: [128, 128, 128], grey: [128, 128, 128],
+  silver: [192, 192, 192], darkgray: [169, 169, 169], darkgrey: [169, 169, 169],
+  lightgray: [211, 211, 211], lightgrey: [211, 211, 211], dimgray: [105, 105, 105],
+  dimgrey: [105, 105, 105], gainsboro: [220, 220, 220], whitesmoke: [245, 245, 245],
+  blue: [0, 0, 255], red: [255, 0, 0], green: [0, 128, 0], navy: [0, 0, 128],
+  maroon: [128, 0, 0], purple: [128, 0, 128], orange: [255, 165, 0], yellow: [255, 255, 0],
+  teal: [0, 128, 128], olive: [128, 128, 0], lime: [0, 255, 0], aqua: [0, 255, 255],
+  cyan: [0, 255, 255], fuchsia: [255, 0, 255], magenta: [255, 0, 255],
+  darkblue: [0, 0, 139], darkred: [139, 0, 0], darkgreen: [0, 100, 0],
+};
+// System / CSS-wide keywords: never a design choice.
+const COLOR_KEYWORDS = new Set([
+  'windowtext', 'inherit', 'initial', 'unset', 'revert', 'revert-layer', 'transparent',
+  'currentcolor', 'buttontext', 'canvastext', 'graytext', 'highlighttext', 'none', 'auto',
+]);
+// Office's default hyperlink / followed-hyperlink / legacy-blue stamps.
+const OFFICE_DEFAULT_HEX = new Set(['#0563c1', '#954f72', '#0000ff']);
+const GRAYSCALE_SPREAD = 24;
+const clamp255 = (n) => Math.max(0, Math.min(255, Math.round(n)));
+const toHex = ([r, g, b]) => `#${[r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+
+/**
+ * Parse a CSS/HTML colour → `{ rgb, a }`, `{ keyword }`, or null (unknown —
+ * hsl(), var(), exotic names — treated as an author choice by callers).
+ * Hex 3/4/6/8, rgb()/rgba() (comma or space syntax, % channels, alpha 0 →
+ * transparent) and the named colours above.
+ */
+export function parseColor(value) {
+  const v = String(value ?? '').trim().toLowerCase().replace(/\s*!important$/, '');
+  if (!v) return null;
+  if (COLOR_KEYWORDS.has(v)) return { keyword: v };
+  const hex = v.match(/^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/);
+  if (hex) {
+    let h = hex[1];
+    if (h.length <= 4) h = [...h].map((c) => c + c).join('');
+    const a = h.length === 8 ? parseInt(h.slice(6, 8), 16) / 255 : 1;
+    if (a === 0) return { keyword: 'transparent' };
+    return { rgb: [h.slice(0, 2), h.slice(2, 4), h.slice(4, 6)].map((c) => parseInt(c, 16)), a };
+  }
+  const rgb = v.match(/^rgba?\(\s*([\d.]+%?)\s*[,\s]\s*([\d.]+%?)\s*[,\s]\s*([\d.]+%?)\s*(?:[,/]\s*([\d.]+%?)\s*)?\)$/);
+  if (rgb) {
+    const chan = (s) => clamp255(s.endsWith('%') ? parseFloat(s) * 2.55 : parseFloat(s));
+    const a = rgb[4] === undefined ? 1 : (rgb[4].endsWith('%') ? parseFloat(rgb[4]) / 100 : parseFloat(rgb[4]));
+    if (a === 0) return { keyword: 'transparent' };
+    return { rgb: [chan(rgb[1]), chan(rgb[2]), chan(rgb[3])], a };
+  }
+  if (NAMED_COLORS[v]) return { rgb: NAMED_COLORS[v], a: 1 };
+  return null;
+}
+
+/**
+ * Does this colour carry NO authorial intent? `ctx.tag` is the element's tag,
+ * `ctx.inLink` whether it sits on/inside an <a> (link colours are the mail
+ * client's, never the writer's), `ctx.prop` the property it came from
+ * (`color`, `background-color`, `background`, `bgcolor` — informational).
+ * Unknown/unparseable values are treated as authorial (return false).
+ */
+export function isNonAuthorialColor(value, ctx = {}) {
+  const c = parseColor(value);
+  if (!c) return false;
+  if (c.keyword) return true;
+  if (ctx.inLink || String(ctx.tag || '').toLowerCase() === 'a') return true;
+  if (OFFICE_DEFAULT_HEX.has(toHex(c.rgb))) return true;
+  const [r, g, b] = c.rgb;
+  // Any grayscale — black, greys at every lightness, white — including the
+  // near-white cell backgrounds Word/Outlook stamp on tables.
+  return Math.max(r, g, b) - Math.min(r, g, b) <= GRAYSCALE_SPREAD;
+}
+
+// The v3.8.11 near-black rule, kept verbatim for LIGHT mode.
 function isNearBlackColor(value) {
   const v = String(value || '').trim().toLowerCase();
   if (!v) return false;
@@ -107,68 +201,221 @@ function isNearBlackColor(value) {
   return false;
 }
 
-// Scoped to SafeHtml's sanitize call only (hooks are global on the DOMPurify
-// singleton — the composer's paste sanitizer must NOT rewrite outgoing HTML).
-let dropNearBlackColors = false;
-DOMPurify.addHook('afterSanitizeAttributes', (node) => {
-  if (!dropNearBlackColors || !node.getAttribute) return;
-  if (node.tagName === 'FONT' && isNearBlackColor(node.getAttribute('color'))) {
-    node.removeAttribute('color');
+const relativeLuminance = ([r, g, b]) => {
+  const lin = (v) => { const c = v / 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+};
+const hslOf = ([r, g, b]) => {
+  const R = r / 255; const G = g / 255; const B = b / 255;
+  const max = Math.max(R, G, B); const min = Math.min(R, G, B);
+  const l = (max + min) / 2;
+  if (max === min) return { h: 0, s: 0, l };
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h;
+  if (max === R) h = ((G - B) / d) % 6;
+  else if (max === G) h = (B - R) / d + 2;
+  else h = (R - G) / d + 4;
+  h = Math.round(h * 60);
+  if (h < 0) h += 360;
+  return { h, s, l };
+};
+// "Dark" text = it would sink into the dark ground: relative luminance under
+// 0.35 (navy/teal/forest signatures), EXCEPT vivid mid-lightness primaries
+// (HSL lightness ≥ 45% — `#EE0000`) whose luminance is low only because of
+// channel weighting; those already read on a dark ground and stay verbatim.
+const DARK_TEXT_LUMINANCE = 0.35;
+const DARK_TEXT_MAX_LIGHTNESS = 0.45;
+const LIFTED_LIGHTNESS = 70;
+function isDarkTextColor(rgb) {
+  return relativeLuminance(rgb) < DARK_TEXT_LUMINANCE && hslOf(rgb).l < DARK_TEXT_MAX_LIGHTNESS;
+}
+/** Same hue and saturation, lifted to 70% lightness (CSS Color 4 syntax). */
+export function liftColorForDark(rgb) {
+  const { h, s } = hslOf(rgb);
+  return `hsl(${h} ${Math.round(s * 100)}% ${LIFTED_LIGHTNESS}%)`;
+}
+
+// Text colour → null (drop), a rewritten value, or the value verbatim.
+function mapTextColor(value, ctx) {
+  if (isNonAuthorialColor(value, { ...ctx, prop: 'color' })) {
+    // Mid greys are the author's way of de-emphasising (disclaimer footers,
+    // "Sent from my iPhone", quoted headers). Keep that intent in dark mode by
+    // mapping them to the muted token instead of flattening to full foreground.
+    // Near-black / near-white greys and colours on links simply drop.
+    const g = parseColor(value);
+    if (g?.rgb && !ctx?.inLink && ctx?.tag !== 'A') {
+      const { l } = hslOf(g.rgb);
+      const chroma = Math.max(...g.rgb) - Math.min(...g.rgb);
+      if (chroma <= 24 && l >= 0.35 && l <= 0.85) return 'hsl(var(--muted-foreground))';
+    }
+    return null;
   }
-  const style = node.getAttribute('style');
-  if (!style || !/color/i.test(style)) return;
-  // Split/rejoin on ';' is lossless here: we only remove exact `color:`
-  // declarations, whose values can never contain a ';' (unlike e.g. a
-  // background data: URI, which passes through untouched).
-  const kept = style.split(';').filter((decl) => {
-    const i = decl.indexOf(':');
-    if (i < 0) return decl.trim() !== '';
-    if (decl.slice(0, i).trim().toLowerCase() !== 'color') return true;
-    return !isNearBlackColor(decl.slice(i + 1));
+  const c = parseColor(value);
+  if (c?.rgb && isDarkTextColor(c.rgb)) return liftColorForDark(c.rgb);
+  return value;
+}
+
+// `background` shorthand: split into whitespace tokens (parens kept intact so
+// `rgb(1, 2, 3)` / `url(a b)` survive) and look for a colour word that is an
+// author choice. Images, `none`, `transparent`, white → no authorial colour.
+function backgroundHasAuthorialColor(value, ctx) {
+  const tokens = [];
+  let depth = 0; let cur = '';
+  for (const ch of String(value)) {
+    if (ch === '(') depth += 1;
+    else if (ch === ')') depth = Math.max(0, depth - 1);
+    if (/\s/.test(ch) && depth === 0) { if (cur) tokens.push(cur); cur = ''; } else cur += ch;
+  }
+  if (cur) tokens.push(cur);
+  return tokens.some((t) => {
+    const c = parseColor(t);
+    return Boolean(c?.rgb) && !isNonAuthorialColor(t, { ...ctx, prop: 'background' });
   });
+}
+
+// Split a style attribute on `;` at paren/quote depth 0 so `url(data:…;base64,…)`
+// and quoted font names stay whole (the v3.8.11 naive split would have
+// shredded them once we started dropping `background` declarations).
+function splitDeclarations(style) {
+  const out = [];
+  let depth = 0; let quote = null; let cur = '';
+  for (const ch of String(style)) {
+    if (quote) { cur += ch; if (ch === quote) quote = null; continue; }
+    if (ch === '"' || ch === "'") { quote = ch; cur += ch; continue; }
+    if (ch === '(') depth += 1;
+    else if (ch === ')') depth = Math.max(0, depth - 1);
+    if (ch === ';' && depth === 0) { out.push(cur); cur = ''; } else cur += ch;
+  }
+  out.push(cur);
+  return out;
+}
+
+const PAPER_PROPS = new Set(['color', 'background', 'background-color']);
+
+let neutralizeMode = null; // null | 'light' | 'dark' — only during SafeHtml's sanitize
+let paperTriggers = 0;
+
+function neutralizeNode(node) {
+  const dark = neutralizeMode === 'dark';
+  const tag = node.tagName;
+  const ctx = {
+    tag,
+    inLink: dark && typeof node.closest === 'function' && Boolean(node.closest('a')),
+  };
+
+  // A lifted <font color> moves to an inline style: the legacy attribute only
+  // parses names/hex (an `hsl()` value would be mangled by the legacy colour
+  // parser), and `style` wins over the attribute anyway.
+  let liftedFontColor = null;
+  if (tag === 'FONT' && node.hasAttribute('color')) {
+    const v = node.getAttribute('color');
+    if (dark) {
+      const next = mapTextColor(v, ctx);
+      if (next === null) node.removeAttribute('color');
+      else if (next !== v) { node.removeAttribute('color'); liftedFontColor = next; }
+    } else if (isNearBlackColor(v)) {
+      node.removeAttribute('color');
+    } else {
+      paperTriggers += 1;
+    }
+  }
+  if (node.hasAttribute('bgcolor')) {
+    if (dark && isNonAuthorialColor(node.getAttribute('bgcolor'), { ...ctx, prop: 'bgcolor' })) node.removeAttribute('bgcolor');
+    else paperTriggers += 1;
+  }
+  if (node.hasAttribute('background')) {
+    if (dark) node.removeAttribute('background');
+    else paperTriggers += 1;
+  }
+
+  const style = node.getAttribute('style') || '';
+  if (!liftedFontColor && (!style || !/color|background/i.test(style))) return;
+  let changed = Boolean(liftedFontColor);
+  const kept = [];
+  for (const decl of style ? splitDeclarations(style) : []) {
+    const i = decl.indexOf(':');
+    if (i < 0) { if (decl.trim() !== '') kept.push(decl); continue; }
+    const prop = decl.slice(0, i).trim().toLowerCase();
+    const value = decl.slice(i + 1).trim();
+    if (!PAPER_PROPS.has(prop)) { kept.push(decl); continue; }
+    if (!dark) {
+      // v3.8.11: only near-black `color:` is dropped; everything else stays and counts.
+      if (prop === 'color' && isNearBlackColor(value)) { changed = true; continue; }
+      paperTriggers += 1;
+      kept.push(decl);
+      continue;
+    }
+    if (prop === 'color') {
+      const next = mapTextColor(value, ctx);
+      if (next === null) { changed = true; continue; }
+      if (next !== value) { kept.push(`color:${next}`); changed = true; } else kept.push(decl);
+      continue;
+    }
+    if (prop === 'background-color') {
+      if (isNonAuthorialColor(value, { ...ctx, prop })) { changed = true; continue; }
+      paperTriggers += 1;
+      kept.push(decl);
+      continue;
+    }
+    // background shorthand
+    if (backgroundHasAuthorialColor(value, ctx)) { paperTriggers += 1; kept.push(decl); } else changed = true;
+  }
+  if (liftedFontColor) kept.push(`color:${liftedFontColor}`);
+  if (!changed) return;
   const next = kept.join(';');
   if (next.replace(/[;\s]/g, '') === '') node.removeAttribute('style');
-  else if (next !== style) node.setAttribute('style', next);
+  else node.setAttribute('style', next);
+}
+
+DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+  if (!neutralizeMode || !node.getAttribute) return;
+  neutralizeNode(node);
 });
 
-// Does the SANITIZED + NEUTRALIZED markup still carry author colours? The
-// `(?:[^"]*[;\s])?` guard requires attr-start / `;` / whitespace right before
-// `color`, so `border-color:` / `outline-color:` never false-positive. (The
-// plan wrote the guard as `(?:^|[;\s])` — but `^` anchors the whole string,
-// never the attr start, so `style="color:red"` would slip through; this is
-// the equivalent that actually matches attr-start.)
-const COLOR_HINT_RE = /style="(?:[^"]*[;\s])?(?:color|background(?:-color)?)\s*:|<font[^>]*\bcolor\s*=|\sbgcolor\s*=|\sbackground\s*="/i;
-
-/** Sanitized HTML rendering for email/description bodies. */
+/**
+ * Sanitized HTML rendering for email/description bodies. Theme-gated: in dark
+ * mode the neutraliser v2 above maps/drops non-authorial colours and the
+ * body is stamped `--themed` (no paper triggers) or `--paper`; in light mode
+ * only near-black text is dropped (v3.8.11). Memoised on [html, isDark] so a
+ * theme flip re-sanitises exactly once.
+ */
 export function SafeHtml({ html, className = '' }) {
+  const { resolvedTheme } = useTheme();
+  const isDark = resolvedTheme === 'dark';
   // Memoized: parents re-render often (SSE ticks, composer keystrokes) and
   // re-sanitizing a long thread body each time was pure waste.
   const { clean, variantClass } = useMemo(() => {
     let sanitized;
-    dropNearBlackColors = true;
+    let triggers = 0;
+    neutralizeMode = isDark ? 'dark' : 'light';
+    paperTriggers = 0;
     try {
       sanitized = DOMPurify.sanitize(String(html || ''), {
         FORBID_TAGS: ['style', 'form', 'input', 'button'],
         FORBID_ATTR: ['onerror', 'onclick', 'onload'],
         ADD_ATTR: ['target'],
       });
+      triggers = paperTriggers;
     } finally {
-      dropNearBlackColors = false;
+      neutralizeMode = null;
+      paperTriggers = 0;
     }
     return {
       clean: sanitized,
-      variantClass: COLOR_HINT_RE.test(sanitized) ? 'tp-rich-body--paper' : 'tp-rich-body--themed',
+      variantClass: triggers > 0 ? 'tp-rich-body--paper' : 'tp-rich-body--themed',
     };
-  }, [html]);
+  }, [html, isDark]);
   return (
     <div
-      // Dark mode (Phase DW, QA 08-31 #5): conditional rendering. Bodies with
-      // no surviving author colours get `--themed` (fully dark-themed via
-      // index.css); bodies with real inline colours get `--paper` (dimmed
-      // slate panel — never pure white). The base `tp-rich-body` class keeps
-      // the shared layout rules (overflow containment, data tables). Light
-      // mode is unchanged. The `[&_a]` blue is the light value; the themed
-      // dark link colour comes from `.dark .tp-rich-body--themed a` in CSS.
+      // Dark mode (Phase DW, QA 08-31 #5 / QA 09-01 #6): conditional rendering.
+      // Bodies with no surviving author BACKGROUNDS get `--themed` (fully
+      // dark-themed via index.css; author text colours were mapped to read on
+      // the dark ground); bodies with real coloured backgrounds get `--paper`
+      // (dimmed slate panel — never pure white). The base `tp-rich-body` class
+      // keeps the shared layout rules (overflow containment, data tables).
+      // Light mode is unchanged. The `[&_a]` blue is the light value; the
+      // themed dark link colour comes from `.dark .tp-rich-body--themed a`.
       className={`tp-rich-body ${variantClass} text-sm text-foreground/85 break-words [&_a]:text-blue-600 [&_a]:underline [&_img]:max-w-full [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground [&_p]:my-1.5 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 ${className}`}
       // Sanitized above with DOMPurify — the only way to render email HTML faithfully.
       dangerouslySetInnerHTML={{ __html: clean }}
