@@ -88,6 +88,32 @@ export default function AppHeader({
   };
   useEffect(() => () => { if (syncNoticeTimerRef.current) clearTimeout(syncNoticeTimerRef.current); }, []);
 
+  // Publish the bar's MEASURED height as `--tp-app-header-h` on <html> so
+  // sticky elements that dock under it (the dashboard's compact column header,
+  // `.tp-compact-sticky`) use the real value instead of a hardcoded guess
+  // (QA 09-01 #1: the old 57px left a see-through strip above a 53px bar).
+  // Cleared while the bar is hidden (<md) so consumers fall back to their
+  // default; jsdom has no ResizeObserver, so the effect degrades to no-op.
+  const headerRef = useRef(null);
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el || typeof document === 'undefined') return undefined;
+    const root = document.documentElement;
+    const publish = () => {
+      const h = Math.round(el.getBoundingClientRect().height);
+      if (h > 0) root.style.setProperty('--tp-app-header-h', `${h}px`);
+      else root.style.removeProperty('--tp-app-header-h');
+    };
+    publish();
+    if (typeof ResizeObserver === 'undefined') return () => root.style.removeProperty('--tp-app-header-h');
+    const ro = new ResizeObserver(publish);
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+      root.style.removeProperty('--tp-app-header-h');
+    };
+  }, []);
+
   // Server broadcast: someone's "Sync now" hit the already-running guard.
   const lastSkipSeenRef = useRef(null);
   useEffect(() => {
@@ -684,7 +710,7 @@ export default function AppHeader({
       <SideRail />
 
       {/* Desktop bar — phones get no top chrome (MobileTabBar is the nav). */}
-      <header className="sticky top-0 z-40 hidden border-b border-border bg-card shadow-sm md:block">
+      <header ref={headerRef} className="sticky top-0 z-40 hidden border-b border-border bg-card shadow-sm md:block">
         <div className="flex items-center gap-3 px-4 py-2 lg:px-6">
           <div className="flex min-w-0 items-center gap-3">
             {renderWorkspaceControl()}

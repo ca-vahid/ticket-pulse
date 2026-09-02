@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.8.12-preview';
+export const APP_VERSION = '3.8.20-preview';
 
 export const changelog = [
+  {
+    version: '3.8.20-preview',
+    date: 'September 2, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>📱 Dashboard on iPad: the first agent is no longer hidden</strong> — in Compact view on tablet-width screens the sticky column header sat on top of the first row (Andrew Fong looked like Alexey was first). Below 1100px the table is a horizontal scroller, and a sticky offset meant for the desktop header was pushing the columns bar down over the first agent. The header now sits flush inside the scroller on tablets and docks under the app header on desktop, with the 4px see-through strip closed too. (QA 09-01 #1)' },
+      { type: 'improved', html: '<strong>🌙 Dark mode: FreshService ticket bodies join the theme</strong> — most FreshService emails still landed on the light panel because a single harmless colour survived (the grey “Privacy Policy” footer Outlook adds, link blues, white table backgrounds). Grey text at any lightness, white backgrounds, link colours and Office defaults are now treated as non-authorial; dark brand colours in signatures are lightened to stay readable instead of forcing a light panel. Only messages with genuinely coloured backgrounds (an AP aging table, a highlighted banner) keep the dimmed slate panel — measured on real tickets, that drops from 44% of messages to about one in ten. Light mode is unchanged. (QA 09-01 #6)' },
+    ],
+  },
   {
     version: '3.8.12-preview',
     date: 'September 1, 2026',

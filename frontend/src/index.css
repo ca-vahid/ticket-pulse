@@ -152,6 +152,23 @@
       overflow-x: visible;
     }
   }
+  /* The compact table's sticky column header (QA 09-01 #1). Below 1100px the
+     wrapper above is a scroll container, so sticky resolves against IT — a
+     positive top offset would park the header over the first row (it never
+     docks anyway: the wrapper only scrolls sideways). From 1100px sticky
+     resolves against the page again and the header docks under the app
+     header at its MEASURED height (AppHeader publishes --tp-app-header-h;
+     53px is the desktop bar's resting height). Same 1100px seam as above —
+     keep the two in step. */
+  .tp-compact-sticky {
+    position: sticky;
+    top: 0;
+  }
+  @media (min-width: 1100px) {
+    .tp-compact-sticky {
+      top: var(--tp-app-header-h, 53px);
+    }
+  }
 }
 
 html {
@@ -378,14 +395,21 @@ code {
     white-space: pre-wrap;
   }
   /* Dark mode (Phase DW — QA 08-31 #5 overrules the v3.8.02 white-well
-     convention): email/note HTML renders CONDITIONALLY. SafeHtml stamps
-     `--themed` when the sanitized markup carries no author colours (near-black
-     Outlook `color:black`/`windowtext` is neutralized at sanitize time so it
-     doesn't count) → fully dark-themed, no well. It stamps `--paper` when real
-     inline colours survive → a DIMMED SLATE paper panel, never pure white.
-     Light mode is unchanged (no well needed on a white card).
+     convention; neutraliser v2 in QA 09-01 #6): email/note HTML renders
+     CONDITIONALLY. SafeHtml (ticketUi.jsx) sanitizes with a theme-gated
+     colour neutraliser — in dark mode non-authorial colours (greys at any
+     lightness, white backgrounds, Office link defaults, `windowtext`/
+     `inherit`/`transparent`, anything inside a link) are dropped, dark
+     authorial TEXT colours are lifted to the same hue at 70% lightness and
+     light ones kept — and stamps `--themed` when no authorial BACKGROUND
+     survives → fully dark-themed, no well. It stamps `--paper` only when a
+     coloured background (`bgcolor`, `background(-color)`) survives → a DIMMED
+     SLATE paper panel, never pure white. Light mode keeps the v3.8.11
+     near-black-only rule (no well needed on a white card).
      Cascade note: keep the two-class `.dark .tp-rich-body--themed` form —
-     (0,2,0) must out-rank SafeHtml's `text-foreground/85` utility (0,1,0). */
+     (0,2,0) must out-rank SafeHtml's `text-foreground/85` utility (0,1,0);
+     the :where() safety net below stays at zero specificity so a lifted
+     `color:hsl(…)` inline value still wins. */
   .dark .tp-rich-body--themed {
     background: transparent;
     color: hsl(var(--card-foreground) / 0.9);

@@ -7,16 +7,23 @@ import { getCompactColumns, getCompactGridTemplate } from './compactLayout';
  * exactly. Click a sortable header to sort the table; click again to flip
  * direction.
  *
- * Sticky offset:
- *   - Mobile: top-[52px] — just below the mobile page <header> (banner not sticky).
- *   - Desktop (md+): top-[57px] — just below the white app <header>. The purple
- *     stats banner used to be sticky too (and we'd dock under it at top-[196px]),
- *     but the banner now scrolls away with the page, so we only need to clear
- *     the app header.
+ * Sticky offset — `.tp-compact-sticky` (index.css, beside `.tp-compact-scroll`):
+ *   - Below 1100px the wrapper is `overflow-x:auto` (QA 08-04 #3), which makes
+ *     it a SCROLL CONTAINER: `position:sticky` then resolves against the
+ *     wrapper, not the page. Any positive `top` there parks the header that
+ *     many px below the wrapper's top edge — i.e. over the first technician
+ *     row (QA 09-01 #1, 49px of a 58px row hidden on iPad). So `top:0`; the
+ *     wrapper never scrolls vertically, so there is nothing to dock under.
+ *   - From 1100px the wrapper's overflow is visible again and the header
+ *     docks under the app <header> at `var(--tp-app-header-h, 53px)` — the
+ *     measured height, published by AppHeader (a ResizeObserver keeps it
+ *     honest; the fallback is the desktop bar's resting height, NOT the old
+ *     57px guess that left a 4px see-through strip).
+ *   Phones (<sm) never render this table — the cards view takes over.
  *
- * z-index: matches the app header's z-40 baseline minus 10. The banner (when
- * it was sticky) used z-30; we keep z-30 here since nothing else competes
- * for this slot once the banner is non-sticky.
+ * z-index: the app header is z-40; z-30 keeps the column header under it and
+ * above the rows. Nothing else competes for this slot (the purple stats
+ * banner stopped being sticky long ago).
  */
 export default function TechCompactHeader({ viewMode, sortField, sortDirection, onSort, simple = false }) {
   const columns = getCompactColumns(viewMode, simple);
@@ -39,7 +46,7 @@ export default function TechCompactHeader({ viewMode, sortField, sortDirection, 
   };
 
   return (
-    <div className="sticky top-[52px] md:top-[57px] z-30 mb-2 -mx-1 px-1">
+    <div data-testid="tech-compact-header" className="tp-compact-sticky z-30 mb-2 -mx-1 px-1">
       <div
         className="grid items-center gap-3 px-3 py-2 bg-card/95 backdrop-blur-md border border-border rounded-lg shadow-md"
         style={{ gridTemplateColumns: gridTemplate }}

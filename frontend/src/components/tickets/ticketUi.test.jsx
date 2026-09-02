@@ -1,10 +1,11 @@
 /** @vitest-environment jsdom */
 import '@testing-library/jest-dom/vitest';
-import { afterEach, describe, expect, test, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import DOMPurify from 'dompurify';
+import { ThemeProvider, useTheme } from '../../contexts/ThemeContext';
 import {
-  AgentFirstName, ExternalChip, FeaturedFieldChip, MirrorChip, OriginChip, PersonAvatar, PriorityDot, QueueStatePill, SafeHtml, SlaChip, SlaTargetChip, StatusPill, formatDay, formatDayTime, initials, slaTargetState, timeAgo, timeAgoShort,
+  AgentFirstName, ExternalChip, FeaturedFieldChip, MirrorChip, OriginChip, PersonAvatar, PriorityDot, QueueStatePill, SafeHtml, SlaChip, SlaTargetChip, StatusPill, formatDay, formatDayTime, initials, isNonAuthorialColor, parseColor, slaTargetState, timeAgo, timeAgoShort,
 } from './ticketUi';
 
 afterEach(cleanup);
@@ -319,6 +320,201 @@ describe('ticketUi components', () => {
       rerender(<SafeHtml html="<p>bye</p>" />);
       expect(spy.mock.calls.length).toBe(initialCalls + 1);
       spy.mockRestore();
+    });
+
+    // Neutraliser v2 (QA 09-01 #6): theme-gated. Everything above ran without
+    // a ThemeProvider (= light fallback) and pins the v3.8.11 behaviour; the
+    // dark branch below maps/drops non-authorial colours.
+    describe('neutraliser v2 (dark mode)', () => {
+      const themed = (html, theme = 'dark') => {
+        localStorage.setItem('tp_theme', theme);
+        return render(<ThemeProvider><SafeHtml html={html} /></ThemeProvider>).container.firstChild;
+      };
+      // Mid-grey de-emphasis maps to the muted token (not a leftover author colour).
+      const MUTED = /color:\s*hsl\(var\(--muted-foreground\)\)/gi;
+      const noColorDecl = (el) => expect(el.innerHTML.replace(MUTED, '')).not.toMatch(/(?:^|[;"\s])color\s*:/i);
+
+      test('mid-grey text keeps its de-emphasis via the muted token; near-black and near-white greys drop', () => {
+        const el = themed('<p>Body <span style="color:#A6A6A6">Privacy footer</span> <span style="color:#111111">dark</span> <span style="color:#F5F5F5">light</span> <a href="https://x.test" style="color:#808080">link</a></p>');
+        expect(el.className).toMatch(/tp-rich-body--themed/);
+        const spans = el.querySelectorAll('span');
+        expect(spans[0].getAttribute('style')).toMatch(/hsl\(var\(--muted-foreground\)\)/);
+        expect(spans[1].getAttribute('style') || '').not.toMatch(/color/);
+        expect(spans[2].getAttribute('style') || '').not.toMatch(/color/);
+        expect(el.querySelector('a').getAttribute('style') || '').not.toMatch(/color/);
+      });
+
+      beforeEach(() => {
+        localStorage.clear();
+        document.documentElement.classList.remove('dark');
+      });
+      afterEach(() => {
+        localStorage.clear();
+        document.documentElement.classList.remove('dark');
+      });
+
+      // Redacted FS #240242: Outlook quote header, Office-default link,
+      // white table cells, cid background, and the ONE colour that survived
+      // v3.8.11 — the grey disclaimer footer.
+      const FS_240242 = (
+        '<div style="color:black;font-family:Calibri">Hi team,</div>' +
+        '<p style="color:windowtext">Please see <a href="https://x.test" style="color:#0563C1;text-decoration:underline">the portal</a>.</p>' +
+        '<table bgcolor="#FFFFFF" background="cid:image001.png@01DC"><tbody><tr>' +
+        '<td style="background:white;padding:2px"><span style="color:rgb(0,0,0)">Item</span></td></tr></tbody></table>' +
+        '<p style="color:inherit;background:transparent">Regards</p>' +
+        '<span style="color:#A6A6A6;font-size:9pt">Privacy Policy: This message is confidential…</span>'
+      );
+
+      test('greys at any lightness, white, keywords → dropped, body --themed', () => {
+        const body = themed(
+          '<p style="color:#A6A6A6">footer</p>' +
+          '<span style="color: rgb(72, 72, 72)">mid</span>' +
+          '<span style="color:#f5f5f5">light</span>' +
+          '<span style="color:silver">named</span>' +
+          '<span style="color:inherit">kw1</span>' +
+          '<span style="color:transparent">kw2</span>' +
+          '<span style="color:rgba(0,0,0,0)">alpha0</span>' +
+          '<font color="gray">f</font>',
+        );
+        noColorDecl(body);
+        expect(body.querySelector('font').hasAttribute('color')).toBe(false);
+        expect(body).toHaveClass('tp-rich-body--themed');
+        expect(body).not.toHaveClass('tp-rich-body--paper');
+      });
+
+      test('white cell backgrounds, background:white and the legacy background= image → --themed, attrs removed', () => {
+        const body = themed(
+          '<table><tbody><tr><td bgcolor="#ffffff" background="x.png" style="background:white;padding:1px">x</td></tr></tbody></table>',
+        );
+        const td = body.querySelector('td');
+        expect(td.hasAttribute('bgcolor')).toBe(false);
+        expect(td.hasAttribute('background')).toBe(false);
+        expect(td.getAttribute('style')).toBe('padding:1px');
+        expect(body).toHaveClass('tp-rich-body--themed');
+      });
+
+      test('background shorthand with a data: URI is dropped whole (paren-aware split keeps siblings)', () => {
+        const body = themed('<div style="font-weight:bold;background:url(data:image/png;base64,AAA;BBB) no-repeat #fff;margin:0">x</div>');
+        expect(body.querySelector('div').getAttribute('style')).toBe('font-weight:bold;margin:0');
+        expect(body).toHaveClass('tp-rich-body--themed');
+      });
+
+      test('Office link defaults and any colour inside a link → dropped', () => {
+        const body = themed(
+          '<a href="https://x.test" style="color:#0563C1">link</a>' +
+          '<a href="https://x.test"><span style="color:#EE0000">inside</span></a>' +
+          '<span style="color:blue">legacy blue</span>' +
+          '<span style="color:#954F72">followed</span>',
+        );
+        noColorDecl(body);
+        expect(body).toHaveClass('tp-rich-body--themed');
+      });
+
+      test('dark saturated text is LIFTED to the same hue at 70% lightness and does not count', () => {
+        const body = themed('<p><span style="color:#0C1975;font-weight:bold">BGC Engineering</span></p>');
+        expect(body.querySelector('span').getAttribute('style')).toBe('color:hsl(233 81% 70%);font-weight:bold');
+        expect(body).toHaveClass('tp-rich-body--themed');
+        cleanup();
+        // <font color> can't carry hsl() (legacy colour parser) — the lift moves to style.
+        const font = themed('<font color="#1F497D" face="Calibri">navy</font>');
+        const fontEl = font.querySelector('font');
+        expect(fontEl.hasAttribute('color')).toBe(false);
+        expect(fontEl.getAttribute('style')).toMatch(/^color:hsl\(\d+ \d+% 70%\)$/);
+        expect(fontEl.getAttribute('face')).toBe('Calibri');
+        expect(font).toHaveClass('tp-rich-body--themed');
+      });
+
+      test('light saturated text (#EE0000, #5B9BD5) is kept verbatim and does not count', () => {
+        const body = themed('<span style="color:#EE0000">-12.5%</span><span style="color:#5B9BD5">sky</span>');
+        expect(body.innerHTML).toContain('color:#EE0000');
+        expect(body.innerHTML).toContain('color:#5B9BD5');
+        expect(body).toHaveClass('tp-rich-body--themed');
+      });
+
+      test('ONLY saturated backgrounds trigger --paper (bgcolor, background, background-color)', () => {
+        const yellow = themed('<table><tbody><tr><td bgcolor="#ffff00">x</td></tr></tbody></table>');
+        expect(yellow.querySelector('td').getAttribute('bgcolor')).toBe('#ffff00');
+        expect(yellow).toHaveClass('tp-rich-body--paper');
+        cleanup();
+        const teal = themed('<table><tbody><tr><th style="background:#156082;color:white">Aging</th><td style="color:#EE0000">-3</td></tr></tbody></table>');
+        expect(teal.innerHTML).toContain('background:#156082');
+        expect(teal.innerHTML).toContain('color:#EE0000');
+        expect(teal).toHaveClass('tp-rich-body--paper');
+        cleanup();
+        const banner = themed('<table style="background-color:#1B348E"><tbody><tr><td>banner</td></tr></tbody></table>');
+        expect(banner.innerHTML).toContain('background-color:#1B348E');
+        expect(banner).toHaveClass('tp-rich-body--paper');
+      });
+
+      test('the redacted FS #240242 body renders --themed with the grey footer neutralised', () => {
+        const body = themed(FS_240242);
+        noColorDecl(body);
+        expect(body.innerHTML).not.toMatch(/bgcolor|background/i);
+        expect(body.innerHTML).toContain('Privacy Policy');
+        expect(body).toHaveClass('tp-rich-body--themed');
+      });
+
+      test('near-black and border-color rules still hold in dark', () => {
+        const body = themed('<p style="color:#000">a</p><p style="border-color:#c00;border-style:solid;outline-color:#0f0">b</p>');
+        noColorDecl(body);
+        expect(body.innerHTML).toContain('border-color:#c00');
+        expect(body).toHaveClass('tp-rich-body--themed');
+      });
+
+      test('LIGHT mode keeps v3.8.11 exactly: #A6A6A6 and #0C1975 stay intact (and count)', () => {
+        const body = themed('<span style="color:#A6A6A6">footer</span><span style="color:#0C1975">navy</span><a style="color:#0563C1">l</a>', 'light');
+        expect(body.innerHTML).toContain('color:#A6A6A6');
+        expect(body.innerHTML).toContain('color:#0C1975');
+        expect(body.innerHTML).toContain('color:#0563C1');
+        expect(body).toHaveClass('tp-rich-body--paper');
+      });
+
+      test('a theme flip re-sanitises exactly once (memo on [html, isDark])', () => {
+        localStorage.setItem('tp_theme', 'light');
+        const html = '<span style="color:#A6A6A6">footer</span>';
+        function Flip() {
+          const { setTheme } = useTheme();
+          return <button type="button" onClick={() => setTheme('dark')}>dark</button>;
+        }
+        const spy = vi.spyOn(DOMPurify, 'sanitize');
+        const { container, rerender } = render(<ThemeProvider><Flip /><SafeHtml html={html} /></ThemeProvider>);
+        const calls = spy.mock.calls.length;
+        expect(container.querySelector('.tp-rich-body')).toHaveClass('tp-rich-body--paper');
+        fireEvent.click(screen.getByText('dark'));
+        expect(spy.mock.calls.length).toBe(calls + 1);
+        expect(container.querySelector('.tp-rich-body')).toHaveClass('tp-rich-body--themed');
+        expect(container.querySelector('.tp-rich-body').innerHTML).not.toContain('#A6A6A6');
+        rerender(<ThemeProvider><Flip /><SafeHtml html={html} /></ThemeProvider>);
+        expect(spy.mock.calls.length).toBe(calls + 1);
+        spy.mockRestore();
+      });
+    });
+
+    describe('parseColor / isNonAuthorialColor', () => {
+      test('parses hex 3/4/6/8, rgb/rgba (alpha 0 → transparent), named greys', () => {
+        expect(parseColor('#abc').rgb).toEqual([170, 187, 204]);
+        expect(parseColor('#abcd').a).toBeCloseTo(0.867, 2);
+        expect(parseColor('#0C1975').rgb).toEqual([12, 25, 117]);
+        expect(parseColor('#00000000')).toEqual({ keyword: 'transparent' });
+        expect(parseColor('rgb(72, 72, 72)').rgb).toEqual([72, 72, 72]);
+        expect(parseColor('rgba(255,0,0,0)')).toEqual({ keyword: 'transparent' });
+        expect(parseColor('rgb(10 20 30 / 0.5)').a).toBe(0.5);
+        expect(parseColor('Silver').rgb).toEqual([192, 192, 192]);
+        expect(parseColor('WindowText')).toEqual({ keyword: 'windowtext' });
+        expect(parseColor('var(--x)')).toBeNull();
+      });
+      test('classifies keywords, links, Office defaults and grayscale as non-authorial', () => {
+        expect(isNonAuthorialColor('inherit')).toBe(true);
+        expect(isNonAuthorialColor('#EE0000', { inLink: true })).toBe(true);
+        expect(isNonAuthorialColor('#EE0000', { tag: 'A' })).toBe(true);
+        expect(isNonAuthorialColor('#0563c1')).toBe(true);
+        expect(isNonAuthorialColor('blue')).toBe(true);
+        expect(isNonAuthorialColor('#A6A6A6')).toBe(true);
+        expect(isNonAuthorialColor('#f8f8f0')).toBe(true); // spread 8
+        expect(isNonAuthorialColor('#EE0000')).toBe(false);
+        expect(isNonAuthorialColor('#0C1975')).toBe(false);
+        expect(isNonAuthorialColor('hsl(1 2% 3%)')).toBe(false); // unknown → authorial
+      });
     });
   });
 
