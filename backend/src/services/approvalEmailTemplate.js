@@ -68,7 +68,7 @@ const CELL_STYLE = 'border:1px solid #cbd5e1;padding:6px 8px;font-family:Arial,H
 const HEAD_STYLE = `${CELL_STYLE}background:#f1f5f9;font-weight:bold;`;
 
 function cellIsEmpty(inner) {
-  return !String(inner || '').replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, '').replace(/ /g, '').trim();
+  return !String(inner || '').replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, '').replace(/\u00a0/g, '').trim();
 }
 
 /**
@@ -131,7 +131,7 @@ export function normalizeNoteHtmlForEmail(html) {
 
 function pick(obj, keys) {
   const out = {};
-  for (const k of keys) if (obj && obj[k] != null && obj[k] !== '') out[k] = obj[k];
+  for (const k of keys) if (obj && obj[k] !== null && obj[k] !== undefined && obj[k] !== '') out[k] = obj[k];
   return out;
 }
 
