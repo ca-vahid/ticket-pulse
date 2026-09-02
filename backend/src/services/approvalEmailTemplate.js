@@ -1,8 +1,9 @@
 /**
  * Approval e-mails (MEGA-0901 AP-2). Table-based, inline-styled HTML that
  * survives Outlook desktop / OWA / Gmail / Apple Mail: a 640px white card on a
- * slate ground, Arial stack, no external images (Outlook blocks data URIs and
- * remote pictures by default — initials circles are plain table cells).
+ * slate ground, Arial stack, no REMOTE images (Outlook blocks data URIs and
+ * remote pictures by default). People photos ride along as inline (cid:)
+ * attachments; initials circles (plain table cells) are the fallback.
  *
  * Everything user-supplied is escaped here; the request note arrives already
  * sanitized by ticketApprovalService (allow-list) and is only *normalized* for
@@ -159,10 +160,16 @@ function initialsCircle(name, size = 40) {
   return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;"><tr><td width="${size}" height="${size}" align="center" valign="middle" style="width:${size}px;height:${size}px;border-radius:${size / 2}px;background:#dbeafe;color:#1d4ed8;font-family:${FONT};font-size:${font}px;font-weight:bold;line-height:${size}px;">${escapeHtml(initialsOf(name))}</td></tr></table>`;
 }
 
-function personRow({ label, name, meta, size = 40 }) {
+function photoCircle(cid, name, size) {
+  // Inline attachment referenced by cid: — the picture is INSIDE the message (no remote fetch, works
+  // with images-off policies). Outlook desktop ignores border-radius; the square photo is still right.
+  return `<img src="cid:${escapeHtml(cid)}" width="${size}" height="${size}" alt="${escapeHtml(initialsOf(name))}" style="display:block;width:${size}px;height:${size}px;border-radius:${size / 2}px;border:0;">`;
+}
+
+function personRow({ label, name, meta, size = 40, photoCid = null }) {
   return [
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr>',
-    `<td width="${size + 12}" valign="middle" style="padding:0 12px 0 0;">${initialsCircle(name, size)}</td>`,
+    `<td width="${size + 12}" valign="middle" style="padding:0 12px 0 0;">${photoCid ? photoCircle(photoCid, name, size) : initialsCircle(name, size)}</td>`,
     `<td valign="middle" style="font-family:${FONT};">`,
     `<div style="font-size:11px;line-height:14px;letter-spacing:0.6px;text-transform:uppercase;color:${MUTED};">${escapeHtml(label)}</div>`,
     `<div style="font-size:15px;line-height:20px;font-weight:bold;color:${INK};">${escapeHtml(name || 'Unknown')}</div>`,
@@ -236,7 +243,7 @@ export function emailShell({ workspaceName, statusPill, bodyRows, footerHtml, pr
 /**
  * Approver: "your decision is needed". ctx:
  *  { workspaceName, categoryName, ticket:{ref, subject, createdAt, dueBy, priorityLabel, typeLabel, categoryPath, statusLabel, description, appUrl},
- *    requester:{name,title,department,location}, requestedByName, approverName,
+ *    requester:{name,title,department,location,photoCid?}, requestedByName, requestedByPhotoCid?, approverName,
  *    noteHtml (already sanitized + placeholders substituted), clarification:{question,answer}|null,
  *    otherApprovers:[{name,status}], decisionUrl, expiresAt, reRequest:boolean }
  */
@@ -257,9 +264,9 @@ export function renderApproverRequestEmail(ctx) {
   // People
   const requesterMeta = [requester.title, requester.location && !(requester.title || '').toLowerCase().includes(String(requester.location).toLowerCase()) ? requester.location : null,
     requester.department && requester.department !== requester.location ? requester.department : null].filter(Boolean).join(' · ');
-  rows.push(`<tr><td>${personRow({ label: 'Requested for', name: requester.name || 'Unknown requester', meta: requesterMeta })}</td></tr>`);
+  rows.push(`<tr><td>${personRow({ label: 'Requested for', name: requester.name || 'Unknown requester', meta: requesterMeta, photoCid: requester.photoCid || null })}</td></tr>`);
   rows.push(spacer(12));
-  rows.push(`<tr><td>${personRow({ label: 'Asked by', name: ctx.requestedByName || 'Agent', meta: ctx.workspaceName ? `${ctx.workspaceName} workspace` : null, size: 32 })}</td></tr>`);
+  rows.push(`<tr><td>${personRow({ label: 'Asked by', name: ctx.requestedByName || 'Agent', meta: ctx.workspaceName ? `${ctx.workspaceName} workspace` : null, size: 32, photoCid: ctx.requestedByPhotoCid || null })}</td></tr>`);
   rows.push(spacer(18));
 
   // Facts

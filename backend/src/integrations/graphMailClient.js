@@ -308,6 +308,8 @@ class GraphMailClient {
           name: file.name || 'attachment',
           contentType: file.contentType || 'application/octet-stream',
           contentBytes: file.contentBytes,
+          // Inline (cid:) pictures — e.g. approval e-mail avatars — render in place instead of listing as files.
+          ...(file.contentId ? { contentId: file.contentId, isInline: true } : {}),
         }));
       try {
         await client.api(`/users/${mailbox}/sendMail`).post({
@@ -343,6 +345,7 @@ class GraphMailClient {
           name: file.name || 'attachment',
           contentType: file.contentType || 'application/octet-stream',
           contentBytes: file.contentBytes,
+          ...(file.contentId ? { contentId: file.contentId, isInline: true } : {}),
         });
       } catch (error) {
         logger.warn('Graph API: attachment failed to attach to outbound mail (send continues)', {

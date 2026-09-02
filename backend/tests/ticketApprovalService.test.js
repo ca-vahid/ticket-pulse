@@ -681,6 +681,28 @@ describe('_emailApprover (Phase AP: people, category, requester title)', () => {
     expect(email.html).toContain('review &amp; decide</a>');
   });
 
+  test('embeds people photos as inline (cid:) attachments — never a URL', async () => {
+    const { resetUserPhotoCache } = await import('../src/services/userPhotoService.js');
+    resetUserPhotoCache();
+    const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+    azureAdMock.getUserPhoto.mockImplementation(async (email) => (email === 'rita.photo@x.io' ? `data:image/png;base64,${PNG}` : null));
+    prismaMock.ticket.findFirst.mockResolvedValue({ ...ticket, requester: { name: 'Rita', email: 'rita.photo@x.io', jobTitle: 'Analyst' } });
+    prismaMock.approvalCategory.findFirst.mockResolvedValue({ id: 9, name: 'Laptop purchase', managerEmails: ['alice@x.io'] });
+    prismaMock.ticketApproval.findFirst.mockResolvedValue(null);
+
+    await ticketApprovalService.request(501, 1, { approvalCategoryId: 9, note: 'pls' }, { email: 'nophoto.agent@x.io' });
+
+    const email = sendgridMock.sendEmail.mock.calls[0][0];
+    expect(email.attachments).toEqual([
+      { name: 'requester-photo.png', contentType: 'image/png', contentBytes: PNG, contentId: 'requester-photo', inline: true },
+    ]);
+    expect(email.html).toContain('<img src="cid:requester-photo"');
+    // The agent has no directory photo → initials, no dangling cid reference.
+    expect(email.html).not.toContain('cid:requested-by-photo');
+    expect(email.html).not.toMatch(/<img[^>]+src="https?:/);
+    azureAdMock.getUserPhoto.mockReset();
+  });
+
   test('uses the directory name when the requester is a known technician', async () => {
     prismaMock.approvalCategory.findFirst.mockResolvedValue({ id: 9, name: 'Laptop purchase', managerEmails: ['alice@x.io'] });
     prismaMock.ticketApproval.findFirst.mockResolvedValue(null);

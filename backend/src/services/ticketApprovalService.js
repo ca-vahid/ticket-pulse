@@ -6,6 +6,7 @@ import { ValidationError, NotFoundError } from '../utils/errors.js';
 import ticketActivityRepository from './ticketActivityRepository.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { renderApproverRequestEmail, renderRequesterDecisionEmail, renderRequesterClarificationEmail, normalizeNoteHtmlForEmail } from './approvalEmailTemplate.js';
+import { inlinePhotoAttachment } from './userPhotoService.js';
 import { sseManager } from '../routes/sse.routes.js';
 
 const APPROVAL_EXPIRY_DAYS = 30;
@@ -1101,6 +1102,14 @@ class TicketApprovalService {
       }
     }
 
+    // People photos travel INSIDE the message as inline (cid:) attachments — never a URL the
+    // client has to fetch (blocked by default in Outlook, and a public link would leak).
+    const [requesterPhoto, requestedByPhoto] = await Promise.all([
+      inlinePhotoAttachment(requester.email, 'requester-photo'),
+      inlinePhotoAttachment(approval.requestedBy, 'requested-by-photo'),
+    ]);
+    const attachments = [requesterPhoto, requestedByPhoto].filter(Boolean);
+
     const html = renderApproverRequestEmail({
       workspaceName: await this._workspaceName(ticket),
       categoryName,
@@ -1110,8 +1119,10 @@ class TicketApprovalService {
         title: requester.jobTitle || requester.entraJobTitle || null,
         department: requester.department || requester.entraDepartment || null,
         location: requester.entraOfficeLocation || requester.entraCity || null,
+        photoCid: requesterPhoto?.contentId || null,
       },
       requestedByName,
+      requestedByPhotoCid: requestedByPhoto?.contentId || null,
       approverName: approval.approverName || null,
       noteHtml,
       clarification: clarification?.answer ? clarification : null,
@@ -1122,7 +1133,7 @@ class TicketApprovalService {
     });
 
     const { sendTransactionalEmail } = await import('./transactionalEmailService.js');
-    return sendTransactionalEmail({ workspaceId: ticket.workspaceId, to: approval.approverEmail, subject, html, label: 'approval' });
+    return sendTransactionalEmail({ workspaceId: ticket.workspaceId, to: approval.approverEmail, subject, html, attachments, label: 'approval' });
   }
 
   /**
