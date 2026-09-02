@@ -37,7 +37,7 @@ const prismaMock = {
 const noiseRuleServiceMock = { evaluate: jest.fn() };
 const ticketActivityRepositoryMock = { create: jest.fn() };
 const ticketThreadRepositoryMock = { listForTicket: jest.fn() };
-const lifecycleMock = { emitTicketLifecycleNotifications: jest.fn() };
+const lifecycleMock = { emitTicketLifecycleNotifications: jest.fn(), emitTicketEvent: jest.fn().mockResolvedValue({ status: 'completed' }) };
 const requesterRepositoryMock = { findByEmail: jest.fn(), createNative: jest.fn() };
 const sendgridMock = { sendEmail: jest.fn() };
 const sseBroadcastMock = jest.fn();
@@ -459,7 +459,21 @@ describe('ticketService conversation + status + assignment', () => {
     await ticketService.addPrivateNote(501, 1, { bodyText: 'internal context' }, actor);
     expect(sendgridMock.sendEmail).not.toHaveBeenCalled();
     expect(prismaMock.ticketThreadEntry.create).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ isPrivate: true, visibility: 'private', eventType: 'note' }),
+      data: expect.objectContaining({ isPrivate: true, visibility: 'private', eventType: 'note', authorType: 'agent' }),
+    }));
+    // Human notes carry an explicit systemNote:false on the workflow event (TU-3g).
+    expect(lifecycleMock.emitTicketEvent).toHaveBeenCalledWith('ticket.note_added', 501, expect.objectContaining({
+      extra: expect.objectContaining({ systemNote: false }),
+    }));
+  });
+
+  test('systemNote option (TU-3g): machine-written notes store authorType system and flag the event', async () => {
+    await ticketService.addPrivateNote(501, 1, { bodyText: 'Resubmitted via API — 2 fields changed' }, actor, [], { systemNote: true });
+    expect(prismaMock.ticketThreadEntry.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ isPrivate: true, eventType: 'note', authorType: 'system' }),
+    }));
+    expect(lifecycleMock.emitTicketEvent).toHaveBeenCalledWith('ticket.note_added', 501, expect.objectContaining({
+      extra: expect.objectContaining({ systemNote: true }),
     }));
   });
 

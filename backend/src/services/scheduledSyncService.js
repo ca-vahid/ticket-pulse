@@ -51,6 +51,7 @@ class ScheduledSyncService {
 
       this.startHolidayAutoload();
       this.startGraphSubscriptionMaintenance();
+      this.startMailboxHoldDigest();
 
       logger.info(`Scheduled sync started for ${workspaces.length} workspace(s)`);
       return true;
@@ -422,9 +423,39 @@ class ScheduledSyncService {
     }
   }
 
+  /**
+   * Mailbox hold-queue digest (Phase RL, RL-4): every weekday-and-weekend
+   * morning at 08:00 Pacific, one email per workspace whose "Unmatched
+   * replies" queue is non-empty, to that workspace's admins. Quiet no-op
+   * when every queue is empty. Kill switch: MAILBOX_HOLD_DIGEST=false.
+   */
+  startMailboxHoldDigest() {
+    this.stopMailboxHoldDigest();
+    if (process.env.MAILBOX_HOLD_DIGEST === 'false') return;
+    this.mailboxHoldDigestJob = cron.schedule('0 8 * * *', async () => {
+      try {
+        const { default: mailboxHoldService } = await import('./mailboxHoldService.js');
+        const result = await mailboxHoldService.sendDailyDigests();
+        if (result.sent.length) {
+          logger.info(`Mailbox hold digest: ${result.sent.length} workspace digest(s) sent`);
+        }
+      } catch (error) {
+        logger.warn(`Mailbox hold digest tick failed (non-fatal): ${error.message}`);
+      }
+    }, { scheduled: true, timezone: 'America/Los_Angeles' });
+  }
+
+  stopMailboxHoldDigest() {
+    if (this.mailboxHoldDigestJob) {
+      this.mailboxHoldDigestJob.stop();
+      this.mailboxHoldDigestJob = null;
+    }
+  }
+
   stopAll() {
     this.stopHolidayAutoload();
     this.stopGraphSubscriptionMaintenance();
+    this.stopMailboxHoldDigest();
     if (this.cronJobs.size > 0) {
       logger.info(`Stopping all ${this.cronJobs.size} scheduled sync(s)`);
       for (const [wsId] of this.cronJobs) {

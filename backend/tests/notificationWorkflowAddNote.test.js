@@ -516,7 +516,10 @@ describe('update_ticket.setCustomFields Liquid rider', () => {
         budget: 1500,
         flagged: true,
       },
-      { name: 'Notification workflow' },
+      // TU-5: the node folds custom-field changes into its own single
+      // ticket.fields_updated (actorKind workflow) — setValues must not fire one.
+      { name: 'Notification workflow', role: 'workflow' },
+      { emitEvent: false },
     );
   });
 

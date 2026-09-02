@@ -3,6 +3,7 @@ import logger from '../utils/logger.js';
 import { ticketDisplayRef, ticketSourceLabel } from '../utils/ticketOrigin.js';
 import notificationWorkflowEngine from './notificationWorkflowEngine.js';
 import statusService, { TERMINAL_BASE_STATUSES } from './statusService.js';
+import { buildFieldsUpdatedExtra } from './ticketChangeRenderer.js';
 
 const TERMINAL_STATUS_VALUES = new Set(['resolved', 'closed', '4', '5']);
 
@@ -181,7 +182,44 @@ export function lifecycleNotificationFingerprint(eventType, upsertedTicket, exis
   ].join(':');
 }
 
-export function deriveTicketLifecycleEvents(existingTicket, upsertedTicket, { isTerminal = isTerminalStatus } = {}) {
+/**
+ * FS-side field diff (TU-10). Tracked fields only — status/assignment have
+ * their own events, everything else FreshService can change that a workflow
+ * might care about. `undefined` on the upserted side means "not in this
+ * payload" (partial list upserts) and never counts as a change.
+ */
+export const FS_DIFF_FIELDS = Object.freeze([
+  'subject', 'priority', 'category', 'subCategory', 'ticketCategory', 'ticketType',
+  'dueBy', 'frDueBy', 'groupId', 'ccEmails',
+]);
+
+function normalizeDiffValue(field, value) {
+  if (value === undefined) return undefined;
+  if (value === null || value === '') return null;
+  if (field === 'dueBy' || field === 'frDueBy') return dateIso(value);
+  if (field === 'groupId') return String(value);
+  if (field === 'ccEmails') {
+    return (Array.isArray(value) ? value : []).map((e) => String(e || '').trim().toLowerCase()).filter(Boolean).sort();
+  }
+  if (field === 'priority') return asNumber(value);
+  return String(value).trim();
+}
+
+export function diffTrackedFields(existingTicket, upsertedTicket) {
+  const changes = {};
+  if (!existingTicket || !upsertedTicket) return changes;
+  for (const field of FS_DIFF_FIELDS) {
+    const next = normalizeDiffValue(field, upsertedTicket[field]);
+    if (next === undefined) continue;
+    const prev = normalizeDiffValue(field, existingTicket[field]);
+    if (prev === undefined) continue;
+    if (JSON.stringify(prev ?? null) === JSON.stringify(next ?? null)) continue;
+    changes[field] = { from: prev, to: next };
+  }
+  return changes;
+}
+
+export function deriveTicketLifecycleEvents(existingTicket, upsertedTicket, { isTerminal = isTerminalStatus, includeFieldDiff = false } = {}) {
   const events = [];
   if (!upsertedTicket) return events;
 
@@ -264,7 +302,106 @@ export function deriveTicketLifecycleEvents(existingTicket, upsertedTicket, { is
     });
   }
 
+  // FS-side field changes (TU-10, opt-in per trigger node via
+  // includeFreshserviceChanges): raw diff here; emitTicketLifecycleNotifications
+  // applies the echo guards + actor lookup and renders the payload.
+  if (includeFieldDiff) {
+    const changes = diffTrackedFields(existingTicket, upsertedTicket);
+    const changedFields = Object.keys(changes);
+    if (changedFields.length) {
+      const stampAt = dateIso(upsertedTicket.freshserviceUpdatedAt) || dateIso(upsertedTicket.updatedAt) || 'live';
+      const stamp = `fields:${stableTicketId(upsertedTicket)}:fs:${stampAt}:${changedFields.join(',')}`;
+      events.push({
+        type: 'ticket.fields_updated',
+        occurredAt: dateIso(upsertedTicket.freshserviceUpdatedAt) || new Date().toISOString(),
+        dedupeStamp: stamp,
+        notificationFingerprint: `${asNumber(upsertedTicket.workspaceId) || asNumber(existingTicket?.workspaceId) || 'workspace'}:ticket.fields_updated:${stamp}`,
+        extra: { changes, changedFields, actorKind: 'freshservice', source: 'freshservice_sync' },
+      });
+    }
+  }
+
   return events;
+}
+
+const FS_ECHO_WINDOW_MS = 10 * 60 * 1000;
+const TP_OWNED_FS_FIELDS = new Set(['category', 'subCategory', 'ticketCategory', 'tpSkill', 'tpSubskill']);
+// A write-back that touched any of these covers the FS category family.
+const WRITE_BACK_CATEGORY_KEYS = new Set(['category', 'subCategory', 'ticketCategory', 'internalCategoryId', 'internalSubcategoryId', 'tpSkill', 'tpSubskill']);
+
+/**
+ * Echo guard 1 (TU-10): a field set Ticket Pulse itself just wrote to
+ * FreshService (fs_write_back audit row ≤10 min) comes back through the sync
+ * as an FS-side "change" — it is our own echo, not an update.
+ */
+async function isFsWriteBackEcho(ticketId, changedFields) {
+  try {
+    const row = await prisma.ticketActivity.findFirst({
+      where: { ticketId, activityType: 'fs_write_back', performedAt: { gte: new Date(Date.now() - FS_ECHO_WINDOW_MS) } },
+      orderBy: { performedAt: 'desc' },
+      select: { details: true },
+    });
+    const written = row?.details?.changes && typeof row.details.changes === 'object' ? Object.keys(row.details.changes) : null;
+    if (!written || !written.length) return false;
+    const writtenSet = new Set(written);
+    const categoryWritten = written.some((k) => WRITE_BACK_CATEGORY_KEYS.has(k));
+    return changedFields.every((f) => writtenSet.has(f) || (categoryWritten && WRITE_BACK_CATEGORY_KEYS.has(f)));
+  } catch {
+    return false; // attribution is best-effort — never suppress on a lookup error
+  }
+}
+
+/**
+ * Who changed it in FreshService? Latest cached FS activity line around the
+ * FS updated_at (±10 min). Mirrors syncService._resolveFsActor's fallback
+ * lane without importing the sync (this module must stay sync-free).
+ */
+async function resolveFsFieldActor(ticketId, upsertedTicket) {
+  try {
+    const at = upsertedTicket?.freshserviceUpdatedAt ? new Date(upsertedTicket.freshserviceUpdatedAt).getTime() : Date.now();
+    const rows = await prisma.ticketThreadEntry.findMany({
+      where: {
+        ticketId,
+        source: 'freshservice_activity',
+        occurredAt: { gte: new Date(at - FS_ECHO_WINDOW_MS), lte: new Date(at + FS_ECHO_WINDOW_MS) },
+      },
+      orderBy: { occurredAt: 'desc' },
+      take: 5,
+      select: { actorName: true, content: true },
+    });
+    const hit = rows.find((r) => r.actorName);
+    return hit?.actorName || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Turn the raw FS diff event into the full fields_updated payload, or null
+ * when the echo guards say it was Ticket Pulse's own write coming back.
+ */
+async function finalizeFsFieldsUpdatedEvent(event, ticket, upsertedTicket) {
+  const raw = event.extra?.changes || {};
+  const changedFields = Object.keys(raw);
+  if (!changedFields.length) return null;
+  if (await isFsWriteBackEcho(ticket.id, changedFields)) return null;
+  const actorName = await resolveFsFieldActor(ticket.id, upsertedTicket);
+  let changes = raw;
+  // Echo guard 2: "Ticket Pulse" acting in FreshService is our AI write-back
+  // of the TP category fields — drop those and keep only genuine FS edits.
+  if (String(actorName || '').trim().toLowerCase() === 'ticket pulse') {
+    changes = Object.fromEntries(Object.entries(raw).filter(([field]) => !TP_OWNED_FS_FIELDS.has(field)));
+    if (!Object.keys(changes).length) return null;
+  }
+  return buildFieldsUpdatedExtra({
+    ticket,
+    changes,
+    actorKind: 'freshservice',
+    actorName: actorName || 'FreshService',
+    actorEmail: null,
+    source: 'freshservice_sync',
+    reopened: false,
+  });
 }
 
 async function hydrateTicket(ticketId) {
@@ -337,7 +474,28 @@ async function maybeRefreshSentiment(eventContext) {
   } catch { /* sentiment is an annotation, never a pipeline step */ }
 }
 
-export function buildEventContext({ event, ticket, previousAgent, source, statusBase = null }) {
+/**
+ * How a ticket came to exist (Phase RL, RL-6) — a workflow condition field
+ * (`ticket.createdVia`) so "Ticket arrived" acks can tell an app-created
+ * ticket from an email one, a hold-queue resolution (`held_reply`), an
+ * agent's Cc intake (`agent_cc`), a forwarded mail (`forward`) or an FS
+ * sync-in. Explicit value from the create path wins; otherwise derived from
+ * the dispatch source + arrival channel.
+ *   app | email | api | freshservice_sync | held_reply | agent_cc | forward
+ */
+export const TICKET_CREATED_VIA = Object.freeze(['app', 'email', 'api', 'freshservice_sync', 'held_reply', 'agent_cc', 'forward']);
+
+export function deriveCreatedVia(ticket, { source = null, createdVia = null } = {}) {
+  const explicit = String(createdVia || ticket?.createdVia || '').trim();
+  if (TICKET_CREATED_VIA.includes(explicit)) return explicit;
+  if (String(source || '') === 'freshservice_sync' || (ticket?.origin && ticket.origin !== 'ticketpulse')) return 'freshservice_sync';
+  const channel = Number(ticket?.source);
+  if (channel === 1) return 'email';
+  if (channel === 100 || channel === 101) return 'api';
+  return 'app';
+}
+
+export function buildEventContext({ event, ticket, previousAgent, source, statusBase = null, createdVia = null }) {
   return {
     event: {
       type: event.type,
@@ -390,8 +548,13 @@ export function buildEventContext({ event, ticket, previousAgent, source, status
         id: ticket.internalSubcategory.id,
         name: ticket.internalSubcategory.name,
       } : null,
+      // FS group id (string — BigInt) so `watchers` recipients can resolve
+      // group-scoped watch subscriptions (TU-8).
+      groupId: ticket.groupId === null || ticket.groupId === undefined ? null : String(ticket.groupId),
       isNoise: ticket.isNoise === true,
       origin: ticket.origin || 'freshservice',
+      // Phase RL (RL-6): app | email | api | freshservice_sync | held_reply | agent_cc | forward
+      createdVia: deriveCreatedVia(ticket, { source, createdVia }),
       // Arrival channel (QA 07-07 #1): numeric code + friendly label
       // ("Email", "Portal", "Phone", "API", "Agent"…) for conditions.
       source: ticket.source ?? null,
@@ -433,6 +596,13 @@ export async function emitTicketLifecycleNotifications({
   upsertedTicket,
   source = 'freshservice_sync',
   allowNotificationWorkflows = false,
+  createdVia = null, // Phase RL (RL-6): in-memory pass-through from createTicket
+  // Mail-in agent-Cc intake: ticket.created still fires, but the engine drops
+  // the requester recipient (the agent already replied to them).
+  suppressRequesterAck = false,
+  // Event-level actor kind for the status/assignment events (TU-10): native
+  // callers pass the writer's kind; sync sources are 'freshservice'.
+  actorKind = null,
 } = {}) {
   if (!allowNotificationWorkflows) {
     return { status: 'skipped', reason: 'Notification workflows disabled for this ingest path' };
@@ -443,15 +613,25 @@ export async function emitTicketLifecycleNotifications({
   // does. Unknown labels keep the FS-int/substring heuristics.
   const workspaceId = asNumber(upsertedTicket?.workspaceId) || asNumber(existingTicket?.workspaceId);
   const isTerminal = await workspaceTerminalResolver(workspaceId);
-  const events = deriveTicketLifecycleEvents(existingTicket, upsertedTicket, { isTerminal });
+  // FS-side field diff only for sync-observed writes (TU-10); TP-native
+  // paths emit ticket.fields_updated themselves through ticketService.
+  const fromFreshservice = source !== 'ticketpulse_native' && source !== 'preview';
+  const events = deriveTicketLifecycleEvents(existingTicket, upsertedTicket, { isTerminal, includeFieldDiff: fromFreshservice });
   if (events.length === 0) return { status: 'skipped', reason: 'No lifecycle notification events' };
+  const eventActorKind = actorKind || (fromFreshservice ? 'freshservice' : 'human');
+  suppressRequesterAck = suppressRequesterAck === true || upsertedTicket?.suppressRequesterAck === true;
 
   const ticket = await hydrateTicket(upsertedTicket.id);
   if (!ticket) return { status: 'skipped', reason: 'Ticket not found after upsert' };
+  // createdVia is not a column: createTicket stamps it on the in-memory row
+  // it hands us (and on the created audit row); re-hydration drops it, so
+  // carry it over here before the context is built.
+  createdVia = createdVia || upsertedTicket?.createdVia || null;
   const previousAgent = await hydratePreviousAgent(existingTicket);
   const statusBase = await statusService.resolveBaseStatus(ticket.workspaceId, ticket.status).catch(() => null);
 
   const results = [];
+  const emitted = [];
   for (const event of events) {
     // status_changed conditions get the transition's BASES alongside the
     // names ("left an Open-base status", "entered any Pending-base status").
@@ -462,7 +642,18 @@ export async function emitTicketLifecycleNotifications({
         toBase: await statusService.resolveBaseStatus(ticket.workspaceId, event.extra.to).catch(() => null),
       };
     }
-    const eventContext = buildEventContext({ event, ticket, previousAgent, source, statusBase });
+    if (event.type === 'ticket.fields_updated') {
+      const extra = await finalizeFsFieldsUpdatedEvent(event, ticket, upsertedTicket);
+      if (!extra) continue; // our own write-back echo — not an update
+      event.extra = extra;
+    } else {
+      // Provenance on every lifecycle event (TU-10): lets admins filter the
+      // Closed→Open→Closed sync echoes from human/API changes.
+      event.extra = { ...(event.extra || {}), actorKind: eventActorKind, source };
+      if (event.type === 'ticket.created' && suppressRequesterAck) event.extra.suppressRequesterAck = true;
+    }
+    emitted.push(event.type);
+    const eventContext = buildEventContext({ event, ticket, previousAgent, source, statusBase, createdVia });
     dispatchLifecycleWebhook(eventContext);
     maybeRefreshSentiment(eventContext);
     try {
@@ -481,9 +672,10 @@ export async function emitTicketLifecycleNotifications({
     }
   }
 
+  if (emitted.length === 0) return { status: 'skipped', reason: 'FreshService write-back echo' };
   return {
     status: 'completed',
-    events: events.map((event) => event.type),
+    events: emitted,
     results,
   };
 }
@@ -531,6 +723,8 @@ export async function emitTicketEvent(eventType, ticketId, {
 
 export default {
   deriveTicketLifecycleEvents,
+  diffTrackedFields,
+  deriveCreatedVia,
   emitTicketLifecycleNotifications,
   emitTicketEvent,
   lifecycleNotificationFingerprint,

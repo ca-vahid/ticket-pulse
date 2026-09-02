@@ -32,6 +32,12 @@ import { looksLikeRealHtml, plainTextToHtml } from '../utils/htmlContent.js';
 import { EMAIL_SANITIZE_OPTIONS } from './notificationWorkflowSignatureService.js';
 import { appendSignatureToEmail, getEnabledSignatureForSend } from './userSignatureService.js';
 import { sseManager } from '../routes/sse.routes.js';
+import { actorKindOf, deriveActorKind } from '../utils/actorKind.js';
+import { buildFieldsUpdatedExtra } from './ticketChangeRenderer.js';
+
+// Actor-kind attribution (MEGA 09-01 RO-1/TU-1) — pure helpers, re-exported so
+// callers that already import ticketService need no second import.
+export { actorKindOf, deriveActorKind };
 
 // The 4 canonical statuses. Since Phase 8a these are the BASE statuses of the
 // per-workspace registry (statusService) — TP-born validation goes through
@@ -556,20 +562,68 @@ class TicketService {
   async _audit(ticketId, activityType, actor, details = {}) {
     try {
       const now = new Date();
-      await ticketActivityRepository.create({
+      const row = await ticketActivityRepository.create({
         ticketId,
         activityType,
         performedBy: actor?.name || actor?.email || 'Ticket Pulse',
         performedAt: now,
-        details: { source: 'ticketpulse_native', actorEmail: actor?.email || null, ...details },
+        // actorKind (TU-1): human | api | system | workflow — an explicit
+        // details.actorKind from the caller wins over the actor heuristic.
+        details: { source: 'ticketpulse_native', actorEmail: actor?.email || null, actorKind: actorKindOf(actor), ...details },
       });
       // Every audited action is real activity — keep the honest timestamp fresh.
       await prisma.ticket.update({
         where: { id: ticketId },
         data: { lastRealActivityAt: now },
       }).catch(() => {});
+      // The row id anchors the fields_updated dedupe stamp (TU-5).
+      return row || null;
     } catch (err) {
       logger.warn(`Ticket audit write failed for ticket ${ticketId} (non-fatal): ${err.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * ONE choke point for the `ticket.fields_updated` workflow event (MEGA 09-01
+   * Phase TU, TU-5). Every "real update" — a human in TP, the public API
+   * (incl. Power Apps), an API resubmission, the workflow update_ticket node,
+   * a standalone custom-field edit — funnels here; sync, reconcile, mirror,
+   * pipeline/AI, noise re-eval and scripts NEVER call it (their writes are
+   * echoes, not updates). Status/assignment/notes have their own triggers.
+   *
+   * Payload (event.extra): actorKind, actorName, actorEmail, source, changedFields,
+   * changedCount, reopened, changes{field:{from,to,label,fromLabel,toLabel}},
+   * changesList, changesTableHtml, changesText, auditRowId, workflowId?
+   * Dedupe stamp `fields:<ticketId>:<auditRowId>` keeps retries idempotent.
+   */
+  async _emitFieldsUpdated({
+    ticket, changes, actor = null, source = null, auditRowId = null, reopened = false,
+    workflowId = null, actorKind = null, actorName = null,
+  } = {}) {
+    try {
+      if (!ticket?.id) return null;
+      const changedKeys = Object.keys(changes || {});
+      if (changedKeys.length === 0) return null;
+      const extra = await buildFieldsUpdatedExtra({
+        ticket, changes, actor, actorKind, actorName, source, auditRowId, reopened, workflowId,
+      });
+      if (!extra.changedCount) return null;
+      const stamp = `fields:${ticket.id}:${auditRowId || `${Date.now()}:${extra.changedFields.join(',')}`}`;
+      // Fire-and-forget like the note/reply events: the engine may run whole
+      // workflows (LLM steps, FS write-backs) — a PATCH must not wait on that.
+      const dispatch = ticketLifecycleNotificationService.emitTicketEvent?.('ticket.fields_updated', ticket.id, {
+        source: 'ticketpulse_native',
+        dedupeStamp: stamp,
+        extra,
+      });
+      Promise.resolve(dispatch).catch((err) => {
+        logger.warn(`ticket.fields_updated workflow dispatch failed for ticket ${ticket.id} (non-fatal): ${err.message}`);
+      });
+      return { dispatched: true, dedupeStamp: stamp, changedFields: extra.changedFields };
+    } catch (err) {
+      logger.warn(`ticket.fields_updated dispatch failed for ticket ${ticket?.id} (non-fatal): ${err.message}`);
+      return null;
     }
   }
 
@@ -613,12 +667,16 @@ class TicketService {
     return { ...updated, displayRef: ticketDisplayRef(updated), deleted: true };
   }
 
-  async _notifyLifecycle(existingTicket, upsertedTicket, { allow = true } = {}) {
+  async _notifyLifecycle(existingTicket, upsertedTicket, { allow = true, suppressRequesterAck = false, actorKind = null } = {}) {
     await ticketLifecycleNotificationService.emitTicketLifecycleNotifications({
       existingTicket,
       upsertedTicket,
       source: 'ticketpulse_native',
       allowNotificationWorkflows: allow,
+      // suppressRequesterAck (mail-in agent-Cc intake): ticket.created still
+      // fires for the team, but the engine drops the requester recipient.
+      ...(suppressRequesterAck ? { suppressRequesterAck: true } : {}),
+      ...(actorKind ? { actorKind } : {}),
     }).catch((err) => {
       logger.warn('Native ticket lifecycle notification dispatch failed (non-fatal)', {
         ticketId: upsertedTicket.id,
@@ -1553,10 +1611,13 @@ class TicketService {
     }
     const [thread, activities, approvals, attachments, pinnedCards] = await Promise.all([
       ticketThreadRepository.listForTicket(ticket.id, { limit: 300 }),
+      // 200 (was 50, TU-2): machine rows (sync echo, reconcile flaps) used to
+      // evict the human ones from the History tab; the UI now hides machine
+      // kinds by default, so it needs the deeper window.
       prisma.ticketActivity.findMany({
         where: { ticketId: ticket.id },
         orderBy: { performedAt: 'desc' },
-        take: 50,
+        take: 200,
       }),
       prisma.ticketApproval.findMany({
         where: { ticketId: ticket.id },
@@ -1606,7 +1667,10 @@ class TicketService {
       // tickets, where FreshService composes it.
       replySubjectDefault: replySubjectDefault(ticket),
       thread: resolvedThread,
-      activities,
+      // Every row carries actorKind (explicit details.actorKind or the
+      // read-time heuristic for legacy rows) so the History tab can chip +
+      // filter without re-deriving.
+      activities: (activities || []).map((a) => ({ ...a, actorKind: deriveActorKind(a) })),
       approvals,
       attachments,
       pinnedCards,
@@ -2282,7 +2346,18 @@ class TicketService {
 
   // ------------------------------------------------------------------ create
 
-  async createTicket(workspaceId, input, actor, { sourceChannel = TICKET_SOURCE.AGENT, enforceRequired = false } = {}) {
+  // `createdVia` (Mega 09-01 RL-3/RL-6): intake lane label — 'app' | 'email'
+  // | 'api' | 'freshservice_sync' | 'held_reply' | 'agent_cc' | 'forward'.
+  // Not a column: it rides the created audit row (details.createdVia), the
+  // returned ticket and the lifecycle payload so the workflow context can
+  // expose ticket.createdVia (engine side = RL-6).
+  // `suppressRequesterAck` (mail-in agent-Cc intake): the requester already
+  // got the agent's reply, so the "we received your request" ack must NOT go
+  // out — but the team's "Ticket arrived" workflow still fires. Narrower than
+  // `notifyRequester:false` (which suppresses EVERY ticket.created workflow).
+  async createTicket(workspaceId, input, actor, {
+    sourceChannel = TICKET_SOURCE.AGENT, enforceRequired = false, createdVia = null, suppressRequesterAck = false,
+  } = {}) {
     const workspace = await this._getWorkspace(workspaceId);
     if (!workspace.nativeTicketingEnabled) {
       throw new ValidationError('Native ticketing is not enabled for this workspace');
@@ -2480,8 +2555,10 @@ class TicketService {
       nativeNumber,
       requesterId: requester.id,
       via: 'ticketpulse_app',
+      ...(createdVia ? { createdVia } : {}),
       ...(data.ccEmails.length ? { ccEmails: data.ccEmails } : {}),
       ...(data.notifyRequester === false ? { requesterEmailSuppressed: true } : {}),
+      ...(suppressRequesterAck ? { requesterAckSuppressed: true } : {}),
       // Intake bookkeeping (FR 08-05 #1): which keys were auto-provisioned
       // and which were rejected (with reasons) — the audit trail an admin
       // reads when a sender asks "where did my field go?".
@@ -2503,7 +2580,13 @@ class TicketService {
       await this._audit(ticket.id, 'assigned', actor, { toTechId: assignee.id, note: 'Assigned at creation' });
     }
 
-    await this._notifyLifecycle(null, ticket, { allow: data.notifyRequester });
+    if (createdVia) ticket.createdVia = createdVia;
+    if (suppressRequesterAck) ticket.suppressRequesterAck = true;
+    await this._notifyLifecycle(null, ticket, {
+      allow: data.notifyRequester,
+      suppressRequesterAck: suppressRequesterAck === true,
+      actorKind: actorKindOf(actor),
+    });
     // Category/group watchers + custom agent alerts (both fire-and-forget;
     // creation never blocks on them).
     watcherNotificationService.notify('created', ticket.id).catch(() => {});
@@ -2560,7 +2643,9 @@ class TicketService {
 
   // ---------------------------------------------------------------- updates
 
-  async updateTicketFields(ticketId, workspaceId, input, actor) {
+  // `emitEvent:false` (TU-5): an aggregating caller (API resubmission) fires
+  // ONE ticket.fields_updated for the whole change set itself.
+  async updateTicketFields(ticketId, workspaceId, input, actor, { emitEvent = true, eventSource = null } = {}) {
     const ticket = await this._requireNativeTicket(ticketId, workspaceId);
     const parsed = updateTicketSchema.safeParse(input);
     if (!parsed.success) throw new ValidationError(zodMessage(parsed.error));
@@ -2571,11 +2656,18 @@ class TicketService {
     // audit; NO auto-provisioning on update — creation is the intake path, so
     // an unknown key here is a hard ValidationError). Runs before the field
     // patch: the prisma update below re-reads the row, so its return already
-    // carries the merged customFields.
+    // carries the merged customFields. emitEvent:false — this PATCH fires ONE
+    // fields_updated event below, with the custom-field diff merged in.
     let customFieldsResult = null;
     if (data.customFields !== undefined) {
-      customFieldsResult = await customFieldService.setValues(ticketId, workspaceId, data.customFields, actor);
+      customFieldsResult = await customFieldService.setValues(ticketId, workspaceId, data.customFields, actor, { emitEvent: false });
       delete data.customFields;
+    }
+    const customFieldChanges = {};
+    for (const [key, change] of Object.entries(customFieldsResult?.changes || {})) {
+      if (JSON.stringify(change?.from ?? null) !== JSON.stringify(change?.to ?? null)) {
+        customFieldChanges[`customFields.${key}`] = { from: change.from ?? null, to: change.to ?? null };
+      }
     }
 
     // Per-workspace type vocabulary (registry): normalize aliases/case; null
@@ -2727,6 +2819,11 @@ class TicketService {
       // A customFields-only PATCH is still a change — setValues already
       // persisted + audited it; reflect the merged values in the return.
       if (customFieldsResult) {
+        if (emitEvent && Object.keys(customFieldChanges).length) {
+          await this._emitFieldsUpdated({
+            ticket, changes: customFieldChanges, actor, source: eventSource, auditRowId: customFieldsResult.auditRowId ?? null,
+          });
+        }
         return { ...ticket, customFields: customFieldsResult.customFields, displayRef: ticketDisplayRef(ticket), changed: true };
       }
       return { ...ticket, displayRef: ticketDisplayRef(ticket), changed: false };
@@ -2750,11 +2847,28 @@ class TicketService {
     // Due edits get their own audit type (due_changed) so SLA-clock history
     // reads distinctly in the activity timeline; other field edits keep the
     // generic fields_updated entry.
-    if (Object.keys(otherChanges).length) await this._audit(ticket.id, 'fields_updated', actor, { changes: otherChanges });
-    if (Object.keys(dueChanges).length) await this._audit(ticket.id, 'due_changed', actor, { changes: dueChanges });
+    let auditRow = null; // first audit row of this write anchors the event stamp
+    if (Object.keys(otherChanges).length) {
+      const row = await this._audit(ticket.id, 'fields_updated', actor, { changes: otherChanges });
+      auditRow = auditRow || row;
+    }
+    if (Object.keys(dueChanges).length) {
+      const row = await this._audit(ticket.id, 'due_changed', actor, { changes: dueChanges });
+      auditRow = auditRow || row;
+    }
     // "Also for" edits get their own cc_changed entry (old/new lists) so the
     // activity timeline reads "additional requesters changed", not "fields".
-    if (ccChanged) await this._audit(ticket.id, 'cc_changed', actor, { from: changes.ccEmails.from, to: changes.ccEmails.to });
+    if (ccChanged) {
+      const row = await this._audit(ticket.id, 'cc_changed', actor, { from: changes.ccEmails.from, to: changes.ccEmails.to });
+      auditRow = auditRow || row;
+    }
+    // ONE ticket.fields_updated per PATCH (TU-5): union of field + due + cc +
+    // custom-field changes, stamped with the first audit row of this write.
+    if (emitEvent) {
+      await this._emitFieldsUpdated({
+        ticket, changes: { ...changes, ...customFieldChanges }, actor, source: eventSource, auditRowId: auditRow?.id ?? null,
+      });
+    }
     this._broadcast(workspaceId, 'updated', updated, { changes: Object.keys(changes) });
     if (!dueOnly) await mirrorService.enqueueFieldSync(workspaceId, ticket.id);
     // Subject/description changed → the content embedding is stale (P5.2).
@@ -3101,7 +3215,35 @@ class TicketService {
       }).catch(() => { /* duplicate startedAt guard — harmless */ });
     }
 
-    await this._audit(ticket.id, 'fs_write_back', actor, { changes, fsTicketId: Number(ticket.freshserviceTicketId) });
+    const writeBackAudit = await this._audit(ticket.id, 'fs_write_back', actor, {
+      changes,
+      fsTicketId: Number(ticket.freshserviceTicketId),
+      // Echoed FS updated_at — the sync guard (RO-5) treats any snapshot
+      // whose FS updated_at is OLDER than this as stale and keeps the local
+      // status until FreshService catches up.
+      fsUpdatedAt: fsTicket.updated_at || null,
+    });
+    // ticket.fields_updated (TU-5) for the FIELD part of a write-back —
+    // status and assignee have their own triggers (status_changed /
+    // assigned / reassigned fire from _notifyLifecycle below).
+    {
+      const fieldChanges = Object.fromEntries(Object.entries(changes)
+        .filter(([key]) => key !== 'status' && key !== 'assignee' && key !== 'assignedTechId'));
+      if (Object.keys(fieldChanges).length) {
+        await this._emitFieldsUpdated({ ticket, changes: fieldChanges, actor, auditRowId: writeBackAudit?.id ?? null });
+      }
+    }
+    if (changes.status) {
+      // In-process marker (RO-5): snapshot / fast refresh / on-open reconcile
+      // consult it before overwriting the status we just wrote. The audit row
+      // above is the durable fallback after a restart.
+      import('./syncService.js')
+        .then(({ default: syncService }) => syncService.notePendingStatusWriteback?.(ticket.id, {
+          status: localPatch.status,
+          fsUpdatedAt: fsTicket.updated_at || null,
+        }))
+        .catch(() => {});
+    }
     this._broadcast(workspaceId, 'fs_update', updated, { changes: Object.keys(changes) });
     // Subject/description changed → the content embedding is stale (P5.2).
     if (changes.subject || changes.description) this._refreshEmbedding(ticket.id, workspaceId);
@@ -3374,11 +3516,21 @@ class TicketService {
     return this._addThreadEntry(ticketId, workspaceId, input, actor, { isPrivate: false, files });
   }
 
-  async addPrivateNote(ticketId, workspaceId, input, actor, files = []) {
-    return this._addThreadEntry(ticketId, workspaceId, input, actor, { isPrivate: true, files });
+  /**
+   * `options.systemNote` (TU-3g): the note was machine-written (API
+   * resubmission diff, …) — stored with authorType 'system' and flagged on the
+   * ticket.note_added event (`event.extra.systemNote`) so the seeded "Internal
+   * note added" workflow can skip it visibly instead of mailing every diff.
+   */
+  async addPrivateNote(ticketId, workspaceId, input, actor, files = [], options = {}) {
+    return this._addThreadEntry(ticketId, workspaceId, input, actor, {
+      isPrivate: true,
+      files,
+      systemNote: options?.systemNote === true,
+    });
   }
 
-  async _addThreadEntry(ticketId, workspaceId, input, actor, { isPrivate, files = [] }) {
+  async _addThreadEntry(ticketId, workspaceId, input, actor, { isPrivate, files = [], systemNote = false }) {
     const ticket = await prisma.ticket.findFirst({
       where: { id: ticketId, workspaceId },
       include: TICKET_INCLUDE,
@@ -3546,7 +3698,7 @@ class TicketService {
         eventType: isPrivate ? 'note' : 'reply',
         actorName: actor?.name || actor?.email || 'Ticket Pulse',
         actorEmail: actor?.email || null,
-        authorType: 'agent',
+        authorType: systemNote && isPrivate ? 'system' : 'agent',
         incoming: false,
         isPrivate,
         visibility: isPrivate ? 'private' : 'public',
@@ -3605,7 +3757,13 @@ class TicketService {
       ticket.id,
       {
         dedupeStamp: `${isPrivate ? 'note' : 'reply'}:${entry.id}`,
-        extra: { entryId: entry.id, byEmail: actor?.email || null },
+        extra: {
+          entryId: entry.id,
+          byEmail: actor?.email || null,
+          // Condition field `event.systemNote` (TU-3g): true only for
+          // machine-written notes; human notes carry an explicit false.
+          ...(isPrivate ? { systemNote: systemNote === true } : {}),
+        },
       },
     ).catch?.(() => {});
 
@@ -3867,6 +4025,44 @@ class TicketService {
    * SendGrid/SMTP path. The subject carries the TP-<n> reference as a second
    * threading signal. Non-fatal by design.
    */
+  /**
+   * "On <date>, <name> wrote:" block for the last inbound public entry on the
+   * ticket (RL-8) — sanitized HTML capped at ~20 KB, plus a `> ` quoted text
+   * twin. Null when the ticket has no inbound mail yet.
+   */
+  async _lastInboundQuote(ticketId, excludeEntryId = null) {
+    const escapeHtml = (value) => String(value ?? '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    const last = await prisma.ticketThreadEntry.findFirst({
+      where: {
+        ticketId,
+        incoming: true,
+        isPrivate: false,
+        ...(excludeEntryId ? { id: { not: excludeEntryId } } : {}),
+        OR: [{ source: 'email_inbound' }, { authorType: 'requester' }],
+      },
+      orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
+      select: { bodyHtml: true, bodyText: true, content: true, actorName: true, actorEmail: true, occurredAt: true },
+    });
+    if (!last) return null;
+    const rawHtml = last.bodyHtml || (last.bodyText || last.content ? `<p>${escapeHtml(last.bodyText || last.content).replace(/\n/g, '<br/>')}</p>` : '');
+    if (!rawHtml.trim()) return null;
+    const QUOTE_CAP = 20 * 1024;
+    let quotedHtml = sanitizeHtml(rawHtml, EMAIL_SANITIZE_OPTIONS).trim();
+    if (quotedHtml.length > QUOTE_CAP) quotedHtml = `${quotedHtml.slice(0, QUOTE_CAP)}<p>[…]</p>`;
+    const who = escapeHtml(last.actorName || last.actorEmail || 'the requester');
+    const when = last.occurredAt
+      ? new Date(last.occurredAt).toLocaleString('en-CA', { dateStyle: 'medium', timeStyle: 'short' })
+      : '';
+    const header = when ? `On ${when}, ${who} wrote:` : `${who} wrote:`;
+    const html = '<hr style="border:none;border-top:1px solid #d0d5dd;margin:20px 0 12px;" />'
+      + `<div class="tp-quoted"><p style="color:#5f6b7a;font-size:13px;margin:0 0 8px;">${header}</p>`
+      + `<blockquote style="margin:0;padding-left:12px;border-left:3px solid #d0d5dd;color:#374151;">${quotedHtml}</blockquote></div>`;
+    const plain = (last.bodyText || last.content || stripHtml(quotedHtml) || '').trim().slice(0, QUOTE_CAP);
+    const text = `\n\n${header.replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, '&')}\n${plain.split(/\r?\n/).map((line) => `> ${line}`).join('\n')}`;
+    return { html, text };
+  }
+
   async _emailRequesterReply(ticket, entry, { cc = [], attachments = [], signature = null, subject: subjectOverride = null } = {}) {
     const ref = ticketDisplayRef(ticket);
     // Agent-edited subject (Phase SN4) or the default — either way the
@@ -3877,6 +4073,20 @@ class TicketService {
     let html = entry.bodyHtml || `<p>${(entry.bodyText || '').replace(/\n/g, '<br/>')}</p>`;
     let text = entry.bodyText || stripHtml(entry.bodyHtml) || '';
     if (signature) ({ html, text } = appendSignatureToEmail({ html, text }, signature));
+    // Phase RL (RL-8): quote the last inbound message under the reply so the
+    // requester sees what is being answered (Outlook shows a bare reply with
+    // a rewritten `[TP-n]` subject as a new, unrelated conversation). Both
+    // lanes — the Graph createReply draft's own quote is overwritten by our
+    // PATCH, so this is the only quote either lane carries.
+    try {
+      const quote = await this._lastInboundQuote(ticket.id, entry.id);
+      if (quote) {
+        html = `${html}${quote.html}`;
+        text = `${text}${quote.text}`;
+      }
+    } catch (err) {
+      logger.debug(`Reply quote skipped for ticket ${ticket.id}: ${err.message}`);
+    }
     const dedupeKey = `native-reply:${entry.id}`;
     // Sender display name (Phase SN1, QA 08-28 #2): the replying agent's own
     // name — "Susan Xu <ticketpulse@…>", matching FreshService — unless the
@@ -3949,6 +4159,7 @@ class TicketService {
               fromAddress: connection.address,
               provider: 'msgraph',
               providerMessageId: sent?.internetMessageId || null,
+              messageId: sent?.internetMessageId || null,
               dedupeKey,
               sentAt: new Date(),
             },
@@ -4003,6 +4214,7 @@ class TicketService {
           textBody: text.slice(0, 20000),
           provider: result?.provider || 'sendgrid',
           providerMessageId: result?.providerMessageId || null,
+          messageId: result?.messageId || null,
           dedupeKey,
           sentAt: new Date(),
         },
@@ -4031,4 +4243,13 @@ class TicketService {
   }
 }
 
-export default new TicketService();
+const ticketService = new TicketService();
+
+// Standalone custom-field edits (customFieldService.setValues without a
+// surrounding PATCH) report through the same fields_updated choke point.
+// Registered here — not imported there — so customFieldService stays free of
+// the ticketService → lifecycle → engine import chain (and its unit tests
+// stay light).
+customFieldService.registerFieldsUpdatedEmitter?.((args) => ticketService._emitFieldsUpdated(args));
+
+export default ticketService;

@@ -7,6 +7,13 @@ import ticketActivityRepository from './ticketActivityRepository.js';
 import mirrorService from './mirrorService.js';
 import { TICKET_ORIGIN, TICKET_SOURCE, ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { sseManager } from '../routes/sse.routes.js';
+import agentIntake from './agentIntakeService.js';
+import { PARSER_VERSION, textToHtml } from '../utils/forwardedMailParser.js';
+
+// In-memory memory of messages handed to the hold queue (RL-4) so the delta
+// poller does not re-fetch them every catch-up round; bounded, process-local
+// (the hold service itself is idempotent on connection + Message-ID).
+const HELD_CACHE_MAX = 5000;
 
 const TICK_MS = Number(process.env.MAILBOX_INGEST_TICK_MS || 30 * 1000);
 const FIRST_LOOKBACK_MS = 15 * 60 * 1000; // fresh connections look back 15 minutes
@@ -177,9 +184,17 @@ export function mergeInboundCc(existing, email, { mailboxAddress = null, exclude
  *  2. "TP-1042" ticket ref in the subject (TP-born tickets)
  *  3. "#12345" FreshService ref in the subject → SKIPPED here (FreshService
  *     receives the same mail itself; ingesting would duplicate the thread)
- *  4. Sender + recency heuristic against open TP-born tickets
- *  → no match: create a new TP-born ticket (AI triage runs; ticket.created
- *    workflows send the acknowledgement)
+ *  4. Sender + recency heuristic against open TP-born tickets — NEVER
+ *     evaluated against an agent sender (FW-2): for an agent forward it runs
+ *     against the quoted original sender, for an agent Cc reply against the
+ *     external recipient, otherwise it is skipped.
+ *  0. (after the ladder, Mega 09-01 RL-3) reply evidence + the agent-intake
+ *     decision table (agentIntakeService.classifyIntake):
+ *       forward / agent_cc / fresh → createTicketFromEmail(intake)
+ *       external_reply_unknown     → hold queue (unless newTicketPolicy=create)
+ *       agent_no_requester         → hold queue (agent_reply_no_requester)
+ *       ambiguous_sender           → hold queue
+ *  Every decision is logged with its rule + reason.
  */
 class MailboxIngestService {
   constructor() {
@@ -188,6 +203,13 @@ class MailboxIngestService {
     // Connection ids whose next poll must run NOW regardless of cadence
     // (lifecycle `missed`/`subscriptionRemoved`, a failed webhook fetch).
     this._catchUpRequested = new Set();
+    this._heldMessageIds = new Set();
+  }
+
+  _rememberHeld(internetMessageId) {
+    if (!internetMessageId) return;
+    if (this._heldMessageIds.size >= HELD_CACHE_MAX) this._heldMessageIds.clear();
+    this._heldMessageIds.add(internetMessageId);
   }
 
   /** Force the next tick to reconcile this connection (delta or inbox fetch). */
@@ -337,13 +359,14 @@ class MailboxIngestService {
   async _ingestBatch(connection, emails, since) {
     const senderCreates = new Map();
     let latest = since;
-    const results = { matchedReplies: 0, created: 0, skipped: 0 };
+    const results = { matchedReplies: 0, created: 0, held: 0, skipped: 0 };
     for (const email of emails) {
       if (email.receivedAt > latest) latest = email.receivedAt;
       try {
         const outcome = await this.ingestSingleMessage(connection, email, senderCreates);
         if (outcome === 'reply') results.matchedReplies += 1;
         else if (outcome === 'created') results.created += 1;
+        else if (outcome === 'held') results.held += 1;
         else results.skipped += 1;
       } catch (err) {
         results.skipped += 1;
@@ -363,6 +386,7 @@ class MailboxIngestService {
   /** Dedupe probe shared by the delta lane and the webhook worker. */
   async _alreadyIngested(connection, internetMessageId) {
     if (!internetMessageId) return false;
+    if (this._heldMessageIds.has(internetMessageId)) return true;
     const seen = await prisma.ticketThreadEntry.findFirst({
       where: { emailMessageId: internetMessageId, workspaceId: connection.workspaceId },
       select: { id: true },
@@ -377,8 +401,9 @@ class MailboxIngestService {
 
   /**
    * THE per-message pipeline (poller, delta lane and webhook worker all end
-   * here): loop guards → dedupe by internetMessageId → matching ladder →
-   * reply ingest or new ticket. Returns 'reply' | 'created' | 'skipped'.
+   * here): loop guards → dedupe by internetMessageId → agent-sender detection
+   * (+ forward parse) → matching ladder → reply ingest, or the RL-3 decision
+   * table → new ticket / hold. Returns 'reply' | 'created' | 'held' | 'skipped'.
    */
   async ingestSingleMessage(connection, email, senderCreates = new Map()) {
     const loopReason = looksLikeLoopMail(email, connection.address);
@@ -387,17 +412,71 @@ class MailboxIngestService {
       return 'skipped';
     }
 
-    // Dedupe: has this exact message already been ingested?
+    // Dedupe: has this exact message already been ingested (or held)?
     if (await this._alreadyIngested(connection, email.internetMessageId)) return 'skipped';
 
-    const match = await this.matchEmailToTicket(connection.workspaceId, email, connection.address);
-    if (match?.skip) return 'skipped';
+    // Agent sender? Parse the body ONCE (forward header block / quoted From)
+    // BEFORE the ladder so rung 4 never runs against the agent (FW-2).
+    const agent = await agentIntake.resolveAgentSender(connection.workspaceId, email.from);
+    const ctx = agent ? await agentIntake.prepareAgentContext(connection, email, agent) : null;
+
+    const match = await this.matchEmailToTicket(connection.workspaceId, email, connection.address, {
+      subject: ctx ? ctx.subjectForMatch : undefined,
+      recencySender: ctx ? ctx.recencySender : email.from,
+    });
+    if (match?.skip) {
+      logger.info(`Mailbox ingest decision: skip (${match.reason}) for "${email.subject}" from ${email.from}`);
+      return 'skipped';
+    }
     if (match?.ticket) {
-      await this.ingestReply(connection, match.ticket, email, match.via);
+      await this.ingestReply(connection, match.ticket, email, match.via, { agent, ctx });
       return 'reply';
     }
 
-    // Throttle runaway senders (loops the header checks didn't catch)
+    // Rung 0 (RL-3): reply evidence. Last matching attempt on TP-refs found
+    // in the body head (token-stripped subjects, quoted acks) before the
+    // decision table runs.
+    const reply = agentIntake.looksLikeReply(email);
+    for (const nativeNumber of reply.bodyRefs.tp) {
+      const ticket = await prisma.ticket.findFirst({
+        where: { workspaceId: connection.workspaceId, nativeNumber, origin: TICKET_ORIGIN.TICKETPULSE },
+      });
+      if (ticket) {
+        await this.ingestReply(connection, ticket, email, 'body_ref', { agent, ctx });
+        return 'reply';
+      }
+    }
+
+    const intake = await agentIntake.classifyIntake(connection, email, { knownReferenceFound: false, agent, ctx });
+    const policy = agentIntake.newTicketPolicy(connection);
+    logger.info(`Mailbox ingest decision: ${intake.kind} (rule ${intake.decision.rule}) for "${email.subject}" from ${email.from} → ${connection.address}`, {
+      workspaceId: connection.workspaceId, connectionId: connection.id, internetMessageId: email.internetMessageId, policy, ...intake.decision.details,
+    });
+
+    switch (intake.kind) {
+    case 'forward':
+    case 'agent_cc':
+    case 'fresh':
+      break; // → create below
+    case 'external_reply_unknown':
+      if (policy === 'create') {
+        logger.info(`Mailbox ingest: policy=create — creating despite reply evidence (${intake.decision.rule}) for "${email.subject}"`);
+        break;
+      }
+      return this._holdOrFallback(connection, email, intake, 'unknown_reference', senderCreates);
+    case 'agent_no_requester':
+      return this._holdOrFallback(connection, email, intake, 'agent_reply_no_requester', senderCreates);
+    case 'ambiguous_sender':
+      return this._holdOrFallback(connection, email, intake, 'ambiguous_sender', senderCreates);
+    default:
+      break;
+    }
+
+    return this._createWithCap(connection, email, intake, senderCreates);
+  }
+
+  /** Per-sender create cap (loops the header checks didn't catch), then create. */
+  async _createWithCap(connection, email, intake, senderCreates) {
     const senderKey = String(email.from).toLowerCase();
     const count = senderCreates.get(senderKey) || 0;
     if (count >= MAX_CREATES_PER_SENDER_PER_CYCLE) {
@@ -406,11 +485,62 @@ class MailboxIngestService {
     }
     senderCreates.set(senderKey, count + 1);
 
-    await this.createTicketFromEmail(connection, email);
+    await this.createTicketFromEmail(connection, email, intake);
     return 'created';
   }
 
-  async matchEmailToTicket(workspaceId, email, mailboxAddress = null) {
+  /**
+   * Hand the message to the hold queue (RL-4, built in parallel — contract:
+   * mailboxHoldService.holdMessage(connection, email, {reason, bestGuessTicketId,
+   * candidates, decision}) → {id}, idempotent on connection + Message-ID).
+   * When the service is missing or throws: create ONLY when the mailbox
+   * policy is 'create', otherwise remember the id and skip (the delta poller
+   * will re-see it once the queue exists).
+   */
+  async _holdOrFallback(connection, email, intake, reason, senderCreates) {
+    const policy = agentIntake.newTicketPolicy(connection);
+    let bestGuessTicketId = intake.bestGuessTicketId ?? null;
+    if (bestGuessTicketId === null && !intake.agent && email.from) {
+      // Sender + recency with no status / 3-day cap — a hint for the reviewer only.
+      const guess = await prisma.ticket.findFirst({
+        where: {
+          workspaceId: connection.workspaceId,
+          origin: TICKET_ORIGIN.TICKETPULSE,
+          requester: { is: { email: { equals: String(email.from), mode: 'insensitive' } } },
+        },
+        orderBy: { updatedAt: 'desc' },
+        select: { id: true },
+      }).catch(() => null);
+      bestGuessTicketId = guess?.id ?? null;
+    }
+    try {
+      const { default: holdService } = await import('./mailboxHoldService.js');
+      if (typeof holdService?.holdMessage !== 'function') throw new Error('mailboxHoldService.holdMessage not available');
+      const held = await holdService.holdMessage(connection, email, {
+        reason,
+        bestGuessTicketId,
+        candidates: intake.candidates || [],
+        decision: intake.decision,
+      });
+      this._rememberHeld(email.internetMessageId);
+      logger.info(`Mailbox ingest held "${email.subject}" from ${email.from} (${reason}, rule ${intake.decision.rule}, hold ${held?.id ?? '?'})`);
+      return 'held';
+    } catch (err) {
+      logger.warn(`Mailbox ingest: hold queue unavailable (${err.message}) — ${policy === 'create' ? 'creating (policy=create)' : 'skipping'} "${email.subject}" from ${email.from} [${reason}]`);
+      if (policy === 'create') {
+        return this._createWithCap(connection, email, { ...intake, kind: 'fresh', decision: { rule: `${intake.decision.rule}:hold_unavailable`, details: intake.decision.details } }, senderCreates);
+      }
+      this._rememberHeld(email.internetMessageId);
+      return 'skipped';
+    }
+  }
+
+  /**
+   * @param {object} [options]
+   * @param {string} [options.subject] subject to use for rungs 2/3 (prefix-stripped for agent mail)
+   * @param {string|null} [options.recencySender] address for rung 4; null/'' skips rung 4 entirely
+   */
+  async matchEmailToTicket(workspaceId, email, mailboxAddress = null, { subject: subjectOverride, recencySender } = {}) {
     // 1. Threading headers ↔ our stored Message-IDs
     const refs = referencedMessageIds(email);
     if (refs.length > 0) {
@@ -427,16 +557,16 @@ class MailboxIngestService {
 
     // 1b. Workflow/lifecycle emails (ticket.created acks — the highest-volume
     // lane) have NO thread entry: their outbound Message-ID lives only in
-    // notification_deliveries.provider_message_id (Graph lane). Match the
-    // same angle-bracketed ids there (plus the bare form, in case a lane
-    // stores the id without brackets) — one query, ticket_id links directly.
+    // notification_deliveries — provider_message_id (Graph lane) and, since
+    // RL-5, message_id (the RFC Message-ID the SendGrid lane generates).
+    // Match the same angle-bracketed ids there (plus the bare form, in case
+    // a lane stores the id without brackets). One OR query; before the RL-5
+    // column exists the Prisma client rejects `messageId` and we fall back
+    // to the provider_message_id-only shape.
     if (refs.length > 0) {
       const bare = refs.map((r) => r.replace(/^<|>$/g, ''));
-      const delivery = await prisma.notificationDelivery.findFirst({
-        where: { workspaceId, providerMessageId: { in: [...new Set([...refs, ...bare])] } },
-        select: { ticketId: true },
-        orderBy: { id: 'desc' },
-      });
+      const ids = [...new Set([...refs, ...bare])];
+      const delivery = await this._findDeliveryByMessageIds(workspaceId, ids);
       if (delivery?.ticketId) {
         const ticket = await prisma.ticket.findUnique({ where: { id: delivery.ticketId } });
         if (ticket) return { ticket, via: 'notification_delivery' };
@@ -451,7 +581,7 @@ class MailboxIngestService {
       if (ticket) return { ticket, via: 'plus_address' };
     }
 
-    const subject = String(email.subject || '');
+    const subject = String(subjectOverride !== undefined && subjectOverride !== null ? subjectOverride : (email.subject || ''));
 
     // 2. TP-born ref in subject
     const tpMatch = subject.match(/\bTP-(\d{3,})\b/i);
@@ -474,20 +604,41 @@ class MailboxIngestService {
 
     // 4. Sender + recency against open TP-born tickets (open = Open/Pending-
     // BASE names from the workspace registry, so a reply still threads onto a
-    // ticket parked in a custom open status — Phase 8b)
+    // ticket parked in a custom open status — Phase 8b). The address is the
+    // caller's choice: the sender for requester mail, the quoted original
+    // sender / external recipient for agent mail, never the agent (FW-2).
+    const sender = recencySender === undefined ? String(email.from || '') : String(recencySender || '');
+    if (!sender) return null;
     const recent = await prisma.ticket.findFirst({
       where: {
         workspaceId,
         origin: TICKET_ORIGIN.TICKETPULSE,
         status: { in: await statusService.statusNamesForBase(workspaceId, ['Open', 'Pending']) },
         updatedAt: { gte: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000) },
-        requester: { is: { email: { equals: String(email.from), mode: 'insensitive' } } },
+        requester: { is: { email: { equals: sender, mode: 'insensitive' } } },
       },
       orderBy: { updatedAt: 'desc' },
     });
     if (recent) return { ticket: recent, via: 'sender_recency' };
 
     return null;
+  }
+
+  /** Rung 1b lookup — OR over provider_message_id + message_id, falling back pre-RL-5. */
+  async _findDeliveryByMessageIds(workspaceId, ids) {
+    const select = { select: { ticketId: true }, orderBy: { id: 'desc' } };
+    try {
+      return await prisma.notificationDelivery.findFirst({
+        where: { workspaceId, OR: [{ providerMessageId: { in: ids } }, { messageId: { in: ids } }] },
+        ...select,
+      });
+    } catch (err) {
+      logger.debug(`rung 1b: message_id column unavailable (${err.message?.split('\n')[0]}) — provider_message_id only`);
+      return prisma.notificationDelivery.findFirst({
+        where: { workspaceId, providerMessageId: { in: ids } },
+        ...select,
+      });
+    }
   }
 
   /**
@@ -527,9 +678,26 @@ class MailboxIngestService {
     }
   }
 
-  async ingestReply(connection, ticket, email, via) {
+  /**
+   * A matched inbound message becomes a thread entry. Three shapes:
+   *  • requester reply (default)      — authorType requester, incoming.
+   *  • agent forward onto a ticket    — authorType agent (the forwarder),
+   *    incoming (the content is the requester's), rawPayload.forwarded.
+   *  • agent reply from Outlook with the mailbox in Cc — authorType agent,
+   *    NOT incoming (already delivered by Outlook → deliveryState external,
+   *    never re-sent), no reply_received event.
+   */
+  async ingestReply(connection, ticket, email, via, { agent = null, ctx = null } = {}) {
     const now = new Date();
     const recipients = emailRecipients(email);
+    const isForward = Boolean(agent && ctx?.parsed?.isForward && ctx?.originalOk);
+    const isAgentReply = Boolean(agent && !isForward);
+    const forwardedMeta = isForward ? this._forwardedMeta(agent, email, ctx.parsed, { sliced: false }) : null;
+    const rawPayload = {
+      ...(recipients || {}),
+      ...(isAgentReply ? { deliveryState: 'external', agentIntake: { kind: 'agent_reply_email', technicianId: agent.id, via } } : {}),
+      ...(forwardedMeta ? { forwarded: forwardedMeta } : {}),
+    };
     const entry = await prisma.ticketThreadEntry.create({
       data: {
         ticketId: ticket.id,
@@ -537,10 +705,10 @@ class MailboxIngestService {
         externalEntryId: `graph-${email.id}`,
         source: 'email_inbound',
         eventType: 'reply',
-        actorName: email.fromName || email.from,
-        actorEmail: email.from,
-        authorType: 'requester',
-        incoming: true,
+        actorName: agent ? agent.name : (email.fromName || email.from),
+        actorEmail: agent ? agent.email : email.from,
+        authorType: agent ? 'agent' : 'requester',
+        incoming: !isAgentReply,
         isPrivate: false,
         visibility: 'public',
         bodyHtml: email.bodyHtml,
@@ -551,7 +719,7 @@ class MailboxIngestService {
         // Requester replies belong on the FS fallback copy too
         mirrorState: ticket.origin === TICKET_ORIGIN.TICKETPULSE ? 'pending' : null,
         // Who else the sender addressed (QA 08-05 #3) — FS conversation shape.
-        ...(recipients ? { rawPayload: recipients } : {}),
+        ...(Object.keys(rawPayload).length ? { rawPayload } : {}),
       },
     });
 
@@ -589,10 +757,19 @@ class MailboxIngestService {
     });
     await ticketActivityRepository.create({
       ticketId: ticket.id,
-      activityType: 'requester_reply',
-      performedBy: email.fromName || email.from,
+      activityType: isAgentReply ? 'agent_reply' : 'requester_reply',
+      performedBy: agent ? agent.name : (email.fromName || email.from),
       performedAt: now,
-      details: { via, emailMessageId: email.internetMessageId, source: 'email_inbound' },
+      details: {
+        via,
+        emailMessageId: email.internetMessageId,
+        source: 'email_inbound',
+        entryId: entry.id,
+        ...(isAgentReply ? { deliveryState: 'external', technicianId: agent.id, actorEmail: agent.email } : {}),
+        ...(isForward ? {
+          forwardedBy: agent.email, forwardedByTechnicianId: agent.id, originalFrom: forwardedMeta.originalFrom, originalDate: forwardedMeta.originalDate,
+        } : {}),
+      },
     }).catch(() => {});
     if (ccAdded) {
       // Same audit shape the manual Cc editor writes (ticketService
@@ -622,25 +799,28 @@ class MailboxIngestService {
       if (ccAdded) await mirrorService.enqueueFieldSync?.(ticket.workspaceId, ticket.id)?.catch?.(() => {});
     }
 
-    // Workflow trigger: "Requester replied" (drives the seeded reopen workflow).
-    try {
-      const { default: lifecycle } = await import('./ticketLifecycleNotificationService.js');
-      await lifecycle.emitTicketEvent('ticket.reply_received', ticket.id, {
-        source: 'email_inbound',
-        dedupeStamp: `reply:${entry.id}`,
-        extra: { entryId: entry.id, from: email.from, via },
-      });
-    } catch (err) {
-      logger.warn(`reply_received workflow dispatch failed (non-fatal): ${err.message}`);
-    }
+    // Workflow trigger: "Requester replied" (drives the seeded reopen
+    // workflow). An agent's own Outlook reply is not a requester reply.
+    if (!isAgentReply) {
+      try {
+        const { default: lifecycle } = await import('./ticketLifecycleNotificationService.js');
+        await lifecycle.emitTicketEvent('ticket.reply_received', ticket.id, {
+          source: 'email_inbound',
+          dedupeStamp: `reply:${entry.id}`,
+          extra: { entryId: entry.id, from: isForward ? forwardedMeta.originalFrom : email.from, via, ...(isForward ? { forwardedBy: agent.email } : {}) },
+        });
+      } catch (err) {
+        logger.warn(`reply_received workflow dispatch failed (non-fatal): ${err.message}`);
+      }
 
-    // Category/group watchers who opted into requester replies (fire-and-forget).
-    try {
-      const { default: watcherNotificationService } = await import('./watcherNotificationService.js');
-      watcherNotificationService.notify('requester_reply', ticket.id, {
-        entryPreview: entry.bodyText || entry.content || null,
-      }).catch(() => {});
-    } catch { /* non-fatal */ }
+      // Category/group watchers who opted into requester replies (fire-and-forget).
+      try {
+        const { default: watcherNotificationService } = await import('./watcherNotificationService.js');
+        watcherNotificationService.notify('requester_reply', ticket.id, {
+          entryPreview: entry.bodyText || entry.content || null,
+        }).catch(() => {});
+      } catch { /* non-fatal */ }
+    }
 
     try {
       sseManager.broadcast('ticket-change', {
@@ -649,13 +829,35 @@ class MailboxIngestService {
         ticketId: ticket.id,
         origin: ticket.origin,
         displayRef: ticketDisplayRef(ticket),
-        incoming: true,
+        incoming: !isAgentReply,
         entryId: entry.id,
       }, ticket.workspaceId);
     } catch { /* non-fatal */ }
 
-    logger.info(`Inbound email matched ${ticketDisplayRef(ticket)} via ${via} (from ${email.from})`);
+    logger.info(`Inbound email matched ${ticketDisplayRef(ticket)} via ${via} (from ${email.from}${agent ? `, agent ${agent.id}${isForward ? ' forward' : ' reply'}` : ''})`);
     return entry;
+  }
+
+  /** rawPayload.forwarded — the FW-3 data contract (no migration). */
+  _forwardedMeta(agent, email, parsed, { sliced }) {
+    const emails = (list) => (Array.isArray(list) ? list : []).map((a) => a?.email).filter(Boolean);
+    return {
+      kind: 'forward',
+      byEmail: agent.email,
+      byName: agent.name,
+      byTechnicianId: agent.id,
+      receivedAt: email.receivedAt instanceof Date ? email.receivedAt.toISOString() : (email.receivedAt || null),
+      originalFrom: parsed.original.email,
+      originalFromName: parsed.original.name || null,
+      originalDate: parsed.original.date instanceof Date ? parsed.original.date.toISOString() : null,
+      originalDateRaw: parsed.original.dateRaw || null,
+      originalSubject: parsed.original.subject || null,
+      originalTo: emails(parsed.original.to),
+      originalCc: emails(parsed.original.cc),
+      client: parsed.client,
+      sliced,
+      parser: PARSER_VERSION,
+    };
   }
 
   /**
@@ -688,21 +890,57 @@ class MailboxIngestService {
     return merged.added.length ? merged : null;
   }
 
-  async createTicketFromEmail(connection, email) {
-    const subject = String(email.subject || '').trim() || '(no subject)';
-    const ticket = await ticketService.createTicket(connection.workspaceId, {
-      subject: subject.length >= 3 ? subject.slice(0, 500) : `Email: ${subject}`,
-      description: email.bodyHtml || null,
-      priority: 2,
-      requesterEmail: email.from,
-      requesterName: email.fromName || null,
-      runAiTriage: true,
+  /**
+   * New TP-born ticket from an unmatched message. `intake` (from
+   * agentIntakeService.classifyIntake) picks the shape:
+   *   forward  → requester = the quoted original sender (FW-3)
+   *   agent_cc → requester = the external recipient, agent's words = first
+   *              public agent reply (RL-3 rule 2)
+   *   fresh / anything else → the sender is the requester (today's behaviour)
+   */
+  async createTicketFromEmail(connection, email, intake = null) {
+    if (intake?.kind === 'forward') return this._createFromForward(connection, email, intake);
+    if (intake?.kind === 'agent_cc') return this._createFromAgentCc(connection, email, intake);
+    return this._createFresh(connection, email, intake);
+  }
+
+  _routingDefaults(connection) {
+    return {
       // Mailbox→group routing: AP@ lands in the AP group, AR@ in AR, etc.
       ...(connection.defaultGroupId ? { groupId: connection.defaultGroupId.toString() } : {}),
       // Internal (TP-native) group routing — a mailbox can default into an internal group.
       ...(connection.defaultInternalGroupId ? { internalGroupId: connection.defaultInternalGroupId } : {}),
       ...(connection.defaultTicketType ? { ticketType: connection.defaultTicketType } : {}),
-    }, SYSTEM_ACTOR, { sourceChannel: TICKET_SOURCE.EMAIL });
+    };
+  }
+
+  _subjectFor(raw) {
+    const subject = String(raw || '').trim() || '(no subject)';
+    return subject.length >= 3 ? subject.slice(0, 500) : `Email: ${subject}`;
+  }
+
+  /**
+   * Today's behaviour: the sender is the requester. The hold queue's "Create
+   * ticket (for <address>)" action reuses this path with
+   * `{ kind:'fresh', forcedRequester, createdVia:'held_reply', heldMessageId, resolvedBy }`:
+   * forcedRequester wins over email.from, createdVia defaults to 'email'.
+   */
+  async _createFresh(connection, email, intake = null) {
+    const subject = String(email.subject || '').trim() || '(no subject)';
+    const forcedRequester = String(intake?.forcedRequester || '').trim().toLowerCase() || null;
+    const createdVia = intake?.createdVia || 'email';
+    const ticket = await ticketService.createTicket(connection.workspaceId, {
+      subject: this._subjectFor(subject),
+      description: email.bodyHtml || null,
+      priority: 2,
+      requesterEmail: forcedRequester || email.from,
+      requesterName: forcedRequester ? null : (email.fromName || null),
+      runAiTriage: true,
+      ...this._routingDefaults(connection),
+    }, SYSTEM_ACTOR, { sourceChannel: TICKET_SOURCE.EMAIL, createdVia });
+    const heldReply = intake?.heldMessageId
+      ? { heldMessageId: intake.heldMessageId, resolvedBy: intake.resolvedBy || null, ...(forcedRequester ? { forcedRequester } : {}) }
+      : null;
 
     // Persist who the email was addressed to (QA 08-05 #3): graphMailClient
     // already fetched to/cc — store them on the ticket row (same columns FS
@@ -737,9 +975,16 @@ class MailboxIngestService {
           occurredAt: email.receivedAt || new Date(),
           emailMessageId: email.internetMessageId,
           title: 'Original email',
-          ...(recipients ? { rawPayload: recipients } : {}),
+          ...(recipients || heldReply ? { rawPayload: { ...(recipients || {}), ...(heldReply ? { heldReply } : {}) } } : {}),
         },
       }).catch(() => {});
+    }
+
+    // An agent's forward we could not parse (no header block, or the quoted
+    // sender is the agent/mailbox/invalid): today's behaviour + a system
+    // note + `forwarded_intake_unparsed` so the requester swap is one click.
+    if (intake?.agent && intake?.decision?.rule === 'agent_forward_unparsed') {
+      await this._noteUnparsedForward(connection, ticket, email, intake);
     }
 
     const attachmentNotice = await this._captureAttachments(connection, email, { id: ticket.id, workspaceId: connection.workspaceId });
@@ -747,7 +992,324 @@ class MailboxIngestService {
       logger.warn(`Attachment capture notice for ${ticket.displayRef}: ${attachmentNotice.trim()}`);
     }
 
-    logger.info(`Inbound email created ${ticket.displayRef} (from ${email.from}: "${subject}")`);
+    logger.info(`Inbound email created ${ticket.displayRef} (from ${email.from}: "${subject}"${intake?.decision?.rule ? `, rule ${intake.decision.rule}` : ''}${heldReply ? `, from held #${heldReply.heldMessageId} by ${heldReply.resolvedBy || '?'}${forcedRequester ? ` for ${forcedRequester}` : ''}` : ''})`);
+    return ticket;
+  }
+
+  async _noteUnparsedForward(connection, ticket, email, intake) {
+    const now = new Date();
+    const reason = intake.decision?.details?.reason || 'no_header_block';
+    const text = `Forwarded by ${intake.agent.name} (${intake.agent.email}) — Ticket Pulse could not identify the original sender (${reason.replace(/_/g, ' ')}), so the agent is the requester. Change the requester if this was forwarded on someone's behalf.`;
+    const note = await prisma.ticketThreadEntry.create({
+      data: {
+        ticketId: ticket.id,
+        workspaceId: connection.workspaceId,
+        source: 'email_inbound',
+        eventType: 'note',
+        actorName: SYSTEM_ACTOR.name,
+        actorEmail: SYSTEM_ACTOR.email,
+        authorType: 'system',
+        incoming: false,
+        isPrivate: true,
+        visibility: 'private',
+        bodyText: text,
+        content: text,
+        occurredAt: now,
+        title: 'Forwarded email — sender not identified',
+        rawPayload: { agentIntake: { kind: 'forward_unparsed', technicianId: intake.agent.id, reason, client: intake.decision?.details?.client || null } },
+      },
+    }).catch(() => null);
+    await ticketActivityRepository.create({
+      ticketId: ticket.id,
+      activityType: 'forwarded_intake_unparsed',
+      performedBy: SYSTEM_ACTOR.name,
+      performedAt: now,
+      details: {
+        source: 'email_inbound',
+        actorEmail: SYSTEM_ACTOR.email,
+        byEmail: intake.agent.email,
+        byName: intake.agent.name,
+        byTechnicianId: intake.agent.id,
+        reason,
+        parser: PARSER_VERSION,
+        ...(note?.id ? { noteEntryId: note.id } : {}),
+      },
+    }).catch(() => {});
+  }
+
+  /** FW-3: an agent forwarded a requester's mail — the requester is the quoted sender. */
+  async _createFromForward(connection, email, intake) {
+    const { agent, parsed } = intake;
+    const original = parsed.original;
+    const subject = this._subjectFor(original.subject || agentIntake.stripSubject(email.subject));
+    const sliced = Boolean(parsed.originalHtml || parsed.originalText);
+    const description = parsed.originalHtml
+      || (parsed.originalText ? textToHtml(parsed.originalText) : null)
+      || email.bodyHtml
+      || null;
+
+    const ticket = await ticketService.createTicket(connection.workspaceId, {
+      subject,
+      description,
+      priority: 2,
+      requesterEmail: original.email,
+      requesterName: original.name || null,
+      runAiTriage: true,
+      // ccEmails deliberately stays [] — agents are never Cc'd (d7).
+      ...this._routingDefaults(connection),
+    }, SYSTEM_ACTOR, { sourceChannel: TICKET_SOURCE.EMAIL, createdVia: 'forward' });
+
+    const recipients = emailRecipients(email);
+    if (recipients?.to_emails?.length) {
+      await prisma.ticket.update({
+        where: { id: ticket.id },
+        data: { toEmails: recipients.to_emails },
+      }).catch((err) => {
+        logger.warn(`Email recipients not persisted for ${ticket.displayRef} (non-fatal): ${err.message}`);
+      });
+    }
+
+    const forwarded = this._forwardedMeta(agent, email, parsed, { sliced });
+    const originalRecipients = {
+      ...(forwarded.originalTo.length ? { to_emails: forwarded.originalTo } : {}),
+      ...(forwarded.originalCc.length ? { cc_emails: forwarded.originalCc } : {}),
+    };
+    const originalText = (parsed.originalText || '').slice(0, 4000) || email.bodyPreview || null;
+
+    // The original email: actor = the requester, occurredAt = when they
+    // wrote it; the forward's Message-ID stays here for dedupe / rung 1.
+    const originalEntry = await prisma.ticketThreadEntry.create({
+      data: {
+        ticketId: ticket.id,
+        workspaceId: connection.workspaceId,
+        externalEntryId: `graph-${email.id}`,
+        source: 'email_inbound',
+        eventType: 'original_email',
+        actorName: original.name || original.email,
+        actorEmail: original.email,
+        authorType: 'requester',
+        incoming: true,
+        isPrivate: false,
+        visibility: 'public',
+        bodyText: originalText,
+        content: originalText,
+        occurredAt: original.date || email.receivedAt || new Date(),
+        ...(email.internetMessageId ? { emailMessageId: email.internetMessageId } : {}),
+        title: 'Original email',
+        rawPayload: { ...originalRecipients, forwarded },
+      },
+    }).catch((err) => {
+      logger.warn(`Original-email entry not written for ${ticket.displayRef} (non-fatal): ${err.message}`);
+      return null;
+    });
+
+    // The agent's covering note (private, agent-authored) when they wrote one.
+    let noteEntry = null;
+    const noteText = String(parsed.noteText || '').trim();
+    if (noteText) {
+      noteEntry = await prisma.ticketThreadEntry.create({
+        data: {
+          ticketId: ticket.id,
+          workspaceId: connection.workspaceId,
+          source: 'email_inbound',
+          eventType: 'note',
+          actorName: agent.name,
+          actorEmail: agent.email,
+          authorType: 'agent',
+          incoming: false,
+          isPrivate: true,
+          visibility: 'private',
+          bodyHtml: parsed.noteHtml || null,
+          bodyText: noteText,
+          content: noteText,
+          occurredAt: email.receivedAt || new Date(),
+          mirrorState: 'pending',
+          title: 'Forwarding note',
+          rawPayload: { forwarded, agentIntake: { kind: 'forward_note', technicianId: agent.id } },
+        },
+      }).catch((err) => {
+        logger.warn(`Forwarding-note entry not written for ${ticket.displayRef} (non-fatal): ${err.message}`);
+        return null;
+      });
+      if (noteEntry) await Promise.resolve(mirrorService.enqueueThreadEntry(connection.workspaceId, ticket.id, noteEntry.id)).catch(() => {});
+    }
+
+    await ticketActivityRepository.create({
+      ticketId: ticket.id,
+      activityType: 'forwarded_intake',
+      performedBy: SYSTEM_ACTOR.name,
+      performedAt: new Date(),
+      details: {
+        source: 'email_inbound',
+        actorEmail: SYSTEM_ACTOR.email,
+        byEmail: agent.email,
+        byName: agent.name,
+        byTechnicianId: agent.id,
+        originalFrom: forwarded.originalFrom,
+        originalFromName: forwarded.originalFromName,
+        originalDate: forwarded.originalDate,
+        originalSubject: forwarded.originalSubject,
+        client: forwarded.client,
+        sliced,
+        parser: PARSER_VERSION,
+        emailMessageId: email.internetMessageId,
+        ...(originalEntry?.id ? { entryId: originalEntry.id } : {}),
+        ...(noteEntry?.id ? { noteEntryId: noteEntry.id } : {}),
+      },
+    }).catch(() => {});
+
+    const attachmentNotice = await this._captureAttachments(connection, email, { id: ticket.id, workspaceId: connection.workspaceId }, originalEntry?.id || null);
+    if (attachmentNotice) {
+      logger.warn(`Attachment capture notice for ${ticket.displayRef}: ${attachmentNotice.trim()}`);
+    }
+
+    logger.info(`Inbound forward created ${ticket.displayRef} for ${original.email} (forwarded by ${agent.email}, client ${parsed.client}, sliced ${sliced}: "${subject}")`);
+    return ticket;
+  }
+
+  /**
+   * RL-3 rule 2: an agent replied to (or wrote) a requester with the mailbox
+   * in Cc. The requester is the external recipient, the quoted original (when
+   * the parser found one) is the description, the agent's own words become
+   * the first public agent reply — already delivered by Outlook, so it is
+   * marked deliveryState:'external' and never re-sent. The agent is assigned
+   * ("I'm on it"); the requester ack is suppressed.
+   */
+  async _createFromAgentCc(connection, email, intake) {
+    const { agent, parsed, requester, quotedOriginal } = intake;
+    const now = new Date();
+    const subject = this._subjectFor(agentIntake.stripSubject(email.subject) || quotedOriginal?.subject || '');
+    const description = quotedOriginal
+      ? (quotedOriginal.html || (quotedOriginal.text ? textToHtml(quotedOriginal.text) : null))
+      : (email.bodyHtml || (email.bodyText ? textToHtml(email.bodyText) : null));
+    const agentHtml = parsed.hasHeaderBlock
+      ? (parsed.noteHtml || (parsed.noteText ? textToHtml(parsed.noteText) : null))
+      : email.bodyHtml;
+    const agentText = parsed.hasHeaderBlock
+      ? (parsed.noteText || null)
+      : (email.bodyText || email.bodyPreview || null);
+    const assign = agentIntake.agentCcIntakeEnabled(connection);
+    const otherExternals = (intake.externals || []).filter((e) => e !== requester.email).slice(0, MAX_CC_EMAILS);
+
+    const ticket = await ticketService.createTicket(connection.workspaceId, {
+      subject,
+      description: description || null,
+      priority: 2,
+      requesterEmail: requester.email,
+      requesterName: requester.name || null,
+      // The agent is on it: assign at creation (existing assign path — episode
+      // + 'assigned' audit by SYSTEM_ACTOR); AI still classifies, never reassigns.
+      ...(assign ? { assignedTechId: agent.id, runAiTriage: false, aiClassifyOnly: true } : { runAiTriage: true }),
+      // The agent already replied — no "we received your request" ack.
+      notifyRequester: true, // team 'Ticket arrived' still fires…
+      suppressRequesterAck: true, // …but the requester already got the agent's reply — no second ack
+      ...(otherExternals.length ? { ccEmails: otherExternals } : {}),
+      ...this._routingDefaults(connection),
+    }, SYSTEM_ACTOR, { sourceChannel: TICKET_SOURCE.EMAIL, createdVia: 'agent_cc' });
+
+    const recipients = emailRecipients(email);
+    if (recipients?.to_emails?.length) {
+      await prisma.ticket.update({
+        where: { id: ticket.id },
+        data: { toEmails: recipients.to_emails },
+      }).catch((err) => {
+        logger.warn(`Email recipients not persisted for ${ticket.displayRef} (non-fatal): ${err.message}`);
+      });
+    }
+
+    // The requester's original words (quoted by the agent) — no Message-ID
+    // here: the mail's id belongs to the agent's reply below.
+    let originalEntry = null;
+    if (quotedOriginal) {
+      const originalText = (quotedOriginal.text || '').slice(0, 4000) || null;
+      originalEntry = await prisma.ticketThreadEntry.create({
+        data: {
+          ticketId: ticket.id,
+          workspaceId: connection.workspaceId,
+          source: 'email_inbound',
+          eventType: 'original_email',
+          actorName: requester.name || requester.email,
+          actorEmail: requester.email,
+          authorType: 'requester',
+          incoming: true,
+          isPrivate: false,
+          visibility: 'public',
+          bodyText: originalText,
+          content: originalText,
+          occurredAt: quotedOriginal.date || email.receivedAt || now,
+          title: 'Original email (quoted by agent)',
+          rawPayload: {
+            agentIntake: { kind: 'agent_cc_original', technicianId: agent.id, quotedFrom: parsed.original.email, originalDateRaw: quotedOriginal.dateRaw || null, client: parsed.client, parser: PARSER_VERSION },
+          },
+        },
+      }).catch((err) => {
+        logger.warn(`Quoted-original entry not written for ${ticket.displayRef} (non-fatal): ${err.message}`);
+        return null;
+      });
+    }
+
+    // The agent's reply — FIRST PUBLIC AGENT REPLY, delivered by Outlook.
+    const agentEntry = await prisma.ticketThreadEntry.create({
+      data: {
+        ticketId: ticket.id,
+        workspaceId: connection.workspaceId,
+        externalEntryId: `graph-${email.id}`,
+        source: 'email_inbound',
+        eventType: 'reply',
+        actorName: agent.name,
+        actorEmail: agent.email,
+        authorType: 'agent',
+        incoming: false,
+        isPrivate: false,
+        visibility: 'public',
+        bodyHtml: agentHtml || null,
+        bodyText: agentText,
+        content: agentText,
+        occurredAt: email.receivedAt || now,
+        ...(email.internetMessageId ? { emailMessageId: email.internetMessageId } : {}),
+        mirrorState: 'pending',
+        rawPayload: {
+          ...(recipients || {}),
+          deliveryState: 'external',
+          agentIntake: { kind: 'agent_cc', technicianId: agent.id, requester: requester.email, hasQuotedOriginal: Boolean(quotedOriginal), client: parsed.client, parser: PARSER_VERSION },
+        },
+      },
+    }).catch((err) => {
+      logger.warn(`Agent-reply entry not written for ${ticket.displayRef} (non-fatal): ${err.message}`);
+      return null;
+    });
+    if (agentEntry) await Promise.resolve(mirrorService.enqueueThreadEntry(connection.workspaceId, ticket.id, agentEntry.id)).catch(() => {});
+
+    await ticketActivityRepository.create({
+      ticketId: ticket.id,
+      activityType: 'agent_cc_intake',
+      performedBy: SYSTEM_ACTOR.name,
+      performedAt: now,
+      details: {
+        source: 'email_inbound',
+        actorEmail: SYSTEM_ACTOR.email,
+        byEmail: agent.email,
+        byName: agent.name,
+        byTechnicianId: agent.id,
+        requester: requester.email,
+        viaQuotedFrom: Boolean(intake.decision?.details?.viaQuotedFrom),
+        assigned: assign,
+        requesterAckSuppressed: true,
+        externals: intake.externals || [],
+        client: parsed.client,
+        parser: PARSER_VERSION,
+        emailMessageId: email.internetMessageId,
+        ...(agentEntry?.id ? { entryId: agentEntry.id } : {}),
+        ...(originalEntry?.id ? { originalEntryId: originalEntry.id } : {}),
+      },
+    }).catch(() => {});
+
+    const attachmentNotice = await this._captureAttachments(connection, email, { id: ticket.id, workspaceId: connection.workspaceId }, agentEntry?.id || null);
+    if (attachmentNotice) {
+      logger.warn(`Attachment capture notice for ${ticket.displayRef}: ${attachmentNotice.trim()}`);
+    }
+
+    logger.info(`Agent-Cc intake created ${ticket.displayRef} for ${requester.email} (agent ${agent.email}${assign ? ', assigned' : ''}, quoted original ${Boolean(quotedOriginal)}: "${subject}")`);
     return ticket;
   }
 }

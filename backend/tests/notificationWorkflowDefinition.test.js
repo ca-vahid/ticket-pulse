@@ -640,3 +640,53 @@ describe('notification workflow definitions', () => {
     expect(result.state.email.text).toContain('/ticket-status/public-status-token');
   });
 });
+
+// MEGA 09-01 Phase TU (TU-6): "Ticket updated (fields)" registry entry,
+// seeded default (visible actor-kind guard → assignee), sample context and
+// template variables.
+describe('ticket.fields_updated registry + defaults (TU-6)', () => {
+  test('is a registered trigger with the fields_updated default key', async () => {
+    const { defaultWorkflowKey, defaultWorkflowMetadata } = await import('../src/services/notificationWorkflowDefinition.js');
+    expect(NOTIFICATION_EVENT_TYPES).toContain('ticket.fields_updated');
+    expect(defaultWorkflowKey('ticket.fields_updated')).toBe('ticket_fields_updated');
+    expect(defaultWorkflowMetadata('ticket.fields_updated')).toEqual(expect.objectContaining({
+      key: 'ticket_fields_updated', name: 'Ticket updated (fields)', triggerType: 'ticket.fields_updated',
+    }));
+  });
+
+  test('default definition: trigger → noise guard → actorKind in [human, api] → assigned agent → template → send', () => {
+    const definition = buildDefaultWorkflowDefinition('ticket.fields_updated');
+    expect(validateWorkflowDefinition(definition, { triggerType: 'ticket.fields_updated' }).success).toBe(true);
+    const guard = definition.nodes.find((n) => n.id === 'human-or-api');
+    expect(guard.data.conditionGroup).toEqual({
+      logic: 'all', conditions: [{ field: 'event.actorKind', operator: 'in', value: ['human', 'api'] }],
+    });
+    expect(definition.edges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: 'skip-noise', sourceHandle: 'true', target: 'human-or-api' }),
+      expect.objectContaining({ source: 'human-or-api', sourceHandle: 'true', target: 'recipients' }),
+      expect.objectContaining({ source: 'human-or-api', sourceHandle: 'false', target: 'stop-skipped' }),
+    ]));
+    expect(definition.nodes.find((n) => n.type === 'recipient_resolver').data.to).toEqual(['assigned_agent']);
+    const template = definition.nodes.find((n) => n.type === 'template_render');
+    expect(template.data.subject).toBe('Ticket {{ ticket.displayRef }} updated by {{ event.extra.actorName }}: {{ event.extra.changedFields | join: ", " }}');
+    expect(template.data.html).toContain('{{ event.extra.changesTableHtml }}');
+    expect(template.data.text).toContain('{{ event.extra.changesText }}');
+  });
+
+  test('sample context carries the fields_updated payload only for that trigger; the catalog lists its variables', async () => {
+    const { sampleEventContext } = await import('../src/services/notificationWorkflowDefinition.js');
+    const sample = sampleEventContext('ticket.fields_updated');
+    expect(sample.event.extra).toEqual(expect.objectContaining({
+      actorKind: 'human', actorName: 'Cora Coordinator', source: 'app', changedCount: 3, reopened: false,
+      changedFields: ['priority', 'dueBy', 'customFields.client_location'],
+    }));
+    expect(sample.event.extra.changesTableHtml).toContain('<td><strong>Priority</strong></td><td>Medium (2)</td><td>High (3)</td>');
+    expect(sampleEventContext('ticket.created').event.extra).toBeUndefined();
+
+    const paths = notificationVariableCatalog().map((v) => v.path);
+    for (const path of ['event.extra.actorName', 'event.extra.actorKind', 'event.extra.source', 'event.extra.changedFields',
+      'event.extra.changedCount', 'event.extra.changesTableHtml', 'event.extra.changesText', 'event.extra.changesList', 'event.extra.reopened']) {
+      expect(paths).toContain(path);
+    }
+  });
+});

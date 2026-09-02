@@ -23,6 +23,9 @@ export const WEBHOOK_EVENTS = [
   'ticket.public_reply_added',
   'ticket.tags_changed',
   'ticket.custom_fields_changed',
+  // Field edits (TU-11): payload = lifecycle context + event.extra (actorKind,
+  // source, changedFields, changes{from,to,labels}, changesText…).
+  'ticket.fields_updated',
   'approval.requested',
   'approval.decided',
 ];

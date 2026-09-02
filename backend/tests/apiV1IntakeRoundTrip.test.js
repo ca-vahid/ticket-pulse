@@ -346,8 +346,9 @@ describe('updateTicketFields — customFields via the strict update schema', () 
     expect(result.changed).toBe(true);
     expect(result.customFields).toEqual({ client_name: 'ACME Inc' });
     // setValues persisted the merge itself (Json column update)…
+    // TU-1: a custom-field edit is real activity — setValues also bumps lastRealActivityAt.
     expect(prismaMock.ticket.update).toHaveBeenCalledWith(expect.objectContaining({
-      data: { customFields: { client_name: 'ACME Inc' } },
+      data: { customFields: { client_name: 'ACME Inc' }, lastRealActivityAt: expect.any(Date) },
     }));
     // …and audited it as custom_fields_changed.
     expect(ticketActivityRepositoryMock.create).toHaveBeenCalledWith(expect.objectContaining({

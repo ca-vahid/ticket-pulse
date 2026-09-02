@@ -13,6 +13,7 @@ import { jest } from '@jest/globals';
 const calls = [];
 let messageLookup = {}; // internetMessageId -> graph id
 let failCreateReply = false;
+let failSendMail = false;
 
 function fakeRequest(path) {
   const query = {};
@@ -33,6 +34,10 @@ function fakeRequest(path) {
     },
     post: async (body) => {
       calls.push({ method: 'POST', path, body });
+      if (/\/sendMail$/.test(path)) {
+        if (failSendMail) { const e = new Error('Access is denied. Check credentials and try again.'); e.statusCode = 403; e.code = 'ErrorAccessDenied'; throw e; }
+        return {};
+      }
       if (/\/createReply$/.test(path)) {
         if (failCreateReply) throw new Error('ErrorItemNotFound');
         return { id: 'reply-draft-1', internetMessageId: '<reply-1@mailbox.example>', conversationId: 'conv-1', subject: 'RE: original' };
@@ -83,6 +88,7 @@ beforeEach(() => {
   calls.length = 0;
   messageLookup = {};
   failCreateReply = false;
+  failSendMail = false;
   jest.clearAllMocks();
 });
 
@@ -123,43 +129,69 @@ describe('sendMailAsMailbox threading (MB-1b)', () => {
       internetMessageId: '<reply-1@mailbox.example>',
       conversationId: 'conv-1',
       threadedVia: 'createReply',
+      sentVia: 'draft',
     });
   });
 
-  test('no anchor resolves → plain draft (existing behaviour) with Reply-To; threadedVia null', async () => {
+  test('no anchor resolves → single POST /sendMail (Mail.Send only, RL-2) with Reply-To + minted Message-ID; threadedVia null', async () => {
     const result = await graphMailClient.sendMailAsMailbox(MAILBOX, {
       ...baseSend, inReplyTo: '<never-seen@elsewhere.example>', references: [],
     });
 
     expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual([
       `GET /users/${MAILBOX}/messages`,
-      `POST /users/${MAILBOX}/messages`,
-      `POST /users/${MAILBOX}/messages/draft-1/send`,
+      `POST /users/${MAILBOX}/sendMail`,
     ]);
-    expect(calls[1].body.replyTo).toEqual([{ emailAddress: { address: 'patickets+tp1042@bgcengineering.ca' } }]);
-    expect(calls[1].body.from).toEqual({ emailAddress: { address: MAILBOX, name: 'Susan Xu' } });
+    const { message, saveToSentItems } = calls[1].body;
+    expect(saveToSentItems).toBe(true);
+    expect(message.replyTo).toEqual([{ emailAddress: { address: 'patickets+tp1042@bgcengineering.ca' } }]);
+    expect(message.from).toEqual({ emailAddress: { address: MAILBOX, name: 'Susan Xu' } });
+    expect(message.internetMessageId).toMatch(/^<tp-\d+-[a-z0-9]+@bgcengineering\.ca>$/);
     expect(result).toEqual({
-      messageId: 'draft-1', internetMessageId: '<draft-1@mailbox.example>', conversationId: 'conv-2', threadedVia: null,
+      messageId: null, internetMessageId: message.internetMessageId, conversationId: null, threadedVia: null, sentVia: 'sendMail',
     });
   });
 
-  test('no threading inputs at all → exactly the pre-MB-1b request shape (no replyTo key, no lookup)', async () => {
+  test('no threading inputs at all → one sendMail with the plain message shape (no replyTo key, no lookup)', async () => {
     await graphMailClient.sendMailAsMailbox(MAILBOX, {
       to: 'rita@example.com', subject: 'FW: Ticket [TP-1042]', html: '<p>fw</p>',
     });
 
     expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual([
-      `POST /users/${MAILBOX}/messages`,
-      `POST /users/${MAILBOX}/messages/draft-1/send`,
+      `POST /users/${MAILBOX}/sendMail`,
     ]);
-    expect(calls[0].body).toEqual({
+    const { internetMessageId, ...message } = calls[0].body.message;
+    expect(message).toEqual({
       subject: 'FW: Ticket [TP-1042]',
       body: { contentType: 'HTML', content: '<p>fw</p>' },
       toRecipients: [{ emailAddress: { address: 'rita@example.com' } }],
       ccRecipients: [],
     });
-    expect(calls[0].body).not.toHaveProperty('replyTo');
-    expect(calls[0].body).not.toHaveProperty('from');
+    expect(internetMessageId).toMatch(/^<tp-/);
+    expect(message).not.toHaveProperty('replyTo');
+    expect(message).not.toHaveProperty('from');
+  });
+
+  test('sendMail 403 → error tagged permission_denied (never ip_blocked), with the operation in the message', async () => {
+    failSendMail = true;
+    await expect(graphMailClient.sendMailAsMailbox(MAILBOX, { ...baseSend })).rejects.toMatchObject({
+      graphPermissionDenied: true,
+      errorClass: 'permission_denied',
+      graphOperation: 'sendMail',
+      statusCode: 403,
+    });
+    await expect(graphMailClient.sendMailAsMailbox(MAILBOX, { ...baseSend })).rejects.toThrow(/sendMail as .* refused \(403 access denied\)/);
+  });
+
+  test('attachments ride inline on sendMail (no separate attach calls on the no-anchor path)', async () => {
+    await graphMailClient.sendMailAsMailbox(MAILBOX, {
+      ...baseSend,
+      attachments: [{ name: 'a.pdf', contentType: 'application/pdf', contentBytes: 'QUJD' }, { name: 'skipped.txt' }],
+    });
+    expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual([`POST /users/${MAILBOX}/sendMail`]);
+    expect(calls[0].body.message.attachments).toEqual([
+      { '@odata.type': '#microsoft.graph.fileAttachment', name: 'a.pdf', contentType: 'application/pdf', contentBytes: 'QUJD' },
+    ]);
   });
 
   test('anchor order: In-Reply-To first, then References newest-first, bounded to 3 lookups', async () => {
@@ -196,7 +228,7 @@ describe('sendMailAsMailbox threading (MB-1b)', () => {
     expect(calls[1].path).toBe(`/users/${MAILBOX}/messages/graph-q/createReply`);
   });
 
-  test('createReply failure degrades to a plain draft instead of failing the send', async () => {
+  test('createReply failure degrades to sendMail instead of failing the send', async () => {
     messageLookup['<gone@x>'] = 'graph-gone';
     failCreateReply = true;
 
@@ -205,11 +237,11 @@ describe('sendMailAsMailbox threading (MB-1b)', () => {
     expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual([
       `GET /users/${MAILBOX}/messages`,
       `POST /users/${MAILBOX}/messages/graph-gone/createReply`,
-      `POST /users/${MAILBOX}/messages`,
-      `POST /users/${MAILBOX}/messages/draft-1/send`,
+      `POST /users/${MAILBOX}/sendMail`,
     ]);
     expect(result.threadedVia).toBeNull();
-    expect(result.internetMessageId).toBe('<draft-1@mailbox.example>');
+    expect(result.sentVia).toBe('sendMail');
+    expect(result.internetMessageId).toMatch(/^<tp-/);
     expect(loggerMock.warn).toHaveBeenCalled();
   });
 

@@ -7,6 +7,39 @@ import prisma from './prisma.js';
 /**
  * Repository for Ticket operations
  */
+/**
+ * Keys of an upsert update payload whose value differs from the stored row
+ * (TU-3e no-op detection). `undefined` = "leave alone" and never counts;
+ * Prisma atomic ops ({ increment }) always count; Dates compare by time,
+ * BigInts by value, arrays/objects structurally.
+ */
+export function changedUpsertKeys(payload, existing) {
+  const changed = [];
+  for (const [key, next] of Object.entries(payload || {})) {
+    if (next === undefined) continue;
+    const prev = existing ? existing[key] : undefined;
+    if (!upsertValuesEqual(prev, next)) changed.push(key);
+  }
+  return changed;
+}
+
+function upsertValuesEqual(prev, next) {
+  if (next !== null && typeof next === 'object' && !Array.isArray(next) && !(next instanceof Date)) {
+    return false; // atomic op such as { increment: 1 }
+  }
+  if (prev === next) return true;
+  if ((prev === null || prev === undefined) && (next === null || next === undefined)) return true;
+  if (prev === null || prev === undefined || next === null || next === undefined) return false;
+  if (next instanceof Date || prev instanceof Date) {
+    const a = new Date(prev).getTime();
+    const b = new Date(next).getTime();
+    return Number.isFinite(a) && Number.isFinite(b) && a === b;
+  }
+  if (typeof prev === 'bigint' || typeof next === 'bigint') return String(prev) === String(next);
+  if (Array.isArray(prev) || Array.isArray(next)) return JSON.stringify(prev) === JSON.stringify(next);
+  return false;
+}
+
 class TicketRepository {
   /**
    * Get all tickets created today (timezone-aware)
@@ -263,7 +296,10 @@ class TicketRepository {
         activitiesSyncFreshserviceUpdatedAt: data.activitiesSyncFreshserviceUpdatedAt || undefined,
         activitiesSyncError: data.activitiesSyncError !== undefined ? data.activitiesSyncError : undefined,
         activitiesSyncErrorAt: data.activitiesSyncErrorAt !== undefined ? data.activitiesSyncErrorAt : undefined,
-        updatedAt: new Date(),
+        // No explicit updatedAt (TU-3e): Prisma's @updatedAt stamps real
+        // updates, and no-op re-syncs return early below without touching
+        // the row — updated_at used to move on 8,861 tickets/day vs 325 with
+        // real activity.
       };
 
       if (data.workspaceId !== undefined) {
@@ -329,26 +365,51 @@ class TicketRepository {
       const fsId = BigInt(data.freshserviceTicketId);
       const ticketInclude = { assignedTech: true, requester: true };
 
-      const updated = await prisma.ticket.updateMany({
-        where: { freshserviceTicketId: fsId, origin: TICKET_ORIGIN.FRESHSERVICE },
-        data: updatePayload,
-      });
-
-      if (updated.count > 0) {
-        return await prisma.ticket.findUnique({
-          where: { freshserviceTicketId: fsId },
-          include: ticketInclude,
-        });
-      }
+      // Spam/Deleted protection (TU-3d): the FS LIST payload carries no
+      // spam/deleted flags, so a row the reconcile flipped to Spam used to be
+      // flipped back to Open by the next 1-min upsert — forever (956 identical
+      // Open→Spam rows on 8 tickets). Only a payload that EXPLICITLY says
+      // spam:false / deleted:false (a detail fetch) may downgrade such a row.
+      const protectedStatuses = [];
+      if (data.spam !== false) protectedStatuses.push('Spam');
+      if (data.deleted !== false) protectedStatuses.push('Deleted');
+      const guardedWhere = {
+        freshserviceTicketId: fsId,
+        origin: TICKET_ORIGIN.FRESHSERVICE,
+        ...(protectedStatuses.length ? { status: { notIn: protectedStatuses } } : {}),
+      };
 
       const existing = await prisma.ticket.findUnique({
         where: { freshserviceTicketId: fsId },
         include: ticketInclude,
       });
       if (existing) {
-        // Row exists but wasn't updatable → it's TP-born. Return it untouched.
-        logger.debug(`FS ingest skipped for TP-born ticket ${existing.id} (fs #${fsId})`);
-        return existing;
+        if (existing.origin !== TICKET_ORIGIN.FRESHSERVICE) {
+          // TP-born row wearing its mirror's FS id. Return it untouched.
+          logger.debug(`FS ingest skipped for TP-born ticket ${existing.id} (fs #${fsId})`);
+          return existing;
+        }
+        if (protectedStatuses.includes(String(existing.status))) {
+          logger.debug(`FS ingest kept ${existing.status} on ticket ${existing.id} (fs #${fsId}) — payload carries no explicit ${existing.status.toLowerCase()}:false`);
+          return existing;
+        }
+        // No-op detection (TU-3e): a re-sync that changes nothing must not
+        // write (and so must not bump updated_at).
+        if (changedUpsertKeys(updatePayload, existing).length === 0) {
+          return existing;
+        }
+        const updated = await prisma.ticket.updateMany({
+          where: guardedWhere,
+          data: updatePayload,
+        });
+        if (updated.count === 0) {
+          // Raced into a protected state between the read and the write.
+          return existing;
+        }
+        return await prisma.ticket.findUnique({
+          where: { freshserviceTicketId: fsId },
+          include: ticketInclude,
+        });
       }
 
       try {
@@ -360,7 +421,7 @@ class TicketRepository {
         if (createError.code === 'P2002') {
           // Concurrent ingest created the row first — retry as a guarded update.
           await prisma.ticket.updateMany({
-            where: { freshserviceTicketId: fsId, origin: TICKET_ORIGIN.FRESHSERVICE },
+            where: guardedWhere,
             data: updatePayload,
           });
           return await prisma.ticket.findUnique({

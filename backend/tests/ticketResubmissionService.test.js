@@ -15,7 +15,8 @@ const ticketServiceMock = {
   changeStatus: jest.fn().mockResolvedValue({ changed: true }),
   updateTicketFields: jest.fn().mockResolvedValue({ changed: true }),
   addPrivateNote: jest.fn().mockResolvedValue({ id: 77 }),
-  _audit: jest.fn().mockResolvedValue(undefined),
+  _audit: jest.fn().mockResolvedValue({ id: 4242 }),
+  _emitFieldsUpdated: jest.fn().mockResolvedValue({ status: 'completed' }),
   _startAiTriage: jest.fn().mockResolvedValue({ queued: true, mode: 'classify' }),
   getTicket: jest.fn(),
 };
@@ -137,11 +138,27 @@ describe('applyResubmission — changed body', () => {
 
     // customFields: intake with auto-provision, then merge of the CHANGED keys only.
     expect(customFieldServiceMock.setValuesAtCreate).toHaveBeenCalledWith(WS, body.customFields, expect.objectContaining({ autoProvision: true }));
-    expect(customFieldServiceMock.setValues).toHaveBeenCalledWith(501, WS, { client_location: 'Montreal' }, actor);
+    expect(customFieldServiceMock.setValues).toHaveBeenCalledWith(501, WS, { client_location: 'Montreal' }, actor, { emitEvent: false });
+    // TU-5: the per-call events are silenced and ONE aggregated
+    // ticket.fields_updated carries the whole diff (actorKind api rides on the actor).
+    const [, , updateOptions] = ticketServiceMock.updateTicketFields.mock.calls[0].slice(2);
+    expect(updateOptions).toEqual({ emitEvent: false });
+    expect(ticketServiceMock._emitFieldsUpdated).toHaveBeenCalledTimes(1);
+    expect(ticketServiceMock._emitFieldsUpdated).toHaveBeenCalledWith(expect.objectContaining({
+      actor, source: 'api:resubmission', reopened: false, auditRowId: 4242,
+      changes: expect.objectContaining({
+        priority: { from: 2, to: 3 },
+        'customFields.client_location': { from: 'Quebec', to: 'Montreal' },
+      }),
+    }));
+    expect(ticketServiceMock._emitFieldsUpdated.mock.calls[0][0].changes).not.toHaveProperty('status');
 
     // Private note (never a reply) with before/after rows; audit row; activity bump.
     expect(ticketServiceMock.addPrivateNote).toHaveBeenCalledTimes(1);
-    const [, , note] = ticketServiceMock.addPrivateNote.mock.calls[0];
+    const [, , note, , noteFiles, noteOptions] = ticketServiceMock.addPrivateNote.mock.calls[0];
+    // TU-3g: the diff note is machine-written — authorType 'system' + event.systemNote.
+    expect(noteFiles).toEqual([]);
+    expect(noteOptions).toEqual({ systemNote: true });
     expect(note.bodyHtml).toContain('<td><strong>Priority</strong></td><td>Medium (2)</td><td>High (3)</td>');
     expect(note.bodyHtml).toContain('<td><strong>Custom field: client_location</strong></td><td>Quebec</td><td>Montreal</td>');
     expect(note.bodyHtml).toContain('matched by externalRef');
@@ -187,6 +204,7 @@ describe('applyResubmission — unchanged body', () => {
     expect(ticketServiceMock.updateTicketFields).not.toHaveBeenCalled();
     expect(ticketServiceMock.addPrivateNote).not.toHaveBeenCalled();
     expect(ticketServiceMock._audit).not.toHaveBeenCalled();
+    expect(ticketServiceMock._emitFieldsUpdated).not.toHaveBeenCalled();
     expect(ticketServiceMock._startAiTriage).not.toHaveBeenCalled();
     expect(prismaMock.ticket.update).not.toHaveBeenCalled();
   });
@@ -225,6 +243,10 @@ describe('applyResubmission — terminal handling', () => {
     expect(result.reopened).toBe(true);
     expect(result.changedFields).toEqual(['status', 'priority']);
     expect(ticketServiceMock._audit).toHaveBeenCalledWith(501, 'resubmitted', actor, expect.objectContaining({ reopened: true }));
+    // The reopen rides on the aggregated event; status itself stays out of the diff.
+    expect(ticketServiceMock._emitFieldsUpdated).toHaveBeenCalledTimes(1);
+    expect(ticketServiceMock._emitFieldsUpdated).toHaveBeenCalledWith(expect.objectContaining({ reopened: true, source: 'api:resubmission' }));
+    expect(ticketServiceMock._emitFieldsUpdated.mock.calls[0][0].changes).not.toHaveProperty('status');
   });
 
   test('Resolved + reopenOnResubmit:false → createNew with the prior ticket, nothing written', async () => {

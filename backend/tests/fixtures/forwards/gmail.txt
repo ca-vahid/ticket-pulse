@@ -1,0 +1,20 @@
+Forwarding so we track this in Ticket Pulse. I told Rita someone from AP
+will reply.
+
+Alex
+
+---------- Forwarded message ---------
+From: Rita Requester <rita.requester@customer.example>
+Date: Mon, Sep 1, 2026 at 9:41 AM
+Subject: Invoice 4471 still unpaid
+To: Alex Agent <alex.agent@bgcengineering.ca>
+Cc: Boss Person <boss@customer.example>
+
+
+Hi Alex,
+
+Invoice 4471 from July is still showing as unpaid on our side. Could you
+check whether it went through AP?
+
+Thanks,
+Rita

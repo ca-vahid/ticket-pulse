@@ -1167,6 +1167,25 @@ export const ticketsAPI = {
   testMailbox: async (id) => {
     return await api.post(`/tickets/mailboxes/${id}/test`);
   },
+
+  // Mailbox hold queue (Phase RL, RL-4): inbound mail parked for a human.
+  // Staff-gated (admins + agents). Attach re-runs the reply ingest; create
+  // runs the new-ticket path (optionally for a chosen requester address).
+  listHeldMessages: async (status = 'held') => {
+    return await api.get('/tickets/mailboxes/held', { params: { status } });
+  },
+
+  attachHeldMessage: async (id, ticketId) => {
+    return await api.post(`/tickets/mailboxes/held/${id}/attach`, { ticketId });
+  },
+
+  createTicketFromHeld: async (id, payload = {}) => {
+    return await api.post(`/tickets/mailboxes/held/${id}/create`, payload);
+  },
+
+  discardHeldMessage: async (id) => {
+    return await api.post(`/tickets/mailboxes/held/${id}/discard`);
+  },
 };
 
 /**

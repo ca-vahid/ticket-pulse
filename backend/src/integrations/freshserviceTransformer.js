@@ -87,6 +87,10 @@ export function transformTicket(fsTicket, {
       description: fsTicket.description || null,
       descriptionText: fsTicket.description_text || null,
       status: fsTicket.deleted ? 'Deleted' : fsTicket.spam ? 'Spam' : (STATUS_MAP[fsTicket.status] || 'Open'),
+      // Explicit FS flags (TU-3d): only detail payloads carry them. The
+      // repository treats "absent" as "never downgrade a Spam/Deleted row".
+      spam: typeof fsTicket.spam === 'boolean' ? fsTicket.spam : undefined,
+      deleted: typeof fsTicket.deleted === 'boolean' ? fsTicket.deleted : undefined,
       priority: PRIORITY_MAP[fsTicket.priority] || 3,
       ticketType: fsTicket.type || null,
       assignedTechId: null,
@@ -301,7 +305,10 @@ export function analyzeTicketActivities(activities) {
     const groupMatch = content.match(/set Group as (.+?)(?:\s+and\s+set\s+|$)/);
     if (groupMatch) {
       let groupName = groupMatch[1].trim();
-      groupName = groupName.replace(/\s+and\s+set\s+.*/i, '').trim();
+      // FS chains several sets in one line — "set Group as Accounts Payable,
+      // set Type as Incident" / "… and set Status as Open" (TU-3f): keep only
+      // the group name.
+      groupName = groupName.replace(/\s*,\s*(?:and\s+)?set\s+.*/i, '').replace(/\s+and\s+set\s+.*/i, '').trim();
       const isNone = groupName.toLowerCase() === 'none';
       events.push({
         type: 'group_changed',

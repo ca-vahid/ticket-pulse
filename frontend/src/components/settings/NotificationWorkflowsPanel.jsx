@@ -79,6 +79,7 @@ const EVENT_LABELS = {
   'ticket.reply_received': 'Requester replied',
   'ticket.note_added': 'Internal note added',
   'ticket.status_changed': 'Status changed',
+  'ticket.fields_updated': 'Ticket updated (fields)',
   'ticket.public_reply_added': 'Agent replied to requester',
   'approval.requested': 'Approval requested',
   'approval.decided': 'Approval decided',
@@ -91,7 +92,7 @@ const EVENT_LABELS = {
 };
 
 // Trigger picker metadata for the create dialog + trigger editing (QA 07-07 #3).
-const TRIGGER_PICKER_GROUPS = [
+export const TRIGGER_PICKER_GROUPS = [
   {
     label: 'Ticket lifecycle',
     triggers: [
@@ -99,6 +100,8 @@ const TRIGGER_PICKER_GROUPS = [
       { value: 'ticket.assigned', hint: 'First assignment to a member' },
       { value: 'ticket.reassigned', hint: 'Moves between members' },
       { value: 'ticket.status_changed', hint: 'Any status transition (from/to available in conditions)' },
+      // MEGA 09-01 Phase TU (TU-8): field edits get their own trigger.
+      { value: 'ticket.fields_updated', hint: 'A field on the ticket changed — priority, category, due date, custom fields… Status, assignment and notes have their own triggers' },
       { value: 'ticket.resolved_closed', hint: 'Ticket reaches Resolved or Closed' },
     ],
   },
@@ -145,6 +148,7 @@ const TRIGGER_VISUALS = {
   'ticket.reply_received': { icon: Repeat, icon_: 'text-sky-600 dark:text-sky-300', chip: 'bg-sky-50 dark:bg-sky-500/15 text-sky-700 dark:text-sky-200 ring-sky-200 dark:ring-sky-500/30', rail: 'bg-sky-400' },
   'ticket.note_added': { icon: FileJson, icon_: 'text-indigo-600 dark:text-indigo-300', chip: 'bg-indigo-50 dark:bg-indigo-500/15 text-indigo-700 dark:text-indigo-200 ring-indigo-200 dark:ring-indigo-500/30', rail: 'bg-indigo-400' },
   'ticket.status_changed': { icon: Waypoints, icon_: 'text-violet-600 dark:text-violet-300', chip: 'bg-violet-50 dark:bg-violet-500/15 text-violet-700 dark:text-violet-200 ring-violet-200 dark:ring-violet-500/30', rail: 'bg-violet-400' },
+  'ticket.fields_updated': { icon: Pencil, icon_: 'text-rose-600 dark:text-rose-300', chip: 'bg-rose-50 dark:bg-rose-500/15 text-rose-700 dark:text-rose-200 ring-rose-200 dark:ring-rose-500/30', rail: 'bg-rose-400' },
   'ticket.public_reply_added': { icon: Repeat, icon_: 'text-cyan-600 dark:text-cyan-300', chip: 'bg-cyan-50 dark:bg-cyan-500/15 text-cyan-700 dark:text-cyan-200 ring-cyan-200 dark:ring-cyan-500/30', rail: 'bg-cyan-400' },
 };
 
@@ -484,11 +488,13 @@ const LLM_TOOL_POLICY_MODES = [
   { value: 'tools_enabled', label: 'Evidence + tools', description: 'Attach the evidence bundle and allow enabled read-only tools during drafting.', helpTopic: 'policyToolsEnabled' },
 ];
 
-const CONDITION_FIELD_OPTIONS = [
+export const CONDITION_FIELD_OPTIONS = [
   { value: 'ticket.status', label: 'Ticket status', example: 'Open' },
   { value: 'ticket.statusBase', label: 'Ticket status base (Open/Pending/Resolved/Closed)', example: 'Pending' },
   { value: 'ticket.priorityLabel', label: 'Ticket priority', example: 'High' },
   { value: 'ticket.assessedPriority', label: 'Assessed priority', example: 'Urgent' },
+  { value: 'ticket.origin', label: 'Ticket origin', example: 'ticketpulse' },
+  { value: 'ticket.createdVia', label: 'Created via (app / email / api / freshservice_sync / held_reply / agent_cc / forward)', example: 'email' },
   { value: 'ticket.category', label: 'Category', example: 'Access' },
   { value: 'ticket.subCategory', label: 'Subcategory', example: 'VPN' },
   { value: 'ticket.ticketCategory', label: 'Ticket category', example: 'IT' },
@@ -502,7 +508,76 @@ const CONDITION_FIELD_OPTIONS = [
   { value: 'assignedAgent.email', label: 'Assigned agent exists', example: 'agent@example.com' },
   { value: 'ticket.isNoise', label: 'Noise ticket', example: 'true' },
   { value: 'availability.isAfterHours', label: 'After-hours state', example: 'true' },
+  { value: 'event.systemNote', label: 'Note was written by the system', example: 'false' },
+  { value: 'event.senderIsAgent', label: 'Reply sender is an agent', example: 'false' },
+  { value: 'event.isSurveyResponse', label: 'Reply is a survey response', example: 'false' },
+  // "Ticket updated (fields)" payload (MEGA 09-01 Phase TU, TU-7).
+  { value: 'event.changedFields', label: 'Changed fields (fields_updated)', example: 'priority' },
+  { value: 'event.actorKind', label: 'Updated by kind (human / api / system / workflow / freshservice)', example: 'human' },
+  { value: 'event.source', label: 'Update source (app / api:<key> / api:resubmission / workflow:<id> / freshservice_sync)', example: 'app' },
+  { value: 'event.changedCount', label: 'Changed field count', example: '2' },
+  { value: 'event.reopened', label: 'Reopened by this update', example: 'false' },
 ];
+
+/**
+ * Trigger-node options for "Ticket updated (fields)" (TU-8). Stored on the
+ * trigger node's data like the aging/SLA thresholds; read by the engine's
+ * fieldsUpdatedGate at event time:
+ *   coalesceMinutes           edits within this window merge into ONE email (0 = off)
+ *   includeFreshserviceChanges also react to changes made in FreshService (sync diff)
+ *   notifyActor               keep the editing agent in To/Cc (off = they are removed)
+ */
+export function FieldsUpdatedTriggerOptions({ data = {}, onChange, disabled = false }) {
+  const coalesce = data.coalesceMinutes === undefined || data.coalesceMinutes === null ? 3 : Number(data.coalesceMinutes);
+  return (
+    <div className="space-y-3" data-testid="fields-updated-trigger-options">
+      <div>
+        <label className="text-xs font-medium uppercase text-muted-foreground" htmlFor="fields-updated-coalesce">
+          Group edits made within (minutes)
+        </label>
+        <input
+          id="fields-updated-coalesce"
+          type="number"
+          min="0"
+          max="1440"
+          value={Number.isFinite(coalesce) ? coalesce : 3}
+          disabled={disabled}
+          onChange={(event) => onChange({ coalesceMinutes: Math.max(0, Math.min(1440, Number(event.target.value) || 0)) })}
+          className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm normal-case text-foreground tabular-nums"
+        />
+        <p className="mt-1 text-[11px] text-muted-foreground/75 normal-case">
+          An agent who edits the category and then the due date sends ONE email listing both. 0 sends immediately per edit.
+        </p>
+      </div>
+      <label className="flex items-start gap-2 rounded-md border border-border px-3 py-2 text-sm normal-case">
+        <input
+          type="checkbox"
+          checked={data.includeFreshserviceChanges === true}
+          disabled={disabled}
+          onChange={(event) => onChange({ includeFreshserviceChanges: event.target.checked })}
+          className="mt-0.5 h-4 w-4 rounded border-input text-blue-600 dark:text-blue-300"
+        />
+        <span>
+          <span className="font-medium text-foreground">Include changes made in FreshService</span>
+          <span className="block text-[11px] text-muted-foreground/75">Off by default: only edits made in Ticket Pulse or through the API fire. Sync echoes of Ticket Pulse&apos;s own write-backs are always filtered.</span>
+        </span>
+      </label>
+      <label className="flex items-start gap-2 rounded-md border border-border px-3 py-2 text-sm normal-case">
+        <input
+          type="checkbox"
+          checked={data.notifyActor === true}
+          disabled={disabled}
+          onChange={(event) => onChange({ notifyActor: event.target.checked })}
+          className="mt-0.5 h-4 w-4 rounded border-input text-blue-600 dark:text-blue-300"
+        />
+        <span>
+          <span className="font-medium text-foreground">Also notify the person who made the change</span>
+          <span className="block text-[11px] text-muted-foreground/75">Off by default: the editing agent is removed from To/Cc so they don&apos;t get mail about their own edit.</span>
+        </span>
+      </label>
+    </div>
+  );
+}
 
 const ROUTING_BEHAVIOR_OPTIONS = [
   {
@@ -7388,7 +7463,9 @@ export default function NotificationWorkflowsPanel({
 
   useEffect(() => {
     if (!selectedNode || ticketMeta) return;
-    if (!['update_ticket', 'request_approval'].includes(selectedNode.type)) return;
+    // recipient_resolver needs the internal-group list for the
+    // "Internal group members" recipient (Phase RL, RL-6).
+    if (!['update_ticket', 'request_approval', 'recipient_resolver'].includes(selectedNode.type)) return;
     ticketsAPI.meta()
       .then((res) => setTicketMeta(res?.data || {}))
       .catch(() => setTicketMeta({ technicians: [], categoryTree: [], groups: [], approvalCategories: [] }));
@@ -9332,6 +9409,10 @@ export default function NotificationWorkflowsPanel({
                 : 'Changing the event keeps your steps; a live workflow is paused until you re-publish on the new trigger.'}
             </p>
           </div>
+          {/* "Ticket updated (fields)" options — read by the engine's fieldsUpdatedGate (TU-8/TU-9). */}
+          {triggerType === 'ticket.fields_updated' && (
+            <FieldsUpdatedTriggerOptions data={selectedNode.data || {}} onChange={updateNodeData} disabled={saving} />
+          )}
           {/* Time-trigger thresholds — read by the time-trigger worker. */}
           {triggerType === 'ticket.aging' && (
             <div>
@@ -9978,6 +10059,16 @@ export default function NotificationWorkflowsPanel({
       const cc = selectedNode.data?.cc || [];
       const customEmails = selectedNode.data?.customEmails || [];
       const showCustomEmailInput = to.includes('custom_emails') || customEmails.length > 0;
+      // "Internal group members" (Phase RL, RL-6): `internal_group:<id>`
+      // tokens resolve to the group's ACTIVE member emails at send time —
+      // replaces hand-maintained custom_emails lists that go stale.
+      const internalGroups = (ticketMeta?.groups || []).filter((g) => g.origin === 'local');
+      const groupTokens = (list) => list.filter((t) => /^internal_group:\d+$/.test(String(t)));
+      const setGroupToken = (key, groupId) => {
+        const current = selectedNode.data?.[key] || [];
+        const next = [...current.filter((t) => !/^internal_group:\d+$/.test(String(t))), ...(groupId ? [`internal_group:${groupId}`] : [])];
+        updateNodeData({ [key]: next });
+      };
       const recipientGroups = [
         {
           key: 'to',
@@ -9986,6 +10077,8 @@ export default function NotificationWorkflowsPanel({
           options: [
             ['requester', 'Requester'],
             ['assigned_agent', 'Assigned agent'],
+            ['last_replying_agent', 'Last replying agent (newest agent reply on the thread)'],
+            ['watchers', 'Category / group watchers'],
             ['approval_requester', 'Approval requester (approval events)'],
             ['custom_emails', 'Custom emails'],
           ],
@@ -10016,6 +10109,22 @@ export default function NotificationWorkflowsPanel({
                     <span>{label}</span>
                   </label>
                 ))}
+                <label className="flex flex-wrap items-center gap-2 rounded-md border border-border px-3 py-2">
+                  <span className="text-sm">Internal group members</span>
+                  <select
+                    aria-label={`${group.label}: internal group members`}
+                    value={groupTokens(group.values)[0]?.replace('internal_group:', '') || ''}
+                    onChange={(event) => setGroupToken(group.key, event.target.value)}
+                    className="ml-auto rounded-md border border-border bg-card px-2 py-1 text-xs text-foreground"
+                  >
+                    <option value="">None</option>
+                    {internalGroups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+                    {groupTokens(group.values).map((t) => t.replace('internal_group:', ''))
+                      .filter((id) => !internalGroups.some((g) => String(g.id) === id))
+                      .map((id) => <option key={`missing-${id}`} value={id}>Group #{id}</option>)}
+                  </select>
+                  <span className="basis-full text-[11px] text-muted-foreground/75">Resolves to the group&apos;s active members at send time — no address list to maintain.</span>
+                </label>
               </div>
             </div>
           ))}

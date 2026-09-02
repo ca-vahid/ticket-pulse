@@ -22,6 +22,9 @@ export const CG_FIELDS = [
   { value: 'ticket.statusBase', label: 'Ticket status base (Open/Pending/Resolved/Closed)', type: 'enum', options: ['Open', 'Pending', 'Resolved', 'Closed'] },
   { value: 'ticket.priorityLabel', label: 'Priority', type: 'enum', options: ['Low', 'Medium', 'High', 'Urgent'] },
   { value: 'ticket.origin', label: 'Ticket origin', type: 'enum', options: ['ticketpulse', 'freshservice'] },
+  // How the ticket came to exist (Phase RL, RL-6) — lets a "Ticket arrived"
+  // ack skip FreshService sync-ins and hold-queue resolutions.
+  { value: 'ticket.createdVia', label: 'Created via', type: 'enum', options: ['app', 'email', 'api', 'freshservice_sync', 'held_reply', 'agent_cc', 'forward'] },
   { value: 'ticket.sourceLabel', label: 'Ticket source (arrival channel)', type: 'enum', options: ['Email', 'Portal', 'Phone', 'Chat', 'API', 'Webhook', 'Agent'] },
   // Per-workspace vocabulary (registry-driven) — string on the backend; the
   // builder swaps in the workspace's type names as enum options at runtime.
@@ -47,6 +50,17 @@ export const CG_FIELDS = [
   { value: 'requester.city', label: 'Requester city', type: 'string' },
   { value: 'event.statusFrom', label: 'Status changed from', type: 'string' },
   { value: 'event.statusTo', label: 'Status changed to', type: 'string' },
+  // Event provenance flags (MEGA 09-01) — absent counts as false.
+  { value: 'event.systemNote', label: 'Note was written by the system', type: 'boolean' },
+  { value: 'event.senderIsAgent', label: 'Reply sender is an agent', type: 'boolean' },
+  { value: 'event.isSurveyResponse', label: 'Reply is a survey response', type: 'boolean' },
+  // "Ticket updated (fields)" payload (MEGA 09-01 Phase TU, TU-7). The server
+  // catalog appends this workspace's custom-field keys to changedFields.
+  { value: 'event.changedFields', label: 'Changed fields (fields_updated)', type: 'list', options: ['subject', 'description', 'priority', 'ticketType', 'impact', 'urgency', 'source', 'category', 'subCategory', 'ticketCategory', 'internalCategoryId', 'internalSubcategoryId', 'groupId', 'internalGroupId', 'requester', 'ccEmails', 'dueBy', 'frDueBy'] },
+  { value: 'event.actorKind', label: 'Updated by (kind)', type: 'enum', options: ['human', 'api', 'system', 'workflow', 'freshservice'] },
+  { value: 'event.source', label: 'Update source', type: 'string' },
+  { value: 'event.changedCount', label: 'Changed field count', type: 'number' },
+  { value: 'event.reopened', label: 'Reopened by this update', type: 'boolean' },
   { value: 'availability.isBusinessHours', label: 'During business hours', type: 'boolean' },
   { value: 'availability.isAfterHours', label: 'After hours', type: 'boolean' },
   { value: 'availability.isHoliday', label: 'On a holiday', type: 'boolean' },

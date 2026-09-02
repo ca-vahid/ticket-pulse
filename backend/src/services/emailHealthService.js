@@ -39,15 +39,43 @@ export function sanitizeEmailErrorMessage(error) {
     .slice(0, 500);
 }
 
+/**
+ * Exact grant text for a Graph 403 (Phase RL, RL-2). The app registration
+ * name/id are what IT sees in Entra; the permission is what the send lane
+ * needs beyond Mail.Send (createReply + draft-then-send write to the mailbox).
+ */
+export const GRAPH_APP_NAME = process.env.AZURE_GRAPH_APP_NAME || 'Ticket Pulse Backend';
+export const GRAPH_APP_ID = process.env.AZURE_GRAPH_CLIENT_ID || 'f3a49518-786c-456d-a881-6cc24e378c2c';
+export const GRAPH_PERMISSION_GRANT_TEXT = `Grant Mail.ReadWrite (application) to ${GRAPH_APP_NAME} (${GRAPH_APP_ID}) in Entra → App registrations → API permissions, then "Grant admin consent" — Mail.Send alone cannot create the reply draft. Scope it to the ticket mailboxes with Exchange RBAC for Applications if the tenant requires it. Until then every send falls back to SendGrid as ticketpulse@.`;
+
+/** Is this error a Microsoft Graph access-denied (403 / ErrorAccessDenied)? */
+export function isGraphPermissionError(error, provider = null) {
+  const statusCode = statusCodeFromError(error);
+  const code = String(error?.code || '').toLowerCase();
+  const message = String(error?.message || '').toLowerCase();
+  const graphShaped = provider === 'msgraph'
+    || error?.graphPermissionDenied === true
+    || code === 'erroraccessdenied'
+    || code === 'accessdenied'
+    || message.includes('microsoft graph')
+    || message.includes('graph api');
+  if (!graphShaped) return false;
+  return statusCode === 403 || code === 'erroraccessdenied' || code === 'accessdenied' || message.includes('access is denied');
+}
+
 /** Classify an email transport error into a stable class + status code. */
-export function classifyEmailError(error) {
+export function classifyEmailError(error, { provider = null } = {}) {
   const statusCode = statusCodeFromError(error);
   const message = sanitizeEmailErrorMessage(error);
   const lower = message.toLowerCase();
   const code = error?.code;
   let errorClass = 'unknown';
 
-  if (lower.includes('not configured') || lower.includes('no recipient') || lower.includes('is required')) {
+  if (isGraphPermissionError(error, provider)) {
+    // Graph 403 = the app registration lacks the mailbox permission (Phase
+    // RL): NOT an IP block — that label sent IT to SendGrid's allowlist.
+    errorClass = 'permission_denied';
+  } else if (lower.includes('not configured') || lower.includes('no recipient') || lower.includes('is required')) {
     errorClass = 'config_missing';
   } else if (statusCode === 401 || lower.includes('unauthorized') || lower.includes('authentication')) {
     errorClass = 'auth_error';
@@ -80,9 +108,11 @@ export function classifyEmailError(error) {
 /** A plain-English, actionable hint for the most recent failure. */
 export function hintForFailure({ errorClass, statusCode, provider } = {}) {
   switch (errorClass) {
+  case 'permission_denied':
+    return `Microsoft Graph refused the send (403 access denied) — the send lane is not granted. ${GRAPH_PERMISSION_GRANT_TEXT}`;
   case 'ip_blocked':
     return provider === 'msgraph'
-      ? 'Microsoft Graph rejected the request (403). Check the app registration’s Mail.Send permission and conditional-access rules.'
+      ? `Microsoft Graph rejected the request (403). ${GRAPH_PERMISSION_GRANT_TEXT}`
       : 'SendGrid returned 403 — the sending server’s outbound IP is likely blocked. Check SendGrid → Settings → IP Access Management (allowlist the app’s outbound IPs, or disable it for this send-only key).';
   case 'auth_error':
     return 'The provider rejected the credentials (401). Verify the SendGrid API key (or Graph client secret) is valid and not expired.';
@@ -147,7 +177,7 @@ class EmailHealthService {
     durationMs = null,
     recipients = null,
   } = {}) {
-    const classified = classifyEmailError(error);
+    const classified = classifyEmailError(error, { provider });
     try {
       return await prisma.notificationChannelHealthEvent.create({
         data: {
@@ -181,6 +211,36 @@ class EmailHealthService {
       take: RECENT_TAKE,
     });
     return this._classify(channel, events);
+  }
+
+  /**
+   * Outbound Graph lane state for one workspace (Phase RL, RL-2 / RL-7):
+   * the most recent msgraph email event in the lookback window decides it.
+   *   { status: 'ok' | 'not_granted' | 'failing', lastEventAt, errorClass,
+   *     statusCode, message, hint, permissionGrantText }
+   * Null when Graph has never been tried for this workspace.
+   */
+  async getGraphSendLane(workspaceId) {
+    const since = new Date(Date.now() - LOOKBACK_MS);
+    const last = await prisma.notificationChannelHealthEvent.findFirst({
+      where: { channel: 'email', provider: 'msgraph', createdAt: { gte: since }, ...(workspaceId ? { workspaceId: Number(workspaceId) } : {}) },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, createdAt: true, success: true, errorClass: true, statusCode: true, sanitizedMessage: true, context: true },
+    });
+    if (!last) return null;
+    if (last.success) return { status: 'ok', lastEventAt: last.createdAt, errorClass: null, statusCode: null, message: null, hint: null };
+    const notGranted = last.errorClass === 'permission_denied'
+      || (last.errorClass === 'ip_blocked' && last.statusCode === 403); // pre-RL rows
+    return {
+      status: notGranted ? 'not_granted' : 'failing',
+      lastEventAt: last.createdAt,
+      errorClass: notGranted ? 'permission_denied' : last.errorClass,
+      statusCode: last.statusCode,
+      message: last.sanitizedMessage,
+      context: last.context,
+      hint: hintForFailure({ errorClass: notGranted ? 'permission_denied' : last.errorClass, statusCode: last.statusCode, provider: 'msgraph' }),
+      ...(notGranted ? { permissionGrantText: GRAPH_PERMISSION_GRANT_TEXT } : {}),
+    };
   }
 
   async getRecentFailures({ channel = 'email', limit = 10 } = {}) {
@@ -236,7 +296,7 @@ class EmailHealthService {
       base.lastMessage = lastFailure.sanitizedMessage;
       base.lastStatusCode = lastFailure.statusCode;
       base.lastProvider = lastFailure.provider;
-      const systemic = ['ip_blocked', 'auth_error', 'config_missing'].includes(lastFailure.errorClass);
+      const systemic = ['ip_blocked', 'permission_denied', 'auth_error', 'config_missing'].includes(lastFailure.errorClass);
       base.status = (systemic || normalizedStreak >= 3) ? 'down' : 'degraded';
       base.hint = hintForFailure({
         errorClass: lastFailure.errorClass,
