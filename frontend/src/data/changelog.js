@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.8.24-preview';
+export const APP_VERSION = '3.8.25-preview';
 
 export const changelog = [
+  {
+    version: '3.8.25-preview',
+    date: 'September 2, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Approval page photos</strong> — the API now lets the public page paint the people photos across hosts (the browser was silently refusing the image because of a same-origin resource policy); the 3.8.24 URL fix alone was not enough.' },
+    ],
+  },
   {
     version: '3.8.24-preview',
     date: 'September 2, 2026',

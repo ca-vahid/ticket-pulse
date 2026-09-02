@@ -109,6 +109,8 @@ describe('GET /api/ticket-approvals/public/:token/photo', () => {
     expect(azureAdMock.getUserPhoto).toHaveBeenCalledWith('jane@x.io');
     expect(res.headers['content-type']).toBe('image/png');
     expect(res.headers['cache-control']).toBe('private, max-age=3600');
+    // Painted by an <img> on the app host while the API answers from api.<domain> — helmet's same-origin default would block it
+    expect(res.headers['cross-origin-resource-policy']).toBe('cross-origin');
     expect(Buffer.isBuffer(res.body)).toBe(true);
     expect(res.body.equals(Buffer.from(PNG_1X1, 'base64'))).toBe(true);
   });

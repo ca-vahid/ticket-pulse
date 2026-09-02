@@ -1915,6 +1915,10 @@ ticketApprovalPublicRouter.get('/:token/photo', asyncHandler(async (req, res) =>
   const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');
   const email = await ticketApprovalService.photoSubjectEmail(req.params.token, who);
   const decoded = email ? decodePhotoDataUri(await getCachedUserPhoto(email)) : null;
+  // The public page lives on the app host and this API answers from api.<domain>; helmet's default
+  // Cross-Origin-Resource-Policy: same-origin makes browsers refuse to paint the <img>. The response is
+  // already token-gated (no email in the URL, no auth reuse), so opening it cross-origin is safe.
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   if (!decoded) {
     res.setHeader('Cache-Control', 'private, max-age=600');
     return res.status(404).json({ success: false, error: 'No photo available' });
