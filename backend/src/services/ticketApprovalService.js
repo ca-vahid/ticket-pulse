@@ -5,6 +5,7 @@ import logger from '../utils/logger.js';
 import { ValidationError, NotFoundError } from '../utils/errors.js';
 import ticketActivityRepository from './ticketActivityRepository.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
+import { renderApproverRequestEmail, renderRequesterDecisionEmail, renderRequesterClarificationEmail, normalizeNoteHtmlForEmail } from './approvalEmailTemplate.js';
 import { sseManager } from '../routes/sse.routes.js';
 
 const APPROVAL_EXPIRY_DAYS = 30;
@@ -135,7 +136,12 @@ class TicketApprovalService {
   async request(ticketId, workspaceId, { approvalCategoryId, note = null, noteHtml = null, notifyApprover = true }, actor) {
     const ticket = await prisma.ticket.findFirst({
       where: { id: ticketId, workspaceId },
-      include: { requester: { select: { name: true, email: true, jobTitle: true, entraJobTitle: true } } },
+      include: {
+        requester: { select: { name: true, email: true, jobTitle: true, entraJobTitle: true, department: true, entraDepartment: true, entraOfficeLocation: true, entraCity: true } },
+        internalCategory: { select: { name: true } },
+        internalSubcategory: { select: { name: true } },
+        workspace: { select: { name: true } },
+      },
     });
     if (!ticket) throw new NotFoundError(`Ticket ${ticketId} not found in this workspace`);
 
@@ -607,7 +613,12 @@ class TicketApprovalService {
 
     const ticket = await prisma.ticket.findFirst({
       where: { id: ticketId, workspaceId },
-      include: { requester: { select: { name: true, email: true, jobTitle: true, entraJobTitle: true } } },
+      include: {
+        requester: { select: { name: true, email: true, jobTitle: true, entraJobTitle: true, department: true, entraDepartment: true, entraOfficeLocation: true, entraCity: true } },
+        internalCategory: { select: { name: true } },
+        internalSubcategory: { select: { name: true } },
+        workspace: { select: { name: true } },
+      },
     });
     let categoryName = null;
     if (approval.approvalCategoryId) {
@@ -1006,13 +1017,43 @@ class TicketApprovalService {
     return updated;
   }
 
+  /** Workspace display name for e-mail chrome — from the loaded relation, else a cheap lookup. */
+  async _workspaceName(ticket) {
+    if (ticket?.workspace?.name) return ticket.workspace.name;
+    try {
+      const ws = await prisma.workspace.findUnique({ where: { id: ticket.workspaceId }, select: { name: true } });
+      return ws?.name || null;
+    } catch { return null; }
+  }
+
+  /** Ticket facts shared by the approval e-mails (mirrors what the public page shows). */
+  _emailTicketFacts(ticket) {
+    const topCat = ticket.internalCategory?.name || ticket.category || null;
+    const subCat = ticket.internalSubcategory?.name || ticket.subCategory || null;
+    return {
+      ref: ticketDisplayRef(ticket),
+      subject: ticket.subject || null,
+      createdAt: ticket.createdAt || null,
+      dueBy: ticket.dueBy || null,
+      priorityLabel: PRIORITY_LABELS[ticket.priority] || null,
+      typeLabel: ticket.ticketType || null,
+      categoryPath: topCat ? (subCat ? `${topCat} › ${subCat}` : topCat) : null,
+      statusLabel: ticket.status || null,
+      description: ticket.description || ticket.descriptionText || null,
+      appUrl: `${publicBaseUrl()}/tickets/${ticket.id}`,
+    };
+  }
+
   async _emailApprover(ticket, approval, decisionUrl, categoryName = null, clarification = null) {
     if (process.env.TP_SUPPRESS_APPROVAL_EMAIL === '1') {
       logger.info(`[approval] email suppressed (TP_SUPPRESS_APPROVAL_EMAIL) → ${approval.approverEmail}`);
       return { sent: false, reason: 'suppressed' };
     }
     const ref = ticketDisplayRef(ticket);
-    const subject = `${categoryName ? `${categoryName} approval` : 'Approval'} requested: ${ticket.subject || 'ticket'} [${ref}]`;
+    const requesterName = ticket.requester?.name || null;
+    // Subject: what is asked, for whom, and the ref last (threading + inbox filters). Identical on a
+    // re-request so it lands in the same conversation.
+    const subject = `Approval needed: ${categoryName || 'request'}${requesterName ? ` for ${requesterName}` : ''} — ${ticket.subject || 'ticket'} [${ref}]`;
 
     // T3.9: the request note supports placeholders. Plain values substitute
     // before escaping; {{decision.url}} becomes a real link after escaping.
@@ -1032,32 +1073,53 @@ class TicketApprovalService {
         .replace(/\{\{\s*decision\.url\s*\}\}/gi, `<a href="${decisionUrl}">review &amp; decide</a>`)
         .replace(/\n/g, '<br/>');
     }
+    // Mail-client normalization: pasted spreadsheet tables lose fixed widths/empty columns and gain borders.
+    noteHtml = noteHtml ? (normalizeNoteHtmlForEmail(noteHtml) || '') : '';
 
-    const escHtml = (s) => String(s || '').replace(/</g, '&lt;');
     // Phase AP: the requester of the approval shows as a person, not an address.
-    const requestedByName = escHtml(
-      (await this._resolvePersonName(approval.requestedBy)) || prettifyLocalPart(approval.requestedBy) || approval.requestedBy,
-    );
-    const requesterTitle = ticket.requester?.jobTitle || ticket.requester?.entraJobTitle || null;
-    const requesterLine = ticket.requester?.name
-      ? ` (requested for ${escHtml(ticket.requester.name)}${requesterTitle ? `, ${escHtml(requesterTitle)}` : ''})`
-      : '';
-    const clarificationHtml = clarification?.answer
-      ? `<div style="border-left:3px solid #8b5cf6;padding:6px 10px;margin:8px 0;background:#f5f3ff">${
-        clarification.question ? `<p style="margin:0 0 4px">You asked: “${escHtml(clarification.question)}”</p>` : ''
-      }<p style="margin:0">Reply from ${requestedByName}: “${escHtml(clarification.answer)}”</p></div>`
-      : '';
-    const html = [
-      clarification?.answer
-        ? `<p>Your approval was re-requested on ticket <b>${ref}</b> with the clarification you asked for.</p>`
-        : `<p>Your approval was requested on ticket <b>${ref}</b>${requesterLine}.</p>`,
-      `<p><b>${(ticket.subject || '').replace(/</g, '&lt;')}</b></p>`,
-      categoryName ? `<p style="color:#475569">Category: <b>${escHtml(categoryName)}</b></p>` : '',
-      clarificationHtml,
-      noteHtml ? `<p>Note from ${requestedByName}: ${noteHtml}</p>` : '',
-      `<p><a href="${decisionUrl}">Review and decide</a> (approve, or reject with a reason).</p>`,
-      '<p style="color:#64748b;font-size:12px">This link is personal to you and expires in 30 days.</p>',
-    ].join('');
+    const requestedByName = (await this._resolvePersonName(approval.requestedBy)) || prettifyLocalPart(approval.requestedBy) || approval.requestedBy;
+    const requester = ticket.requester || {};
+
+    // Sibling approvers (multi-manager categories) — "also asked", first decision wins.
+    let otherApprovers = [];
+    if (approval.requestGroupId) {
+      try {
+        const rows = await prisma.ticketApproval.findMany({
+          where: { requestGroupId: approval.requestGroupId, workspaceId: ticket.workspaceId, NOT: { id: approval.id } },
+          orderBy: { id: 'asc' },
+          select: { approverEmail: true, approverName: true, status: true },
+        });
+        for (const row of rows || []) {
+          otherApprovers.push({
+            name: row.approverName || (await this._resolvePersonName(row.approverEmail)) || prettifyLocalPart(row.approverEmail),
+            status: row.status,
+          });
+        }
+      } catch (err) {
+        logger.warn(`Approval e-mail: sibling approvers unavailable (${err.message})`);
+        otherApprovers = [];
+      }
+    }
+
+    const html = renderApproverRequestEmail({
+      workspaceName: await this._workspaceName(ticket),
+      categoryName,
+      ticket: this._emailTicketFacts(ticket),
+      requester: {
+        name: requester.name || null,
+        title: requester.jobTitle || requester.entraJobTitle || null,
+        department: requester.department || requester.entraDepartment || null,
+        location: requester.entraOfficeLocation || requester.entraCity || null,
+      },
+      requestedByName,
+      approverName: approval.approverName || null,
+      noteHtml,
+      clarification: clarification?.answer ? clarification : null,
+      otherApprovers,
+      decisionUrl,
+      expiresAt: approval.expiresAt || null,
+      reRequest: !!clarification?.answer,
+    });
 
     const { sendTransactionalEmail } = await import('./transactionalEmailService.js');
     return sendTransactionalEmail({ workspaceId: ticket.workspaceId, to: approval.approverEmail, subject, html, label: 'approval' });
@@ -1087,22 +1149,16 @@ class TicketApprovalService {
     // Subject prefix stays identical for the self variant — inbox filters and
     // threading keep working; only the body wording changes.
     const subject = `${verdictLabel}: your approval request on ${ticket.subject || 'ticket'} [${ref}]`;
-    const esc = (s) => String(s || '').replace(/</g, '&lt;');
-    const approver = esc(actorLabel || approval.approverName || approval.approverEmail);
-    const verdictHtml = `<span style="color:${approved ? '#059669' : '#dc2626'};font-weight:bold">${verdictLabel.toUpperCase()} ${approved ? '✔' : '✘'}</span>`;
-    const decidedLine = isSelf
-      ? (changedFrom
-        ? `<p>You changed the decision on your own approval request on ticket <b>${ref}</b>: ${verdictHtml}</p>`
-        : `<p>You ${approved ? 'approved' : 'rejected'} your own approval request on ticket <b>${ref}</b>: ${verdictHtml}</p>`)
-      : (changedFrom
-        ? `<p>${approver} changed the decision on your approval request on ticket <b>${ref}</b>: ${verdictHtml}</p>`
-        : `<p>${approver} decided your approval request on ticket <b>${ref}</b>: ${verdictHtml}</p>`);
-    const html = [
-      decidedLine,
-      `<p><b>${esc(ticket.subject || '')}</b></p>`,
-      note?.trim() ? `<p>${isSelf ? 'Your note' : 'Their note'}: “${esc(note.trim())}”</p>` : '',
-      `<p><a href="${ticketUrl}">Open the ticket</a> to see the full approval trail.</p>`,
-    ].join('');
+    const html = renderRequesterDecisionEmail({
+      workspaceName: await this._workspaceName(ticket),
+      ticket: { ref, subject: ticket.subject || null, appUrl: ticketUrl },
+      approved,
+      approverName: actorLabel || approval.approverName || approval.approverEmail,
+      isSelf,
+      changedFrom: changedFrom || null,
+      note: note?.trim() || null,
+      requester: { name: ticket.requester?.name || null },
+    });
     const { sendTransactionalEmail } = await import('./transactionalEmailService.js');
     return sendTransactionalEmail({ workspaceId: ticket.workspaceId, to, subject, html, label: 'approval decision' });
   }
@@ -1118,13 +1174,13 @@ class TicketApprovalService {
     const ref = ticketDisplayRef(ticket);
     const ticketUrl = `${publicBaseUrl()}/tickets/${ticket.id}`;
     const subject = `More info needed on your approval request [${ref}]`;
-    const esc = (s) => String(s || '').replace(/</g, '&lt;');
-    const html = [
-      `<p>${esc(approval.approverName || approval.approverEmail)} needs more information before deciding your approval request on ticket <b>${ref}</b>.</p>`,
-      `<p><b>${esc(ticket.subject || '')}</b></p>`,
-      `<p>Their question: “${esc(question)}”</p>`,
-      `<p>Add the requested details on the ticket, then <a href="${ticketUrl}">open it</a> and hit <b>Resubmit</b> to send it back for approval.</p>`,
-    ].join('');
+    const html = renderRequesterClarificationEmail({
+      workspaceName: await this._workspaceName(ticket),
+      ticket: { ref, subject: ticket.subject || null, appUrl: ticketUrl },
+      approverName: approval.approverName || approval.approverEmail,
+      question,
+      requester: { name: ticket.requester?.name || null },
+    });
     const { sendTransactionalEmail } = await import('./transactionalEmailService.js');
     return sendTransactionalEmail({ workspaceId: ticket.workspaceId, to, subject, html, label: 'approval clarification' });
   }
