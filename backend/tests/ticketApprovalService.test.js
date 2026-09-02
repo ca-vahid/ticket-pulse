@@ -669,10 +669,14 @@ describe('_emailApprover (Phase AP: people, category, requester title)', () => {
     await ticketApprovalService.request(501, 1, { approvalCategoryId: 9, note: 'Need {{decision.url}} please' }, { email: 'jane.doe@x.io' });
 
     const email = sendgridMock.sendEmail.mock.calls[0][0];
-    expect(email.html).toContain('Note from Jane Doe:');
+    expect(email.html).toContain('Note from Jane Doe');
     expect(email.html).not.toContain('Note from jane.doe@x.io');
-    expect(email.html).toContain('Category: <b>Laptop purchase</b>');
-    expect(email.html).toContain('(requested for Rita, Analyst)');
+    expect(email.subject).toBe('Approval needed: Laptop purchase for Rita — New laptop [TP-ID-501]');
+    expect(email.html).toContain('Laptop purchase approval');
+    expect(email.html).toContain('Requested for');
+    expect(email.html).toContain('>Rita<');
+    expect(email.html).toContain('Analyst');
+    expect(email.html).toContain('Review and decide');
     // Placeholders still substitute.
     expect(email.html).toContain('review &amp; decide</a>');
   });
@@ -682,6 +686,6 @@ describe('_emailApprover (Phase AP: people, category, requester title)', () => {
     prismaMock.ticketApproval.findFirst.mockResolvedValue(null);
     prismaMock.technician.findFirst.mockResolvedValue({ name: 'Jane Doe-Smith' });
     await ticketApprovalService.request(501, 1, { approvalCategoryId: 9, note: 'pls' }, { email: 'jdoe@x.io' });
-    expect(sendgridMock.sendEmail.mock.calls[0][0].html).toContain('Note from Jane Doe-Smith:');
+    expect(sendgridMock.sendEmail.mock.calls[0][0].html).toContain('Note from Jane Doe-Smith');
   });
 });

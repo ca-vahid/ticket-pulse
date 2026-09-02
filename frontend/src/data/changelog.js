@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.8.25-preview';
+export const APP_VERSION = '3.8.26-preview';
 
 export const changelog = [
+  {
+    version: '3.8.26-preview',
+    date: 'September 2, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>✅ Approval e-mails redesigned</strong> — the “your decision is needed” e-mail is now a proper branded card that matches the approval page: who it is for (name, title, office) and who asked, ticket ref/subject/dates, priority/type/category/status, the agent’s note with pasted spreadsheet tables cleaned up (fixed widths and empty columns removed, borders added), a preview of the ticket description, the other approvers, one clear <em>Review and decide</em> button, and the expiry date in the footer. Subject reads “Approval needed: &lt;category&gt; for &lt;person&gt; — &lt;ticket&gt; [ref]”. The decision, changed-decision and “question from the approver” e-mails to the agent use the same layout. Built for Outlook (tables, inline styles, no images).' },
+    ],
+  },
   {
     version: '3.8.25-preview',
     date: 'September 2, 2026',
