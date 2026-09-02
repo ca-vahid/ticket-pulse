@@ -98,7 +98,8 @@ function normalizeAttachments(value) {
       continue;
     }
     totalBase64Bytes += contentBase64.length;
-    kept.push({ filename, contentType, contentBase64 });
+    const contentId = trim(item.contentId || item.cid) || null;
+    kept.push({ filename, contentType, contentBase64, ...(contentId ? { contentId } : {}) });
   }
   return { attachments: kept, dropped };
 }
@@ -177,7 +178,8 @@ async function sendViaSendgridApi({
     content: a.contentBase64,
     filename: a.filename,
     type: a.contentType,
-    disposition: 'attachment',
+    disposition: a.contentId ? 'inline' : 'attachment',
+    ...(a.contentId ? { content_id: a.contentId } : {}),
   }));
 
   // SendGrid v3 supports from.name natively — never stuff the display name
@@ -273,6 +275,7 @@ async function sendViaSmtp({
         filename: a.filename,
         content: Buffer.from(a.contentBase64, 'base64'),
         contentType: a.contentType,
+        ...(a.contentId ? { cid: a.contentId, contentDisposition: 'inline' } : {}),
       }))
       : undefined,
   });

@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.8.26-preview';
+export const APP_VERSION = '3.8.27-preview';
 
 export const changelog = [
+  {
+    version: '3.8.27-preview',
+    date: 'September 2, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Approval e-mail photos</strong> — the “requested for” and “asked by” people now show their directory photos in the e-mail. The pictures are embedded in the message itself (inline attachments), not linked, so they render with images-off policies and never depend on a public URL; people without a photo keep their initials.' },
+    ],
+  },
   {
     version: '3.8.26-preview',
     date: 'September 2, 2026',

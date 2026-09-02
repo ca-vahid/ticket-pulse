@@ -121,6 +121,19 @@ describe('renderApproverRequestEmail', () => {
     expect(html).toContain('<b>Marcus Blackstock replied:</b> No stock.');
     expect(html).toContain('Review the answer and decide &rarr;');
   });
+  test('renders inline (cid:) photos when attachments exist, initials otherwise', () => {
+    const ctx = baseCtx();
+    ctx.requester.photoCid = 'requester-photo';
+    ctx.requestedByPhotoCid = 'requested-by-photo';
+    const html = renderApproverRequestEmail(ctx);
+    expect(html).toContain('<img src="cid:requester-photo" width="40" height="40" alt="IG"');
+    expect(html).toContain('<img src="cid:requested-by-photo" width="32" height="32" alt="MB"');
+    expect(html).not.toContain('>IG<');
+    expect(html).not.toMatch(/src="https?:/);
+    const plain = renderApproverRequestEmail(baseCtx());
+    expect(plain).not.toContain('cid:');
+    expect(plain).toContain('>IG<');
+  });
   test('degrades without optional data', () => {
     const html = renderApproverRequestEmail({ ticket: { ref: 'TP-9', subject: 'x' }, decisionUrl: 'https://app/a', noteHtml: '', otherApprovers: [] });
     expect(html).toContain('Approval — your decision is needed');
