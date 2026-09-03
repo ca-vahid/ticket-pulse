@@ -77,7 +77,7 @@ function TopBar({ workspaceName, theme, onToggleTheme }) {
 function Shell({ workspaceName, theme, onToggleTheme, children, bottomPad = true }) {
   return (
     <div className="tp-approval-backdrop min-h-screen bg-background text-foreground">
-      <div className={`mx-auto max-w-[1040px] px-5 pt-7 ${bottomPad ? 'pb-[220px] min-[800px]:pb-28' : 'pb-16'}`}>
+      <div className={`mx-auto max-w-[1240px] px-5 pt-7 ${bottomPad ? 'pb-[220px] min-[800px]:pb-28' : 'pb-16'}`}>
         <TopBar workspaceName={workspaceName} theme={theme} onToggleTheme={onToggleTheme} />
         <main id="approval-main">{children}</main>
       </div>
@@ -142,7 +142,7 @@ function MessageCard({ icon: Icon, tone = 'muted', title, children }) {
 }
 
 /** Decided / cancelled / info-requested banner. `tabIndex=-1` so the page can move focus here after a submit. */
-const DecisionBanner = ({ approval, decidedByYou, bannerRef }) => {
+const DecisionBanner = ({ approval, decidedByYou, bannerRef, isDark }) => {
   const status = approval?.status;
   let tone = 'bg-muted text-foreground border-border';
   let Icon = Ban;
@@ -163,7 +163,7 @@ const DecisionBanner = ({ approval, decidedByYou, bannerRef }) => {
     body = (approval.decisionNoteHtml || approval.decisionNote)
       ? (
         <div className="mt-2 rounded-lg border border-border/60 bg-card/70 px-3 py-2 text-sm text-foreground/85">
-          {approval.decisionNoteHtml ? <SafeHtml html={approval.decisionNoteHtml} /> : <p className="whitespace-pre-wrap">{approval.decisionNote}</p>}
+          {approval.decisionNoteHtml ? <SafeHtml html={approval.decisionNoteHtml} isDark={isDark} preferThemed /> : <p className="whitespace-pre-wrap">{approval.decisionNote}</p>}
         </div>
       )
       : <p className="mt-1 text-sm opacity-80">The requester and the agent have been notified — you can close this page.</p>;
@@ -201,7 +201,7 @@ const DecisionBanner = ({ approval, decidedByYou, bannerRef }) => {
   );
 };
 
-function RequestNote({ approval, workspaceName }) {
+function RequestNote({ approval, workspaceName, isDark }) {
   const hasHtml = Boolean(approval?.requestNoteHtml);
   if (!hasHtml && !approval?.requestNote) return null;
   return (
@@ -215,16 +215,16 @@ function RequestNote({ approval, workspaceName }) {
       </div>
       <div className="overflow-x-auto" data-testid="request-note-well">
         {hasHtml
-          ? <SafeHtml html={approval.requestNoteHtml} className="text-[14px] leading-relaxed" />
+          ? <SafeHtml html={approval.requestNoteHtml} className="text-[14px] leading-relaxed" isDark={isDark} preferThemed />
           : <p className="whitespace-pre-wrap text-[14px] leading-relaxed text-foreground/85">{approval.requestNote}</p>}
       </div>
     </section>
   );
 }
 
-const COLLAPSED_MAX = 152; // ≈ 6 lines at 14px / 1.55
+const COLLAPSED_MAX = 232; // ≈ 9 lines at 14px / 1.55 — a short pasted table fits without a clipped row
 
-function TicketDescription({ ticket }) {
+function TicketDescription({ ticket, isDark }) {
   const [expanded, setExpanded] = useState(false);
   const [overflows, setOverflows] = useState(false);
   const bodyRef = useRef(null);
@@ -246,11 +246,11 @@ function TicketDescription({ ticket }) {
         <div
           ref={bodyRef}
           id="ticket-description-body"
-          className="overflow-hidden text-[14px] leading-[1.55] text-foreground/85"
+          className="tp-approval-desc overflow-hidden text-[14px] leading-[1.55] text-foreground/85"
           style={collapsed ? { maxHeight: COLLAPSED_MAX } : undefined}
         >
           {html
-            ? <SafeHtml html={html} className="text-[14px] leading-[1.55]" />
+            ? <SafeHtml html={html} className="text-[14px] leading-[1.55]" isDark={isDark} preferThemed />
             : <p className="whitespace-pre-wrap">{text}</p>}
         </div>
         {collapsed && (
@@ -306,10 +306,10 @@ function QuestionThread({ approval }) {
 }
 
 function HeaderActions({ ticket, copied, onCopy }) {
-  const href = ticket?.publicStatusUrl || ticket?.appTicketUrl;
-  const title = ticket?.publicStatusUrl
-    ? 'Open the ticket status page'
-    : 'Opens the ticket in Ticket Pulse — agents need to be signed in';
+  // Always the ticket itself: an approver who wants the detail has an account,
+  // and the public status page shows far less than this page already does.
+  const href = ticket?.appTicketUrl;
+  const title = 'Opens the full ticket in Ticket Pulse — sign in if you are not already';
   return (
     <div className="flex flex-wrap items-center gap-2">
       {href && (
@@ -340,7 +340,7 @@ function HeaderActions({ ticket, copied, onCopy }) {
 
 export default function PublicApprovalDecision() {
   const { token } = useParams();
-  const { theme, toggle } = usePublicTheme();
+  const { theme, isDark, toggle } = usePublicTheme();
   const [data, setData] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -513,10 +513,10 @@ export default function PublicApprovalDecision() {
             className="min-w-0 border-b border-border px-5 py-5 min-[800px]:border-b-0 min-[800px]:border-r min-[800px]:px-[26px]"
           >
             <div aria-live="polite" aria-atomic="true">
-              <DecisionBanner approval={approval} decidedByYou={decidedByYou} bannerRef={bannerRef} />
+              <DecisionBanner approval={approval} decidedByYou={decidedByYou} bannerRef={bannerRef} isDark={isDark} />
             </div>
-            <RequestNote approval={approval} workspaceName={workspaceName} />
-            <TicketDescription ticket={ticket} />
+            <RequestNote approval={approval} workspaceName={workspaceName} isDark={isDark} />
+            <TicketDescription ticket={ticket} isDark={isDark} />
             <QuestionThread approval={approval} />
             {open && <DecisionBox approval={approval} onDecide={onDecide} />}
           </section>

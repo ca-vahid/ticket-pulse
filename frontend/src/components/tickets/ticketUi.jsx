@@ -294,6 +294,10 @@ function splitDeclarations(style) {
 const PAPER_PROPS = new Set(['color', 'background', 'background-color']);
 
 let neutralizeMode = null; // null | 'light' | 'dark' — only during SafeHtml's sanitize
+// Surfaces that are NOT a mail-client view (the public approval page's ticket
+// preview and note) ask for a fully dark well: in dark mode author backgrounds
+// are dropped like any other non-authorial colour, so nothing stamps `--paper`.
+let neutralizeDropBackgrounds = false;
 let paperTriggers = 0;
 
 function neutralizeNode(node) {
@@ -321,7 +325,7 @@ function neutralizeNode(node) {
     }
   }
   if (node.hasAttribute('bgcolor')) {
-    if (dark && isNonAuthorialColor(node.getAttribute('bgcolor'), { ...ctx, prop: 'bgcolor' })) node.removeAttribute('bgcolor');
+    if (dark && (neutralizeDropBackgrounds || isNonAuthorialColor(node.getAttribute('bgcolor'), { ...ctx, prop: 'bgcolor' }))) node.removeAttribute('bgcolor');
     else paperTriggers += 1;
   }
   if (node.hasAttribute('background')) {
@@ -353,13 +357,13 @@ function neutralizeNode(node) {
       continue;
     }
     if (prop === 'background-color') {
-      if (isNonAuthorialColor(value, { ...ctx, prop })) { changed = true; continue; }
+      if (neutralizeDropBackgrounds || isNonAuthorialColor(value, { ...ctx, prop })) { changed = true; continue; }
       paperTriggers += 1;
       kept.push(decl);
       continue;
     }
     // background shorthand
-    if (backgroundHasAuthorialColor(value, ctx)) { paperTriggers += 1; kept.push(decl); } else changed = true;
+    if (!neutralizeDropBackgrounds && backgroundHasAuthorialColor(value, ctx)) { paperTriggers += 1; kept.push(decl); } else changed = true;
   }
   if (liftedFontColor) kept.push(`color:${liftedFontColor}`);
   if (!changed) return;
@@ -380,15 +384,19 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
  * only near-black text is dropped (v3.8.11). Memoised on [html, isDark] so a
  * theme flip re-sanitises exactly once.
  */
-export function SafeHtml({ html, className = '' }) {
+export function SafeHtml({ html, className = '', isDark: isDarkOverride = null, preferThemed = false }) {
   const { resolvedTheme } = useTheme();
-  const isDark = resolvedTheme === 'dark';
+  // `isDark` override: surfaces with their OWN theme (the public approval page
+  // stamps `.dark` from `tp_public_theme`, not from ThemeProvider) must
+  // neutralise against the theme the reader actually sees, not the app's.
+  const isDark = isDarkOverride === null ? resolvedTheme === 'dark' : Boolean(isDarkOverride);
   // Memoized: parents re-render often (SSE ticks, composer keystrokes) and
   // re-sanitizing a long thread body each time was pure waste.
   const { clean, variantClass } = useMemo(() => {
     let sanitized;
     let triggers = 0;
     neutralizeMode = isDark ? 'dark' : 'light';
+    neutralizeDropBackgrounds = isDark && preferThemed;
     paperTriggers = 0;
     try {
       sanitized = DOMPurify.sanitize(String(html || ''), {
@@ -399,13 +407,14 @@ export function SafeHtml({ html, className = '' }) {
       triggers = paperTriggers;
     } finally {
       neutralizeMode = null;
+      neutralizeDropBackgrounds = false;
       paperTriggers = 0;
     }
     return {
       clean: sanitized,
       variantClass: triggers > 0 ? 'tp-rich-body--paper' : 'tp-rich-body--themed',
     };
-  }, [html, isDark]);
+  }, [html, isDark, preferThemed]);
   return (
     <div
       // Dark mode (Phase DW, QA 08-31 #5 / QA 09-01 #6): conditional rendering.

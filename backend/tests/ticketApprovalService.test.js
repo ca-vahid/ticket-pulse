@@ -498,7 +498,7 @@ describe('ticketApprovalService.getByToken (Phase AP payload)', () => {
     expect(data.ticket).toMatchObject({
       id: 501, displayRef: 'TP-77', subject: 'New laptop', priority: 3, priorityLabel: 'High',
       ticketType: 'Service Request', categoryPath: 'Hardware › Laptop', descriptionText: 'Need a laptop',
-      workspace: { name: 'IT', slug: 'it' }, publicStatusUrl: null,
+      workspace: { name: 'IT', slug: 'it' },
     });
     expect(data.ticket.appTicketUrl).toMatch(/^https?:\/\/.+\/tickets\/501$/);
     expect(data.ticket.descriptionHtml).toContain('<img src="https://cdn.example.com/spec.png" />');
@@ -567,14 +567,15 @@ describe('ticketApprovalService.getByToken (Phase AP payload)', () => {
     expect(data.approval.clarificationLog[0]).toMatchObject({ question: 'Which model?', askedBy: 'bob@x.io', answer: null });
   });
 
-  test('requester email + public status link open up when the workspace settings allow', async () => {
+  test('requester email opens up when the workspace settings allow — and no public status token is ever minted', async () => {
     prismaMock.ticketApproval.findUnique.mockResolvedValue(row());
     publicStatusMock.getPublicTicketStatusSettings.mockResolvedValue({ enabled: true, showRequesterEmail: true, showRequesterName: true });
-    publicStatusMock.ensurePublicTicketStatusLink.mockResolvedValue({ url: 'https://app.test/ticket-status/abc' });
     const data = await ticketApprovalService.getByToken(TOKEN);
     expect(data.ticket.requester.email).toBe('rita@x.io');
-    expect(data.ticket.publicStatusUrl).toBe('https://app.test/ticket-status/abc');
-    expect(publicStatusMock.ensurePublicTicketStatusLink).toHaveBeenCalledWith({ workspaceId: 1, ticketId: 501 });
+    // The page links to the ticket itself now; nothing public is created.
+    expect(data.ticket.publicStatusUrl).toBeUndefined();
+    expect(data.ticket.appTicketUrl).toMatch(/\/tickets\/501$/);
+    expect(publicStatusMock.ensurePublicTicketStatusLink).not.toHaveBeenCalled();
   });
 
   test('public status link is never minted when the surface is disabled', async () => {

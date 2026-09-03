@@ -284,6 +284,24 @@ describe('ticketUi components', () => {
       expect(gray).toHaveClass('tp-rich-body--paper');
     });
 
+    test('isDark override + preferThemed: a page with its OWN theme gets a dark well, backgrounds dropped', () => {
+      const html = '<table><tbody><tr><td bgcolor="#ffff00" style="background-color:#cfe2f3;color:#1F497D">cell</td></tr></tbody></table>';
+      // Default (app theme = light in this harness): author colours survive → paper.
+      const light = render(<SafeHtml html={html} />).container.firstChild;
+      expect(light).toHaveClass('tp-rich-body--paper');
+      cleanup();
+      // Same body, told the surface is dark and wants a themed well.
+      const dark = render(<SafeHtml html={html} isDark preferThemed />).container.firstChild;
+      expect(dark).toHaveClass('tp-rich-body--themed');
+      expect(dark).not.toHaveClass('tp-rich-body--paper');
+      expect(dark.innerHTML).not.toContain('bgcolor');
+      expect(dark.innerHTML).not.toContain('#cfe2f3');
+      cleanup();
+      // isDark WITHOUT preferThemed keeps the mail-client convention (paper well).
+      const mail = render(<SafeHtml html={html} isDark />).container.firstChild;
+      expect(mail).toHaveClass('tp-rich-body--paper');
+    });
+
     test('plain / lightly-formatted HTML stamps --themed', () => {
       const body = bodyOf('<p>hello <a href="https://x.test">link</a></p><ul><li>item</li></ul>');
       expect(body).toHaveClass('tp-rich-body', 'tp-rich-body--themed');

@@ -262,16 +262,9 @@ class TicketApprovalService {
       logger.warn(`Approval page: public-status settings unavailable, defaulting to closed (${err.message})`);
     }
 
-    let publicStatusUrl = null;
-    if (visibility.enabled) {
-      try {
-        const { ensurePublicTicketStatusLink } = await import('./publicTicketStatusService.js');
-        const link = await ensurePublicTicketStatusLink({ workspaceId: ticket.workspaceId, ticketId: ticket.id });
-        publicStatusUrl = link?.url || null;
-      } catch (err) {
-        logger.warn(`Approval page: public status link unavailable (${err.message})`);
-      }
-    }
+    // The page links to the ticket itself (approvers have accounts), so no
+    // public status token is minted here any more — the settings lookup above
+    // still gates the requester's e-mail address.
 
     let photosAvailable = false;
     try {
@@ -418,7 +411,6 @@ class TicketApprovalService {
         } : null,
         workspace: { name: ticket.workspace?.name || null, slug: ticket.workspace?.slug || null },
         appTicketUrl: `${publicBaseUrl()}/tickets/${ticket.id}`,
-        publicStatusUrl,
       },
       approvers,
       meta: { viewedAt: viewedAt.toISOString() },

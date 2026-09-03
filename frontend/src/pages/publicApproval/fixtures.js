@@ -48,7 +48,6 @@ const ticket = {
   },
   workspace: { name: 'IT', slug: 'it' },
   appTicketUrl: 'https://ticketpulse.bgcsaas.com/tickets/239934',
-  publicStatusUrl: null,
 };
 
 const baseApproval = {
