@@ -72,7 +72,7 @@ class TicketIntakeRunService {
    * Persist one extraction. Never throws — a bookkeeping failure must not
    * fail an Autofill the agent is waiting on; the caller gets `null`.
    */
-  async record({ workspaceId, actor = null, text = '', images = [], data, meta = {} }) {
+  async record({ workspaceId, actor = null, text = '', images = [], notes = '', data, meta = {} }) {
     try {
       const row = await prisma.ticketIntakeRun.create({
         data: {
@@ -89,6 +89,8 @@ class TicketIntakeRunService {
           requestSummary: {
             sourceSummary: data?.sourceSummary || null,
             textPreview: String(text || '').slice(0, TEXT_PREVIEW_CHARS),
+            notesPreview: notes ? String(notes).slice(0, TEXT_PREVIEW_CHARS) : null,
+            notesDetected: Boolean(meta.notesDetected),
             images: images.map((img) => ({
               name: img.fileName || null,
               size: img.buffer?.length || img.size || 0,

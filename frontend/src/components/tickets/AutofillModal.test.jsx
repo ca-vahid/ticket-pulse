@@ -397,3 +397,47 @@ describe('AutofillModal — v2 result panel', () => {
     expect(payload.meta.runId).toBe(123);
   });
 });
+
+
+describe('AutofillModal — AF3 technician notes', () => {
+  const openWithMaterial = () => {
+    const { editor } = renderModal();
+    typeText(editor, 'chat transcript here');
+    return editor;
+  };
+
+  test('the notes box is sent as the third argument, separate from the paste', async () => {
+    ticketsAPI.autofillExtract.mockResolvedValue(okResponse());
+    openWithMaterial();
+    fireEvent.change(screen.getByTestId('autofill-notes'), { target: { value: '  make it urgent, he needs a laptop  ' } });
+    fireEvent.click(screen.getByRole('button', { name: /read & propose/i }));
+    await waitFor(() => expect(ticketsAPI.autofillExtract).toHaveBeenCalledTimes(1));
+    const [text, images, notes] = ticketsAPI.autofillExtract.mock.calls[0];
+    expect(text).toContain('chat transcript here');
+    expect(Array.isArray(images)).toBe(true);
+    expect(notes).toBe('make it urgent, he needs a laptop');
+  });
+
+  test('a low-confidence priority the notes set is pre-ticked, chipped "from your notes", and the notes are echoed', async () => {
+    ticketsAPI.autofillExtract.mockResolvedValue(okResponse({
+      ...RESULT,
+      priorityHint: 4,
+      priorityFrom: 'notes',
+      notesApplied: ['priority', 'description'],
+      technicianNotes: 'also make it urgent and also make it that he has a new laptop',
+      notesDetected: true,
+      confidence: { ...RESULT.confidence, priority: 0.2 },
+    }));
+    openWithMaterial();
+    fireEvent.click(screen.getByRole('button', { name: /read & propose/i }));
+    const row = await screen.findByTestId('autofill-row-priority');
+    expect(within(row).getByRole('checkbox')).toBeChecked();
+    expect(within(row).getByTestId('autofill-row-priority-from-notes')).toHaveTextContent(/from your notes/i);
+    expect(within(row).getByText(/Urgent \(P4\)/)).toBeInTheDocument();
+    expect(screen.getByTestId('autofill-row-description-from-notes')).toBeInTheDocument();
+    expect(screen.queryByTestId('autofill-row-subject-from-notes')).toBeNull();
+    const notice = screen.getByTestId('autofill-notes-used');
+    expect(notice).toHaveTextContent('Treated as your notes');
+    expect(notice).toHaveTextContent('he has a new laptop');
+  });
+});

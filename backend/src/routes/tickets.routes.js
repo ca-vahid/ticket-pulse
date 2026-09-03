@@ -99,6 +99,7 @@ function parseTicketId(req) {
 // request that is forwarded to a paid vision model. Caps are duplicated in
 // ticketIntakeExtractService (which is imported lazily, like summarize).
 const AUTOFILL_MAX_TEXT_CHARS = 20000;
+const AUTOFILL_MAX_NOTES_CHARS = 2000;
 const AUTOFILL_MAX_IMAGES = 6;
 const AUTOFILL_MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const AUTOFILL_MAX_TOTAL_IMAGE_BYTES = 20 * 1024 * 1024;
@@ -209,6 +210,12 @@ router.post(
     if (text.length > AUTOFILL_MAX_TEXT_CHARS) {
       throw new ValidationError(`Pasted text is limited to ${AUTOFILL_MAX_TEXT_CHARS.toLocaleString()} characters`);
     }
+    // AF3: the technician's own notes (authoritative) ride in a separate field.
+    const rawNotes = req.body?.notes;
+    const notes = typeof rawNotes === 'string' ? rawNotes : '';
+    if (notes.length > AUTOFILL_MAX_NOTES_CHARS) {
+      throw new ValidationError(`Notes are limited to ${AUTOFILL_MAX_NOTES_CHARS.toLocaleString()} characters`);
+    }
     const files = req.files || [];
     const totalBytes = files.reduce((sum, file) => sum + (file.size || file.buffer?.length || 0), 0);
     if (totalBytes > AUTOFILL_MAX_TOTAL_IMAGE_BYTES) {
@@ -228,6 +235,7 @@ router.post(
       workspaceId: req.workspaceId,
       text,
       images,
+      notes,
       actorEmail: req.ticketActor?.email || null,
       actorTechnicianId: req.ticketActor?.technicianId || null,
     });
@@ -240,6 +248,7 @@ router.post(
       actor: req.ticketActor,
       text,
       images,
+      notes: result.data?.technicianNotes || notes,
       data: result.data,
       meta: result.meta,
     });

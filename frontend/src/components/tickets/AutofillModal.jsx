@@ -32,6 +32,7 @@ export const AUTOFILL_CAPS = Object.freeze({
   maxImageBytes: 5 * 1024 * 1024,
   maxTotalBytes: 20 * 1024 * 1024,
   maxTextChars: 20000,
+  maxNotesChars: 2000,
 });
 
 export const AUTOFILL_FIELDS = [
@@ -113,6 +114,7 @@ export default function AutofillModal({
   const [stage, setStage] = useState('compose'); // compose | loading | result
   const [dumpHtml, setDumpHtml] = useState('');
   const [dumpText, setDumpText] = useState('');
+  const [notes, setNotes] = useState(''); // AF3: the technician's own instructions (authoritative)
   const [staged, setStaged] = useState([]); // [{ id, file }]
   const [error, setError] = useState(null);
   const [dragOver, setDragOver] = useState(false);
@@ -230,15 +232,19 @@ export default function AutofillModal({
     setStage('loading');
     try {
       const prepared = await downscaleAll(staged.map((s) => s.file));
-      const res = await ticketsAPI.autofillExtract(dumpText.slice(0, AUTOFILL_CAPS.maxTextChars), prepared);
+      const res = await ticketsAPI.autofillExtract(dumpText.slice(0, AUTOFILL_CAPS.maxTextChars), prepared, notes.trim());
       if (!aliveRef.current) return;
       // The API client unwraps axios responses to the JSON envelope; tolerate a raw axios response too.
       const body = res && res.data && res.data.data !== undefined ? res.data : (res || {});
       const data = body.data || {};
       const nextSelected = {};
+      const fromNotes = Array.isArray(data.notesApplied) ? data.notesApplied : [];
       for (const f of AUTOFILL_FIELDS) {
         const value = fieldValue(data, f);
         let ok = hasValue(value) && !locked.has(f.key) && confidenceTier(data.confidence?.[f.confKey]) !== 'low';
+        // AF3: a value the technician's own notes set is ticked whatever the
+        // model's confidence — it is what they asked for (vocabulary still applies).
+        if (!ok && hasValue(value) && !locked.has(f.key) && fromNotes.includes(f.key) && !['requester', 'assignee'].includes(f.key)) ok = true;
         if (ok && f.key === 'category' && categoryNames.length && !matchByName(value, categoryNames)) ok = false;
         if (ok && f.key === 'type' && typeNames.length && !matchByName(value, typeNames)) ok = false;
         if (ok && f.key === 'priority' && !(Number(value) >= 1 && Number(value) <= 4)) ok = false;
@@ -476,6 +482,23 @@ export default function AutofillModal({
                 />
               </div>
 
+              {/* (a2) AF3 — the technician's own notes: authoritative, applied on top of the paste */}
+              <div>
+                <label htmlFor="autofill-notes" className="block text-xs font-semibold text-foreground/85">
+                  Your notes for the AI <span className="font-normal text-muted-foreground/75">(optional — applied on top of the paste)</span>
+                </label>
+                <textarea
+                  id="autofill-notes"
+                  data-testid="autofill-notes"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value.slice(0, AUTOFILL_CAPS.maxNotesChars))}
+                  rows={2}
+                  maxLength={AUTOFILL_CAPS.maxNotesChars}
+                  placeholder="Anything the material doesn’t say — “make it urgent”, “he also needs a new laptop”, “Soheil will handle it”."
+                  className="tp-focus-ring mt-1 w-full resize-y rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/75"
+                />
+              </div>
+
               {/* (c) caps + live counters */}
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px] text-muted-foreground/75">
                 <span className={overText ? 'font-semibold text-red-600 dark:text-red-300' : ''} aria-live="polite">
@@ -547,6 +570,12 @@ export default function AutofillModal({
 
           {stage === 'result' && result && (
             <div className="space-y-3">
+              {result.technicianNotes && (
+                <p className="text-xs text-violet-800 dark:text-violet-200 bg-violet-50 dark:bg-violet-500/10 border border-violet-200 dark:border-violet-500/20 rounded-lg px-3 py-2" data-testid="autofill-notes-used">
+                  <span className="font-semibold">{result.notesDetected ? 'Treated as your notes' : 'Your notes'}:</span> “{result.technicianNotes}”
+                  {result.notesDetected ? ' — typed next to the paste, so it was applied as your instruction rather than read as material.' : ''}
+                </p>
+              )}
               {hasValue(result.sourceSummary) && (
                 <p className="text-xs text-muted-foreground flex items-start gap-1.5" data-testid="autofill-source-summary">
                   <Sparkles className="w-3.5 h-3.5 mt-px flex-shrink-0 text-indigo-500" aria-hidden="true" />
@@ -576,6 +605,11 @@ export default function AutofillModal({
                           {hasValue(value) && (
                             <span className={`inline-flex items-center rounded-full border px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide ${TIER_CHIP[tier]}`} data-testid={`${id}-confidence`}>
                               {tier}
+                            </span>
+                          )}
+                          {hasValue(value) && Array.isArray(result.notesApplied) && result.notesApplied.includes(field.key) && (
+                            <span className="inline-flex items-center rounded-full border border-violet-200 dark:border-violet-500/30 bg-violet-50 dark:bg-violet-500/15 px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-violet-700 dark:text-violet-200" data-testid={`${id}-from-notes`}>
+                              from your notes
                             </span>
                           )}
                         </div>

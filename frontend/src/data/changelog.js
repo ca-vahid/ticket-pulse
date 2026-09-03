@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.8.27-preview';
+export const APP_VERSION = '3.8.28-preview';
 
 export const changelog = [
+  {
+    version: '3.8.28-preview',
+    date: 'September 2, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>✅ Autofill reads your notes, not just the screenshot</strong> — the modal has a new “Your notes for the AI” box for anything the material doesn’t say (“make it urgent”, “he also needs a new laptop”, “Soheil will handle it”). Notes are applied on top of the paste in the same single AI call: a priority you state wins outright, requirements become description bullets, a named handler becomes the assignee. Rows the notes changed carry a “from your notes” chip and are ticked whatever the model’s confidence. If you type a short note straight into the paste box next to a screenshot, it is detected and treated as your instruction (the result panel says so) instead of being read as untrusted material — which is why “make it urgent” was ignored before.' },
+      { type: 'improved', html: '<strong>Autofill priority rubric</strong> — the model now has explicit rules for Urgent / High / Medium / Low instead of guessing Medium; AI Usage shows the notes with each run.' },
+    ],
+  },
   {
     version: '3.8.27-preview',
     date: 'September 2, 2026',

@@ -99,6 +99,15 @@ export function proposalRows(result) {
   return rows;
 }
 
+/** requestSummary is an object ({ sourceSummary, textPreview, notesPreview, … }) — render one honest line. */
+function summaryLine(run) {
+  const rs = run?.requestSummary;
+  if (!rs) return null;
+  if (typeof rs === 'string') return rs;
+  const bits = [rs.sourceSummary || null, rs.notesPreview ? `Notes${rs.notesDetected ? ' (typed in the paste)' : ''}: ${rs.notesPreview}` : null].filter(Boolean);
+  return bits.length ? bits.join(' · ') : null;
+}
+
 function RunBlock({ run, defaultOpen = false }) {
   const [open, setOpen] = useState(defaultOpen);
   const result = run.result && typeof run.result === 'object' ? run.result : {};
@@ -120,7 +129,7 @@ function RunBlock({ run, defaultOpen = false }) {
         <p className="min-w-0 flex-1 text-xs text-muted-foreground">
           <span className="font-semibold text-foreground/85">Run #{run.id}</span>
           {stats.length > 0 && <span> · {stats.join(' · ')}</span>}
-          {run.requestSummary && <span className="block text-[11px] text-muted-foreground/75 truncate">{run.requestSummary}</span>}
+          {summaryLine(run) && <span className="block text-[11px] text-muted-foreground/75 truncate" title={summaryLine(run)}>{summaryLine(run)}</span>}
         </p>
         <button
           type="button"
