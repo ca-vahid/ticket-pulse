@@ -846,9 +846,11 @@ export const ticketsAPI = {
   // → PROPOSED ticket fields (never auto-submitted). Multipart; the vision
   // round-trip can take a while, so it rides the long-timeout client.
   // 400 = over caps, 429 = per-actor rate limit, 503 = no AI provider.
-  autofillExtract: async (text, images = []) => {
+  autofillExtract: async (text, images = [], notes = '') => {
     const form = new FormData();
     form.append('text', String(text || ''));
+    // AF3: the technician's own notes — authoritative, sent as a separate field.
+    if (notes && String(notes).trim()) form.append('notes', String(notes).trim());
     for (const file of images) form.append('images', file, file.name);
     return await apiLongTimeout.post('/tickets/autofill-extract', form, {
       // Let the browser set the multipart boundary.

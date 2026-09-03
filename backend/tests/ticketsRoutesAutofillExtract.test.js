@@ -131,6 +131,16 @@ describe('POST /api/tickets/autofill-extract (Phase AF)', () => {
     expect(extractMock).toHaveBeenCalledTimes(2);
   });
 
+  test('AF3: the notes field reaches the service and the run record; over 2 000 chars → 400', async () => {
+    await request(buildApp()).post('/api/tickets/autofill-extract')
+      .field('text', 'chat').field('notes', 'make it urgent').expect(200);
+    expect(extractMock.mock.calls[0][0]).toMatchObject({ text: 'chat', notes: 'make it urgent' });
+    expect(runServiceMock.record.mock.calls[0][0]).toMatchObject({ notes: 'make it urgent' });
+    const res = await request(buildApp()).post('/api/tickets/autofill-extract')
+      .field('text', 'chat').field('notes', 'n'.repeat(2001)).expect(400);
+    expect(res.body.message || res.body.error).toMatch(/2,000 characters/);
+  });
+
   test('400 when neither text nor images are provided', async () => {
     const res = await request(buildApp()).post('/api/tickets/autofill-extract').field('text', '   ').expect(400);
     expect(res.body.message).toMatch(/Paste some text or add at least one image/);

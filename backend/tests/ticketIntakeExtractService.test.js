@@ -36,6 +36,7 @@ jest.unstable_mockModule('../src/services/intakeResolvers.js', () => ({
 }));
 
 const {
+  detectTechnicianNotes, notesPriority,
   default: service,
   INTAKE_SCHEMA,
   INTAKE_LIMITS,
@@ -157,8 +158,12 @@ describe('ticketIntakeExtractService.extract — request shape', () => {
 
     expect(result.meta).toEqual({
       provider: 'anthropic', model: 'claude-sonnet-5', imageCount: 0, textChars: pasted.length,
+      notesChars: 0, notesDetected: false,
       durationMs: expect.any(Number), inputTokens: 1200, outputTokens: 340,
     });
+    expect(textBlock.text).toContain('(no technician notes)');
+    expect(result.data.notesApplied).toEqual([]);
+    expect(result.data.priorityFrom).toBe('material');
     expect(result.data).toMatchObject({
       subject: COMPLIANT.subject,
       requesterNameOrEmail: 'sam.lee@example.com',
@@ -451,8 +456,8 @@ describe('ticketIntakeExtractService.extract — hardening', () => {
     // Output shape is exactly the contract, regardless of what came back.
     expect(Object.keys(result.data).sort()).toEqual([
       'assigneeHint', 'assigneeMatch', 'categoryHint', 'categoryLevel', 'confidence', 'conversingAgent',
-      'description', 'descriptionHtml', 'descriptionText', 'peopleMentioned', 'priorityHint',
-      'requesterMatch', 'requesterNameOrEmail', 'sourceSummary', 'subject', 'typeHint',
+      'description', 'descriptionHtml', 'descriptionText', 'notesApplied', 'notesDetected', 'peopleMentioned', 'priorityFrom', 'priorityHint',
+      'requesterMatch', 'requesterNameOrEmail', 'sourceSummary', 'subject', 'technicianNotes', 'typeHint',
     ]);
     expect(result.data.subject).toHaveLength(120);
     expect(result.data.priorityHint).toBe(4); // in range → kept; the human Apply step is the guard
@@ -505,6 +510,10 @@ describe('ticketIntakeExtractService.extract — hardening', () => {
       typeHint: null,
       peopleMentioned: [],
       sourceSummary: '',
+      notesApplied: [],
+      priorityFrom: null,
+      technicianNotes: null,
+      notesDetected: false,
       requesterMatch: { status: 'none', candidate: null, candidates: [], reason: expect.any(String) },
       assigneeMatch: { status: 'none', technician: null, candidates: [], reason: expect.any(String) },
       confidence: { subject: 0, description: 0, requester: 0, category: 0, priority: 0, type: 0, assignee: 0 },
@@ -602,5 +611,79 @@ describe('ticketIntakeExtractService.extract — tool-call leak scrub', () => {
     expect(out.subject).toBe('keep me');
     expect(out.priorityHint).toBe(2);
     expect(out.description.request).toBe('r');
+  });
+});
+
+
+describe('AF3 — technician notes combine with the material in ONE call', () => {
+  test('detectTechnicianNotes: short imperative lines typed next to a screenshot are notes; transcripts and e-mails are not', () => {
+    const typed = detectTechnicianNotes(' [Image: screenshot-1.png] \r\n\r\n\r\nalso make it urgent and also make it that he has a new laptop');
+    expect(typed).toEqual({ material: '[Image: screenshot-1.png]', notes: 'also make it urgent and also make it that he has a new laptop', detected: true });
+    expect(detectTechnicianNotes('[Image: a.png]').detected).toBe(false);
+    expect(detectTechnicianNotes('').detected).toBe(false);
+    expect(detectTechnicianNotes('Simon Dickinson: can I get ChatGPT plus?\nVahid: let me ask Soheil', { imageCount: 1 }).detected).toBe(false);
+    // Text-only pastes are material, never notes — a requester's one-liner must not become an instruction.
+    expect(detectTechnicianNotes('also make it urgent').detected).toBe(false);
+    expect(detectTechnicianNotes('please make it urgent', { imageCount: 1 }).detected).toBe(true);
+    expect(detectTechnicianNotes('From: Sam\nSubject: printer\nIt jams', { imageCount: 1 }).detected).toBe(false);
+    expect(detectTechnicianNotes('Yesterday 3:20 PM\nhi there', { imageCount: 1 }).detected).toBe(false);
+    expect(detectTechnicianNotes('see https://x.io/ticket', { imageCount: 1 }).detected).toBe(false);
+    expect(detectTechnicianNotes('a'.repeat(401), { imageCount: 1 }).detected).toBe(false);
+  });
+
+  test('notesPriority reads plain words deterministically', () => {
+    expect(notesPriority('also make it urgent')).toBe(4);
+    expect(notesPriority('ASAP please')).toBe(4);
+    expect(notesPriority('high priority')).toBe(3);
+    expect(notesPriority('low priority, no rush')).toBe(1);
+    expect(notesPriority('normal priority')).toBe(2);
+    expect(notesPriority('he needs a new laptop')).toBeNull();
+    expect(notesPriority('')).toBeNull();
+  });
+
+  test('buildIntakeText fences the notes as AUTHORITATIVE, after the untrusted material', () => {
+    const text = buildIntakeText({ text: 'chat here', notes: 'make it urgent', imageCount: 1, vocabulary: { categoryTree: [], types: [] } });
+    const untrusted = text.indexOf('END UNTRUSTED MATERIAL');
+    const notes = text.indexOf('BEGIN TECHNICIAN NOTES');
+    expect(untrusted).toBeGreaterThan(-1);
+    expect(notes).toBeGreaterThan(untrusted);
+    expect(text).toContain('AUTHORITATIVE');
+    expect(text).toContain('make it urgent');
+    expect(text).toContain('apply the technician notes on top');
+  });
+
+  test('normalizeResult: a priority stated in the notes overrides the model (confidence ≥ 0.95, priorityFrom = notes)', () => {
+    const vocab = { categories: [], matchable: [], types: [], topsWithChildren: new Set() };
+    const out = normalizeResult({ ...COMPLIANT, priorityHint: 2, notesApplied: ['description'] }, vocab, { notes: 'also make it urgent and he has a new laptop' });
+    expect(out.priorityHint).toBe(4);
+    expect(out.confidence.priority).toBeGreaterThanOrEqual(0.95);
+    expect(out.notesApplied).toEqual(['description', 'priority']);
+    expect(out.priorityFrom).toBe('notes');
+    // No notes → notesApplied is ignored even if the model invents it.
+    const plain = normalizeResult({ ...COMPLIANT, notesApplied: ['priority'] }, vocab);
+    expect(plain.notesApplied).toEqual([]);
+    expect(plain.priorityFrom).toBe('material');
+  });
+
+  test('extract: notes typed into the paste are detected, sent in the trusted block, and echoed back', async () => {
+    const result = await service.extract({ workspaceId: 7, text: ' [Image: screenshot-1.png] \n\nalso make it urgent and also make it that he has a new laptop', images: [{ mimeType: 'image/png', buffer: Buffer.alloc(16, 1) }] });
+    const block = sendJsonMock.mock.calls[0][0].userMessage.at(-1).text;
+    expect(block).toContain('BEGIN TECHNICIAN NOTES');
+    expect(block).toContain('also make it urgent and also make it that he has a new laptop');
+    // The material block no longer carries the note as "data".
+    expect(block.slice(block.indexOf('BEGIN UNTRUSTED'), block.indexOf('END UNTRUSTED'))).not.toContain('make it urgent');
+    expect(result.data.technicianNotes).toBe('also make it urgent and also make it that he has a new laptop');
+    expect(result.data.notesDetected).toBe(true);
+    expect(result.data.priorityHint).toBe(4);
+    expect(result.data.priorityFrom).toBe('notes');
+    expect(result.meta).toMatchObject({ notesChars: 61, notesDetected: true });
+  });
+
+  test('extract: an explicit notes field wins over detection and is length-capped', async () => {
+    await service.extract({ workspaceId: 7, text: 'make it urgent', notes: 'low priority actually' });
+    const block = sendJsonMock.mock.calls[0][0].userMessage.at(-1).text;
+    expect(block.slice(block.indexOf('BEGIN TECHNICIAN'), block.indexOf('END TECHNICIAN'))).toContain('low priority actually');
+    expect(block.slice(block.indexOf('BEGIN UNTRUSTED'), block.indexOf('END UNTRUSTED'))).toContain('make it urgent');
+    await expect(service.extract({ workspaceId: 7, text: 'x', notes: 'n'.repeat(2001) })).rejects.toBeInstanceOf(ValidationError);
   });
 });

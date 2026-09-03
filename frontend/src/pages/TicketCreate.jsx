@@ -232,13 +232,18 @@ export default function TicketCreate() {
       const narrativeText = structuredText || legacyNarrative || String(result.description?.request || '').trim();
       const dump = sourceHtml ? sanitizeRichHtml(sourceHtml) : '';
       const dumpHasContent = Boolean((sourceText || '').trim()) || /<img\b/i.test(dump);
+      // AF3: when the only text in the paste was the agent's own note (detected and
+      // applied as instructions), label the dump honestly instead of "source material".
+      const notesOnlyDump = Boolean(result.technicianNotes)
+        && String(sourceText || '').replace(/\[Image:[^\]]*\]/gi, '').trim() === String(result.technicianNotes).trim();
+      const dumpLabel = notesOnlyDump ? 'Your notes to the AI (applied above)' : 'Source material (pasted)';
       // No <hr>/<details> — neither is in the composer's sanitizer allow-list;
       // a spaced bold heading survives edit/re-sanitize round-trips.
       const html = narrativeHtml + (dumpHasContent
-        ? `<p><br></p><p><strong>— Source material (pasted) —</strong></p><div>${dump}</div>`
+        ? `<p><br></p><p><strong>— ${dumpLabel} —</strong></p><div>${dump}</div>`
         : '');
       setDescription(html);
-      setDescriptionText(dumpHasContent ? `${narrativeText}\n\n— Source material (pasted) —\n${sourceText || ''}` : narrativeText);
+      setDescriptionText(dumpHasContent ? `${narrativeText}\n\n— ${dumpLabel} —\n${sourceText || ''}` : narrativeText);
     }
 
     // Assignee (v2): only a clean technician match reaches here (the modal
@@ -261,7 +266,13 @@ export default function TicketCreate() {
     let classified = false;
     if (want('priority')) {
       const p = Number(result.priorityHint);
-      if (p >= 1 && p <= 4) { setPriority(p); classified = true; }
+      if (p >= 1 && p <= 4) {
+        setPriority(p);
+        classified = true;
+        // AF3: a priority the agent stated in their notes is theirs — pin it so
+        // nothing later (templates, AI assessment) can quietly downgrade it.
+        if (result.priorityFrom === 'notes') markTouched('priority');
+      }
     }
     if (want('type') && result.typeHint) {
       const name = matchByName(result.typeHint, activeTypes.map((t) => t.name));

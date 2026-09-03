@@ -67,6 +67,8 @@ describe('record', () => {
     expect(arg.data.requestSummary).toEqual({
       sourceSummary: 'Teams chat screenshot',
       textPreview: 'x'.repeat(500),
+      notesPreview: null,
+      notesDetected: false,
       images: [{ name: 'teams.png', size: 1234, type: 'image/png' }],
     });
     expect(JSON.stringify(arg.data)).not.toContain(buffer.toString('base64').slice(0, 20));
