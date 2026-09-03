@@ -89,7 +89,7 @@ describe('PublicApprovalDecision (approval redesign)', () => {
     expect(screen.getByText(/sent to you by/)).toHaveTextContent(/Requested for Ingrid Berru Garcia · Geotechnical Engineer, Vancouver · sent to you by Marcus Blackstock on Sep 1/);
     const view = screen.getByRole('link', { name: /View ticket/ });
     expect(view).toHaveAttribute('href', 'https://ticketpulse.bgcsaas.com/tickets/239934');
-    expect(view).toHaveAttribute('title', expect.stringMatching(/signed in/));
+    expect(view).toHaveAttribute('title', expect.stringMatching(/sign in/));
     expect(screen.getByRole('button', { name: /Copy ref/ })).toBeInTheDocument();
     expect(screen.getAllByText('IT workspace').length).toBeGreaterThan(0);
 
@@ -337,12 +337,30 @@ describe('PublicApprovalDecision (approval redesign)', () => {
     expect(await screen.findByRole('button', { name: /Copied/ })).toBeInTheDocument();
   });
 
-  test('View ticket prefers the public status URL when present', async () => {
+  test('View ticket always opens the FULL ticket in the app, never the thin public status page', async () => {
     apiMock.get.mockReturnValue(ok({ ...pendingFixture, ticket: { ...pendingFixture.ticket, publicStatusUrl: 'https://ticketpulse.bgcsaas.com/ticket-status/abc' } }));
     renderPage();
     const view = await screen.findByRole('link', { name: /View ticket/ });
-    expect(view).toHaveAttribute('href', 'https://ticketpulse.bgcsaas.com/ticket-status/abc');
-    expect(view).toHaveAttribute('title', 'Open the ticket status page');
+    expect(view).toHaveAttribute('href', pendingFixture.ticket.appTicketUrl);
+    expect(view.getAttribute('href')).not.toContain('ticket-status');
+    expect(view).toHaveAttribute('title', expect.stringContaining('full ticket in Ticket Pulse'));
+  });
+
+  test('in dark mode the ticket body follows the PAGE theme: author backgrounds are dropped, no light paper well', async () => {
+    localStorage.setItem('tp_public_theme', 'dark');
+    apiMock.get.mockReturnValue(ok({
+      ...pendingFixture,
+      ticket: {
+        ...pendingFixture.ticket,
+        descriptionHtml: '<table><tbody><tr><td bgcolor="#ffffcc" style="background-color:#cfe2f3;color:#000">quote</td></tr></tbody></table>',
+      },
+    }));
+    renderPage();
+    const body = (await screen.findByText('quote')).closest('.tp-rich-body');
+    expect(body).toHaveClass('tp-rich-body--themed');
+    expect(body).not.toHaveClass('tp-rich-body--paper');
+    expect(body.innerHTML).not.toContain('bgcolor');
+    expect(body.innerHTML).not.toContain('#cfe2f3');
   });
 
   test('description falls back to plain text when there is no HTML', async () => {

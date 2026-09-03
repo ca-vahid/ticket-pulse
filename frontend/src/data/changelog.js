@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.8.28-preview';
+export const APP_VERSION = '3.8.29-preview';
 
 export const changelog = [
+  {
+    version: '3.8.29-preview',
+    date: 'September 3, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Approval page — “View ticket” opens the real ticket</strong> — the button used to prefer the public status page, which shows far less than the approval page itself. It now always opens the full ticket in Ticket Pulse (approvers have accounts and can act on it there). No public status token is minted for an approval any more.' },
+      { type: 'fixed', html: '<strong>Approval page dark mode</strong> — the ticket description and the agent’s note stayed on a light panel when the page was switched to dark. The page has its own light/dark choice (approvers arrive with no session), and the e-mail-body renderer was reading the app’s theme instead of the page’s. It now follows the page, and on this surface pasted tables are re-themed dark rather than kept on a mail-client paper panel.' },
+      { type: 'improved', html: '<strong>Approval page layout</strong> — the reading column is wider (the card grows 1040 → 1240 px, all of it going to the note and description), and the description preview shows more before “Show full description”, so a pasted quote table is not squeezed into a thin scrolling strip.' },
+    ],
+  },
   {
     version: '3.8.28-preview',
     date: 'September 2, 2026',

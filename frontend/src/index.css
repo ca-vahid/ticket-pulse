@@ -513,6 +513,27 @@ code {
     color: hsl(var(--foreground));
     font-weight: 600;
   }
+  /* The ticket description well: author borders are gone in dark (the
+     neutraliser drops them with the backgrounds), so give its tables the same
+     token-coloured grid the note gets — but let them wrap (no max-content). */
+  .tp-approval-desc .tp-rich-body table {
+    border-collapse: collapse;
+    margin: 0.5rem 0 0.25rem;
+    font-size: 0.8125rem;
+    border: 1px solid hsl(var(--border));
+  }
+  .tp-approval-desc .tp-rich-body table td,
+  .tp-approval-desc .tp-rich-body table th {
+    border: 1px solid hsl(var(--border));
+    padding: 0.4rem 0.625rem;
+    text-align: left;
+    vertical-align: top;
+  }
+  .tp-approval-desc .tp-rich-body table th {
+    background: hsl(var(--muted));
+    color: hsl(var(--foreground));
+    font-weight: 600;
+  }
   .dark .tp-approval-note .tp-rich-body--themed table td,
   .dark .tp-approval-note .tp-rich-body--themed table th {
     border-color: hsl(var(--border));
