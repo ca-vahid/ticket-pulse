@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.8.30-preview';
+export const APP_VERSION = '3.8.31-preview';
 
 export const changelog = [
+  {
+    version: '3.8.31-preview',
+    date: 'September 4, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Tickets page header is a single slim row</strong> — the illustrated band that spent about 90&nbsp;px repeating the page name is gone. The title, the workspace and both actions (Export, New ticket) now sit on one 33&nbsp;px line, so the queue starts a full ticket row higher.' },
+      { type: 'fixed', html: '<strong>The “new updates” pill</strong> — it now reads <em>↻ 12 new</em> instead of a long sentence, is taller and easier to hit, and the count is part of the text rather than a badge stuck on an icon. At three digits (“99+”) that badge used to break out of the pill and float outside it; nothing can overflow now at any count. Clicking still confirms with “Refreshing…” then “Up to date”.' },
+    ],
+  },
   {
     version: '3.8.30-preview',
     date: 'September 3, 2026',
