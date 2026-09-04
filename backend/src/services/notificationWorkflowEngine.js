@@ -243,6 +243,22 @@ function safeJson(value) {
   }));
 }
 
+/**
+ * Ids a parked run needs to rebuild the identities that the audit redaction
+ * strips from its stored context (QA 09-03). Ids only — no addresses are
+ * written to the run row.
+ */
+function resumeContextHints(eventContext) {
+  const ticketId = Number(eventContext?.ticket?.id) || null;
+  const previousAgentId = Number(eventContext?.previousAgent?.id) || null;
+  const auditRowId = Number(eventContext?.event?.extra?.auditRowId) || null;
+  return {
+    ...(ticketId ? { ticketId } : {}),
+    ...(previousAgentId ? { previousAgentId } : {}),
+    ...(auditRowId ? { auditRowId } : {}),
+  };
+}
+
 function safeAuditJson(value) {
   return sanitizeWorkflowAuditPayload(safeJson(value));
 }
@@ -2964,7 +2980,7 @@ export async function executeDefinition({
         status: 'waiting',
         resumeAt,
         resumeNodeId: trigger.id,
-        resumeState: safeJson({ state, coalescing: true }),
+        resumeState: safeJson({ state, coalescing: true, hints: resumeContextHints(eventContext) }),
       },
     });
     workflowAbort.cleanup();
@@ -3043,7 +3059,7 @@ export async function executeDefinition({
               status: 'waiting',
               resumeAt,
               resumeNodeId: resumeTargets[0],
-              resumeState: safeJson({ state }),
+              resumeState: safeJson({ state, hints: resumeContextHints(eventContext) }),
             },
           });
           workflowAbort.cleanup();
@@ -4027,6 +4043,19 @@ async function resumeRun(run) {
   if (!definition) throw new Error('No definition available to resume');
   if (!run.resumeNodeId) throw new Error('Run has no resume node');
 
+  // The stored context is the AUDIT copy: people objects and address lists were
+  // replaced with `has…` flags before it was written. Rehydrate them from the
+  // database (ids only ever left the run row) so recipients still resolve after
+  // a park — QA 09-03 / TP-1221: a coalesced "Ticket updated" run mailed nobody.
+  const hints = run.resumeState?.hints || {};
+  let eventContext = run.eventContext;
+  try {
+    const { restoreRedactedEventContext } = await import('./ticketLifecycleNotificationService.js');
+    eventContext = (await restoreRedactedEventContext(run.eventContext, hints)) || run.eventContext;
+  } catch (error) {
+    logger.warn('Workflow resume: context rehydrate failed, using the stored copy', { runId: run.id, error: error.message });
+  }
+
   // Back to running before continuing so a crashed resume is visible.
   await prisma.notificationWorkflowRun.update({
     where: { id: run.id },
@@ -4036,7 +4065,7 @@ async function resumeRun(run) {
   return executeDefinition({
     workflow,
     definition,
-    eventContext: run.eventContext,
+    eventContext,
     dryRun: run.dryRun === true,
     executionMode: run.executionMode || EXECUTION_MODE_LIVE,
     triggerSource: run.triggerSource || 'delay_resume',
