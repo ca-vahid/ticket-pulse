@@ -1,16 +1,22 @@
-import { Check, Inbox, RefreshCw } from 'lucide-react';
+import { Check, RefreshCw } from 'lucide-react';
 
 /**
- * "N updates — refresh" pill for the ticket queue.
+ * "N new" pill for the ticket queue.
  *
  * Lifecycle (driven by the parent's `state`):
- *   idle  — count > 0: springy drop-in, ambient pulse, and a notification-style
- *           count badge perched on the inbox icon (re-keyed per value so the
- *           pop animation replays when the number moves).
+ *   idle  — count > 0: springy drop-in, ambient pulse, and the count popping
+ *           in place whenever the number moves (re-keyed per value).
  *   busy  — the click landed: morphs into "Refreshing…" with a spinner while
  *           the list re-fetches and diff-highlights what changed.
  *   done  — brief emerald "Up to date" confirmation, then fades itself out
  *           (the parent unmounts it right after).
+ *
+ * The count is part of the text run, not a badge perched on an icon: at three
+ * characters ("99+") the old badge cleared the pill's rounded edge and floated
+ * outside it. Nothing here can overflow at any count.
+ *
+ * Blue stays `blue-600` in BOTH themes — the dark-mode `primary` token is a
+ * light blue, and white on it misses AA.
  *
  * Sticky (not absolute) so it stays visible below the app header even when
  * the user is scrolled deep into the list — updates can't arrive unseen.
@@ -18,6 +24,7 @@ import { Check, Inbox, RefreshCw } from 'lucide-react';
 export default function LiveUpdatePill({ count, state = 'idle', onApply }) {
   const busy = state === 'busy';
   const done = state === 'done';
+  const shown = count > 99 ? '99+' : count;
 
   return (
     <div className={`sticky top-[76px] z-20 h-0 flex justify-center pointer-events-none ${done ? '' : 'tp-pill-enter'}`}>
@@ -25,8 +32,8 @@ export default function LiveUpdatePill({ count, state = 'idle', onApply }) {
         type="button"
         onClick={onApply}
         disabled={busy || done}
-        title={done ? undefined : busy ? undefined : 'Load the changes into the list — new and updated rows get highlighted'}
-        className={`pointer-events-auto inline-flex items-center gap-2 pl-3.5 pr-4 py-2 rounded-full text-sm font-semibold text-white shadow-soft transition-all duration-200 tp-focus-ring ${
+        title={done || busy ? undefined : `${count} ticket update${count === 1 ? '' : 's'} — load them into the list (new and updated rows get highlighted)`}
+        className={`pointer-events-auto inline-flex items-center gap-2 rounded-full pl-3.5 pr-4 py-2.5 text-sm leading-5 font-semibold text-white shadow-soft transition-all duration-200 tp-focus-ring ${
           done
             ? 'bg-emerald-600 tp-pill-done'
             : busy
@@ -46,18 +53,13 @@ export default function LiveUpdatePill({ count, state = 'idle', onApply }) {
           </>
         ) : (
           <>
-            {/* Inbox wearing the count — the ring matches the pill background
-                so the badge reads punched-out, never bigger than the pill. */}
-            <span aria-hidden="true" className="relative inline-flex mr-1">
-              <Inbox className="w-[18px] h-[18px]" />
-              <span
-                key={count}
-                className="tp-count-pop absolute -top-1.5 -right-2 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-card px-1 text-[10px] font-extrabold leading-none text-blue-700 dark:text-blue-200 ring-2 ring-blue-600"
-              >
-                {count > 99 ? '99+' : count}
-              </span>
+            <RefreshCw className="w-4 h-4" aria-hidden="true" />
+            <span>
+              {/* Re-keyed so the number pops when it moves, without moving the pill. */}
+              <span key={count} className="tp-count-pop inline-block text-[15px] leading-5 font-extrabold tabular-nums">{shown}</span>
+              {' '}
+              <span className="font-semibold text-white/85">new</span>
             </span>
-            {count === 1 ? 'New update' : 'New updates'} — refresh
           </>
         )}
         {/* Screen readers hear count changes without the pill stealing focus. */}

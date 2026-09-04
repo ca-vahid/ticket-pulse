@@ -33,8 +33,6 @@ import { useAuth } from '../contexts/AuthContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useWorkspaceRole } from '../components/nav/navDestinations';
 import { useSSE } from '../hooks/useSSE';
-import ticketsHeroArt from '../assets/tickets-hero.png';
-import ticketsHeroArtDark from '../assets/tickets-hero-dark.png';
 
 // Status vocabulary comes from the workspace registry in the queue meta
 // (Phase 8b, statusDefs.js) — canonical 4 until meta loads.
@@ -1290,48 +1288,35 @@ export default function Tickets() {
 
       {/* pb clears the mobile bottom tab bar (QA 07-06 #11) */}
       <main className="max-w-[2200px] mx-auto px-4 sm:px-6 py-6 pb-20 md:pb-6 animate-fadeIn">
-        {/* Hero band: gpt-image-2 artwork, content sits on the card-coloured
-            fade. Two arts (DM-B): the light wallpaper is a light image that
-            cannot be inverted, so the night twin swaps in under `.dark` via
-            class visibility (no JS, no flash). The veil is lighter in dark —
-            the night art is already deep on its left half, so it only needs
-            a thin wash to keep the title crisp. */}
-        <div className="relative overflow-hidden rounded-2xl border border-card/70 dark:border-border shadow-subtle mb-4">
-          <img src={ticketsHeroArt} alt="" aria-hidden="true" className="absolute inset-0 h-full w-full object-cover object-right dark:hidden" />
-          {/* object-[right_62%]: the night art's glow band sits below its
-              vertical middle — the short desktop band would otherwise crop to
-              its darkest strip and read as a plain dark rectangle. */}
-          <img src={ticketsHeroArtDark} alt="" aria-hidden="true" className="absolute inset-0 hidden h-full w-full object-cover object-[right_62%] dark:block" />
-          <div aria-hidden="true" className="absolute inset-0 bg-gradient-to-r from-card/95 via-card/75 to-white/25 dark:from-card/60 dark:via-card/25 dark:to-transparent" />
-          <div className="relative px-4 sm:px-5 py-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h1 className="text-xl font-bold text-foreground">Tickets</h1>
-                <p className="text-sm text-muted-foreground">
-                  {currentWorkspace?.name ? `${currentWorkspace.name} workspace` : 'Workspace'} · tickets born here and synced from FreshService
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={exportCsv}
-                  disabled={isExporting || isLoading}
-                  className="tp-focus-ring inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-muted-foreground bg-card/90 border border-border rounded-lg hover:border-blue-300 dark:hover:border-blue-500/40 hover:text-blue-700 dark:hover:text-blue-200 disabled:opacity-50"
-                  title="Export the current filtered list as CSV (up to 5000 rows)"
-                >
-                  <Download className="w-4 h-4" aria-hidden="true" />
-                  {isExporting ? 'Exporting…' : 'Export'}
-                </button>
-                {ticketingOn && (
-                  <button
-                    onClick={() => navigate('/tickets/new')}
-                    className="tp-focus-ring inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground text-sm font-semibold rounded-lg shadow-subtle hover:bg-blue-700 transition-colors"
-                  >
-                    <Plus className="w-4 h-4" aria-hidden="true" />
-                    New ticket
-                  </button>
-                )}
-              </div>
-            </div>
+        {/* Page header (v3.8.31): one slim row. The artwork band spent ~94 px and
+            a subtitle to repeat the page you are already on; the title, the
+            workspace and both actions fit on a single 33 px line. */}
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 min-w-0">
+            <h1 className="text-lg font-bold text-foreground">Tickets</h1>
+            <span className="rounded-full bg-muted px-2.5 py-0.5 text-[11.5px] font-semibold text-muted-foreground">
+              {currentWorkspace?.name ? `${currentWorkspace.name} workspace` : 'Workspace'}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={exportCsv}
+              disabled={isExporting || isLoading}
+              className="tp-focus-ring inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-muted-foreground bg-card border border-border rounded-lg hover:border-blue-300 dark:hover:border-blue-500/40 hover:text-blue-700 dark:hover:text-blue-200 disabled:opacity-50"
+              title="Export the current filtered list as CSV (up to 5000 rows)"
+            >
+              <Download className="w-4 h-4" aria-hidden="true" />
+              {isExporting ? 'Exporting…' : 'Export'}
+            </button>
+            {ticketingOn && (
+              <button
+                onClick={() => navigate('/tickets/new')}
+                className="tp-focus-ring inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground text-sm font-semibold rounded-lg shadow-subtle hover:bg-blue-700 transition-colors"
+              >
+                <Plus className="w-4 h-4" aria-hidden="true" />
+                New ticket
+              </button>
+            )}
           </div>
         </div>
 
