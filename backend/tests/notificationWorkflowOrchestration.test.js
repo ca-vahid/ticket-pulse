@@ -15,10 +15,11 @@ const prismaMock = {
   publicTicketStatusSettings: { upsert: jest.fn() },
   publicTicketStatusLink: { findUnique: jest.fn() },
   ticket: { findFirst: jest.fn(), findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
+  technician: { findUnique: jest.fn() },
   // FR 08-05 Phase 1b: typed custom-field conditions + category-by-name.
   customFieldDefinition: { findMany: jest.fn() },
   competencyCategory: { findMany: jest.fn(), findFirst: jest.fn() },
-  ticketActivity: { create: jest.fn() },
+  ticketActivity: { create: jest.fn(), findUnique: jest.fn() },
   mirrorJob: { findFirst: jest.fn(), create: jest.fn() },
   ticketThreadEntry: { findMany: jest.fn() },
   notificationDelivery: { upsert: jest.fn(), findUnique: jest.fn(), update: jest.fn(), create: jest.fn() },
@@ -56,8 +57,11 @@ const {
   default: engine,
   executeDefinition,
   resumeWaitingRuns,
+  sanitizeWorkflowAuditPayload,
   invalidateCustomFieldConditionTypesCache,
 } = await import('../src/services/notificationWorkflowEngine.js');
+
+const { buildDefaultWorkflowDefinition } = await import('../src/services/notificationWorkflowDefinition.js');
 
 const eventContext = (over = {}) => ({
   event: { type: 'ticket.created', source: 'test', occurredAt: '2026-07-07T10:00:00.000Z', dedupeStamp: `t-${Math.random()}` },
@@ -68,6 +72,15 @@ const eventContext = (over = {}) => ({
   previousAgent: null,
   ...over,
 });
+
+// The seeded "Ticket updated (fields)" graph, with the recipient node retargeted —
+// a hand-rolled graph would fail definition validation.
+function fieldsUpdatedDefinition({ to, cc }) {
+  const definition = buildDefaultWorkflowDefinition('ticket.fields_updated');
+  const recipients = definition.nodes.find((n) => n.type === 'recipient_resolver');
+  recipients.data = { ...recipients.data, to, cc };
+  return definition;
+}
 
 function branchDefinition() {
   return {
@@ -284,6 +297,87 @@ describe('delay node — park and durable resume', () => {
       .map((c) => c[0])
       .find((c) => c.data?.status === 'completed' && c.where.id === 901);
     expect(completed).toBeTruthy();
+  });
+
+  // QA 09-03 (TP-1221): run rows store the AUDIT copy of the context, where
+  // `requester` / `assignedAgent` / address lists are replaced by `has…` flags.
+  // Resuming from that copy left every person-shaped recipient unresolvable, so
+  // a coalesced "Ticket updated" mail was skipped with "No recipient email
+  // address resolved". The resume must rehydrate identities from the database.
+  test('a parked run resumes with identities rehydrated from the DB, not the redacted copy', async () => {
+    const definition = fieldsUpdatedDefinition({ to: ['assigned_agent'], cc: ['requester'] });
+    // Exactly what the run row holds after sanitizeWorkflowAuditPayload.
+    const stored = sanitizeWorkflowAuditPayload(eventContext({
+      event: { type: 'ticket.fields_updated', source: 'ticketpulse_native', occurredAt: '2026-09-03T23:19:58.000Z', dedupeStamp: 'fields:100', extra: { actorKind: 'human', actorName: 'Susan Xu', actorEmail: 'susan@example.com', auditRowId: 4242, changedFields: ['description'] } },
+      assignedAgent: { id: 9, name: 'Susan Xu', email: 'susan@example.com' },
+    }));
+    expect(stored.assignedAgent).toBeUndefined();
+    expect(stored.hasAssignedAgent).toBe(true);
+
+    prismaMock.notificationWorkflowRun.findMany.mockResolvedValue([{
+      id: 902, workflowId: 31, workflowVersionId: null, workspaceId: 1,
+      eventContext: stored, dryRun: false, executionMode: 'live', triggerSource: 'ticketpulse_native',
+      status: 'waiting', resumeAt: new Date(Date.now() - 60000), resumeNodeId: 'recipients',
+      resumeState: { state: {}, hints: { ticketId: 100, auditRowId: 4242 } },
+    }]);
+    prismaMock.notificationWorkflow.findUnique.mockResolvedValue({
+      id: 31, workspaceId: 1, triggerType: 'ticket.fields_updated', publishedVersion: 1, publishedDefinition: definition, versions: [],
+    });
+    prismaMock.ticket.findUnique.mockResolvedValue({
+      id: 100, workspaceId: 1, origin: 'ticketpulse', status: 'Open', priority: 3, subject: 'VPN access problem',
+      createdAt: new Date(), workspace: { id: 1, name: 'IT', defaultTimezone: 'America/Vancouver' },
+      requester: { id: 4, name: 'Rita', email: 'rita@example.com' },
+      assignedTech: { id: 9, name: 'Susan Xu', email: 'susan@example.com' },
+    });
+    prismaMock.ticketActivity.findUnique = jest.fn().mockResolvedValue({ details: { actorEmail: 'susan@example.com' } });
+
+    const summary = await resumeWaitingRuns();
+    expect(summary).toEqual({ due: 1, resumed: 1 });
+
+    const steps = prismaMock.notificationWorkflowStepRun.update.mock.calls.map(([c]) => c.data).filter(Boolean);
+    const resolver = steps.find((d) => d.output?.recipients);
+    // Step outputs are stored through the audit sanitizer, so addresses read
+    // back as "[redacted-email]" — the COUNTS are what this guards.
+    // The assignee IS the editor here, so fields_updated drops them (and now
+    // says so again), while the requester in cc still receives the mail.
+    expect(resolver.output.recipients.to).toEqual([]);
+    expect(resolver.output.actorExcluded).toBe('[redacted-email]');
+    expect(resolver.output.recipients.cc).toHaveLength(1);
+  });
+
+  test('a resumed run whose editor is NOT the assignee mails the assignee', async () => {
+    const definition = fieldsUpdatedDefinition({ to: ['assigned_agent'], cc: [] });
+    const stored = sanitizeWorkflowAuditPayload(eventContext({
+      event: { type: 'ticket.fields_updated', source: 'ticketpulse_native', occurredAt: '2026-09-03T23:19:58.000Z', dedupeStamp: 'fields:101', extra: { actorKind: 'human', actorName: 'Alvina Ho', actorEmail: 'alvina@example.com', auditRowId: 4243, changedFields: ['description'] } },
+      assignedAgent: { id: 9, name: 'Susan Xu', email: 'susan@example.com' },
+    }));
+    prismaMock.notificationWorkflowRun.findMany.mockResolvedValue([{
+      id: 903, workflowId: 32, workflowVersionId: null, workspaceId: 1,
+      eventContext: stored, dryRun: false, executionMode: 'live', triggerSource: 'ticketpulse_native',
+      status: 'waiting', resumeAt: new Date(Date.now() - 60000), resumeNodeId: 'recipients',
+      resumeState: { state: {}, hints: { ticketId: 100, auditRowId: 4243 } },
+    }]);
+    prismaMock.notificationWorkflow.findUnique.mockResolvedValue({
+      id: 32, workspaceId: 1, triggerType: 'ticket.fields_updated', publishedVersion: 1, publishedDefinition: definition, versions: [],
+    });
+    prismaMock.ticket.findUnique.mockResolvedValue({
+      id: 100, workspaceId: 1, origin: 'ticketpulse', status: 'Open', priority: 3, subject: 'VPN access problem',
+      createdAt: new Date(), workspace: { id: 1, name: 'IT', defaultTimezone: 'America/Vancouver' },
+      requester: { id: 4, name: 'Rita', email: 'rita@example.com' },
+      assignedTech: { id: 9, name: 'Susan Xu', email: 'susan@example.com' },
+    });
+    prismaMock.ticketActivity.findUnique = jest.fn().mockResolvedValue({ details: { actorEmail: 'alvina@example.com' } });
+
+    await resumeWaitingRuns();
+    const steps = prismaMock.notificationWorkflowStepRun.update.mock.calls.map(([c]) => c.data).filter(Boolean);
+    const resolver = steps.find((d) => d.output?.recipients);
+    // One recipient resolved (the assignee) — before the fix this was empty and
+    // the send step skipped with "No recipient email address resolved".
+    expect(resolver.output.recipients.to).toHaveLength(1);
+    // The editor is still excluded from their own change mail — they just are not the assignee here.
+    expect(resolver.output.actorExcluded).toBe('[redacted-email]');
+    const skippedForNoRecipient = steps.some((d) => d.output?.skipped === true && /No recipient email address resolved/.test(d.output?.reason || ''));
+    expect(skippedForNoRecipient).toBe(false);
   });
 });
 

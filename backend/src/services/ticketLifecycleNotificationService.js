@@ -591,6 +591,90 @@ export function buildEventContext({ event, ticket, previousAgent, source, status
   };
 }
 
+/**
+ * Rehydrate a REDACTED event context so a parked run can resume with real
+ * addresses (QA 09-03, TP-1221).
+ *
+ * Run records store the context through `sanitizeWorkflowAuditPayload`, which
+ * replaces `requester` / `assignedAgent` / `previousAgent` and every address
+ * list with `has…` booleans. A coalesced "Ticket updated" run parks for a few
+ * minutes and then resumes from that stripped copy, so `assigned_agent`
+ * resolved to nothing and the mail was skipped with "No recipient email
+ * address resolved" — and, for the same reason, the editing agent was no
+ * longer excluded from their own change mail.
+ *
+ * The identities are read back from the database instead of being stored a
+ * second time in the run row: the ticket carries the requester, the assignee
+ * and the address lists; `event.extra.auditRowId` carries the editor; the
+ * previous agent (assignment events behind a delay node) rides `hints` as a
+ * plain id. Everything else in the stored context — action URLs, availability,
+ * routing, policy — is preserved as-is.
+ *
+ * Never throws: an unresolvable ticket returns the stored context unchanged,
+ * which is exactly today's behaviour.
+ */
+export async function restoreRedactedEventContext(storedContext, hints = {}) {
+  if (!storedContext || typeof storedContext !== 'object') return storedContext;
+  const ticketId = Number(hints?.ticketId ?? storedContext.ticket?.id) || null;
+  if (!ticketId) return storedContext;
+  let ticket = null;
+  try {
+    ticket = await hydrateTicket(ticketId);
+  } catch (err) {
+    logger.warn(`Resume context rehydrate failed for ticket ${ticketId} (using stored copy): ${err.message}`);
+    return storedContext;
+  }
+  if (!ticket) return storedContext;
+
+  let previousAgent = null;
+  const previousAgentId = Number(hints?.previousAgentId) || null;
+  if (previousAgentId) {
+    previousAgent = await prisma.technician.findUnique({
+      where: { id: previousAgentId },
+      select: { id: true, name: true, email: true },
+    }).catch(() => null);
+  }
+
+  const fresh = buildEventContext({
+    event: storedContext.event || {},
+    ticket,
+    previousAgent,
+    source: storedContext.event?.source || null,
+  });
+
+  // The editing agent, for the "don't mail me about my own edit" exclusion.
+  let actorEmail = null;
+  const auditRowId = Number(hints?.auditRowId ?? storedContext.event?.extra?.auditRowId) || null;
+  if (auditRowId) {
+    const row = await prisma.ticketActivity.findUnique({
+      where: { id: auditRowId },
+      select: { details: true },
+    }).catch(() => null);
+    const candidate = row?.details?.actorEmail;
+    if (typeof candidate === 'string' && candidate.includes('@')) actorEmail = candidate;
+  }
+
+  const event = storedContext.event ? { ...storedContext.event } : null;
+  if (event && event.extra && typeof event.extra === 'object' && actorEmail && !event.extra.actorEmail) {
+    event.extra = { ...event.extra, actorEmail };
+  }
+
+  return {
+    ...storedContext,
+    ...(event ? { event } : {}),
+    requester: fresh.requester,
+    assignedAgent: fresh.assignedAgent,
+    previousAgent: fresh.previousAgent,
+    ticket: {
+      ...(storedContext.ticket || {}),
+      toEmails: fresh.ticket.toEmails,
+      ccEmails: fresh.ticket.ccEmails,
+      replyCcEmails: fresh.ticket.replyCcEmails,
+      fwdEmails: fresh.ticket.fwdEmails,
+    },
+  };
+}
+
 export async function emitTicketLifecycleNotifications({
   existingTicket,
   upsertedTicket,
@@ -728,4 +812,5 @@ export default {
   emitTicketLifecycleNotifications,
   emitTicketEvent,
   lifecycleNotificationFingerprint,
+  restoreRedactedEventContext,
 };

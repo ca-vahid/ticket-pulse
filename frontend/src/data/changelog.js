@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.8.29-preview';
+export const APP_VERSION = '3.8.30-preview';
 
 export const changelog = [
+  {
+    version: '3.8.30-preview',
+    date: 'September 3, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>✅ “Ticket updated” workflows now reach their recipients</strong> — a workflow set to notify the assigned agent sent nothing (QA: TP-1221). The trigger groups edits made within a few minutes into one email, which parks the run and finishes it later; on resume the engine reloaded the copy of the event saved on the run, and that copy has names and addresses stripped out for privacy. Recipients chosen as people (assigned agent, requester, previous agent) therefore resolved to nobody and the email was skipped with “No recipient email address resolved”. The resume now reads those identities back from the ticket instead, so nothing sensitive is stored twice. This also restores the rule that keeps the person who made the edit off their own change email. Any workflow with a delay node was affected the same way.' },
+    ],
+  },
   {
     version: '3.8.29-preview',
     date: 'September 3, 2026',
