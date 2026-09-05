@@ -1275,6 +1275,10 @@ model Ticket {
   // Noise detection
   isNoise          Boolean @default(false) @map("is_noise")
   noiseRuleMatched String? @map("noise_rule_matched") @db.VarChar(100)
+  // QA 09-04 (F): a rule matched but the human-sender guard refused to auto-close. Kept for
+  // the audit panel so a suppressed dismissal is visible instead of silent.
+  noiseRuleSuppressed String? @map("noise_rule_suppressed") @db.VarChar(255)
+  noiseSuppressReason String? @map("noise_suppress_reason") @db.VarChar(120)
 
   // Bounce / rejection tracking
   rejectionCount  Int     @default(0) @map("rejection_count")
@@ -1376,6 +1380,13 @@ model NoiseRule {
   category        String    @db.VarChar(100)
   isEnabled       Boolean   @default(true) @map("is_enabled")
   mode            String    @default("noise") @db.VarChar(20) // noise | never_noise (never_noise = hard veto: matching tickets can never be auto-dismissed)
+  // QA 09-04 (B): a subject match alone is not evidence a MACHINE sent the mail — a person
+  // forwarding the same notification looks identical. When set, the rule only fires if the
+  // requester's address also matches this regex (e.g. the Exchange system mailbox).
+  senderPattern       String?  @map("sender_pattern") @db.Text
+  // QA 09-04 (A): rules that are SUPPOSED to swallow human forwards (phishing-simulation
+  // campaigns) opt back in; every other rule holds a person's mail for review instead.
+  autoCloseFromPeople Boolean  @default(false) @map("auto_close_from_people")
   matchCount      Int       @default(0) @map("match_count")
   dedupWindowDays Int?      @map("dedup_window_days")
   workspaceId     Int       @map("workspace_id")

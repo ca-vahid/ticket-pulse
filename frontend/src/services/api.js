@@ -1309,6 +1309,10 @@ export const noiseRulesAPI = {
   getStats: async () => {
     return await api.get('/noise-rules/stats');
   },
+  // QA 09-04 (F): what the rules closed, and what the sender guard held back.
+  activity: async (days = 30) => {
+    return await api.get('/noise-rules/activity', { params: { days } });
+  },
 
   create: async (rule) => {
     return await api.post('/noise-rules', rule);

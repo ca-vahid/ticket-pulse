@@ -188,7 +188,10 @@ describe('noiseRuleService.evaluate (noise mode unchanged, NT-2 zero-behavior-ch
 
   test('noise-mode rules keep matching on subject only', async () => {
     const result = await noiseRuleService.evaluate('[BGC-FDR] Synology replication failed', null, 1);
-    expect(result).toEqual({ isNoise: true, ruleId: 'Synology NAS Alerts', category: 'infrastructure' });
+    // QA 09-04 added the suppression fields; a match with no requester context still
+    // behaves exactly as before (the sender guard re-checks before anything is closed).
+    expect(result).toMatchObject({ isNoise: true, ruleId: 'Synology NAS Alerts', category: 'infrastructure' });
+    expect(result.suppressedRule).toBeNull();
   });
 });
 

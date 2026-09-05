@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.8.31-preview';
+export const APP_VERSION = '3.8.32-preview';
 
 export const changelog = [
+  {
+    version: '3.8.32-preview',
+    date: 'September 5, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>✅ Noise rules can no longer close a ticket a person sent</strong> — a rule matched the <em>subject only</em>, so a colleague forwarding their own “Your archive mailbox is almost full” warning looked identical to the machine’s original notice and was auto-closed unread (QA: Rod Kostaschuk). Before a rule may close anything, the sender now has to look automated: a forwarded or replied subject, or a requester who also files ordinary tickets, keeps the ticket in the queue where the AI and the team can read it. Automated alerts — Synology, Veeam, Azure Backup, Site24x7 — are untouched.' },
+      { type: 'improved', html: '<strong>Rules can require the sender’s address</strong> — a rule can now match on who sent it as well as what it says. The mailbox-capacity rule now fires only for Exchange itself; 12 of the 13 tickets it had ever caught were employees asking for help.' },
+      { type: 'improved', html: '<strong>Settings → Noise Rules shows what the rules did</strong> — a new panel lists the last 30 days in two halves: tickets held back for review (with who sent them and why) and tickets auto-closed. Campaign rules that are supposed to swallow forwards, like a phishing simulation, opt in with one switch.' },
+    ],
+  },
   {
     version: '3.8.31-preview',
     date: 'September 4, 2026',
