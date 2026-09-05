@@ -9,6 +9,41 @@ export const NOISE_RULE_MODES = ['noise', 'never_noise'];
 // (subjects and category names are short; descriptions can be huge emails).
 const NEVER_NOISE_DESCRIPTION_LIMIT = 2048;
 
+// ---------------------------------------------------------------------------
+// Human-sender guard (QA 09-04, phase A).
+//
+// A noise rule tests the SUBJECT only, and a subject cannot tell "Exchange sent
+// this warning" apart from "a colleague forwarded that warning asking for help".
+// Every ticket the Mailbox Full rule ever caught was the second kind. So before a
+// rule may auto-close a ticket, the sender has to look like a machine.
+//
+// Two cheap signals decide it, and both were measured against a year of prod data
+// before being chosen (100 of 3,705 rule-matched tickets are "a real person, and
+// they forwarded it" — about one a week):
+//   • the envelope: Outlook/Gmail forward and reply prefixes, incl. fr/de/es/nl.
+//   • the address: no-reply/alert/automation mailboxes, and the known senders
+//     behind the big detectors (Site24x7, Exchange, FortiCloud, M365 messaging).
+// A requester who also files ordinary tickets is a person too, whatever they send
+// from — that check needs the database, so it runs only on a rule match.
+const HUMAN_SUBJECT_PREFIX = /^\s*(?:fw|fwd|re|tr|aw|sv|antw|rv|vs|enc)\s*:/i;
+const MACHINE_ADDRESS = /(?:^|[._-])(?:noreply|no-reply|donotreply|do-not-reply|postmaster|mailer-daemon|notifications?|alerts?|monitoring|automat\w*|backup|scanner|helpdesk-bot)(?:[._-]|@)|@(?:site24x7|forticloud|messaging\.microsoft|engage\.mail\.microsoft|sync\.logitech)|microsoftexchange[0-9a-f]{6,}/i;
+
+export const NOISE_SUPPRESS_REASONS = Object.freeze({
+  FORWARDED: 'forwarded_by_person',
+  PERSON: 'person_requester',
+  SENDER_MISMATCH: 'sender_mismatch',
+});
+
+/** Envelope + address read of who sent this. No database access. */
+export function classifySender({ subject = null, requesterEmail = null } = {}) {
+  const email = String(requesterEmail || '').trim().toLowerCase();
+  return {
+    humanPrefix: HUMAN_SUBJECT_PREFIX.test(String(subject || '')),
+    machineAddress: Boolean(email) && MACHINE_ADDRESS.test(email),
+    hasAddress: Boolean(email),
+  };
+}
+
 const DEFAULT_RULES = [
   {
     name: 'Synology NAS Alerts',
@@ -86,7 +121,11 @@ const DEFAULT_RULES = [
   {
     name: 'Mailbox Full / Archive Warnings',
     pattern: '(?:mailbox is almost full|archive mailbox is almost full)',
-    description: 'Automated mailbox capacity warnings from Exchange/M365',
+    // QA 09-04: every ticket this rule had ever caught was an EMPLOYEE forwarding
+    // their own warning to ask for help — the machine's notice arrives from the
+    // Exchange system mailbox, so that is what the rule now requires.
+    senderPattern: 'microsoftexchange[0-9a-f]{6,}@|^postmaster@',
+    description: 'Automated mailbox capacity warnings sent by Exchange/M365 itself. A person forwarding their own warning is a real request and is left in the queue.',
     category: 'monitoring',
   },
   {
@@ -156,6 +195,15 @@ const rulesCacheByWorkspace = new Map();
 import('./memoryDiagnostics.js').then(({ registerGauge }) => registerGauge('noiseRules.cache', () => rulesCacheByWorkspace.size)).catch(() => {});
 const CACHE_TTL_MS = 60_000;
 
+function safeRegex(pattern, ruleName) {
+  try {
+    return new RegExp(pattern, 'i');
+  } catch (err) {
+    logger.warn(`Noise rule "${ruleName}" has an invalid sender pattern, ignoring it: ${err.message}`);
+    return null;
+  }
+}
+
 function notFoundError() {
   const err = new Error('Rule not found');
   err.code = 'P2025';
@@ -203,9 +251,46 @@ class NoiseRuleService {
     const mapped = rules.map(r => ({
       ...r,
       regex: new RegExp(r.pattern, 'i'),
+      // A bad sender pattern must not take the rule (or the sync) down with it.
+      senderRegex: r.senderPattern ? safeRegex(r.senderPattern, r.name) : null,
     }));
     rulesCacheByWorkspace.set(wsId, { rules: mapped, timestamp: now });
     return mapped;
+  }
+
+  /**
+   * Does this requester behave like a person? One ordinary (non-noise) ticket in
+   * the past year is enough — machine mailboxes never file those.
+   */
+  async _requesterLooksHuman(requesterId) {
+    if (!requesterId) return false;
+    try {
+      const since = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000);
+      const found = await prisma.ticket.findFirst({
+        where: { requesterId: Number(requesterId), isNoise: false, createdAt: { gte: since } },
+        select: { id: true },
+      });
+      return Boolean(found);
+    } catch (err) {
+      // Fail SAFE: an unavailable lookup must not license an auto-close.
+      logger.warn(`Noise guard: requester lookup failed (treating as human): ${err.message}`);
+      return true;
+    }
+  }
+
+  /**
+   * May a matched rule auto-close this ticket? (QA 09-04 phase A.)
+   * @returns {Promise<{allowed: boolean, reason: string|null}>}
+   */
+  async canAutoClose(rule, { subject = null, requesterEmail = null, requesterId = null } = {}) {
+    if (rule?.autoCloseFromPeople) return { allowed: true, reason: null };
+    const sender = classifySender({ subject, requesterEmail });
+    if (sender.machineAddress) return { allowed: true, reason: null };
+    if (sender.humanPrefix) return { allowed: false, reason: NOISE_SUPPRESS_REASONS.FORWARDED };
+    if (await this._requesterLooksHuman(requesterId)) {
+      return { allowed: false, reason: NOISE_SUPPRESS_REASONS.PERSON };
+    }
+    return { allowed: true, reason: null };
   }
 
   invalidateCache() {
@@ -222,8 +307,10 @@ class NoiseRuleService {
    * @param {Date|null} createdAt - Ticket creation date (needed for dedup check)
    * @returns {Promise<{isNoise: boolean, ruleId: string|null, category: string|null}>}
    */
-  async evaluate(subject, createdAt = null, workspaceId = 1) {
+  async evaluate(subject, createdAt = null, workspaceId = 1, context = {}) {
     if (!subject) return { isNoise: false, ruleId: null, category: null };
+    const { requesterEmail = null, requesterId = null } = context || {};
+    let nearMiss = null; // subject matched, sender did not
 
     const wsId = workspaceId ?? 1;
     const rules = await this._getRules(wsId);
@@ -233,6 +320,13 @@ class NoiseRuleService {
       // behavior is unchanged.
       if (rule.mode === 'never_noise') continue;
       if (!rule.regex.test(subject)) continue;
+      // (B) The rule may also require the mail to come FROM a specific sender. A
+      // subject that matched on words alone is worth recording even so — that is
+      // the exact shape of the mistake this work was built for.
+      if (rule.senderRegex && !rule.senderRegex.test(String(requesterEmail || ''))) {
+        if (!nearMiss) nearMiss = rule;
+        continue;
+      }
 
       if (rule.dedupWindowDays && createdAt) {
         const windowStart = new Date(createdAt);
@@ -250,12 +344,34 @@ class NoiseRuleService {
           // First occurrence in this window - keep as actionable
           return { isNoise: false, ruleId: null, category: null };
         }
-        return { isNoise: true, ruleId: rule.name, category: rule.category };
+        return this._matchResult(rule, { subject, requesterEmail, requesterId });
       }
 
-      return { isNoise: true, ruleId: rule.name, category: rule.category };
+      return this._matchResult(rule, { subject, requesterEmail, requesterId });
+    }
+    if (nearMiss) {
+      logger.info(`Noise rule "${nearMiss.name}" skipped: the subject matched but the sender did not`);
+      return {
+        isNoise: false, ruleId: null, category: null,
+        suppressedRule: nearMiss.name, suppressReason: NOISE_SUPPRESS_REASONS.SENDER_MISMATCH,
+      };
     }
     return { isNoise: false, ruleId: null, category: null };
+  }
+
+  /**
+   * A matched rule becomes a noise verdict only if the sender looks automated;
+   * otherwise the match is recorded as SUPPRESSED and the ticket stays in the
+   * queue, where the AI pipeline classifies it with the body and the requester
+   * in hand (QA 09-04 phases A + C).
+   */
+  async _matchResult(rule, ctx) {
+    const gate = await this.canAutoClose(rule, ctx);
+    if (gate.allowed) {
+      return { isNoise: true, ruleId: rule.name, category: rule.category, suppressedRule: null, suppressReason: null };
+    }
+    logger.info(`Noise rule "${rule.name}" suppressed (${gate.reason}) — ticket stays actionable for AI review`);
+    return { isNoise: false, ruleId: null, category: null, suppressedRule: rule.name, suppressReason: gate.reason };
   }
 
   /**
@@ -301,12 +417,68 @@ class NoiseRuleService {
     });
   }
 
+  /**
+   * Recent noise activity for the audit panel (QA 09-04 phase F).
+   *
+   * A wrong auto-close used to leave no trace anyone would look at — 4,275 noise
+   * tickets in IT against 17 manual corrections ever. This returns both halves of
+   * the story: what the rules closed, and what the sender guard REFUSED to close.
+   */
+  async getRecentActivity(workspaceId, { days = 30, limit = 40 } = {}) {
+    const wsId = workspaceId ?? 1;
+    const since = new Date(Date.now() - Math.max(1, Math.min(Number(days) || 30, 180)) * 24 * 60 * 60 * 1000);
+    const take = Math.max(1, Math.min(Number(limit) || 40, 200));
+    const select = {
+      id: true, subject: true, createdAt: true, status: true, isNoise: true,
+      nativeNumber: true, freshserviceTicketId: true,
+      noiseRuleMatched: true, noiseRuleSuppressed: true, noiseSuppressReason: true,
+      requester: { select: { name: true, email: true } },
+    };
+
+    const [held, dismissed] = await Promise.all([
+      prisma.ticket.findMany({
+        where: { workspaceId: wsId, noiseRuleSuppressed: { not: null }, createdAt: { gte: since } },
+        orderBy: { createdAt: 'desc' }, take, select,
+      }),
+      prisma.ticket.findMany({
+        where: { workspaceId: wsId, isNoise: true, noiseRuleMatched: { not: null }, createdAt: { gte: since } },
+        orderBy: { createdAt: 'desc' }, take, select,
+      }),
+    ]);
+
+    const shape = (t) => ({
+      id: t.id,
+      ref: t.nativeNumber ? `TP-${t.nativeNumber}` : (t.freshserviceTicketId ? `#${t.freshserviceTicketId}` : `#${t.id}`),
+      subject: t.subject,
+      createdAt: t.createdAt,
+      status: t.status,
+      rule: t.noiseRuleSuppressed || t.noiseRuleMatched,
+      reason: t.noiseSuppressReason || null,
+      requesterName: t.requester?.name || null,
+      requesterEmail: t.requester?.email || null,
+    });
+
+    return {
+      days: Number(days) || 30,
+      heldForReview: held.map(shape),
+      autoClosed: dismissed.map(shape),
+      counts: { heldForReview: held.length, autoClosed: dismissed.length },
+    };
+  }
+
   async createRule(data) {
     // Validate regex
     try {
       new RegExp(data.pattern, 'i');
     } catch (e) {
       throw new Error(`Invalid regex pattern: ${e.message}`);
+    }
+    if (data.senderPattern) {
+      try {
+        new RegExp(data.senderPattern, 'i');
+      } catch (e) {
+        throw new Error(`Invalid sender pattern: ${e.message}`);
+      }
     }
 
     if (data.mode !== undefined && !NOISE_RULE_MODES.includes(data.mode)) {
@@ -322,6 +494,8 @@ class NoiseRuleService {
         isEnabled: data.isEnabled !== false,
         mode: data.mode || 'noise',
         dedupWindowDays: data.dedupWindowDays || null,
+        senderPattern: data.senderPattern || null,
+        autoCloseFromPeople: data.autoCloseFromPeople === true,
         workspaceId: data.workspaceId,
       },
     });
@@ -343,6 +517,13 @@ class NoiseRuleService {
         throw new Error(`Invalid regex pattern: ${e.message}`);
       }
     }
+    if (data.senderPattern) {
+      try {
+        new RegExp(data.senderPattern, 'i');
+      } catch (e) {
+        throw new Error(`Invalid sender pattern: ${e.message}`);
+      }
+    }
 
     if (data.mode !== undefined && !NOISE_RULE_MODES.includes(data.mode)) {
       throw new Error(`Invalid mode: must be one of ${NOISE_RULE_MODES.join(', ')}`);
@@ -356,6 +537,8 @@ class NoiseRuleService {
     if (data.isEnabled !== undefined) updateData.isEnabled = data.isEnabled;
     if (data.mode !== undefined) updateData.mode = data.mode;
     if (data.dedupWindowDays !== undefined) updateData.dedupWindowDays = data.dedupWindowDays;
+    if (data.senderPattern !== undefined) updateData.senderPattern = data.senderPattern || null;
+    if (data.autoCloseFromPeople !== undefined) updateData.autoCloseFromPeople = data.autoCloseFromPeople === true;
 
     const rule = await prisma.noiseRule.update({
       where: { id },

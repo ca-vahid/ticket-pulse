@@ -2457,7 +2457,11 @@ class TicketService {
 
     const requester = await this.resolveRequester(workspaceId, data);
 
-    const { isNoise, ruleId } = await noiseRuleService.evaluate(data.subject, new Date(), workspaceId);
+    const { isNoise, ruleId, suppressedRule = null, suppressReason = null } = await noiseRuleService.evaluate(
+      data.subject, new Date(), workspaceId,
+      // The resolved requester is the authority here — `data` may only carry a name.
+      { requesterEmail: requester?.email || data.requesterEmail || null, requesterId: requester?.id || null },
+    );
     const nativeNumber = await this._nextNativeNumber();
     const now = new Date();
     const isSelfPicked = Boolean(assignee && actor?.technicianId && actor.technicianId === assignee.id);
@@ -2502,6 +2506,8 @@ class TicketService {
         lastRealActivityAt: now,
         isNoise,
         noiseRuleMatched: ruleId,
+        noiseRuleSuppressed: suppressedRule,
+        noiseSuppressReason: suppressReason,
         // Arrival channel (QA 07-07 #1): Agent for the app UI; email ingest
         // and the public API pass their own channel. The create form can
         // override it (QA 07-10 #7: phone / walk-up / Teams requests logged

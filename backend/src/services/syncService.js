@@ -1496,13 +1496,19 @@ class SyncService {
     for (const ticket of tickets) {
       try {
         const noiseWorkspaceId = ticket.workspaceId !== null ? ticket.workspaceId : 1;
-        const { isNoise, ruleId } = await noiseRuleService.evaluate(
+        const noiseVerdict = await noiseRuleService.evaluate(
           ticket.subject,
           ticket.createdAt ? new Date(ticket.createdAt) : null,
           noiseWorkspaceId,
+          // The FS requester link is resolved AFTER this upsert, so these are often empty here;
+          // the authoritative check runs again in _noiseAutoCloseGuard before anything is closed.
+          { requesterEmail: ticket.requesterEmail || ticket.email || null, requesterId: ticket.requesterId || null },
         );
-        ticket.isNoise = isNoise;
-        ticket.noiseRuleMatched = ruleId;
+        ticket.isNoise = noiseVerdict.isNoise;
+        ticket.noiseRuleMatched = noiseVerdict.ruleId;
+        // QA 09-04 (F): a match the human-sender guard held back is recorded, not lost.
+        ticket.noiseRuleSuppressed = noiseVerdict.suppressedRule || null;
+        ticket.noiseSuppressReason = noiseVerdict.suppressReason || null;
         await ticketRepository.upsert(ticket);
         syncedCount++;
       } catch (error) {
@@ -1593,10 +1599,13 @@ class SyncService {
       }
     }
 
-    const { isNoise, ruleId, category: noiseCategory } = await noiseRuleService.evaluate(
+    const {
+      isNoise, ruleId, category: noiseCategory, suppressedRule = null, suppressReason = null,
+    } = await noiseRuleService.evaluate(
       ticket.subject,
       ticket.createdAt ? new Date(ticket.createdAt) : null,
       ticketWorkspaceId,
+      { requesterEmail: ticket.requesterEmail || ticket.email || null, requesterId: ticket.requesterId || null },
     );
     const normalizedNoiseCategory = formatNoiseCategory(noiseCategory);
 
@@ -1716,6 +1725,9 @@ class SyncService {
       workspaceId: ticketWorkspaceId,
       isNoise: effectiveIsNoise,
       noiseRuleMatched: effectiveNoiseRuleId,
+      // QA 09-04 (F): a rule the sender guard held back is recorded so the audit
+      // panel can show it. Left untouched when a stored verdict is being preserved.
+      ...(effectiveIsNoise === undefined ? {} : { noiseRuleSuppressed: suppressedRule, noiseSuppressReason: suppressReason }),
       // Don't stamp a noise category label when the noise flip itself was
       // suppressed — the rule verdict didn't take effect.
       ticketCategory: ticket.ticketCategory || (noiseVerdictPreserved ? null : normalizedNoiseCategory),
@@ -2541,6 +2553,34 @@ class SyncService {
     return { skipped: false, checked: tickets.length, created, alreadyHandled: skipped, syncTriggered, runIds };
   }
 
+  /**
+   * Re-runs the human-sender guard against the STORED ticket (QA 09-04). Fails
+   * safe: anything unexpected blocks the auto-close rather than allowing it.
+   */
+  async _noiseAutoCloseGuard(ticket, workspaceId) {
+    try {
+      const row = await prisma.ticket.findUnique({
+        where: { id: ticket.id },
+        select: { subject: true, requesterId: true, requester: { select: { email: true } } },
+      });
+      const rule = ticket.noiseRuleMatched
+        ? await prisma.noiseRule.findFirst({
+          where: { workspaceId, name: ticket.noiseRuleMatched },
+          select: { name: true, autoCloseFromPeople: true },
+        })
+        : null;
+      const verdict = await noiseRuleService.canAutoClose(rule, {
+        subject: row?.subject ?? ticket.subject ?? null,
+        requesterEmail: row?.requester?.email ?? null,
+        requesterId: row?.requesterId ?? ticket.requesterId ?? null,
+      });
+      return { allowed: verdict.allowed, reason: verdict.reason, ruleName: rule?.name || null };
+    } catch (err) {
+      logger.warn(`Noise auto-close guard failed for ticket ${ticket.id} — holding the ticket: ${err.message}`);
+      return { allowed: false, reason: 'guard_error', ruleName: ticket.noiseRuleMatched || null };
+    }
+  }
+
   async _ensureNoiseTicketDismissed(ticket, workspaceId, options = {}) {
     if (!ticket?.isNoise) {
       return { skipped: true, reason: 'not_noise' };
@@ -2554,6 +2594,28 @@ class SyncService {
     const config = options.config || await assignmentRepository.getConfig(workspaceId);
     if (!config?.isEnabled || !config?.autoCloseNoise) {
       return { skipped: true, reason: 'noise_auto_close_disabled' };
+    }
+
+    // QA 09-04 (A + C): last line of defence before a ticket is closed with no human
+    // and no AI ever reading it. Ingest may have flagged this before the requester was
+    // known (or under an older build), so the sender is re-checked here against the
+    // stored row. A person's mail loses the noise flag and stays in the queue, where the
+    // AI pipeline classifies it with the body and the requester in hand.
+    const guard = await this._noiseAutoCloseGuard(ticket, workspaceId);
+    if (!guard.allowed) {
+      await prisma.ticket.update({
+        where: { id: ticket.id },
+        data: {
+          isNoise: false,
+          noiseRuleMatched: null,
+          noiseRuleSuppressed: ticket.noiseRuleMatched || guard.ruleName || 'unknown rule',
+          noiseSuppressReason: guard.reason,
+        },
+      }).catch((err) => logger.warn(`Noise suppression not recorded for ticket ${ticket.id}: ${err.message}`));
+      logger.info('Noise auto-close blocked: the sender looks like a person, not a machine', {
+        ticketId: ticket.id, rule: ticket.noiseRuleMatched, reason: guard.reason,
+      });
+      return { skipped: true, reason: `noise_guard_${guard.reason}` };
     }
 
     let matchedNoiseCategory = options.noiseRuleCategory || null;
@@ -2604,6 +2666,7 @@ class SyncService {
             ticketClassification: noiseRuleCategory,
             noiseRuleMatched: ticket.noiseRuleMatched || null,
             noiseRuleCategory,
+            senderKind: 'machine',
             source: 'noise_rule',
           },
           errorMessage: ticket.noiseRuleMatched

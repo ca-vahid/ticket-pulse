@@ -159,6 +159,8 @@ function RuleRow({ rule, onUpdate, onDelete }) {
       category: rule.category,
       mode: rule.mode || 'noise',
       dedupWindowDays: rule.dedupWindowDays || '',
+      senderPattern: rule.senderPattern || '',
+      autoCloseFromPeople: rule.autoCloseFromPeople === true,
     });
     setIsEditing(true);
   };
@@ -167,6 +169,8 @@ function RuleRow({ rule, onUpdate, onDelete }) {
     await onUpdate(rule.id, {
       ...editData,
       // Dedup windows only make sense for noise-flagging rules.
+      senderPattern: editData.mode !== 'never_noise' ? (editData.senderPattern || '').trim() || null : null,
+      autoCloseFromPeople: editData.mode !== 'never_noise' && editData.autoCloseFromPeople === true,
       dedupWindowDays: editData.mode !== 'never_noise' && editData.dedupWindowDays
         ? parseInt(editData.dedupWindowDays)
         : null,
@@ -293,6 +297,14 @@ function RuleRow({ rule, onUpdate, onDelete }) {
                   </div>
                 )}
               </div>
+              {editData.mode !== 'never_noise' && (
+                <SenderConditionFields
+                  idPrefix={`edit-${rule.id}`}
+                  senderPattern={editData.senderPattern}
+                  autoCloseFromPeople={editData.autoCloseFromPeople}
+                  onChange={(patch) => setEditData(d => ({ ...d, ...patch }))}
+                />
+              )}
               <div className="flex items-center gap-2">
                 <button onClick={saveEdit} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium">
                   <Save className="w-3.5 h-3.5" /> Save
@@ -343,26 +355,150 @@ function RuleRow({ rule, onUpdate, onDelete }) {
   );
 }
 
+/**
+ * Sender conditions on a noise rule (QA 09-04).
+ *
+ * A subject match cannot tell the machine's notice apart from a colleague
+ * forwarding it — so a rule can require the ADDRESS to match too, and rules that
+ * are meant to swallow forwards (phishing-simulation campaigns) say so out loud.
+ */
+export function SenderConditionFields({ idPrefix, senderPattern = '', autoCloseFromPeople = false, onChange }) {
+  return (
+    <div className="rounded-lg border border-border bg-muted/40 p-3 space-y-2">
+      <div>
+        <label htmlFor={`${idPrefix}-sender`} className="block text-xs font-medium text-muted-foreground mb-1">
+          Sender address must match (optional)
+        </label>
+        <input
+          id={`${idPrefix}-sender`}
+          value={senderPattern}
+          onChange={(e) => onChange({ senderPattern: e.target.value })}
+          className="tp-focus-ring w-full px-3 py-1.5 border border-input rounded-lg text-sm font-mono bg-card"
+          placeholder="e.g. noreply@|^postmaster@"
+        />
+        <p className="text-[10px] text-muted-foreground/75 mt-0.5">
+          Leave empty to match on the subject alone. With a pattern, the rule only fires when the requester’s address matches it too.
+        </p>
+      </div>
+      <label className="flex items-start gap-2 text-xs text-foreground/85">
+        <input
+          type="checkbox"
+          checked={autoCloseFromPeople === true}
+          onChange={(e) => onChange({ autoCloseFromPeople: e.target.checked })}
+          className="mt-0.5 h-3.5 w-3.5 rounded border-input text-blue-600 dark:text-blue-300"
+        />
+        <span>
+          <span className="font-medium text-foreground">Close these even when a person sent them</span>
+          <span className="block text-[10px] text-muted-foreground/75">
+            Off by default: a ticket forwarded by a colleague is left in the queue for the AI and the team to read. Turn this on only for campaigns where the forwards themselves are the noise.
+          </span>
+        </span>
+      </label>
+    </div>
+  );
+}
+
+const SUPPRESS_REASON_LABEL = {
+  forwarded_by_person: 'forwarded by a person',
+  person_requester: 'requester is a real user',
+  sender_mismatch: 'sender did not match the rule',
+  guard_error: 'guard could not verify the sender',
+};
+
+/**
+ * What the rules actually did (QA 09-04 phase F). A wrong auto-close used to leave
+ * no trace anyone would look at; this shows both halves — held back, and closed.
+ */
+export function NoiseActivityPanel({ activity, isLoading, onRefresh }) {
+  const [tab, setTab] = useState('held');
+  const rows = (tab === 'held' ? activity?.heldForReview : activity?.autoClosed) || [];
+  return (
+    <div className="bg-card rounded-lg shadow-sm border border-border p-5" data-testid="noise-activity">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+          <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-300" />
+          What the rules did · last {activity?.days ?? 30} days
+        </h3>
+        <button
+          onClick={onRefresh}
+          className="tp-focus-ring flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-border text-[11px] font-medium text-muted-foreground hover:bg-muted"
+        >
+          <RefreshCw className={`w-3 h-3 ${isLoading ? 'animate-spin' : ''}`} /> Refresh
+        </button>
+      </div>
+      <div className="flex items-center gap-2 mb-3">
+        {[
+          ['held', `Held for review (${activity?.counts?.heldForReview ?? 0})`],
+          ['closed', `Auto-closed (${activity?.counts?.autoClosed ?? 0})`],
+        ].map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => setTab(key)}
+            className={`tp-focus-ring px-2.5 py-1 rounded-lg text-[11px] font-semibold border ${
+              tab === key
+                ? 'border-blue-300 dark:border-blue-500/40 bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200'
+                : 'border-border text-muted-foreground hover:bg-muted'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {rows.length === 0 ? (
+        <p className="text-xs text-muted-foreground">
+          {tab === 'held'
+            ? 'Nothing held back — every rule match in this window came from an automated sender.'
+            : 'No rule closed a ticket in this window.'}
+        </p>
+      ) : (
+        <ul className="divide-y divide-border/60 rounded-lg border border-border overflow-hidden">
+          {rows.map((row) => (
+            <li key={`${tab}-${row.id}`} className="px-3 py-2 text-xs bg-card">
+              <div className="flex items-baseline gap-2 flex-wrap">
+                <span className="font-mono text-[11px] text-muted-foreground">{row.ref}</span>
+                <span className="font-medium text-foreground truncate">{row.subject || '(no subject)'}</span>
+              </div>
+              <div className="text-[11px] text-muted-foreground mt-0.5">
+                {row.requesterName || row.requesterEmail || 'unknown requester'}
+                {row.rule ? <> · rule <span className="text-foreground/85">{row.rule}</span></> : null}
+                {tab === 'held' && row.reason ? <> · {SUPPRESS_REASON_LABEL[row.reason] || row.reason}</> : null}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export default function NoiseRulesPanel() {
   const [rules, setRules] = useState([]);
   const [stats, setStats] = useState(null);
+  const [activity, setActivity] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [status, setStatus] = useState(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [isBackfilling, setIsBackfilling] = useState(false);
   const [newRule, setNewRule] = useState({
     name: '', pattern: '', description: '', category: 'custom', mode: 'noise', dedupWindowDays: '',
+    senderPattern: '', autoCloseFromPeople: false,
   });
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [rulesRes, statsRes] = await Promise.all([
+      const [rulesRes, statsRes, activityRes] = await Promise.all([
         noiseRulesAPI.getAll(),
         noiseRulesAPI.getStats(),
+        // QA 09-04 (F): strictly non-fatal — the rules list must render even if the
+        // activity call fails or the client predates the endpoint.
+        typeof noiseRulesAPI.activity === 'function'
+          ? noiseRulesAPI.activity(30).catch(() => null)
+          : Promise.resolve(null),
       ]);
       setRules(rulesRes.data || []);
       setStats(statsRes.data || null);
+      setActivity(activityRes?.data || null);
     } catch (e) {
       setStatus({ success: false, message: e.message });
     } finally {
@@ -380,12 +516,17 @@ export default function NoiseRulesPanel() {
     try {
       await noiseRulesAPI.create({
         ...newRule,
+        senderPattern: newRule.mode !== 'never_noise' ? (newRule.senderPattern || '').trim() || null : null,
+        autoCloseFromPeople: newRule.mode !== 'never_noise' && newRule.autoCloseFromPeople === true,
         dedupWindowDays: newRule.mode !== 'never_noise' && newRule.dedupWindowDays
           ? parseInt(newRule.dedupWindowDays)
           : null,
       });
       setShowAddForm(false);
-      setNewRule({ name: '', pattern: '', description: '', category: 'custom', mode: 'noise', dedupWindowDays: '' });
+      setNewRule({
+        name: '', pattern: '', description: '', category: 'custom', mode: 'noise', dedupWindowDays: '',
+        senderPattern: '', autoCloseFromPeople: false,
+      });
       setStatus({
         success: true,
         message: newRule.mode === 'never_noise'
@@ -506,6 +647,8 @@ export default function NoiseRulesPanel() {
       )}
 
       {/* Add new rule form */}
+      <NoiseActivityPanel activity={activity} isLoading={isLoading} onRefresh={fetchData} />
+
       {showAddForm && (
         <div className="bg-card rounded-lg shadow-sm border border-blue-200 dark:border-blue-500/30 p-5 space-y-3">
           <h3 className="text-sm font-semibold text-foreground">Add New Noise Rule</h3>
@@ -567,6 +710,14 @@ export default function NoiseRulesPanel() {
               </div>
             )}
           </div>
+          {newRule.mode !== 'never_noise' && (
+            <SenderConditionFields
+              idPrefix="new-rule"
+              senderPattern={newRule.senderPattern}
+              autoCloseFromPeople={newRule.autoCloseFromPeople}
+              onChange={(patch) => setNewRule(r => ({ ...r, ...patch }))}
+            />
+          )}
           <div className="flex items-center gap-2">
             <button onClick={handleCreate} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium">
               <Plus className="w-3.5 h-3.5" /> Create Rule

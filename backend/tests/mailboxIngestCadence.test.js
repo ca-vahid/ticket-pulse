@@ -38,7 +38,9 @@ const {
 const NOW = Date.parse('2026-09-01T12:00:00Z');
 const base = { id: 1, workspaceId: 5, address: 'patickets@example.com', pollIntervalSec: 15, lastMessageAt: null, deltaLink: null };
 const webhooked = {
-  ...base, id: 2, subscriptionId: 'sub-2', notificationStatus: 'active', subscriptionExpiresAt: new Date(NOW + 3 * 24 * 3600 * 1000),
+  // The expiry must outrun the REAL clock: tick() reads Date.now(), so a fixture pinned to
+  // NOW + 3 days silently expired on 2026-09-04 and the suite began failing by calendar.
+  ...base, id: 2, subscriptionId: 'sub-2', notificationStatus: 'active', subscriptionExpiresAt: new Date(Math.max(NOW, Date.now()) + 3 * 24 * 3600 * 1000),
 };
 
 beforeEach(() => {

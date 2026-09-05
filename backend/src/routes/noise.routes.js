@@ -33,6 +33,21 @@ router.get(
 );
 
 /**
+ * GET /api/noise-rules/activity?days=30
+ * What the rules closed, and what the sender guard held back (QA 09-04 phase F).
+ */
+router.get(
+  '/activity',
+  asyncHandler(async (req, res) => {
+    const data = await noiseRuleService.getRecentActivity(req.workspaceId, {
+      days: req.query.days,
+      limit: req.query.limit,
+    });
+    res.json({ success: true, data });
+  }),
+);
+
+/**
  * POST /api/noise-rules
  * Create a new noise rule
  */
@@ -40,7 +55,7 @@ router.post(
   '/',
   requireAdmin,
   asyncHandler(async (req, res) => {
-    const { name, pattern, description, category, isEnabled, mode } = req.body;
+    const { name, pattern, description, category, isEnabled, mode, senderPattern, autoCloseFromPeople } = req.body;
 
     if (!name || !pattern) {
       return res.status(400).json({
@@ -64,6 +79,8 @@ router.post(
         category,
         isEnabled,
         mode,
+        senderPattern,
+        autoCloseFromPeople,
         workspaceId: req.workspaceId,
       });
       logger.info(`Created noise rule: ${name}`);
