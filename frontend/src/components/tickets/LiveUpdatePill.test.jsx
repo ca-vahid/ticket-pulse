@@ -23,6 +23,16 @@ describe('LiveUpdatePill', () => {
     expect(button).toBeEnabled();
   });
 
+  test('the zero-height rail does not squash the pill (QA 09-05)', () => {
+    // The rail is `h-0` so it takes no layout space. Without `items-start` the button is a flex
+    // item stretched to that zero height: `box-sizing: border-box` then eats its own padding and
+    // the pill renders 20 px tall instead of 41. jsdom does no layout, so the class is the guard.
+    const { container } = render(<LiveUpdatePill count={3} state="idle" onApply={() => {}} />);
+    const rail = container.firstChild;
+    expect(rail.className).toContain('h-0');
+    expect(rail.className).toContain('items-start');
+  });
+
   test('caps at 99+ and keeps the true number for screen readers', () => {
     render(<LiveUpdatePill count={412} state="idle" onApply={() => {}} />);
     expect(screen.getByRole('button')).toHaveTextContent(/99\+\s*new/);

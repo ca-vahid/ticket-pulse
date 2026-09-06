@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.8.32-preview';
+export const APP_VERSION = '3.8.33-preview';
 
 export const changelog = [
+  {
+    version: '3.8.33-preview',
+    date: 'September 5, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>The “N new” pill is its proper size</strong> — it was rendering about half as tall as designed. The pill floats in a zero-height strip so it never pushes the list down, and being a flex item in that strip stretched it to zero height, which ate its own padding. It now sits at its intended 41&nbsp;px.' },
+    ],
+  },
   {
     version: '3.8.32-preview',
     date: 'September 5, 2026',
