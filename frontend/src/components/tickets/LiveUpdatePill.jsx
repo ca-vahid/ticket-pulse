@@ -26,8 +26,11 @@ export default function LiveUpdatePill({ count, state = 'idle', onApply }) {
   const done = state === 'done';
   const shown = count > 99 ? '99+' : count;
 
+  // `items-start` is load-bearing: this rail is `h-0` so it takes no layout space, and a
+  // flex item in a zero-height container gets STRETCHED to that height — which ate the
+  // pill's vertical padding and left it 20 px tall instead of 40 (QA 09-05).
   return (
-    <div className={`sticky top-[76px] z-20 h-0 flex justify-center pointer-events-none ${done ? '' : 'tp-pill-enter'}`}>
+    <div className={`sticky top-[76px] z-20 h-0 flex items-start justify-center pointer-events-none ${done ? '' : 'tp-pill-enter'}`}>
       <button
         type="button"
         onClick={onApply}
