@@ -930,6 +930,7 @@ export function notificationLlmContextPrompt(bundle) {
     'Only use outage-like wording if outageSignals.allowedPublicPhrases explicitly allows it.',
     'Do not imply an outage, widespread issue, or broad impact from watch or routine_cluster signals.',
     'Only make response-time or resolution-time claims when timingEvidence has deterministic due-by data or qualified historical evidence; otherwise use neutral follow-up language.',
+    'If the workflow prompt asks for timing estimates but timingEvidence does not support them, ignore that timing request.',
     'Never quote private/internal notes verbatim in requester-facing email fields. When ticket.agentNotes or private thread entries are provided, you may summarize what was done in neutral, requester-friendly language.',
     JSON.stringify(modelBundle, null, 2),
     '--- End Evidence Bundle ---',
