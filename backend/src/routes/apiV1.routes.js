@@ -66,6 +66,12 @@ function ticketShape(t) {
     ref: t.displayRef,
     // Caller's stable per-record key (Phase PA) — the resubmission upsert key.
     externalRef: t.externalRef || null,
+    // The same request in other systems. TP-born tickets are mirrored into
+    // FreshService, so most carry an entry here and either number resolves on
+    // this API — an integrator holding one number can address both systems.
+    externalReferences: t.freshserviceTicketId
+      ? [{ system: 'FRESHSERVICE', id: String(t.freshserviceTicketId) }]
+      : [],
     origin: t.origin,
     subject: t.subject,
     status: t.status,
@@ -566,6 +572,61 @@ router.get('/tickets/:id/attachments/:attachmentId', S('attachments:read'), asyn
 }));
 
 // ------------------------------------------------------------- approvals
+
+/**
+ * The gate endpoint: one call, one definitive approval verdict (Assetron, Sep 2026).
+ *
+ * `category` is REQUIRED and deliberately has no default. A ticket can carry
+ * approvals from several categories, so an implicit ticket-wide answer would
+ * let an approved "AI Premium License Request" open a laptop-handout gate.
+ * Pass `category=any` to opt into the ticket-wide verdict on purpose.
+ */
+router.get('/tickets/:id/approval', S('approvals:read'), asyncHandler(async (req, res) => {
+  const { default: approvalVerdictService } = await import('../services/approvalVerdictService.js');
+  const raw = typeof req.query.category === 'string' ? req.query.category.trim() : '';
+  if (!raw) {
+    const names = (await approvalVerdictService.listCategories(req.workspaceId)).map((c) => c.name);
+    throw new ApiProblem({
+      status: 400,
+      code: 'category_required',
+      title: 'Approval category required',
+      detail: `Pass ?category=<name> to scope the verdict to one approval category, or ?category=any for a ticket-wide verdict. Active categories in this workspace: ${names.join(', ') || '(none configured)'}.`,
+    });
+  }
+
+  let category = null;
+  if (raw.toLowerCase() !== 'any') {
+    category = await approvalVerdictService.findCategory(req.workspaceId, raw);
+    if (!category) {
+      const names = (await approvalVerdictService.listCategories(req.workspaceId)).map((c) => c.name);
+      throw new ApiProblem({
+        status: 404,
+        code: 'approval_category_not_found',
+        title: 'Unknown approval category',
+        detail: `No approval category named "${raw}" in this workspace. Active categories: ${names.join(', ') || '(none configured)'}.`,
+      });
+    }
+  }
+
+  // R4: an unparseable reference is a 400, distinct from a well-formed
+  // reference that matches nothing (404). Accepted forms: TP-1042, #231164, 1042.
+  const ref = String(req.params.id ?? '').trim();
+  if (!/^(?:#?\d+|tp-?\d+)$/i.test(ref)) {
+    throw new ApiProblem({
+      status: 400,
+      code: 'invalid_ticket_reference',
+      title: 'Invalid ticket reference',
+      detail: `"${ref}" is not a ticket reference. Use TP-1042 (Ticket Pulse number), #231164 (FreshService number), or a bare number.`,
+    });
+  }
+
+  const verdict = await approvalVerdictService.verdict((await tid(req)), req.workspaceId, {
+    category,
+    echo: ref || null,
+  });
+  if (!verdict) throw problems.notFound(`No ticket matching "${req.params.id}" in this workspace`);
+  res.json({ success: true, data: verdict });
+}));
 
 router.get('/tickets/:id/approvals', S('approvals:read'), asyncHandler(async (req, res) => {
   const { default: ticketApprovalService } = await import('../services/ticketApprovalService.js');

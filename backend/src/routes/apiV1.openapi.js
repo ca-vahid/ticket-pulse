@@ -177,6 +177,62 @@ const T = {
   Message: { type: 'object', required: ['body'], properties: { body: { type: 'string' }, bodyHtml: { type: 'string' } } },
   Contact: { type: 'object', properties: { id: { type: 'integer' }, name: { type: 'string' }, email: { type: 'string', nullable: true }, phone: { type: 'string', nullable: true }, department: { type: 'string', nullable: true }, location: { type: 'string', nullable: true } } },
   Task: { type: 'object', properties: { id: { type: 'integer' }, title: { type: 'string' }, description: { type: 'string', nullable: true }, status: { type: 'string', enum: ['open', 'in_progress', 'done'] }, assignee: { type: 'object', nullable: true }, dueAt: { type: 'string', format: 'date-time', nullable: true } } },
+  ApprovalVerdict: {
+    type: 'object',
+    description: 'One definitive approval answer for one ticket. `approval.isApproved` and `approval.state` are present on EVERY 200 — never conditionally absent.',
+    properties: {
+      ticket: {
+        type: 'object',
+        properties: {
+          id: { type: 'integer', description: 'Internal id — the one in the deep link.' },
+          ref: { type: 'string', example: 'TP-1042', description: 'Canonical display reference.' },
+          reference: { type: 'string', nullable: true, description: 'The reference you sent, echoed back.' },
+          type: { type: 'string', nullable: true, example: 'Service Request' },
+          subject: { type: 'string', nullable: true },
+          status: { type: 'string', description: 'Lifecycle status — distinct from the approval state.' },
+          url: { type: 'string', description: 'Human-facing ticket page (a different host from this API).' },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+          externalReferences: {
+            type: 'array',
+            description: 'The same request in other systems. TP-born tickets are mirrored into FreshService, so most carry a FRESHSERVICE entry — either number resolves on this endpoint.',
+            items: { type: 'object', properties: { system: { type: 'string', enum: ['FRESHSERVICE'] }, id: { type: 'string' } } },
+          },
+        },
+      },
+      approval: {
+        type: 'object',
+        properties: {
+          state: {
+            type: 'string',
+            enum: ['NOT_REQUESTED', 'PENDING', 'INFO_REQUESTED', 'EXPIRED', 'REJECTED', 'CANCELLED', 'APPROVED'],
+            description: 'The complete, stable enum. APPROVED is the ONLY value that means approved. INFO_REQUESTED = an approver asked the requester a question. EXPIRED = still pending and the emailed decision link has lapsed (a coordinator can still decide it in-app). Ticket Pulse has no delegated, automated, multi-stage or partially-approved states, so those values are never returned.',
+          },
+          isApproved: { type: 'boolean', description: 'The boolean to gate on. True only when state = APPROVED.' },
+          requirement: { type: 'string', enum: ['NOT_MODELLED'], description: 'Ticket Pulse has no per-ticket-type approval requirement — approval is a manual request against a category. NOT_REQUESTED therefore means “nobody asked”, which is not the same as “not needed”.' },
+          scope: { type: 'string', enum: ['category', 'ticket'], description: 'Whether the verdict covers one approval category or the whole ticket (`category=any`).' },
+          category: { type: 'string', nullable: true, example: 'New Computer Upgrade' },
+          decidedAt: { type: 'string', format: 'date-time', nullable: true, description: 'When the decisive decision was made. A granted approval never expires here — apply your own age policy to this value.' },
+          expiresAt: { type: 'string', format: 'date-time', nullable: true, description: 'Set only while a request is PENDING/EXPIRED (30 days from the request).' },
+          approvers: {
+            type: 'array',
+            description: 'The decisive request group. One approval request fans out to every manager on the category and the FIRST decision wins — approval is any-of, never all-of.',
+            items: {
+              type: 'object',
+              properties: {
+                name: { type: 'string', nullable: true }, email: { type: 'string' },
+                decision: { type: 'string' }, decidedAt: { type: 'string', format: 'date-time', nullable: true },
+                decidedVia: { type: 'string', nullable: true, enum: ['link', 'app', null] },
+              },
+            },
+          },
+          requestCount: { type: 'integer', description: 'How many distinct approval requests exist in scope, ever.' },
+        },
+      },
+      requester: { type: 'object', nullable: true, properties: { name: { type: 'string', nullable: true }, email: { type: 'string', nullable: true } } },
+      asset: { type: 'object', nullable: true, description: 'Always null — Ticket Pulse holds no serial numbers or asset tags. Present so the field never appears and disappears between responses.' },
+    },
+  },
 };
 
 const ref = (n) => ({ $ref: `#/components/schemas/${n}` });
@@ -417,8 +473,18 @@ export function buildOpenApiSpec(baseUrl) {
       },
       '/tickets/{id}/attachments': { get: op('List attachments', 'attachments:read', { tag: 'attachments' }) },
       '/tickets/{id}/attachments/{attachmentId}': { get: op('Download an attachment', 'attachments:read', { tag: 'attachments' }) },
+      '/tickets/{id}/approval': {
+        get: op('The approval verdict for one ticket — the gate endpoint', 'approvals:read', {
+          tag: 'approvals',
+          responseRef: ref('ApprovalVerdict'),
+          parameters: [{
+            name: 'category', in: 'query', required: true, schema: { type: 'string' }, example: 'New Computer Upgrade',
+            description: 'REQUIRED, no default. Scopes the verdict to one approval category. A ticket can carry approvals from several categories, so an implicit ticket-wide answer could let an approved licence request open a hardware gate. Pass `any` to opt into the ticket-wide verdict deliberately. Unknown name → 404 `approval_category_not_found` listing the valid ones.',
+          }],
+        }),
+      },
       '/tickets/{id}/approvals': {
-        get: op('List approvals on a ticket', 'approvals:read', { tag: 'approvals' }),
+        get: op('List approvals on a ticket (raw rows — prefer /approval for a verdict)', 'approvals:read', { tag: 'approvals' }),
         post: op('Request approval against a category', 'approvals:write', { tag: 'approvals', body: { type: 'object', required: ['approvalCategoryId'], properties: { approvalCategoryId: { type: 'integer' }, note: { type: 'string' } } }, status: 201 }),
       },
       '/tags': { get: op('List the workspace tag palette', 'tags:read', { tag: 'taxonomy' }) },

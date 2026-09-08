@@ -1,6 +1,16 @@
-export const APP_VERSION = '3.8.33-preview';
+export const APP_VERSION = '3.8.34-preview';
 
 export const changelog = [
+  {
+    version: '3.8.34-preview',
+    date: 'September 8, 2026',
+    entries: [
+      { type: 'added', html: '<strong>\u2728 Other systems can now ask Ticket Pulse whether a request was approved</strong> \u2014 a new read-only API endpoint answers, in one call, whether one ticket carries an approval: <code>GET /api/v1/tickets/{ref}/approval</code>. Built for Assetron, which refuses to hand a new laptop to an employee unless a ticketing system confirms the request was approved. It accepts whichever number the agent has (TP-1042, #231164, or a bare number), and because Ticket Pulse tickets are mirrored into FreshService, the answer names the ticket in both systems.' },
+      { type: 'added', html: '<strong>The approval answer is scoped to one approval category</strong> \u2014 a ticket can carry approvals from several categories at once, so \u201cis this ticket approved?\u201d is the wrong question: an approved <em>AI Premium License Request</em> must never open a <em>New Computer Upgrade</em> gate. The endpoint requires the caller to name the category, and refuses a vague question rather than guessing.' },
+      { type: 'improved', html: '<strong>Approval states are published as a fixed list</strong> \u2014 the seven values the API can return (approved, pending, awaiting an answer from the requester, link expired, rejected, cancelled, never requested) are documented and frozen, with <em>approved</em> the only one that opens a gate. Anything the API cannot determine is reported as an error rather than as \u201cnot approved\u201d, so a caller can tell \u201cgenuinely not approved\u201d from \u201cwe could not reach it\u201d and block a handout for the right reason.' },
+      { type: 'improved', html: '<strong>API tickets now carry their FreshService number</strong> \u2014 every ticket the public API returns lists its counterparts in other systems, so an integrator holding one number can address both systems without a second lookup.' },
+    ],
+  },
   {
     version: '3.8.33-preview',
     date: 'September 5, 2026',
