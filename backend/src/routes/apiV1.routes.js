@@ -620,7 +620,16 @@ router.get('/tickets/:id/approval', S('approvals:read'), asyncHandler(async (req
     });
   }
 
-  const verdict = await approvalVerdictService.verdict((await tid(req)), req.workspaceId, {
+  // NOT tid(): that treats a bare number as the INTERNAL database id, which is
+  // right for callers holding ids from a previous API response and wrong here.
+  // This endpoint is explicitly addressed by "the reference an agent typed"
+  // (their R2), and agents type ticket numbers — a FreshService number today.
+  // So resolve every form the human way: FS number, then TP number, then id.
+  const { resolveTicketRef } = await import('../services/ticketRefResolver.js');
+  const resolved = await resolveTicketRef(ref, req.workspaceId);
+  if (!resolved) throw problems.notFound(`No ticket matching "${ref}" in this workspace — try its TP-#### or #FS number`);
+
+  const verdict = await approvalVerdictService.verdict(resolved.id, req.workspaceId, {
     category,
     echo: ref || null,
   });
