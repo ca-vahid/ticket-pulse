@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.8.34-preview';
+export const APP_VERSION = '3.8.35-preview';
 
 export const changelog = [
+  {
+    version: '3.8.35-preview',
+    date: 'September 8, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Approval lookups accept the number an agent actually types</strong> \u2014 the new approval endpoint treated a plain number as an internal database id rather than as a ticket number, so a caller sending a FreshService number (which is what their people type today) would have been told the ticket does not exist. A bare number is now resolved the way a person means it: FreshService number first, then Ticket Pulse number, then internal id \u2014 the same rule the app\u2019s own ticket search uses.' },
+    ],
+  },
   {
     version: '3.8.34-preview',
     date: 'September 8, 2026',
