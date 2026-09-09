@@ -19,6 +19,7 @@ import notificationPreferenceService from './notificationPreferenceService.js';
 import ticketLifecycleNotificationService from './ticketLifecycleNotificationService.js';
 import { TICKET_ORIGIN, ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { sseManager } from '../routes/sse.routes.js';
+import { isGroupExcluded } from './assignmentDecisionRules.js';
 
 const TP_SKILL_OBJECT_TITLE = 'Ticket Pulse Skills';
 const TP_SUBSKILL_OBJECT_TITLE = 'Ticket Pulse Subskills';
@@ -1047,12 +1048,26 @@ class FreshServiceActionService {
     const buildError = actionPlan.error;
 
     if (buildError) {
+      const skipData = { syncStatus: 'skipped', syncError: buildError, syncPayload: { actions, preview } };
+      // A run that auto-assigned someone who cannot exist in FreshService
+      // (an app-only/local person — the CIO case, Sep 2026) must not stay
+      // "auto_assigned + skipped": nothing was applied anywhere, the ticket
+      // sits unowned, and nobody is told. Downgrade to pending_review so it
+      // surfaces in Awaiting Decision, mirroring the preflight-abort pattern.
+      if (buildError === 'missing_fs_agent_id' && run.decision === 'auto_assigned') {
+        skipData.decision = 'pending_review';
+        skipData.assignedTechId = null;
+        skipData.decidedAt = null;
+        skipData.errorMessage = 'Auto-assign chose a person with no FreshService identity (app-only/local) — nothing was applied. Downgraded to pending_review for manual handling.';
+      } else if (buildError === 'missing_fs_agent_id') {
+        skipData.errorMessage = 'Assignment could not sync: the chosen person has no FreshService identity (app-only/local).';
+      }
       await prisma.assignmentPipelineRun.update({
         where: { id: runId },
-        data: { syncStatus: 'skipped', syncError: buildError, syncPayload: { actions, preview } },
+        data: skipData,
       });
-      logger.info('FreshService sync skipped', { runId, reason: buildError });
-      return { success: false, error: buildError, preview };
+      logger.info('FreshService sync skipped', { runId, reason: buildError, downgraded: !!skipData.decision });
+      return { success: false, error: buildError, preview, downgraded: !!skipData.decision };
     }
 
     if (actions.length === 0) {
@@ -1709,6 +1724,25 @@ class FreshServiceActionService {
     try {
       const fsTicket = await client.getTicket(assignAction.ticketId);
       if (!fsTicket) return null;
+
+      // Check 0 (apply-time observe guard): the routing race — a ticket
+      // analyzed BEFORE a FreshService workflow moved it into an observe-only
+      // group must not be written to at apply time. The analysis-time gate ran
+      // against the old group; re-verify against FS's LIVE group here. The
+      // caller's generic downgrade turns auto_assigned into pending_review.
+      if (fsTicket.group_id) {
+        const observeConfig = await prisma.assignmentConfig.findUnique({
+          where: { workspaceId: run.workspaceId },
+          select: { observeOnlyGroupIds: true },
+        }).catch(() => null);
+        if (isGroupExcluded(fsTicket.group_id, observeConfig?.observeOnlyGroupIds)) {
+          return {
+            code: 'observed_group_at_apply',
+            reason: `Ticket now sits in observe-only group #${fsTicket.group_id} — assignment held by the apply-time guard`,
+            details: { groupId: fsTicket.group_id },
+          };
+        }
+      }
 
       // Check 1: ticket already assigned to someone else
       if (fsTicket.responder_id && Number(fsTicket.responder_id) !== Number(assignAction.agentId)) {

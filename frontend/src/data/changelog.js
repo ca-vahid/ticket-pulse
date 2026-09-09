@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.8.35-preview';
+export const APP_VERSION = '3.8.36-preview';
 
 export const changelog = [
+  {
+    version: '3.8.36-preview',
+    date: 'September 9, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>🛡️ Auto-assign can no longer pick people who can’t hold the ticket</strong> — app-only (local) people are excluded from AI candidate pools for FreshService-born tickets, and if a write-back ever finds the chosen person has no FreshService identity, the run now downgrades to <b>Awaiting Decision</b> instead of silently reporting success while the ticket sits unowned. The competency learner also stopped crediting assignments that never actually applied — the loop that quietly taught the AI to keep picking the same unassignable person is closed end-to-end.' },
+      { type: 'fixed', html: '<strong>⏰ 8 AM queue drain hardened</strong> — pipeline bookkeeping writes now retry transient database errors with backoff, and runs that still fail on a database error are automatically re-queued (3-attempt cap) instead of relying on luck. The morning batch that used to produce an occasional stuck, unanalyzed ticket now heals itself.' },
+      { type: 'fixed', html: '<strong>👀 Observe-only groups are respected at apply time</strong> — if a workflow moved a ticket into an observe-only group after the AI analyzed it, the assignment write-back now re-checks the live group and holds the run for review instead of acting on stale routing.' },
+    ],
+  },
   {
     version: '3.8.35-preview',
     date: 'September 8, 2026',

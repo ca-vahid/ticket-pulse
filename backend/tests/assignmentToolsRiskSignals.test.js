@@ -4,6 +4,7 @@ const prismaMock = {
   workspace: { findUnique: jest.fn() },
   ticket: {
     findFirst: jest.fn(),
+    findUnique: jest.fn().mockResolvedValue({ origin: 'freshservice' }),
     groupBy: jest.fn(),
   },
   technician: { findMany: jest.fn() },

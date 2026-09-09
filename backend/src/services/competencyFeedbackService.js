@@ -33,6 +33,7 @@ class CompetencyFeedbackService {
         select: {
           feedbackApplied: true,
           recommendation: true,
+          syncStatus: true,
           ticket: {
             select: {
               ticketCategory: true,
@@ -47,6 +48,17 @@ class CompetencyFeedbackService {
       });
 
       if (!run || run.feedbackApplied) return;
+
+      // Auto-assignments only teach the matrix when the assignment actually
+      // APPLIED (synced to FS or applied locally). A decision whose write-back
+      // was skipped/failed/dry-run assigned nobody anywhere — learning from it
+      // minted competencies for a person who never held a ticket (the CIO
+      // case, Sep 2026). Human decisions (approved/modified) stay exempt:
+      // a reviewer's explicit pick is a real signal even if FS hiccups later.
+      if (decision === 'auto_assigned' && run.syncStatus !== 'synced') {
+        logger.debug('Competency feedback: auto-assign did not apply — no learning', { runId, syncStatus: run.syncStatus });
+        return;
+      }
 
       const targetCategoryId = run.ticket?.internalSubcategoryId || run.ticket?.internalCategoryId || null;
       const ticketCategory = run.ticket?.internalSubcategory?.name

@@ -79,3 +79,66 @@ describe('competencyFeedbackService learning gate', () => {
     expect(prismaMock.technicianCompetency.create).not.toHaveBeenCalled();
   });
 });
+
+// Regression guard for the CIO incident (Sep 2026): the AI auto-assigned a
+// local (no-FreshService-identity) person four times; every write-back was
+// skipped so nothing applied anywhere — but the learner credited each failed
+// decision and minted competencies for someone who never held a ticket.
+// Auto-assign decisions must only teach the matrix when they actually applied.
+describe('competencyFeedbackService outcome gate (auto_assigned)', () => {
+  const baseRun = (syncStatus) => ({
+    feedbackApplied: false,
+    recommendation: {},
+    syncStatus,
+    ticket: {
+      internalCategoryId: 92,
+      internalSubcategoryId: null,
+      internalCategory: { id: 92, name: 'SharePoint / Coreshack' },
+      internalSubcategory: null,
+      ticketCategory: null,
+      category: null,
+    },
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prismaMock.assignmentConfig.findUnique.mockResolvedValue({ competencyFeedbackEnabled: true });
+    prismaMock.competencyCategory.findMany.mockResolvedValue([
+      { id: 92, name: 'SharePoint / Coreshack', parentId: null },
+    ]);
+    prismaMock.technicianCompetency.findUnique.mockResolvedValue(null);
+    prismaMock.technicianCompetency.create.mockResolvedValue({ id: 1 });
+    prismaMock.assignmentPipelineRun.update.mockResolvedValue({});
+    prismaMock.technicianCompetency.count.mockResolvedValue(0);
+  });
+
+  test.each(['skipped', 'failed', 'dry_run', null])(
+    'auto_assigned with syncStatus=%s does NOT learn and does NOT consume the run',
+    async (syncStatus) => {
+      prismaMock.assignmentPipelineRun.findUnique.mockResolvedValue(baseRun(syncStatus));
+
+      await competencyFeedbackService.processDecisionFeedback(101, 'auto_assigned', 48, 1);
+
+      expect(prismaMock.technicianCompetency.create).not.toHaveBeenCalled();
+      expect(prismaMock.assignmentPipelineRun.update).not.toHaveBeenCalled();
+    },
+  );
+
+  test('auto_assigned with syncStatus=synced learns normally', async () => {
+    prismaMock.assignmentPipelineRun.findUnique.mockResolvedValue(baseRun('synced'));
+
+    await competencyFeedbackService.processDecisionFeedback(101, 'auto_assigned', 48, 1);
+
+    expect(prismaMock.technicianCompetency.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ technicianId: 48, proficiencyLevel: 'basic' }),
+    }));
+  });
+
+  test('human decisions (modified) stay exempt from the outcome gate', async () => {
+    prismaMock.assignmentPipelineRun.findUnique.mockResolvedValue(baseRun('skipped'));
+
+    await competencyFeedbackService.processDecisionFeedback(101, 'modified', 48, 1);
+
+    expect(prismaMock.technicianCompetency.create).toHaveBeenCalled();
+  });
+});

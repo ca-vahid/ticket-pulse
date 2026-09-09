@@ -222,9 +222,37 @@ class AssignmentRepository {
     }
   }
 
+  /**
+   * Retry a pipeline bookkeeping write that failed on a TRANSIENT database
+   * error (connection drop / pool exhaustion at the 8 AM drain — four failed
+   * runs in two weeks, Sep 2026). Validation errors rethrow immediately;
+   * transient ones get two more attempts with backoff.
+   */
+  async _withTransientRetry(label, fn) {
+    const transient = (error) => {
+      const code = error?.code || error?.meta?.code || '';
+      if (['P1001', 'P1002', 'P1008', 'P1017', 'P2024'].includes(code)) return true;
+      return /connect|connection|timeout|terminat|ECONNRESET|socket/i.test(String(error?.message || ''));
+    };
+    let lastError;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        return await fn();
+      } catch (error) {
+        lastError = error;
+        if (attempt === 3 || !transient(error)) throw error;
+        const delay = attempt === 1 ? 300 : 1200;
+        logger.warn(`${label}: transient DB error, retrying in ${delay}ms (attempt ${attempt}/3): ${error.message}`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+    throw lastError;
+  }
+
   async updatePipelineRun(id, data) {
     try {
-      return await prisma.assignmentPipelineRun.update({ where: { id }, data });
+      return await this._withTransientRetry('updatePipelineRun', () =>
+        prisma.assignmentPipelineRun.update({ where: { id }, data }));
     } catch (error) {
       logger.error('Error updating pipeline run:', error);
       throw new DatabaseError('Failed to update pipeline run', error);
@@ -996,7 +1024,8 @@ class AssignmentRepository {
 
   async updatePipelineStep(id, data) {
     try {
-      return await prisma.assignmentPipelineStep.update({ where: { id }, data });
+      return await this._withTransientRetry('updatePipelineStep', () =>
+        prisma.assignmentPipelineStep.update({ where: { id }, data }));
     } catch (error) {
       logger.error('Error updating pipeline step:', error);
       throw new DatabaseError('Failed to update pipeline step', error);

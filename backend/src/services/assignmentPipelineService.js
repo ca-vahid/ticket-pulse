@@ -1429,19 +1429,28 @@ class AssignmentPipelineService {
       // the earlier 'completed' broadcast predates these writes.
       if (decision === 'auto_assigned' || decision === 'classified_only') {
         freshServiceActionService.execute(runId, workspaceId, assignmentConfig?.dryRunMode ?? true)
+          .then((syncResult) => {
+            // Competency feedback ONLY for auto-assignments that actually
+            // APPLIED (Bryan/CIO loop, Sep 2026): a decision whose write-back
+            // was skipped, downgraded, aborted or dry-run must not teach the
+            // matrix — that's how a person who can never hold a ticket
+            // accumulated three competencies from assignments that went
+            // nowhere. Human decisions (approved/modified) keep learning at
+            // the decide route — human intent is a real signal on its own.
+            const applied = !!syncResult?.success && !syncResult?.skipped && !syncResult?.dryRun;
+            if (decision === 'auto_assigned' && topRec?.techId && applied) {
+              competencyFeedbackService.processDecisionFeedback(runId, decision, topRec.techId, workspaceId).catch((err) =>
+                logger.warn('Competency feedback failed after auto-assign', { runId, error: err.message }),
+              );
+            }
+            return null;
+          })
           .catch((err) => logger.warn('FreshService pipeline sync failed', { runId, decision, error: err.message }))
           .then(() => this._broadcastRunUpdate(workspaceId, ticketId, runId, 'synced', decision));
       } else if (decision === 'noise_dismissed' && assignmentConfig?.autoCloseNoise && !noiseVetoApplied) {
         freshServiceActionService.execute(runId, workspaceId, assignmentConfig?.dryRunMode ?? true)
           .catch((err) => logger.warn('FreshService auto-close noise failed', { runId, error: err.message }))
           .then(() => this._broadcastRunUpdate(workspaceId, ticketId, runId, 'synced', decision));
-      }
-
-      // Competency feedback for auto-assign
-      if (decision === 'auto_assigned' && topRec?.techId) {
-        competencyFeedbackService.processDecisionFeedback(runId, decision, topRec.techId, workspaceId).catch((err) =>
-          logger.warn('Competency feedback failed after auto-assign', { runId, error: err.message }),
-        );
       }
 
       emit({ type: 'complete', runId });
@@ -1736,6 +1745,8 @@ class AssignmentPipelineService {
         // The per-turn attemptTimeoutMs makes this a rare backstop.
         await this.reconcileStuckAnalysisRuns({ olderThanMs: 7 * 60 * 1000, broadcast: true })
           .catch((e) => logger.warn(`[stuck-run watchdog] ${e.message}`));
+        await this.requeueDbErrorFailedRuns()
+          .catch((e) => logger.warn(`[db-error requeue] ${e.message}`));
         const { default: workspaceRepository } = await import('./workspaceRepository.js');
         const workspaces = await workspaceRepository.getAllActive();
         for (const ws of workspaces) {
@@ -1965,6 +1976,71 @@ class AssignmentPipelineService {
     }
 
     return { recovered: stuck.length, runIds: stuck.map((r) => r.id) };
+  }
+
+  /**
+   * Requeue runs that FAILED on a transient database write ("Database error:
+   * Failed to update pipeline run/step" at the 8 AM drain). Unlike watchdog
+   * stalls, these had no systematic retry — the earlier "self-heals" were
+   * luck (a later ticket update spawned a fresh run); #239982 sat unanalyzed
+   * for three days when the luck ran out (Sep 2026). Same eligibility rules
+   * and 3-failure cap as the stuck-run requeue.
+   */
+  async requeueDbErrorFailedRuns() {
+    const failed = await prisma.assignmentPipelineRun.findMany({
+      where: {
+        status: 'failed',
+        errorMessage: { startsWith: 'Database error:' },
+        updatedAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+      },
+      select: { id: true, ticketId: true, workspaceId: true },
+      take: 25,
+    });
+    if (failed.length === 0) return { requeued: 0 };
+
+    let requeued = 0;
+    for (const r of failed) {
+      try {
+        // Only the LATEST run for the ticket qualifies — a newer run of any
+        // status means something else already picked the ticket back up.
+        const newer = await prisma.assignmentPipelineRun.count({
+          where: { ticketId: r.ticketId, id: { gt: r.id } },
+        });
+        if (newer > 0) continue;
+        const ticket = await prisma.ticket.findUnique({
+          where: { id: r.ticketId },
+          select: { status: true, assignedTechId: true, isNoise: true },
+        });
+        const base = ticket ? await statusService.baseStatusOf(r.workspaceId, ticket.status) : null;
+        if (!ticket || ticket.assignedTechId || !['Open', 'Pending'].includes(base) || ticket.isNoise) continue;
+        const failures = await prisma.assignmentPipelineRun.count({
+          where: { ticketId: r.ticketId, status: 'failed' },
+        });
+        if (failures >= 3) {
+          logger.warn('DB-error auto-retry cap reached — leaving ticket for manual triage', { ticketId: r.ticketId, failures });
+          continue;
+        }
+        const open = await assignmentRepository.getOpenPipelineRun(r.ticketId);
+        if (open) continue;
+        await prisma.assignmentPipelineRun.create({
+          data: {
+            ticketId: r.ticketId,
+            workspaceId: r.workspaceId,
+            status: 'queued',
+            triggerSource: 'poll',
+            queuedAt: new Date(),
+            queuedReason: `Auto-retry after a transient database write failure (attempt ${failures + 1}/3)`,
+          },
+        });
+        requeued += 1;
+      } catch (retryError) {
+        logger.warn('DB-error auto-retry could not queue', { ticketId: r.ticketId, error: retryError.message });
+      }
+    }
+    if (requeued > 0) {
+      logger.info(`DB-error recovery re-queued ${requeued} ticket(s) for automatic retry`);
+    }
+    return { requeued };
   }
 }
 
