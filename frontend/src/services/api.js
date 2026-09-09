@@ -1309,6 +1309,19 @@ export const noiseRulesAPI = {
   getStats: async () => {
     return await api.get('/noise-rules/stats');
   },
+  // QA 09-05 (option 4): what happened AFTER each AI noise verdict, so a wrong
+  // verdict is a measurement instead of an inference.
+  verdictAccuracy: async (days = 180) => {
+    return await api.get('/noise-rules/verdict-accuracy', { params: { days } });
+  },
+  // QA 09-05 (option 2): the workspace's own definition of noise. Stored on the
+  // assignment config; exposed here so the Noise Rules panel talks to one API.
+  guidance: async () => {
+    return await api.get('/assignment/config');
+  },
+  saveGuidance: async (noiseGuidance) => {
+    return await api.put('/assignment/config', { noiseGuidance });
+  },
   // QA 09-04 (F): what the rules closed, and what the sender guard held back.
   activity: async (days = 30) => {
     return await api.get('/noise-rules/activity', { params: { days } });

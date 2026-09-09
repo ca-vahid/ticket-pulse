@@ -1981,6 +1981,12 @@ model AssignmentConfig {
   emailPollingIntervalSec             Int       @default(60) @map("email_polling_interval_sec")
   lastEmailCheckAt                    DateTime? @map("last_email_check_at")
   autoCloseNoise                      Boolean   @default(false) @map("auto_close_noise")
+  // Per-workspace noise guidance injected into the assignment system prompt
+  // (QA 09-05, Accounting option 2). The IT default — "no-reply address means
+  // machine means noise" — is backwards in an Accounts Payable mailbox, where
+  // the vendor robots ARE the customers. Editable in Settings so a team can
+  // tune what noise means for them without a deploy.
+  noiseGuidance                       String?   @map("noise_guidance") @db.Text
   dryRunMode                          Boolean   @default(true) @map("dry_run_mode")
   dailyReviewEnabled                  Boolean   @default(false) @map("daily_review_enabled")
   dailyReviewRunHour                  Int       @default(18) @map("daily_review_run_hour")

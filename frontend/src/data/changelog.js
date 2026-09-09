@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.8.40-preview';
+export const APP_VERSION = '3.8.41-preview';
 
 export const changelog = [
+  {
+    version: '3.8.41-preview',
+    date: 'September 9, 2026',
+    entries: [
+      { type: 'added', html: '<strong>\u2728 You can now see whether the AI\u2019s \u201cnot actionable\u201d calls were right</strong> \u2014 Settings \u2192 Noise Rules has a new <em>Was the AI right?</em> panel showing, for the last 180 days, how many tickets it called noise and how many a person went on to work anyway. Accounting has been living with this quietly: <strong>1,535 verdicts, 844 of them worked by a person regardless</strong>. The panel lists recent examples so you can spot-check them, and it is honest that these are signals rather than confirmed mistakes.' },
+      { type: 'added', html: '<strong>Each team can say what \u201cnoise\u201d means in their own mailbox</strong> \u2014 a new guidance box in Settings \u2192 Noise Rules is added to the AI\u2019s instructions and <em>overrides</em> the general rules. This matters most in Accounts Payable, where the built-in assumption is backwards: in IT an automated no-reply sender usually is noise, but in AP the vendor robots are the customers. One click fills in wording that marks invoices, statements, remittances and past-due notices as real work while keeping marketing, webinars and giveaways as noise \u2014 and tells the AI to judge the message, not the sender, when one address sends both.' },
+      { type: 'improved', html: '<strong>Accounting\u2019s guidance is switched on</strong> \u2014 the Accounts Payable wording above is now live for the Accounting workspace, so vendor invoices should stop being labelled non-actionable. Nothing was being auto-closed there, so no ticket was ever lost \u2014 the cost was a wrong label and a coordinator\u2019s time. IT is unchanged.' },
+    ],
+  },
   {
     version: '3.8.40-preview',
     date: 'September 9, 2026',

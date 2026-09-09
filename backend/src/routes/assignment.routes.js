@@ -152,6 +152,7 @@ router.put('/config', requireAdmin, asyncHandler(async (req, res) => {
     recommendationPrompt, pollForUnassigned, pollMaxPerCycle,
     monitoredMailbox, emailPollingEnabled, emailPollingIntervalSec,
     autoCloseNoise, duplicateBurstEnabled, dryRunMode, excludedGroupIds, observeOnlyGroupIds, autoCategorizeEnabled,
+    noiseGuidance,
     competencyFeedbackEnabled,
     observeCategoryWritebackEnabled,
     dailyReviewEnabled, dailyReviewRunHour, dailyReviewRunMinute, dailyReviewLookbackDays,
@@ -177,6 +178,12 @@ router.put('/config', requireAdmin, asyncHandler(async (req, res) => {
   if (emailPollingEnabled !== undefined) data.emailPollingEnabled = emailPollingEnabled;
   if (emailPollingIntervalSec !== undefined) data.emailPollingIntervalSec = emailPollingIntervalSec;
   if (autoCloseNoise !== undefined) data.autoCloseNoise = autoCloseNoise;
+  // Per-workspace noise guidance (QA 09-05, option 2). Empty string clears it
+  // back to the built-in guidance; capped so a paste can't bloat every prompt.
+  if (noiseGuidance !== undefined) {
+    const trimmed = String(noiseGuidance || '').trim();
+    data.noiseGuidance = trimmed ? trimmed.slice(0, 4000) : null;
+  }
   if (duplicateBurstEnabled !== undefined) data.duplicateBurstEnabled = !!duplicateBurstEnabled;
   if (autoCategorizeEnabled !== undefined) data.autoCategorizeEnabled = !!autoCategorizeEnabled;
   if (competencyFeedbackEnabled !== undefined) data.competencyFeedbackEnabled = !!competencyFeedbackEnabled;
@@ -444,6 +451,7 @@ router.get('/queue-status', requireAdmin, asyncHandler(async (req, res) => {
       nextWindow,
       autoAssign: !!cfg?.autoAssign,
       autoCloseNoise: !!cfg?.autoCloseNoise,
+      noiseGuidance: cfg?.noiseGuidance || '',
       pipelineEnabled: !!cfg?.isEnabled,
       dryRunMode: !!cfg?.dryRunMode,
       excludedGroupCount: Array.isArray(cfg?.excludedGroupIds) ? cfg.excludedGroupIds.length : 0,
