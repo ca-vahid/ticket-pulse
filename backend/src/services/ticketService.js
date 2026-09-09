@@ -752,12 +752,61 @@ class TicketService {
     const byEmail = await requesterRepository.findByEmail(email);
     if (byEmail) return byEmail;
 
+    // QA 09-09: creating a requester for an INTERNAL address nobody owns is
+    // how a typo becomes permanent. A QA run of the Power Apps integration
+    // posted susan.xu@bgcengineering.ca (a guess; her login is sxu@) through
+    // POST /api/v1/tickets — Graph 404'd, the 404 was swallowed, the row was
+    // created anyway, and from then on it shadowed the real Susan Xu in every
+    // requester picker.
+    //
+    // So: on a domain this workspace calls internal, the address has to
+    // actually exist before we mint a person for it. External addresses are
+    // untouched — an unknown external requester is normal and expected.
+    const domain = email.split('@')[1] || '';
+    const internalDomains = await this._internalDomains(workspaceId);
+    const isInternal = internalDomains.includes(domain);
+
     let entra = null;
-    try {
+    let entraMissing = false;
+    if (isInternal) {
       const { default: azureAdService } = await import('./azureAdService.js');
-      entra = await azureAdService.getUserProfile(email);
-    } catch (err) {
-      logger.debug(`Entra enrichment unavailable for ${email}: ${err.message}`);
+      const resolved = await azureAdService.resolveAddress(email);
+
+      if (resolved.status === 'absent') {
+        // Try to name the person they probably meant, so the error is
+        // actionable rather than just a refusal.
+        let hint = '';
+        try {
+          const local = email.split('@')[0].replace(/[._-]+/g, ' ').trim();
+          const candidates = await azureAdService.searchUsers(local, 3);
+          const suggestion = (candidates || []).find((c) => c.mail);
+          if (suggestion) hint = ` Did you mean ${suggestion.mail} (${suggestion.displayName})?`;
+        } catch { /* a hint is a nicety; never let it change the outcome */ }
+        throw new ValidationError(
+          `${email} is not a mailbox in this organisation, so no requester was created.${hint}`
+          + ' Use their real address, or pick them from the requester list.',
+        );
+      }
+
+      // 'unavailable' must NOT be treated as absent: a Graph outage would
+      // otherwise stop every integration from filing tickets.
+      if (resolved.status === 'unavailable') {
+        logger.warn(`Entra unreachable while resolving ${email}; creating the requester unverified`);
+      } else {
+        entra = {
+          displayName: resolved.displayName,
+          jobTitle: resolved.jobTitle,
+          department: resolved.department,
+        };
+      }
+    } else {
+      try {
+        const { default: azureAdService } = await import('./azureAdService.js');
+        entra = await azureAdService.getUserProfile(email);
+        if (!entra) entraMissing = true;
+      } catch (err) {
+        logger.debug(`Entra enrichment unavailable for ${email}: ${err.message}`);
+      }
     }
 
     return requesterRepository.createNative({
@@ -766,7 +815,22 @@ class TicketService {
       department: entra?.department || null,
       jobTitle: entra?.jobTitle || null,
       entraProfile: entra,
+      entraMissing,
     });
+  }
+
+  /** Domains this workspace treats as its own. Empty list = no internal check. */
+  async _internalDomains(workspaceId) {
+    try {
+      const ws = await prisma.workspace.findUnique({
+        where: { id: workspaceId },
+        select: { internalDomains: true },
+      });
+      return (ws?.internalDomains || []).map((d) => String(d).trim().toLowerCase()).filter(Boolean);
+    } catch (err) {
+      logger.warn(`Could not read internal domains for ws ${workspaceId}: ${err.message}`);
+      return [];
+    }
   }
 
   // ------------------------------------------------------------------ reads
@@ -2306,6 +2370,9 @@ class TicketService {
     const requesters = await prisma.requester.findMany({
       where: {
         isActive: true,
+        // QA 09-09: phantom/QA-artifact rows are hidden here rather than via
+        // isActive, which the FreshService sync overwrites every cycle.
+        suppressedAt: null,
         OR: [
           { name: { contains: query, mode: 'insensitive' } },
           { email: { contains: query, mode: 'insensitive' } },

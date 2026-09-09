@@ -267,8 +267,12 @@ async function refreshRequesterEntraProfile(requester) {
       entraJobTitle: profile.jobTitle,
       entraPreferredLanguage: profile.preferredLanguage,
       entraProfileSyncedAt: new Date(),
+      entraMissingAt: null,
     } : {
-      entraProfileSyncedAt: new Date(),
+      // QA 09-09: a miss is recorded as a miss. Stamping entraProfileSyncedAt
+      // here made an unresolvable address look freshly enriched — which is how
+      // a phantom requester sat in the pickers for a month looking legitimate.
+      entraMissingAt: new Date(),
     };
 
     return prisma.requester.update({
