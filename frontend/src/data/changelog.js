@@ -1,6 +1,16 @@
-export const APP_VERSION = '3.8.45-preview';
+export const APP_VERSION = '3.8.46-preview';
 
 export const changelog = [
+  {
+    version: '3.8.46-preview',
+    date: 'September 9, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>\u2728 Refreshed tickets now sweep instead of flashing a cut-off blue box</strong> \u2014 the old highlight was painted on the subject <em>text</em>, and because long subjects are trimmed with an ellipsis the blue box stopped dead mid-word (FR: Vahid). Worse, 83 of them at once was a wall of blue. A refreshed row now gets a single band of light passing across the <strong>whole row</strong>, staggered a fraction of a second apart so a big refresh reads as a wave rolling down the list rather than everything flashing at once. Nothing hugs the text, so nothing can be cut off.' },
+      { type: 'improved', html: '<strong>It covers every change, not just the subject</strong> \u2014 a ticket that changed status, assignee, priority or activity gets the same sweep in a cooler blue, so you can see what moved even when the title did not. This applies to the automatic background refresh as well as the refresh button.' },
+      { type: 'improved', html: '<strong>The \u201chidden by your filter\u201d message reads as one line</strong> \u2014 the boxed panel inside the empty state looked lopsided, so it is now a single centred sentence: <em>\u201c1 ticket hidden by your Status filter \u2014 Include Closed (1)\u201d</em>. Same behaviour, less furniture.' },
+      { type: 'fixed', html: '<strong>Reduced-motion users get a proper cue</strong> \u2014 with animations turned off, a refreshed row shows a steady tint for the few seconds it stays flagged instead of a moving sweep. Previously the same setting would have left the highlight parked across the row with nothing to carry it away.' },
+    ],
+  },
   {
     version: '3.8.45-preview',
     date: 'September 9, 2026',

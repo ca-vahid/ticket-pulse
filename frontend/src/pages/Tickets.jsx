@@ -1788,7 +1788,7 @@ export default function Tickets() {
                               lines, so this is "measurably more visible", not a WCAG
                               claim. Mobile cards share these <li>s — one change, both. */}
                           <ul className="divide-y divide-border">
-                            {tickets.map((ticket) => {
+                            {tickets.map((ticket, rowIndex) => {
                               const previewing = previewId === ticket.id;
                               // The AI assignment pipeline is deciding this ticket RIGHT NOW —
                               // the row gets a live indigo aura so watchers see it happening.
@@ -1836,9 +1836,7 @@ export default function Tickets() {
                                   state={linkState}
                                   onClick={(e) => { e.stopPropagation(); if (isModifiedClick(e)) return; e.preventDefault(); onRowClick(ticket.id); }}
                                   onDoubleClick={(e) => { e.stopPropagation(); e.preventDefault(); onRowDoubleClick(ticket.id); }}
-                                  className={`tp-focus-ring rounded text-left font-medium text-foreground truncate min-w-0 ${roomy ? 'text-[15px]' : 'text-sm'} ${
-                                    fx === 'new' ? 'tp-subject-flash-new' : fx === 'updated' ? 'tp-subject-flash-updated' : ''
-                                  }`}
+                                  className={`tp-focus-ring rounded text-left font-medium text-foreground truncate min-w-0 ${roomy ? 'text-[15px]' : 'text-sm'}`}
                                 >
                                   {ticket.subject || '(no subject)'}
                                 </Link>
@@ -1952,10 +1950,18 @@ export default function Tickets() {
                                   animate={{ opacity: 1, y: 0 }}
                                   transition={{ type: 'spring', stiffness: 420, damping: 34 }}
                                   className={`group flex items-stretch transition-colors cursor-pointer ${
+                                    fx === 'new' ? 'tp-fx1' : fx === 'updated' ? 'tp-fx1 tp-fx1-updated' : ''
+                                  } ${
                                     aiLive ? 'tp-ai-live'
                                       : previewing ? 'bg-blue-50/50 dark:bg-blue-500/10'
                                         : selectedIds.has(ticket.id) ? 'bg-blue-50/40 dark:bg-blue-500/10' : 'hover:bg-muted/70'
                                   }`}
+                                  /* Stagger the sweep so 83 refreshed rows read as a wave.
+                                     Capped at 12 rows (660ms) so the last row's 1.1s sweep
+                                     still finishes before rowFx clears at 3.2s. */
+                                  style={fx === 'new' || fx === 'updated'
+                                    ? { '--tp-fx-delay': `${Math.min(rowIndex, 12) * 55}ms` }
+                                    : undefined}
                                   onClick={() => onRowClick(ticket.id)}
                                   onDoubleClick={() => onRowDoubleClick(ticket.id)}
                                   title="Click to preview (double-click opens)"
@@ -2067,9 +2073,7 @@ export default function Tickets() {
                                         to={ticketHref}
                                         state={linkState}
                                         onClick={(e) => { e.stopPropagation(); if (isModifiedClick(e)) return; e.preventDefault(); onRowClick(ticket.id); }}
-                                        className={`text-sm font-medium text-foreground line-clamp-2 ${
-                                          fx === 'new' ? 'tp-subject-flash-new' : fx === 'updated' ? 'tp-subject-flash-updated' : ''
-                                        }`}
+                                        className="text-sm font-medium text-foreground line-clamp-2"
                                       >
                                         {ticket.subject || '(no subject)'}
                                       </Link>
