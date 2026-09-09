@@ -34,7 +34,7 @@ import ErrorBoundary from './components/ErrorBoundary';
 import EmailHealthBanner from './components/EmailHealthBanner';
 import SyncHealthBanner from './components/SyncHealthBanner';
 import CommandPalette from './components/CommandPalette';
-import AdminRoute, { LoadingScreen } from './components/nav/AdminRoute';
+import AdminRoute, { LoadingScreen, ViewRoute } from './components/nav/AdminRoute';
 import AccessBounceToast from './components/nav/AccessBounceToast';
 import { homePathFor, useWorkspaceRole } from './components/nav/navDestinations';
 
@@ -251,18 +251,18 @@ function App() {
                     <Route
                       path="/dashboard"
                       element={
-                        <AdminRoute>
+                        <ViewRoute>
                           <Dashboard />
-                        </AdminRoute>
+                        </ViewRoute>
                       }
                     />
 
                     <Route
                       path="/technician/:id"
                       element={
-                        <AdminRoute>
+                        <ViewRoute>
                           <TechnicianDetailNew />
-                        </AdminRoute>
+                        </ViewRoute>
                       }
                     />
 
@@ -287,27 +287,27 @@ function App() {
                     <Route
                       path="/timeline"
                       element={
-                        <AdminRoute>
+                        <ViewRoute>
                           <TimelineExplorer />
-                        </AdminRoute>
+                        </ViewRoute>
                       }
                     />
 
                     <Route
                       path="/analytics"
                       element={
-                        <AdminRoute>
+                        <ViewRoute>
                           <Analytics />
-                        </AdminRoute>
+                        </ViewRoute>
                       }
                     />
 
                     <Route
                       path="/analytics/category-map"
                       element={
-                        <AdminRoute>
+                        <ViewRoute>
                           <Analytics view="category-map" />
-                        </AdminRoute>
+                        </ViewRoute>
                       }
                     />
 

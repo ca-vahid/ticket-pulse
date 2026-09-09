@@ -78,7 +78,8 @@ export const ALL_SETTINGS_NAV_ITEMS = [
   { id: 'ai-usage', label: 'AI Usage & Cost', Icon: BarChart3, minRole: 'global', group: 'Workspace' },
   // Was viewer-tier: a dead form for non-admins (PUT /settings is admin-only).
   { id: 'dashboard', label: 'Dashboard', Icon: LayoutDashboard, minRole: 'admin', group: 'Workspace' },
-  { id: 'workspace-access', label: 'Workspace Access', Icon: KeyRound, minRole: 'admin', group: 'Workspace' },
+  // 'workspace-access' retired (Sep 2026): merged into Members — app-only
+  // people and grants live there now; the old #workspace-access hash aliases.
   { id: 'workspaces', label: 'Workspaces', Icon: Globe, minRole: 'global', group: 'Workspace' },
 ];
 
