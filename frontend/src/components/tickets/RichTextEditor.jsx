@@ -24,7 +24,13 @@ const ALLOWED = {
 // Inline-style allowlist: presentational table/text props only. Everything
 // else — position/behavior props and any url()/expression() value — is
 // stripped, so a pasted style can't phone home or overlay the app.
-const ALLOWED_STYLE_PROP_RE = /^(?:border(?:-[a-z-]+)?|background(?:-color)?|color|text-align|font-weight|padding(?:-[a-z]+)?|width)$/;
+// `margin` and `line-height` earn their place here (QA 09-08): an Outlook
+// signature is a stack of `<p class=MsoNormal style='margin:0'>` lines, and
+// dropping the margin (the class goes too) left bare <p> elements that every
+// mail client then pads with its own ~1em paragraph margin — a signature that
+// is tight in Outlook went out looking loose. Negative values are rejected
+// below, which is the only part of `margin` that could overlay app chrome.
+const ALLOWED_STYLE_PROP_RE = /^(?:border(?:-[a-z-]+)?|background(?:-color)?|color|text-align|font-weight|padding(?:-[a-z]+)?|margin(?:-[a-z]+)?|line-height|width)$/;
 
 // Dedicated DOMPurify instance: ticketUi.jsx installs a global hook on the
 // shared one (cid-image removal for rendered emails) — the composer's much
@@ -42,6 +48,9 @@ purifier.addHook('afterSanitizeAttributes', (node) => {
         let value = decl.slice(sep + 1).trim();
         if (!prop || !value || !ALLOWED_STYLE_PROP_RE.test(prop)) return null;
         if (/url\s*\(|expression\s*\(/i.test(value)) return null;
+        // A negative margin can drag pasted content over the app's own chrome;
+        // nothing legitimate in an email signature needs one.
+        if (prop.startsWith('margin') && /-\s*\d/.test(value)) return null;
         // Normalize Office-isms so pasted borders actually render (QA 08-17
         // #1): `windowtext` is an IE system color browsers/email clients don't
         // paint, and Excel's hairline `.5pt` widths round down to nothing.

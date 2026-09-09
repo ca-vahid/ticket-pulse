@@ -25,6 +25,7 @@ export default function SignaturePanel() {
   const [enabled, setEnabled] = useState(true);
   const [html, setHtml] = useState('');
   const [text, setText] = useState('');
+  const [spacing, setSpacing] = useState('tight');
 
   useEffect(() => {
     let cancelled = false;
@@ -38,6 +39,7 @@ export default function SignaturePanel() {
         setEnabled(data.exists ? data.enabled !== false : true);
         setHtml(data.html || '');
         setText(data.text || '');
+        setSpacing(data.spacing || 'tight');
       } catch (err) {
         if (!cancelled) setError(err.response?.data?.message || err.message || 'Could not load your signature');
       } finally {
@@ -57,11 +59,13 @@ export default function SignaturePanel() {
         enabled,
         html,
         text,
+        spacing,
       });
       const data = res.data || {};
       setHtml(data.html || '');
       setText(data.text || '');
       setEnabled(data.enabled !== false);
+      setSpacing(data.spacing || 'tight');
       setMessage('Saved');
       setTimeout(() => setMessage(null), 4000);
     } catch (err) {
@@ -117,10 +121,49 @@ export default function SignaturePanel() {
           <p className="text-[11px] text-muted-foreground/75">
             Tip: copy your signature from Outlook and paste it here — formatting is preserved.
           </p>
+
+          {/* Line spacing (QA 09-08): mail clients add their own paragraph
+              margin to a pasted signature, which is what made these go out
+              looser than the same signature from FreshService. */}
+          <div className="pt-1">
+            <label className="block text-xs font-semibold uppercase tracking-wide text-muted-foreground" id="sig-spacing-label">
+              Line spacing
+            </label>
+            <div className="mt-1.5 inline-flex rounded-lg border border-input bg-card p-0.5" role="radiogroup" aria-labelledby="sig-spacing-label">
+              {[
+                ['tight', 'Tight', 'Lines stack directly — matches Outlook and FreshService'],
+                ['normal', 'Normal', 'A little breathing room between lines'],
+                ['relaxed', 'Relaxed', 'Roomier, for short signatures'],
+              ].map(([value, label, hint]) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="radio"
+                  aria-checked={spacing === value}
+                  title={hint}
+                  onClick={() => setSpacing(value)}
+                  className={`tp-focus-ring rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+                    spacing === value
+                      ? 'bg-blue-600 text-white'
+                      : 'text-muted-foreground hover:bg-muted'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1.5 text-[11px] text-muted-foreground/75">
+              Applied when the signature is added to an outgoing email. The preview shows exactly what recipients see.
+            </p>
+          </div>
         </div>
         <div className="space-y-2">
           <label className="block text-xs font-semibold uppercase tracking-wide text-muted-foreground">Preview</label>
-          <div className={`rounded-lg border border-dashed border-border bg-muted/30 p-3 ${enabled ? '' : 'opacity-50'}`} data-testid="signature-preview">
+          <div
+            className={`tp-sig-preview tp-sig-${spacing} rounded-lg border border-dashed border-border bg-muted/30 p-3 ${enabled ? '' : 'opacity-50'}`}
+            data-testid="signature-preview"
+            data-spacing={spacing}
+          >
             {String(html || '').trim()
               ? <SafeHtml html={html} />
               : <p className="text-sm text-muted-foreground/75">Nothing yet — your reply emails go out unsigned.</p>}

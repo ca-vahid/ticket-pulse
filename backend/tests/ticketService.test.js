@@ -1803,7 +1803,7 @@ describe('ticketService per-user signatures on reply sends (Mega 08-15 Phase D)'
     });
     // Outbound email carries body + separator + signature…
     expect(sendgridMock.sendEmail).toHaveBeenCalledWith(expect.objectContaining({
-      html: '<p>Fixed it!</p><br><br><p><strong>Cora Coordinator</strong><br>IT Service Desk</p>',
+      html: '<p>Fixed it!</p><br><br><p style="margin: 0"><strong>Cora Coordinator</strong><br>IT Service Desk</p>',
       text: expect.stringContaining('Fixed it!\n\n-- \nCora Coordinator'),
     }));
     // …while the persisted entry does NOT (decision: thread stays clean).
@@ -1820,7 +1820,7 @@ describe('ticketService per-user signatures on reply sends (Mega 08-15 Phase D)'
 
     expect(fsClientMock.createReply).toHaveBeenCalledWith(
       9,
-      '<p>Fixed it!</p><br><br><p><strong>Cora Coordinator</strong><br>IT Service Desk</p>',
+      '<p>Fixed it!</p><br><br><p style="margin: 0"><strong>Cora Coordinator</strong><br>IT Service Desk</p>',
       { ccEmails: [], attachments: [] },
     );
     expect(entry.bodyHtml).toBe('<p>Fixed it!</p>');

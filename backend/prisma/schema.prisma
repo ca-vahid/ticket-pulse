@@ -3531,6 +3531,12 @@ model UserEmailSignature {
   enabled     Boolean   @default(true)
   html        String?   @db.Text
   text        String?   @db.Text
+  // Line spacing applied to the signature's <p> lines when it is appended to an
+  // outbound email (QA 09-08). Pasted Outlook signatures arrive as bare <p>
+  // elements, and every mail client then adds its own ~1em paragraph margin —
+  // which is why a signature that is tight in Outlook rendered loose from here.
+  // tight = margin:0 (matches FreshService), normal = 6px, relaxed = 12px.
+  spacing     String    @default("tight") @db.VarChar(10)
   updatedBy   String?   @map("updated_by") @db.VarChar(255)
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
