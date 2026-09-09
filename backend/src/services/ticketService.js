@@ -3287,12 +3287,32 @@ class TicketService {
    * the cached thread (QA 07-06 #4). Reuses the preheat's idempotent
    * transform + bulkUpsert; broadcasts when anything new arrives.
    */
-  async _refreshFsBornThread(ticket) {
+  /**
+   * Hydrate a resolved FS-born ticket's conversation thread on the LOW lane.
+   * The on-open hydration only fires when somebody views the ticket in Ticket
+   * Pulse — fast FS-side closers never trigger it, so their notes were
+   * invisible to the mirror and every thread-based measurement (the
+   * resolution-notes review, Sep 2026). Resolution is the natural moment the
+   * record should become analysis-grade.
+   */
+  async hydrateThreadOnResolution(ticketId) {
+    const ticket = await prisma.ticket.findUnique({
+      where: { id: ticketId },
+      select: { id: true, workspaceId: true, freshserviceTicketId: true, origin: true, status: true, displayRef: true },
+    });
+    if (!ticket?.freshserviceTicketId) return;
+    const client = await mirrorService.getClient(ticket.workspaceId).catch(() => null);
+    if (!client) return;
+    await this._refreshFsBornThread(ticket, { client, broadcast: false });
+  }
+
+  async _refreshFsBornThread(ticket, { client: injectedClient = null, broadcast = true } = {}) {
     if (!ticket.freshserviceTicketId) return;
     // Interactive client: the reader is on the page waiting for the thread.
     // If the queue is congested the 15s budget makes this refresh a silent
     // skip (caller swallows the rejection) rather than minutes-late data.
-    const client = await mirrorService.getInteractiveClient(ticket.workspaceId);
+    // (Background callers inject the low-priority mirror client instead.)
+    const client = injectedClient || await mirrorService.getInteractiveClient(ticket.workspaceId);
     if (!client) return;
     const fsTicketId = Number(ticket.freshserviceTicketId);
     // Ticket detail carries the ticket-level attachments (email files land on
@@ -3318,7 +3338,7 @@ class TicketService {
     } catch (err) {
       logger.warn(`FS attachment ingest on open failed for ticket ${ticket.id} (non-fatal): ${err.message}`);
     }
-    if (upserted > 0 || ingested > 0) {
+    if (broadcast && (upserted > 0 || ingested > 0)) {
       this._broadcast(ticket.workspaceId, 'reply', ticket, { refreshedFromFs: upserted, attachmentsIngested: ingested });
     }
   }

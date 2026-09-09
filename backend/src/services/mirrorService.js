@@ -589,7 +589,13 @@ class MirrorService {
   /** Mirror-prefixed FS body for a thread entry (create AND edit reuse this). */
   _threadEntryMirrorBody(ticket, entry) {
     const label = entry.isPrivate ? 'internal note' : 'reply to requester';
-    return `<p><b>${MIRROR_MARKER}</b> ${entry.actorName || 'Ticket Pulse'} · ${label} · ${ticketDisplayRef(ticket)}</p>`
+    // Private notes carry the author's email too: the FS conversation is
+    // authored by the service account's API key, so the body line is the only
+    // machine-parseable attribution the FS side ever gets (resolution-notes
+    // review, Sep 2026). Public notes stay name-only — no agent emails on
+    // portal-visible content.
+    const author = `${entry.actorName || 'Ticket Pulse'}${entry.isPrivate && entry.actorEmail ? ` <${entry.actorEmail}>` : ''}`;
+    return `<p><b>${MIRROR_MARKER}</b> ${author} · ${label} · ${ticketDisplayRef(ticket)}</p>`
       + (entry.bodyHtml || textToHtml(entry.bodyText || entry.content || ''));
   }
 
