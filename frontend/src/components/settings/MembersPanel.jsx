@@ -258,6 +258,18 @@ export default function MembersPanel() {
     };
   }, [members]);
 
+  // App-only people, render-time view (Sep 9 fix): a grant counts as
+  // app-only only when its email has no ACTIVE technician row — disabled
+  // technicians with grants (a retired local agent, an old FS record) would
+  // otherwise show in BOTH lists. Disabled roster rows still exist under the
+  // Disabled/All filters as history; the app-only section is the living view.
+  const visibleAppOnly = useMemo(() => {
+    const activeEmails = new Set((members || [])
+      .filter((t) => t.isActive)
+      .map((t) => String(t.email || '').toLowerCase()));
+    return appOnly.filter((r) => !activeEmails.has(String(r.email || '').toLowerCase()));
+  }, [appOnly, members]);
+
   const rows = useMemo(() => {
     let list = members || [];
     if (filter === 'active') list = list.filter((t) => t.isActive);
@@ -512,14 +524,16 @@ export default function MembersPanel() {
               Sign-in access without being a technician — observers and admin accounts. Not in any assignment pool, invisible to the AI.
             </p>
           </div>
-          {appOnly.length > 0 && (
+          {visibleAppOnly.length > 0 && (
             <ul className="divide-y divide-border/60">
-              {appOnly.map((row) => {
+              {visibleAppOnly.map((row) => {
                 const email = String(row.email).toLowerCase();
                 return (
                   <li key={email} className="flex items-center gap-3 py-2">
-                    <span className="text-sm text-foreground/85 font-medium flex-1 min-w-0 truncate">{row.name || email}</span>
-                    <span className="text-xs text-muted-foreground/75 hidden sm:block truncate max-w-[220px]">{email}</span>
+                    <span className="text-sm text-foreground/85 font-medium flex-1 min-w-0 truncate">{row.name && String(row.name).toLowerCase() !== email ? row.name : email}</span>
+                    {row.name && String(row.name).toLowerCase() !== email && (
+                      <span className="text-xs text-muted-foreground/75 hidden sm:block truncate max-w-[220px]">{email}</span>
+                    )}
                     <select
                       value={accessByEmail?.[email] || ''}
                       onChange={(e) => changeAccess({ email, name: row.name || email }, e.target.value).then(() => loadAccess())}

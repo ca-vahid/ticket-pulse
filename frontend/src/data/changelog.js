@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.8.38-preview';
+export const APP_VERSION = '3.8.39-preview';
 
 export const changelog = [
+  {
+    version: '3.8.39-preview',
+    date: 'September 9, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>👥 App-only people list, polished</strong> — rows no longer print the email twice when a grant has no display name, and a person with a <em>disabled</em> technician record and an app grant now appears only in the App-only section (their disabled roster row stays under the Disabled filter as history) — no more double listings.' },
+    ],
+  },
   {
     version: '3.8.38-preview',
     date: 'September 9, 2026',
