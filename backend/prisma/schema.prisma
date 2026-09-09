@@ -1124,6 +1124,16 @@ model Requester {
   entraJobTitle          String?   @map("entra_job_title") @db.VarChar(255)
   entraPreferredLanguage String?   @map("entra_preferred_language") @db.VarChar(50)
   entraProfileSyncedAt   DateTime? @map("entra_profile_synced_at")
+  // Directory lookup MISSED (QA 09-09). Kept separate from
+  // entraProfileSyncedAt, which used to be stamped on a miss too — so a row
+  // with no Entra data looked freshly enriched instead of unresolvable.
+  entraMissingAt         DateTime? @map("entra_missing_at")
+  // Hidden from requester pickers without touching isActive, which the
+  // FreshService requester sync overwrites from FreshService on every cycle
+  // (a deactivation would be undone on the next sync). entra_absent = no
+  // account, no alias, nothing deliverable; qa_artifact = a test address.
+  suppressedAt           DateTime? @map("suppressed_at")
+  suppressedReason       String?   @map("suppressed_reason") @db.VarChar(60)
   isActive               Boolean   @default(true) @map("is_active")
   createdAt              DateTime  @default(now()) @map("created_at")
   updatedAt              DateTime  @updatedAt @map("updated_at")

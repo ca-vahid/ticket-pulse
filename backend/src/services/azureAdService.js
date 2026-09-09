@@ -255,6 +255,86 @@ class AzureAdService {
    * @param {number} top - Max results (default 10)
    * @returns {Promise<Array<{displayName, mail, userPrincipalName, jobTitle}>>}
    */
+  /**
+   * Does this address correspond to a real mailbox? (QA 09-09.)
+   *
+   * Returns a THREE-way answer, and the middle case is the whole point:
+   *   { status: 'found',       owner }  the address is a user's UPN
+   *   { status: 'alias',       owner }  404 on the UPN, but it IS a
+   *                                    proxyAddress/otherMail on a live
+   *                                    mailbox — mail sent there is delivered
+   *   { status: 'absent'            }  no account, no alias: undeliverable
+   *   { status: 'unavailable'       }  Graph could not answer
+   *
+   * `absent` and `unavailable` MUST stay distinct. Callers refuse on absent;
+   * treating an outage as absent would block ticket creation whenever Graph
+   * has a bad afternoon.
+   *
+   * The alias branch exists because /users/{email} only resolves when the
+   * address IS the UPN. Two live BGC addresses (skumar@, aschevers@) are
+   * aliases on other mailboxes, so a UPN-only check would have called them
+   * phantoms and rejected two real employees' tickets.
+   */
+  async resolveAddress(email) {
+    const address = String(email || '').trim().toLowerCase();
+    if (!address || !address.includes('@')) return { status: 'absent' };
+
+    let token;
+    try {
+      token = await this.getAccessToken();
+    } catch (error) {
+      logger.warn(`Entra address check unavailable (token): ${error.message}`);
+      return { status: 'unavailable' };
+    }
+
+    try {
+      const res = await axios.get(`${this.graphApiUrl}/users/${encodeURIComponent(address)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        params: { $select: 'displayName,userPrincipalName,mail,jobTitle,department,accountEnabled' },
+      });
+      return {
+        status: 'found',
+        owner: res.data.userPrincipalName || res.data.mail || address,
+        displayName: res.data.displayName || null,
+        jobTitle: res.data.jobTitle || null,
+        department: res.data.department || null,
+      };
+    } catch (error) {
+      if (error.response?.status !== 404) {
+        logger.warn(`Entra address check unavailable for ${address}: ${error.message}`);
+        return { status: 'unavailable' };
+      }
+    }
+
+    // 404 on the direct lookup. Try the alias surfaces before concluding the
+    // address does not exist.
+    for (const filter of [
+      `proxyAddresses/any(x:x eq 'smtp:${address}')`,
+      `otherMails/any(x:x eq '${address}')`,
+    ]) {
+      try {
+        const res = await axios.get(`${this.graphApiUrl}/users`, {
+          headers: { Authorization: `Bearer ${token}`, ConsistencyLevel: 'eventual' },
+          params: { $filter: filter, $select: 'displayName,userPrincipalName,jobTitle,department', $count: true, $top: 1 },
+        });
+        const hit = res.data?.value?.[0];
+        if (hit) {
+          return {
+            status: 'alias',
+            owner: hit.userPrincipalName,
+            displayName: hit.displayName || null,
+            jobTitle: hit.jobTitle || null,
+            department: hit.department || null,
+          };
+        }
+      } catch (error) {
+        logger.debug(`Entra alias filter failed for ${address}: ${error.message}`);
+      }
+    }
+
+    return { status: 'absent' };
+  }
+
   async searchUsers(query, top = 10) {
     if (!query || query.length < 2) return [];
 

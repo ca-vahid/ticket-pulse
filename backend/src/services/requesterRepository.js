@@ -86,7 +86,7 @@ class RequesterRepository {
    * Create a TP-native requester (no FreshService id yet — the fallback mirror
    * backfills freshserviceId once FS auto-creates them during ticket mirroring).
    */
-  async createNative({ email, name, department = null, jobTitle = null, entraProfile = null }) {
+  async createNative({ email, name, department = null, jobTitle = null, entraProfile = null, entraMissing = false }) {
     try {
       return await prisma.requester.create({
         data: {
@@ -102,6 +102,9 @@ class RequesterRepository {
           entraCity: entraProfile?.city || null,
           entraCountry: entraProfile?.country || null,
           entraProfileSyncedAt: entraProfile ? new Date() : null,
+          // QA 09-09: record a MISS as a miss. This used to leave both columns
+          // null, which is indistinguishable from "never looked".
+          entraMissingAt: entraProfile ? null : (entraMissing ? new Date() : null),
         },
       });
     } catch (error) {

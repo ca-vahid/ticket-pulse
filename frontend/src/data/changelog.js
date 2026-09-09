@@ -1,6 +1,16 @@
-export const APP_VERSION = '3.8.43-preview';
+export const APP_VERSION = '3.8.44-preview';
 
 export const changelog = [
+  {
+    version: '3.8.44-preview',
+    date: 'September 9, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>\u2705 A made-up email address can no longer become a person</strong> \u2014 searching the requester list for \u201csusan\u201d showed <em>two</em> Susan Xus: her real account and <code>susan.xu@bgcengineering.ca</code>, which is not a mailbox at all (QA: Vahid). A test run of the Project Accounting Power App integration filed a ticket through the API with a guessed address; Ticket Pulse asked Entra about it, was told it does not exist, ignored that, and created the person anyway. On a domain your workspace calls its own, an address now has to actually exist before a requester is created for it \u2014 and the error names the person you probably meant.' },
+      { type: 'improved', html: '<strong>Aliases still work, and an Entra outage never blocks a ticket</strong> \u2014 the check looks for the address as a login <em>and</em> as an alias on someone\u2019s mailbox, because several real BGC addresses are aliases on another account (mail to them reaches a real person). If Entra cannot be reached at all, the ticket is still created \u2014 an outage must not stop the helpdesk taking work.' },
+      { type: 'fixed', html: '<strong>Directory lookups no longer claim success when they found nothing</strong> \u2014 a failed Entra lookup used to be recorded with a fresh \u201clast synced\u201d timestamp, so an address that cannot be resolved looked freshly verified. Misses are now recorded as misses, which is what let us find these records in the first place.' },
+      { type: 'improved', html: '<strong>Five bogus requesters are out of the pickers</strong> \u2014 two invented by that test run and three left over from QA. They are hidden rather than deleted, so their tickets keep their history, and hiding them is deliberately separate from the active/inactive flag that FreshService overwrites on every sync. <strong>Nothing else was touched:</strong> 27 other addresses missing from Entra are real \u2014 device and backup senders like the Synology units, and shared mailboxes such as accountspayable@ \u2014 and one of them alone has 628 tickets.' },
+    ],
+  },
   {
     version: '3.8.43-preview',
     date: 'September 9, 2026',
