@@ -1731,9 +1731,33 @@ async function findMatchingAgents(workspaceId, criteria, ticketId = null) {
     subcategoryName,
   });
 
+  // Local (app-only) people can never hold a FreshService-born ticket — the
+  // write-back has no FS identity to assign, so nothing applies anywhere and
+  // the ticket sits unowned (the CIO case, Sep 2026: four tickets in a void,
+  // and "zero open tickets" made the local person ever more attractive).
+  // Keep them out of the candidate pool for FS-born tickets entirely.
+  let requireFsIdentity = false;
+  if (ticketId) {
+    try {
+      const originRow = await prisma.ticket.findUnique({
+        where: { id: ticketId },
+        select: { origin: true },
+      });
+      requireFsIdentity = !originRow || originRow.origin !== 'ticketpulse';
+    } catch {
+      // Fail CLOSED: if the origin can't be read, keep local people out of
+      // the pool — a suboptimal TP-born pool beats another CIO incident.
+      requireFsIdentity = true;
+    }
+  }
+
   const [techs, competencies, leaves, openTickets, todayTickets, assignmentConfig] = await Promise.all([
     prisma.technician.findMany({
-      where: { workspaceId, isActive: true },
+      where: {
+        workspaceId,
+        isActive: true,
+        ...(requireFsIdentity ? { freshserviceId: { not: null } } : {}),
+      },
       select: { id: true, name: true, location: true, timezone: true, workStartTime: true, workEndTime: true, routingGuidance: true },
     }),
     prisma.technicianCompetency.findMany({
