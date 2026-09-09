@@ -476,6 +476,23 @@ router.patch('/tickets/:id', S('tickets:write'), withIdempotency, asyncHandler(a
   res.json({ success: true, data: ticketShape(ticket) });
 }));
 
+router.post('/tickets/:id/split', S('tickets:write'), withIdempotency, asyncHandler(async (req, res) => {
+  const { default: ticketSplitService } = await import('../services/ticketSplitService.js');
+  const result = await ticketSplitService.split((await tid(req)), req.workspaceId, {
+    entryIds: req.body?.entryIds,
+    subject: req.body?.subject,
+    description: req.body?.description,
+    requesterId: req.body?.requesterId,
+    priority: req.body?.priority,
+    internalCategoryId: req.body?.internalCategoryId,
+    internalSubcategoryId: req.body?.internalSubcategoryId,
+    assignedTechId: req.body?.assignedTechId,
+    moveAttachments: req.body?.moveAttachments,
+    notifyRequester: req.body?.notifyRequester === true,
+  }, apiActor(req));
+  res.status(201).json({ success: true, data: result });
+}));
+
 router.post('/tickets/:id/merge', S('tickets:write'), withIdempotency, asyncHandler(async (req, res) => {
   const { default: ticketMergeService } = await import('../services/ticketMergeService.js');
   const result = await ticketMergeService.merge((await tid(req)), req.workspaceId, {

@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'reac
 import {
   Activity, AlertCircle, ArrowLeft, Bell, BellRing, Bot, Building2, CalendarClock, Check, CheckCircle2,
   CheckSquare, ChevronDown, ChevronLeft, ChevronRight, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Flame, Forward, Hand,
-  GitMerge, History, Image as ImageIcon, Inbox, Link2, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, Paperclip, Pencil, Phone, Plus,
+  GitBranch, GitMerge, History, Image as ImageIcon, Inbox, Link2, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, Paperclip, Pencil, Phone, Plus,
   RefreshCw, Send, ShieldCheck, Smartphone, Smile, Sparkles, Stamp, StickyNote, Trash2, UserRound, VolumeX, X, XCircle,
 } from 'lucide-react';
 import AttachmentPreviewModal from '../components/tickets/AttachmentPreviewModal';
@@ -58,6 +58,7 @@ import { useSSE } from '../hooks/useSSE';
 import { useTicketPresence } from '../hooks/useTicketPresence';
 import { useTicketTypes } from '../hooks/useTicketTypes';
 import MergeTicketsModal from '../components/tickets/MergeTicketsModal';
+import SplitTicketModal from '../components/tickets/SplitTicketModal';
 import { MERGE_FS_BLOCKED_REASON, MERGE_TERMINAL_BLOCKED_REASON } from '../components/tickets/mergeRules';
 import EditTicketModal from '../components/tickets/EditTicketModal';
 import { baseStatusOf, isTerminalStatus, statusDefsFromMeta, statusToneFromDefs } from '../components/tickets/statusDefs';
@@ -840,6 +841,7 @@ export default function TicketDetail() {
   const [editFile, setEditFile] = useState(null);
   const [cloneConfirm, setCloneConfirm] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false); // multi-merge modal (QA 07-13 #1)
+  const [splitOpen, setSplitOpen] = useState(false); // split into a new ticket (QA 09-08)
   const [isSending, setIsSending] = useState(false);
   const [requestApprovalOpen, setRequestApprovalOpen] = useState(false);
   const [deleteApprovalTarget, setDeleteApprovalTarget] = useState(null); // approval group pending delete-confirm
@@ -2230,6 +2232,20 @@ export default function TicketDetail() {
                       >
                         <GitMerge className="w-3.5 h-3.5" aria-hidden="true" />
                         Merge
+                      </button>
+                    )}
+                    {/* Split (QA 09-08): the inverse of merge. Unlike merge
+                        this works on FS-born tickets too — the parent is never
+                        modified, only linked and noted. */}
+                    {ticketingOn && meta?.actor?.kind !== 'agent' && (
+                      <button
+                        onClick={() => setSplitOpen(true)}
+                        title="Carve a separate issue out of this conversation into its own ticket"
+                        data-testid="split-button"
+                        className="tp-focus-ring inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-card text-muted-foreground border border-border hover:border-violet-300 dark:hover:border-violet-500/40 hover:text-violet-700 dark:hover:text-violet-200"
+                      >
+                        <GitBranch className="w-3.5 h-3.5" aria-hidden="true" />
+                        Split
                       </button>
                     )}
                     {isNative && canReview && (
@@ -3985,6 +4001,19 @@ export default function TicketDetail() {
             </div>
           </div>
         </div>
+      )}
+
+      {splitOpen && ticket && (
+        <SplitTicketModal
+          ticket={ticket}
+          onClose={() => setSplitOpen(false)}
+          onSplit={(result) => {
+            setSplitOpen(false);
+            lastLocalMutationRef.current = Date.now();
+            showToast('emerald', `Split into ${result?.child?.ref || 'a new ticket'} — this ticket is unchanged`);
+            fetchTicket({ silent: true });
+          }}
+        />
       )}
 
       {mergeOpen && ticket && (

@@ -876,6 +876,10 @@ export const ticketsAPI = {
   mergeTicket: async (id, targetTicketRef, notifyRequester = false) => await api.post(`/tickets/${id}/merge`, { targetTicketRef, notifyRequester }),
   // Multi-merge (QA 07-13 #1): primaryId survives; ticketIds fold into it.
   mergeMany: async (primaryId, ticketIds, notifyRequester = false) => await api.post(`/tickets/${primaryId}/merge-many`, { ticketIds, notifyRequester }),
+  // Split (QA 09-08): the inverse of merge. `splittable` lists the messages a
+  // split can carry; `split` creates the TP-born child and links it.
+  splittable: async (id) => await api.get(`/tickets/${id}/splittable`),
+  split: async (id, payload) => await api.post(`/tickets/${id}/split`, payload),
 
   // Parent / child tickets (QA 07-16 #4). Refs accept TP-1042 / #231164 / bare number.
   family: async (id) => await api.get(`/tickets/${id}/family`),
