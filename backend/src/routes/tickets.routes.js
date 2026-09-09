@@ -903,6 +903,40 @@ router.post('/bulk-by-query', asyncHandler(async (req, res) => {
   res.json({ success: true, data: result });
 }));
 
+// ------------------------------------------------------------------ split
+// The inverse of merge: carve a conversation out of a ticket into a new
+// TP-born child. Unlike merge, the PARENT may be FS-born — a split never
+// touches the parent's conversation, it only adds a link and a note.
+// Members/admins only, same gate as merge.
+
+router.get('/:id/splittable', asyncHandler(async (req, res) => {
+  const { default: ticketSplitService } = await import('../services/ticketSplitService.js');
+  const data = await ticketSplitService.splittableEntries(parseTicketId(req), req.workspaceId);
+  res.json({ success: true, data });
+}));
+
+router.post('/:id/split', asyncHandler(async (req, res) => {
+  if (req.ticketActor.kind === 'agent') {
+    throw new ValidationError('Splitting a ticket requires coordinator or admin access');
+  }
+  const { default: ticketSplitService } = await import('../services/ticketSplitService.js');
+  const result = await ticketSplitService.split(parseTicketId(req), req.workspaceId, {
+    entryIds: req.body?.entryIds,
+    subject: req.body?.subject,
+    description: req.body?.description,
+    requesterId: req.body?.requesterId,
+    priority: req.body?.priority,
+    internalCategoryId: req.body?.internalCategoryId,
+    internalSubcategoryId: req.body?.internalSubcategoryId,
+    groupId: req.body?.groupId,
+    internalGroupId: req.body?.internalGroupId,
+    assignedTechId: req.body?.assignedTechId,
+    moveAttachments: req.body?.moveAttachments,
+    notifyRequester: req.body?.notifyRequester === true,
+  }, req.ticketActor);
+  res.status(201).json({ success: true, data: result });
+}));
+
 // ---------------------------------------------------- merge (gap plan P2.1)
 // True merge: copies the source conversation onto the target, unions tags,
 // links + closes the source. Members/admins only — agents cannot merge.

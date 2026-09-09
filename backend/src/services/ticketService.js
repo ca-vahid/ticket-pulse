@@ -1546,7 +1546,7 @@ class TicketService {
     if (!source.requester?.email && !source.requesterId) {
       throw new ValidationError('The source ticket has no requester to clone with');
     }
-    return this.createTicket(workspaceId, {
+    const clone = await this.createTicket(workspaceId, {
       subject: `Copy of: ${source.subject || '(no subject)'}`.slice(0, 500),
       description: source.description || source.descriptionText || null,
       priority: source.priority || 2,
@@ -1558,6 +1558,33 @@ class TicketService {
       groupId: source.groupId ? Number(source.groupId) : null,
       runAiTriage: false,
     }, actor);
+
+    // Link the copy back to its source (QA 09-08). Clone used to create an
+    // orphan — all three clones in production were linked to nothing, so the
+    // relationship existed only in whoever-remembered's head. Best-effort:
+    // a failed link must never cost the caller the ticket they just made.
+    try {
+      await prisma.ticketLink.upsert({
+        where: { ticketId_relatedTicketId_kind: { ticketId: ticketId, relatedTicketId: clone.id, kind: 'related_to' } },
+        update: {},
+        create: {
+          workspaceId, ticketId, relatedTicketId: clone.id, kind: 'related_to',
+          createdBy: actor?.email || null,
+        },
+      });
+      const cloneRef = clone.displayRef || `TP-${clone.nativeNumber || clone.id}`;
+      await ticketActivityRepository.create({
+        ticketId,
+        activityType: 'cloned_into',
+        performedBy: actor?.email || actor?.name || 'system',
+        performedAt: new Date(),
+        details: { cloneId: clone.id, cloneRef },
+      }).catch(() => {});
+    } catch (err) {
+      logger.warn(`Clone link failed (non-fatal), ${ticketId} -> ${clone.id}: ${err.message}`);
+    }
+
+    return clone;
   }
 
   async getTicket(ticketId, workspaceId, { reconcile: withReconcile = true } = {}) {

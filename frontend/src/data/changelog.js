@@ -1,6 +1,16 @@
-export const APP_VERSION = '3.8.42-preview';
+export const APP_VERSION = '3.8.43-preview';
 
 export const changelog = [
+  {
+    version: '3.8.43-preview',
+    date: 'September 9, 2026',
+    entries: [
+      { type: 'added', html: '<strong>\u2728 You can now split a ticket</strong> \u2014 when one ticket turns out to be two problems, open it and click <em>Split</em>. Tick the messages that are really a separate issue, give the new ticket a subject, and it is created with the same requester, category and priority, linked as a child of the original. The messages are <strong>copied</strong>, so the original conversation is never edited, and nothing is closed \u2014 the ticket you split from keeps its status exactly as it was. Attachments on the messages you picked come across with them (you can turn that off).' },
+      { type: 'added', html: '<strong>Split works on FreshService tickets too</strong> \u2014 unlike merge, which needs a Ticket Pulse ticket to merge into, split works on any ticket. That matters: of the 482 tickets long enough to be worth splitting, 473 came from FreshService. The new child ticket is Ticket-Pulse-owned so you can fully edit it, and the FreshService original is left untouched apart from an internal note recording what happened.' },
+      { type: 'fixed', html: '<strong>Clone now links back to the ticket it came from</strong> \u2014 \u201cCopy of\u2026\u201d used to create a ticket related to nothing, so the connection lived only in whoever-remembered\u2019s head. All three clones in the system were orphans. New clones are linked to their source and recorded in its history.' },
+      { type: 'added', html: '<strong>Split is on the public API</strong> \u2014 <code>POST /api/v1/tickets/&#123;ref&#125;/split</code>, documented in the OpenAPI spec alongside merge.' },
+    ],
+  },
   {
     version: '3.8.42-preview',
     date: 'September 9, 2026',
