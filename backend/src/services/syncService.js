@@ -4284,6 +4284,15 @@ class SyncService {
           if ((fsStatusName === 'Resolved' || fsStatusName === 'Closed') && !current.resolvedAt) {
             patch.resolvedAt = fsTicket.stats?.resolved_at ? new Date(fsTicket.stats.resolved_at) : now;
             patch.resolutionTimeSeconds = Math.max(0, Math.round((patch.resolvedAt.getTime() - new Date(current.createdAt).getTime()) / 1000));
+            // Analysis-grade mirror (Sep 2026): hydrate the FS conversation
+            // thread the moment a ticket first resolves. On-open hydration
+            // never fires for tickets nobody views in TP, which made fast
+            // FS-side closers look "silent" in every thread-based measurement.
+            // Fire-and-forget on the low-priority lane; dynamic import avoids
+            // a sync↔ticket service cycle.
+            import('./ticketService.js')
+              .then((m) => m.default.hydrateThreadOnResolution(ticket.id))
+              .catch((err) => logger.debug(`resolution thread hydration skipped for ticket ${ticket.id}: ${err.message}`));
           }
           if (fsStatusName === 'Closed' && !current.closedAt) {
             patch.closedAt = fsTicket.stats?.closed_at ? new Date(fsTicket.stats.closed_at) : now;

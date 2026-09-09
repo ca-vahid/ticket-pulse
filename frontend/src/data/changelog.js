@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.8.36-preview';
+export const APP_VERSION = '3.8.37-preview';
 
 export const changelog = [
+  {
+    version: '3.8.37-preview',
+    date: 'September 9, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>📚 The ticket record completes itself at resolution</strong> — when a FreshService-born ticket resolves, Ticket Pulse now pulls its full conversation thread automatically (on the low-priority lane). Previously the thread only mirrored when someone opened the ticket in Ticket Pulse, so work done entirely FreshService-side was invisible here — the root cause of the resolution-notes review mismeasurement. From now on, resolved tickets are analysis-grade by default.' },
+      { type: 'improved', html: '<strong>✍️ Mirrored internal notes carry their author’s email</strong> — notes written in Ticket Pulse land in FreshService under the service account, so the note body now includes the author’s name and (for private notes only) email, keeping attribution machine-readable on both sides. Public replies stay name-only.' },
+    ],
+  },
   {
     version: '3.8.36-preview',
     date: 'September 9, 2026',
