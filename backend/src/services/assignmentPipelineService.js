@@ -795,6 +795,17 @@ class AssignmentPipelineService {
       systemPrompt += `\n\n## Historical Admin Feedback\n${assignmentConfig.feedbackContext.slice(-4000)}`;
     }
 
+    // Workspace noise guidance (QA 09-05, Accounting option 2). The built-in
+    // prompt learned "noise" in an IT queue, where a no-reply sender usually
+    // IS noise. In an Accounts Payable mailbox that is backwards — the vendor
+    // robots are the customers — and the AI called 1,535 ordinary AP tickets
+    // non-actionable in 180 days while a person quietly worked 844 of them.
+    // A team can now say what noise means for their own mailbox.
+    const noiseGuidance = String(assignmentConfig?.noiseGuidance || '').trim();
+    if (noiseGuidance) {
+      systemPrompt += `\n\n## Workspace Noise Guidance\nThis workspace has defined what counts as non-actionable noise in ITS mailbox. This guidance OVERRIDES the general noise heuristics above wherever they disagree — in particular, do not treat an automated or no-reply sender as evidence of noise if this guidance says such mail is the work.\n\n${noiseGuidance.slice(0, 4000)}`;
+    }
+
     systemPrompt += '\n\n## Time Handling\nTreat the workspace current date/time supplied in the user message as the source of truth for what "today" means. Tool outputs expose ticket and decision timestamps in workspace-local time unless explicitly labeled as UTC. Agent availability includes each technician\'s own local date/time. Historical admin feedback may contain legacy UTC timestamps from older runs, so prefer current workspace-local timestamps when there is any ambiguity.';
     if (!priorityAssessmentEnabled) {
       systemPrompt += '\n\n## Workspace Priority Controls\nPriority assessment is disabled for this workspace. The submit_recommendation schema may still require priority fields for compatibility, but Ticket Pulse will not save those priority fields to the ticket or write them to FreshService. Do not spend extra tool calls or analysis turns only to refine priority.';

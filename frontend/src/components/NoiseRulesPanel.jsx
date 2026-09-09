@@ -471,10 +471,203 @@ export function NoiseActivityPanel({ activity, isLoading, onRefresh }) {
   );
 }
 
+/**
+ * Was the AI right? (QA 09-05, Accounting option 4.)
+ *
+ * The Accounting problem was argued from an inference — "a person worked it
+ * anyway" — that nobody could actually see. This panel shows it. The signals
+ * are proxies, not confirmed errors, and the panel says so rather than
+ * dressing an estimate up as a fact.
+ */
+export function NoiseAccuracyPanel({ accuracy, isLoading, onRefresh }) {
+  const [showSamples, setShowSamples] = useState(false);
+  if (!accuracy) return null;
+  const { total, overridden, upheld, accuracy: pct, signals, autoCloseNoise, days, samples } = accuracy;
+  const tone = pct === null ? 'muted' : pct >= 80 ? 'good' : pct >= 50 ? 'warn' : 'bad';
+  const toneClass = {
+    good: 'text-emerald-700 dark:text-emerald-200',
+    warn: 'text-amber-700 dark:text-amber-200',
+    bad: 'text-red-700 dark:text-red-200',
+    muted: 'text-muted-foreground',
+  }[tone];
+
+  const rows = [
+    ['Given to a person', signals?.assigned, 'A coordinator or the pipeline assigned it after the verdict'],
+    ['Agent replied to the requester', signals?.agentReplied, 'Someone answered the sender'],
+    ['Noise flag taken back off', signals?.noiseCleared, autoCloseNoise
+      ? 'Someone un-flagged it'
+      : 'Not counted here — this workspace does not auto-close, so the flag is never written in the first place'],
+    ['Still open', signals?.stillOpen, 'Context only — where nothing auto-closes, open is the resting state'],
+  ];
+
+  return (
+    <div className="bg-card rounded-lg shadow-sm border border-border p-5" data-testid="noise-accuracy">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+          <ShieldCheck className="w-4 h-4 text-blue-600 dark:text-blue-300" />
+          Was the AI right? · last {days} days
+        </h3>
+        <button
+          onClick={onRefresh}
+          className="tp-focus-ring flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-border text-[11px] font-medium text-muted-foreground hover:bg-muted"
+        >
+          <RefreshCw className={`w-3 h-3 ${isLoading ? 'animate-spin' : ''}`} /> Refresh
+        </button>
+      </div>
+
+      {total === 0 ? (
+        <p className="text-xs text-muted-foreground">No AI noise verdicts in this window — nothing to score.</p>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+            {[
+              [total, 'verdicts', 'text-foreground'],
+              [upheld, 'looked right', 'text-emerald-700 dark:text-emerald-200'],
+              [overridden, 'worked anyway', 'text-amber-700 dark:text-amber-200'],
+              [pct === null ? '—' : `${pct}%`, 'looked right', toneClass],
+            ].map(([value, label, cls], i) => (
+              <div key={i} className="rounded-lg border border-border bg-muted/40 px-3 py-2">
+                <div className={`text-lg font-bold tabular-nums leading-tight ${cls}`}>{value}</div>
+                <div className="text-[10.5px] text-muted-foreground">{label}</div>
+              </div>
+            ))}
+          </div>
+
+          <ul className="divide-y divide-border/60 rounded-lg border border-border overflow-hidden mb-3">
+            {rows.map(([label, signal, hint]) => (
+              <li key={label} className={`px-3 py-2 text-xs bg-card flex items-baseline gap-2 ${signal?.counted === false ? 'opacity-60' : ''}`}>
+                <span className="font-semibold tabular-nums text-foreground w-12">{signal?.count ?? 0}</span>
+                <span className="text-foreground/85">{label}</span>
+                {signal?.counted === false && (
+                  <span className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground/75">not counted</span>
+                )}
+                <span className="text-[11px] text-muted-foreground ml-auto text-right max-w-[52%]">{hint}</span>
+              </li>
+            ))}
+          </ul>
+
+          <p className="text-[11px] text-muted-foreground">
+            These are <strong>signals, not confirmed mistakes</strong> — a ticket can be assigned for reasons
+            unrelated to the verdict. Treat the percentage as a trend line to watch, and send us the tickets
+            where you disagree so it can be calibrated against real examples.
+          </p>
+
+          {samples?.length > 0 && (
+            <div className="mt-3">
+              <button
+                onClick={() => setShowSamples((v) => !v)}
+                className="tp-focus-ring text-[11px] font-semibold text-blue-700 dark:text-blue-300 hover:underline"
+              >
+                {showSamples ? 'Hide' : `Show ${samples.length} recent`} tickets a person worked anyway
+              </button>
+              {showSamples && (
+                <ul className="divide-y divide-border/60 rounded-lg border border-border overflow-hidden mt-2">
+                  {samples.map((row) => (
+                    <li key={row.ticketId} className="px-3 py-2 text-xs bg-card">
+                      <div className="flex items-baseline gap-2 flex-wrap">
+                        <span className="font-mono text-[11px] text-muted-foreground">{row.ref}</span>
+                        <span className="font-medium text-foreground truncate">{row.subject}</span>
+                      </div>
+                      <div className="text-[11px] text-muted-foreground mt-0.5">
+                        {row.status}
+                        {row.assignedTo ? <> · worked by <span className="text-foreground/85">{row.assignedTo}</span></> : null}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * What noise means in THIS mailbox (QA 09-05, Accounting option 2). The
+ * built-in prompt learned noise in an IT queue, where a no-reply sender
+ * usually IS noise. In Accounts Payable the vendor robots are the customers,
+ * so the same heuristic reads backwards.
+ */
+const AP_GUIDANCE_TEMPLATE = [
+  'This is an Accounts Payable / Accounts Receivable mailbox. Automated senders are our CUSTOMERS here, not noise.',
+  '',
+  'TREAT AS REAL WORK (never noise), even from a no-reply or automated address:',
+  '- Invoices, statements, remittance advice, payment confirmations and receipts',
+  '- Purchase orders, credit notes, dunning and past-due notices',
+  '- Vendor account, banking or tax-detail changes',
+  '- Anything naming an invoice number, account number or an amount to be actioned',
+  '',
+  'TREAT AS NOISE:',
+  '- Marketing, newsletters, product announcements, webinar and event invitations',
+  '- Conference, giveaway and survey invitations',
+  '- Phishing and spoofed payment-change requests (flag rather than dismiss when money is involved)',
+  '- Delivery/read receipts and out-of-office auto-replies',
+  '',
+  'When one sender sends both kinds of mail from the same address, judge the message, not the sender.',
+].join('\n');
+
+export function NoiseGuidancePanel({ value, onSave, isSaving }) {
+  const [draft, setDraft] = useState(value || '');
+  const [dirty, setDirty] = useState(false);
+  useEffect(() => { setDraft(value || ''); setDirty(false); }, [value]);
+
+  return (
+    <div className="bg-card rounded-lg shadow-sm border border-border p-5" data-testid="noise-guidance">
+      <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-1">
+        <ShieldCheck className="w-4 h-4 text-violet-600 dark:text-violet-300" />
+        What counts as noise in this mailbox
+      </h3>
+      <p className="text-[11px] text-muted-foreground mb-3">
+        Added to the AI&apos;s instructions for this workspace, and it <strong>overrides</strong> the general
+        rules — so if you say automated invoices are real work, an automated sender stops being evidence of
+        noise. Leave it empty to use the built-in guidance.
+      </p>
+      <textarea
+        value={draft}
+        onChange={(e) => { setDraft(e.target.value); setDirty(true); }}
+        rows={10}
+        maxLength={4000}
+        placeholder="e.g. Invoices and statements from vendor systems are real work; marketing and event invitations are noise…"
+        className="w-full rounded-lg border border-input bg-card p-3 text-xs text-foreground font-mono leading-relaxed settings-scrollbar"
+        aria-label="Workspace noise guidance"
+      />
+      <div className="flex items-center gap-2 mt-2 flex-wrap">
+        <button
+          onClick={() => { onSave(draft); setDirty(false); }}
+          disabled={isSaving || !dirty}
+          className="tp-focus-ring px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 disabled:opacity-50"
+        >
+          {isSaving ? 'Saving…' : 'Save guidance'}
+        </button>
+        <button
+          onClick={() => { setDraft(AP_GUIDANCE_TEMPLATE); setDirty(true); }}
+          className="tp-focus-ring px-3 py-1.5 rounded-lg border border-border text-xs font-medium text-muted-foreground hover:bg-muted"
+        >
+          Insert Accounts Payable wording
+        </button>
+        {draft && (
+          <button
+            onClick={() => { setDraft(''); setDirty(true); }}
+            className="tp-focus-ring px-3 py-1.5 rounded-lg border border-border text-xs font-medium text-muted-foreground hover:bg-muted"
+          >
+            Clear
+          </button>
+        )}
+        <span className="text-[11px] text-muted-foreground ml-auto tabular-nums">{draft.length} / 4000</span>
+      </div>
+    </div>
+  );
+}
+
 export default function NoiseRulesPanel() {
   const [rules, setRules] = useState([]);
   const [stats, setStats] = useState(null);
   const [activity, setActivity] = useState(null);
+  const [accuracy, setAccuracy] = useState(null);
+  const [guidance, setGuidance] = useState('');
+  const [savingGuidance, setSavingGuidance] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [status, setStatus] = useState(null);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -487,7 +680,7 @@ export default function NoiseRulesPanel() {
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [rulesRes, statsRes, activityRes] = await Promise.all([
+      const [rulesRes, statsRes, activityRes, accuracyRes, configRes] = await Promise.all([
         noiseRulesAPI.getAll(),
         noiseRulesAPI.getStats(),
         // QA 09-04 (F): strictly non-fatal — the rules list must render even if the
@@ -495,10 +688,20 @@ export default function NoiseRulesPanel() {
         typeof noiseRulesAPI.activity === 'function'
           ? noiseRulesAPI.activity(30).catch(() => null)
           : Promise.resolve(null),
+        // QA 09-05 (option 4): verdict accuracy. Same non-fatal contract.
+        typeof noiseRulesAPI.verdictAccuracy === 'function'
+          ? noiseRulesAPI.verdictAccuracy(180).catch(() => null)
+          : Promise.resolve(null),
+        // QA 09-05 (option 2): the workspace's own noise guidance.
+        typeof noiseRulesAPI.guidance === 'function'
+          ? noiseRulesAPI.guidance().catch(() => null)
+          : Promise.resolve(null),
       ]);
       setRules(rulesRes.data || []);
       setStats(statsRes.data || null);
       setActivity(activityRes?.data || null);
+      setAccuracy(accuracyRes?.data || null);
+      setGuidance(configRes?.data?.noiseGuidance || '');
     } catch (e) {
       setStatus({ success: false, message: e.message });
     } finally {
@@ -507,6 +710,21 @@ export default function NoiseRulesPanel() {
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // QA 09-05 (option 2): saving guidance must never take the panel down with
+  // it — the rules list is the primary content here.
+  const saveGuidance = useCallback(async (next) => {
+    setSavingGuidance(true);
+    try {
+      await noiseRulesAPI.saveGuidance(next);
+      setGuidance(next);
+      setStatus({ success: true, message: next.trim() ? 'Noise guidance saved' : 'Noise guidance cleared' });
+    } catch (e) {
+      setStatus({ success: false, message: e.response?.data?.message || e.message });
+    } finally {
+      setSavingGuidance(false);
+    }
+  }, []);
 
   const handleCreate = async () => {
     if (!newRule.name || !newRule.pattern) {
@@ -647,6 +865,10 @@ export default function NoiseRulesPanel() {
       )}
 
       {/* Add new rule form */}
+      <NoiseAccuracyPanel accuracy={accuracy} isLoading={isLoading} onRefresh={fetchData} />
+
+      <NoiseGuidancePanel value={guidance} onSave={saveGuidance} isSaving={savingGuidance} />
+
       <NoiseActivityPanel activity={activity} isLoading={isLoading} onRefresh={fetchData} />
 
       {showAddForm && (

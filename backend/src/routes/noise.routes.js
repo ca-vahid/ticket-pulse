@@ -48,6 +48,21 @@ router.get(
 );
 
 /**
+ * GET /api/noise-rules/verdict-accuracy
+ * What happened after each AI noise verdict in this workspace (QA 09-05,
+ * Accounting option 4). Read-only, computed on demand from pipeline runs +
+ * current ticket state.
+ */
+router.get(
+  '/verdict-accuracy',
+  asyncHandler(async (req, res) => {
+    const { default: noiseVerdictOutcomeService } = await import('../services/noiseVerdictOutcomeService.js');
+    const data = await noiseVerdictOutcomeService.accuracy(req.workspaceId, { days: req.query.days });
+    res.json({ success: true, data });
+  }),
+);
+
+/**
  * POST /api/noise-rules
  * Create a new noise rule
  */

@@ -103,7 +103,7 @@ describe('NoiseRulesPanel rule modes (NT-4)', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit rule Server alerts' }));
     fireEvent.click(screen.getByRole('radio', { name: 'Never noise' }));
-    fireEvent.click(screen.getByRole('button', { name: /Save/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/ }));
 
     await waitFor(() => expect(noiseRulesAPI.update).toHaveBeenCalledTimes(1));
     expect(noiseRulesAPI.update).toHaveBeenCalledWith(2, expect.objectContaining({
