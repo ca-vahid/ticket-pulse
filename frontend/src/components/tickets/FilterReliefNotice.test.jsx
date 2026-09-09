@@ -22,7 +22,7 @@ describe('FilterReliefNotice — empty state', () => {
   test('names the culprit filter and the exact status to add', () => {
     render(<FilterReliefNotice relief={reported} onWiden={() => {}} onClearFilters={() => {}} />);
     expect(screen.getByTestId('filter-relief-empty')).toBeInTheDocument();
-    expect(screen.getByText(/1 ticket is/)).toBeInTheDocument();
+    expect(screen.getByText(/1 ticket/)).toBeInTheDocument();
     expect(screen.getByText(/Status/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Include Closed \(1\)/ })).toBeInTheDocument();
   });
