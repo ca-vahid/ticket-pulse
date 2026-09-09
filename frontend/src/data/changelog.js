@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.8.39-preview';
+export const APP_VERSION = '3.8.40-preview';
 
 export const changelog = [
+  {
+    version: '3.8.40-preview',
+    date: 'September 9, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>\u2705 Email signatures are no longer spaced out</strong> \u2014 a signature pasted from Outlook went out looking far looser than the same signature sent from FreshService (QA: Marcus Blackstock). Outlook writes each line as a paragraph with its margin set to zero; our paste filter kept the colours but dropped the margin, leaving bare paragraphs that every mail client then pads with its own line of space. Signatures now carry their spacing explicitly when the email is sent \u2014 the reported signature goes from 176&nbsp;px tall to 108&nbsp;px, matching the FreshService version line for line.' },
+      { type: 'added', html: '<strong>Choose your signature\u2019s line spacing</strong> \u2014 Notifications \u2192 Email signature has a new <em>Tight / Normal / Relaxed</em> control, and the preview beside it shows exactly what recipients will see. Tight is the default and matches Outlook. Nothing about your saved signature changes \u2014 the spacing is applied as the email goes out, so you can switch between the three at any time and see the result immediately.' },
+      { type: 'improved', html: '<strong>Pasted formatting keeps its spacing</strong> \u2014 the composer and signature editor now preserve <code>margin</code> and <code>line-height</code> when you paste from Outlook or Word, so a carefully laid-out block arrives looking the way it did in the source. Negative margins are still stripped.' },
+    ],
+  },
   {
     version: '3.8.39-preview',
     date: 'September 9, 2026',

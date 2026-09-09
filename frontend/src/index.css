@@ -193,6 +193,15 @@ code {
 }
 
 @layer components {
+
+  /* Signature preview spacing (QA 09-08). The email itself gets INLINE margins
+     (mail clients strip <style>), so these rules exist only to make the in-app
+     preview show the same result the recipient will see. Keep the values in
+     step with SPACING_MARGIN in backend/src/services/userSignatureService.js. */
+  .tp-sig-preview p { margin: 0; }
+  .tp-sig-normal p { margin: 0 0 6px; }
+  .tp-sig-relaxed p { margin: 0 0 12px; }
+
   .tp-page-backdrop {
     background:
       linear-gradient(180deg, rgb(248 250 252) 0%, rgb(241 245 249) 44%, rgb(248 250 252) 100%);

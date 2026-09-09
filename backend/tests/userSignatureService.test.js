@@ -113,7 +113,7 @@ describe('getEnabledSignatureForSend', () => {
     prismaMock.userEmailSignature.findUnique.mockResolvedValue({
       enabled: true, html: '<p>— Ana</p>', text: '— Ana',
     });
-    await expect(getEnabledSignatureForSend(1, 'Agent@Example.com')).resolves.toEqual({ html: '<p>— Ana</p>', text: '— Ana' });
+    await expect(getEnabledSignatureForSend(1, 'Agent@Example.com')).resolves.toEqual({ html: '<p>— Ana</p>', text: '— Ana', spacing: 'tight' });
     expect(prismaMock.userEmailSignature.findUnique).toHaveBeenCalledWith({
       where: { workspaceId_ownerEmail: { workspaceId: 1, ownerEmail: 'agent@example.com' } },
     });
@@ -138,7 +138,9 @@ describe('appendSignatureToEmail', () => {
       { html: '<p>Fixed it!</p>', text: 'Fixed it!' },
       { html: '<p><strong>Ana</strong></p>', text: 'Ana' },
     );
-    expect(out.html).toBe('<p>Fixed it!</p><br><br><p><strong>Ana</strong></p>');
+    // QA 09-08: the signature's <p> carries the chosen line spacing inline
+    // (mail clients strip <style>). The REPLY body above it is untouched.
+    expect(out.html).toBe('<p>Fixed it!</p><br><br><p style="margin: 0"><strong>Ana</strong></p>');
     expect(out.text).toBe('Fixed it!\n\n-- \nAna');
   });
 
@@ -150,7 +152,7 @@ describe('appendSignatureToEmail', () => {
 
   test('signature-only when the base body is empty; text derived from html when missing', () => {
     const out = appendSignatureToEmail({ html: '', text: '' }, { html: '<p>Ana</p>' });
-    expect(out.html).toBe('<p>Ana</p>');
+    expect(out.html).toBe('<p style="margin: 0">Ana</p>');
     expect(out.text).toBe('Ana');
   });
 });

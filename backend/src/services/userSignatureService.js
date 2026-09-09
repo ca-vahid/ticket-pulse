@@ -24,6 +24,60 @@ import logger from '../utils/logger.js';
 
 const TEMPLATE_VARIABLE_PATTERN = /\{\{\s*(name|title|email)\s*\}\}/gi;
 
+/**
+ * Line spacing (QA 09-08). A signature pasted from Outlook arrives as bare
+ * <p> lines: the composer's paste filter keeps `color` but drops `margin`
+ * (it was never on the inline-style allowlist) along with the MsoNormal
+ * class, so the paragraphs lose the `margin:0` Outlook gave them. Every mail
+ * client then applies its own ~1em paragraph margin and the signature renders
+ * far looser than the same signature sent from FreshService.
+ *
+ * Rather than trust whatever margins survive a paste, the spacing is an
+ * explicit per-signature choice applied to <p> at send time. Only <p> is
+ * touched: <div> has no default margin, so rewriting it would collapse
+ * deliberate layout in table/div signatures for no benefit.
+ */
+export const SIGNATURE_SPACINGS = Object.freeze(['tight', 'normal', 'relaxed']);
+export const DEFAULT_SIGNATURE_SPACING = 'tight';
+const SPACING_MARGIN = Object.freeze({
+  tight: '0',
+  normal: '0 0 6px',
+  relaxed: '0 0 12px',
+});
+
+export function normalizeSpacing(value) {
+  const wanted = String(value || '').trim().toLowerCase();
+  return SIGNATURE_SPACINGS.includes(wanted) ? wanted : DEFAULT_SIGNATURE_SPACING;
+}
+
+/** Drop every margin declaration from an inline style string. */
+function stripMarginDeclarations(style) {
+  return String(style || '')
+    .split(';')
+    .map((decl) => decl.trim())
+    .filter((decl) => decl && !/^margin(?:-top|-bottom|-left|-right)?\s*:/i.test(decl))
+    .join('; ');
+}
+
+/**
+ * Force the chosen line spacing onto the signature's <p> elements. Inline
+ * styles only — mail clients strip <style> blocks, so a class-based rule
+ * would work in our preview and nowhere else.
+ */
+export function applySignatureSpacing(html, spacing = DEFAULT_SIGNATURE_SPACING) {
+  const raw = String(html || '');
+  if (!raw.trim()) return raw;
+  const margin = SPACING_MARGIN[normalizeSpacing(spacing)];
+  return raw.replace(/<p\b([^>]*)>/gi, (match, attrs) => {
+    const styleMatch = /\sstyle\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(attrs);
+    const existing = styleMatch ? (styleMatch[1] ?? styleMatch[2] ?? '') : '';
+    const kept = stripMarginDeclarations(existing);
+    const style = kept ? `margin: ${margin}; ${kept}` : `margin: ${margin}`;
+    const rest = styleMatch ? attrs.replace(styleMatch[0], '') : attrs;
+    return `<p${rest.trimEnd()} style="${style}">`;
+  });
+}
+
 function signatureClient(client = prisma) {
   // Optional-chained like the workflow service's blockClient: environments
   // whose Prisma client predates the migration degrade to "no signature".
@@ -62,6 +116,7 @@ export function serializeSignature(row = null, { workspaceId = null, ownerEmail 
       exists: false,
       html: '',
       text: '',
+      spacing: DEFAULT_SIGNATURE_SPACING,
       updatedBy: null,
       updatedAt: null,
       maxHtmlBytes: MAX_SIGNATURE_HTML_BYTES,
@@ -74,6 +129,7 @@ export function serializeSignature(row = null, { workspaceId = null, ownerEmail 
     exists: true,
     html: row.html || '',
     text: row.text || '',
+    spacing: normalizeSpacing(row.spacing),
     updatedBy: row.updatedBy || null,
     updatedAt: row.updatedAt || null,
     maxHtmlBytes: MAX_SIGNATURE_HTML_BYTES,
@@ -135,12 +191,15 @@ export async function saveSignature(workspaceId, ownerEmail, input = {}, actor =
   const enabled = input.enabled !== undefined
     ? input.enabled === true || input.enabled === 'true'
     : existing?.enabled !== false;
+  const spacing = input.spacing !== undefined
+    ? normalizeSpacing(input.spacing)
+    : normalizeSpacing(existing?.spacing);
   const updatedBy = actorEmail(actor) || email;
 
   const row = await client.upsert({
     where: { workspaceId_ownerEmail: { workspaceId: wsId, ownerEmail: email } },
-    create: { workspaceId: wsId, ownerEmail: email, enabled, html, text, updatedBy },
-    update: { enabled, html, text, updatedBy },
+    create: { workspaceId: wsId, ownerEmail: email, enabled, html, text, spacing, updatedBy },
+    update: { enabled, html, text, spacing, updatedBy },
   });
   return serializeSignature(row);
 }
@@ -169,6 +228,7 @@ export async function getEnabledSignatureForSend(workspaceId, ownerEmail) {
     return {
       html: String(row.html || '').trim(),
       text: String(row.text || stripHtml(row.html)).trim(),
+      spacing: normalizeSpacing(row.spacing),
     };
   } catch (err) {
     logger.warn(`Signature lookup failed for ${ownerEmail} in ws ${workspaceId} (reply sends unsigned): ${err.message}`);
@@ -182,7 +242,10 @@ export async function getEnabledSignatureForSend(workspaceId, ownerEmail) {
  * signature delimiter. No-op when the signature is empty.
  */
 export function appendSignatureToEmail(email = {}, signature = null) {
-  const signatureHtml = String(signature?.html || '').trim();
+  // Spacing is applied here, not at save time: the stored HTML stays exactly
+  // what the author pasted, so changing the preference re-renders rather than
+  // rewriting (and never compounds margins across saves).
+  const signatureHtml = applySignatureSpacing(String(signature?.html || '').trim(), signature?.spacing);
   const signatureText = String(signature?.text || stripHtml(signatureHtml)).trim();
   if (!signatureHtml && !signatureText) return { ...email };
 
