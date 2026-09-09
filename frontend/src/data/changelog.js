@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.8.44-preview';
+export const APP_VERSION = '3.8.45-preview';
 
 export const changelog = [
+  {
+    version: '3.8.45-preview',
+    date: 'September 9, 2026',
+    entries: [
+      { type: 'added', html: '<strong>\u2728 \u201cNo tickets match these filters\u201d now tells you which filter is in the way</strong> \u2014 searching for a ticket number and getting nothing was a dead end: the Status filter starts with Resolved and Closed unchecked, so a ticket that plainly exists is invisible, and <em>Reset filters</em> only clears the text you typed (FR: Vahid). The empty state now says <em>\u201c1 ticket is hidden by your Status filter\u201d</em> and offers a single click \u2014 <em>Include Closed (1)</em> \u2014 that names the exact status rather than making you guess. Your search text is always kept.' },
+      { type: 'added', html: '<strong>It also tells you when there is more to see</strong> \u2014 if a search returns results but a filter is hiding others, a line above the list reads <em>\u201c12 more matches hidden by your Status filter\u201d</em> with the same one-click widening. This appears only while you are searching, so ordinary browsing is never nagged about the thousands of closed tickets it is deliberately not showing.' },
+      { type: 'improved', html: '<strong>It works for every filter, not just Status</strong> \u2014 assignee, priority, category, group, source, tags, type, dates and the canned views are all checked, and whichever is hiding the most is offered first. When several are in the way there is also a <em>\u201cSearch all tickets for \u2026\u201d</em> escape hatch that drops every filter and keeps your text. Clicking any of these updates the filter rail for real, so what you see always matches what the rail says, and <em>Reset filters</em> still puts it back.' },
+    ],
+  },
   {
     version: '3.8.44-preview',
     date: 'September 9, 2026',

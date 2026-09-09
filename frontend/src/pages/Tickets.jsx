@@ -29,6 +29,7 @@ import {
 import { QUEUE_CARD_REGISTRY, normalizeQueueCards } from '../components/tickets/queueCards';
 import { ticketsAPI } from '../services/api';
 import HeldRepliesPanel from '../components/tickets/HeldRepliesPanel';
+import FilterReliefNotice from '../components/tickets/FilterReliefNotice';
 import { useAuth } from '../contexts/AuthContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useWorkspaceRole } from '../components/nav/navDestinations';
@@ -204,6 +205,9 @@ export default function Tickets() {
   // reviewer-gated API.
   const canSeeAi = Boolean(user);
   const [searchParams, setSearchParams] = useSearchParams();
+  // FR 09-09: what the active filters are hiding, asked for only when the page
+  // has something useful to offer (nothing found, or a text search running).
+  const [relief, setRelief] = useState(null);
 
   const [meta, setMeta] = useState(null);
   const [metaError, setMetaError] = useState(null);
@@ -416,6 +420,55 @@ export default function Tickets() {
   // 100, so no server change). Every PAGE_SIZE consumer below reads this.
   const effectivePageSize = boardMode ? 50 : PAGE_SIZE;
 
+  // FR 09-09: which URL params make up each filter group the relief endpoint
+  // can name. Kept beside queryParams so the two never drift.
+  const RELIEF_URL_KEYS = {
+    status: ['status'],
+    segment: ['segment'],
+    assignee: ['assignee'],
+    priority: ['priority'],
+    category: ['category', 'subcategory'],
+    group: ['group'],
+    source: ['source'],
+    created: ['createdFrom', 'createdTo'],
+    due: ['due'],
+    tag: ['tag', 'tagMode'],
+    type: ['type'],
+    origin: ['origin'],
+    impact: ['impact'],
+    urgency: ['urgency'],
+    aiState: ['aiState'],
+    requester: ['requesterId', 'requesterName'],
+    noise: ['noise'],
+  };
+
+  // FR 09-09: drop one filter group, keeping the typed text. For Status we ADD
+  // the statuses that actually have matches rather than clearing the filter —
+  // "Include Closed" is a smaller, more predictable step than "show
+  // everything", and it leaves the rail agreeing with the results.
+  const widenFilters = useCallback((group) => {
+    const next = new URLSearchParams(searchParams);
+    const statusesToAdd = relief?.statusesToAdd || [];
+    if (group.key === 'status' && statusesToAdd.length) {
+      const current = String(next.get('status') || '').split(',').map((x) => x.trim()).filter(Boolean);
+      next.set('status', [...new Set([...current, ...statusesToAdd.map((x) => x.status)])].join(','));
+    } else {
+      for (const k of (RELIEF_URL_KEYS[group.key] || [])) next.delete(k);
+    }
+    next.delete('page');
+    setSearchParams(next, { replace: false });
+  }, [searchParams, setSearchParams, relief]);
+
+  // The escape hatch: every filter goes, the search text stays.
+  const clearFiltersKeepingSearch = useCallback(() => {
+    const next = new URLSearchParams(searchParams);
+    for (const keys of Object.values(RELIEF_URL_KEYS)) {
+      for (const k of keys) next.delete(k);
+    }
+    next.delete('page');
+    setSearchParams(next, { replace: false });
+  }, [searchParams, setSearchParams]);
+
   const queryParams = useMemo(() => {
     const params = { page, pageSize: effectivePageSize, sort, dir };
     // A segment supplies its own status scope; the checkboxes apply otherwise.
@@ -512,6 +565,21 @@ export default function Tickets() {
       setTickets(items);
       setTotal(res.data.total || 0);
       setLoadError(null);
+
+      // FR 09-09: ask what the filters are hiding, but only when the answer is
+      // worth showing — nothing found, or a text search is running. On the
+      // plain default view this would just report the 16,000 closed tickets we
+      // are deliberately not showing, which is noise, not help.
+      const worthAsking = items.length === 0 || Boolean(String(queryParams.q || '').trim());
+      if (!worthAsking) {
+        setRelief(null);
+      } else if (typeof ticketsAPI.filterRelief === 'function') {
+        const { page: _p, pageSize: _ps, ...scope } = queryParams;
+        ticketsAPI.filterRelief(scope)
+          .then((r) => setRelief(r.data || null))
+          // Strictly non-fatal: a help affordance must never break the list.
+          .catch(() => setRelief(null));
+      }
       if (diffAgainst) {
         const fx = new Map();
         for (const t of items) {
@@ -1582,6 +1650,14 @@ export default function Tickets() {
                     <LiveUpdatePill count={pendingCount} state={refreshState} onApply={applyPendingUpdates} />
                   )}
 
+                  {/* FR 09-09: results ARE showing, but a filter is hiding
+                      more of them. Only while a text search is running — on the
+                      plain default view this would permanently report the
+                      16,000 closed tickets we deliberately do not show. */}
+                  {!isLoading && urlSearch && tickets.length > 0 && view !== 'scheduled' && (
+                    <FilterReliefNotice relief={relief} variant="inline" onWiden={widenFilters} />
+                  )}
+
                   {view === 'scheduled' ? (
                     <ScheduledTicketsPanel ticketingOn={ticketingOn} />
                   ) : isLoading ? (
@@ -1600,7 +1676,17 @@ export default function Tickets() {
                     <div className="tp-card rounded-xl p-12 text-center">
                       <Inbox className="w-10 h-10 text-muted-foreground/50 mx-auto mb-3" aria-hidden="true" />
                       <p className="text-foreground/85 font-medium">No tickets match these filters</p>
-                      <p className="text-sm text-muted-foreground mt-1">Try a different segment or clear the filters in the rail.</p>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        {relief?.groups?.length
+                          ? 'Something matches — a filter is in the way.'
+                          : 'Try a different segment or clear the filters in the rail.'}
+                      </p>
+                      <FilterReliefNotice
+                        relief={relief}
+                        variant="empty"
+                        onWiden={widenFilters}
+                        onClearFilters={clearFiltersKeepingSearch}
+                      />
                     </div>
                   ) : boardMode ? (
                     <>
