@@ -279,7 +279,7 @@ export const TOOL_SCHEMAS = [
   },
   {
     name: 'submit_recommendation',
-    description: 'Submit your final assignment recommendation. You MUST call this tool when you have completed your analysis. Provide ranked technician recommendations with scores and reasoning. For noise/FYI tickets, submit with an empty recommendations array — the system will auto-dismiss them.',
+    description: 'Submit your final assignment recommendation. You MUST call this tool when you have completed your analysis. Provide ranked technician recommendations with scores and reasoning. For noise/FYI tickets: where the workspace auto-dismisses them, submit an empty recommendations array; where it does not (the system tells you so in the prompt), set nonActionable:true and STILL provide recommendations.',
     input_schema: {
       type: 'object',
       properties: {
@@ -297,6 +297,14 @@ export const TOOL_SCHEMAS = [
             },
             required: ['rank', 'techId', 'techName', 'score', 'reasoning'],
           },
+        },
+        nonActionable: {
+          type: 'boolean',
+          description: 'TRUE when this ticket needs no helpdesk follow-up (FYI, newsletter, automated notice with nothing to do). This is a LABEL, separate from routing: in a workspace that does not auto-close, set this true AND still provide your best recommendations, so a wrong judgement costs a label rather than leaving the ticket unrouted. Leave false/absent for ordinary work.',
+        },
+        nonActionableReason: {
+          type: 'string',
+          description: 'One short sentence on why the ticket needs no follow-up. Only meaningful when nonActionable is true.',
         },
         overallReasoning: {
           type: 'string',

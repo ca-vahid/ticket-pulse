@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.8.41-preview';
+export const APP_VERSION = '3.8.42-preview';
 
 export const changelog = [
+  {
+    version: '3.8.42-preview',
+    date: 'September 9, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>\u2728 A \u201cnot actionable\u201d call no longer costs you the routing</strong> \u2014 until now the AI said \u201cthis is noise\u201d by recommending nobody, so the verdict and the routing were the same answer and it could not tell you both. In workspaces where nothing is auto-closed (Accounting, AR and Power Apps), it now recommends who should handle the ticket <em>and</em> separately labels it \u201cneeds no follow-up\u201d. If it is wrong you disagree with a label instead of finding an unrouted ticket \u2014 Accounting had 1,535 of those in six months, 844 of which a person picked up by hand.' },
+      { type: 'added', html: '<strong>The label is visible where you review</strong> \u2014 runs the AI thinks need no follow-up now carry a note on the recommendation saying so, with its one-line reason, plus a reminder that the ticket was still routed and nothing was closed or dismissed.' },
+      { type: 'improved', html: '<strong>IT is deliberately unchanged</strong> \u2014 where auto-close is switched on, a noise verdict still works exactly as before: an empty recommendation, the same dismissal, the same never-noise protections. The new label can never close a ticket on its own. <em>Was the AI right?</em> counts both kinds of verdict, so the numbers stay comparable across this change instead of looking like the AI stopped judging.' },
+    ],
+  },
   {
     version: '3.8.41-preview',
     date: 'September 9, 2026',

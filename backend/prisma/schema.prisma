@@ -2953,6 +2953,13 @@ model AssignmentPipelineRun {
   totalDurationMs            Int?                     @map("total_duration_ms")
   totalTokensUsed            Int?                     @map("total_tokens_used")
   recommendation             Json? // ranked list: [{ techId, name, score, breakdown, reasoning }]
+  // QA 09-05 option 3: the AI's "needs no follow-up" LABEL, kept separate from
+  // routing. A run can carry this alongside a real recommendation, so in a
+  // workspace that does not auto-close, a wrong call costs a label rather than
+  // an unrouted ticket. The auto-close path still keys off an EMPTY
+  // recommendations array, never this flag.
+  nonActionable              Boolean                  @default(false) @map("non_actionable")
+  nonActionableReason        String?                  @map("non_actionable_reason") @db.Text
   decision                   String?                  @map("decision") @db.VarChar(20) // pending_review | approved | modified | rejected | auto_assigned | noise_dismissed
   decidedByEmail             String?                  @map("decided_by_email") @db.VarChar(255)
   decidedAt                  DateTime?                @map("decided_at")
