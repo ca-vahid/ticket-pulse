@@ -15,6 +15,7 @@ import { CopyBadge, prepareRunTranscriptMarkdown, transcriptMdComponents } from 
 import { RecommendationCards } from './LivePipelineView';
 import HandoffHistoryStrip from './HandoffHistoryStrip';
 import { getRecommendationList, withNormalizedRecommendations } from '../../utils/assignmentRecommendations';
+import NonActionableBadge from './NonActionableBadge';
 
 const ticketDescriptionMdComponents = {
   ...transcriptMdComponents,
@@ -1683,7 +1684,10 @@ export default function PipelineRunDetail({ run, onDecide, deciding, onSyncCompl
 
       {/* Public note preview — exactly what gets posted to FreshService for the assignee. */}
       {normalizedRecommendation && (run.decision === 'auto_assigned' || run.decision === 'pending_review' || run.decision === 'approved' || run.decision === 'modified' || run.decision === 'noise_dismissed') && (
-        <AgentBriefingCard recommendation={normalizedRecommendation} decision={run.decision} />
+        <>
+          <NonActionableBadge recommendation={normalizedRecommendation} className="mb-4" />
+          <AgentBriefingCard recommendation={normalizedRecommendation} decision={run.decision} />
+        </>
       )}
 
       {/* Handoff history strip — shows every pickup/rejection/reassignment for this ticket */}

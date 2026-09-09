@@ -12,6 +12,7 @@ import {
   CopyBadge, mdComponents, StreamContent, cleanTranscript, processStreamEvent,
 } from './StreamingComponents';
 import { getRecommendationList } from '../../utils/assignmentRecommendations';
+import NonActionableBadge from './NonActionableBadge';
 
 /** Strip obvious script/event-handler vectors before rendering FreshService HTML. Not a full sanitizer. */
 function sanitizeBriefingHtml(html) {
@@ -167,6 +168,7 @@ export function RecommendationCards({
           )}
           <p className="text-xs text-muted-foreground/75 mt-2 text-center">No technician recommendations were produced for this run.</p>
         </div>
+        <NonActionableBadge recommendation={data} className="mt-4" />
         {!hideAgentBriefing && <AgentBriefingPreview recommendation={data} decision={decision || 'noise_dismissed'} />}
       </div>
     );

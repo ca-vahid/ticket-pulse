@@ -77,12 +77,18 @@ class NoiseVerdictOutcomeService {
         WITH verdicts AS (
           SELECT r.id AS run_id, r.ticket_id, r.created_at AS decided_at,
                  r.llm_model,
+                 r.decision, r.non_actionable,
                  t.assigned_tech_id, t.is_noise, t.status, t.subject,
                  t.native_number, t.freshservice_ticket_id, t.origin
           FROM assignment_pipeline_runs r
           JOIN tickets t ON t.id = r.ticket_id
           WHERE r.workspace_id = ${wsId}
-            AND r.decision = 'noise_dismissed'
+            -- A "verdict" is the AI judging the ticket non-actionable, in
+            -- EITHER form: the classic empty-recommendations dismissal, or the
+            -- decoupled label that replaced it where auto-close is off
+            -- (QA 09-05 option 3). Counting only the first would make this
+            -- panel read as "the AI stopped judging" the day option 3 shipped.
+            AND (r.decision = 'noise_dismissed' OR r.non_actionable = true)
             AND r.created_at > now() - interval '${window} days'
         ), scored AS (
           SELECT v.*,
@@ -102,6 +108,8 @@ class NoiseVerdictOutcomeService {
           count(*)::text AS total,
           count(*) FILTER (WHERE llm_model = 'noise-rule')::text AS by_rule,
           count(*) FILTER (WHERE llm_model IS DISTINCT FROM 'noise-rule')::text AS by_ai,
+          count(*) FILTER (WHERE decision = 'noise_dismissed')::text AS as_dismissal,
+          count(*) FILTER (WHERE non_actionable AND decision IS DISTINCT FROM 'noise_dismissed')::text AS as_label,
           count(*) FILTER (WHERE assigned)::text AS assigned,
           count(*) FILTER (WHERE noise_cleared)::text AS noise_cleared,
           count(*) FILTER (WHERE agent_replied)::text AS agent_replied,
@@ -122,6 +130,10 @@ class NoiseVerdictOutcomeService {
         total,
         byAi: num(r.by_ai),
         byRule: num(r.by_rule),
+        // How the verdict was expressed: a dismissal (auto-close path) or a
+        // label alongside a real recommendation (QA 09-05 option 3).
+        asDismissal: num(r.as_dismissal),
+        asLabel: num(r.as_label),
         overridden,
         upheld: Math.max(0, total - overridden),
         // Null rather than 100% when there is nothing to judge — an empty
@@ -158,7 +170,7 @@ class NoiseVerdictOutcomeService {
         JOIN tickets t ON t.id = r.ticket_id
         LEFT JOIN technicians tech ON tech.id = t.assigned_tech_id
         WHERE r.workspace_id = ${wsId}
-          AND r.decision = 'noise_dismissed'
+          AND (r.decision = 'noise_dismissed' OR r.non_actionable = true)
           AND r.created_at > now() - interval '${window} days'
           AND (t.assigned_tech_id IS NOT NULL OR EXISTS (
                 SELECT 1 FROM ticket_thread_entries e

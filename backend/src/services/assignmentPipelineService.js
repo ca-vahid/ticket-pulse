@@ -795,6 +795,16 @@ class AssignmentPipelineService {
       systemPrompt += `\n\n## Historical Admin Feedback\n${assignmentConfig.feedbackContext.slice(-4000)}`;
     }
 
+    // Verdict/routing decoupling (QA 09-05, Accounting option 3). Where the
+    // workspace does not auto-close, a noise verdict costs nothing but a
+    // label — so the model should still say who would handle it if it is
+    // wrong. Empty recommendations in such a workspace leave the ticket
+    // unrouted for no benefit; ws2 did that 1,535 times in 180 days while a
+    // person picked up 844 of them by hand.
+    if (assignmentConfig?.autoCloseNoise !== true && !isPriorityAssessmentOnly && triggerSource !== 'classification_only') {
+      systemPrompt += '\n\n## Non-actionable Tickets In This Workspace\nThis workspace does NOT auto-close tickets you judge non-actionable, so a wrong judgement here costs only a label — never a closed ticket. Therefore: even when you are confident a ticket needs no helpdesk follow-up, still return your best ranked recommendations AND set `nonActionable: true` with a one-line `nonActionableReason`. Do NOT return an empty recommendations array in this workspace. A human reviews the label and the routing together.';
+    }
+
     // Workspace noise guidance (QA 09-05, Accounting option 2). The built-in
     // prompt learned "noise" in an IT queue, where a no-reply sender usually
     // IS noise. In an Accounts Payable mailbox that is backwards — the vendor
@@ -1133,7 +1143,18 @@ class AssignmentPipelineService {
       }
 
       const topRec = recommendation?.recommendations?.[0];
+      // An EMPTY recommendations array is still the noise verdict — unchanged,
+      // and the only thing ws1 (auto-close on) ever produces or acts on.
       const isNoise = recommendation && (!recommendation.recommendations || recommendation.recommendations.length === 0);
+      // QA 09-05 option 3: the label, decoupled from routing. A run can now
+      // carry "this looks non-actionable" AND a ranked recommendation, so in a
+      // workspace that does not auto-close, being wrong costs a label instead
+      // of an unrouted ticket. Deliberately NOT folded into isNoise: nothing
+      // about the auto-close path may move.
+      const flaggedNonActionable = recommendation?.nonActionable === true;
+      const nonActionableReason = flaggedNonActionable
+        ? String(recommendation?.nonActionableReason || '').trim().slice(0, 500) || null
+        : null;
 
       // NT-1 deterministic noise veto: when the LLM's verdict is "noise"
       // (empty recommendations array) but an admin never_noise rule matches
@@ -1347,6 +1368,10 @@ class AssignmentPipelineService {
         llmFallbackReason,
         llmAttemptCount,
         recommendation,
+        // QA 09-05 option 3: the label rides alongside the recommendation, so
+        // the review queue and the accuracy panel can both read it.
+        nonActionable: flaggedNonActionable,
+        nonActionableReason,
         fullTranscript,
         errorMessage,
         ...(decision === 'auto_assigned' && topRec?.techId ? { assignedTechId: topRec.techId } : {}),
