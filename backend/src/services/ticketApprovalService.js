@@ -150,10 +150,19 @@ class TicketApprovalService {
       where: { id: Number(approvalCategoryId), workspaceId, isActive: true },
     });
     if (!category) throw new ValidationError('Pick an active approval category');
-    const managers = [...new Set((category.managerEmails || [])
+    const allManagers = [...new Set((category.managerEmails || [])
       .map((e) => String(e || '').trim().toLowerCase()).filter(Boolean))];
-    if (managers.length === 0) {
+    if (allManagers.length === 0) {
       throw new ValidationError(`"${category.name}" has no approval managers configured — add them in Settings`);
+    }
+    // Self-approval is prohibited: the requester never receives their own
+    // approval row, so the request fans out to the OTHER managers only. If
+    // they're the sole manager, fail loudly instead of creating a request
+    // nobody is allowed to decide.
+    const requesterEmailLc = String(actor?.email || '').trim().toLowerCase();
+    const managers = allManagers.filter((m) => m !== requesterEmailLc);
+    if (managers.length === 0) {
+      throw new ValidationError(`You are the only approval manager on "${category.name}" and self-approval is prohibited — add another manager in Settings, or have someone else request this approval`);
     }
 
     // Don't stack a second open request for the same category on this ticket.
@@ -900,6 +909,16 @@ class TicketApprovalService {
     const normalized = String(decision || '').toLowerCase();
     if (!['approved', 'rejected'].includes(normalized)) {
       throw new ValidationError('Decision must be "approved" or "rejected"');
+    }
+    // Self-approval is prohibited (Sep 2026): the person who filed the request
+    // never decides it — even when they are one of the category's approvers,
+    // and even as an admin. Any-of semantics mean another manager can still
+    // decide; the row stays pending, no new status value is introduced (the
+    // external verdict mapping is untouched).
+    const requesterEmail = String(approval.requestedBy || '').trim().toLowerCase();
+    const deciderEmail = String(actorEmail || approval.approverEmail || '').trim().toLowerCase();
+    if (requesterEmail && deciderEmail && requesterEmail === deciderEmail) {
+      throw new ValidationError('You requested this approval — a different approver has to decide it');
     }
     // A fresh decision must be on an open row; a change flips an already-decided
     // one (changedFrom carries the prior status so guarding happened upstream).

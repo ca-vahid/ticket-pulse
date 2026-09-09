@@ -9,6 +9,8 @@ import { AssignmentNavIcon, MapNavIcon, WorkflowNavIcon } from './NavIcons';
 // hover saturate + active underline hue), and an optional role `gate`.
 //
 //   gate: 'review'  -> visible to reviewers/admins
+//   gate: 'view'    -> visible to workspace admins AND read-only grants
+//                      (Dashboard, Timeline, Analytics — watch, don't touch)
 //   gate: 'manage'  -> visible to workspace admins (Dashboard, Timeline,
 //                      Analytics, Assignment, Mail Workflows, Agent Maps)
 //   gate: 'tickets' -> visible when the workspace has native ticketing enabled
@@ -31,7 +33,7 @@ export const NAV_DESTINATIONS = [
     tile: 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-400/30 dark:bg-blue-500/15 dark:text-blue-200',
     hover: 'hover:border-blue-300 hover:bg-blue-100',
     bar: 'bg-blue-600',
-    gate: 'manage',
+    gate: 'view',
   },
   {
     id: 'tickets',
@@ -54,7 +56,7 @@ export const NAV_DESTINATIONS = [
     tile: 'border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-400/30 dark:bg-indigo-500/15 dark:text-indigo-200',
     hover: 'hover:border-indigo-300 hover:bg-indigo-100',
     bar: 'bg-indigo-600',
-    gate: 'manage',
+    gate: 'view',
   },
   {
     id: 'analytics',
@@ -64,7 +66,7 @@ export const NAV_DESTINATIONS = [
     tile: 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-400/30 dark:bg-emerald-500/15 dark:text-emerald-200',
     hover: 'hover:border-emerald-300 hover:bg-emerald-100',
     bar: 'bg-emerald-600',
-    gate: 'manage',
+    gate: 'view',
   },
   {
     id: 'assignments',
@@ -145,6 +147,16 @@ export function isWorkspaceAdmin(user, wsRole) {
 }
 
 /**
+ * View-tier access to the operational pages (Dashboard, Technician detail,
+ * Timeline, Analytics): admins, plus the 'readonly' grant — the observer role
+ * (Sep 2026). Read-only people watch the operation; the server blocks every
+ * mutation for them, so exposing the pages is safe by construction.
+ */
+export function canViewOps(user, wsRole) {
+  return isWorkspaceAdmin(user, wsRole) || wsRole === 'readonly';
+}
+
+/**
  * Single source of truth for whether a user gets Settings affordances at all.
  * Since v3.7.02 Settings is workspace-admin only: viewers/reviewers have zero
  * sections (approval categories moved to Approvals → Categories), and
@@ -170,7 +182,7 @@ export function useCanAccessSettings() {
  * SideRail logo so "/dashboard" is no longer hardcoded as the home.
  */
 export function homePathFor(user, wsRole) {
-  return isWorkspaceAdmin(user, wsRole) ? '/dashboard' : '/tickets';
+  return canViewOps(user, wsRole) ? '/dashboard' : '/tickets';
 }
 
 /**
@@ -184,6 +196,7 @@ export function useNavDestinations() {
   const wsRole = useWorkspaceRole();
   const canReview = wsRole === 'admin' || wsRole === 'reviewer';
   const canManage = wsRole === 'admin';
+  const canView = canManage || wsRole === 'readonly';
 
   // Agent-role users only work tickets + approvals — everything else in the app
   // is coordinator/manager territory and would just bounce them. Agents can be
@@ -195,6 +208,7 @@ export function useNavDestinations() {
   return NAV_DESTINATIONS.filter((dest) => {
     if (dest.gate === 'review') return canReview;
     if (dest.gate === 'manage') return canManage;
+    if (dest.gate === 'view') return canView;
     return true;
   });
 }

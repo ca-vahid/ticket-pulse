@@ -309,26 +309,23 @@ describe('decision email to the requester (QA 08-11 #5 / 08-17 #2)', () => {
     }
   });
 
-  test('self-decision still emails the requester — ONE send, "your own" wording (QA 08-17 #2)', async () => {
+  // Superseded (Sep 2026): self-approval is now PROHIBITED — the "self
+  // decision email" feature (QA 08-17 #2) no longer has a reachable path.
+  test('self-decision is refused outright — no status change, no email', async () => {
     prismaMock.ticketApproval.findFirst.mockResolvedValue(approvalRow({ requestedBy: 'alice@x.io' }));
-    await ticketApprovalService.decideInApp(501, 1, 2, 'approved', null, { email: 'alice@x.io', name: 'Alice' });
-
-    expect(sendgridMock.sendEmail).toHaveBeenCalledTimes(1);
-    const email = sendgridMock.sendEmail.mock.calls[0][0];
-    expect(email.to).toEqual(['alice@x.io']);
-    // Subject prefix unchanged (filters/threads keep working); body says self.
-    expect(email.subject).toMatch(/^Approved:/);
-    expect(email.html).toContain('You approved your own approval request');
+    await expect(
+      ticketApprovalService.decideInApp(501, 1, 2, 'approved', null, { email: 'alice@x.io', name: 'Alice' }),
+    ).rejects.toThrow(/You requested this approval/);
+    expect(prismaMock.ticketApproval.update).not.toHaveBeenCalled();
+    expect(sendgridMock.sendEmail).not.toHaveBeenCalled();
   });
 
-  test('self-REJECTION wording follows the verdict', async () => {
+  test('self-REJECTION is refused the same way', async () => {
     prismaMock.ticketApproval.findFirst.mockResolvedValue(approvalRow({ requestedBy: 'alice@x.io' }));
-    await ticketApprovalService.decideInApp(501, 1, 2, 'rejected', 'changed my mind', { email: 'alice@x.io', name: 'Alice' });
-
-    const email = sendgridMock.sendEmail.mock.calls[0][0];
-    expect(email.subject).toMatch(/^Rejected:/);
-    expect(email.html).toContain('You rejected your own approval request');
-    expect(email.html).toContain('Your note');
+    await expect(
+      ticketApprovalService.decideInApp(501, 1, 2, 'rejected', 'changed my mind', { email: 'alice@x.io', name: 'Alice' }),
+    ).rejects.toThrow(/You requested this approval/);
+    expect(sendgridMock.sendEmail).not.toHaveBeenCalled();
   });
 
   test('admin deciding ON BEHALF where requester === approver is NOT a self-decision', async () => {
@@ -355,12 +352,14 @@ describe('decision email to the requester (QA 08-11 #5 / 08-17 #2)', () => {
     expect(email.html).toContain('looks fine');
   });
 
-  test('decideByToken on your own request sends the self variant (link decider = approver)', async () => {
-    prismaMock.ticketApproval.findUnique.mockResolvedValue(approvalRow({ requestedBy: 'alice@x.io' }));
-    await ticketApprovalService.decideByToken('a'.repeat(32), 'approved');
-
-    expect(sendgridMock.sendEmail).toHaveBeenCalledTimes(1);
-    expect(sendgridMock.sendEmail.mock.calls[0][0].html).toContain('your own approval request');
+  test('decideByToken on your own request is refused (requester === approver)', async () => {
+    // The magic-link decider IS the row's approver — when that row belongs to
+    // the person who filed the request, the link must refuse too.
+    prismaMock.ticketApproval.findUnique.mockResolvedValue(approvalRow({ requestedBy: 'alice@x.io', approverEmail: 'alice@x.io' }));
+    await expect(
+      ticketApprovalService.decideByToken('a'.repeat(32), 'approved'),
+    ).rejects.toThrow(/You requested this approval/);
+    expect(sendgridMock.sendEmail).not.toHaveBeenCalled();
   });
 
   test('changeDecision emails the requester with the changed-decision wording', async () => {

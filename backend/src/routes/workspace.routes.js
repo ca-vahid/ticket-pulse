@@ -316,7 +316,7 @@ router.post(
  * the old handler upserted `role || 'viewer'` raw, so any string became a
  * "role" (Mega 08-23 AC1 hardening).
  */
-const ALLOWED_ACCESS_ROLES = ['viewer', 'reviewer', 'admin'];
+const ALLOWED_ACCESS_ROLES = ['readonly', 'viewer', 'reviewer', 'admin'];
 
 /**
  * Bind the admin gate for the /:id/access + /:id/members routes to the

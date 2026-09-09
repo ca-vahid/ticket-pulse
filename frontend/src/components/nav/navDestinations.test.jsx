@@ -75,12 +75,21 @@ describe('isWorkspaceAdmin / canAccessSettings / homePathFor', () => {
 });
 
 describe('NAV_DESTINATIONS gates', () => {
-  test('only Tickets and Approvals are ungated; every other tile is admin ("manage")', () => {
+  test('only Tickets and Approvals are ungated; watch pages are "view", the rest "manage" (Sep 2026)', () => {
     const open = NAV_DESTINATIONS.filter((d) => d.gate === null).map((d) => d.id).sort();
     expect(open).toEqual(['approvals', 'tickets']);
-    const gated = NAV_DESTINATIONS.filter((d) => d.gate !== null);
-    expect(gated.every((d) => d.gate === 'manage')).toBe(true);
-    expect(gated.map((d) => d.id).sort()).toEqual(['analytics', 'assignments', 'dashboard', 'map', 'timeline', 'workflows']);
+    // 'view' = admins AND the read-only observer grant (watch, don't touch).
+    const viewGated = NAV_DESTINATIONS.filter((d) => d.gate === 'view').map((d) => d.id).sort();
+    expect(viewGated).toEqual(['analytics', 'dashboard', 'timeline']);
+    // Everything operational stays admin-only.
+    const manageGated = NAV_DESTINATIONS.filter((d) => d.gate === 'manage').map((d) => d.id).sort();
+    expect(manageGated).toEqual(['assignments', 'map', 'workflows']);
+  });
+
+  test('read-only role: view tiles shown, operational tiles hidden, home is the dashboard', () => {
+    const readonlyUser = { role: 'user' };
+    expect(homePathFor(readonlyUser, 'readonly')).toBe('/dashboard');
+    expect(homePathFor(readonlyUser, 'viewer')).toBe('/tickets');
   });
 });
 

@@ -2,7 +2,7 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { Activity } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
-import { ACCESS_BOUNCE_KEY, isWorkspaceAdmin, useWorkspaceRole } from './navDestinations';
+import { ACCESS_BOUNCE_KEY, canViewOps, isWorkspaceAdmin, useWorkspaceRole } from './navDestinations';
 
 export function LoadingScreen({ label = 'Loading...' }) {
   return (
@@ -46,5 +46,31 @@ export default function AdminRoute({ children }) {
     return <Navigate to="/tickets" replace />;
   }
 
+  return children;
+}
+
+/**
+ * ViewRoute (Sep 2026): AdminRoute semantics, but the read-only observer role
+ * passes too. Wraps the watch-don't-touch pages — Dashboard, Technician
+ * detail, Timeline, Analytics — where a 'readonly' grant may look while the
+ * server blocks every mutation. Everything operational (Assignment Review,
+ * Mail Workflows, Agent Maps, Settings, Summit) stays behind AdminRoute.
+ */
+export function ViewRoute({ children }) {
+  const { user, isAuthenticated, isLoading } = useAuth();
+  const { isWorkspaceSelected, availableWorkspaces, isHydrated } = useWorkspace();
+  const wsRole = useWorkspaceRole();
+  const location = useLocation();
+
+  if (isLoading || !isHydrated) return <LoadingScreen />;
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  if (user?.role === 'agent') return <Navigate to="/tickets" replace />;
+  if (!isWorkspaceSelected && availableWorkspaces.length !== 1) {
+    return <Navigate to="/workspace" replace />;
+  }
+  if (!canViewOps(user, wsRole)) {
+    try { sessionStorage.setItem(ACCESS_BOUNCE_KEY, location.pathname); } catch { /* no-op */ }
+    return <Navigate to="/tickets" replace />;
+  }
   return children;
 }

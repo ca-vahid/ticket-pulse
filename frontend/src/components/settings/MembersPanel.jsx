@@ -174,9 +174,10 @@ const columnHelper = createColumnHelper();
  * option tooltips.
  */
 const ACCESS_OPTIONS = [
-  { value: '', label: 'No access', description: 'Cannot open the app for this workspace (technicians still sign in for the ticket queue).' },
-  { value: 'viewer', label: 'Viewer', description: 'Tickets + Approvals. Sees AI suggestions but cannot approve them.' },
-  { value: 'reviewer', label: 'Reviewer', description: 'Tickets + Approvals. Approves or dismisses AI suggestions and manages approval categories.' },
+  { value: '', label: 'No access', description: 'No app grant. Technicians can still sign in for their own queue (agent self-service); anyone else cannot open the app.' },
+  { value: 'readonly', label: 'Read-only', description: 'Observer: Dashboard, Analytics and tickets in view mode. Cannot change anything — except deciding approvals addressed to them.' },
+  { value: 'viewer', label: 'Standard', description: 'Works tickets + approvals. Sees AI suggestions but cannot approve them. (Formerly called "Viewer".)' },
+  { value: 'reviewer', label: 'Reviewer', description: 'Standard + approves/dismisses AI suggestions and manages approval categories.' },
   { value: 'admin', label: 'Admin', description: 'Everything — Dashboard, Analytics, Assignment Review, Mail Workflows, Agent Maps, Settings.' },
 ];
 
@@ -199,6 +200,10 @@ export default function MembersPanel() {
   // null = not loaded / not permitted → the column stays hidden.
   const [accessByEmail, setAccessByEmail] = useState(null);
   const [accessBusyEmail, setAccessBusyEmail] = useState(null);
+  const [appOnly, setAppOnly] = useState([]);
+  const [newGrantEmail, setNewGrantEmail] = useState('');
+  const [newGrantRole, setNewGrantRole] = useState('readonly');
+  const [grantBusy, setGrantBusy] = useState(false);
 
   const wsId = currentWorkspace?.id;
 
@@ -221,12 +226,19 @@ export default function MembersPanel() {
     try {
       const res = await workspaceAPI.getMembers(wsId);
       const map = {};
+      const appOnlyRows = [];
       for (const m of res?.data || []) {
         if (m.email && m.accessRole) map[String(m.email).toLowerCase()] = m.accessRole;
+        // App-only people (Sep 2026 merge): grants with no technician row —
+        // observers, execs, service accounts. This replaces the separate
+        // Workspace Access page as the single people surface.
+        if (m.email && m.accessRole && !m.technicianId) appOnlyRows.push(m);
       }
       setAccessByEmail(map);
+      setAppOnly(appOnlyRows.sort((a, b) => String(a.email).localeCompare(String(b.email))));
     } catch {
       setAccessByEmail(null);
+      setAppOnly([]);
     }
   }, [wsId]);
 
@@ -472,20 +484,103 @@ export default function MembersPanel() {
         </div>
       </div>
 
-      {/* What "App access" means + cross-link to the full-list surface (AC3/AC4) */}
+      {/* What "App access" means (role ladder, Sep 2026) */}
       {accessByEmail && (
         <p className="flex items-start gap-1.5 text-xs text-muted-foreground max-w-3xl">
           <KeyRound className="w-3.5 h-3.5 mt-0.5 text-muted-foreground/75 shrink-0" aria-hidden="true" />
           <span>
             <strong className="font-semibold text-muted-foreground">App access</strong> sets what this person can open here.
-            <strong className="font-semibold text-muted-foreground"> Viewer</strong>: Tickets + Approvals, sees AI suggestions but can&rsquo;t approve them.
-            <strong className="font-semibold text-muted-foreground"> Reviewer</strong>: also approves AI suggestions and manages approval categories (Approvals → Categories).
-            <strong className="font-semibold text-muted-foreground"> Admin</strong>: everything, including Dashboard, Analytics and Settings.
-            Technicians without access can still sign in and use the ticket queue.
-            The full access list, including non-technician users, is in{' '}
-            <a href="#workspace-access" className="text-blue-600 dark:text-blue-300 hover:text-blue-800 dark:hover:text-blue-200 underline underline-offset-2 tp-focus-ring rounded">Workspace access</a>.
+            <strong className="font-semibold text-muted-foreground"> Read-only</strong>: observer — Dashboard, Analytics and tickets in view mode; can only decide approvals addressed to them.
+            <strong className="font-semibold text-muted-foreground"> Standard</strong> (formerly Viewer): works tickets + approvals, sees AI suggestions but can&rsquo;t approve them.
+            <strong className="font-semibold text-muted-foreground"> Reviewer</strong>: also approves AI suggestions and manages approval categories.
+            <strong className="font-semibold text-muted-foreground"> Admin</strong>: everything, including Settings.
+            Technicians without a grant can still sign in for their own queue. People who should never receive tickets belong below, not in the roster above.
           </span>
         </p>
+      )}
+
+      {/* App-only people (Sep 2026): access grants with no technician row —
+          observers, execs, admin accounts. Absorbed from the retired
+          Workspace Access page so people management lives on ONE surface.
+          They can never be assigned tickets: assignment draws exclusively
+          from the technician roster. */}
+      {accessByEmail && (
+        <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">App-only people</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Sign-in access without being a technician — observers and admin accounts. Not in any assignment pool, invisible to the AI.
+            </p>
+          </div>
+          {appOnly.length > 0 && (
+            <ul className="divide-y divide-border/60">
+              {appOnly.map((row) => {
+                const email = String(row.email).toLowerCase();
+                return (
+                  <li key={email} className="flex items-center gap-3 py-2">
+                    <span className="text-sm text-foreground/85 font-medium flex-1 min-w-0 truncate">{row.name || email}</span>
+                    <span className="text-xs text-muted-foreground/75 hidden sm:block truncate max-w-[220px]">{email}</span>
+                    <select
+                      value={accessByEmail?.[email] || ''}
+                      onChange={(e) => changeAccess({ email, name: row.name || email }, e.target.value).then(() => loadAccess())}
+                      disabled={accessBusyEmail === email}
+                      className="tp-focus-ring rounded-lg border border-input bg-card px-2 py-1 text-xs text-foreground"
+                      aria-label={`App access for ${row.name || email}`}
+                    >
+                      {ACCESS_OPTIONS.map((o) => (
+                        <option key={o.value || 'none'} value={o.value} title={o.description}>{o.value ? o.label : 'Remove access'}</option>
+                      ))}
+                    </select>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <form
+            className="flex flex-wrap items-center gap-2"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const email = newGrantEmail.trim().toLowerCase();
+              if (!email || !wsId) return;
+              setGrantBusy(true); setError(null);
+              try {
+                await workspaceAPI.grantAccess(wsId, email, newGrantRole);
+                flash(`${email} can now sign in (${ACCESS_OPTIONS.find((o) => o.value === newGrantRole)?.label || newGrantRole}).`);
+                setNewGrantEmail('');
+                await loadAccess();
+              } catch (err) {
+                setError(err.response?.data?.message || err.message || 'Failed to grant access');
+              } finally { setGrantBusy(false); }
+            }}
+          >
+            <input
+              type="email"
+              required
+              value={newGrantEmail}
+              onChange={(e) => setNewGrantEmail(e.target.value)}
+              placeholder="person@bgcengineering.ca"
+              className="tp-focus-ring flex-1 min-w-[220px] rounded-lg border border-input bg-card px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground/50"
+              aria-label="Email to grant app access"
+            />
+            <select
+              value={newGrantRole}
+              onChange={(e) => setNewGrantRole(e.target.value)}
+              className="tp-focus-ring rounded-lg border border-input bg-card px-2 py-1.5 text-sm text-foreground"
+              aria-label="Role for the new grant"
+            >
+              {ACCESS_OPTIONS.filter((o) => o.value).map((o) => (
+                <option key={o.value} value={o.value} title={o.description}>{o.label}</option>
+              ))}
+            </select>
+            <button
+              type="submit"
+              disabled={grantBusy || !newGrantEmail.trim()}
+              className="tp-focus-ring rounded-lg bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground disabled:opacity-50"
+            >
+              {grantBusy ? 'Granting…' : 'Grant access'}
+            </button>
+          </form>
+        </div>
       )}
 
       {/* Alerts */}

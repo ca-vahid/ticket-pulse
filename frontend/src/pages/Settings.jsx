@@ -26,7 +26,6 @@ import AdminManagementPanel from '../components/settings/AdminManagementPanel';
 import VacationTrackerPanel from '../components/settings/VacationTrackerPanel';
 import CalendarLeavePanel from '../components/settings/CalendarLeavePanel';
 import TechnicianVisibilityPanel from '../components/settings/TechnicianVisibilityPanel';
-import WorkspaceAccessPanel from '../components/settings/WorkspaceAccessPanel';
 import FreshServiceWebhookCard from '../components/settings/FreshServiceWebhookCard';
 import AiProviderSettingsPanel from '../components/settings/AiProviderSettingsPanel';
 import EmailHealthCard from '../components/settings/EmailHealthCard';
@@ -56,6 +55,7 @@ import {
   Send,
   PanelLeftClose,
   PanelLeftOpen,
+  Search,
 } from 'lucide-react';
 import { AssignmentConfigPanel } from './AssignmentReview';
 import { filterSettingsNavItems, resolveActiveSettingsItem } from './settingsNav';
@@ -149,7 +149,16 @@ export default function Settings() {
     isWsAdmin,
     isWsReviewer,
   });
-  const activeNavigationItem = resolveActiveSettingsItem(navigationItems, activeSection);
+  // Retired-section alias (Sep 2026): Workspace Access merged into Members.
+  const aliasedSection = activeSection === 'workspace-access' ? 'members' : activeSection;
+  const activeNavigationItem = resolveActiveSettingsItem(navigationItems, aliasedSection);
+  // Type-to-filter for the section tree (Sep 2026): "members" jumps straight
+  // to Members without scanning six groups. Matches label or group name.
+  const [navFilter, setNavFilter] = useState('');
+  const navFilterQ = navFilter.trim().toLowerCase();
+  const visibleNavItems = navFilterQ
+    ? navigationItems.filter((i) => `${i.label} ${i.group || ''}`.toLowerCase().includes(navFilterQ))
+    : navigationItems;
   const activeSectionId = activeNavigationItem?.id ?? null;
 
   useEffect(() => {
@@ -589,13 +598,38 @@ export default function Settings() {
                 </TooltipContent>
               </Tooltip>
             </div>
+            {!isNavCollapsed && (
+              <div className="hidden px-2 pt-2 md:block">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/60" aria-hidden="true" />
+                  <input
+                    type="search"
+                    value={navFilter}
+                    onChange={(e) => setNavFilter(e.target.value)}
+                    onKeyDown={(e) => {
+                      // Enter jumps to the first match — type "mem", hit Enter, done.
+                      if (e.key === 'Enter' && visibleNavItems.length > 0) {
+                        setActiveSection(visibleNavItems[0].id);
+                        setNavFilter('');
+                      } else if (e.key === 'Escape') setNavFilter('');
+                    }}
+                    placeholder="Filter sections…"
+                    aria-label="Filter settings sections"
+                    className="tp-focus-ring w-full rounded-lg border border-input bg-card py-1.5 pl-8 pr-2 text-xs text-foreground placeholder:text-muted-foreground/50"
+                  />
+                </div>
+              </div>
+            )}
             <nav className="settings-scrollbar flex gap-1 overflow-x-auto p-2 md:block md:h-[calc(100%-65px)] md:space-y-1 md:overflow-y-auto">
-              {navigationItems.map((item, idx) => {
+              {navFilterQ && visibleNavItems.length === 0 && (
+                <div className="hidden px-3 py-2 text-xs text-muted-foreground/75 md:block">No sections match &ldquo;{navFilter.trim()}&rdquo;</div>
+              )}
+              {visibleNavItems.map((item, idx) => {
                 const isActive = activeSectionId === item.id;
                 const isDisabled = !!item.disabled;
                 // Group header when the group changes (desktop vertical nav only;
                 // the mobile horizontal strip stays a flat scroll).
-                const showGroupHeader = item.group && item.group !== navigationItems[idx - 1]?.group;
+                const showGroupHeader = item.group && item.group !== visibleNavItems[idx - 1]?.group;
                 const groupHeader = showGroupHeader && !isNavCollapsed ? (
                   <div key={`group-${item.group}`} className={cn('hidden px-3 pb-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground/75 md:block', idx > 0 && 'pt-3')}>
                     {item.group}
@@ -1277,13 +1311,6 @@ export default function Settings() {
                 {activeSectionId === 'admins' && (
                   <div className="p-6">
                     <AdminManagementPanel />
-                  </div>
-                )}
-
-                {/* Workspace Access */}
-                {activeSectionId === 'workspace-access' && (
-                  <div className="p-6">
-                    <WorkspaceAccessPanel />
                   </div>
                 )}
 

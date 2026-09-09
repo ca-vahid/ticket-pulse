@@ -180,6 +180,11 @@ app.use('/api', graphNotificationRoutes);
 
 // Mount API routes
 // Auth routes are public
+// Read-only role gate: one server-side write-block for 'readonly' grants
+// (see middleware/auth.js). Sits in front of the main router so no
+// sub-router needs its own role sprinkles; token/API-key requests pass.
+const { blockReadonlyWrites } = await import('./middleware/auth.js');
+app.use('/api', blockReadonlyWrites);
 app.use('/api', routes);
 
 // Protected routes - require authentication

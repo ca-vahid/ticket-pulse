@@ -1,6 +1,16 @@
-export const APP_VERSION = '3.8.37-preview';
+export const APP_VERSION = '3.8.38-preview';
 
 export const changelog = [
+  {
+    version: '3.8.38-preview',
+    date: 'September 9, 2026',
+    entries: [
+      { type: 'new', html: '<strong>👁️ Read-only access — the observer role</strong> — grant someone <b>Read-only</b> and they can watch the operation (Dashboard, Analytics, Timeline, tickets in view mode) without being able to change anything: the server refuses every write for the role. The one deliberate exception: approvals addressed to them are always actionable — their decisions are theirs. Built for executives and supervisors who need visibility, not a queue.' },
+      { type: 'improved', html: '<strong>👥 One people page</strong> — Workspace Access has merged into <b>Members</b>: app-only people (observers, execs, admin accounts — anyone with sign-in access but no technician role) now appear in their own section there, with grant/change/revoke and an add-by-email form. Old #workspace-access links land on Members. The role formerly called “Viewer” is now <b>Standard</b> — it was never read-only, and now the name says so.' },
+      { type: 'new', html: '<strong>🔍 Settings sections filter</strong> — type in the box above the Settings section tree to filter it (“mem” → Members); Enter jumps to the first match.' },
+      { type: 'fixed', html: '<strong>🚫 Self-approval is now prohibited</strong> — the person who files an approval request can never be the one to decide it, even if they are one of the category’s approval managers and even from the email link. Requests no longer send an approval row to the requester at all; if they are the only manager on a category, the request is refused with a clear message instead of creating an approval nobody may decide.' },
+    ],
+  },
   {
     version: '3.8.37-preview',
     date: 'September 9, 2026',

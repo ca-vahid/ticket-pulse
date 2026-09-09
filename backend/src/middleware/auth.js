@@ -160,6 +160,48 @@ export function requireGlobalAdmin(req, res, next) {
  * (NOT 401) — global-'agent' users hitting gated endpoints with perfectly
  * valid credentials must never trigger the frontend's sign-out recovery.
  */
+/**
+ * Read-only role enforcement (Sep 2026): a 'readonly' workspace grant sees the
+ * app but never mutates it. One server-side gate beats sprinkling role checks
+ * through every router — any non-GET request from a readonly principal is
+ * refused except a short allowlist of personal/benign actions:
+ *   - their own approval decisions (approvals addressed to you are always
+ *     actionable regardless of role — they're your decisions, not workspace
+ *     mutations) and clarification requests
+ *   - presence heartbeats, SSE long-poll, per-user preferences, auth/session
+ * Unauthenticated (public-token) and API-key/OAuth requests have no session
+ * user and pass through untouched (Assetron contract: /api/v1 principals have
+ * no membership and must never be gated here).
+ */
+const READONLY_WRITE_ALLOWLIST = [
+  /^\/auth(\/|$)/,
+  /^\/sse(\/|$)/,
+  /^\/user-preferences(\/|$)/,
+  /\/presence$/,
+  /\/approvals\/\d+\/(decide|clarify)$/,
+];
+
+export function blockReadonlyWrites(req, res, next) {
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
+  const user = sessionUser(req);
+  if (!user?.email || user.role === 'admin') return next();
+  const rawWs = req.headers['x-workspace-id'] ?? user.selectedWorkspaceId ?? req.query.workspaceId;
+  const wsId = Number(rawWs);
+  if (!Number.isFinite(wsId) || wsId <= 0) return next();
+  if (READONLY_WRITE_ALLOWLIST.some((re) => re.test(req.path))) return next();
+  getWsRepo()
+    .then((wsRepo) => wsRepo.getAccessRole(user.email, wsId))
+    .then((wsRole) => {
+      if (wsRole === 'readonly') {
+        logger.info(`Read-only role blocked ${req.method} ${req.path} for ${user.email}`);
+        return next(new AuthorizationError('Your access is read-only — this action needs a Standard role or higher', 'read_only_role'));
+      }
+      next();
+    })
+    // A role-lookup error must not take writes down for everyone else.
+    .catch(() => next());
+}
+
 export function requireWorkspaceAccess(req, res, next) {
   const user = sessionUser(req);
   if (user?.role === 'admin') {
