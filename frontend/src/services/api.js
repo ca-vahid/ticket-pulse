@@ -878,6 +878,9 @@ export const ticketsAPI = {
   mergeMany: async (primaryId, ticketIds, notifyRequester = false) => await api.post(`/tickets/${primaryId}/merge-many`, { ticketIds, notifyRequester }),
   // Split (QA 09-08): the inverse of merge. `splittable` lists the messages a
   // split can carry; `split` creates the TP-born child and links it.
+  // FR 09-09: what the active filters are hiding, for the "your filters are
+  // hiding this" affordance on the tickets page.
+  filterRelief: async (params) => await api.get('/tickets/filter-relief', { params }),
   splittable: async (id) => await api.get(`/tickets/${id}/splittable`),
   split: async (id, payload) => await api.post(`/tickets/${id}/split`, payload),
 

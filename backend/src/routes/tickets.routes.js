@@ -267,6 +267,15 @@ router.get('/intake-runs', requireTicketingAdmin, asyncHandler(async (req, res) 
 
 // ------------------------------------------------------------------- reads
 
+// "Your filters are hiding this" (FR 09-09): given the SAME query the list was
+// fetched with, how many more rows would appear if each filter group were
+// dropped. Read-only, and asked only when the page has something to offer.
+router.get('/filter-relief', asyncHandler(async (req, res) => {
+  const { default: ticketFilterReliefService } = await import('../services/ticketFilterReliefService.js');
+  const data = await ticketFilterReliefService.analyse(req.workspaceId, req.query || {});
+  res.json({ success: true, data });
+}));
+
 router.get('/', asyncHandler(async (req, res) => {
   const result = await ticketService.listTickets(req.workspaceId, req.query);
   res.json({ success: true, data: result });
