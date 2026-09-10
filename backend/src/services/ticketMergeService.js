@@ -196,9 +196,13 @@ class TicketMergeService {
 
     // 6. Close out the source. addPrivateNote routes to FreshService for an
     //    FS-born source, so the pointer note lands on the FS ticket too.
+    // Was `.catch(() => null)` — a merge note that failed to write left no
+    // trace anywhere, which is exactly the shape of QA 09-09 #5 ("I don't see
+    // any private notes about the merging"). Still non-fatal (the merge itself
+    // has already happened), but it must be visible in the logs.
     await ticketService.addPrivateNote(sourceId, workspaceId, {
       bodyText: `Merged into ${tgtRef} by ${actorLabel}. The conversation continues there.`,
-    }, actor).catch(() => null);
+    }, actor).catch((err) => logger.warn(`Merge source note failed for ${srcRef} (non-fatal): ${err.message}`));
     let sourceClosed = false;
     if (!['Resolved', 'Closed'].includes(source.status)) {
       if (source.origin === 'ticketpulse') {

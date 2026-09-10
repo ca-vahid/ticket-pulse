@@ -17,7 +17,7 @@ const KIND_LABEL = {
   merged_into: 'merged into',
 };
 
-export function TicketLinksCard({ ticketId, canWrite = false, canMerge = false, onNavigate, onMerged, refreshToken = null }) {
+export function TicketLinksCard({ ticketId, canWrite = false, canMerge = false, onNavigate, onMerged, onReopened, refreshToken = null }) {
   const [links, setLinks] = useState([]);
   const [adding, setAdding] = useState(false);
   const [targetId, setTargetId] = useState('');
@@ -78,6 +78,21 @@ export function TicketLinksCard({ ticketId, canWrite = false, canMerge = false, 
     try { await ticketsAPI.removeLink(ticketId, linkId); await load(); } catch { /* refresh shows truth */ }
   };
 
+  // "Not a duplicate": the guard was wrong. Drops the link, reverts its
+  // dismissal run and reopens the copy it resolved (QA 09-09 #1).
+  const notDuplicate = async () => {
+    if (busy) return;
+    setBusy(true); setError(null);
+    try {
+      await ticketsAPI.notDuplicate(ticketId);
+      await load();
+      onReopened?.();
+    } catch (e) {
+      setError(e.response?.data?.message || e.message || 'Could not reopen the ticket');
+    }
+    setBusy(false);
+  };
+
   if (links.length === 0 && !canWrite) return null;
 
   return (
@@ -95,6 +110,19 @@ export function TicketLinksCard({ ticketId, canWrite = false, canMerge = false, 
         )}
       </div>
       {links.length === 0 && <p className="text-xs text-muted-foreground/75 italic">No linked tickets.</p>}
+      {/* QA 09-09 #1: removing the link alone left the ticket resolved and out
+          of the queue, so a wrong duplicate call stayed invisible. This undoes
+          the whole dismissal — link, run and status — in one click. */}
+      {canWrite && links.some((l) => l.kind === 'duplicate_of' && l.direction !== 'in') && (
+        <button
+          onClick={notDuplicate}
+          disabled={busy}
+          className="tp-focus-ring mt-1 text-xs font-medium text-amber-700 dark:text-amber-300 underline decoration-amber-400/60 hover:decoration-amber-600 disabled:opacity-50"
+          data-testid="not-a-duplicate"
+        >
+          Not a duplicate — reopen and put it back in the queue
+        </button>
+      )}
       <ul className="space-y-1">
         {links.map((link) => (
           <li key={`${link.direction}-${link.id}`} className="group flex items-center gap-1.5 text-xs">

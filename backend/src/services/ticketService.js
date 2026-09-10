@@ -166,14 +166,27 @@ const emailListSchema = z.preprocess(
  * but an address added to the ticket AFTER the draft was opened, or a client
  * that never seeds (API v1 replies), must still reach every additional
  * requester.
+ *
+ * `ccRemoved` (QA 09-09 #6) is the escape hatch that safety net was missing.
+ * Marcus took mblackstock@ off a reply's Cc and it was mailed anyway, because
+ * the same address sits on the ticket's "Also for" list and the union put it
+ * straight back — the server could not tell "never in the draft" from "the
+ * agent deliberately took this off". The composer now names what it removed,
+ * and an explicit removal wins over the union. Addresses NOT named still come
+ * through, so a late-added additional requester is as reachable as before.
  */
-export function unionReplyCc(ticket, composerCc = []) {
+export function unionReplyCc(ticket, composerCc = [], ccRemoved = []) {
   const requester = String(ticket?.requester?.email || '').trim().toLowerCase();
+  const dropped = new Set(
+    (Array.isArray(ccRemoved) ? ccRemoved : [])
+      .map((a) => String(a || '').trim().toLowerCase())
+      .filter(Boolean),
+  );
   const seen = new Set();
   const out = [];
   for (const raw of [...(Array.isArray(ticket?.ccEmails) ? ticket.ccEmails : []), ...(Array.isArray(composerCc) ? composerCc : [])]) {
     const address = String(raw || '').trim().toLowerCase();
-    if (!address || address === requester || seen.has(address)) continue;
+    if (!address || address === requester || seen.has(address) || dropped.has(address)) continue;
     seen.add(address);
     out.push(address);
   }
@@ -283,6 +296,10 @@ const threadBodySchema = z.object({
   bodyHtml: z.string().max(200000).optional().nullable(),
   bodyText: z.string().max(200000).optional().nullable(),
   cc: emailListSchema.default([]),
+  // Addresses the agent explicitly took OFF this reply's Cc (QA 09-09 #6).
+  // Only meaningful for a client that seeds the row from the ticket's "Also
+  // for" list; omitting it keeps the old union behaviour exactly.
+  ccRemoved: emailListSchema.default([]),
   // Reply subject override (Phase SN4, QA 08-27 #8): TP-born replies only —
   // FreshService composes the subject for FS-born ones (its reply API has
   // no subject field). Trimmed, CR/LF stripped, ≤255.
@@ -3679,7 +3696,7 @@ class TicketService {
     // Public replies reach the ticket's "Also for" list ∪ the composer cc
     // (Phase MR4) — the requester is dropped here already (they are the To;
     // _emailRequesterReply dedupes again for the wire). Notes carry none.
-    const cc = isPrivate ? [] : unionReplyCc(ticket, parsed.data.cc);
+    const cc = isPrivate ? [] : unionReplyCc(ticket, parsed.data.cc, parsed.data.ccRemoved);
 
     // Reply subject override (Phase SN4/SN5): TP-born public replies only.
     // FS-born → FreshService composes the subject (no API field) — reject

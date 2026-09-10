@@ -1230,6 +1230,11 @@ model Ticket {
   webhookIngestCount                  Int       @default(0) @map("webhook_ingest_count")
   activitiesSyncedAt                  DateTime? @map("activities_synced_at")
   activitiesSyncFreshserviceUpdatedAt DateTime? @map("activities_sync_freshservice_updated_at")
+  // Same cursor for the conversations lane (QA 09-09 #5). Without it the
+  // preheat cycle judged conversation freshness from created/assigned/resolved/
+  // closed only, so a FreshService-side note on an otherwise-unchanged ticket —
+  // a merge note on the merge TARGET, most visibly — was never read.
+  conversationsSyncFreshserviceUpdatedAt DateTime? @map("conversations_sync_freshservice_updated_at")
   activitiesSyncError                 String?   @map("activities_sync_error") @db.Text
   activitiesSyncErrorAt               DateTime? @map("activities_sync_error_at")
 
@@ -1367,6 +1372,7 @@ model Ticket {
   @@index([lastIngestSource])
   @@index([workspaceId, lastWebhookIngestedAt])
   @@index([activitiesSyncFreshserviceUpdatedAt])
+  @@index([conversationsSyncFreshserviceUpdatedAt])
   @@index([assessedPriorityId])
   @@index([priorityAssessedAt])
   @@index([ticketType])

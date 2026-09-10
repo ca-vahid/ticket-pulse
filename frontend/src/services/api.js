@@ -701,7 +701,7 @@ export const syncAPI = {
  * `subject` (Phase SN4) is the agent's reply-subject override (TP-born only).
  */
 export function buildThreadPayload(body = {}) {
-  const { files, cc, idempotencyKey, subject, ...rest } = body;
+  const { files, cc, ccRemoved, idempotencyKey, subject, ...rest } = body;
   const headers = idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {};
   const subjectField = typeof subject === 'string' && subject.trim() ? { subject: subject.trim() } : {};
   if (files && files.length > 0) {
@@ -709,12 +709,21 @@ export function buildThreadPayload(body = {}) {
     if (rest.bodyText) form.append('bodyText', rest.bodyText);
     if (rest.bodyHtml) form.append('bodyHtml', rest.bodyHtml);
     if (cc && cc.length) form.append('cc', cc.join(','));
+    // Must be named explicitly: this branch appends a fixed field list, so an
+    // omission here would silently drop the agent's Cc removals whenever the
+    // reply happens to carry an attachment (QA 09-09 #6).
+    if (ccRemoved && ccRemoved.length) form.append('ccRemoved', ccRemoved.join(','));
     if (subjectField.subject) form.append('subject', subjectField.subject);
     for (const file of files) form.append('files', file);
     return [form, { headers: { 'Content-Type': undefined, ...headers }, timeout: 120000 }];
   }
   return [
-    { ...rest, ...(cc && cc.length ? { cc } : {}), ...subjectField },
+    {
+      ...rest,
+      ...(cc && cc.length ? { cc } : {}),
+      ...(ccRemoved && ccRemoved.length ? { ccRemoved } : {}),
+      ...subjectField,
+    },
     Object.keys(headers).length ? { headers } : undefined,
   ];
 }
@@ -873,6 +882,8 @@ export const ticketsAPI = {
   addLink: async (id, relatedTicketRef, kind = 'related_to') => await api.post(`/tickets/${id}/links`, { relatedTicketRef, kind }),
   removeLink: async (id, linkId) => await api.delete(`/tickets/${id}/links/${linkId}`),
   markDuplicateOf: async (id, targetRef) => await api.post(`/tickets/${id}/duplicate-of/${encodeURIComponent(targetRef)}`),
+  // Undo a duplicate dismissal: unlink, revert the guard's run, reopen.
+  notDuplicate: async (id) => await api.post(`/tickets/${id}/not-duplicate`),
   mergeTicket: async (id, targetTicketRef, notifyRequester = false) => await api.post(`/tickets/${id}/merge`, { targetTicketRef, notifyRequester }),
   // Multi-merge (QA 07-13 #1): primaryId survives; ticketIds fold into it.
   mergeMany: async (primaryId, ticketIds, notifyRequester = false) => await api.post(`/tickets/${primaryId}/merge-many`, { ticketIds, notifyRequester }),

@@ -39,6 +39,21 @@ export function seedReplyCc(ticket) {
   return normalizeRecipients(source).map((e) => e.toLowerCase()).slice(0, 10);
 }
 
+/**
+ * Every address the SERVER may union onto a reply's Cc (QA 09-09 #6). The
+ * server's safety net reads `ticket.ccEmails`; the composer may have been
+ * seeded from `replyCcEmails`. Anything in either that the agent has since
+ * taken off the row is a deliberate removal, so both belong here — otherwise
+ * an address the agent never saw could be re-added behind their back.
+ */
+export function ccSourceForReply(ticket) {
+  const all = [
+    ...normalizeRecipients(ticket?.ccEmails),
+    ...normalizeRecipients(ticket?.replyCcEmails),
+  ].map((e) => e.toLowerCase());
+  return [...new Set(all)];
+}
+
 function RecipientGroup({ label, emails, expanded, visibleCount }) {
   const shown = expanded ? emails : emails.slice(0, visibleCount);
   return (
