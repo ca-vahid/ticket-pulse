@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.8.52-preview';
+export const APP_VERSION = '3.8.53-preview';
 
 export const changelog = [
+  {
+    version: '3.8.53-preview',
+    date: 'September 10, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>🗂\uFE0F Category \u2194 group mapping is now readable</strong> \u2014 the panel used to draw every category against every group, 187 buttons in all, whether or not anything was mapped. So the ordinary state \u2014 <em>this category is not restricted</em> \u2014 was a wall of grey chips, and the only fact that mattered was tiny italic text at the end of a wrapped line (FR: Vahid). It is now a category list on the left and a group picker on the right, the pattern <strong>Settings \u2192 Members</strong> already uses.' },
+      { type: 'improved', html: '<strong>It tells you what a mapping will actually do</strong> \u2014 in a sentence, as you build it: <em>\u201cAn agent will see Cloud &amp; Servers in the category picker <strong>only</strong> when the ticket is in Servers or Azure &amp; M365.\u201d</em> Scoping narrows what a category applies to, which the old grid of equal-looking choices never conveyed \u2014 and getting it backwards is easy to do and hard to notice.' },
+      { type: 'improved', html: '<strong>Scope at a glance, and a way to find a group</strong> \u2014 each category in the list shows a count when it is scoped or a globe when it shows everywhere, a line at the top says how many of your categories are scoped at all, and the picker has a search box plus a one-click <strong>Show everywhere</strong> to undo scoping. The panel is about a third shorter, and reaching <strong>Save</strong> by keyboard now takes 12 stops instead of 188.' },
+    ],
+  },
   {
     version: '3.8.52-preview',
     date: 'September 10, 2026',
