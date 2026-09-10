@@ -2,7 +2,7 @@
 import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, test } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import RecipientsLine, { normalizeRecipients, seedReplyCc } from './RecipientsLine';
+import RecipientsLine, { normalizeRecipients, seedReplyCc, ccSourceForReply } from './RecipientsLine';
 
 // QA 08-05 #3 — Cc visibility: the quiet To/Cc line shared by the ticket
 // description card, thread-entry headers and the peek preview.
@@ -92,5 +92,29 @@ describe('RecipientsLine', () => {
   test('no expand control when everything already fits', () => {
     render(<RecipientsLine cc={['a@x.com', 'b@y.com']} />);
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
+});
+
+// QA 09-09 #6: the server unions ticket.ccEmails back onto every reply, while
+// the composer may have seeded from replyCcEmails. Both are removable, so both
+// must be reported — otherwise an address the agent never saw on the row could
+// be silently re-added to the send.
+describe('ccSourceForReply', () => {
+  test('covers ccEmails and replyCcEmails, lowercased and deduped', () => {
+    expect(ccSourceForReply({
+      ccEmails: ['A@x.com', 'b@y.com'],
+      replyCcEmails: ['a@x.com', 'C@z.com'],
+    })).toEqual(['a@x.com', 'b@y.com', 'c@z.com']);
+  });
+
+  test('unlike seedReplyCc, replyCcEmails does not shadow ccEmails', () => {
+    const ticket = { ccEmails: ['b@y.com'], replyCcEmails: ['a@x.com'] };
+    expect(seedReplyCc(ticket)).toEqual(['a@x.com']);
+    expect(ccSourceForReply(ticket)).toEqual(['b@y.com', 'a@x.com']);
+  });
+
+  test('an empty ticket yields nothing to remove', () => {
+    expect(ccSourceForReply({})).toEqual([]);
+    expect(ccSourceForReply(null)).toEqual([]);
   });
 });

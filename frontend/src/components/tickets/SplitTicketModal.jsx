@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertCircle, GitBranch, Loader2, X } from 'lucide-react';
 import { ticketsAPI } from '../../services/api';
+import AssigneePicker from './AssigneePicker';
 
 /**
  * Split a conversation out of a ticket (QA 09-08) — the inverse of
@@ -14,13 +15,17 @@ import { ticketsAPI } from '../../services/api';
  * Unlike merge, this works on FreshService-born tickets too: the parent is
  * never modified, so FreshService's ownership of it is untouched.
  */
-export default function SplitTicketModal({ ticket, onClose, onSplit }) {
+export default function SplitTicketModal({ ticket, onClose, onSplit, technicians = [] }) {
   const [entries, setEntries] = useState(null);
   const [selected, setSelected] = useState(() => new Set());
   const [subject, setSubject] = useState('');
   const [subjectTouched, setSubjectTouched] = useState(false);
   const [moveAttachments, setMoveAttachments] = useState(true);
   const [notifyRequester, setNotifyRequester] = useState(false);
+  // QA 09-09 #3: the new ticket used to land unassigned, so every split meant
+  // opening the child afterwards just to give it an owner. Picked here, applied
+  // at create — the backend has always accepted assignedTechId on split.
+  const [assignedTechId, setAssignedTechId] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const dialogRef = useRef(null);
@@ -71,6 +76,7 @@ export default function SplitTicketModal({ ticket, onClose, onSplit }) {
         subject: subject.trim(),
         moveAttachments,
         notifyRequester,
+        ...(assignedTechId ? { assignedTechId } : {}),
       });
       onSplit?.(res.data);
     } catch (err) {
@@ -166,7 +172,10 @@ export default function SplitTicketModal({ ticket, onClose, onSplit }) {
             <p className="text-xs font-semibold text-foreground">What will happen</p>
             <ul className="text-[11px] text-muted-foreground space-y-1">
               <li>• A <strong>new ticket</strong> is created with the same requester, category and priority, linked as a child of <span className="font-mono">{ticket.displayRef}</span>.</li>
-              <li>• The {count === 1 ? 'message' : `${count} messages`} you picked {count === 0 ? 'would be' : 'are'} <strong>copied</strong> across — <span className="font-mono">{ticket.displayRef}</span>&apos;s own thread is never edited.</li>
+              <li>• {count === 0
+                ? <>Any messages you tick are <strong>copied</strong> across</>
+                : <>The {count === 1 ? 'message' : `${count} messages`} you picked are <strong>copied</strong> across</>
+              } — <span className="font-mono">{ticket.displayRef}</span>&apos;s own thread is never edited.</li>
               <li>• Both tickets get an internal note recording the split.</li>
               <li>• Nothing is closed, and the original keeps its status.</li>
             </ul>
@@ -188,7 +197,25 @@ export default function SplitTicketModal({ ticket, onClose, onSplit }) {
           )}
         </div>
 
-        <div className="flex items-center justify-end gap-2 border-t border-border p-4">
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border p-4">
+          {/* Beside Cancel, as asked (QA 09-09 #3): choose the new ticket's
+              owner here instead of reopening it afterwards. Writes nothing on
+              its own — the pick is applied when the ticket is created. */}
+          <div className="mr-auto flex items-center gap-2 min-w-0">
+            <span className="text-xs font-medium text-muted-foreground/75 flex-shrink-0">Assign to</span>
+            <AssigneePicker
+              ticketId={null}
+              value={assignedTechId}
+              technicians={technicians}
+              size="sm"
+              showAi={false}
+              disabled={busy}
+              assignFn={async (techId) => {
+                setAssignedTechId(techId ?? null);
+                return { data: null };
+              }}
+            />
+          </div>
           <button
             onClick={() => !busy && onClose?.()}
             className="tp-focus-ring px-3 py-2 text-sm font-medium text-muted-foreground bg-card border border-border rounded-lg hover:bg-muted/50"

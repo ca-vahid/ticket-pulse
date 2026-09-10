@@ -16,7 +16,7 @@ const MEMBERS = [
 ];
 
 // App-access union (Mega 08-23 AC3): Adrian already has viewer; Gaby is the
-// technician-only "Marcus case" (accessRole null → No access).
+// technician-only "Marcus case" (accessRole null → Basic access).
 const ACCESS_MEMBERS = [
   { email: 'alo@bgcengineering.ca', name: 'Adrian Lo', photoUrl: null, technicianId: 1, accessRole: 'viewer' },
   { email: 'gtonnova@bgcengineering.ca', name: 'Gaby Tonnova', photoUrl: null, technicianId: 4, accessRole: null },
@@ -102,7 +102,7 @@ describe('MembersPanel (table rebuild)', () => {
 describe('MembersPanel — App access column (Mega 08-23 AC3)', () => {
   afterEach(() => cleanup());
 
-  test('renders per-member roles: granted members show their role, technician-only rows show No access', async () => {
+  test('renders per-member roles: granted members show their role, technician-only rows show Basic access', async () => {
     render(<MembersPanel />);
     // Column header (sortable button) — the info line also says "App access".
     await waitFor(() => expect(screen.getByRole('button', { name: /App access/ })).toBeInTheDocument());
@@ -123,7 +123,7 @@ describe('MembersPanel — App access column (Mega 08-23 AC3)', () => {
     await waitFor(() => expect(screen.getByText(/can now sign in as reviewer/)).toBeInTheDocument());
   });
 
-  test('selecting No access revokes', async () => {
+  test('selecting Basic access revokes', async () => {
     render(<MembersPanel />);
     const adrianSelect = await screen.findByLabelText('App access for Adrian Lo');
     fireEvent.change(adrianSelect, { target: { value: '' } });

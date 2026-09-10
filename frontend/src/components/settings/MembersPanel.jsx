@@ -174,7 +174,9 @@ const columnHelper = createColumnHelper();
  * option tooltips.
  */
 const ACCESS_OPTIONS = [
-  { value: '', label: 'No access', description: 'No app grant. Technicians can still sign in for their own queue (agent self-service); anyone else cannot open the app.' },
+  // "No access" was misleading (QA 09-09 #7): a technician with no app grant
+  // can still sign in and work their own queue, which is not "no access".
+  { value: '', label: 'Basic access', description: 'No app grant. Technicians can still sign in for their own queue (agent self-service); anyone else cannot open the app.' },
   { value: 'readonly', label: 'Read-only', description: 'Observer: Dashboard, Analytics and tickets in view mode. Cannot change anything — except deciding approvals addressed to them.' },
   { value: 'viewer', label: 'Standard', description: 'Works tickets + approvals. Sees AI suggestions but cannot approve them. (Formerly called "Viewer".)' },
   { value: 'reviewer', label: 'Reviewer', description: 'Standard + approves/dismisses AI suggestions and manages approval categories.' },

@@ -1078,6 +1078,15 @@ class SyncService {
             { assignedAt: { gte: startOfDay } },
             { resolvedAt: { gte: startOfDay } },
             { closedAt: { gte: startOfDay } },
+            // FreshService's own updated_at (QA 09-09 #5) — NOT Prisma's
+            // local `updatedAt`, which the caveat above rightly warns about.
+            // This is the only signal that catches a ticket whose sole change
+            // today was a note added on the FreshService side: merging into an
+            // older ticket writes two notes onto it and touches nothing else,
+            // so without this the merge TARGET never enters the cohort at all.
+            // Bounded by the per-ticket conversations cursor below and by
+            // MAX_PREHEAT_TICKETS_PER_CYCLE.
+            { freshserviceUpdatedAt: { gte: startOfDay } },
           ],
         },
         select: {
@@ -1087,6 +1096,8 @@ class SyncService {
           assignedAt: true,
           resolvedAt: true,
           closedAt: true,
+          freshserviceUpdatedAt: true,
+          conversationsSyncFreshserviceUpdatedAt: true,
         },
         orderBy: { createdAt: 'asc' },
       });
@@ -1134,8 +1145,20 @@ class SyncService {
           jobs.push({ ticket, kind: 'activities' });
           ticketsToHydrate.add(ticket.id);
         }
-        if (!latestConversations || (fsChange && latestConversations < fsChange)) {
-          jobs.push({ ticket, kind: 'conversations' });
+        // Conversations use FreshService's own updated_at, not newestFsChange
+        // (QA 09-09 #5). A note added on the FS side — a merge note on the
+        // merge TARGET being the case Kirsten hit — bumps updated_at but
+        // touches none of created/assigned/resolved/closed, so the old test
+        // never re-read the thread and the note was invisible in Ticket Pulse.
+        // The per-ticket cursor stops an updated_at that moved for some other
+        // reason from re-fetching this ticket on every cycle for ever.
+        const fsUpdated = ticket.freshserviceUpdatedAt || null;
+        const convCursor = ticket.conversationsSyncFreshserviceUpdatedAt || null;
+        const conversationsStale = !latestConversations
+          || (fsUpdated && (!convCursor || convCursor < fsUpdated))
+          || (fsChange && latestConversations < fsChange);
+        if (conversationsStale) {
+          jobs.push({ ticket, kind: 'conversations', fsUpdated });
           ticketsToHydrate.add(ticket.id);
         }
 
@@ -1185,6 +1208,14 @@ class SyncService {
                 await ticketThreadRepository.bulkUpsert(entries);
                 conversationsFetched += entries.length;
               }
+            }
+            // Advance the cursor only after the fetch actually succeeded, so a
+            // failed read is retried rather than silently marked done.
+            if (job.fsUpdated) {
+              await prisma.ticket.update({
+                where: { id: ticket.id },
+                data: { conversationsSyncFreshserviceUpdatedAt: job.fsUpdated },
+              }).catch((err) => logger.warn(`[preheat ws=${workspaceId}] conversations cursor update failed for ticket ${ticket.id}: ${err.message}`));
             }
           }
         } catch (error) {

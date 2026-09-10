@@ -1479,6 +1479,16 @@ router.delete('/:id/links/:linkId', asyncHandler(async (req, res) => {
   res.json({ success: true, data: result });
 }));
 
+// "Not a duplicate" (QA 09-09 #1): undo a duplicate dismissal end to end —
+// drop the link, revert the guard's run and reopen the copy it resolved.
+router.post('/:id/not-duplicate', asyncHandler(async (req, res) => {
+  const { default: ticketLinkService } = await import('../services/ticketLinkService.js');
+  const result = await ticketLinkService.notDuplicate(
+    parseTicketId(req), req.workspaceId, req.ticketActor,
+  );
+  res.json({ success: true, data: result });
+}));
+
 router.post('/:id/duplicate-of/:targetId', asyncHandler(async (req, res) => {
   const { default: ticketLinkService } = await import('../services/ticketLinkService.js');
   // The path segment accepts a visible ref (TP-1042 / #231164 / bare number).

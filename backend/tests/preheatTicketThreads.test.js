@@ -156,12 +156,19 @@ describe('_preheatTicketThreads', () => {
     expect(where.workspaceId).toBe(7);
     expect(Array.isArray(where.OR)).toBe(true);
     const fields = where.OR.map((c) => Object.keys(c)[0]).sort();
-    // CRITICAL: we filter on FS timestamps only. updatedAt is excluded
-    // because Prisma's @updatedAt auto-bumps on every local DB write,
-    // which would balloon the cohort to every recently-synced ticket.
-    expect(fields).toEqual(['assignedAt', 'closedAt', 'createdAt', 'resolvedAt']);
+    // CRITICAL: we filter on FS timestamps only. Prisma's local `updatedAt` is
+    // still excluded — it auto-bumps on every local DB write, which would
+    // balloon the cohort to every recently-synced ticket.
+    //
+    // `freshserviceUpdatedAt` is a different thing: FreshService's own stamp,
+    // which moves only on a real FS-side change. It was added for QA 09-09 #5
+    // — merging into an older ticket writes notes onto it and touches nothing
+    // else, so without this clause the merge target never entered the cohort
+    // and its notes were invisible in Ticket Pulse. Re-reads are bounded by the
+    // per-ticket conversations cursor.
+    expect(fields).toEqual(['assignedAt', 'closedAt', 'createdAt', 'freshserviceUpdatedAt', 'resolvedAt']);
     expect(fields).not.toContain('updatedAt');
-    // All four conditions filter by the SAME start-of-day date
+    // Every condition filters by the SAME start-of-day date
     const dates = where.OR.map((c) => Object.values(c)[0].gte.getTime());
     expect(new Set(dates).size).toBe(1);
   });

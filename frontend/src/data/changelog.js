@@ -1,6 +1,43 @@
-export const APP_VERSION = '3.8.47-preview';
+export const APP_VERSION = '3.8.51-preview';
 
 export const changelog = [
+  {
+    version: '3.8.51-preview',
+    date: 'September 9, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>🔗 Notes added on the FreshService side now reach Ticket Pulse</strong> \u2014 merging two tickets in FreshService writes private notes onto the surviving ticket, and those notes were nowhere to be seen in Ticket Pulse (FR: Kirsten). Two separate gaps: a ticket whose only change was a new note never qualified for a thread re-read, and if the merge target was an older ticket it was never even considered. Both now follow FreshService\u2019s own <em>last updated</em> stamp, which it does move when a note is added. Kirsten\u2019s ticket has been backfilled.' },
+      { type: 'improved', html: '<strong>A merge note that fails to save now says so</strong> \u2014 one of the two notes Ticket Pulse writes during its own merge was swallowed silently if it failed, which looks identical to the bug above. It stays non-fatal \u2014 the merge has already happened \u2014 but it is now logged instead of vanishing.' },
+    ],
+  },
+  {
+    version: '3.8.50-preview',
+    date: 'September 9, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>\u2702\uFE0F Assign the new ticket while you split it</strong> \u2014 splitting always left the child unassigned, so every split meant opening the new ticket afterwards just to give it an owner (FR: Kirsten). There is now an <strong>Assign to</strong> picker beside Cancel, with search and a plain <em>Unassigned</em> option, and the choice is applied as the ticket is created.' },
+      { type: 'fixed', html: '<strong>Long email addresses stay inside their box</strong> \u2014 an address such as <code>bgcengineeringcait@efusion.freshservice.com</code> ran straight through the right-hand border of the <strong>Also for</strong> panel (FR: Kirsten). Address chips now shrink and trim to fit, with the full address on hover. The same fix covers the Cc row in the reply composer.' },
+      { type: 'improved', html: '<strong>\u201cNo access\u201d is now called \u201cBasic access\u201d</strong> \u2014 the old label was misleading (FR: Kirsten): a technician with no app grant can still sign in and work their own queue, which is not \u201cno access\u201d. Same behaviour, honest name.' },
+    ],
+  },
+  {
+    version: '3.8.49-preview',
+    date: 'September 9, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>🧾 Invoices are no longer dismissed as duplicates of each other</strong> \u2014 Accounting reported real invoices being written off as duplicates, and five Instacart ones in a row (FR: Kirsten). The duplicate guard only compared the <em>subject</em>, which works for a burst of identical tickets but not for a vendor whose every invoice is titled the same thing. It now reads the body as well, and when the body is empty \u2014 the invoice-as-attachment case \u2014 it compares the attachments, right down to file size. Replayed against the last 60 days, this correctly separates <strong>63</strong> invoices that had been collapsed together, while still catching the genuine repeats.' },
+      { type: 'fixed', html: '<strong>\u201cNever noise\u201d now means never, through every door</strong> \u2014 Accounting had already written never-noise rules for Instacart, Starlink and FedEx, and all of them sat at zero hits while those very invoices were being dismissed. The rules only guarded one path; the duplicate guard ran before they were ever consulted. A ticket protected by a never-noise rule can no longer be set aside automatically by any route.' },
+      { type: 'improved', html: '<strong>\u201cNot a duplicate\u201d puts a ticket straight back in the queue</strong> \u2014 removing the duplicate link used to leave the ticket resolved and out of sight, so a wrong call stayed invisible. One click now undoes the whole thing: the link goes, the dismissal is reverted, and a resolved copy is reopened.' },
+      { type: 'improved', html: '<strong>Accounting\u2019s financial-document protection covers the real vocabulary</strong> \u2014 statements of account, payment confirmations, payment authorizations, remittance advice and past-due notices are now protected from automatic dismissal alongside invoices and receipts. Over the last 30 days that is another 43 documents that would have been set aside.' },
+    ],
+  },
+  {
+    version: '3.8.48-preview',
+    date: 'September 9, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>🛡\uFE0F Removing someone from a reply\u2019s Cc now actually removes them</strong> \u2014 Marcus took an address off a reply and the mail went to them anyway (FR: Marcus). Ticket Pulse adds the ticket\u2019s <strong>Also for</strong> list onto every reply as a safety net, so that nobody who was added to the ticket after you started typing gets left out \u2014 but it could not tell \u201cnever in the draft\u201d from \u201cthe agent deliberately took this off\u201d, and put the address straight back. The composer now says what you removed, and a deliberate removal wins.' },
+      { type: 'improved', html: '<strong>The composer explains what removing a Cc actually does</strong> \u2014 taking an additional requester off the Cc row drops them from <em>that reply only</em>; they stay on the ticket and get the next one. Rather than let that surprise you later, the composer now says so under the Cc row and points at <strong>Also for</strong>, which is the control that removes them for good.' },
+      { type: 'fixed', html: '<strong>\u2709\uFE0F IT replies finally come back</strong> \u2014 a reply to a Ticket Pulse ticket in the IT workspace was delivered to a mailbox nothing was reading, so it never reached the conversation thread (FR: Susan). The mailbox is now connected: replies land on the ticket as they should, and the ones already sitting there have been recovered.' },
+      { type: 'improved', html: '<strong>FreshService\u2019s own status mail can no longer open a Ticket Pulse ticket</strong> \u2014 with IT\u2019s mailbox connected, FreshService notifications addressed to it would have read as brand-new requests and filed tickets about tickets. They are now recognised and filed as noise. A person forwarding the same notification because they genuinely need something is <em>not</em> caught \u2014 the rule checks who sent it, not just the subject.' },
+    ],
+  },
   {
     version: '3.8.47-preview',
     date: 'September 9, 2026',

@@ -22,7 +22,7 @@ import AssigneePicker from '../components/tickets/AssigneePicker';
 import DueDateEditor from '../components/tickets/DueDateEditor';
 import MobileAssignSheet from '../components/tickets/MobileAssignSheet';
 import CcChips from '../components/tickets/CcChips';
-import RecipientsLine, { seedReplyCc } from '../components/tickets/RecipientsLine';
+import RecipientsLine, { seedReplyCc, ccSourceForReply } from '../components/tickets/RecipientsLine';
 import FsSyncConfirm from '../components/tickets/FsSyncConfirm';
 import RichTextEditor, { isRichContent } from '../components/tickets/RichTextEditor';
 import ComposerSignatureStrip from '../components/tickets/ComposerSignatureStrip';
@@ -970,6 +970,15 @@ export default function TicketDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [alsoForKey]);
 
+  // Additional requesters the agent has taken off the reply's Cc row (QA 09-09
+  // #6). Drives both the composer hint and the `ccRemoved` the server needs to
+  // stop its safety net putting them back.
+  const removedAdditionalRequesters = useMemo(() => {
+    if (composerMode !== 'reply' || !ccSeededRef.current) return [];
+    const kept = new Set(composerCc.map((e) => String(e).toLowerCase()));
+    return ccSourceForReply(ticket).filter((a) => !kept.has(a));
+  }, [composerMode, composerCc, ticket]);
+
   const addComposerFiles = (fileList) => {
     const incoming = [...fileList];
     setComposerFiles((prev) => {
@@ -1888,7 +1897,19 @@ export default function TicketDetail() {
         const subjectOverride = isNative && subjectDraft && subjectDraft !== (ticket?.replySubjectDefault || '')
           ? subjectDraft
           : null;
-        await ticketsAPI.reply(ticketId, { ...payload, cc: composerCc, ...(subjectOverride ? { subject: subjectOverride } : {}) });
+        // Name what the agent took OFF the Cc row (QA 09-09 #6). The server
+        // unions the ticket's "Also for" list back in as a safety net, so a
+        // removal it cannot see reads as an omission and the address is mailed
+        // anyway — which is exactly how Marcus's removed Cc still got the mail.
+        // Only meaningful once the row was actually seeded; otherwise there was
+        // nothing on screen to remove.
+        const ccRemoved = removedAdditionalRequesters;
+        await ticketsAPI.reply(ticketId, {
+          ...payload,
+          cc: composerCc,
+          ...(ccRemoved.length ? { ccRemoved } : {}),
+          ...(subjectOverride ? { subject: subjectOverride } : {}),
+        });
       } else {
         await ticketsAPI.note(ticketId, payload);
       }
@@ -2883,6 +2904,19 @@ export default function TicketDetail() {
                         {composerMode === 'reply' && (
                           <div className="mb-2">
                             <CcChips value={composerCc} onChange={setComposerCc} />
+                            {/* QA 09-09 #6: removing an additional requester here
+                                drops them from THIS reply only — they stay on the
+                                ticket and receive the next one. Say so, and point
+                                at the control that actually removes them. */}
+                            {removedAdditionalRequesters.length > 0 && (
+                              <p className="mt-1 px-1 text-[11px] text-muted-foreground/75">
+                                {removedAdditionalRequesters.join(', ')}
+                                {removedAdditionalRequesters.length === 1 ? ' is an ' : ' are '}
+                                additional requester{removedAdditionalRequesters.length === 1 ? '' : 's'} on this ticket
+                                and won&rsquo;t get this reply. To stop future replies too, remove
+                                {removedAdditionalRequesters.length === 1 ? ' them' : ' them'} from <strong>Also for</strong>.
+                              </p>
+                            )}
                           </div>
                         )}
                         {composerMode === 'forward' && (
@@ -3470,6 +3504,7 @@ export default function TicketDetail() {
                   canWrite={canConverse}
                   canMerge={meta?.actor?.kind !== 'agent'}
                   onMerged={() => { lastLocalMutationRef.current = Date.now(); fetchTicket({ silent: true }); showToast('emerald', 'Ticket merged — the conversation continues on the target'); }}
+                  onReopened={() => { lastLocalMutationRef.current = Date.now(); fetchTicket({ silent: true }); showToast('emerald', 'Reopened — this ticket is back in the queue'); }}
                   refreshToken={ticket?.updatedAt}
                   onNavigate={(id) => navigate(`/tickets/${id}`)}
                 />
@@ -4006,6 +4041,7 @@ export default function TicketDetail() {
       {splitOpen && ticket && (
         <SplitTicketModal
           ticket={ticket}
+          technicians={meta?.technicians || []}
           onClose={() => setSplitOpen(false)}
           onSplit={(result) => {
             setSplitOpen(false);

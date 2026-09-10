@@ -126,16 +126,25 @@ export default function CcChips({
         <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/75 mr-0.5">
           {prefix}{value.length > 0 && <span className="ml-1 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200 text-[10px] font-bold">{value.length}</span>}
         </span>
+        {/* max-w-full + min-w-0 + truncate (QA 09-09 #4): a long address such as
+            bgcengineeringcait@efusion.freshservice.com used to push the chip
+            straight through the container's right border, because an inline-flex
+            child will not shrink below its content unless told to. The full
+            address stays available on hover. */}
         {value.map((email) => (
-          <span key={email} className={`inline-flex items-center gap-1 pl-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-500/15 border border-blue-200 dark:border-blue-500/30 text-xs text-blue-800 dark:text-blue-200 ${readOnly ? 'pr-2' : 'pr-1'}`}>
-            {email}
+          <span
+            key={email}
+            title={email}
+            className={`inline-flex items-center gap-1 max-w-full min-w-0 pl-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-500/15 border border-blue-200 dark:border-blue-500/30 text-xs text-blue-800 dark:text-blue-200 ${readOnly ? 'pr-2' : 'pr-1'}`}
+          >
+            <span className="truncate min-w-0">{email}</span>
             {!readOnly && (
               <button
                 type="button"
                 onClick={() => onChange(value.filter((v) => v !== email))}
                 disabled={disabled}
                 aria-label={`Remove ${email} from ${prefix}`}
-                className="tp-focus-ring rounded-full p-0.5 hover:bg-blue-100 dark:hover:bg-blue-500/20 text-blue-500 disabled:opacity-50"
+                className="tp-focus-ring flex-shrink-0 rounded-full p-0.5 hover:bg-blue-100 dark:hover:bg-blue-500/20 text-blue-500 disabled:opacity-50"
               >
                 <X className="w-3 h-3" aria-hidden="true" />
               </button>

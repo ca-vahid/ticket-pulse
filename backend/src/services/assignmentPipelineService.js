@@ -188,7 +188,20 @@ class AssignmentPipelineService {
       try {
         const { default: duplicateBurstService } = await import('./duplicateBurstService.js');
         const original = await duplicateBurstService.detectBurstDuplicate(ticketId, workspaceId);
-        if (original) {
+        // QA 09-09 #1: a never_noise rule is a promise that this ticket is
+        // never swept aside automatically — and the duplicate guard is a
+        // second door onto the same outcome. Accounting had never_noise rules
+        // for Instacart, Starlink and FedEx sitting at 0 hits while the very
+        // invoices they were written to protect were dismissed as duplicates,
+        // because this guard ran before the veto was ever consulted.
+        const veto = original ? await this._evaluateNoiseVeto(ticketId, workspaceId) : { vetoed: false };
+        if (original && veto.vetoed) {
+          logger.info('Duplicate-burst dismissal vetoed by a never_noise rule', {
+            ticketId, workspaceId, originalTicketId: original.id,
+            ruleId: veto.ruleId, ruleName: veto.ruleName,
+          });
+        }
+        if (original && !veto.vetoed) {
           const run = await duplicateBurstService.dismissAsDuplicate(ticketId, workspaceId, original, triggerSource);
           this._broadcastRunUpdate(workspaceId, ticketId, run.id, 'completed');
           emit({ type: 'error', message: `Duplicate of ticket #${original.freshserviceTicketId || original.nativeNumber} — AI run skipped` });

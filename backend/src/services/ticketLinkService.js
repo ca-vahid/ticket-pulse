@@ -106,6 +106,55 @@ class TicketLinkService {
     return { link, resolved };
   }
 
+  /**
+   * "Not a duplicate" (QA 09-09 #1) — undo a duplicate dismissal.
+   *
+   * Removing the link on its own was never enough: the guard also resolves
+   * TP-born copies and records a `duplicate_dismissed` run, so the ticket
+   * stayed out of the review queue and nobody saw it again. Kirsten found five
+   * Instacart invoices that way. This reverses all three parts, so the ticket
+   * comes back as ordinary work.
+   *
+   * Deliberately does NOT re-run the AI: the human has just said the machine
+   * was wrong, so the ticket returns to the queue for a person to triage.
+   */
+  async notDuplicate(ticketId, workspaceId, actor) {
+    const links = await prisma.ticketLink.findMany({
+      where: { workspaceId, ticketId, kind: 'duplicate_of' },
+      include: { relatedTicket: { select: { id: true, subject: true, origin: true, nativeNumber: true, freshserviceTicketId: true } } },
+    });
+
+    const ticket = await prisma.ticket.findFirst({ where: { id: ticketId, workspaceId } });
+    if (!ticket) throw new NotFoundError(`Ticket ${ticketId} not found in this workspace`);
+
+    for (const link of links) {
+      await prisma.ticketLink.delete({ where: { id: link.id } }).catch(() => {});
+    }
+
+    // Mark the guard's run as reverted so the review queue stops reporting it
+    // as a dismissal and the accuracy numbers stay honest.
+    const reverted = await prisma.assignmentPipelineRun.updateMany({
+      where: { ticketId, workspaceId, decision: 'duplicate_dismissed' },
+      data: { decision: 'duplicate_reverted', decidedAt: new Date(), decidedByEmail: actor?.email || null },
+    });
+
+    // Reopen a TP-born copy the guard resolved. FS-born keeps its FS status —
+    // FreshService owns that field.
+    let reopened = false;
+    const { default: ticketService } = await import('./ticketService.js');
+    if (ticket.origin === 'ticketpulse' && ['Resolved', 'Closed'].includes(ticket.status)) {
+      await ticketService.changeStatus(ticketId, workspaceId, 'Open', actor);
+      reopened = true;
+    }
+
+    const refs = links.map((l) => ticketDisplayRef(l.relatedTicket)).join(', ');
+    await ticketService.addPrivateNote(ticketId, workspaceId, {
+      bodyText: `Not a duplicate${refs ? ` of ${refs}` : ''} — reopened by ${actor?.name || actor?.email || 'an agent'} and returned to the queue.`,
+    }, actor, [], { systemNote: true }).catch(() => {});
+
+    return { unlinked: links.length, reverted: reverted.count, reopened };
+  }
+
   // ---- Parent / child (QA 07-16 #4, Option A) --------------------------
   // Convention: a `parent_of` link is stored as { ticketId: parent,
   // relatedTicketId: child }. Children are real, independently-assigned
