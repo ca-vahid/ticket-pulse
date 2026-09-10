@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, Archive, ArrowDown, ArrowUp, CalendarClock, Check, Eye, EyeOff, FileText, FormInput, Globe as GlobeGlyph, LayoutGrid, Layers, Loader2, Pencil, Plus, RefreshCw, Repeat, RotateCcw, Sparkles, Star, StickyNote, Tag as TagGlyph, Timer, Trash2, Users, Wand2 } from 'lucide-react';
+import { AlertTriangle, Archive, ArrowDown, ArrowUp, CalendarClock, Check, Eye, EyeOff, FileText, FormInput, Globe as GlobeGlyph, LayoutGrid, Layers, Loader2, Pencil, Plus, RefreshCw, Repeat, RotateCcw, Search, Sparkles, Star, StickyNote, Tag as TagGlyph, Timer, Trash2, Users, Wand2 } from 'lucide-react';
 import { settingsAPI, ticketsAPI, workspaceAPI } from '../../services/api';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 import { SOURCE_OPTIONS, TAG_CHIP_TONES, TYPE_COLOR_TONES } from '../tickets/ticketUi';
@@ -1112,13 +1112,20 @@ function TagsSection() {
   );
 }
 
-function CategoryGroupSection() {
+export function CategoryGroupSection() {
   const [links, setLinks] = useState([]); // [{ categoryId, groupId }]
   const [categories, setCategories] = useState([]);
   const [groups, setGroups] = useState([]);
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  // Two-pane builder (FR 09-10): pick a category on the left, shape its scope on
+  // the right. Replaced a grid of 11 x 17 = 187 buttons that rendered every
+  // category against every group whether or not anything was mapped — so the
+  // normal state ("no mapping") was drawn as a wall, and the one fact that
+  // mattered was 10px italic text at the end of a wrapped line.
+  const [selectedId, setSelectedId] = useState(null);
+  const [query, setQuery] = useState('');
 
   useEffect(() => {
     ticketsAPI.meta().then((res) => {
@@ -1140,6 +1147,12 @@ function CategoryGroupSection() {
     });
   };
 
+  const clearSelected = () => {
+    if (selectedId == null) return;
+    setDirty(true);
+    setLinks((prev) => prev.filter((l) => l.categoryId !== selectedId));
+  };
+
   const save = async () => {
     setBusy(true); setError(null);
     try {
@@ -1149,35 +1162,171 @@ function CategoryGroupSection() {
     setBusy(false);
   };
 
+  // Land on the first category so the right pane is never empty on open, and
+  // recover if the selected one disappears from under us (categories reload).
+  useEffect(() => {
+    if (!categories.length) return;
+    if (selectedId == null || !categories.some((c) => c.id === selectedId)) {
+      setSelectedId(categories[0].id);
+    }
+  }, [categories, selectedId]);
+
+  const selected = categories.find((c) => c.id === selectedId) || null;
+  const selectedGroupIds = selected
+    ? links.filter((l) => l.categoryId === selected.id).map((l) => l.groupId)
+    : [];
+  const groupName = (gid) => groups.find((g) => g.id === gid)?.name || gid;
+  const scopedCount = new Set(links.map((l) => l.categoryId)).size;
+  const needle = query.trim().toLowerCase();
+  const visibleGroups = needle
+    ? groups.filter((g) => g.name.toLowerCase().includes(needle))
+    : groups;
+
   if (groups.length === 0) return null;
 
   return (
     <SectionCard icon={Check} title="Category ↔ group mapping" hint="Scope top categories to specific groups: a mapped category only shows in pickers for tickets in one of its groups. Categories with no mapping stay visible everywhere.">
-      <div className="space-y-1.5 mb-2">
-        {categories.map((cat) => {
-          const mapped = links.filter((l) => l.categoryId === cat.id).map((l) => l.groupId);
-          return (
-            <div key={cat.id} className="flex flex-wrap items-center gap-1.5 text-xs">
-              <span className="w-56 truncate font-semibold text-muted-foreground" title={cat.name}>{cat.name}</span>
-              {groups.map((g) => (
-                <button
-                  key={g.id}
-                  type="button"
-                  onClick={() => toggle(cat.id, g.id)}
-                  aria-pressed={mapped.includes(g.id)}
-                  className={`tp-focus-ring px-2 py-0.5 rounded-full border text-[11px] ${
-                    mapped.includes(g.id) ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-card text-muted-foreground/75 border-border hover:border-indigo-300 dark:hover:border-indigo-500/40'
-                  }`}
-                >
-                  {g.name}
-                </button>
-              ))}
-              {mapped.length === 0 && <span className="text-[10px] text-muted-foreground/50 italic">all groups</span>}
-            </div>
-          );
-        })}
+      <p className="text-[11px] text-muted-foreground/75 mb-2" data-testid="cgm-summary">
+        <strong className="text-foreground/85">{scopedCount}</strong>
+        {` of ${categories.length} ${categories.length === 1 ? 'category is' : 'categories are'} scoped to specific groups. The rest show everywhere.`}
+      </p>
+
+      <div className="rounded-lg border border-border overflow-hidden grid grid-cols-1 md:grid-cols-[272px_1fr]">
+        {/* Left: every category, with its scope readable at a glance — a count
+            when it is scoped, a globe when it is not. */}
+        <div className="border-b md:border-b-0 md:border-r border-border bg-muted/25 flex flex-col min-h-0">
+          <div className="px-3 py-2 border-b border-border flex-shrink-0">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/75">Categories</span>
+          </div>
+          <ul className="divide-y divide-border/50 flex-1 min-h-0 max-h-96 overflow-y-auto settings-scrollbar" data-testid="cgm-category-list">
+            {categories.map((c) => {
+              const n = links.filter((l) => l.categoryId === c.id).length;
+              const active = c.id === selectedId;
+              return (
+                <li key={c.id}>
+                  <button
+                    type="button"
+                    onClick={() => { setSelectedId(c.id); setQuery(''); }}
+                    aria-current={active ? 'true' : undefined}
+                    className={`tp-focus-ring w-full flex items-center gap-2 px-3 py-2 text-left border-l-2 ${
+                      active ? 'bg-card border-l-primary' : 'border-l-transparent hover:bg-card/70'
+                    }`}
+                  >
+                    <span className={`min-w-0 flex-1 truncate text-xs ${active ? 'font-bold text-foreground' : 'font-medium text-foreground/85'}`}>
+                      {c.name}
+                    </span>
+                    {n === 0 ? (
+                      <GlobeGlyph className="w-3 h-3 flex-shrink-0 text-muted-foreground/50" aria-label="Shows everywhere" />
+                    ) : (
+                      <span className="flex-shrink-0 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-primary/15 text-[10px] font-bold text-primary">
+                        {n}
+                      </span>
+                    )}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+
+        {/* Right: shape the selected category's scope, and say plainly what it does. */}
+        <div className="bg-card p-3.5">
+          {!selected ? (
+            <p className="text-xs text-muted-foreground/75">This workspace has no top-level categories yet.</p>
+          ) : (
+            <>
+              <div className="flex items-start justify-between gap-3 mb-1">
+                <div className="min-w-0">
+                  <h4 className="text-sm font-bold text-foreground truncate" title={selected.name}>{selected.name}</h4>
+                  <p className="text-[11px] text-muted-foreground/75 mt-0.5">
+                    {selectedGroupIds.length === 0
+                      ? 'Not scoped — shows in the category picker for every ticket.'
+                      : `Scoped to ${selectedGroupIds.length} of ${groups.length} groups.`}
+                  </p>
+                </div>
+                {selectedGroupIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={clearSelected}
+                    className="tp-focus-ring flex-shrink-0 text-[11px] font-medium text-muted-foreground hover:text-foreground/85 underline decoration-muted-foreground/40"
+                  >
+                    Show everywhere
+                  </button>
+                )}
+              </div>
+
+              {/* The sentence the old chip wall had nowhere to put: what this
+                  mapping will actually do to the picker. */}
+              <div
+                className={`rounded-lg px-3 py-2 my-2.5 text-[11px] leading-relaxed border ${
+                  selectedGroupIds.length === 0
+                    ? 'bg-muted/50 text-muted-foreground border-border'
+                    : 'bg-primary/10 border-primary/30 text-foreground'
+                }`}
+                data-testid="cgm-explainer"
+              >
+                {selectedGroupIds.length === 0 ? (
+                  <>Anyone raising a ticket can pick <strong className="text-foreground/85">{selected.name}</strong>, whichever group the ticket is in.</>
+                ) : (
+                  <>An agent will see <strong>{selected.name}</strong> in the category picker <strong>only</strong> when the ticket is in{' '}
+                    {selectedGroupIds.map((gid, i) => (
+                      <span key={gid}>
+                        {i > 0 && (i === selectedGroupIds.length - 1 ? ' or ' : ', ')}
+                        <strong>{groupName(gid)}</strong>
+                      </span>
+                    ))}.
+                  </>
+                )}
+              </div>
+
+              <span className="relative block mb-2">
+                <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/50" aria-hidden="true" />
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Find a group…"
+                  aria-label={`Find a group to scope ${selected.name} to`}
+                  className="tp-focus-ring w-full rounded-md border border-input bg-card pl-7 pr-2 py-1.5 text-xs text-foreground"
+                />
+              </span>
+
+              <div className="grid gap-1 grid-cols-[repeat(auto-fill,minmax(178px,1fr))]" data-testid="cgm-group-picker">
+                {visibleGroups.map((g) => {
+                  const on = selectedGroupIds.includes(g.id);
+                  return (
+                    <label
+                      key={g.id}
+                      className={`flex items-center gap-2 px-2 py-1.5 rounded-md border cursor-pointer text-xs focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-1 ${
+                        on
+                          ? 'bg-primary/10 border-primary/30 text-foreground font-medium'
+                          : 'bg-card border-border text-foreground/85 hover:bg-muted/50'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={on}
+                        onChange={() => toggle(selected.id, g.id)}
+                        className="sr-only"
+                      />
+                      <span className={`grid place-items-center w-3.5 h-3.5 rounded-[4px] border flex-shrink-0 ${
+                        on ? 'bg-primary border-primary' : 'bg-card border-input'
+                      }`} aria-hidden="true">
+                        {on && <Check className="w-2.5 h-2.5 text-primary-foreground" />}
+                      </span>
+                      <span className="min-w-0 truncate" title={g.name}>{g.name}</span>
+                    </label>
+                  );
+                })}
+                {visibleGroups.length === 0 && (
+                  <p className="text-[11px] text-muted-foreground/75 col-span-full py-1">No group matches “{query}”.</p>
+                )}
+              </div>
+            </>
+          )}
+        </div>
       </div>
-      {error && <p className="text-xs text-red-500 mb-1.5">{error}</p>}
+
+      {error && <p className="text-xs text-red-500 mt-2 mb-1.5">{error}</p>}
       {dirty && (
         <button onClick={save} disabled={busy} className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 disabled:opacity-60">
           {busy ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" /> : <Check className="w-3 h-3" aria-hidden="true" />} Save mapping
