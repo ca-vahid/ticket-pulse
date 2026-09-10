@@ -1156,9 +1156,28 @@ class AssignmentPipelineService {
       }
 
       const topRec = recommendation?.recommendations?.[0];
-      // An EMPTY recommendations array is still the noise verdict — unchanged,
-      // and the only thing ws1 (auto-close on) ever produces or acts on.
-      const isNoise = recommendation && (!recommendation.recommendations || recommendation.recommendations.length === 0);
+      // An EMPTY recommendations array is the noise verdict for an ordinary run
+      // — unchanged, and the only thing ws1 (auto-close on) ever acts on.
+      //
+      // It is NOT a verdict for a priority-assessment-only run. Those defer
+      // assignment ranking by design and therefore return an empty array EVERY
+      // time, so the array carries no information about noise at all. Reading
+      // it as one auto-closed two live tickets overnight on Sep 10 — #241481
+      // ("Issue with Oasis Montaj license") and #241462 (a Darktrace score-92
+      // SSL alert) — whose own overallReasoning read "This ticket is actionable
+      // — not noise — but full assignment ranking is deferred to the
+      // business-hours run". Both had to be reopened by hand.
+      //
+      // For those runs the model must say noise POSITIVELY via nonActionable
+      // (the explicit label added in v3.8.42). Absent that, the run defers and
+      // the business-hours pass makes the call — noise is closed a few hours
+      // later instead of never, which is the safe direction to be wrong in.
+      const emptyRecommendations = Boolean(
+        recommendation && (!recommendation.recommendations || recommendation.recommendations.length === 0),
+      );
+      const isNoise = isPriorityAssessmentOnly
+        ? emptyRecommendations && recommendation?.nonActionable === true
+        : emptyRecommendations;
       // QA 09-05 option 3: the label, decoupled from routing. A run can now
       // carry "this looks non-actionable" AND a ranked recommendation, so in a
       // workspace that does not auto-close, being wrong costs a label instead
