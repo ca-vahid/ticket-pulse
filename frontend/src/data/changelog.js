@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.8.51-preview';
+export const APP_VERSION = '3.8.52-preview';
 
 export const changelog = [
+  {
+    version: '3.8.52-preview',
+    date: 'September 10, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>\u26A0\uFE0F Overnight priority checks were closing real tickets as noise</strong> \u2014 the after-hours pass looks at a new ticket\u2019s urgency and deliberately leaves the assignment ranking for the morning run. Because it hands back an empty ranking every time, the pipeline mistook that for a verdict of \u201cnoise\u201d and closed the ticket \u2014 in IT, where auto-close is on, that closed it in FreshService too. Two were caught this morning, including a Darktrace score-92 security alert and a licence fault whose own AI notes read <em>\u201cthis ticket is actionable \u2014 not noise\u201d</em>.' },
+      { type: 'fixed', html: '<strong>It had been happening since July, about one real ticket a week</strong> \u2014 an audit of every overnight dismissal found <strong>seven</strong> where the requester wrote back to say the ticket was not resolved, including a field worker at Red Chris Mine locked out by 2FA, plus a run of genuine infrastructure alerts left closed. All seven had already been rescued by hand; nothing needs reopening.' },
+      { type: 'improved', html: '<strong>An overnight pass now has to say \u201cnoise\u201d out loud</strong> \u2014 it can still dismiss obvious noise, but only when it explicitly marks the ticket non-actionable rather than by staying silent. Anything else waits for the business-hours run, so noise is closed a few hours later instead of a real request being closed at four in the morning. Nothing about daytime triage changed.' },
+    ],
+  },
   {
     version: '3.8.51-preview',
     date: 'September 9, 2026',
