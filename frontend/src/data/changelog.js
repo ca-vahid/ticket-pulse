@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.8.46-preview';
+export const APP_VERSION = '3.8.47-preview';
 
 export const changelog = [
+  {
+    version: '3.8.47-preview',
+    date: 'September 9, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>🔍 Settings section filter, fixed and fuzzier</strong> — the filter box now sits inside the section tree as a sticky header, so items scroll cleanly under it and the last sections (Workspace group) are reachable again; collapsing the sidebar keeps a same-size search button (tap it to expand and start typing) so icons no longer shift; and matching is now fuzzy — “wsacc” finds the Workspace items, “snc” finds Sync — with results ranked so Enter always jumps to the best match.' },
+    ],
+  },
   {
     version: '3.8.46-preview',
     date: 'September 9, 2026',

@@ -1,4 +1,4 @@
-import { Fragment, useState, useEffect } from 'react';
+import { Fragment, useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { useSettings } from '../contexts/SettingsContext';
@@ -155,9 +155,35 @@ export default function Settings() {
   // Type-to-filter for the section tree (Sep 2026): "members" jumps straight
   // to Members without scanning six groups. Matches label or group name.
   const [navFilter, setNavFilter] = useState('');
+  const navFilterInputRef = useRef(null);
   const navFilterQ = navFilter.trim().toLowerCase();
+  // Fuzzy matcher (QA 09-09): "wsacc" finds Workspace-group items, "snc" finds
+  // Sync. Substring beats subsequence; earlier and more-contiguous beats
+  // scattered; the label beats the group. Results are RANKED, so Enter jumps
+  // to the best match, not merely the first in tree order.
+  const fuzzyScore = (q, text) => {
+    const t = String(text || '').toLowerCase();
+    if (!q) return 1;
+    const at = t.indexOf(q);
+    if (at === 0) return 100;
+    if (at > 0) return 80 - Math.min(at, 40) * 0.5;
+    let from = 0; let bestRun = 0; let run = 0; let prev = -2; let spread = 0;
+    for (const ch of q) {
+      const f = t.indexOf(ch, from);
+      if (f === -1) return 0;
+      run = f === prev + 1 ? run + 1 : 1;
+      bestRun = Math.max(bestRun, run);
+      spread += f - from;
+      prev = f; from = f + 1;
+    }
+    return Math.max(1, 40 + bestRun * 3 - spread * 0.3);
+  };
   const visibleNavItems = navFilterQ
-    ? navigationItems.filter((i) => `${i.label} ${i.group || ''}`.toLowerCase().includes(navFilterQ))
+    ? navigationItems
+      .map((i) => ({ i, score: Math.max(fuzzyScore(navFilterQ, i.label), fuzzyScore(navFilterQ, i.group) * 0.6) }))
+      .filter((x) => x.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .map((x) => x.i)
     : navigationItems;
   const activeSectionId = activeNavigationItem?.id ?? null;
 
@@ -598,29 +624,48 @@ export default function Settings() {
                 </TooltipContent>
               </Tooltip>
             </div>
-            {!isNavCollapsed && (
-              <div className="hidden px-2 pt-2 md:block">
-                <div className="relative">
-                  <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/60" aria-hidden="true" />
-                  <input
-                    type="search"
-                    value={navFilter}
-                    onChange={(e) => setNavFilter(e.target.value)}
-                    onKeyDown={(e) => {
-                      // Enter jumps to the first match — type "mem", hit Enter, done.
-                      if (e.key === 'Enter' && visibleNavItems.length > 0) {
-                        setActiveSection(visibleNavItems[0].id);
-                        setNavFilter('');
-                      } else if (e.key === 'Escape') setNavFilter('');
+            <nav className="settings-scrollbar flex gap-1 overflow-x-auto p-2 md:block md:h-[calc(100%-65px)] md:space-y-1 md:overflow-y-auto md:pt-0">
+              {/* Filter lives INSIDE the scroll container (QA 09-09): sticky with
+                  an opaque mask so items scroll UNDER it cleanly, and it spends
+                  in-flow height so the tree's last section stays reachable —
+                  the outside-the-nav version broke both. Collapsed keeps an
+                  equal-height search button so icons don't shift. */}
+              <div className="sticky top-0 z-10 -mx-2 mb-1 hidden bg-card/95 px-4 pb-2 pt-2 backdrop-blur-sm md:block dark:bg-card/90">
+                {isNavCollapsed ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsNavCollapsed(false);
+                      setTimeout(() => navFilterInputRef.current?.focus(), 60);
                     }}
-                    placeholder="Filter sections…"
-                    aria-label="Filter settings sections"
-                    className="tp-focus-ring w-full rounded-lg border border-input bg-card py-1.5 pl-8 pr-2 text-xs text-foreground placeholder:text-muted-foreground/50"
-                  />
-                </div>
+                    aria-label="Search settings sections"
+                    title="Search settings sections"
+                    className="tp-focus-ring flex h-[30px] w-full items-center justify-center rounded-lg border border-input bg-card text-muted-foreground/70 hover:text-foreground"
+                  >
+                    <Search className="h-3.5 w-3.5" aria-hidden="true" />
+                  </button>
+                ) : (
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/60" aria-hidden="true" />
+                    <input
+                      ref={navFilterInputRef}
+                      type="search"
+                      value={navFilter}
+                      onChange={(e) => setNavFilter(e.target.value)}
+                      onKeyDown={(e) => {
+                        // Enter jumps to the BEST match (results are ranked).
+                        if (e.key === 'Enter' && visibleNavItems.length > 0) {
+                          setActiveSection(visibleNavItems[0].id);
+                          setNavFilter('');
+                        } else if (e.key === 'Escape') setNavFilter('');
+                      }}
+                      placeholder="Filter sections…"
+                      aria-label="Filter settings sections"
+                      className="tp-focus-ring h-[30px] w-full rounded-lg border border-input bg-card pl-8 pr-2 text-xs text-foreground placeholder:text-muted-foreground/50"
+                    />
+                  </div>
+                )}
               </div>
-            )}
-            <nav className="settings-scrollbar flex gap-1 overflow-x-auto p-2 md:block md:h-[calc(100%-65px)] md:space-y-1 md:overflow-y-auto">
               {navFilterQ && visibleNavItems.length === 0 && (
                 <div className="hidden px-3 py-2 text-xs text-muted-foreground/75 md:block">No sections match &ldquo;{navFilter.trim()}&rdquo;</div>
               )}
@@ -629,7 +674,7 @@ export default function Settings() {
                 const isDisabled = !!item.disabled;
                 // Group header when the group changes (desktop vertical nav only;
                 // the mobile horizontal strip stays a flat scroll).
-                const showGroupHeader = item.group && item.group !== visibleNavItems[idx - 1]?.group;
+                const showGroupHeader = !navFilterQ && item.group && item.group !== visibleNavItems[idx - 1]?.group;
                 const groupHeader = showGroupHeader && !isNavCollapsed ? (
                   <div key={`group-${item.group}`} className={cn('hidden px-3 pb-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground/75 md:block', idx > 0 && 'pt-3')}>
                     {item.group}
