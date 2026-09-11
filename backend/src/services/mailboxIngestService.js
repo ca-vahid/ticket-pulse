@@ -1,4 +1,5 @@
 import prisma from './prisma.js';
+import { stripQuotedHtml, stripQuotedText } from '../utils/replyQuoteStripper.js';
 import logger from '../utils/logger.js';
 import graphMailClient from '../integrations/graphMailClient.js';
 import ticketService from './ticketService.js';
@@ -711,9 +712,12 @@ class MailboxIngestService {
         incoming: !isAgentReply,
         isPrivate: false,
         visibility: 'public',
-        bodyHtml: email.bodyHtml,
-        bodyText: email.bodyText || email.bodyPreview || null,
-        content: email.bodyText || email.bodyPreview || null,
+        // Store what the person WROTE, not their client's copy of our thread
+        // (FR 09-10). Outbound replies now quote the whole conversation; left
+        // unstripped, each round trip would fold another copy back in.
+        bodyHtml: stripQuotedHtml(email.bodyHtml),
+        bodyText: stripQuotedText(email.bodyText || email.bodyPreview || null),
+        content: stripQuotedText(email.bodyText || email.bodyPreview || null),
         occurredAt: email.receivedAt || now,
         emailMessageId: email.internetMessageId,
         // Requester replies belong on the FS fallback copy too

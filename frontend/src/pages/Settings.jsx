@@ -578,7 +578,6 @@ export default function Settings() {
                   const newId = Number(e.target.value);
                   if (newId === currentWorkspace.id) return;
                   switchWorkspace(newId);
-                  window.location.reload();
                 }}
                 className="min-w-[180px] rounded-lg border border-blue-100 dark:border-blue-500/20 bg-blue-50/90 dark:bg-blue-500/10 px-2.5 py-1.5 text-xs font-semibold text-blue-700 dark:text-blue-200 outline-none transition hover:bg-blue-100 dark:hover:bg-blue-500/20 focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-500/30"
                 title="Switch workspace"

@@ -259,7 +259,6 @@ export default function CommandPalette() {
         Icon: Boxes,
         run: () => {
           switchWorkspace(ws.id);
-          window.location.reload();
         },
       });
     }

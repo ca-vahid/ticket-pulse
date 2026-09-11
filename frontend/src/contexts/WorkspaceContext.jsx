@@ -5,6 +5,30 @@ import { useAuth } from './AuthContext';
 const WorkspaceContext = createContext(null);
 
 const LS_KEY = 'tp_selectedWorkspace';
+
+/**
+ * Where to land after a workspace switch (QA 09-10 #2).
+ *
+ * Every switch used to end in `window.location.reload()`, which reloads the
+ * CURRENT url. On a record page that is a deep link into the workspace you just
+ * left — reloading `/tickets/1263` in a workspace that has no ticket 1263 gave
+ * a "not found" instead of a workspace. Record routes drop to their list; every
+ * other route (dashboard, analytics, settings…) is workspace-neutral and stays
+ * exactly where it is.
+ */
+const RECORD_ROUTE_PARENTS = [
+  [/^\/tickets\/[^/]+/, '/tickets'],
+  [/^\/technician\/[^/]+/, '/dashboard'],
+  [/^\/assignments\/run\/[^/]+/, '/assignments'],
+];
+
+export function safeWorkspacePath(pathname = '/') {
+  const path = String(pathname || '/');
+  for (const [pattern, parent] of RECORD_ROUTE_PARENTS) {
+    if (pattern.test(path)) return parent;
+  }
+  return path;
+}
 // Sticky flag for "the server never learned about the last workspace switch".
 // sessionStorage because switchWorkspace() is usually followed by a full page
 // reload — a plain state flag would die with the old document.
@@ -224,6 +248,16 @@ export function WorkspaceProvider({ children }) {
     // page immediately), but WITH retry + persistent visible error — see
     // selectWorkspaceWithRetry above.
     selectWorkspaceWithRetry(targetId);
+
+    // Callers used to follow this with window.location.reload(), which reloads
+    // the record you were looking at in a workspace that does not contain it
+    // (QA 09-10 #2). Owning the navigation here fixes every entry point at once
+    // — header, command palette, mobile tab bar, settings.
+    try {
+      const target = safeWorkspacePath(window.location.pathname);
+      if (target === window.location.pathname) window.location.reload();
+      else window.location.assign(`${target}${window.location.search || ''}`);
+    } catch { /* non-browser context (tests) — the caller decides */ }
   }, [availableWorkspaces, selectWorkspaceWithRetry]);
 
   const refreshWorkspaces = useCallback(async () => {

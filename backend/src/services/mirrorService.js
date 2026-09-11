@@ -804,6 +804,16 @@ class MirrorService {
       const recipients = {};
       if (Array.isArray(conv.to_emails) && conv.to_emails.length) recipients.to_emails = conv.to_emails;
       if (Array.isArray(conv.cc_emails) && conv.cc_emails.length) recipients.cc_emails = conv.cc_emails;
+      // Who wrote it: FS gives us `user_id`; look up the technician so the
+      // thread shows a person instead of "FreshService user" (FR 09-10).
+      // Non-fatal — an unknown id just falls back to the old label.
+      let authorTech = null;
+      if (conv.user_id) {
+        authorTech = await prisma.technician.findFirst({
+          where: { freshserviceId: BigInt(conv.user_id) },
+          select: { name: true, email: true },
+        }).catch(() => null);
+      }
       await prisma.ticketThreadEntry.create({
         data: {
           ticketId: ticket.id,
@@ -811,10 +821,19 @@ class MirrorService {
           externalEntryId,
           source: 'freshservice_reconciliation',
           eventType: conv.private ? 'note' : 'reply',
-          // RFC 2047 encoded-words + mojibake repair for display names
-          // (FR 08-05 item 2) — same treatment as parseRfc822Address.
-          actorName: cleanDisplayName(conv.user_name || conv.from_email) || 'FreshService user',
-          actorEmail: conv.from_email || null,
+          // Author (FR 09-10): FreshService's conversation payload carries
+          // `user_id`, NOT `user_name`, and `from_email` is null for a note an
+          // agent typed in the FS UI — so both sides of the old
+          // `user_name || from_email` fallback were always empty and every
+          // mirrored note read "FreshService user". Gaby Tonnova's note on
+          // SR-241641 came back with user_id 1000008456, which is her exact
+          // technician.freshserviceId; we simply never looked.
+          //
+          // The FS-BORN path (freshserviceTransformer) already did this
+          // correctly — only this TP-born reconciliation lane was blind.
+          actorName: cleanDisplayName(conv.user_name || authorTech?.name || conv.from_email) || 'FreshService user',
+          actorEmail: conv.from_email || authorTech?.email || null,
+          actorFreshserviceId: conv.user_id ? BigInt(conv.user_id) : null,
           authorType: conv.incoming ? 'requester' : 'agent',
           incoming: conv.incoming === true,
           isPrivate: conv.private === true,

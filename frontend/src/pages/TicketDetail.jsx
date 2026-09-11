@@ -3828,7 +3828,11 @@ export default function TicketDetail() {
       {toast && (
         <div
           role="status"
-          className={`fixed bottom-20 md:bottom-5 right-5 z-50 flex items-center gap-3 px-4 py-2.5 rounded-lg shadow-soft text-sm font-medium animate-slideInLeft ${
+          /* z-[70]: above the z-[60] modals (QA 09-10 #1). A toast raised
+             while a modal is open — "you are the only approval manager…" —
+             sat UNDER the modal's backdrop-blur, so the message the user
+             needed most was the one they could not read. */
+          className={`fixed bottom-20 md:bottom-5 right-5 z-[70] flex items-center gap-3 px-4 py-2.5 rounded-lg shadow-soft text-sm font-medium animate-slideInLeft ${
             toast.tone === 'red' ? 'bg-red-600 text-white' : toast.tone === 'sky' ? 'bg-sky-600 text-white' : 'bg-emerald-600 text-white'
           }`}
         >

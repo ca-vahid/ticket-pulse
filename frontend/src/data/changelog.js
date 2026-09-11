@@ -1,6 +1,18 @@
-export const APP_VERSION = '3.8.53-preview';
+export const APP_VERSION = '3.8.54-preview';
 
 export const changelog = [
+  {
+    version: '3.8.54-preview',
+    date: 'September 10, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>📧 Replies now carry the conversation, not just your last line</strong> \u2014 a reply arrived in the requester\u2019s inbox with none of the ticket behind it, so they had no idea what it was about (FR: Alvina/David). Every reply now quotes the whole public conversation underneath, in ordinary email-thread style: newest first, each message dated and attributed. Internal notes are <strong>never</strong> included \u2014 only what the requester could already see.' },
+      { type: 'fixed', html: '<strong>The warning you could not read is now on top</strong> \u2014 asking for approval in a category where you are the only approver raised a warning behind the pop-up\u2019s blur, so the one message you needed was the one you could not read (FR: Kirsten). Warnings now sit above any dialog.' },
+      { type: 'improved', html: '<strong>Switching workspace lands you somewhere that exists</strong> \u2014 switching while looking at a ticket tried to open that same ticket number in the new workspace and showed \u201cnot found\u201d. It now takes you to that workspace\u2019s tickets list. The same applies to technician and AI-run pages; anything not tied to one record leaves you exactly where you were.' },
+      { type: 'improved', html: '<strong>\u201cCreate &amp; resolve\u201d asks what you did</strong> \u2014 the walk-up log is for work already finished at the desk, so the thing missing afterwards was any record of it. It now offers a short internal note first. Entirely optional \u2014 <em>Skip &amp; resolve</em> behaves exactly as before \u2014 and the note is written before the ticket resolves, so it is never left blank.' },
+      { type: 'fixed', html: '<strong>Notes written in FreshService show who wrote them</strong> \u2014 a note added on the FreshService side came back to Ticket Pulse as \u201cFreshService user\u201d instead of the person (FR: Vahid). FreshService was telling us the author\u2019s id all along and we were reading a field it does not send; Gaby Tonnova\u2019s note now reads as Gaby Tonnova.' },
+      { type: 'fixed', html: '<strong>No more stray &lt;p&gt; tags in FreshService notes</strong> \u2014 the AI\u2019s assignment summary occasionally arrived with its formatting already escaped, so the tags showed as text in the note (FR: Vahid). Affected about one note in thirty; they now read as written.' },
+    ],
+  },
   {
     version: '3.8.53-preview',
     date: 'September 10, 2026',
