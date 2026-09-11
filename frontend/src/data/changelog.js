@@ -1,6 +1,16 @@
-export const APP_VERSION = '3.8.54-preview';
+export const APP_VERSION = '3.8.55-preview';
 
 export const changelog = [
+  {
+    version: '3.8.55-preview',
+    date: 'September 11, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>\u26A1 Changes reach FreshService in about a minute instead of up to an hour</strong> \u2014 assigning a ticket in Ticket Pulse could take 15\u201320 minutes to show up on the FreshService copy (FR: Vahid). Measured across a week, updates had a five-minute median and a <strong>45-minute</strong> tail. The cause was not load: the sync pushed one ticket at a time, so a single slow call to FreshService held up every other ticket behind it \u2014 one assignment waited ten minutes without a single attempt while an unrelated ticket sat on the phone to FreshService.' },
+      { type: 'improved', html: '<strong>Several tickets now sync at once</strong> \u2014 four in parallel by default. Changes to the <em>same</em> ticket still go over in the order you made them, so a ticket can never arrive before the thing that created it; only separate tickets overlap.' },
+      { type: 'improved', html: '<strong>A busy FreshService no longer stalls the queue</strong> \u2014 background syncs waited indefinitely for a slot behind bigger jobs. They now give up after 90 seconds and try again on the next pass, which costs a minute instead of an hour. Work you are waiting on in the app still jumps the queue exactly as before.' },
+      { type: 'fixed', html: '<strong>Due dates now reach FreshService too</strong> \u2014 the sync carried the subject, status, priority and assignee but never the due date, so a date set in Ticket Pulse left FreshService showing its own SLA clock. Two systems, two different dates on the same ticket. They now match.' },
+    ],
+  },
   {
     version: '3.8.54-preview',
     date: 'September 10, 2026',
