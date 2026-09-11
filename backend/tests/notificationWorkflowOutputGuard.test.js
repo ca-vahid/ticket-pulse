@@ -361,6 +361,36 @@ describe('notification workflow output guard', () => {
     expect(result.payload.html).toBe(html);
   });
 
+  test('repairs generated URLs and anchor tags before workflow link rendering', () => {
+    const result = guardNotificationEmailPayload({
+      subject: 'Ticket update',
+      html: [
+        '<p>We received your request and the team is reviewing it.</p>',
+        '<p><strong>Raise Urgency:</strong> https://ticketpulse.example/ticket-urgency/sample-token</p>',
+        '<p>Track it here: <a href="https://ticketpulse.example/ticket-status/sample-token">Ticket Status</a></p>',
+      ].join(''),
+      text: [
+        'We received your request and the team is reviewing it.',
+        'Raise Urgency: https://ticketpulse.example/ticket-urgency/sample-token',
+        'Ticket Status: https://ticketpulse.example/ticket-status/sample-token',
+      ].join('\n\n'),
+    }, {
+      repairGuardrails: ['generated_public_links'],
+    });
+
+    expect(result.accepted).toBe(true);
+    expect(result.payload.html).toContain('We received your request');
+    expect(result.payload.html).not.toContain('ticketpulse.example');
+    expect(result.payload.html).not.toContain('<a ');
+    expect(result.payload.text).not.toContain('ticketpulse.example');
+    expect(result.repairedIssues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'generated_public_links',
+        action: 'repaired',
+      }),
+    ]));
+  });
+
   test('strips unknown cited signals from metadata without rewriting email formatting', () => {
     const html = '<div class="body"><p><strong>Hi Dulaney,</strong></p><p>We are reviewing your phone request.</p></div>';
     const text = 'Hi Dulaney,\n\nWe are reviewing your phone request.';

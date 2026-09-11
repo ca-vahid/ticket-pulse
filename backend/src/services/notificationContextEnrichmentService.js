@@ -707,6 +707,33 @@ function prioritySignals(ticket) {
   return signals;
 }
 
+function actionLinkAvailability(eventContext = {}) {
+  const publicStatusUrl = eventContext.ticket?.publicStatusUrl || eventContext.publicStatusUrl || null;
+  const raiseUrgencyUrl = eventContext.ticket?.raiseUrgencyUrl || eventContext.raiseUrgencyUrl || null;
+  const afterHoursSupportUrl = eventContext.afterHoursSupport?.immediateSupportUrl
+    || eventContext.ticket?.afterHoursEscalationUrl
+    || eventContext.afterHoursEscalationUrl
+    || null;
+  return {
+    publicStatus: {
+      available: Boolean(publicStatusUrl),
+      label: 'ticket status',
+      appendOnly: true,
+    },
+    raiseUrgency: {
+      available: Boolean(raiseUrgencyUrl),
+      label: 'raise urgency',
+      appendOnly: true,
+    },
+    afterHoursSupport: {
+      available: Boolean(afterHoursSupportUrl),
+      label: 'immediate after-hours support',
+      appendOnly: true,
+    },
+    guidance: 'Do not include raw URLs or HTML links in generated email fields. The workflow rendering layer appends approved links when configured.',
+  };
+}
+
 function buildSummary(bundle) {
   return {
     enabled: bundle.enabled,
@@ -879,14 +906,7 @@ export async function buildNotificationLlmContext({
     recentSimilarTickets,
     outageSignals: outageSignals(recentSimilarTickets, settings),
     prioritySignals: prioritySignals(ticket),
-    actionLinks: {
-      publicStatusUrl: eventContext.ticket?.publicStatusUrl || eventContext.publicStatusUrl || null,
-      raiseUrgencyUrl: eventContext.ticket?.raiseUrgencyUrl || eventContext.raiseUrgencyUrl || null,
-      afterHoursSupportUrl: eventContext.afterHoursSupport?.immediateSupportUrl
-        || eventContext.ticket?.afterHoursEscalationUrl
-        || eventContext.afterHoursEscalationUrl
-        || null,
-    },
+    actionLinks: actionLinkAvailability(eventContext),
     redactions: {
       enabled: policy.redactionEnabled,
       count: redactionState.count,
