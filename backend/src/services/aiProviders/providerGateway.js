@@ -53,6 +53,14 @@ function providerAttemptTimeoutError({ provider, model, timeoutMs }) {
   return error;
 }
 
+function errorFromAbortedSignal(signal, fallbackMessage = 'AI provider attempt cancelled') {
+  if (signal?.reason instanceof Error) return signal.reason;
+  const error = new Error(fallbackMessage);
+  error.name = 'AbortError';
+  error.code = 'ABORT_ERR';
+  return error;
+}
+
 function createProviderAttemptAbortController({ parentSignal = null, timeoutMs = null, provider, model } = {}) {
   const normalized = normalizedTimeoutMs(timeoutMs);
   if (!parentSignal && !normalized) {
@@ -138,6 +146,23 @@ class ProviderGateway {
     let attemptNumber = 0;
 
     for (const attempt of resolution.attempts) {
+      if (callOptions.signal?.aborted) {
+        const skippedError = errorFromAbortedSignal(
+          callOptions.signal,
+          'AI provider attempt cancelled before provider call',
+        );
+        lastError = skippedError;
+        emit?.({
+          type: attempt.fallbackFromProvider ? 'provider_fallback_skipped' : 'provider_attempt_skipped',
+          provider: attempt.provider,
+          model: attempt.model,
+          attemptNumber: attemptNumber + 1,
+          fallbackFromProvider: attempt.fallbackFromProvider || null,
+          reason: 'parent_signal_aborted',
+          message: sanitizeProviderErrorMessage(skippedError),
+        });
+        break;
+      }
       attemptNumber += 1;
       const startedAt = Date.now();
       const isFallback = !!attempt.fallbackFromProvider;
@@ -253,6 +278,23 @@ class ProviderGateway {
         });
 
         if (!classified.retryable) break;
+        if (callOptions.signal?.aborted) {
+          const skippedError = errorFromAbortedSignal(
+            callOptions.signal,
+            'AI provider fallback skipped because the parent request was already aborted',
+          );
+          lastError = skippedError;
+          emit?.({
+            type: 'provider_fallback_skipped',
+            provider: null,
+            model: null,
+            attemptNumber: attemptNumber + 1,
+            fallbackFromProvider: attempt.provider,
+            reason: 'parent_signal_aborted',
+            message: sanitizeProviderErrorMessage(skippedError),
+          });
+          break;
+        }
       } finally {
         attemptAbort.cleanup();
       }
