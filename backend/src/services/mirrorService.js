@@ -1,4 +1,5 @@
 import prisma from './prisma.js';
+import { runJobsInPool } from '../utils/parallelPool.js';
 import logger from '../utils/logger.js';
 import settingsRepository from './settingsRepository.js';
 import ticketActivityRepository from './ticketActivityRepository.js';
@@ -24,8 +25,27 @@ const DRAIN_INTERVAL_MS = Number(process.env.NATIVE_TICKET_MIRROR_INTERVAL_MS ||
 const STALE_PROCESSING_MS = 10 * 60 * 1000;
 const MIRROR_MARKER = '[Ticket Pulse mirror]';
 
+// How many DIFFERENT tickets a drain pushes to FreshService at once (FR 09-11).
+// Jobs for one ticket still run in order, one after another — only separate
+// tickets overlap. Before this the whole drain was one sequential loop behind a
+// single `_draining` lock, so one slow FreshService call stalled every other
+// ticket: measured over 7 days, field updates had a 5-minute median and a
+// 45-minute p95, and an assignment sat 10 minutes without a single attempt
+// while an unrelated ticket's job waited on the API.
+const DRAIN_CONCURRENCY = Number(process.env.NATIVE_TICKET_MIRROR_CONCURRENCY || 4);
+// Bound how long a mirror job may sit in the shared FreshService queue. The
+// interactive lane has had one (15s) since the 4-minute hangs; the background
+// mirror had none at all and would wait behind an entire sync sweep for ever.
+// Failing fast turns that into a retry on the next drain instead of a stall.
+const MIRROR_QUEUE_TIMEOUT_MS = Number(process.env.NATIVE_TICKET_MIRROR_QUEUE_TIMEOUT_MS || 90 * 1000);
+
 function backoffMs(attempts) {
   return Math.min(BASE_BACKOFF_MS * (2 ** Math.max(0, attempts - 1)), MAX_BACKOFF_MS);
+}
+
+/** Back-pressure, not a failure: the call never reached FreshService. */
+export function isQueueTimeout(error) {
+  return error?.code === 'FS_QUEUE_TIMEOUT' || /FS_QUEUE_TIMEOUT/.test(String(error?.message || ''));
 }
 
 /**
@@ -229,17 +249,29 @@ class MirrorService {
         orderBy: [{ ticketId: 'asc' }, { id: 'asc' }],
         take: limit,
       });
-      if (due.length === 0) return { processed: 0 };
+      if (due.length === 0) return { processed: 0, tickets: 0 };
+
+      // Group by ticket, then run the GROUPS concurrently (FR 09-11).
+      // Ordering guarantee is unchanged: within one ticket the jobs still run
+      // strictly in id order and still stop at the first failure, so a create
+      // can never be overtaken by the update that follows it. What changes is
+      // that a slow ticket no longer blocks the other 49.
+      const byTicket = new Map();
+      for (const job of due) {
+        if (!byTicket.has(job.ticketId)) byTicket.set(job.ticketId, []);
+        byTicket.get(job.ticketId).push(job);
+      }
 
       let processed = 0;
-      const blockedTickets = new Set();
-      for (const job of due) {
-        if (blockedTickets.has(job.ticketId)) continue; // keep per-ticket ordering
-        const ok = await this._processJob(job);
-        processed += 1;
-        if (!ok) blockedTickets.add(job.ticketId);
-      }
-      return { processed };
+      await runJobsInPool([...byTicket.values()], async (jobs) => {
+        for (const job of jobs) {
+          const ok = await this._processJob(job);
+          processed += 1;
+          if (!ok) break; // preserve per-ticket ordering
+        }
+      }, { poolSize: DRAIN_CONCURRENCY });
+
+      return { processed, tickets: byTicket.size };
     } finally {
       this._draining = false;
     }
@@ -279,6 +311,10 @@ class MirrorService {
     const client = createFreshServiceClient(fsConfig.domain, fsConfig.apiKey, {
       priority: 'low',
       source: 'native-ticket-mirror',
+      // Still LOW priority — interactive work must keep jumping ahead — but no
+      // longer an unbounded wait (FR 09-11). A congested queue now fails the
+      // job fast and it retries on the next drain, instead of holding a slot.
+      queueTimeoutMs: MIRROR_QUEUE_TIMEOUT_MS,
     });
     this._clients.set(workspaceId, client);
     return client;
@@ -325,12 +361,23 @@ class MirrorService {
       });
       return true;
     } catch (err) {
-      await this._markFailed(job, err.message || String(err));
+      await this._markFailed(job, err.message || String(err), { softRetry: isQueueTimeout(err) });
       return false;
     }
   }
 
-  async _markFailed(job, message) {
+  async _markFailed(job, message, { softRetry = false } = {}) {
+    // A queue timeout is back-pressure, not a failure: the request never
+    // reached FreshService, so it must not burn one of the 8 attempts or earn
+    // an hours-long backoff. Re-queue it for the next drain (FR 09-11).
+    if (softRetry) {
+      logger.info(`Mirror job ${job.id} (${job.kind}, ticket ${job.ticketId}) deferred — FreshService queue busy; retrying next drain`);
+      await prisma.mirrorJob.update({
+        where: { id: job.id },
+        data: { status: 'pending', lastError: message, nextAttemptAt: new Date(Date.now() + 5000) },
+      });
+      return;
+    }
     const attempts = job.attempts + 1;
     const dead = attempts >= MAX_ATTEMPTS;
     logger.warn(`Mirror job ${job.id} (${job.kind}, ticket ${job.ticketId}) failed${dead ? ' permanently' : ''}: ${message}`);
@@ -563,6 +610,12 @@ class MirrorService {
       priority: ticket.priority || undefined,
       group_id: ticket.groupId ? Number(ticket.groupId) : undefined,
       responder_id: ticket.assignedTech?.freshserviceId ? Number(ticket.assignedTech.freshserviceId) : null,
+      // Due date (FR 09-11): the mirror pushed subject/status/priority/assignee
+      // but never the date, so a due date set in Ticket Pulse left FreshService
+      // showing its own SLA clock instead — two systems, two different dates on
+      // the same ticket. FS expects ISO 8601; undefined when unset so
+      // compactObject drops the key rather than clearing theirs.
+      due_by: ticket.dueBy ? new Date(ticket.dueBy).toISOString() : undefined,
       custom_fields: customFields || undefined,
       // "Also for" additional requesters (Phase MR5) — edits after create
       // propagate to the FS copy. cc_emails is accepted on ticket update by
