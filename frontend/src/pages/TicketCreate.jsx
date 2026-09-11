@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  AlertCircle, ArrowLeft, Building2, Check, ChevronDown, Clock, Loader2, MapPin,
+  AlertCircle, ArrowLeft, Building2, Check, ChevronDown, Clock, Loader2, MapPin, StickyNote,
   Paperclip, Send, Sparkles, Ticket, X,
 } from 'lucide-react';
 import AppHeader from '../components/AppHeader';
@@ -88,6 +88,14 @@ const typeIntoRequesterSearch = (inputId, text) => {
  * still work), and a picked person is enriched with their photo, org details,
  * and helpdesk history.
  */
+
+/** Minimal escape for the walk-up note we wrap in <p> (QA 09-10 #3). */
+function escapeForHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 export default function TicketCreate() {
   const navigate = useNavigate();
 
@@ -135,6 +143,13 @@ export default function TicketCreate() {
   const [error, setError] = useState(null);
   const [successNote, setSuccessNote] = useState(null);
   const [submitMenuOpen, setSubmitMenuOpen] = useState(false);
+  // Walk-up log prompt (QA 09-10 #3): "Create & resolve" now asks what was done
+  // before it resolves. Optional — submitting empty behaves exactly as before.
+  // The value lives in a ref as well as state so `submit()` reads the latest
+  // text without the prompt needing to be part of its dependency chain.
+  const [walkUpOpen, setWalkUpOpen] = useState(false);
+  const [walkUpNote, setWalkUpNote] = useState('');
+  const walkUpNoteRef = useRef('');
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [scheduleAt, setScheduleAt] = useState('');
   // Repeat pattern: the picked first date/time anchors it (its weekday /
@@ -605,6 +620,17 @@ export default function TicketCreate() {
       }
 
       if (afterAction === 'resolve') {
+        // Walk-up log (QA 09-10 #3): the note the agent typed in the prompt is
+        // written BEFORE the resolve, so the ticket is never briefly resolved
+        // with no record of what was actually done. Optional by design —
+        // an empty note just resolves, exactly as before.
+        const note = String(walkUpNoteRef.current || '').trim();
+        if (note) {
+          setSaveStep('Adding note…');
+          try {
+            await ticketsAPI.note(created.id, { bodyText: note, bodyHtml: `<p>${escapeForHtml(note).replace(/\n/g, '<br/>')}</p>` });
+          } catch { /* non-fatal: the resolve still matters more */ }
+        }
         setSaveStep('Resolving…');
         try { await ticketsAPI.setStatus(created.id, 'Resolved'); } catch { /* shown on detail */ }
       }
@@ -1320,7 +1346,8 @@ export default function TicketCreate() {
                           Create & start another
                           </button>
                           <button
-                            onClick={(e) => submit(e, 'resolve')}
+                            type="button"
+                            onClick={() => { setSubmitMenuOpen(false); setWalkUpNote(''); walkUpNoteRef.current = ''; setWalkUpOpen(true); }}
                             role="menuitem"
                             className="tp-focus-ring w-full text-left px-2.5 py-1.5 text-sm rounded-md text-muted-foreground hover:bg-emerald-50 dark:hover:bg-emerald-500/15 hover:text-emerald-700 dark:hover:text-emerald-200"
                           >
@@ -1397,6 +1424,63 @@ export default function TicketCreate() {
           categoryNames={(meta.categoryTree || []).flatMap((c) => [c.name, ...((c.subcategories || []).map((sc) => `${c.name} > ${sc.name}`))])}
           typeNames={activeTypes.map((t) => t.name)}
         />
+      )}
+
+      {/* Walk-up log note (QA 09-10 #3): "Create & resolve" is used for things
+          already handled at the desk, so the one thing missing afterwards is a
+          record of WHAT was done. Asked here, optional, and written before the
+          resolve so the ticket is never resolved with an empty history. */}
+      {walkUpOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 animate-fadeIn" role="dialog" aria-modal="true" aria-labelledby="walkup-title">
+          <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-[2px]" onClick={() => !isSaving && setWalkUpOpen(false)} aria-hidden="true" />
+          <div className="relative w-full max-w-lg rounded-xl bg-card border border-border shadow-soft" data-testid="walkup-note-modal">
+            <div className="flex items-start gap-3 border-b border-border p-4">
+              <span className="h-9 w-9 rounded-lg bg-emerald-50 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 inline-flex items-center justify-center flex-shrink-0">
+                <StickyNote className="w-4.5 h-4.5" aria-hidden="true" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <h2 id="walkup-title" className="text-base font-bold text-foreground">Add an internal note?</h2>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  This ticket is about to be created and resolved. A short note on what you did helps whoever reads it later &mdash; entirely optional.
+                </p>
+              </div>
+            </div>
+            <div className="p-4">
+              <label htmlFor="walkup-note" className="block text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">
+                Internal note <span className="font-normal normal-case text-muted-foreground/75">&mdash; never emailed to the requester</span>
+              </label>
+              <textarea
+                id="walkup-note"
+                autoFocus
+                rows={4}
+                value={walkUpNote}
+                onChange={(e) => { setWalkUpNote(e.target.value); walkUpNoteRef.current = e.target.value; }}
+                placeholder="What did you do? e.g. Reset their MFA at the desk and confirmed sign-in."
+                className="tp-focus-ring w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground"
+              />
+            </div>
+            <div className="flex items-center justify-end gap-2 border-t border-border p-4">
+              <button
+                type="button"
+                onClick={(e) => { setWalkUpOpen(false); submit(e, 'resolve'); }}
+                disabled={isSaving}
+                className="tp-focus-ring px-3 py-2 text-sm font-medium text-muted-foreground bg-card border border-border rounded-lg hover:bg-muted/50 disabled:opacity-50"
+                data-testid="walkup-skip"
+              >
+                Skip &amp; resolve
+              </button>
+              <button
+                type="button"
+                onClick={(e) => { setWalkUpOpen(false); submit(e, 'resolve'); }}
+                disabled={isSaving || !walkUpNote.trim()}
+                className="tp-focus-ring inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                data-testid="walkup-submit"
+              >
+                <Check className="w-4 h-4" aria-hidden="true" /> Add note &amp; resolve
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       <MobileTabBar />

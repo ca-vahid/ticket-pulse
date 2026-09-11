@@ -21,6 +21,29 @@ import { TICKET_ORIGIN, ticketDisplayRef } from '../utils/ticketOrigin.js';
 import { sseManager } from '../routes/sse.routes.js';
 import { isGroupExcluded } from './assignmentDecisionRules.js';
 
+/**
+ * The LLM sometimes returns its briefing HTML already entity-escaped, and we
+ * store it verbatim — so `&lt;p&gt;Juan Gonzalez…` lands inside a note body that
+ * IS html, and FreshService renders the tags as visible text (FR 09-10; ~128 of
+ * 3,618 runs over 30 days). Decode only when the value looks wholly escaped:
+ * it carries escaped tag delimiters and no real ones, so genuine HTML — and a
+ * body that merely mentions "&lt;" in prose — is left untouched.
+ */
+export function unescapeIfEscaped(value) {
+  const html = String(value ?? '');
+  if (!html) return html;
+  if (html.includes('<')) return html;            // already real markup
+  if (!/&lt;\/?[a-zA-Z][^&]*&gt;/.test(html)) return html;  // no escaped tags
+  return html
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&');   // last: never resurrect a double-escape
+}
+
+
 const TP_SKILL_OBJECT_TITLE = 'Ticket Pulse Skills';
 const TP_SUBSKILL_OBJECT_TITLE = 'Ticket Pulse Subskills';
 const TP_SUBSKILL_PARENT_FIELD = 'parent_skill';
@@ -264,7 +287,7 @@ class FreshServiceActionService {
       if (usingFallback) {
         logger.warn('FreshService note: agentBriefingHtml missing, falling back to overallReasoning (may leak internal logic)', { runId: run.id });
       }
-      const messageHtml = briefing || legacyReasoning || '';
+      const messageHtml = unescapeIfEscaped(briefing || legacyReasoning || '');
 
       let noteBody = `<b>[Ticket Pulse]</b> Assignment ${decisionLabel}.<br>`;
       noteBody += `<b>Assigned to:</b> ${tech.name}<br>`;
@@ -288,7 +311,7 @@ class FreshServiceActionService {
       if (!closureNotice) {
         logger.warn('FreshService note: closureNoticeHtml missing on noise_dismissed run, using generic message', { runId: run.id });
       }
-      const messageHtml = closureNotice || 'This ticket has been reviewed and does not require helpdesk follow-up.';
+      const messageHtml = unescapeIfEscaped(closureNotice) || 'This ticket has been reviewed and does not require helpdesk follow-up.';
 
       let noteBody = '<b>[Ticket Pulse]</b> Ticket closed without assignment.<br>';
       noteBody += `${messageHtml}<br>`;

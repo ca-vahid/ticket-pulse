@@ -349,6 +349,9 @@ export function threadBodyFingerprint(bodyText) {
   return createHash('sha1').update(String(bodyText ?? '').replace(/\s+/g, ' ').trim()).digest('hex');
 }
 
+const OMITTED_MARKER_HTML = '<p style="color:#5f6b7a;font-size:12px;margin:0 0 14px;">[… earlier messages omitted — the full history is on the ticket]</p>';
+const OMITTED_MARKER_TEXT = '[… earlier messages omitted — the full history is on the ticket]';
+
 const THREAD_DEDUPE_WINDOW_MS = 60 * 1000;
 
 function stripHtml(html) {
@@ -4183,33 +4186,78 @@ class TicketService {
   async _lastInboundQuote(ticketId, excludeEntryId = null) {
     const escapeHtml = (value) => String(value ?? '')
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-    const last = await prisma.ticketThreadEntry.findFirst({
+
+    // ── Which entries may be quoted to a requester ────────────────────────
+    // isPrivate:false is the ONLY thing standing between an internal note and
+    // the customer, so it is stated twice: once here as an explicit event-type
+    // allowlist, and once as the isPrivate filter below. `note`,
+    // `private_note` and `forward` are all private and must never appear.
+    // Activity/status/assignment events carry no body and are not messages.
+    const QUOTABLE_EVENT_TYPES = ['reply', 'public_reply', 'original_email'];
+    const MAX_QUOTED_MESSAGES = 8;
+    const TOTAL_CAP = 60 * 1024;
+    const QUOTE_CAP = 20 * 1024;
+
+    const rows = await prisma.ticketThreadEntry.findMany({
       where: {
         ticketId,
-        incoming: true,
         isPrivate: false,
         ...(excludeEntryId ? { id: { not: excludeEntryId } } : {}),
-        OR: [{ source: 'email_inbound' }, { authorType: 'requester' }],
+        OR: [
+          { eventType: { in: QUOTABLE_EVENT_TYPES } },
+          { source: 'email_inbound' },
+        ],
       },
       orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
-      select: { bodyHtml: true, bodyText: true, content: true, actorName: true, actorEmail: true, occurredAt: true },
+      take: MAX_QUOTED_MESSAGES + 1,
+      select: {
+        bodyHtml: true, bodyText: true, content: true, actorName: true,
+        actorEmail: true, occurredAt: true, isPrivate: true, eventType: true,
+      },
     });
-    if (!last) return null;
-    const rawHtml = last.bodyHtml || (last.bodyText || last.content ? `<p>${escapeHtml(last.bodyText || last.content).replace(/\n/g, '<br/>')}</p>` : '');
-    if (!rawHtml.trim()) return null;
-    const QUOTE_CAP = 20 * 1024;
-    let quotedHtml = sanitizeHtml(rawHtml, EMAIL_SANITIZE_OPTIONS).trim();
-    if (quotedHtml.length > QUOTE_CAP) quotedHtml = `${quotedHtml.slice(0, QUOTE_CAP)}<p>[…]</p>`;
-    const who = escapeHtml(last.actorName || last.actorEmail || 'the requester');
-    const when = last.occurredAt
-      ? new Date(last.occurredAt).toLocaleString('en-CA', { dateStyle: 'medium', timeStyle: 'short' })
-      : '';
-    const header = when ? `On ${when}, ${who} wrote:` : `${who} wrote:`;
+    // Belt and braces: never trust the query alone with this one.
+    const quotable = rows.filter((r) => r.isPrivate === false);
+    if (quotable.length === 0) return null;
+
+    const truncated = quotable.length > MAX_QUOTED_MESSAGES;
+    const messages = quotable.slice(0, MAX_QUOTED_MESSAGES);
+
+    const blocks = [];
+    const textBlocks = [];
+    let used = 0;
+    for (const row of messages) {
+      const rawHtml = row.bodyHtml
+        || (row.bodyText || row.content ? `<p>${escapeHtml(row.bodyText || row.content).replace(/\n/g, '<br/>')}</p>` : '');
+      if (!rawHtml.trim()) continue;
+      let quotedHtml = sanitizeHtml(rawHtml, EMAIL_SANITIZE_OPTIONS).trim();
+      if (quotedHtml.length > QUOTE_CAP) quotedHtml = `${quotedHtml.slice(0, QUOTE_CAP)}<p>[…]</p>`;
+      if (used + quotedHtml.length > TOTAL_CAP) { blocks.push(OMITTED_MARKER_HTML); textBlocks.push(OMITTED_MARKER_TEXT); break; }
+      used += quotedHtml.length;
+
+      const who = escapeHtml(row.actorName || row.actorEmail || 'the requester');
+      const when = row.occurredAt
+        ? new Date(row.occurredAt).toLocaleString('en-CA', { dateStyle: 'medium', timeStyle: 'short' })
+        : '';
+      const header = when ? `On ${when}, ${who} wrote:` : `${who} wrote:`;
+      blocks.push(
+        `<div class="tp-quoted"><p style="color:#5f6b7a;font-size:13px;margin:0 0 8px;">${header}</p>`
+        + `<blockquote style="margin:0 0 14px;padding-left:12px;border-left:3px solid #d0d5dd;color:#374151;">${quotedHtml}</blockquote></div>`,
+      );
+      const plain = (row.bodyText || row.content || stripHtml(quotedHtml) || '').trim().slice(0, QUOTE_CAP);
+      textBlocks.push(`${header.replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, '&')}\n`
+        + plain.split(/\r?\n/).map((line) => `> ${line}`).join('\n'));
+    }
+    if (blocks.length === 0) return null;
+    if (truncated && blocks[blocks.length - 1] !== OMITTED_MARKER_HTML) {
+      blocks.push(OMITTED_MARKER_HTML);
+      textBlocks.push(OMITTED_MARKER_TEXT);
+    }
+
+    // gmail_quote gives Gmail its best chance of collapsing the history behind
+    // "…"; Outlook shows it inline, which is the expected email convention.
     const html = '<hr style="border:none;border-top:1px solid #d0d5dd;margin:20px 0 12px;" />'
-      + `<div class="tp-quoted"><p style="color:#5f6b7a;font-size:13px;margin:0 0 8px;">${header}</p>`
-      + `<blockquote style="margin:0;padding-left:12px;border-left:3px solid #d0d5dd;color:#374151;">${quotedHtml}</blockquote></div>`;
-    const plain = (last.bodyText || last.content || stripHtml(quotedHtml) || '').trim().slice(0, QUOTE_CAP);
-    const text = `\n\n${header.replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, '&')}\n${plain.split(/\r?\n/).map((line) => `> ${line}`).join('\n')}`;
+      + `<div class="gmail_quote">${blocks.join('')}</div>`;
+    const text = `\n\n${textBlocks.join('\n\n')}`;
     return { html, text };
   }
 

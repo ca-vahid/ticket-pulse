@@ -216,7 +216,6 @@ export default function MobileTabBar() {
                       const newId = Number(event.target.value);
                       if (newId === currentWorkspace?.id) return;
                       switchWorkspace(newId);
-                      window.location.reload();
                     }}
                     className="w-full rounded-lg border border-border bg-muted px-3 py-2 text-sm font-semibold text-foreground"
                   >
