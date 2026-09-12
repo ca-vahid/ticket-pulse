@@ -2182,6 +2182,11 @@ model CompetencyCategory {
   description       String?              @db.Text
   isActive          Boolean              @default(true) @map("is_active")
   isSystemSuggested Boolean              @default(false) @map("is_system_suggested")
+  // Marks a category as "a laptop/desktop is handed to a person here". The
+  // Assetron handout gate asks Ticket Pulse whether a person has a ticket in
+  // one of these; nothing else about the category changes. Owned by us on
+  // purpose, so an integrator never has to guess a category name.
+  gatesHardware     Boolean              @default(false) @map("gates_hardware")
   source            String               @default("manual") @db.VarChar(30)
   sortOrder         Int                  @default(0) @map("sort_order")
   createdAt         DateTime             @default(now()) @map("created_at")

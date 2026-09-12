@@ -4,7 +4,7 @@ import {
   Activity, Plus, Trash2, Loader2, Search, ChevronDown, ChevronRight, Folder,
   CornerDownRight, Pencil, SlidersHorizontal, Archive, ArchiveRestore, GitMerge,
   Check, X, Sparkles, AlertTriangle, Brain, CheckSquare, Database, Download,
-  FileText, Gauge, HelpCircle, RotateCcw, ShieldCheck, Upload, Zap,
+  FileText, Gauge, HelpCircle, Laptop, RotateCcw, ShieldCheck, Upload, Zap,
 } from 'lucide-react';
 import { formatDateTimeInTimezone } from '../../utils/dateHelpers';
 
@@ -930,6 +930,7 @@ function ConfirmRetirePopover({ row, busy, onConfirm, onClose }) {
 function EditDetailsPopover({ row, busy, onSave, onClose }) {
   const [description, setDescription] = useState(row.description || '');
   const [sortOrder, setSortOrder] = useState(Number.isFinite(row.sortOrder) ? String(row.sortOrder) : '0');
+  const [gatesHardware, setGatesHardware] = useState(Boolean(row.gatesHardware));
   return (
     <RowPopover onClose={onClose} labelledBy={`edit-title-${row.id}`}>
       <p id={`edit-title-${row.id}`} className="text-xs font-semibold text-foreground">Edit &ldquo;{row.name}&rdquo;</p>
@@ -950,10 +951,24 @@ function EditDetailsPopover({ row, busy, onSave, onClose }) {
         onChange={(e) => setSortOrder(e.target.value)}
         className="mt-1 w-24 rounded-lg border border-border bg-muted/50 px-2.5 py-1.5 text-xs outline-none focus:border-blue-300 dark:focus:border-blue-500/40 focus:bg-card"
       />
+      <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-lg bg-muted/50 px-2.5 py-2">
+        <input
+          type="checkbox"
+          checked={gatesHardware}
+          onChange={(e) => setGatesHardware(e.target.checked)}
+          className="tp-focus-ring mt-0.5 h-3.5 w-3.5 rounded border-input accent-primary"
+        />
+        <span className="text-[11px] leading-snug text-muted-foreground">
+          <span className="font-medium text-foreground">A laptop or desktop is handed over here</span>
+          <br />
+          Asset systems ask Ticket Pulse whether a person has a ticket in one of these before
+          releasing hardware. Nothing else about the category changes.
+        </span>
+      </label>
       <div className="mt-3 flex justify-end gap-2">
         <button onClick={onClose} className="tp-focus-ring rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted/50">Cancel</button>
         <button
-          onClick={() => onSave({ description: description.trim() || null, sortOrder: Number(sortOrder) || 0 })}
+          onClick={() => onSave({ description: description.trim() || null, sortOrder: Number(sortOrder) || 0, gatesHardware })}
           disabled={busy}
           className="tp-focus-ring flex items-center gap-1 rounded-lg bg-blue-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
         >
@@ -1158,6 +1173,14 @@ function CategoryRow({
               )}
               {!row.isActive && (
                 <span className="flex-shrink-0 rounded-full bg-amber-50 dark:bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-200">Retired</span>
+              )}
+              {row.gatesHardware && (
+                <span
+                  title="Asset systems check for a ticket in this category before releasing a laptop or desktop"
+                  className="inline-flex flex-shrink-0 items-center gap-0.5 rounded-full bg-emerald-50 dark:bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-200"
+                >
+                  <Laptop className="h-2.5 w-2.5" /> Hardware handout
+                </span>
               )}
             </div>
           )}

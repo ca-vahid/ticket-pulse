@@ -474,13 +474,42 @@ export function buildOpenApiSpec(baseUrl) {
       },
       '/tickets/{id}/attachments': { get: op('List attachments', 'attachments:read', { tag: 'attachments' }) },
       '/tickets/{id}/attachments/{attachmentId}': { get: op('Download an attachment', 'attachments:read', { tag: 'attachments' }) },
+      '/hardware/handout-check': {
+        get: op('Can this person be handed a laptop or desktop? — the asset-handout gate', 'approvals:read', {
+          tag: 'approvals',
+          parameters: [
+            {
+              name: 'user', in: 'query', required: true, schema: { type: 'string' }, example: 'jsmith@bgcengineering.ca',
+              description: 'The person the asset is being assigned to. An e-mail address or a bare username — both resolve. New hires have no requester record and are matched from the new-hire ticket subject instead.',
+            },
+            {
+              name: 'windowDays', in: 'query', required: false, schema: { type: 'integer', default: 180, minimum: 1, maximum: 730 },
+              description: 'How far back a hardware ticket still counts as covering this handout.',
+            },
+          ],
+          responseRef: {
+            type: 'object',
+            properties: {
+              decision: { type: 'string', enum: ['ALLOW', 'HOLD', 'NO_TICKET'], description: 'ALLOW — a hardware ticket covers this handout and nothing is holding it. HOLD — an approval exists and has not been granted. NO_TICKET — Ticket Pulse has no record; a process gap to show the operator, not proof of wrongdoing.' },
+              isApproved: { type: 'boolean', description: 'True only when an approval was explicitly granted. Most legitimate handouts are ALLOW with isApproved false — gate on `decision`, not on this.' },
+              reason: { type: 'string', description: 'One sentence, safe to show an operator verbatim.' },
+              approval: { type: 'object', properties: { state: { type: 'string', enum: ['NOT_REQUESTED', 'PENDING', 'INFO_REQUESTED', 'EXPIRED', 'REJECTED', 'CANCELLED', 'APPROVED'] }, decidedAt: { type: 'string', format: 'date-time', nullable: true }, decidedBy: { type: 'string', nullable: true }, category: { type: 'string', nullable: true } } },
+              ticket: { type: 'object', nullable: true, properties: { ref: { type: 'string' }, freshserviceId: { type: 'string', nullable: true }, subject: { type: 'string' }, status: { type: 'string' }, category: { type: 'string', nullable: true }, subcategory: { type: 'string', nullable: true }, url: { type: 'string' } } },
+              otherTickets: { type: 'array', items: { type: 'object' } },
+              person: { type: 'object', properties: { query: { type: 'string' }, matchedBy: { type: 'string', nullable: true, enum: ['requester_email', 'ticket_subject', null] }, email: { type: 'string', nullable: true }, name: { type: 'string', nullable: true } } },
+              scope: { type: 'object', description: 'Which categories and window answered this, so a surprising answer is explainable without calling us.' },
+              checkedAt: { type: 'string', format: 'date-time' },
+            },
+          },
+        }),
+      },
       '/tickets/{id}/approval': {
-        get: op('The approval verdict for one ticket — the gate endpoint', 'approvals:read', {
+        get: op('The approval verdict for one ticket — use when an agent typed a ticket reference', 'approvals:read', {
           tag: 'approvals',
           responseRef: ref('ApprovalVerdict'),
           parameters: [{
-            name: 'category', in: 'query', required: true, schema: { type: 'string' }, example: 'New Computer Upgrade',
-            description: 'REQUIRED, no default. Scopes the verdict to one approval category. A ticket can carry approvals from several categories, so an implicit ticket-wide answer could let an approved licence request open a hardware gate. Pass `any` to opt into the ticket-wide verdict deliberately. Unknown name → 404 `approval_category_not_found` listing the valid ones.',
+            name: 'category', in: 'query', required: false, schema: { type: 'string' }, example: 'New Computer Upgrade',
+            description: 'Optional. Omit it and the verdict is scoped to whatever Ticket Pulse currently treats as a hardware approval — we own that list so you never have to name it. Pass an explicit category to scope to one, or `any` for a ticket-wide verdict. Unknown name → 404 `approval_category_not_found` listing the valid ones.',
           }],
         }),
       },
