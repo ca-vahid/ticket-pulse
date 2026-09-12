@@ -12,7 +12,7 @@ const DETAILED = [
   { id: 2, name: 'Quebec', description: null, parentId: 1, parentName: 'Project Setup', isActive: true, source: 'manual', sortOrder: 0, isSystemSuggested: false, ticketCount: 12, techCount: 3, childCount: 0 },
   { id: 3, name: 'Ontario', description: null, parentId: 1, parentName: 'Project Setup', isActive: true, source: 'manual', sortOrder: 0, isSystemSuggested: false, ticketCount: 8, techCount: 2, childCount: 0 },
   { id: 4, name: 'Proposal Setup', description: 'Pre-award work', parentId: null, parentName: null, isActive: true, source: 'freshservice', sortOrder: 2, isSystemSuggested: false, ticketCount: 7, techCount: 2, childCount: 1 },
-  { id: 5, name: 'Alberta', description: null, parentId: 4, parentName: 'Proposal Setup', isActive: true, source: 'manual', sortOrder: 0, isSystemSuggested: false, ticketCount: 3, techCount: 1, childCount: 0 },
+  { id: 5, name: 'Alberta', description: null, parentId: 4, parentName: 'Proposal Setup', isActive: true, source: 'manual', sortOrder: 0, isSystemSuggested: false, ticketCount: 3, techCount: 1, childCount: 0, gatesHardware: true },
   { id: 6, name: 'Old Hardware', description: 'Legacy queue', parentId: null, parentName: null, isActive: false, source: 'manual', sortOrder: 9, isSystemSuggested: false, ticketCount: 99, techCount: 0, childCount: 0 },
 ];
 
@@ -446,5 +446,44 @@ describe('CategoriesManagementTab (tree overhaul)', () => {
     await renderTab({ showMigrationControls: true });
     await waitFor(() => expect(assignmentAPI.getSkillDraft).toHaveBeenCalled());
     expect(screen.queryByText(/legacy draft from the migration editor/)).not.toBeInTheDocument();
+  });
+});
+
+describe('hardware handout flag (Assetron gate, 09-12)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    assignmentAPI.getCompetencies.mockResolvedValue({ data: { categoriesDetailed: DETAILED, categories: [], categoryTree: [] } });
+    assignmentAPI.getSkillDraft.mockResolvedValue({ data: { draft: null } });
+    assignmentAPI.getReclassificationRuns.mockResolvedValue({ data: [] });
+  });
+  afterEach(() => cleanup());
+
+  test('a flagged category is labelled in the tree, an unflagged one is not', async () => {
+    await renderTab();
+    // Exactly one row carries the flag in the fixture.
+    expect(screen.getAllByText('Hardware handout')).toHaveLength(1);
+  });
+
+  test('the editor opens with the current value and saves a change', async () => {
+    await renderTab();
+    fireEvent.click(screen.getByLabelText('Edit Quebec'));
+    const box = await screen.findByRole('checkbox');
+    expect(box).not.toBeChecked(); // Quebec is not a handout category
+    fireEvent.click(box);
+    fireEvent.click(screen.getByRole('button', { name: /save/i }));
+    await waitFor(() => expect(assignmentAPI.updateCategory).toHaveBeenCalledWith(
+      2, expect.objectContaining({ gatesHardware: true }),
+    ));
+  });
+
+  test('editing something else leaves the flag alone', async () => {
+    await renderTab();
+    fireEvent.click(screen.getByLabelText('Edit Alberta'));
+    const box = await screen.findByRole('checkbox');
+    expect(box).toBeChecked(); // Alberta IS a handout category
+    fireEvent.click(screen.getByRole('button', { name: /save/i }));
+    await waitFor(() => expect(assignmentAPI.updateCategory).toHaveBeenCalledWith(
+      5, expect.objectContaining({ gatesHardware: true }),
+    ));
   });
 });

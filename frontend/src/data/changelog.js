@@ -1,6 +1,17 @@
-export const APP_VERSION = '3.8.55-preview';
+export const APP_VERSION = '3.8.56-preview';
 
 export const changelog = [
+  {
+    version: '3.8.56-preview',
+    date: 'September 12, 2026',
+    entries: [
+      { type: 'added', html: '<strong>💻 Asset systems can ask whether a person is due a laptop</strong> — one call, answered about a <em>person</em> rather than a ticket number, because a person is what an asset system is holding when someone is standing at the desk. It replies <strong>Allow</strong>, <strong>Hold</strong> or <strong>No ticket</strong>, names the ticket it used, and explains itself in a sentence you can show whoever is waiting.' },
+      { type: 'fixed', html: '<strong>The old laptop gate would have blocked almost every handover</strong> — it opened only when a ticket carried a granted approval. Measured against the last six months that is <strong>13 people out of 397</strong>: approvals are how IT handles the exceptions (a Mac instead of a Dell, an early replacement), not the everyday path. The gate now opens when a hardware ticket exists and nothing is holding it, and stops only when an approval really was asked for and has not been granted yet.' },
+      { type: 'fixed', html: '<strong>New starters are recognised</strong> — their laptop ticket is filed by the onboarding automation rather than by them, and someone who joined yesterday has no helpdesk history at all, so looking them up by requester found nobody. Their name is read from the ticket title instead, in all four title formats the automation has used since May 2025.' },
+      { type: 'improved', html: '<strong>You decide which categories hand over a computer</strong> — a new tick-box on a ticket category, under Assignment › Categories. Until now the outside system had to name the category it cared about, so renaming one here would have quietly started turning people away. Five are ticked to begin with; peripherals, phones and hardware returns are not.' },
+      { type: 'improved', html: '<strong>Less for an integrator to get right</strong> — the approval endpoint no longer insists you name a category. Leave it out and it answers about hardware. There is no test workspace to set up and no category name to agree in advance.' },
+    ],
+  },
   {
     version: '3.8.55-preview',
     date: 'September 11, 2026',

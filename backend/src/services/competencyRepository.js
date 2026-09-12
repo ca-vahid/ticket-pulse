@@ -313,6 +313,7 @@ class CompetencyRepository {
             ...(data.isSystemSuggested !== undefined && { isSystemSuggested: data.isSystemSuggested }),
             ...(data.source !== undefined && { source: data.source || 'manual' }),
             ...(data.sortOrder !== undefined && { sortOrder: Number(data.sortOrder) || 0 }),
+            ...(data.gatesHardware !== undefined && { gatesHardware: Boolean(data.gatesHardware) }),
           },
         });
 

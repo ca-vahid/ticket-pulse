@@ -1993,8 +1993,11 @@ router.put('/competencies/categories/:id', requireAdmin, asyncHandler(async (req
     return res.status(403).json({ success: false, message: 'Category belongs to a different workspace' });
   }
   // Whitelist the editable surface: name/description/isActive/sortOrder plus
-  // guarded parentId moves. source/isSystemSuggested stay server-owned.
-  const { name, description, isActive, sortOrder, parentId } = req.body || {};
+  // guarded parentId moves and the hardware-handout flag. source and
+  // isSystemSuggested stay server-owned.
+  const {
+    name, description, isActive, sortOrder, parentId, gatesHardware,
+  } = req.body || {};
   if (name !== undefined && !String(name).trim()) {
     return res.status(400).json({ success: false, message: 'Category name cannot be empty' });
   }
@@ -2004,6 +2007,7 @@ router.put('/competencies/categories/:id', requireAdmin, asyncHandler(async (req
     ...(isActive !== undefined && { isActive: Boolean(isActive) }),
     ...(sortOrder !== undefined && { sortOrder }),
     ...(parentId !== undefined && { parentId }),
+    ...(gatesHardware !== undefined && { gatesHardware: Boolean(gatesHardware) }),
   });
   res.json({ success: true, data: updated });
 }));

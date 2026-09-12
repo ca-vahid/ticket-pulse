@@ -588,6 +588,53 @@ router.get('/tickets/:id/attachments/:attachmentId', S('attachments:read'), asyn
   stream.pipe(res);
 }));
 
+// ------------------------------------------------- hardware handout gate
+
+/**
+ * "Can I hand this person a laptop?" — the whole Assetron integration in one
+ * call, keyed by the person, because that is what an asset system holds at the
+ * moment of assignment. No ticket reference to type, no category name to agree.
+ *
+ * `user` accepts an e-mail or a bare username: new hires have no requester row
+ * (they have never mailed the helpdesk) and appear only as the username inside
+ * the new-hire automation's subject line, so both forms have to resolve.
+ */
+router.get('/hardware/handout-check', S('approvals:read'), asyncHandler(async (req, res) => {
+  const { default: hardwareHandoutService, DEFAULT_WINDOW_DAYS } = await import('../services/hardwareHandoutService.js');
+  const user = typeof req.query.user === 'string' ? req.query.user.trim() : '';
+  if (!user) {
+    throw new ApiProblem({
+      status: 400,
+      code: 'user_required',
+      title: 'A person is required',
+      detail: 'Pass ?user=<email or username> — the person the asset is being assigned to. Both forms resolve: jsmith@bgcengineering.ca or jsmith.',
+    });
+  }
+  if (user.length > 255 || /[\s<>]/.test(user)) {
+    throw new ApiProblem({
+      status: 400,
+      code: 'invalid_user',
+      title: 'Invalid person reference',
+      detail: `"${user}" is not an e-mail address or a username.`,
+    });
+  }
+
+  const windowDays = req.query.windowDays === undefined
+    ? DEFAULT_WINDOW_DAYS
+    : Number(req.query.windowDays);
+  if (!Number.isFinite(windowDays) || windowDays < 1 || windowDays > 730) {
+    throw new ApiProblem({
+      status: 400,
+      code: 'invalid_window',
+      title: 'Invalid window',
+      detail: 'windowDays must be a whole number of days between 1 and 730. It defaults to 180.',
+    });
+  }
+
+  const result = await hardwareHandoutService.check(req.workspaceId, user, { windowDays });
+  res.json({ success: true, data: result });
+}));
+
 // ------------------------------------------------------------- approvals
 
 /**
@@ -600,19 +647,15 @@ router.get('/tickets/:id/attachments/:attachmentId', S('attachments:read'), asyn
  */
 router.get('/tickets/:id/approval', S('approvals:read'), asyncHandler(async (req, res) => {
   const { default: approvalVerdictService } = await import('../services/approvalVerdictService.js');
+  // `category` used to be required, on the theory that an integrator should
+  // name the category it gates on. In practice that made the caller responsible
+  // for a string we own and can rename — so omitting it now means "whatever
+  // Ticket Pulse currently treats as a hardware approval", which is the only
+  // thing anyone ever asked for. An explicit name and `any` still work.
   const raw = typeof req.query.category === 'string' ? req.query.category.trim() : '';
-  if (!raw) {
-    const names = (await approvalVerdictService.listCategories(req.workspaceId)).map((c) => c.name);
-    throw new ApiProblem({
-      status: 400,
-      code: 'category_required',
-      title: 'Approval category required',
-      detail: `Pass ?category=<name> to scope the verdict to one approval category, or ?category=any for a ticket-wide verdict. Active categories in this workspace: ${names.join(', ') || '(none configured)'}.`,
-    });
-  }
 
   let category = null;
-  if (raw.toLowerCase() !== 'any') {
+  if (raw && raw.toLowerCase() !== 'any') {
     category = await approvalVerdictService.findCategory(req.workspaceId, raw);
     if (!category) {
       const names = (await approvalVerdictService.listCategories(req.workspaceId)).map((c) => c.name);
