@@ -52,6 +52,7 @@ import {
   ToggleRight,
   Trash2,
   Type,
+  RotateCcw,
   Undo2,
   Upload,
   UploadCloud,
@@ -79,6 +80,7 @@ const EVENT_LABELS = {
   'ticket.reply_received': 'Requester replied',
   'ticket.note_added': 'Internal note added',
   'ticket.status_changed': 'Status changed',
+  'ticket.reopened': 'Ticket reopened',
   'ticket.fields_updated': 'Ticket updated (fields)',
   'ticket.public_reply_added': 'Agent replied to requester',
   'approval.requested': 'Approval requested',
@@ -103,6 +105,8 @@ export const TRIGGER_PICKER_GROUPS = [
       // MEGA 09-01 Phase TU (TU-8): field edits get their own trigger.
       { value: 'ticket.fields_updated', hint: 'A field on the ticket changed — priority, category, due date, custom fields… Status, assignment and notes have their own triggers' },
       { value: 'ticket.resolved_closed', hint: 'Ticket reaches Resolved or Closed' },
+      // FR 09-11 #4 — the named reopen trigger QA asked for.
+      { value: 'ticket.reopened', hint: 'A resolved or closed ticket goes back to an open state — by a requester reply, an agent, or the API' },
     ],
   },
   {
@@ -149,6 +153,7 @@ const TRIGGER_VISUALS = {
   'ticket.note_added': { icon: FileJson, icon_: 'text-indigo-600 dark:text-indigo-300', chip: 'bg-indigo-50 dark:bg-indigo-500/15 text-indigo-700 dark:text-indigo-200 ring-indigo-200 dark:ring-indigo-500/30', rail: 'bg-indigo-400' },
   'ticket.status_changed': { icon: Waypoints, icon_: 'text-violet-600 dark:text-violet-300', chip: 'bg-violet-50 dark:bg-violet-500/15 text-violet-700 dark:text-violet-200 ring-violet-200 dark:ring-violet-500/30', rail: 'bg-violet-400' },
   'ticket.fields_updated': { icon: Pencil, icon_: 'text-rose-600 dark:text-rose-300', chip: 'bg-rose-50 dark:bg-rose-500/15 text-rose-700 dark:text-rose-200 ring-rose-200 dark:ring-rose-500/30', rail: 'bg-rose-400' },
+  'ticket.reopened': { icon: RotateCcw, icon_: 'text-emerald-600 dark:text-emerald-300', chip: 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 ring-emerald-200 dark:ring-emerald-500/30', rail: 'bg-emerald-400' },
   'ticket.public_reply_added': { icon: Repeat, icon_: 'text-cyan-600 dark:text-cyan-300', chip: 'bg-cyan-50 dark:bg-cyan-500/15 text-cyan-700 dark:text-cyan-200 ring-cyan-200 dark:ring-cyan-500/30', rail: 'bg-cyan-400' },
 };
 

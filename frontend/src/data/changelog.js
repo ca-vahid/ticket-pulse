@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.8.57-preview';
+export const APP_VERSION = '3.8.58-preview';
 
 export const changelog = [
+  {
+    version: '3.8.58-preview',
+    date: 'September 13, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>The new &ldquo;Ticket reopened&rdquo; trigger is now named properly in Mail Workflows</strong> — it was grouped under the raw code <code>TICKET.REOPENED</code>, because the workflow page keeps its own list of trigger names and the new one had only been added to the server&rsquo;s. It now reads &ldquo;Ticket reopened&rdquo;, can be picked when you build a new workflow, and has its own icon like every other trigger.' },
+    ],
+  },
   {
     version: '3.8.57-preview',
     date: 'September 13, 2026',
