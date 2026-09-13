@@ -175,6 +175,13 @@ export async function getSenderIdentity(workspaceId) {
     replyUsesAgentName: typeof row?.replyUsesAgentName === 'boolean' ? row.replyUsesAgentName : REPLY_AGENT_NAME_DEFAULT,
     fromEmail: sendgridConfig.fromEmail || sendgridConfig.smtpFromEmail || null,
     mailboxAddress: mailboxConnection?.address || null,
+    // FR 09-11 #5: when outbound mail leaves through Graph, Exchange rewrites
+    // the display name to the mailbox's own directory name — so everything
+    // above is cosmetic and the Settings card was quietly promising something
+    // it could not deliver (Project Accounting kept showing "PA Tickets"). Say
+    // so, and name the mailbox that is doing the overriding.
+    outboundLane: mailboxConnection ? 'graph' : 'sendgrid',
+    nameOverriddenByExchange: Boolean(mailboxConnection),
     updatedBy: row?.updatedBy || null,
     updatedAt: row?.updatedAt || null,
   };

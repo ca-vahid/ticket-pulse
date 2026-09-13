@@ -141,3 +141,52 @@ describe('SenderIdentityCard', () => {
     });
   });
 });
+
+describe('the Graph lane warning (FR 09-11 #5)', () => {
+  afterEach(() => { cleanup(); vi.clearAllMocks(); });
+
+  // Project Accounting: patickets@ sends through Graph, so Exchange stamps its
+  // own directory name ("PA Tickets") over whatever is configured here. The
+  // card used to show the setting as if it worked.
+  const graphIdentity = {
+    ...inheritedIdentity,
+    workspaceId: 5,
+    fromName: 'Project Accounting',
+    effectiveFromName: 'Project Accounting',
+    mailboxAddress: 'patickets@bgcengineering.ca',
+    outboundLane: 'graph',
+    nameOverriddenByExchange: true,
+  };
+
+  test('warns that the configured name will not reach the recipient', async () => {
+    settingsAPI.getSenderIdentity.mockResolvedValue({ success: true, data: graphIdentity });
+    render(<SenderIdentityCard />);
+    await waitFor(() => expect(screen.getByText('These names will not reach the recipient yet.')).toBeInTheDocument());
+  });
+
+  test('names the mailbox doing the overriding, so the fix is findable', async () => {
+    settingsAPI.getSenderIdentity.mockResolvedValue({ success: true, data: graphIdentity });
+    const { container } = render(<SenderIdentityCard />);
+    await waitFor(() => expect(screen.getByText('These names will not reach the recipient yet.')).toBeInTheDocument());
+    // The address is interpolated mid-sentence, so read the rendered text.
+    expect(container.textContent).toContain('patickets@bgcengineering.ca');
+    expect(container.textContent).toMatch(/switch this workspace/i);
+  });
+
+  test('stays silent on the SendGrid lane, where the name really is honoured', async () => {
+    settingsAPI.getSenderIdentity.mockResolvedValue({
+      success: true,
+      data: { ...graphIdentity, mailboxAddress: null, outboundLane: 'sendgrid', nameOverriddenByExchange: false },
+    });
+    render(<SenderIdentityCard />);
+    await waitFor(() => expect(screen.getByText('Sender identity')).toBeInTheDocument());
+    expect(screen.queryByText('These names will not reach the recipient yet.')).toBeNull();
+  });
+
+  test('an older API response without the field shows no warning', async () => {
+    settingsAPI.getSenderIdentity.mockResolvedValue({ success: true, data: inheritedIdentity });
+    render(<SenderIdentityCard />);
+    await waitFor(() => expect(screen.getByText('Sender identity')).toBeInTheDocument());
+    expect(screen.queryByText('These names will not reach the recipient yet.')).toBeNull();
+  });
+});

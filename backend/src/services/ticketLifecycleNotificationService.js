@@ -300,6 +300,25 @@ export function deriveTicketLifecycleEvents(existingTicket, upsertedTicket, { is
       notificationFingerprint: lifecycleNotificationFingerprint('ticket.status_changed', upsertedTicket, existingTicket),
       extra: { from: oldStatus, to: newStatus },
     });
+
+    // FR 09-11 #4: a first-class "ticket reopened" trigger. This was already
+    // expressible as status_changed + the `event.reopened` condition, but no
+    // admin ever found it — QA asked for the trigger by name. Fires on any
+    // terminal -> non-terminal transition, whatever caused it (a requester
+    // reply through the seeded reopen workflow, an agent, the API, FS sync);
+    // `extra.from`/`extra.to` say which statuses, so "only from Closed" stays
+    // expressible. Deliberately NOT fired for Open -> Pending or on create.
+    if (isTerminal(oldStatus) && !isTerminal(newStatus)) {
+      events.push({
+        type: 'ticket.reopened',
+        occurredAt: dateIso(upsertedTicket.freshserviceUpdatedAt)
+          || dateIso(upsertedTicket.updatedAt)
+          || new Date().toISOString(),
+        dedupeStamp: eventStamp('ticket.reopened', upsertedTicket, existingTicket),
+        notificationFingerprint: lifecycleNotificationFingerprint('ticket.reopened', upsertedTicket, existingTicket),
+        extra: { from: oldStatus, to: newStatus, reopened: true },
+      });
+    }
   }
 
   // FS-side field changes (TU-10, opt-in per trigger node via

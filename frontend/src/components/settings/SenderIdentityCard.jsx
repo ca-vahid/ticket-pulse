@@ -125,6 +125,21 @@ export default function SenderIdentityCard() {
       </div>
 
       <div className="mt-3 grid gap-4 lg:grid-cols-2">
+        {identity?.nameOverriddenByExchange && (
+          <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] leading-relaxed text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-100">
+            <p className="font-semibold">These names will not reach the recipient yet.</p>
+            <p className="mt-1">
+              This workspace sends through the {identity.mailboxAddress || 'connected'} mailbox, and Exchange
+              replaces the display name on every message with that mailbox&rsquo;s own directory name. Whatever
+              you set here is overwritten on delivery.
+            </p>
+            <p className="mt-1">
+              To make it stick, switch this workspace&rsquo;s outbound mail to SendGrid (the mailbox keeps
+              receiving replies exactly as it does now), or rename the mailbox itself in Exchange.
+            </p>
+          </div>
+        )}
+
         <div className="grid gap-3">
           <label className="block text-xs font-medium uppercase text-muted-foreground">
             From address
