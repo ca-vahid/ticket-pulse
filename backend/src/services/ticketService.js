@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import sanitizeHtml from 'sanitize-html';
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
+import { textToHtml } from '../utils/forwardedMailParser.js';
 import { ValidationError, NotFoundError, ServiceBusyError, ConflictError } from '../utils/errors.js';
 import { TICKET_ORIGIN, TICKET_SOURCE, TICKET_SOURCE_LABELS, APP_NATIVE_TRIGGER_SOURCE, AGENT_SELECTABLE_SOURCES, ticketDisplayRef } from '../utils/ticketOrigin.js';
 import noiseRuleService from './noiseRuleService.js';
@@ -4226,8 +4227,13 @@ class TicketService {
     const textBlocks = [];
     let used = 0;
     for (const row of messages) {
+      // FR 09-11 #3 (review): the same double-spacing the conversation had.
+      // Forwarded originals arrive text-only with a blank line after every
+      // line; one <br/> per newline reproduced each blank line in the email
+      // the requester receives. textToHtml treats a blank line as a paragraph
+      // and a single newline as a line break — mail-client behaviour.
       const rawHtml = row.bodyHtml
-        || (row.bodyText || row.content ? `<p>${escapeHtml(row.bodyText || row.content).replace(/\n/g, '<br/>')}</p>` : '');
+        || (row.bodyText || row.content ? textToHtml(row.bodyText || row.content) : '');
       if (!rawHtml.trim()) continue;
       let quotedHtml = sanitizeHtml(rawHtml, EMAIL_SANITIZE_OPTIONS).trim();
       if (quotedHtml.length > QUOTE_CAP) quotedHtml = `${quotedHtml.slice(0, QUOTE_CAP)}<p>[…]</p>`;
@@ -4383,6 +4389,9 @@ class TicketService {
       const result = await sendgridNotificationService.sendEmail({
         to: [ticket.requester.email],
         cc: ccForSend,
+        // FR 09-11 #5: leave from the workspace's own mailbox address, not the
+        // global sender — replies are read there, so the From should say so.
+        from: ingestMailbox?.address || null,
         replyTo: sendgridReplyTo,
         subject,
         html,

@@ -286,9 +286,12 @@ describe('transactionalEmailService (Phase MB-1 mailbox reply loop)', () => {
     jest.clearAllMocks();
     prismaMock.mailboxConnection.findFirst.mockResolvedValue(null);
     await deliverTransactionalEmail({ workspaceId: 5, to: 'admin@example.com', subject: 'Sync health', html: '<p>B</p>' });
-    expect(sendgridSendEmailMock).toHaveBeenLastCalledWith(expect.objectContaining({ replyTo: null }));
-    // No ticket → the ingest picker is never consulted (only the send picker ran).
-    expect(prismaMock.mailboxConnection.findFirst).toHaveBeenCalledTimes(1);
+    expect(sendgridSendEmailMock).toHaveBeenLastCalledWith(expect.objectContaining({ replyTo: null, from: null }));
+    // No ticket → no plus-address Reply-To, so the ingest picker is not asked
+    // for one. It IS still asked once more for the From address (FR 09-11 #5):
+    // workspace mail should leave from the workspace's own mailbox whether or
+    // not a ticket is attached. Send picker + from-address lookup = 2.
+    expect(prismaMock.mailboxConnection.findFirst).toHaveBeenCalledTimes(2);
   });
 
   test('SendGrid lane (no mailbox): asks SendGrid to mint a Message-ID for the ticket, carries threading, Reply-To null', async () => {
@@ -339,5 +342,55 @@ describe('transactionalEmailService (Phase MB-1 mailbox reply loop)', () => {
     await deliverTransactionalEmail({ workspaceId: 5, to: 'a@example.com', subject: 'S', html: '<p>B</p>', fromName: 'Susan Xu' });
     expect(resolveFromNameMock).not.toHaveBeenCalled();
     expect(sendgridSendEmailMock).toHaveBeenCalledWith(expect.objectContaining({ fromName: 'Susan Xu' }));
+  });
+});
+
+describe('FR 09-11 #5 (review): SendGrid mail leaves FROM the workspace mailbox', () => {
+  // Switching Project Accounting off Graph fixed the display name but sent
+  // every PA mail as ticketpulse@ — the global sender — with only Reply-To
+  // pointing home. Domain authentication (QA, 09-11) lets SendGrid send AS
+  // patickets@, so the lane now does.
+  const ingestOnly = async ({ where }) => (
+    where.mode.in.includes('ingest') ? { id: 4, address: 'patickets@bgcengineering.ca', mode: 'ingest' } : null
+  );
+  const tpTicket = { id: 501, workspaceId: 5, origin: 'ticketpulse', nativeNumber: 1042, freshserviceTicketId: null };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    resolveFromNameMock.mockResolvedValue('Project Accounting');
+    prismaMock.ticketThreadEntry.findMany.mockResolvedValue([]);
+    prismaMock.ticketThreadEntry.update.mockResolvedValue({});
+    emailHealthMock.recordSuccess.mockResolvedValue(undefined);
+    emailHealthMock.recordFailure.mockResolvedValue(undefined);
+  });
+
+  test('a ticket reply leaves from the ingest mailbox, not the global sender', async () => {
+    prismaMock.mailboxConnection.findFirst.mockImplementation(ingestOnly);
+    sendgridSendEmailMock.mockResolvedValue({ provider: 'sendgrid', messageId: '<m@bgcengineering.ca>' });
+    const result = await deliverTransactionalEmail({ workspaceId: 5, to: 'rita@example.com', subject: 'S', html: '<p>B</p>', ticket: tpTicket });
+    expect(sendgridSendEmailMock).toHaveBeenLastCalledWith(expect.objectContaining({ from: 'patickets@bgcengineering.ca' }));
+    expect(result.from).toBe('patickets@bgcengineering.ca');
+  });
+
+  test('workflow mail with NO ticket still leaves from the workspace mailbox', async () => {
+    prismaMock.mailboxConnection.findFirst.mockImplementation(ingestOnly);
+    sendgridSendEmailMock.mockResolvedValue({ provider: 'sendgrid' });
+    await deliverTransactionalEmail({ workspaceId: 5, to: 'agent@example.com', subject: 'Reopened: X', html: '<p>B</p>' });
+    expect(sendgridSendEmailMock).toHaveBeenLastCalledWith(expect.objectContaining({ from: 'patickets@bgcengineering.ca', replyTo: null }));
+  });
+
+  test('a caller-supplied from wins over the mailbox address', async () => {
+    prismaMock.mailboxConnection.findFirst.mockImplementation(ingestOnly);
+    sendgridSendEmailMock.mockResolvedValue({ provider: 'sendgrid' });
+    await deliverTransactionalEmail({ workspaceId: 5, to: 'x@example.com', subject: 'S', html: '<p>B</p>', from: 'noreply@bgcengineering.ca' });
+    expect(sendgridSendEmailMock).toHaveBeenLastCalledWith(expect.objectContaining({ from: 'noreply@bgcengineering.ca' }));
+  });
+
+  test('no mailbox at all → from stays null so SendGrid uses the global sender', async () => {
+    prismaMock.mailboxConnection.findFirst.mockResolvedValue(null);
+    sendgridSendEmailMock.mockResolvedValue({ provider: 'sendgrid' });
+    const result = await deliverTransactionalEmail({ workspaceId: 3, to: 'x@example.com', subject: 'S', html: '<p>B</p>' });
+    expect(sendgridSendEmailMock).toHaveBeenLastCalledWith(expect.objectContaining({ from: null }));
+    expect(result.from).toBeNull();
   });
 });

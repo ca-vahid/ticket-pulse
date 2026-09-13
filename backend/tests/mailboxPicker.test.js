@@ -11,7 +11,9 @@ const prismaMock = {
 
 jest.unstable_mockModule('../src/services/prisma.js', () => ({ default: prismaMock }));
 
-const { pickOutboundMailbox, pickIngestMailbox, setPrimaryMailbox, OUTBOUND_MAILBOX_ORDER } = await import('../src/services/mailboxPicker.js');
+const {
+  pickOutboundMailbox, pickIngestMailbox, setPrimaryMailbox, OUTBOUND_MAILBOX_ORDER, sendgridFromAddress,
+} = await import('../src/services/mailboxPicker.js');
 
 // Mega 08-31 Phase MB-1g: ONE centralized outbound picker replacing five
 // ad-hoc `findFirst` call sites — primary first, then oldest id.
@@ -103,5 +105,28 @@ describe('mailboxPicker.setPrimaryMailbox', () => {
     await setPrimaryMailbox(5, 12, false);
     expect(prismaMock.mailboxConnection.updateMany).not.toHaveBeenCalled();
     expect(prismaMock.mailboxConnection.update).toHaveBeenCalledWith({ where: { id: 12 }, data: { isPrimary: false } });
+  });
+});
+
+describe('FR 09-11 #5 (review): sendgridFromAddress', () => {
+  test('returns the ingest mailbox address, trimmed', async () => {
+    prismaMock.mailboxConnection.findFirst.mockResolvedValue({ id: 4, address: '  patickets@bgcengineering.ca ', mode: 'ingest' });
+    await expect(sendgridFromAddress(5)).resolves.toBe('patickets@bgcengineering.ca');
+    expect(prismaMock.mailboxConnection.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ workspaceId: 5, mode: { in: ['ingest', 'both'] } }),
+    }));
+  });
+
+  test('null when there is no mailbox, and null (not a throw) when the lookup fails', async () => {
+    prismaMock.mailboxConnection.findFirst.mockResolvedValue(null);
+    await expect(sendgridFromAddress(5)).resolves.toBeNull();
+    prismaMock.mailboxConnection.findFirst.mockRejectedValue(new Error('db down'));
+    await expect(sendgridFromAddress(5)).resolves.toBeNull();
+  });
+
+  test('a bad workspace id is null without touching the database', async () => {
+    prismaMock.mailboxConnection.findFirst.mockClear();
+    await expect(sendgridFromAddress('nope')).resolves.toBeNull();
+    expect(prismaMock.mailboxConnection.findFirst).not.toHaveBeenCalled();
   });
 });

@@ -134,3 +134,38 @@ describe('the source still matches these assumptions', () => {
     expect(line).not.toMatch(/'note'|'private_note'|'forward'/);
   });
 });
+
+describe('FR 09-11 #3 (review): a quoted text-only original is not double-spaced', () => {
+  // The real TP-1291 body: forwarded in with no HTML, a blank line after
+  // every line. The conversation view was fixed in 3.8.57; the SAME defect
+  // sat in the quote we append to outbound replies, so the requester's email
+  // showed Chelsea's message with an empty line between each line.
+  const body = 'Hi PA Team,\n\nCan we please have an A-code opened?\n\nStart date – August 17, 2026\n\nBST Tasks\n\nPlanning\n\nPacking/Moving';
+
+  test('blank lines become paragraphs, never <br/><br/>', async () => {
+    findMany.mockResolvedValue([entry({ bodyHtml: null, bodyText: body, content: body, actorName: 'Chelsea Simpson' })]);
+    const quote = await ticketService._lastInboundQuote(1);
+    expect(quote.html).not.toMatch(/<br\s*\/?>\s*<br\s*\/?>/);
+    expect(quote.html).toContain('<p>Planning</p>');
+    expect(quote.html).toContain('<p>Packing/Moving</p>');
+  });
+
+  test('a single newline inside a paragraph is still a line break', async () => {
+    findMany.mockResolvedValue([entry({ bodyHtml: null, bodyText: 'Line one\nLine two', content: 'Line one\nLine two' })]);
+    const quote = await ticketService._lastInboundQuote(1);
+    // The email sanitizer normalises <br> to <br />; either is a line break.
+    expect(quote.html).toMatch(/Line one<br\s*\/?>Line two/);
+  });
+
+  test('HTML in the text is escaped, and stored HTML is still preferred over text', async () => {
+    findMany.mockResolvedValue([
+      entry({ bodyHtml: null, bodyText: '<script>x</script> & co', content: '<script>x</script> & co' }),
+      entry({ bodyHtml: '<p>real html</p>', bodyText: 'ignored' }),
+    ]);
+    const quote = await ticketService._lastInboundQuote(1);
+    expect(quote.html).toContain('&lt;script&gt;');
+    expect(quote.html).not.toContain('<script>');
+    expect(quote.html).toContain('<p>real html</p>');
+    expect(quote.html).not.toContain('ignored');
+  });
+});

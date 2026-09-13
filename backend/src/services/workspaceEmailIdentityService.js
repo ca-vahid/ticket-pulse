@@ -2,7 +2,7 @@ import prisma from './prisma.js';
 import settingsRepository from './settingsRepository.js';
 import logger from '../utils/logger.js';
 import { sanitizeFromName } from '../utils/emailSender.js';
-import { pickOutboundMailbox } from './mailboxPicker.js';
+import { pickIngestMailbox, pickOutboundMailbox } from './mailboxPicker.js';
 
 /**
  * Per-workspace outbound sender identity (Phase EB).
@@ -155,7 +155,7 @@ export async function resolveReplyFromName(workspaceId = null, actorName = null)
  */
 export async function getSenderIdentity(workspaceId) {
   const id = normalizeWorkspaceId(workspaceId);
-  const [row, sendgridConfig, mailboxConnection] = await Promise.all([
+  const [row, sendgridConfig, mailboxConnection, ingestMailbox] = await Promise.all([
     id !== null
       ? prisma.workspaceEmailIdentity.findUnique({ where: { workspaceId: id } })
       : Promise.resolve(null),
@@ -163,6 +163,9 @@ export async function getSenderIdentity(workspaceId) {
     // Same picker every outbound lane uses (MB-1g), so the Settings view
     // names the address mail will actually leave from.
     id !== null ? pickOutboundMailbox(id) : Promise.resolve(null),
+    // FR 09-11 #5: on the SendGrid lane mail now leaves from the ingest
+    // mailbox's address, so the card must show THAT, not the global sender.
+    id !== null ? pickIngestMailbox(id).catch(() => null) : Promise.resolve(null),
   ]);
 
   const overrideFromName = sanitizeFromName(row?.fromName);
@@ -173,7 +176,7 @@ export async function getSenderIdentity(workspaceId) {
     globalFromName,
     effectiveFromName: overrideFromName || globalFromName,
     replyUsesAgentName: typeof row?.replyUsesAgentName === 'boolean' ? row.replyUsesAgentName : REPLY_AGENT_NAME_DEFAULT,
-    fromEmail: sendgridConfig.fromEmail || sendgridConfig.smtpFromEmail || null,
+    fromEmail: mailboxConnection?.address || ingestMailbox?.address || sendgridConfig.fromEmail || sendgridConfig.smtpFromEmail || null,
     mailboxAddress: mailboxConnection?.address || null,
     // FR 09-11 #5: when outbound mail leaves through Graph, Exchange rewrites
     // the display name to the mailbox's own directory name — so everything

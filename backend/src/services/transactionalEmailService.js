@@ -1,7 +1,7 @@
 import logger from '../utils/logger.js';
 import emailHealthService from './emailHealthService.js';
 import { resolveFromName } from './workspaceEmailIdentityService.js';
-import { pickIngestMailbox, pickOutboundMailbox } from './mailboxPicker.js';
+import { pickIngestMailbox, pickOutboundMailbox, sendgridFromAddress } from './mailboxPicker.js';
 import { plusAddressReplyTo, storeEntryMessageId, threadingHeadersForTicket } from './emailThreadingService.js';
 
 function normalizeList(value) {
@@ -142,17 +142,20 @@ export async function deliverTransactionalEmail({
   }
 
   // sendgridNotificationService.sendEmail records its own health event.
-  // Reply-To on this lane points at the workspace's ingest mailbox (when
-  // one is connected) so a requester's answer still reaches the ticket even
-  // though the mail left as ticketpulse@.
+  // Reply-To on this lane points at the workspace's ingest mailbox (when one
+  // is connected) so a requester's answer still reaches the ticket. Since
+  // FR 09-11 #5 the mail also LEAVES from that mailbox's address when the
+  // caller did not name one — a workspace's mail should carry the address
+  // people write to, not the global sender's.
   const sendgridReplyTo = ticket ? await sendgridLaneReplyTo(workspaceId, ticket) : null;
+  const laneFrom = from || await sendgridFromAddress(workspaceId ?? ticket?.workspaceId ?? null);
   const { default: sendgrid } = await import('./sendgridNotificationService.js');
   try {
     const result = await sendgrid.sendEmail({
       to: recipients,
       cc: ccRecipients,
       bcc: bccRecipients,
-      from,
+      from: laneFrom,
       replyTo: sendgridReplyTo,
       subject,
       html: htmlBody,
@@ -173,7 +176,7 @@ export async function deliverTransactionalEmail({
       provider: result?.provider || 'sendgrid',
       providerMessageId: result?.providerMessageId || null,
       messageId,
-      from: from || null,
+      from: laneFrom || null,
       replyTo: sendgridReplyTo,
     };
   } catch (err) {

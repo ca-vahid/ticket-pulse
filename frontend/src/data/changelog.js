@@ -1,6 +1,16 @@
-export const APP_VERSION = '3.8.58-preview';
+export const APP_VERSION = '3.8.59-preview';
 
 export const changelog = [
+  {
+    version: '3.8.59-preview',
+    date: 'September 13, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>🔍 A second look at yesterday’s fixes found three holes</strong> — we reviewed the 09-11 train as if it were someone else’s work. It mostly held; where it did not, here is what changed.' },
+      { type: 'fixed', html: '<strong>The &ldquo;Ticket reopened&rdquo; trigger now fires when a workflow does the reopening</strong> — the &ldquo;Reopen on requester reply&rdquo; workflow writes status directly and skipped the events the new trigger listens for, so the one reopen path QA asked about was the one it could not see. It fires from that path now, guarded so a workflow cannot set itself off.' },
+      { type: 'fixed', html: '<strong>Project Accounting mail leaves from patickets@ again</strong> — moving it off the mailbox route fixed the display name and quietly sent everything from the global ticketpulse@ address instead. With the domain authenticated in SendGrid, a workspace’s mail now goes out from its own mailbox address, for replies and automated messages alike. The sender-identity card shows that address too.' },
+      { type: 'fixed', html: '<strong>Quoted email history is no longer double-spaced either</strong> — the spacing fix for forwarded mail covered the conversation on screen but not the history we quote at the bottom of outgoing replies. Same cause, same fix, now in both places.' },
+    ],
+  },
   {
     version: '3.8.58-preview',
     date: 'September 13, 2026',

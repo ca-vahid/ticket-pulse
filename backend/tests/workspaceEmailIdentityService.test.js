@@ -213,3 +213,32 @@ describe('workspaceEmailIdentityService', () => {
     expect(ticketService).toContain('resolveReplyFromName(ticket.workspaceId, entry.actorName)');
   });
 });
+
+describe('FR 09-11 #5 (review): fromEmail reports the address mail really leaves from', () => {
+  // A Graph-lane workspace sends as its outbound mailbox; a SendGrid-lane
+  // workspace with an ingest mailbox now sends as THAT; only a workspace with
+  // no mailbox at all uses the global SendGrid sender. The card used to show
+  // the global sender for everyone, which was wrong for two of the three.
+  const ingestOnly = async ({ where }) => (
+    where.mode.in.includes('ingest') ? { id: 4, address: 'patickets@bgcengineering.ca', mode: 'ingest' } : null
+  );
+
+  test('outbound (Graph) mailbox wins', async () => {
+    prismaMock.mailboxConnection.findFirst.mockResolvedValue({ id: 1, address: 'it@bgcengineering.ca', mode: 'both' });
+    const view = await getSenderIdentity(1);
+    expect(view.fromEmail).toBe('it@bgcengineering.ca');
+  });
+
+  test('ingest-only mailbox (SendGrid lane) is next', async () => {
+    prismaMock.mailboxConnection.findFirst.mockImplementation(ingestOnly);
+    const view = await getSenderIdentity(5);
+    expect(view.fromEmail).toBe('patickets@bgcengineering.ca');
+    expect(view.nameOverriddenByExchange).toBe(false);
+  });
+
+  test('no mailbox → the global SendGrid sender', async () => {
+    prismaMock.mailboxConnection.findFirst.mockResolvedValue(null);
+    const view = await getSenderIdentity(3);
+    expect(view.fromEmail).toBe('ticketpulse@bgcengineering.ca');
+  });
+});
