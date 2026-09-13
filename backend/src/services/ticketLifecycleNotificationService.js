@@ -738,7 +738,7 @@ export async function emitTicketLifecycleNotifications({
   for (const event of events) {
     // status_changed conditions get the transition's BASES alongside the
     // names ("left an Open-base status", "entered any Pending-base status").
-    if (event.type === 'ticket.status_changed' && event.extra) {
+    if ((event.type === 'ticket.status_changed' || event.type === 'ticket.reopened') && event.extra) {
       event.extra = {
         ...event.extra,
         fromBase: await statusService.resolveBaseStatus(ticket.workspaceId, event.extra.from).catch(() => null),

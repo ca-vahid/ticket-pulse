@@ -63,3 +63,20 @@ export async function setPrimaryMailbox(workspaceId, mailboxId, isPrimary = true
 }
 
 export default { pickOutboundMailbox, pickIngestMailbox, setPrimaryMailbox, OUTBOUND_MAILBOX_ORDER };
+
+/**
+ * The address SendGrid mail should leave FROM for this workspace (FR 09-11 #5).
+ *
+ * Until now the SendGrid lane always sent as the global sender
+ * (ticketpulse@…), so a workspace that reads its own mailbox — patickets@ —
+ * replied from an address it does not own, with only Reply-To pointing home.
+ * With the bgcengineering.ca domain authenticated in SendGrid (QA confirmed
+ * 09-11) we can send AS the workspace's ingest mailbox: the address people
+ * already write to, and the one whose Reply-To we were setting anyway.
+ * Null when no mailbox is connected → callers fall back to the global sender.
+ */
+export async function sendgridFromAddress(workspaceId) {
+  const ingest = await pickIngestMailbox(workspaceId).catch(() => null);
+  const address = String(ingest?.address || '').trim();
+  return address || null;
+}

@@ -3357,6 +3357,43 @@ export async function applyFsBornStatusWriteback({ node, ticket, setStatus, stat
  * executeForEvent can skip the workflow that made the change (loop guard).
  * Status is excluded (status_changed has its own trigger).
  */
+/**
+ * Pure: did this status write take the ticket from a closed state back to an
+ * open one? Bases, not names — a workspace's custom "Signed off" maps to
+ * Closed. `terminal` defaults to the canonical pair; callers pass the
+ * registry's list.
+ */
+export function isWorkflowReopen(fromBase, toBase, terminal = ['Resolved', 'Closed']) {
+  const set = new Set(terminal);
+  return Boolean(fromBase && toBase) && set.has(fromBase) && !set.has(toBase);
+}
+
+async function emitWorkflowReopened({ ticket, patch, workflowId }) {
+  const from = String(ticket?.status || '').trim();
+  const to = String(patch?.status || '').trim();
+  if (!from || !to || from === to) return null;
+  try {
+    const { default: statusService, TERMINAL_BASE_STATUSES } = await import('./statusService.js');
+    const [fromBase, toBase] = await Promise.all([
+      statusService.baseStatusOf(ticket.workspaceId, from),
+      statusService.baseStatusOf(ticket.workspaceId, to),
+    ]);
+    if (!isWorkflowReopen(fromBase, toBase, TERMINAL_BASE_STATUSES)) return null;
+    const { default: lifecycle } = await import('./ticketLifecycleNotificationService.js');
+    return await lifecycle.emitTicketEvent('ticket.reopened', ticket.id, {
+      source: workflowId ? `workflow:${workflowId}` : 'workflow',
+      dedupeStamp: `reopened:${ticket.id}:${from}->${to}:${new Date().toISOString()}`,
+      extra: {
+        from, to, fromBase, toBase, reopened: true,
+        actorKind: 'workflow', workflowId: workflowId || null,
+      },
+    });
+  } catch (error) {
+    logger.warn(`update_ticket ticket.reopened dispatch failed (non-fatal): ${error.message}`);
+    return null;
+  }
+}
+
 async function emitWorkflowFieldsUpdated({ ticket, changes, customFieldResult, workflowId, eventContext }) {
   try {
     const merged = {};
@@ -3722,6 +3759,15 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false, sco
   }
   patch.mirrorState = 'pending';
   await prisma.ticket.update({ where: { id: ticket.id }, data: patch });
+
+  // FR 09-11 #4 (review): this node writes status straight to the database,
+  // so none of the lifecycle events fire for it — which meant the seeded
+  // "Reopen on requester reply" workflow reopened a ticket and the brand-new
+  // ticket.reopened trigger never heard about it. Emit exactly that one event
+  // here, loop-guarded by workflowId like fields_updated. status_changed is
+  // deliberately still NOT emitted from workflow writes: that is a standing
+  // decision to keep status-setting workflows from cascading into each other.
+  await emitWorkflowReopened({ ticket, patch, workflowId });
 
   try {
     const { default: ticketActivityRepository } = await import('./ticketActivityRepository.js');
