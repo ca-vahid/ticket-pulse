@@ -440,7 +440,11 @@ describe('inbound Cc merge (reply path)', () => {
     const { data } = prismaMock.ticket.update.mock.calls[0][0];
     expect(data.ccEmails).toBeUndefined();
     expect(data.mirrorState).toBeUndefined();
-    expect(prismaMock.requester.findUnique).not.toHaveBeenCalled();
+    // The Cc merge must do no address resolution. The one requester read that
+    // IS expected here is the FR 09-11 #1 identity check — "is this sender the
+    // requester on this ticket?" — which fetches only the e-mail by id.
+    expect(prismaMock.requester.findUnique).toHaveBeenCalledTimes(1);
+    expect(prismaMock.requester.findUnique).toHaveBeenCalledWith({ where: { id: 55 }, select: { email: true } });
     expect(prismaMock.technician.findMany).not.toHaveBeenCalled();
     expect(activityMock.create).not.toHaveBeenCalledWith(expect.objectContaining({ activityType: 'cc_changed' }));
     expect(mirrorServiceMock.enqueueFieldSync).not.toHaveBeenCalled();

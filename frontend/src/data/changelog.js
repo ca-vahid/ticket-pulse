@@ -1,6 +1,16 @@
-export const APP_VERSION = '3.8.56-preview';
+export const APP_VERSION = '3.8.57-preview';
 
 export const changelog = [
+  {
+    version: '3.8.57-preview',
+    date: 'September 13, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>💬 A reply from someone who is also an agent now counts as a reply</strong> — if the person who raised a ticket happens to work on the helpdesk too, their answer was filed as an <em>agent</em> reply (FR: QA). The ticket never showed &ldquo;requester replied&rdquo;, and nothing reopened. On your own ticket you are the customer, whatever your job title — which is exactly why QA could not reproduce it on anyone else&rsquo;s ticket.' },
+      { type: 'fixed', html: '<strong>Forwarded emails no longer arrive double-spaced</strong> — a blank line between every single line, including one-word lines like &ldquo;Planning&rdquo; (FR: QA). Mail forwarded into a ticket often arrives as plain text with a blank line after every line, and we were honouring each one literally. Blank lines now start a new paragraph instead, which is what a mail client does. The example QA sent got 154 pixels shorter and reads as the list it always was.' },
+      { type: 'added', html: '<strong>A &ldquo;ticket reopened&rdquo; trigger for email workflows</strong> — tells the assigned agent when a ticket lands back on their plate, whether a requester&rsquo;s reply reopened it, an agent did, or the API did (FR: QA). It was technically possible before by combining two other settings, which meant nobody found it. Seeded switched off in every workspace — turn it on when you want the emails.' },
+      { type: 'fixed', html: '<strong>The sender-name setting now tells you when it cannot work</strong> — a workspace that sends through a connected mailbox has its display name replaced by Exchange on delivery, so Project Accounting kept showing &ldquo;PA Tickets&rdquo; however the setting was configured. The settings page said nothing about this. It now says so plainly, names the mailbox responsible, and tells you what to change.' },
+    ],
+  },
   {
     version: '3.8.56-preview',
     date: 'September 12, 2026',

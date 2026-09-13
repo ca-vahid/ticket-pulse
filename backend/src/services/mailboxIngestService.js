@@ -680,6 +680,29 @@ class MailboxIngestService {
   }
 
   /**
+   * Is this sender the REQUESTER on this particular ticket? Agents raise and
+   * are named on tickets too, and on their own ticket they are the customer.
+   * Compared on the address, which is what the mail actually carries.
+   */
+  async _senderIsTicketRequester(ticket, fromAddress) {
+    const from = String(fromAddress || '').trim().toLowerCase();
+    if (!from || !ticket?.requesterId) return false;
+    try {
+      const requester = await prisma.requester.findUnique({
+        where: { id: ticket.requesterId },
+        select: { email: true },
+      });
+      const email = String(requester?.email || '').trim().toLowerCase();
+      return Boolean(email) && email === from;
+    } catch (err) {
+      // Never lose a reply over an identity lookup — fall back to the
+      // workspace-level answer, which is the pre-09-11 behaviour.
+      logger.warn(`Requester identity check failed (non-fatal): ${err.message}`);
+      return false;
+    }
+  }
+
+  /**
    * A matched inbound message becomes a thread entry. Three shapes:
    *  • requester reply (default)      — authorType requester, incoming.
    *  • agent forward onto a ticket    — authorType agent (the forwarder),
@@ -688,10 +711,20 @@ class MailboxIngestService {
    *    NOT incoming (already delivered by Outlook → deliveryState external,
    *    never re-sent), no reply_received event.
    */
-  async ingestReply(connection, ticket, email, via, { agent = null, ctx = null } = {}) {
+  async ingestReply(connection, ticket, email, via, { agent: resolvedAgent = null, ctx = null } = {}) {
     const now = new Date();
     const recipients = emailRecipients(email);
-    const isForward = Boolean(agent && ctx?.parsed?.isForward && ctx?.originalOk);
+    const isForward = Boolean(resolvedAgent && ctx?.parsed?.isForward && ctx?.originalOk);
+    // FR 09-11 #1: identity is per TICKET, not per workspace. Someone who is an
+    // agent elsewhere can be the REQUESTER on this ticket — QA's own tester is
+    // both, which is exactly how this surfaced — and their reply is a requester
+    // reply. resolveAgentSender runs BEFORE the matching ladder, so it cannot
+    // know whose ticket this is; correct it now that we do.
+    // Forwards are deliberately untouched: forwarding is an agent action
+    // whoever does it, and the content belongs to the original sender.
+    const senderIsRequester = !isForward
+      && await this._senderIsTicketRequester(ticket, email.from);
+    const agent = senderIsRequester ? null : resolvedAgent;
     const isAgentReply = Boolean(agent && !isForward);
     const forwardedMeta = isForward ? this._forwardedMeta(agent, email, ctx.parsed, { sliced: false }) : null;
     const rawPayload = {

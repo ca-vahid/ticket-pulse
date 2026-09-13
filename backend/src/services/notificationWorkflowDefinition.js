@@ -26,6 +26,9 @@ export const NOTIFICATION_EVENT_TYPES = [
   'ticket.reply_received',
   'ticket.note_added',
   'ticket.status_changed',
+  // FR 09-11 #4: terminal -> non-terminal, whatever reopened it. A named
+  // trigger because nobody found status_changed + the `reopened` condition.
+  'ticket.reopened',
   // Field edits (MEGA 09-01 Phase TU, TU-5): priority / category / due dates /
   // custom fields… by a human in TP, the public API (incl. Power Apps), an
   // API resubmission, the workflow update_ticket node, or (opt-in per
@@ -524,6 +527,9 @@ export const DEFAULT_WORKFLOW_SPECS = [
   { key: defaultWorkflowKey('ticket.resolved_closed'), triggerType: 'ticket.resolved_closed', scheduleMode: 'standard' },
   // Seeded "reopen on requester reply" — customizable per workspace (decision #11)
   { key: 'ticket_reply_received_reopen', triggerType: 'ticket.reply_received', scheduleMode: 'standard' },
+  // FR 09-11 #4 — seeded DISABLED: it appears in the workflow list so an admin
+  // can read it and switch it on, and sends nothing until they do.
+  { key: defaultWorkflowKey('ticket.reopened'), triggerType: 'ticket.reopened', scheduleMode: 'standard' },
 ];
 
 export const NOTIFICATION_NODE_REGISTRY = Object.freeze({
@@ -1154,6 +1160,7 @@ function eventLabel(triggerType) {
     'ticket.reply_received': 'Requester replied',
     'ticket.note_added': 'Internal note added',
     'ticket.status_changed': 'Status changed',
+    'ticket.reopened': 'Ticket reopened',
     'ticket.fields_updated': 'Ticket updated (fields)',
     'ticket.public_reply_added': 'Agent replied to requester',
     'approval.requested': 'Approval requested',
@@ -1168,7 +1175,10 @@ function eventLabel(triggerType) {
 }
 
 function defaultRecipients(triggerType) {
-  if (triggerType === 'ticket.assigned' || triggerType === 'ticket.reassigned' || triggerType === 'ticket.fields_updated') {
+  if (triggerType === 'ticket.assigned' || triggerType === 'ticket.reassigned'
+    || triggerType === 'ticket.fields_updated' || triggerType === 'ticket.reopened') {
+    // FR 09-11 #4 asked for the assigned agent specifically: a reopen is a
+    // ticket landing back on somebody's plate, not news for the requester.
     return ['assigned_agent'];
   }
   return ['requester'];
@@ -1180,6 +1190,15 @@ function defaultTemplate(triggerType) {
       subject: 'Ticket assigned: #{{ ticket.freshserviceTicketId }}',
       html: '<p>Ticket <strong>#{{ ticket.freshserviceTicketId }}</strong> has been assigned to {{ assignedAgent.name }}.</p><p>{{ ticket.subject }}</p>',
       text: 'Ticket #{{ ticket.freshserviceTicketId }} has been assigned to {{ assignedAgent.name }}.\n\n{{ ticket.subject }}',
+    };
+  }
+
+  if (triggerType === 'ticket.reopened') {
+    return {
+      subject: 'Reopened: {{ ticket.subject }}',
+      html: '<p>A ticket assigned to you has been <strong>reopened</strong>.</p>'
+        + '<p><strong>{{ ticket.subject }}</strong><br>Status went from {{ event.extra.from }} to {{ event.extra.to }}.</p>',
+      text: 'A ticket assigned to you has been reopened.\n\n{{ ticket.subject }}\nStatus went from {{ event.extra.from }} to {{ event.extra.to }}.',
     };
   }
 
@@ -1798,6 +1817,15 @@ export function defaultWorkflowMetadataForSpec(spec) {
       key: spec.key,
       name: 'Reopen on requester reply',
       description: 'When a requester replies to a resolved or closed ticket, reopen it so the reply is not missed. Fully customizable — no email is sent by default.',
+      triggerType: spec.triggerType,
+      scheduleMode: spec.scheduleMode || 'standard',
+    };
+  }
+  if (spec.triggerType === 'ticket.reopened') {
+    return {
+      key: spec.key || defaultWorkflowKey(spec.triggerType),
+      name: 'Ticket reopened',
+      description: 'Tell the assigned agent when a ticket they own is reopened — by a requester reply, an agent, or the API. Seeded switched off; turn it on when you want the emails.',
       triggerType: spec.triggerType,
       scheduleMode: spec.scheduleMode || 'standard',
     };

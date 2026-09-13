@@ -15,6 +15,7 @@ import FieldCardNote from '../components/tickets/FieldCardNote';
 import PinnedIntakeCard from '../components/tickets/PinnedIntakeCard';
 import ThreadSummaryCard from '../components/tickets/ThreadSummaryCard';
 import RequestApprovalModal from '../components/tickets/RequestApprovalModal';
+import { plainTextToHtml } from '../utils/plainTextToHtml';
 import AppHeader from '../components/AppHeader';
 import MobileTabBar from '../components/nav/MobileTabBar';
 import AiAssignModal from '../components/tickets/AiAssignModal';
@@ -166,9 +167,13 @@ function RichBody({ html, text, onImageRef, className = '' }) {
     const clean = escapeHtml(cleanRefName(name));
     return `<span class="tp-img-ref" data-img="${clean}" role="button" tabindex="0">🖼 ${clean}</span>`;
   });
+  // FR 09-11 #3: a text-only body used to become one <br> per newline, so mail
+  // that separates every line with a blank line (Outlook's text down-conversion
+  // of an HTML message) rendered with an empty line between every single line.
+  // Paragraphs carry that structure instead, at a normal paragraph margin.
   const source = (html && looksLikeHtml(html))
     ? injectRefs(html)
-    : injectRefs(escapeHtml(text || html || '').replace(/\n/g, '<br>'));
+    : injectRefs(plainTextToHtml(text || html || ''));
   const handleClick = (e) => {
     const el = e.target.closest?.('.tp-img-ref');
     if (el) { e.preventDefault(); onImageRef?.(el.getAttribute('data-img')); }
