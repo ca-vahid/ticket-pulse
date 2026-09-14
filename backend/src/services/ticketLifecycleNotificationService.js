@@ -459,7 +459,12 @@ export function webhookPayloadFromContext(eventContext) {
   return {
     ticket: {
       id: t.id,
-      ref: t.freshserviceTicketId ? `#${t.freshserviceTicketId}` : `TP-${t.id}`,
+      // The ref people and integrators see: TP-<native number> for a TP-born
+      // ticket, #<FS number> for an FS-born one. (Sandbox acceptance 14 Sep:
+      // deliveries said "TP-44533" for the ticket every read called TP-1298.)
+      ref: t.displayRef
+        || (t.nativeNumber !== null && t.nativeNumber !== undefined ? `TP-${t.nativeNumber}`
+          : t.freshserviceTicketId ? `#${t.freshserviceTicketId}` : `TP-${t.id}`),
       subject: t.subject,
       status: t.status,
       statusBase: t.statusBase ?? null,

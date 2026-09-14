@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.8.64-preview';
+export const APP_VERSION = '3.8.65-preview';
 
 export const changelog = [
+  {
+    version: '3.8.65-preview',
+    date: 'September 14, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>🔌 API: PATCH accepts the same custom-field keys as create</strong> — <code>customFields</code> on a PATCH are now normalised camelCase → snake_case the way they are on POST, so <code>simorghVerdict</code> updates <code>simorgh_verdict</code> instead of being refused as unknown. Found by the Simorgh sandbox acceptance run.' },
+      { type: 'fixed', html: '<strong>Webhooks name the ticket the way you do</strong> — <code>data.ticket.ref</code> on every outbound event is now the display reference (<code>TP-1298</code>), not the internal row id; FS-born tickets keep <code>#&lt;number&gt;</code>.' },
+      { type: 'improved', html: '<strong>“Resolve on benign verdict” acts at once</strong> — the template’s trigger no longer sits in the 3-minute coalescing window meant for change e-mails. Installed copies in the sandbox and IT were upgraded in place.' },
+    ],
+  },
   {
     version: '3.8.64-preview',
     date: 'September 14, 2026',

@@ -485,9 +485,13 @@ router.patch('/tickets/:id', S('tickets:write'), withIdempotency, asyncHandler(a
     // NO auto-provisioning on PATCH — creation is the intake path that
     // provisions definitions. Unknown keys are a 422 naming every offender
     // (setValues alone would stop at the first one).
-    const { default: customFieldService } = await import('../services/customFieldService.js');
+    const { default: customFieldService, normalizeFieldKey } = await import('../services/customFieldService.js');
+    // Keys are normalised the way create normalises them (camelCase →
+    // snake_case): the sandbox acceptance sent `simorghVerdict` on PATCH the
+    // way it had on POST and every key came back "unknown".
+    const values = Object.fromEntries(Object.entries(body.customFields || {}).map(([k, v]) => [normalizeFieldKey(k), v]));
     const known = new Set((await customFieldService.listDefinitions(req.workspaceId)).map((d) => d.key));
-    const unknown = Object.keys(body.customFields || {}).filter((k) => !known.has(k));
+    const unknown = Object.keys(values).filter((k) => !known.has(k));
     if (unknown.length) {
       throw new ApiProblem({
         status: 422,
@@ -497,7 +501,7 @@ router.patch('/tickets/:id', S('tickets:write'), withIdempotency, asyncHandler(a
         errors: unknown.map((k) => ({ field: `customFields.${k}`, code: 'unknown_field' })),
       });
     }
-    await customFieldService.setValues(id, req.workspaceId, body.customFields, actor);
+    await customFieldService.setValues(id, req.workspaceId, values, actor);
   }
   const ticket = await ticketService.getTicket(id, req.workspaceId);
   res.json({ success: true, data: ticketShape(ticket) });

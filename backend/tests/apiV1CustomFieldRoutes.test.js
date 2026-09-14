@@ -131,6 +131,17 @@ describe('PATCH /api/v1/tickets/:id — customFields merge', () => {
     expect(customFieldServiceMock.setValuesAtCreate).not.toHaveBeenCalled();
   });
 
+  test('camelCase keys are normalised to the stored snake_case keys (Simorgh acceptance 14 Sep)', async () => {
+    await request(buildApp())
+      .patch('/api/v1/tickets/501')
+      .set('Authorization', 'Bearer tp_live_x')
+      .send({ customFields: { clientName: 'Updated' } })
+      .expect(200);
+    expect(customFieldServiceMock.setValues).toHaveBeenCalledWith(
+      501, 1, { client_name: 'Updated' }, expect.objectContaining({ role: 'api' }),
+    );
+  });
+
   test('unknown keys → 422 problem listing EVERY offender; nothing written', async () => {
     const response = await request(buildApp())
       .patch('/api/v1/tickets/501')

@@ -89,7 +89,9 @@ export const WORKFLOW_TEMPLATES = [
     description: 'When the security agent finalises a ticket as BenignPositive or FalsePositive with no containment and recommends_close = true, resolve it with a closure note. Every other verdict is left for a person.',
     triggerType: 'ticket.fields_updated',
     build: () => templateNodes([
-      { id: 'trigger', type: 'trigger', data: { triggerType: 'ticket.fields_updated' } },
+      // coalesceMinutes 0: the fields_updated trigger defaults to a 3-minute
+      // coalescing window meant for change e-mails; a resolve must not wait.
+      { id: 'trigger', type: 'trigger', data: { triggerType: 'ticket.fields_updated', coalesceMinutes: 0 } },
       {
         id: 'verdict',
         type: 'condition',
