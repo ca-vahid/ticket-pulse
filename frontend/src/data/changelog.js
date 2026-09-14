@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.8.73-preview';
+export const APP_VERSION = '3.8.74-preview';
 
 export const changelog = [
+  {
+    version: '3.8.74-preview',
+    date: 'September 14, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>🦅 The Simorgh phoenix, everywhere the security agent appears</strong> — the requester card in the ticket header and the preview panel show the Simorgh application’s own blue-and-gold phoenix instead of “S·” initials, and the thread now uses the same mark (light and dark renderings). Rostam keeps his avatar.' },
+    ],
+  },
   {
     version: '3.8.73-preview',
     date: 'September 14, 2026',

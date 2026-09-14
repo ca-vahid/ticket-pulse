@@ -18,7 +18,8 @@ import RequestApprovalModal from '../components/tickets/RequestApprovalModal';
 import ResolveReasonModal from '../components/tickets/ResolveReasonModal';
 import { ticketNeedsResolutionReason, reasonLabel } from '../utils/resolutionReasons';
 import { plainTextToHtml } from '../utils/plainTextToHtml';
-import { integrationIdentity } from '../utils/integrationIdentity';
+import { integrationIdentity, requesterIntegrationIdentity } from '../utils/integrationIdentity';
+import { IntegrationAvatar } from '../components/tickets/IntegrationAvatar';
 import AppHeader from '../components/AppHeader';
 import MobileTabBar from '../components/nav/MobileTabBar';
 import AiAssignModal from '../components/tickets/AiAssignModal';
@@ -481,16 +482,7 @@ export function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, ph
   const avatar = (
     <div className="flex-shrink-0 flex flex-col items-center gap-1 pt-0.5 w-12">
       {integration ? (
-        <span
-          className={`h-10 w-10 rounded-full flex items-center justify-center shadow-subtle overflow-hidden ring-1 ${
-            integration.key === 'rostam'
-              ? 'bg-slate-900 ring-teal-400/60'
-              : 'bg-teal-50 dark:bg-teal-500/15 ring-teal-300/70 dark:ring-teal-400/40'
-          }`}
-          title={`${integration.name} — ${integration.subtitle}`}
-        >
-          <img src={integration.avatarUrl} alt={integration.name} className={`h-full w-full ${integration.key === 'rostam' ? 'object-cover' : 'object-contain p-1'}`} />
-        </span>
+        <IntegrationAvatar identity={integration} size="h-10 w-10" />
       ) : isTicketPulse ? (
         <span className="h-10 w-10 rounded-full bg-gradient-to-br from-blue-50 dark:from-blue-500/15 to-indigo-100 dark:to-indigo-500/20 border border-blue-200 dark:border-blue-500/30 flex items-center justify-center shadow-subtle overflow-hidden" title="Ticket Pulse">
           <img src="/brand/logo-mark.png" alt="Ticket Pulse" className="h-full w-full object-contain p-0.5" />
@@ -2424,7 +2416,9 @@ export default function TicketDetail() {
                   {ticket.requester ? (
                     <div>
                       <div className="flex items-center gap-3">
-                        {requesterPhoto ? (
+                        {requesterIntegrationIdentity(ticket.requester) ? (
+                          <IntegrationAvatar identity={requesterIntegrationIdentity(ticket.requester)} size="h-12 w-12" className="ring-2" />
+                        ) : requesterPhoto ? (
                           <img src={requesterPhoto} alt="" className="h-12 w-12 rounded-full object-cover ring-2 ring-card shadow-subtle flex-shrink-0" />
                         ) : (
                           <PersonAvatar name={ticket.requester.name} size="h-12 w-12" textSize="text-base" />

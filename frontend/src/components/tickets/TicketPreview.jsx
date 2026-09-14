@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { requesterIntegrationIdentity } from '../../utils/integrationIdentity';
+import { IntegrationAvatar } from './IntegrationAvatar';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   Activity, Bot, CalendarDays, Check, ChevronDown, ChevronUp, ExternalLink, Hand, Inbox,
@@ -410,7 +412,9 @@ export default function TicketPreview({ ticketId, meta, pulse = 0, onClose, onCh
             {/* Requester card: photo, role, contact, helpdesk history */}
             <div className="rounded-xl border border-border/60 bg-muted/35 p-3">
               <div className="flex items-start gap-3">
-                {requesterPhoto ? (
+                {requesterIntegrationIdentity(ticket.requester) ? (
+                  <IntegrationAvatar identity={requesterIntegrationIdentity(ticket.requester)} size="h-11 w-11" className="ring-2" />
+                ) : requesterPhoto ? (
                   <img src={requesterPhoto} alt="" className="h-11 w-11 rounded-full object-cover ring-2 ring-card shadow-subtle flex-shrink-0" />
                 ) : (
                   <PersonAvatar name={ticket.requester?.name} size="h-11 w-11" textSize="text-sm" />
