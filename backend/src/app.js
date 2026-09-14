@@ -13,6 +13,7 @@ import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import routes from './routes/index.js';
 import prisma from './services/prisma.js';
 import scheduledSyncService from './services/scheduledSyncService.js';
+import { retryBoot, isTransientDbError } from './utils/bootRetry.js';
 import graphNotificationRoutes from './routes/graphNotifications.routes.js';
 import settingsRepository from './services/settingsRepository.js';
 import availabilityService from './services/availabilityService.js';
@@ -419,6 +420,10 @@ async function initialize() {
 
     logger.info('Server initialization complete');
   } catch (error) {
+    // A database that is unreachable at boot (Azure PostgreSQL maintenance,
+    // 14 Sep 2026 07:21 UTC) is transient: hand it to the boot retry loop
+    // instead of leaving the schedulers unstarted behind a green /health.
+    if (isTransientDbError(error)) throw error;
     logger.error('Server initialization failed:', error);
     // Last resort: still try to start the sync service
     try {
@@ -443,8 +448,14 @@ app.listen(PORT, () => {
   logger.info(`Environment: ${config.env}`);
   logger.info(`Database: ${config.database.url.split('@')[1] || 'configured'}`);
 
-  // Initialize after server starts
-  initialize();
+  // Initialize after server starts — retried with backoff while the database
+  // is still coming back (up to ~10 minutes), because the HTTP server is
+  // already answering and a one-shot failure here used to strand every
+  // scheduler until the next deploy.
+  retryBoot(initialize, {
+    onRetry: (n, ms, err) => logger.warn(`Server initialization attempt ${n} hit a database connectivity error — retrying in ${Math.round(ms / 1000)}s`, { message: err?.message }),
+    onGiveUp: (err, n) => logger.error(`Server initialization gave up after ${n} attempt(s)`, { message: err?.message, stack: err?.stack }),
+  });
 });
 
 // Crash visibility (Jul 9): Node kills the process on unhandled rejections
