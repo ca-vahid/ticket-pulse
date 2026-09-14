@@ -887,9 +887,42 @@ class MirrorService {
       const externalEntryId = fsConversationEntryId(conv.id);
       const exists = await prisma.ticketThreadEntry.findFirst({
         where: { ticketId: ticket.id, externalEntryId: { in: fsConversationEntryIdCandidates(conv.id) } },
-        select: { id: true },
+        select: { id: true, bodyHtml: true, bodyText: true, rawPayload: true },
       });
-      if (exists) continue;
+      if (exists) {
+        // An EDITED FreshService note (TP-1504, 14 Sep: Anton kept editing his
+        // note on the FS copy, adding text and two more pictures; we held the
+        // first version for ever). The FS-born lane upserts by external id and
+        // so picks edits up; this lane only ever created. Re-import when the
+        // body differs or FS says it was updated after what we hold.
+        const heldAt = exists.rawPayload?.fsUpdatedAt || null;
+        const fsUpdatedAt = conv.updated_at || null;
+        const bodyChanged = (conv.body || null) !== (exists.bodyHtml || null)
+          || (conv.body_text || null) !== (exists.bodyText || null);
+        const newer = fsUpdatedAt && heldAt ? new Date(fsUpdatedAt) > new Date(heldAt) : bodyChanged;
+        if (bodyChanged && newer) {
+          await prisma.ticketThreadEntry.update({
+            where: { id: exists.id },
+            data: {
+              bodyHtml: conv.body || null,
+              bodyText: conv.body_text || null,
+              content: conv.body_text || null,
+              rawPayload: {
+                ...(exists.rawPayload && typeof exists.rawPayload === 'object' ? exists.rawPayload : {}),
+                fsUpdatedAt,
+                editedInFreshService: true,
+                editHistory: [
+                  ...((exists.rawPayload?.editHistory || []).slice(-9)),
+                  { at: fsUpdatedAt || new Date().toISOString(), previousBodyHtml: String(exists.bodyHtml || '').slice(0, 20000) },
+                ],
+              },
+            },
+          });
+          imported += 1;
+          this._broadcast(ticket, 'reply');
+        }
+        continue;
+      }
       // Per-message To/Cc (QA 08-05 #3): FS conversation objects carry
       // to_emails/cc_emails — keep them in rawPayload (the same shape the
       // regular FS conversation sync stores) so the UI can show recipients.
@@ -934,7 +967,11 @@ class MirrorService {
           bodyText: conv.body_text || null,
           content: conv.body_text || null,
           occurredAt: conv.created_at ? new Date(conv.created_at) : new Date(),
-          ...(Object.keys(recipients).length ? { rawPayload: recipients } : {}),
+          // fsUpdatedAt lets the edit check above compare timestamps instead
+          // of bodies on the next pass.
+          ...((Object.keys(recipients).length || conv.updated_at)
+            ? { rawPayload: { ...recipients, ...(conv.updated_at ? { fsUpdatedAt: conv.updated_at } : {}) } }
+            : {}),
         },
       });
       imported += 1;

@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.8.70-preview';
+export const APP_VERSION = '3.8.71-preview';
 
 export const changelog = [
+  {
+    version: '3.8.71-preview',
+    date: 'September 14, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>📝 Notes edited in FreshService now reach the Ticket Pulse ticket</strong> — on a Ticket Pulse-born ticket, a note an agent wrote on the FreshService copy was imported once and never looked at again, so later edits (more text, more pictures) stayed in FreshService only. TP-1504: three pictures in FreshService, one in Ticket Pulse. Reconciliation now re-imports an edited note in place and keeps the previous version in its history. FreshService-born tickets were already right.' },
+      { type: 'fixed', html: '<strong>Changelog correction (3.8.70)</strong> — the sandbox copies that leaked into FreshService did <em>not</em> come back into IT or Accounting as duplicates; the three FreshService-born tickets in that id range are genuine. All 202 copies have since been deleted from FreshService.' },
+    ],
+  },
   {
     version: '3.8.70-preview',
     date: 'September 14, 2026',

@@ -334,6 +334,53 @@ describe('mirrorService.reconcile', () => {
   });
 });
 
+describe('mirrorService.reconcile — an EDITED FreshService note is re-imported (TP-1504, 14 Sep)', () => {
+  test('body changed and FS updated_at newer → the held entry is updated in place, history kept', async () => {
+    prismaMock.ticket.findMany.mockResolvedValue([{ ...baseTicket, freshserviceTicketId: BigInt(90001), status: 'Open', assignedTech: null }]);
+    clientMock.fetchTicketSafe.mockResolvedValue({ id: 90001, status: 2, responder_id: null });
+    clientMock.fetchTicketConversations.mockResolvedValue([
+      { id: 7, body: '<div>Isolated the laptop.<img src="https://attachment.freshservice.com/inline/attachment?token=b"><img src="https://attachment.freshservice.com/inline/attachment?token=c"></div>', body_text: 'Isolated the laptop.', private: true, user_id: 1001896785, created_at: '2026-09-14T16:21:38Z', updated_at: '2026-09-14T16:36:01Z' },
+    ]);
+    prismaMock.ticketThreadEntry.findFirst.mockResolvedValue({
+      id: 3179552,
+      bodyHtml: '<div><img src="https://attachment.freshservice.com/inline/attachment?token=a"></div>',
+      bodyText: '',
+      rawPayload: { fsUpdatedAt: '2026-09-14T16:21:38Z' },
+    });
+    prismaMock.ticketThreadEntry.update.mockResolvedValue({});
+
+    const result = await mirrorService.reconcile(1);
+
+    expect(result.imported).toBe(1);
+    expect(prismaMock.ticketThreadEntry.create).not.toHaveBeenCalled();
+    expect(prismaMock.ticketThreadEntry.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 3179552 },
+      data: expect.objectContaining({
+        bodyHtml: expect.stringContaining('token=c'),
+        bodyText: 'Isolated the laptop.',
+        rawPayload: expect.objectContaining({
+          fsUpdatedAt: '2026-09-14T16:36:01Z',
+          editedInFreshService: true,
+          editHistory: [expect.objectContaining({ previousBodyHtml: expect.stringContaining('token=a') })],
+        }),
+      }),
+    }));
+  });
+
+  test('unchanged note (same body) is left alone', async () => {
+    prismaMock.ticket.findMany.mockResolvedValue([{ ...baseTicket, freshserviceTicketId: BigInt(90001), status: 'Open', assignedTech: null }]);
+    clientMock.fetchTicketSafe.mockResolvedValue({ id: 90001, status: 2, responder_id: null });
+    clientMock.fetchTicketConversations.mockResolvedValue([
+      { id: 8, body: '<p>same</p>', body_text: 'same', private: true, created_at: '2026-09-14T16:21:38Z', updated_at: '2026-09-14T16:40:00Z' },
+    ]);
+    prismaMock.ticketThreadEntry.findFirst.mockResolvedValue({ id: 1, bodyHtml: '<p>same</p>', bodyText: 'same', rawPayload: null });
+
+    const result = await mirrorService.reconcile(1);
+    expect(result.imported).toBe(0);
+    expect(prismaMock.ticketThreadEntry.update).not.toHaveBeenCalled();
+  });
+});
+
 // Phase 8c: TP custom labels reach FreshService through their BASE status.
 describe('mirrorService._fsStatusCode (base-mapped FS codes)', () => {
   const registryRows = [
