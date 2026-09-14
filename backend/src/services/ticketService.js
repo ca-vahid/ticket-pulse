@@ -558,12 +558,24 @@ function ticketTags(t) {
  * FreshService). FS-born tickets stay read-only through this service until the
  * mirror phase adds deliberate write-back for them.
  */
+// An integration sandbox (Assetron ws6, Simorgh ws7) is deliberately INACTIVE
+// so no scheduler, FreshService sync or workspace picker ever sees it — yet a
+// credential bound to it must still be able to write tickets there. A native
+// workspace with no FreshService binding is such a sandbox; a decommissioned
+// FreshService workspace (which still carries its FS id) stays closed.
+export function isNativeSandbox(workspace) {
+  if (!workspace || workspace.isActive) return false;
+  const fsId = workspace.freshserviceWorkspaceId;
+  const bound = fsId !== null && fsId !== undefined && String(fsId) !== '0' && String(fsId) !== '';
+  return workspace.nativeTicketingEnabled === true && !bound;
+}
+
 class TicketService {
   // ---------------------------------------------------------------- helpers
 
   async _getWorkspace(workspaceId) {
     const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId } });
-    if (!workspace || !workspace.isActive) {
+    if (!workspace || !(workspace.isActive || isNativeSandbox(workspace))) {
       throw new NotFoundError(`Workspace ${workspaceId} not found`);
     }
     return workspace;

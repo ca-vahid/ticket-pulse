@@ -1,6 +1,7 @@
 import { describe, expect, test } from '@jest/globals';
 import { readFileSync } from 'node:fs';
 import { TICKET_SOURCE, TICKET_SOURCE_LABELS, AGENT_SELECTABLE_SOURCES } from '../src/utils/ticketOrigin.js';
+import { isNativeSandbox } from '../src/services/ticketService.js';
 
 /**
  * Simorgh Release C (part 2) — unattended requesters (A4) and the Security
@@ -51,5 +52,21 @@ describe('A4 — an unattended requester never gets requester-facing mail', () =
     expect(api).toMatch(/unattended: r\.unattended === true,/);
     expect(api).toMatch(/resolutionReasons: RESOLUTION_REASONS\.map/);
     expect(api).toMatch(/sources: AGENT_SELECTABLE_SOURCES\.map/);
+  });
+});
+
+describe('Sandbox workspaces — inactive, but writable through a bound credential', () => {
+  // Acceptance run 14 Sep: POST /tickets into the Simorgh sandbox (ws 7,
+  // isActive:false by design) answered "Workspace 7 not found". The native
+  // ticket service's workspace gate only knew "active".
+  test('a native workspace with no FreshService binding passes the gate while inactive', () => {
+    expect(isNativeSandbox({ isActive: false, nativeTicketingEnabled: true, freshserviceWorkspaceId: 0n })).toBe(true);
+    expect(isNativeSandbox({ isActive: false, nativeTicketingEnabled: true, freshserviceWorkspaceId: null })).toBe(true);
+  });
+
+  test('a decommissioned FreshService workspace, or one without native ticketing, stays closed', () => {
+    expect(isNativeSandbox({ isActive: false, nativeTicketingEnabled: true, freshserviceWorkspaceId: 1000208182n })).toBe(false);
+    expect(isNativeSandbox({ isActive: false, nativeTicketingEnabled: false, freshserviceWorkspaceId: null })).toBe(false);
+    expect(isNativeSandbox({ isActive: true, nativeTicketingEnabled: true, freshserviceWorkspaceId: null })).toBe(false);
   });
 });

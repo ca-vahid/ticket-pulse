@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.8.63-preview';
+export const APP_VERSION = '3.8.64-preview';
 
 export const changelog = [
+  {
+    version: '3.8.64-preview',
+    date: 'September 14, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>🧪 Integration sandboxes accept tickets</strong> — a sandbox workspace is deliberately inactive (no scheduler, no FreshService sync, not in the picker), but a credential bound to it must still be able to file tickets there. The native ticket service’s workspace gate only knew “active” and answered <em>Workspace not found</em> on the first Simorgh acceptance run. A native workspace with no FreshService binding now passes while inactive; a decommissioned FreshService workspace stays closed.' },
+      { type: 'improved', html: '<strong>Provisioning: the Simorgh policy pair in one command</strong> — <code>--policy</code> installs the sender-keyed never-noise veto (<code>^simorgh@</code>) and the “resolve on benign verdict” workflow, disabled until <code>--enable</code>. Installed live in the sandbox; installed disabled in IT.' },
+    ],
+  },
   {
     version: '3.8.63-preview',
     date: 'September 14, 2026',
