@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.8.72-preview';
+export const APP_VERSION = '3.8.73-preview';
 
 export const changelog = [
+  {
+    version: '3.8.73-preview',
+    date: 'September 14, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>🔄 Status changes reach the FreshService copy again</strong> — FreshService refuses a due date on any status without an SLA timer (Pending, Resolved, Closed), and the mirror sent one with every field sync, so the whole update was rejected and a Ticket Pulse-born ticket moved to Pending stayed Open in FreshService (TP-1504 and four Project Accounting closures). The due date is now sent only while the ticket is Open, and a rejection is retried without it.' },
+      { type: 'fixed', html: '<strong>Assignment AI no longer guesses e-mail addresses</strong> — the technician-profile tool was being called with invented first.last addresses, 120 failed directory lookups an hour. Only an address on the technician roster reaches the directory now; anything else is answered locally with the closest roster match.' },
+      { type: 'improved', html: '<strong>Sync log hygiene, every tick</strong> — a run cut off by a deploy is closed as abandoned at the next scheduled tick, not only at boot.' },
+    ],
+  },
   {
     version: '3.8.72-preview',
     date: 'September 14, 2026',

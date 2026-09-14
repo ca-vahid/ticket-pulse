@@ -69,6 +69,14 @@ export function mirrorCcEmails(ticket) {
 }
 
 /** FS rejected the request because of the cc_emails attribute specifically. */
+/** FS: "due_by: It cannot be set, when the status of the ticket doesn't have sla timer on". */
+function isDueByRejection(err) {
+  const detail = err?.freshserviceDetail;
+  const fieldErrors = Array.isArray(detail?.errors) ? detail.errors : [];
+  if (fieldErrors.some((fe) => String(fe.field || '').toLowerCase() === 'due_by')) return true;
+  return /due_by/i.test(String(err?.message || ''));
+}
+
 function isCcEmailsRejection(err) {
   const detail = err?.freshserviceDetail;
   const fieldErrors = Array.isArray(detail?.errors) ? detail.errors : [];
@@ -638,9 +646,16 @@ class MirrorService {
     }
 
     const customFields = await this._skillCustomFields(client, ticket);
+    const fsStatus = (await this._fsStatusCode(ticket)) ?? undefined;
+    // FreshService refuses due_by on any status whose SLA timer is off
+    // (Pending, Resolved, Closed): "It cannot be set, when the status of the
+    // ticket doesn't have sla timer on". Sending it there failed the WHOLE
+    // field sync, so a TP-born ticket moved to Pending stayed Open in
+    // FreshService (TP-1504, four Project Accounting closures — 14 Sep).
+    const dueByAllowed = fsStatus === undefined || Number(fsStatus) === 2;
     const payload = {
       subject: ticket.subject || undefined,
-      status: (await this._fsStatusCode(ticket)) ?? undefined,
+      status: fsStatus,
       priority: ticket.priority || undefined,
       group_id: ticket.groupId ? Number(ticket.groupId) : undefined,
       responder_id: ticket.assignedTech?.freshserviceId ? Number(ticket.assignedTech.freshserviceId) : null,
@@ -649,7 +664,7 @@ class MirrorService {
       // showing its own SLA clock instead — two systems, two different dates on
       // the same ticket. FS expects ISO 8601; undefined when unset so
       // compactObject drops the key rather than clearing theirs.
-      due_by: ticket.dueBy ? new Date(ticket.dueBy).toISOString() : undefined,
+      due_by: dueByAllowed && ticket.dueBy ? new Date(ticket.dueBy).toISOString() : undefined,
       // Resolution reason (Simorgh C4): the FS copy states why, in words, so
       // anyone still reading FreshService sees the same conclusion.
       resolution_notes: ticket.resolutionReason
@@ -666,9 +681,15 @@ class MirrorService {
     try {
       await client.updateTicket(Number(ticket.freshserviceTicketId), payload);
     } catch (err) {
-      if (payload.cc_emails === undefined || !isCcEmailsRejection(err)) throw err;
-      logger.warn(`Mirror: FreshService rejected cc_emails on update for #${ticket.freshserviceTicketId} (${err.message}) — re-sending the field sync without it`);
-      await client.updateTicket(Number(ticket.freshserviceTicketId), { ...payload, cc_emails: undefined });
+      if (payload.due_by !== undefined && isDueByRejection(err)) {
+        logger.warn(`Mirror: FreshService rejected due_by on update for #${ticket.freshserviceTicketId} (${err.message}) — re-sending the field sync without it`);
+        await client.updateTicket(Number(ticket.freshserviceTicketId), { ...payload, due_by: undefined });
+      } else if (payload.cc_emails !== undefined && isCcEmailsRejection(err)) {
+        logger.warn(`Mirror: FreshService rejected cc_emails on update for #${ticket.freshserviceTicketId} (${err.message}) — re-sending the field sync without it`);
+        await client.updateTicket(Number(ticket.freshserviceTicketId), { ...payload, cc_emails: undefined });
+      } else {
+        throw err;
+      }
     }
 
     await prisma.ticket.update({

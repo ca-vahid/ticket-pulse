@@ -189,6 +189,34 @@ describe('mirrorService job processing', () => {
     }));
   });
 
+  test('update_fields omits due_by on statuses without an SLA timer (Pending/Resolved/Closed)', async () => {
+    // TP-1504, 14 Sep: FS rejected the whole field sync — "due_by: It cannot
+    // be set, when the status of the ticket doesn't have sla timer on" — so
+    // the Pending status never reached the FreshService copy.
+    prismaMock.ticket.findUnique.mockResolvedValue({
+      ...baseTicket, freshserviceTicketId: BigInt(90001), status: 'Pending', dueBy: new Date('2026-09-14T20:05:45Z'), assignedTech: null,
+    });
+    clientMock.updateTicket.mockResolvedValue({ id: 90001 });
+    expect(await mirrorService._processJob({ id: 30, ticketId: 501, workspaceId: 1, kind: 'update_fields', attempts: 0 })).toBe(true);
+    const sent = clientMock.updateTicket.mock.calls[0][1];
+    expect(sent.status).toBe(3);
+    expect(sent.due_by).toBeUndefined();
+  });
+
+  test('update_fields keeps due_by while Open, and retries without it if FS still objects', async () => {
+    prismaMock.ticket.findUnique.mockResolvedValue({
+      ...baseTicket, freshserviceTicketId: BigInt(90001), status: 'Open', dueBy: new Date('2026-09-14T20:05:45Z'), assignedTech: null,
+    });
+    const rejection = Object.assign(new Error("Validation failed (due_by: It cannot be set, when the status of the ticket doesn't have sla timer on)"), {
+      freshserviceDetail: { description: 'Validation failed', errors: [{ field: 'due_by', message: 'It cannot be set' }] },
+    });
+    clientMock.updateTicket.mockRejectedValueOnce(rejection).mockResolvedValueOnce({ id: 90001 });
+    expect(await mirrorService._processJob({ id: 31, ticketId: 501, workspaceId: 1, kind: 'update_fields', attempts: 0 })).toBe(true);
+    expect(clientMock.updateTicket.mock.calls[0][1].due_by).toBe('2026-09-14T20:05:45.000Z');
+    expect(clientMock.updateTicket.mock.calls[1][1].due_by).toBeUndefined();
+    expect(clientMock.updateTicket.mock.calls[1][1].status).toBe(2);
+  });
+
   test('public replies mirror as PUBLIC notes (no requester email), internal notes as private', async () => {
     prismaMock.ticket.findUnique.mockResolvedValue({ ...baseTicket, freshserviceTicketId: BigInt(90001) });
     prismaMock.ticketThreadEntry.findUnique.mockResolvedValue({

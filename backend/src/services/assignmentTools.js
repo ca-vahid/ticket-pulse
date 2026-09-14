@@ -2289,7 +2289,27 @@ function parseSenioritySignals(jobTitle, department) {
 async function getTechnicianAdProfile(email) {
   if (!email) return { error: 'Email is required' };
 
-  const result = await graphMailClient.getUserProfile(email);
+  // The model guessed addresses ("mehdi.abbaspour@…") that exist nowhere —
+  // 120 failed Graph lookups an hour on 14 Sep. Only a roster email reaches
+  // Graph; anything else is answered from here with the exact address to use.
+  const wanted = String(email).trim().toLowerCase();
+  const tech = await prisma.technician.findFirst({
+    where: { email: { equals: wanted, mode: 'insensitive' } },
+    select: { email: true, name: true },
+  }).catch(() => null);
+  if (!tech) {
+    const local = wanted.split('@')[0].replace(/[._-]+/g, ' ');
+    const guess = await prisma.technician.findFirst({
+      where: { name: { contains: local.split(' ')[0], mode: 'insensitive' }, isActive: true },
+      select: { email: true, name: true },
+    }).catch(() => null);
+    return {
+      error: `No technician with the email "${email}" is on the roster — use the exact email from the technician list`,
+      ...(guess?.email ? { didYouMean: { name: guess.name, email: guess.email } } : {}),
+    };
+  }
+
+  const result = await graphMailClient.getUserProfile(tech.email);
   if (result.error) return result;
 
   const profile = { ...result };
