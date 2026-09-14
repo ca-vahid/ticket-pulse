@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { integrationIdentity } from './integrationIdentity';
+import { integrationIdentity, requesterIntegrationIdentity } from './integrationIdentity';
 
 describe('integrationIdentity — Simorgh and Rostam get their own avatars and names', () => {
   test('a tier-2 note keyed on rawPayload is Rostam', () => {
@@ -14,6 +14,12 @@ describe('integrationIdentity — Simorgh and Rostam get their own avatars and n
   test('a plain Simorgh note is Simorgh, with the tier when one is given', () => {
     expect(integrationIdentity({ actorName: 'Simorgh', rawPayload: null })).toMatchObject({ key: 'simorgh', name: 'Simorgh', subtitle: 'Security agent' });
     expect(integrationIdentity({ actorName: 'Simorgh · Tier 1', rawPayload: { stage: 'tier1', agent: null } })).toMatchObject({ key: 'simorgh', subtitle: 'Simorgh · Tier 1' });
+  });
+
+  test('the Simorgh requester mailbox gets the phoenix; people do not', () => {
+    expect(requesterIntegrationIdentity({ name: 'Simorgh · Security Operations', email: 'simorgh@bgcengineering.ca' })).toMatchObject({ key: 'simorgh', avatarUrl: '/brand/integrations/simorgh.png', avatarDarkUrl: '/brand/integrations/simorgh-dark.png' });
+    expect(requesterIntegrationIdentity({ name: 'Rita Example', email: 'rita@example.com' })).toBeNull();
+    expect(requesterIntegrationIdentity(null)).toBeNull();
   });
 
   test('people and other systems are untouched', () => {

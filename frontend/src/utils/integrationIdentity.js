@@ -14,8 +14,26 @@
  */
 const AVATARS = {
   simorgh: '/brand/integrations/simorgh.png',
+  simorghDark: '/brand/integrations/simorgh-dark.png',
   rostam: '/brand/integrations/rostam.png',
 };
+
+/** Requester records that belong to an integration, keyed on the address. */
+const INTEGRATION_REQUESTERS = {
+  'simorgh@bgcengineering.ca': 'simorgh',
+};
+
+/**
+ * The requester card: the Simorgh mailbox is an application, not a person —
+ * give it the phoenix instead of "S·" initials.
+ */
+export function requesterIntegrationIdentity(requester) {
+  if (!requester) return null;
+  const email = String(requester.email || '').trim().toLowerCase();
+  const key = INTEGRATION_REQUESTERS[email] || (/^Simorgh\b/i.test(String(requester.name || '')) ? 'simorgh' : null);
+  if (key !== 'simorgh') return null;
+  return { key: 'simorgh', name: 'Simorgh', subtitle: 'Security agent', avatarUrl: AVATARS.simorgh, avatarDarkUrl: AVATARS.simorghDark, tone: 'simorgh' };
+}
 
 export function integrationIdentity(entry) {
   if (!entry) return null;
@@ -41,6 +59,7 @@ export function integrationIdentity(entry) {
       name: agent || 'Simorgh',
       subtitle: tier ? `Simorgh · Tier ${tier}` : 'Security agent',
       avatarUrl: AVATARS.simorgh,
+      avatarDarkUrl: AVATARS.simorghDark,
       tone: 'simorgh',
     };
   }
