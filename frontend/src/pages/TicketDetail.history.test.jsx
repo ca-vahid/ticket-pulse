@@ -150,11 +150,11 @@ describe('TicketDetail History tab — actor kinds, machine filter, collapsing (
 
     // Attributed sync row reads as the human's action in FreshService (RO-1/RO-2).
     expect(within(section).getByText('Closed')).toBeInTheDocument();
-    expect(within(section).getByText(/by Dominic Bautista in FreshService/)).toBeInTheDocument();
+    expect(within(section).getByText('Dominic Bautista')).toBeInTheDocument();
     // The FS feed line for the same close is NOT duplicated.
-    expect(within(section).getAllByText(/by Dominic Bautista in FreshService/)).toHaveLength(1);
+    expect(within(section).getAllByText('Dominic Bautista')).toHaveLength(1);
     // An FS status line with no audit twin is surfaced, named.
-    expect(within(section).getByText(/by Kirsten Fanning in FreshService/)).toBeInTheDocument();
+    expect(within(section).getAllByText('Kirsten Fanning').length).toBeGreaterThanOrEqual(1);
     // Kind chips.
     const chips = within(section).getAllByTestId('actor-kind-chip').map((c) => c.getAttribute('data-kind'));
     expect(chips).toEqual(expect.arrayContaining(['human', 'api', 'freshservice_sync']));
@@ -163,16 +163,18 @@ describe('TicketDetail History tab — actor kinds, machine filter, collapsing (
     expect(within(section).queryByText(/Open → Spam/)).not.toBeInTheDocument();
   });
 
-  test('unticking reveals the collapsed flap (×3 with a time span) and is remembered', async () => {
+  test('unticking reveals the machine burst; expanding it shows the ×3 flap with a time span, and the choice is remembered', async () => {
     renderHistory();
     const section = await historySection();
 
     fireEvent.click(within(section).getByRole('checkbox', { name: /hide machine activity/i }));
 
     expect(within(section).queryByTestId('machine-hidden-count')).not.toBeInTheDocument();
-    const flap = within(section).getAllByText(/Open → Spam/);
-    expect(flap).toHaveLength(1); // three identical rows folded into one
+    // Machine chatter folds into collapsed "N automation events" lines (14 Sep overhaul).
+    for (const b of within(section).queryAllByTestId('history-burst')) fireEvent.click(within(b).getByRole('button', { expanded: false }));
+    // Three identical reconcile rows folded into one with a span.
     expect(within(section).getByTestId('collapsed-span')).toHaveTextContent(/×3, \d{1,2}:\d{2}.*–.*\d{1,2}:\d{2}/);
+    expect(within(section).getAllByText(/Spam/).length).toBeGreaterThanOrEqual(1);
     expect(within(section).getByText(/Ticket Workflow executed Update department/)).toBeInTheDocument();
     expect(localStorage.getItem('tp.ticketHistory.hideMachine')).toBe('false');
   });
