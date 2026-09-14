@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.8.79-preview';
+export const APP_VERSION = '3.8.80-preview';
 
 export const changelog = [
+  {
+    version: '3.8.80-preview',
+    date: 'September 14, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>🕘 Activity tab rebuilt as one readable story</strong> — the ticket history used to show the FreshService feed, our audit rows and the assignment episodes side by side, so one close read as three lines and a real ticket ran to 31 near-identical entries. The tab now merges the three sources into a single timeline: every row is <em>who</em> (avatar, bold name) did <em>what</em> (verb + icon) to <em>where</em> (from → to chips, status and priority in their own colours, assignee as a mini-avatar), grouped by day. Duplicates are told once, with the FreshService line attributed to the person who acted, and consecutive same-actor edits fold to “×N, 10:14–10:19”.' },
+      { type: 'improved', html: '<strong>Automation chatter folds away</strong> — workflow executions, Ticket Pulse’s own write-back echoes and reconcile flaps collapse into an expandable “N automation events · span · actors” row; a lone machine event stays a plain row. “Hide machine activity” still hides them entirely with a count. Ticket Pulse workflow runs, Simorgh (Rostam) resolutions with their reason, reopens and API actions each get their own icon and accent.' },
+      { type: 'fixed', html: '<strong>📱 Activity on a phone</strong> — the tab rendered an empty panel at phone widths. Rows now stack (time under the text), chips wrap, and new events since you opened the ticket glow briefly (respects reduced motion).' },
+    ],
+  },
   {
     version: '3.8.79-preview',
     date: 'September 14, 2026',

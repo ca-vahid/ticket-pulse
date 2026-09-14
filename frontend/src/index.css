@@ -1061,3 +1061,14 @@ code {
 .tp-sheet-preview table { border-collapse: collapse; width: max-content; min-width: 100%; font-variant-numeric: tabular-nums; }
 .tp-sheet-preview td { border: 1px solid hsl(var(--border)); padding: 3px 8px; white-space: nowrap; }
 .tp-sheet-preview tr:first-child td { background: hsl(var(--muted)); font-weight: 600; position: sticky; top: 0; }
+
+/* Activity tab (14 Sep 2026): a row younger than two minutes glows in, then
+   settles — a live update should catch the eye once, not keep blinking. */
+@keyframes tpHistoryNew {
+  0% { background-color: hsl(var(--primary) / 0.14); }
+  100% { background-color: transparent; }
+}
+.tp-history-new { animation: tpHistoryNew 2.4s ease-out 1; }
+@media (prefers-reduced-motion: reduce) {
+  .tp-history-new { animation: none; }
+}

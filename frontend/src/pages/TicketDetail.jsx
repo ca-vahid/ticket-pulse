@@ -1,10 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
-  Activity, AlertCircle, ArrowLeft, Bell, BellRing, Bot, Building2, CalendarClock, Check, CheckCircle2,
-  CheckSquare, ChevronDown, ChevronLeft, ChevronRight, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Flame, Forward, Hand,
-  GitBranch, GitMerge, History, Image as ImageIcon, Inbox, Link2, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, Paperclip, Pencil, Phone, Plus,
-  RefreshCw, Send, ShieldCheck, Smartphone, Smile, Sparkles, Stamp, StickyNote, Trash2, UserRound, VolumeX, X, XCircle,
+  Image as ImageIcon, Activity, AlertCircle, ArrowLeft, Bell, BellRing, Bot, Check, CheckCircle2, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, Copy, CopyPlus, Download, ExternalLink, Eye, FileText, Flame, Forward, Hand, GitBranch, GitMerge, History, Inbox, Link2, Loader2, Lock, Mail, MapPin, MessageCircleQuestion, MessageSquare, Paperclip, Pencil, Phone, RefreshCw, Send, ShieldCheck, Smartphone, Smile, Sparkles, Stamp, StickyNote, Trash2, VolumeX, X, XCircle,
 } from 'lucide-react';
 import AttachmentPreviewModal from '../components/tickets/AttachmentPreviewModal';
 import TicketTagEditor from '../components/tickets/TicketTagEditor';
@@ -19,6 +16,8 @@ import ResolveReasonModal from '../components/tickets/ResolveReasonModal';
 import { ticketNeedsResolutionReason, reasonLabel } from '../utils/resolutionReasons';
 import { plainTextToHtml } from '../utils/plainTextToHtml';
 import { integrationIdentity, requesterIntegrationIdentity } from '../utils/integrationIdentity';
+import { buildHistoryItems, countMachine } from '../utils/ticketHistory';
+import TicketHistoryTimeline from '../components/tickets/TicketHistoryTimeline';
 import { IntegrationAvatar } from '../components/tickets/IntegrationAvatar';
 import AppHeader from '../components/AppHeader';
 import MobileTabBar from '../components/nav/MobileTabBar';
@@ -43,10 +42,7 @@ import {
   pipelineTriggerLabel, ticketCategoryLabels, ticketSourceLabel, timeAgo,
 } from '../components/tickets/ticketUi';
 import { FRESHSERVICE_DOMAIN } from '../components/tech-detail/constants';
-import {
-  ActorKindChip, activityActorKind, collapseConsecutive, fsActorName, isMachineActivity,
-  readHideMachinePreference, spanLabel, writeHideMachinePreference,
-} from '../components/tickets/activityKind';
+import { readHideMachinePreference, writeHideMachinePreference } from '../components/tickets/activityKind';
 
 // UUID for the composer's Idempotency-Key (Phase DR3). crypto.randomUUID is
 // secure-context only; the fallback is plenty for a per-session nonce.
@@ -90,37 +86,6 @@ const LIVE_FIELDS = {
   subject: 'Subject',
 };
 // History timeline: icon + tone per activity type.
-const HISTORY_STYLES = {
-  created: { icon: Plus, tone: 'bg-blue-100 dark:bg-blue-500/20 text-blue-600 dark:text-blue-300' },
-  assigned: { icon: UserRound, tone: 'bg-blue-100 dark:bg-blue-500/20 text-blue-600 dark:text-blue-300' },
-  reassigned: { icon: UserRound, tone: 'bg-sky-100 dark:bg-sky-500/20 text-sky-600 dark:text-sky-300' },
-  coordinator_assigned: { icon: UserRound, tone: 'bg-blue-100 dark:bg-blue-500/20 text-blue-600 dark:text-blue-300' },
-  self_picked: { icon: Hand, tone: 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-300' },
-  picked: { icon: Hand, tone: 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-300' },
-  status_changed: { icon: RefreshCw, tone: 'bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-300' },
-  resolved: { icon: Check, tone: 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-300' },
-  requester_reply: { icon: Mail, tone: 'bg-sky-100 dark:bg-sky-500/20 text-sky-600 dark:text-sky-300' },
-  forwarded: { icon: Forward, tone: 'bg-violet-100 dark:bg-violet-500/20 text-violet-600 dark:text-violet-300' },
-  noise_flagged: { icon: VolumeX, tone: 'bg-violet-100 dark:bg-violet-500/20 text-violet-600 dark:text-violet-300' },
-  noise_cleared: { icon: VolumeX, tone: 'bg-muted text-muted-foreground' },
-  ai_triage: { icon: Sparkles, tone: 'bg-indigo-100 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-300' },
-  fields_updated: { icon: Pencil, tone: 'bg-muted text-muted-foreground' },
-  due_changed: { icon: CalendarClock, tone: 'bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-300' },
-  task_status_changed: { icon: CheckSquare, tone: 'bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-300' },
-  rejected: { icon: X, tone: 'bg-red-100 dark:bg-red-500/20 text-red-600 dark:text-red-300' },
-  group_changed: { icon: Building2, tone: 'bg-sky-100 dark:bg-sky-500/20 text-sky-600 dark:text-sky-300' },
-  // Agent-forwarded / Cc'd intake (Phase FW): the original sender became the requester.
-  forwarded_intake: { icon: Inbox, tone: 'bg-violet-100 dark:bg-violet-500/20 text-violet-600 dark:text-violet-300' },
-  forwarded_intake_unparsed: { icon: Inbox, tone: 'bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-300' },
-  agent_cc_intake: { icon: Inbox, tone: 'bg-violet-100 dark:bg-violet-500/20 text-violet-600 dark:text-violet-300' },
-  // Machine bookkeeping rows (TU-1) — chipped and hidden by default.
-  mirror_conflict: { icon: RefreshCw, tone: 'bg-muted text-muted-foreground' },
-  fs_write_back: { icon: ExternalLink, tone: 'bg-sky-100 dark:bg-sky-500/20 text-sky-600 dark:text-sky-300' },
-  custom_fields_changed: { icon: Pencil, tone: 'bg-muted text-muted-foreground' },
-  workflow_updated_ticket: { icon: Bot, tone: 'bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-300' },
-  resubmitted: { icon: RefreshCw, tone: 'bg-indigo-100 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-300' },
-  default: { icon: History, tone: 'bg-muted text-muted-foreground' },
-};
 
 // FS activity-feed lines we surface as History rows (RO-2): "Dominic Bautista
 // set Status as Closed" → "Closed by Dominic Bautista in FreshService".
@@ -1248,179 +1213,23 @@ export default function TicketDetail() {
     });
   }, []);
 
-  const historyItems = useMemo(() => {
-    const items = [];
-    const humanize = (s) => String(s || '').replace(/_/g, ' ');
-    // Attributed sync rows (RO-1) — used to drop the duplicate FS feed line
-    // for the same transition (±3 min) so a close reads ONCE.
-    const attributedStatus = [];
-    const attributedAssign = [];
-    for (const a of ticket?.activities || []) {
-      const style = HISTORY_STYLES[a.activityType] || HISTORY_STYLES.default;
-      const d = a.details || {};
-      const kind = activityActorKind(a);
-      const fsName = kind === 'freshservice_sync' ? fsActorName(a) : null;
-      if (fsName && a.activityType === 'status_changed' && d.newStatus) {
-        attributedStatus.push({ at: new Date(a.performedAt).getTime(), status: String(d.newStatus).toLowerCase() });
-      }
-      if (fsName && a.activityType === 'assigned') attributedAssign.push({ at: new Date(a.performedAt).getTime() });
-      const bits = [];
-      if (d.oldStatus && d.newStatus) bits.push(`${d.oldStatus} → ${d.newStatus}`);
-      if (d.fromTechId || d.toTechId) {
-        bits.push(`${d.fromTechId ? techNameById.get(d.fromTechId) || `tech ${d.fromTechId}` : 'Unassigned'} → ${d.toTechId ? techNameById.get(d.toTechId) || `tech ${d.toTechId}` : 'Unassigned'}`);
-      }
-      if (Array.isArray(d.to)) bits.push(`to ${d.to.join(', ')}`);
-      // due_changed details carry {changes: {dueBy|frDueBy: {from, to}}}.
-      for (const [key, name] of [['frDueBy', 'First response'], ['dueBy', 'Resolution']]) {
-        const c = d.changes?.[key];
-        if (c && (c.from || c.to)) bits.push(`${name}: ${c.from ? formatDayTime(c.from) : 'not set'} → ${c.to ? formatDayTime(c.to) : 'removed'}`);
-      }
-      if (d.note) bits.push(d.note);
-      const meta = bits.join(' · ') || null;
-      // "Closed by Dominic Bautista in FreshService" for attributed sync rows.
-      const title = fsName && (a.activityType === 'status_changed' || a.activityType === 'assigned')
-        ? (
-          <>
-            <span className="capitalize font-medium">
-              {a.activityType === 'status_changed' && d.newStatus ? d.newStatus : humanize(a.activityType)}
-            </span>
-            <span className="text-muted-foreground"> by {fsName} in FreshService</span>
-          </>
-        )
-        : (
-          <>
-            <span className="capitalize font-medium">{humanize(a.activityType)}</span>
-            {a.performedBy ? <span className="text-muted-foreground"> · {a.performedBy}</span> : null}
-          </>
-        );
-      items.push({
-        key: `a-${a.id}`,
-        at: new Date(a.performedAt).getTime(),
-        ...style,
-        kind,
-        machine: isMachineActivity(a),
-        sig: `a|${a.activityType}|${a.performedBy || ''}|${meta || ''}`,
-        title,
-        meta,
-      });
-    }
-    for (const ep of ticket?.assignmentEpisodes || []) {
-      items.push({
-        key: `ep-${ep.id}`,
-        at: new Date(ep.startedAt).getTime(),
-        ...(HISTORY_STYLES[ep.startMethod] || HISTORY_STYLES.assigned),
-        title: (
-          <>
-            <span className="font-medium">{ep.technician?.name || 'Technician'}</span>
-            <span className="text-muted-foreground"> took ownership ({humanize(ep.startMethod)})</span>
-          </>
-        ),
-        meta: ep.startAssignedByName ? `by ${ep.startAssignedByName}` : null,
-      });
-      if (ep.endedAt && ep.endMethod && ep.endMethod !== 'still_active') {
-        items.push({
-          key: `ep-end-${ep.id}`,
-          at: new Date(ep.endedAt).getTime(),
-          ...(HISTORY_STYLES[ep.endMethod] || HISTORY_STYLES.default),
-          title: (
-            <>
-              <span className="font-medium">{ep.technician?.name || 'Technician'}</span>
-              <span className="text-muted-foreground">’s ownership ended ({humanize(ep.endMethod)})</span>
-            </>
-          ),
-          meta: ep.endActorName ? `by ${ep.endActorName}` : null,
-        });
-      }
-    }
-    for (const pr of ticket?.pipelineRuns || []) {
-      items.push({
-        key: `run-${pr.id}`,
-        at: new Date(pr.decidedAt || pr.createdAt).getTime(),
-        ...HISTORY_STYLES.ai_triage,
-        kind: 'ai',
-        machine: true,
-        title: (
-          <>
-            <span className="font-medium">{pr.status === 'queued' ? 'AI triage queued' : 'AI run'}</span>
-            <span className="text-muted-foreground"> — {pipelineRunLabel(pr)}</span>
-          </>
-        ),
-        meta: `via ${pipelineTriggerLabel(pr.triggerSource)}${pr.syncStatus ? ` · sync ${pr.syncStatus}` : ''}`,
-      });
-    }
-    // FS system feed (workflow executions, field sets): verbatim lines cached
-    // as thread entries — history material, deliberately kept out of the
-    // conversation. Assignment/status/group events are skipped here because
-    // the structured audit rows above already cover them.
-    const NEAR_MS = 3 * 60 * 1000;
-    for (const e of ticket?.thread || []) {
-      if (e.source !== 'freshservice_activity') continue;
-      const at = new Date(e.occurredAt).getTime();
-      // RO-2: FS status/assignment/group lines name the human who acted in
-      // FreshService — surfaced unless an attributed audit row already tells
-      // the same story within ±3 min.
-      const fsEvent = describeFsEvent(e);
-      if (fsEvent) {
-        const dup = fsEvent.kind === 'status'
-          ? attributedStatus.some((s) => Math.abs(s.at - at) <= NEAR_MS && s.status === fsEvent.value.toLowerCase())
-          : fsEvent.kind === 'assignment'
-            ? attributedAssign.some((s) => Math.abs(s.at - at) <= NEAR_MS)
-            : false;
-        if (dup) continue;
-        const actor = e.actorName || 'FreshService';
-        const isEcho = /^ticket pulse$/i.test(actor.trim());
-        const style = fsEvent.kind === 'status'
-          ? HISTORY_STYLES.status_changed
-          : fsEvent.kind === 'assignment' ? HISTORY_STYLES.assigned : HISTORY_STYLES.group_changed;
-        items.push({
-          key: `fs-${e.id}`,
-          at,
-          ...style,
-          kind: 'freshservice_sync',
-          machine: isEcho,
-          sig: `fs|${e.eventType}|${actor}|${fsEvent.value}`,
-          title: (
-            <>
-              <span className="font-medium">{fsEvent.verb}</span>
-              <span className="text-muted-foreground"> by {actor} in FreshService</span>
-            </>
-          ),
-          meta: null,
-        });
-        continue;
-      }
-      if (e.eventType !== 'activity') continue;
-      const text = String(e.bodyText || e.content || '').trim();
-      if (!text) continue;
-      items.push({
-        key: `sys-${e.id}`,
-        at,
-        icon: Bot,
-        tone: 'bg-muted text-muted-foreground',
-        kind: 'freshservice_sync',
-        machine: true,
-        sig: `sys|${e.actorName || ''}|${text}`,
-        title: (
-          <>
-            <span className="font-medium">{e.actorName || 'System'}</span>
-            <span className="text-muted-foreground"> · system activity</span>
-          </>
-        ),
-        meta: text.length > 220 ? `${text.slice(0, 220)}…` : text,
-      });
-    }
-    // Newest first, then fold runs of identical rows into "×N, 10:51–10:54".
-    return collapseConsecutive(items.sort((x, y) => y.at - x.at));
-  }, [ticket?.activities, ticket?.assignmentEpisodes, ticket?.pipelineRuns, ticket?.thread, techNameById]);
+  // Activity tab model (14 Sep overhaul): one normalised, deduplicated,
+  // burst-folded list — see utils/ticketHistory.js.
+  const historyItems = useMemo(() => buildHistoryItems({
+    activities: ticket?.activities || [],
+    assignmentEpisodes: ticket?.assignmentEpisodes || [],
+    pipelineRuns: ticket?.pipelineRuns || [],
+    thread: ticket?.thread || [],
+    techNameById,
+  }), [ticket?.activities, ticket?.assignmentEpisodes, ticket?.pipelineRuns, ticket?.thread, techNameById]);
+  const techPhotoByName = useMemo(() => {
+    const map = new Map();
+    for (const t of meta?.technicians || []) if (t.name && t.photoUrl) map.set(String(t.name).trim().toLowerCase(), t.photoUrl);
+    return map;
+  }, [meta?.technicians]);
+  const photoForName = useCallback((name) => techPhotoByName.get(String(name || '').trim().toLowerCase()) || null, [techPhotoByName]);
 
-  const visibleHistory = useMemo(
-    () => (hideMachine ? historyItems.filter((i) => !i.machine) : historyItems),
-    [historyItems, hideMachine],
-  );
-  const hiddenMachineCount = useMemo(
-    () => historyItems.reduce((n, i) => n + (i.machine ? i.count || 1 : 0), 0),
-    [historyItems],
-  );
+  const hiddenMachineCount = useMemo(() => countMachine(historyItems), [historyItems]);
 
   const subcategories = useMemo(() => {
     const top = (meta?.categoryTree || []).find((c) => c.id === effectiveCategoryId);
@@ -3148,55 +2957,15 @@ export default function TicketDetail() {
                 )}
 
                 {pageTab === 'history' && (
-                  <section className="tp-card rounded-xl p-4 sm:p-5" aria-label="Ticket history">
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 mb-4">
-                      <History className="w-4 h-4 text-blue-500" aria-hidden="true" />
-                      <h2 className="text-sm font-bold text-foreground">Everything that happened on this ticket</h2>
-                      <label className="ml-auto inline-flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
-                        <input
-                          type="checkbox"
-                          checked={hideMachine}
-                          onChange={toggleHideMachine}
-                          className="tp-focus-ring h-3.5 w-3.5 rounded border-input accent-primary"
-                        />
-                        Hide machine activity
-                      </label>
-                      {hideMachine && hiddenMachineCount > 0 && (
-                        <span className="text-[11px] text-muted-foreground/75" data-testid="machine-hidden-count">
-                          {hiddenMachineCount} machine {hiddenMachineCount === 1 ? 'event' : 'events'} hidden
-                        </span>
-                      )}
-                    </div>
-                    {visibleHistory.length === 0 ? (
-                      <p className="text-sm text-muted-foreground/75">
-                        {historyItems.length === 0 ? 'No recorded events yet.' : 'Only machine activity on this ticket — untick “Hide machine activity” to see it.'}
-                      </p>
-                    ) : (
-                      <ol>
-                        {visibleHistory.map((item, i) => (
-                          <HistoryEvent
-                            key={item.key}
-                            icon={item.icon}
-                            tone={item.tone}
-                            title={(
-                              <>
-                                {item.title}
-                                {item.kind ? <ActorKindChip kind={item.kind} className="ml-1.5 align-middle" /> : null}
-                                {item.count > 1 && (
-                                  <span className="text-muted-foreground" data-testid="collapsed-span">
-                                    {' · '}×{item.count}, {spanLabel(item.from, item.to)}
-                                  </span>
-                                )}
-                              </>
-                            )}
-                            meta={item.meta}
-                            at={item.at}
-                            isLast={i === visibleHistory.length - 1}
-                          />
-                        ))}
-                      </ol>
-                    )}
-                  </section>
+                  <TicketHistoryTimeline
+                    items={historyItems}
+                    hideMachine={hideMachine}
+                    onToggleMachine={toggleHideMachine}
+                    hiddenMachineCount={hiddenMachineCount}
+                    statusTone={(status) => statusToneFromDefs(statusDefs, status)}
+                    photoForName={photoForName}
+                    technicians={meta?.technicians || []}
+                  />
                 )}
               </div>
 
