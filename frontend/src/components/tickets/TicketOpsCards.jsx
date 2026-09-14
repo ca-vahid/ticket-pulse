@@ -254,6 +254,11 @@ export function CustomFieldsCard({ ticketId, values = {}, canWrite = false, onSa
   // URL-valued text fields render as links; a per-key toggle switches one back
   // to a plain input for editing.
   const [editingKeys, setEditingKeys] = useState(() => new Set());
+  // Only fields that carry a value are shown by default. A workspace's
+  // definitions are workspace-wide — the 17 Simorgh fields auto-provisioned in
+  // IT on 14 Sep appeared as empty inputs on every IT ticket, Simorgh or not.
+  // Empty definitions sit behind "Show N more fields".
+  const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
     ticketsAPI.customFieldDefinitions()
@@ -269,6 +274,12 @@ export function CustomFieldsCard({ ticketId, values = {}, canWrite = false, onSa
     .filter((k) => !definedKeys.has(k) && values[k] !== null && values[k] !== undefined && values[k] !== '');
 
   if (!definitions || (definitions.length === 0 && orphanKeys.length === 0)) return null;
+
+  const hasValue = (v) => v !== null && v !== undefined && v !== '';
+  const populated = definitions.filter((d) => hasValue(values?.[d.key]));
+  const empty = definitions.filter((d) => !hasValue(values?.[d.key]));
+  const visibleDefinitions = showAll ? definitions : populated;
+  const nothingSet = populated.length === 0 && orphanKeys.length === 0;
 
   const save = async () => {
     if (busy) return;
@@ -343,6 +354,9 @@ export function CustomFieldsCard({ ticketId, values = {}, canWrite = false, onSa
       <div className="flex items-center gap-1.5 mb-2">
         <Copy className="w-3.5 h-3.5 text-muted-foreground/75" aria-hidden="true" />
         <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/75">Custom fields</span>
+        {populated.length > 0 && (
+          <span className="text-[10px] text-muted-foreground/60" data-testid="custom-fields-count">{populated.length} set</span>
+        )}
         {dirty && canWrite && (
           <button
             onClick={save}
@@ -353,8 +367,16 @@ export function CustomFieldsCard({ ticketId, values = {}, canWrite = false, onSa
           </button>
         )}
       </div>
-      <div className="space-y-1.5">
-        {definitions.map((definition) => (
+      {nothingSet && !showAll ? (
+        <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+          <span className="italic">No custom fields set</span>
+          <button type="button" onClick={() => setShowAll(true)} className="tp-focus-ring text-primary hover:underline rounded font-medium">
+            Show {definitions.length} {definitions.length === 1 ? 'field' : 'fields'}
+          </button>
+        </div>
+      ) : null}
+      <div className={`space-y-1.5 ${nothingSet && !showAll ? 'hidden' : ''}`}>
+        {visibleDefinitions.map((definition) => (
           <label key={definition.key} className="block">
             <span className="block text-[10px] text-muted-foreground/75 mb-0.5">{definition.label}</span>
             {input(definition)}
@@ -380,6 +402,20 @@ export function CustomFieldsCard({ ticketId, values = {}, canWrite = false, onSa
           );
         })}
       </div>
+      {empty.length > 0 && !nothingSet && (
+        <button
+          type="button"
+          onClick={() => setShowAll((v) => !v)}
+          className="tp-focus-ring mt-2 text-[11px] text-muted-foreground hover:text-foreground rounded font-medium"
+        >
+          {showAll ? 'Hide empty fields' : `Show ${empty.length} more ${empty.length === 1 ? 'field' : 'fields'}`}
+        </button>
+      )}
+      {empty.length > 0 && nothingSet && showAll && (
+        <button type="button" onClick={() => setShowAll(false)} className="tp-focus-ring mt-2 text-[11px] text-muted-foreground hover:text-foreground rounded font-medium">
+          Hide fields
+        </button>
+      )}
       {error && <p className="mt-1 text-[10px] text-red-500">{error}</p>}
     </div>
   );

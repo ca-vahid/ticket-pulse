@@ -116,3 +116,26 @@ describe('CustomFieldsCard pencil overflow (QA 08-06 #2)', () => {
     expect(pencil.parentElement).toBe(wrapper);
   });
 });
+
+// 14 Sep 2026: the Simorgh fields auto-provisioned in IT showed as 17 empty
+// inputs on every IT ticket. Empty definitions are folded away by default.
+describe('CustomFieldsCard — empty definitions stay folded', () => {
+  test('a ticket with nothing set shows one line and a "Show N fields" affordance', async () => {
+    render(<CustomFieldsCard ticketId={501} values={{}} canWrite />);
+    await waitFor(() => expect(screen.getByText('No custom fields set')).toBeInTheDocument());
+    expect(screen.queryByLabelText('Client Name')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Show \d+ fields?/ }));
+    expect(screen.getByLabelText('Client Name')).toBeInTheDocument();
+  });
+
+  test('only populated fields render; the rest sit behind "Show N more fields"', async () => {
+    render(<CustomFieldsCard ticketId={501} values={{ client_name: 'ACME Inc' }} canWrite />);
+    await waitFor(() => expect(screen.getByDisplayValue('ACME Inc')).toBeInTheDocument());
+    expect(screen.getByTestId('custom-fields-count')).toHaveTextContent('1 set');
+    expect(screen.queryByLabelText('Share Point Item Link')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Show \d+ more fields?/ }));
+    expect(screen.getByLabelText('Share Point Item Link')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Hide empty fields/ }));
+    expect(screen.queryByLabelText('Share Point Item Link')).not.toBeInTheDocument();
+  });
+});
