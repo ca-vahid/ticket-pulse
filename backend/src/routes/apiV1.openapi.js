@@ -403,6 +403,45 @@ const UNKNOWN_CUSTOM_FIELDS_422 = {
   },
 };
 
+/**
+ * Every `code` the API can put in a problem+json body, with its status. Kept
+ * here so the docs page and the spec never drift from what the routes throw
+ * (hourly review 14 Sep: 13 codes were thrown but documented nowhere).
+ */
+export const PROBLEM_CODES = Object.freeze([
+  { code: 'invalid_request', status: 400, meaning: 'The request body or query is malformed or fails validation; `errors` lists fields where known.' },
+  { code: 'validation_failed', status: 400, meaning: 'A field value is not acceptable (e.g. an unknown category name); `detail` lists the allowed values.' },
+  { code: 'invalid_ticket_reference', status: 400, meaning: 'The ticket identifier is not an id, a TP-ref or a #FreshService number.' },
+  { code: 'invalid_user', status: 400, meaning: 'The user reference (e.g. assignee) does not resolve.' },
+  { code: 'user_required', status: 400, meaning: 'A user reference is required for this call.' },
+  { code: 'invalid_window', status: 400, meaning: 'The requested time window is invalid or too wide.' },
+  { code: 'resolution_reason_required', status: 400, meaning: 'Resolving or closing a Security-category ticket needs a `resolutionReason` (see GET /meta → resolutionReasons).' },
+  { code: 'invalid_resolution_reason', status: 400, meaning: '`resolutionReason` is not one of the documented values.' },
+  { code: 'resolution_note_required', status: 400, meaning: 'Reason `other` needs a `resolutionNote` saying what.' },
+  { code: 'resolution_note_too_long', status: 400, meaning: '`resolutionNote` exceeds the maximum length.' },
+  { code: 'api_key_required', status: 401, meaning: 'No credential was sent.' },
+  { code: 'invalid_api_key', status: 401, meaning: 'Unknown, disabled, revoked or expired API key.' },
+  { code: 'invalid_token', status: 401, meaning: 'The OAuth access token is invalid or expired, or its client is disabled.' },
+  { code: 'unauthorized', status: 401, meaning: 'Authentication failed for another reason.' },
+  { code: 'insufficient_scope', status: 403, meaning: 'The credential lacks a scope this call needs; `detail` names it.' },
+  { code: 'ip_not_allowed', status: 403, meaning: 'The request came from an address outside the credential’s IP allowlist.' },
+  { code: 'test_mode_read_only', status: 403, meaning: 'A tp_test_ key attempted a write.' },
+  { code: 'forbidden', status: 403, meaning: 'Refused for another policy reason.' },
+  { code: 'not_found', status: 404, meaning: 'No such ticket / resource in this workspace.' },
+  { code: 'approval_category_not_found', status: 404, meaning: 'The named approval category does not exist in this workspace.' },
+  { code: 'conflict', status: 409, meaning: 'The write conflicts with current state.' },
+  { code: 'external_ref_immutable', status: 409, meaning: 'The ticket already carries a different `externalRef`; it is set once.' },
+  { code: 'external_ref_taken', status: 409, meaning: 'Another ticket in the workspace already carries that `externalRef`.' },
+  { code: 'idempotency_in_flight', status: 409, meaning: 'A request with the same Idempotency-Key is still being processed; retry shortly.' },
+  { code: 'precondition_failed', status: 412, meaning: 'A conditional header did not match.' },
+  { code: 'unknown_custom_fields', status: 422, meaning: 'PATCH carried custom-field keys with no definition; `errors` lists every offender.' },
+  { code: 'idempotency_key_reused', status: 422, meaning: 'The Idempotency-Key was reused with a different request body.' },
+  { code: 'rate_limited', status: 429, meaning: 'Over the per-credential (or per-IP) limit; honour `Retry-After`.' },
+  { code: 'internal_error', status: 500, meaning: 'Unexpected failure; quote `request_id` when reporting it.' },
+  { code: 'upstream_error', status: 502, meaning: 'FreshService (or another upstream) answered with an error.' },
+  { code: 'service_unavailable', status: 503, meaning: 'Temporarily unable to serve (e.g. the FreshService rate-limit queue timed out); retry.' },
+]);
+
 export function buildOpenApiSpec(baseUrl) {
   return {
     openapi: '3.1.0',
@@ -419,6 +458,7 @@ export function buildOpenApiSpec(baseUrl) {
         '**Resubmissions:** send `externalRef` (your per-RECORD key) on `POST /tickets` — a re-POST for a known record UPDATES the ticket (200, `resubmitted: true`) instead of creating a duplicate.',
         '**Pagination:** list endpoints support `?cursor=` (keyset) or `?page=&pageSize=` (offset).',
       ].join('\n'),
+      'x-problem-codes': PROBLEM_CODES.map((c) => ({ ...c })),
     },
     servers: [{ url: `${baseUrl}/api/v1` }],
     security: [{ apiKey: [] }, { oauth2: [] }],
@@ -622,6 +662,12 @@ Both resolve to a single workspace; a credential can never read or write another
 • Lists page by <code>?cursor=</code> (keyset, use the returned <code>next_cursor</code>) or <code>?page=&amp;pageSize=</code>.
 </div>
 ${sections}
+<h2>Error codes</h2>
+<p>Every error is <code>application/problem+json</code> with a stable <code>code</code> (also in the spec as <code>info.x-problem-codes</code>). Branch on the code, not on the text.</p>
+<table><tr><th>code</th><th>status</th><th>meaning</th></tr>
+${PROBLEM_CODES.map((c) => `<tr><td><code>${esc(c.code)}</code></td><td>${c.status}</td><td>${esc(c.meaning)}</td></tr>`).join('')}
+</table>
+
 <h2>Ticket intake enrichment</h2>
 <p><code>POST /tickets</code> accepts more than the basics — senders can classify the ticket against the workspace
 taxonomy <b>by name</b> and attach arbitrary structured metadata that Ticket Pulse keeps, displays, and can automate on.</p>

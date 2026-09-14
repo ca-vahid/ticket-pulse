@@ -234,12 +234,17 @@ function normalizeGraphProfile(profile) {
   };
 }
 
-async function fetchEntraProfile(email) {
+export async function fetchEntraProfile(email) {
   if (!email) return null;
 
+  // Both clients read the same directory. When the primary is configured and
+  // says "no such user", asking the mail client again cannot answer
+  // differently — it only logged an error per vendor no-reply address
+  // (no-reply@amazon.com ×30 in one hour, 14 Sep). Fall back ONLY when the
+  // primary is not configured at all.
   if (azureAdService.isConfigured()) {
     const profile = await azureAdService.getUserProfile(email);
-    if (profile) return normalizeGraphProfile(profile);
+    return profile ? normalizeGraphProfile(profile) : null;
   }
 
   if (graphMailClient.isConfigured()) {

@@ -94,6 +94,21 @@ describe('OpenAPI spec — intake enrichment (FR 08-05 Phase 1c)', () => {
   });
 });
 
+describe('problem-code catalogue (hourly review 14 Sep)', () => {
+  test('every code the routes throw is documented with a status, in the spec and on the docs page', async () => {
+    const { PROBLEM_CODES } = await import('../src/routes/apiV1.openapi.js');
+    const codes = spec.info['x-problem-codes'].map((c) => c.code);
+    for (const must of ['invalid_request', 'insufficient_scope', 'ip_not_allowed', 'resolution_reason_required', 'unknown_custom_fields', 'idempotency_key_reused', 'external_ref_taken', 'rate_limited', 'service_unavailable']) {
+      expect(codes).toContain(must);
+    }
+    expect(new Set(codes).size).toBe(codes.length);
+    for (const c of PROBLEM_CODES) expect([400, 401, 403, 404, 409, 412, 422, 429, 500, 502, 503]).toContain(c.status);
+    const html = renderDocsPage('https://tp.example');
+    expect(html).toContain('<h2>Error codes</h2>');
+    for (const c of PROBLEM_CODES) expect(html).toContain(`<code>${c.code}</code>`);
+  });
+});
+
 describe('docs page — sender guide sections', () => {
   const html = renderDocsPage('https://tp.example');
 
