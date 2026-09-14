@@ -156,6 +156,8 @@ describe('the reason travels everywhere it must', () => {
 
   test('the benign-verdict template resolves as benign_expected', () => {
     const t = WORKFLOW_TEMPLATES.find((x) => x.key === 'simorgh_resolve_benign');
+    // A resolve must not sit in the 3-minute change-mail coalescing window.
+    expect(t.build().nodes.find((n) => n.type === 'trigger').data.coalesceMinutes).toBe(0);
     const node = t.build().nodes.find((n) => n.type === 'update_ticket');
     expect(node.data.setStatus).toBe('Resolved');
     expect(node.data.resolutionReason).toBe('benign_expected');

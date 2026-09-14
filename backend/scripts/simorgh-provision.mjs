@@ -118,6 +118,26 @@ async function ensureSecurityTaxonomy(workspaceId) {
   }
 }
 
+// The sandbox is a native-only workspace: it has no FreshService to detect
+// ticket types from, so it copies IT's type definitions (acceptance 14 Sep:
+// "ticketType must be one of: (none configured)").
+async function ensureTicketTypes(workspaceId) {
+  const have = await prisma.ticketTypeDefinition.count({ where: { workspaceId } });
+  if (have > 0) { log(`${have} ticket types exist`); return; }
+  const source = await prisma.ticketTypeDefinition.findMany({ where: { workspaceId: 1, isActive: true }, orderBy: { id: 'asc' } });
+  plan(`copy ${source.length} ticket types from IT: ${source.map((t) => t.name).join(', ')}`);
+  if (!APPLY) return;
+  for (const t of source) {
+    await prisma.ticketTypeDefinition.create({
+      data: {
+        workspaceId, name: t.name, description: t.description, aliases: t.aliases,
+        fsTypeValue: null, fsChoiceId: null, fsDetectedAt: null,
+        aiAssignable: t.aiAssignable, isDefault: t.isDefault, color: t.color, isActive: true,
+      },
+    });
+  }
+}
+
 async function ensureTags(workspaceId) {
   for (const [name, color] of TAGS) {
     const found = await prisma.ticketTag.findFirst({ where: { workspaceId, name } });
@@ -186,6 +206,27 @@ async function installPolicy(workspaceId, enable) {
       log(`installed workflow #${wf.id}`);
     }
   }
+  // Definition drift: re-publish when the installed trigger still coalesces.
+  if (wf && !wf.publishedVersion) {
+    // Draft-only (installed disabled, never published): keep the draft current
+    // so the eventual --enable publishes the right definition.
+    const trig = (wf.draftDefinition?.nodes || []).find((n) => n.type === 'trigger');
+    if (trig && trig.data?.coalesceMinutes !== 0) {
+      plan(`refresh draft of workflow #${wf.id} to the current template (coalesceMinutes 0)`);
+      if (APPLY) wf = await repo.saveDraft(workspaceId, wf.id, { definition: template.build() }, actor);
+    }
+  }
+  if (wf?.publishedVersion) {
+    const trig = (wf.publishedDefinition?.nodes || []).find((n) => n.type === 'trigger');
+    if (trig && trig.data?.coalesceMinutes !== 0) {
+      plan(`upgrade workflow #${wf.id} to the current template (coalesceMinutes 0) and publish v${wf.publishedVersion + 1}, enabled=${wf.isEnabled}`);
+      if (APPLY) {
+        await repo.saveDraft(workspaceId, wf.id, { definition: template.build() }, actor);
+        await repo.publishWorkflow(workspaceId, wf.id, { enabled: wf.isEnabled, changeNote: 'simorgh-provision: trigger coalesceMinutes 0' }, actor);
+        wf = await prisma.notificationWorkflow.findUnique({ where: { id: wf.id } });
+      }
+    }
+  }
   if (!enable) { log('workflow stays DISABLED (add --enable after the joint acceptance)'); return; }
   if (!wf) { log('(dry run: enable is planned after install)'); return; }
   if (!wf.publishedVersion) {
@@ -228,6 +269,7 @@ async function main() {
       await ensureGroup(ws.id);
       await ensureSecurityTaxonomy(ws.id);
       await ensureTags(ws.id);
+      await ensureTicketTypes(ws.id);
       log(`sandbox workspace id = ${ws.id}`);
     } else {
       log('(dry run: the workspace does not exist yet, so its seed is planned on the first --apply)');

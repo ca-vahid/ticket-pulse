@@ -243,6 +243,20 @@ describe('webhookPayloadFromContext', () => {
     expect(payload.ticket.customFields).toEqual({ source_request_type: 'Project Setup', budget: 1500 });
   });
 
+  test('a TP-born ticket is addressed by its native number, never its row id', () => {
+    const payload = webhookPayloadFromContext({
+      event: { type: 'ticket.status_changed' },
+      ticket: { id: 44533, nativeNumber: 1298, displayRef: 'TP-1298', origin: 'ticketpulse', subject: 'x', status: 'Open' },
+      requester: null,
+      assignedAgent: null,
+    });
+    expect(payload.ticket.ref).toBe('TP-1298');
+    expect(webhookPayloadFromContext({
+      event: { type: 'ticket.created' },
+      ticket: { id: 44533, nativeNumber: 1298, origin: 'ticketpulse', subject: 'x', status: 'Open' },
+    }).ticket.ref).toBe('TP-1298');
+  });
+
   test('uncategorized tickets degrade to nulls and an empty customFields object', () => {
     const payload = webhookPayloadFromContext({
       event: { type: 'ticket.created' },
