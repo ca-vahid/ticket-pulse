@@ -2,7 +2,8 @@ import express from 'express';
 import multer from 'multer';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { requireWorkspace } from '../middleware/workspace.js';
-import { AppError, AuthenticationError, AuthorizationError, ValidationError } from '../utils/errors.js';
+import { AppError, AuthenticationError, AuthorizationError, NotFoundError, ValidationError } from '../utils/errors.js';
+import { locateTicketWorkspaceForUser } from '../services/ticketWorkspaceLocator.js';
 import ticketService from '../services/ticketService.js';
 import scheduledTicketService from '../services/scheduledTicketService.js';
 import attachmentService, { MAX_ATTACHMENT_BYTES } from '../services/attachmentService.js';
@@ -1341,8 +1342,28 @@ router.get('/:id', asyncHandler(async (req, res) => {
   // The peek preview passes ?reconcile=0 to skip the live FreshService check
   // (which otherwise fires a FS API call on every rapid step through tickets).
   const reconcile = req.query.reconcile !== '0';
-  const ticket = await ticketService.getTicket(parseTicketId(req), req.workspaceId, { reconcile });
-  res.json({ success: true, data: ticket });
+  const ticketId = parseTicketId(req);
+  try {
+    const ticket = await ticketService.getTicket(ticketId, req.workspaceId, { reconcile });
+    res.json({ success: true, data: ticket });
+  } catch (err) {
+    if (!(err instanceof NotFoundError)) throw err;
+    // A canonical link opened from another workspace (a Simorgh link while
+    // the session sat on Accounting, 14 Sep): tell the page where the ticket
+    // lives so it can switch and stay on it, instead of a dead "not found".
+    const elsewhere = await locateTicketWorkspaceForUser({
+      ticketId,
+      currentWorkspaceId: req.workspaceId,
+      userEmail: (req.session?.user || req.user)?.email,
+    });
+    if (!elsewhere) throw err;
+    res.status(404).json({
+      success: false,
+      code: 'ticket_in_other_workspace',
+      message: `Ticket ${ticketId} is in the ${elsewhere.name} workspace`,
+      workspace: elsewhere,
+    });
+  }
 }));
 
 // --------------------------------------------------------------- mutations

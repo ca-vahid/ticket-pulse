@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.8.76-preview';
+export const APP_VERSION = '3.8.77-preview';
 
 export const changelog = [
+  {
+    version: '3.8.77-preview',
+    date: 'September 14, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>🔗 Ticket links open from any workspace</strong> — a link such as <code>/tickets/44797</code> opened while your session sat on another workspace answered “not found in this workspace”, and switching workspace from that page bounced you to the queue. The page now learns which workspace the ticket lives in (only if you have access to it), switches, and stays on the ticket. Links from Simorgh, e-mail and chat just work.' },
+    ],
+  },
   {
     version: '3.8.76-preview',
     date: 'September 14, 2026',

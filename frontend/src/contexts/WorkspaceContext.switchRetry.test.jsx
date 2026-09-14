@@ -65,6 +65,26 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+describe('switchWorkspace keepPath (ticket link opened from another workspace)', () => {
+  test('keepPath reloads the current record URL instead of bouncing to its list', async () => {
+    mocks.select.mockImplementation(async (id) => okSelect(id));
+    const reload = vi.fn(); const assign = vi.fn();
+    const original = window.location;
+    Object.defineProperty(window, 'location', { configurable: true, value: { ...original, pathname: '/tickets/44797', search: '', reload, assign } });
+    try {
+      renderProvider();
+      await act(async () => {});
+      await act(async () => { ctx.switchWorkspace(2, { keepPath: true }); });
+      expect(reload).toHaveBeenCalledTimes(1);
+      expect(assign).not.toHaveBeenCalled();
+      await act(async () => { ctx.switchWorkspace(1); });
+      expect(assign).toHaveBeenCalledWith('/tickets');
+    } finally {
+      Object.defineProperty(window, 'location', { configurable: true, value: original });
+    }
+  });
+});
+
 describe('switchWorkspace server-select retry + visible error', () => {
   test('a transient failure is retried once and succeeds silently', async () => {
     mocks.select
