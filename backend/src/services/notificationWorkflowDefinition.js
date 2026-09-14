@@ -99,10 +99,13 @@ export const WORKFLOW_TEMPLATES = [
           label: 'Benign, nothing contained, agent recommends close?',
           conditionGroup: {
             logic: 'all',
+            // Custom fields are addressed `custom:<key>` (the condition model
+            // maps that to ticket.customFields.<key>; a raw path is "Unknown
+            // condition field" at run time — sandbox acceptance run 2, 14 Sep).
             conditions: [
-              { field: 'ticket.customFields.simorgh_verdict', operator: 'in', value: ['BenignPositive', 'FalsePositive'] },
-              { field: 'ticket.customFields.simorgh_containment', operator: 'is', value: 'none' },
-              { field: 'ticket.customFields.simorgh_recommends_close', operator: 'is_true' },
+              { field: 'custom:simorgh_verdict', operator: 'in', value: ['BenignPositive', 'FalsePositive'] },
+              { field: 'custom:simorgh_containment', operator: 'is', value: 'none' },
+              { field: 'custom:simorgh_recommends_close', operator: 'is_true' },
               { field: 'ticket.status', operator: 'in', value: ['Open', 'Pending'] },
             ],
           },

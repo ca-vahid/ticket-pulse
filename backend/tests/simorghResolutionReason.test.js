@@ -5,6 +5,10 @@ import {
   validateResolution, resolvedByKindFromActor,
 } from '../src/services/resolutionReasonService.js';
 import { WORKFLOW_TEMPLATES } from '../src/services/notificationWorkflowDefinition.js';
+import { compileConditionGroup, validateConditionGroup, registerCustomFieldConditionOps } from '../src/services/notificationConditionModel.js';
+import jsonLogic from 'json-logic-js';
+
+registerCustomFieldConditionOps(jsonLogic);
 
 /**
  * Simorgh Release B — resolution reason (their C4, carried on D3).
@@ -161,5 +165,25 @@ describe('the reason travels everywhere it must', () => {
     const node = t.build().nodes.find((n) => n.type === 'update_ticket');
     expect(node.data.setStatus).toBe('Resolved');
     expect(node.data.resolutionReason).toBe('benign_expected');
+  });
+
+  test('the template condition compiles and decides the way the C2 rule says', () => {
+    // Run 2 of the sandbox acceptance: every run ended in
+    // compileError "Unknown condition field: ticket.customFields.simorgh_verdict".
+    const t = WORKFLOW_TEMPLATES.find((x) => x.key === 'simorgh_resolve_benign');
+    const group = t.build().nodes.find((n) => n.id === 'verdict').data.conditionGroup;
+    const types = { simorgh_recommends_close: 'boolean', simorgh_verdict: 'text', simorgh_containment: 'text' };
+    expect(validateConditionGroup(group, { customFieldTypes: types })).toEqual([]);
+    const rule = compileConditionGroup(group, { customFieldTypes: types });
+    const scope = (cf, status = 'Open') => ({ ticket: { status, customFields: cf } });
+    const benign = { simorgh_verdict: 'BenignPositive', simorgh_containment: 'none', simorgh_recommends_close: true };
+    expect(Boolean(jsonLogic.apply(rule, scope(benign)))).toBe(true);
+    expect(Boolean(jsonLogic.apply(rule, scope({ ...benign, simorgh_verdict: 'FalsePositive' })))).toBe(true);
+    expect(Boolean(jsonLogic.apply(rule, scope({ ...benign, simorgh_verdict: 'TruePositive' })))).toBe(false);
+    expect(Boolean(jsonLogic.apply(rule, scope({ ...benign, simorgh_containment: 'queued' })))).toBe(false);
+    expect(Boolean(jsonLogic.apply(rule, scope({ ...benign, simorgh_recommends_close: false })))).toBe(false);
+    expect(Boolean(jsonLogic.apply(rule, scope(benign, 'Resolved')))).toBe(false);
+    // Untyped (no definitions supplied) still compiles — string fallback.
+    expect(() => compileConditionGroup(group)).not.toThrow();
   });
 });
