@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.8.68-preview';
+export const APP_VERSION = '3.8.69-preview';
 
 export const changelog = [
+  {
+    version: '3.8.69-preview',
+    date: 'September 14, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>🛡️ Start-up survives a database that is still restarting</strong> — at 07:20 UTC Azure PostgreSQL restarted for maintenance; the app came back a minute before the database did, its initialisation failed once, and the sync scheduler, mirror, mailbox ingest and watchdogs never started while <code>/health</code> went green as soon as the database returned. Four workspaces served seven-hour-old data (IT stayed fresh only because the FreshService webhook feeds it). Initialisation now retries with backoff for up to ten minutes when the failure is a database connectivity error.' },
+    ],
+  },
   {
     version: '3.8.68-preview',
     date: 'September 14, 2026',
