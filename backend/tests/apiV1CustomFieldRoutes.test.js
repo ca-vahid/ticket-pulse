@@ -33,7 +33,7 @@ jest.unstable_mockModule('../src/utils/logger.js', () => ({
 jest.unstable_mockModule('../src/middleware/apiKeyAuth.js', () => ({
   requireApiKey: () => (req, _res, next) => {
     req.workspaceId = 1;
-    req.apiKey = { id: 5, name: 'test key', keyPrefix: 'tp_live_x', mode: 'live', scopes: authState.scopes, oauthClientId: null };
+    req.apiKey = { id: 5, name: 'test key', keyPrefix: 'tp_live_x', mode: 'live', scopes: authState.scopes, oauthClientId: null, trustedIntake: authState.trustedIntake === true };
     next();
   },
   apiRequestContext: (_req, _res, next) => next(),
@@ -140,6 +140,24 @@ describe('PATCH /api/v1/tickets/:id — customFields merge', () => {
     expect(customFieldServiceMock.setValues).toHaveBeenCalledWith(
       501, 1, { client_name: 'Updated' }, expect.objectContaining({ role: 'api' }),
     );
+  });
+
+  test('a trusted-intake credential provisions unknown keys on PATCH (Simorgh tier-2 fields)', async () => {
+    authState.trustedIntake = true;
+    customFieldServiceMock.setValuesAtCreate.mockResolvedValueOnce({ values: { simorgh_tier2_verdict: 'benign_positive' }, provisioned: ['simorgh_tier2_verdict'], rejected: [] });
+    const response = await request(buildApp())
+      .patch('/api/v1/tickets/501')
+      .set('Authorization', 'Bearer tp_live_x')
+      .send({ customFields: { simorghTier2Verdict: 'benign_positive', client_name: 'ok' } })
+      .expect(200);
+    expect(response.headers['x-provisioned-custom-fields']).toBe('simorgh_tier2_verdict');
+    expect(customFieldServiceMock.setValuesAtCreate).toHaveBeenCalledWith(
+      1, { simorgh_tier2_verdict: 'benign_positive', client_name: 'ok' }, expect.objectContaining({ autoProvision: true }),
+    );
+    expect(customFieldServiceMock.setValues).toHaveBeenCalledWith(
+      501, 1, { simorgh_tier2_verdict: 'benign_positive', client_name: 'ok' }, expect.objectContaining({ role: 'api' }),
+    );
+    authState.trustedIntake = false;
   });
 
   test('unknown keys → 422 problem listing EVERY offender; nothing written', async () => {

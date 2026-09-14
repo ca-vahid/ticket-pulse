@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.8.65-preview';
+export const APP_VERSION = '3.8.66-preview';
 
 export const changelog = [
+  {
+    version: '3.8.66-preview',
+    date: 'September 14, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>🎯 “Resolve on benign verdict” now actually evaluates its verdict</strong> — the template addressed the security agent’s fields as <code>ticket.customFields.…</code>; the condition engine knows them as <code>custom:&lt;key&gt;</code>, so every run ended in <em>Unknown condition field</em> and quietly skipped. Corrected, covered by a test that compiles and decides the rule both ways, and the installed copies in the sandbox and IT were re-published.' },
+      { type: 'improved', html: '<strong>Trusted-intake credentials may add custom fields on PATCH</strong> — an integration whose tier-2 fields exist only once the hunt report lands no longer has to pre-declare them at create. Unknown keys from anyone else are still refused (<code>422 unknown_custom_fields</code>). The reply carries <code>X-Provisioned-Custom-Fields</code>.' },
+      { type: 'improved', html: '<strong>Provisioning re-publishes on any template drift</strong> — <code>simorgh-provision.mjs --policy</code> compares the installed workflow to the current template (positions ignored) and publishes the next version with the same enabled state.' },
+    ],
+  },
   {
     version: '3.8.65-preview',
     date: 'September 14, 2026',

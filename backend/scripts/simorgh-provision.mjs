@@ -206,25 +206,27 @@ async function installPolicy(workspaceId, enable) {
       log(`installed workflow #${wf.id}`);
     }
   }
-  // Definition drift: re-publish when the installed trigger still coalesces.
-  if (wf && !wf.publishedVersion) {
-    // Draft-only (installed disabled, never published): keep the draft current
-    // so the eventual --enable publishes the right definition.
-    const trig = (wf.draftDefinition?.nodes || []).find((n) => n.type === 'trigger');
-    if (trig && trig.data?.coalesceMinutes !== 0) {
-      plan(`refresh draft of workflow #${wf.id} to the current template (coalesceMinutes 0)`);
-      if (APPLY) wf = await repo.saveDraft(workspaceId, wf.id, { definition: template.build() }, actor);
-    }
+  // Definition drift: whenever the installed nodes/edges differ from the
+  // current template (positions ignored), refresh the draft and — if it was
+  // published — publish the next version with the same enabled state.
+  // JSONB storage reorders object keys, so compare with keys sorted.
+  const canon = (v) => (Array.isArray(v) ? v.map(canon)
+    : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])])) : v);
+  const strip = (def) => JSON.stringify(canon({
+    nodes: (def?.nodes || []).map(({ position, ...n }) => n), // eslint-disable-line no-unused-vars
+    edges: def?.edges || [],
+  }));
+  const current = template.build();
+  if (wf && !wf.publishedVersion && strip(wf.draftDefinition) !== strip(current)) {
+    plan(`refresh draft of workflow #${wf.id} to the current template`);
+    if (APPLY) wf = await repo.saveDraft(workspaceId, wf.id, { definition: current }, actor);
   }
-  if (wf?.publishedVersion) {
-    const trig = (wf.publishedDefinition?.nodes || []).find((n) => n.type === 'trigger');
-    if (trig && trig.data?.coalesceMinutes !== 0) {
-      plan(`upgrade workflow #${wf.id} to the current template (coalesceMinutes 0) and publish v${wf.publishedVersion + 1}, enabled=${wf.isEnabled}`);
-      if (APPLY) {
-        await repo.saveDraft(workspaceId, wf.id, { definition: template.build() }, actor);
-        await repo.publishWorkflow(workspaceId, wf.id, { enabled: wf.isEnabled, changeNote: 'simorgh-provision: trigger coalesceMinutes 0' }, actor);
-        wf = await prisma.notificationWorkflow.findUnique({ where: { id: wf.id } });
-      }
+  if (wf?.publishedVersion && strip(wf.publishedDefinition) !== strip(current)) {
+    plan(`upgrade workflow #${wf.id} to the current template and publish v${wf.publishedVersion + 1}, enabled=${wf.isEnabled}`);
+    if (APPLY) {
+      await repo.saveDraft(workspaceId, wf.id, { definition: current }, actor);
+      await repo.publishWorkflow(workspaceId, wf.id, { enabled: wf.isEnabled, changeNote: 'simorgh-provision: template refresh' }, actor);
+      wf = await prisma.notificationWorkflow.findUnique({ where: { id: wf.id } });
     }
   }
   if (!enable) { log('workflow stays DISABLED (add --enable after the joint acceptance)'); return; }

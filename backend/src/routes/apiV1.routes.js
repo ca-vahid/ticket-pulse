@@ -491,7 +491,15 @@ router.patch('/tickets/:id', S('tickets:write'), withIdempotency, asyncHandler(a
     // way it had on POST and every key came back "unknown".
     const values = Object.fromEntries(Object.entries(body.customFields || {}).map(([k, v]) => [normalizeFieldKey(k), v]));
     const known = new Set((await customFieldService.listDefinitions(req.workspaceId)).map((d) => d.key));
-    const unknown = Object.keys(values).filter((k) => !known.has(k));
+    let unknown = Object.keys(values).filter((k) => !known.has(k));
+    if (unknown.length && req.apiKey.trustedIntake === true) {
+      // A trusted-intake credential IS an intake path (Simorgh: the tier-2
+      // fields exist only once the hunt report lands, minutes after create).
+      // Provision the way create does; whatever create would reject stays a 422.
+      const provisioned = await customFieldService.setValuesAtCreate(req.workspaceId, values, { autoProvision: true, actor });
+      unknown = (provisioned.rejected || []).map((r) => r.key);
+      if (!unknown.length) res.set('X-Provisioned-Custom-Fields', (provisioned.provisioned || []).join(','));
+    }
     if (unknown.length) {
       throw new ApiProblem({
         status: 422,
