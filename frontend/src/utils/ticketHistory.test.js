@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { buildHistoryItems, foldBursts, parseFsFeedLine, countMachine } from './ticketHistory';
+import { buildHistoryItems, foldBursts, groupByActor, parseFsFeedLine, countMachine } from './ticketHistory';
 
 const T0 = Date.parse('2026-09-14T11:37:50Z');
 const iso = (ms) => new Date(T0 + ms).toISOString();
@@ -115,5 +115,27 @@ describe('foldBursts', () => {
     expect(two[0]).toMatchObject({ event: 'burst', count: 2 });
     const far = foldBursts([mk('a', 20 * 60e3, true), mk('b', 0, true)]);
     expect(far).toHaveLength(2);
+  });
+});
+
+describe('groupByActor — one run per person, machine rows absorbed only mid-run', () => {
+  const items = buildHistoryItems({ activities, assignmentEpisodes: episodes, thread, techNameById: new Map([[7, 'Anton Kuzmychev']]) });
+  const runs = groupByActor(items);
+
+  test('consecutive actions by the same person become one run with the name once', () => {
+    const anton = runs.filter((r) => r.actor === 'Anton Kuzmychev' && !r.machine);
+    expect(anton).toHaveLength(1);
+    expect(anton[0].items.filter((i) => !i.machine).length).toBeGreaterThanOrEqual(5);
+    // Names never repeat back-to-back on the rail.
+    for (let i = 1; i < runs.length; i += 1) expect(runs[i].machine || runs[i - 1].machine || runs[i].actor !== runs[i - 1].actor).toBe(true);
+  });
+
+  test('a machine row between two people stands on its own; one inside a run is absorbed', () => {
+    const mk = (k, at, actor, machine) => ({ key: k, at, actor, machine, count: 1, from_at: at, to_at: at, event: machine ? 'system' : 'note', kind: machine ? 'system' : 'human' });
+    const inside = groupByActor([mk('a', 30, 'Ann', false), mk('m', 20, 'Ticket Workflow', true), mk('b', 10, 'Ann', false)]);
+    expect(inside).toHaveLength(1);
+    expect(inside[0].items.map((i) => i.key)).toEqual(['a', 'm', 'b']);
+    const between = groupByActor([mk('a', 30, 'Ann', false), mk('m', 20, 'Ticket Workflow', true), mk('b', 10, 'Bob', false)]);
+    expect(between.map((r) => `${r.actor}|${r.machine}`)).toEqual(['Ann|false', 'Ticket Workflow|true', 'Bob|false']);
   });
 });

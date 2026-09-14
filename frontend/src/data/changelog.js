@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.8.80-preview';
+export const APP_VERSION = '3.8.81-preview';
 
 export const changelog = [
+  {
+    version: '3.8.81-preview',
+    date: 'September 14, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>🕘 Activity tab is now a rail</strong> — one vertical timeline; each run of actions by the same person shows their photo and name once, then every action hangs off it with its own coloured icon node (lock = closed, check = resolved/accepted, arrow-back = reopened, person = assigned, bolt = priority, speech bubble = note, plus = created) and from → to chips. Closes, reopens, assignments, urgent and created sit on a tinted plate. Lone automation events are one quiet line; bursts still fold. Anton’s six actions on one ticket went from six repeated name-and-photo rows to one block.' },
+      { type: 'improved', html: '<strong>Quieter server log</strong> — a missing route or a ticket that lives in another workspace was logged as an error with a stack trace, the same as a crash. 404s now log as information and other client errors as warnings, so the error log only holds real failures.' },
+    ],
+  },
   {
     version: '3.8.80-preview',
     date: 'September 14, 2026',
