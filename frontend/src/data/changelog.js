@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.8.62-preview';
+export const APP_VERSION = '3.8.63-preview';
 
 export const changelog = [
+  {
+    version: '3.8.63-preview',
+    date: 'September 14, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>📨 FreshService webhook: answered in milliseconds, not seconds</strong> — the receiver used to fetch the ticket, sync it and start the assignment poll <em>before</em> replying, so the first firing on a brand-new ticket often overran FreshService’s short webhook budget. FreshService logged <em>Result – Failed</em>, retried minutes later, and the retry succeeded (8,393 received / 8,112 accepted said the work was fine; only the timing was wrong). The request is now validated and acknowledged at once, and the ingest runs behind it.' },
+      { type: 'improved', html: '<strong>A ticket FreshService has not finished indexing is retried by us</strong> — a 404 on a just-created ticket, or a busy rate-limit queue, is retried three times over about thirty seconds inside Ticket Pulse instead of being bounced back as a failed delivery. A ticket that never appears is still recorded on the webhook health card.' },
+    ],
+  },
   {
     version: '3.8.62-preview',
     date: 'September 14, 2026',

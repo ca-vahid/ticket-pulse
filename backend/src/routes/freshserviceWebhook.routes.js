@@ -60,7 +60,11 @@ router.post('/:workspaceSlug/tickets', async (req, res) => {
       freshserviceTicketId,
       suppliedSecret,
     });
-    return res.status(202).json({ success: true, data: result });
+    // `pending` is the background ingest promise — for callers in-process; the
+    // HTTP reply is the acknowledgement FreshService is waiting on.
+    const { pending, ...data } = result;
+    if (pending?.catch) pending.catch(() => {});
+    return res.status(202).json({ success: true, data });
   } catch (error) {
     const statusCode = error instanceof WebhookIngestError ? error.statusCode : 500;
     const code = error instanceof WebhookIngestError ? error.code : 'webhook_error';

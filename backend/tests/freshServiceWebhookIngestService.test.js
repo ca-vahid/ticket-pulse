@@ -53,9 +53,10 @@ jest.unstable_mockModule('../src/utils/logger.js', () => ({
 }));
 
 const {
-  default: freshServiceWebhookIngestService,
-  WebhookIngestError,
+  default: freshServiceWebhookIngestService, WebhookIngestError, INGEST_RETRY_DELAYS_MS,
 } = await import('../src/services/freshServiceWebhookIngestService.js');
+// Retries are real-time waits in production; tests run them back-to-back.
+INGEST_RETRY_DELAYS_MS.splice(0, INGEST_RETRY_DELAYS_MS.length, 0, 0, 0);
 
 describe('freshServiceWebhookIngestService', () => {
   beforeEach(() => {
@@ -96,11 +97,15 @@ describe('freshServiceWebhookIngestService', () => {
   });
 
   test('accepts a valid webhook through FreshService fetch, shared sync, and assignment polling', async () => {
-    const result = await freshServiceWebhookIngestService.handleTicketWebhook({
+    const ack = await freshServiceWebhookIngestService.handleTicketWebhook({
       workspaceSlug: 'it',
       freshserviceTicketId: '224183',
       suppliedSecret: 'secret',
     });
+    // Ack-fast (Simorgh 13.1-2): the reply FreshService waits on is immediate;
+    // the ingest runs behind it and its outcome is awaitable in-process.
+    expect(ack).toEqual(expect.objectContaining({ accepted: true, queued: true, freshserviceTicketId: '224183' }));
+    const result = await ack.pending;
 
     expect(result).toEqual(expect.objectContaining({
       accepted: true,
@@ -151,52 +156,97 @@ describe('freshServiceWebhookIngestService', () => {
       subject: 'Wrong workspace',
     });
 
-    await expect(freshServiceWebhookIngestService.handleTicketWebhook({
+    const ack = await freshServiceWebhookIngestService.handleTicketWebhook({
       workspaceSlug: 'it',
       freshserviceTicketId: '224183',
       suppliedSecret: 'secret',
-    })).rejects.toMatchObject({ code: 'workspace_mismatch', statusCode: 403 });
+    });
+    expect(ack.queued).toBe(true);
+    const outcome = await ack.pending;
+    expect(outcome).toMatchObject({ accepted: true, synced: false, rejected: 'workspace_mismatch' });
 
     expect(workspaceWebhookServiceMock.recordRejected).toHaveBeenCalledWith(2, 'workspace_mismatch');
     expect(syncServiceMock.syncFreshServiceTicketSnapshot).not.toHaveBeenCalled();
   });
 
-  test('surfaces FreshService fetch failures as retryable webhook errors', async () => {
+  test('a non-retryable FreshService failure is recorded, not thrown (the ack already went out)', async () => {
     const error = new Error('rate limited');
     error.response = { status: 429 };
     clientMock.fetchTicketSnapshot.mockRejectedValue(error);
 
-    await expect(freshServiceWebhookIngestService.handleTicketWebhook({
+    const ack = await freshServiceWebhookIngestService.handleTicketWebhook({
       workspaceSlug: 'it',
       freshserviceTicketId: '224183',
       suppliedSecret: 'secret',
-    })).rejects.toMatchObject({ code: 'freshservice_429', statusCode: 502 });
-
+    });
+    const outcome = await ack.pending;
+    expect(outcome).toMatchObject({ accepted: true, synced: false, attempts: 1 });
+    expect(clientMock.fetchTicketSnapshot).toHaveBeenCalledTimes(1);
     expect(workspaceWebhookServiceMock.recordError).toHaveBeenCalledWith(2, 'FreshService ticket fetch failed with HTTP 429');
   });
 
-  test('maps FS_QUEUE_TIMEOUT to a 503 so FreshService retries the delivery', async () => {
+  test('a 404 (ticket not yet readable) is retried, and succeeds on the next read', async () => {
+    // Exactly the FreshService "Failed → Success" trail Simorgh reported: the
+    // first fetch of a just-created ticket 404s; a moment later it is there.
+    const notYet = new Error('not found');
+    notYet.response = { status: 404 };
+    clientMock.fetchTicketSnapshot
+      .mockRejectedValueOnce(notYet)
+      .mockResolvedValueOnce({ id: 224183, workspace_id: 10, subject: 'Fresh' });
+
+    const ack = await freshServiceWebhookIngestService.handleTicketWebhook({
+      workspaceSlug: 'it',
+      freshserviceTicketId: '224183',
+      suppliedSecret: 'secret',
+    });
+    const outcome = await ack.pending;
+    expect(outcome).toMatchObject({ synced: true, ticketId: 501 });
+    expect(clientMock.fetchTicketSnapshot).toHaveBeenCalledTimes(2);
+    expect(workspaceWebhookServiceMock.recordAccepted).toHaveBeenCalledWith(2);
+    expect(workspaceWebhookServiceMock.recordError).not.toHaveBeenCalled();
+  });
+
+  test('retries are bounded: a ticket that never appears is recorded as an error after the schedule', async () => {
+    const notYet = new Error('not found');
+    notYet.response = { status: 404 };
+    clientMock.fetchTicketSnapshot.mockRejectedValue(notYet);
+
+    const ack = await freshServiceWebhookIngestService.handleTicketWebhook({
+      workspaceSlug: 'it',
+      freshserviceTicketId: '224183',
+      suppliedSecret: 'secret',
+    });
+    const outcome = await ack.pending;
+    expect(outcome).toMatchObject({ synced: false, attempts: INGEST_RETRY_DELAYS_MS.length + 1 });
+    expect(workspaceWebhookServiceMock.recordError).toHaveBeenCalledWith(2, 'FreshService ticket fetch failed with HTTP 404');
+  });
+
+  test('a queue timeout is retried in-process instead of bounced back to FreshService', async () => {
     const error = new Error('FreshService rate-limit queue timeout after 15000ms');
     error.code = 'FS_QUEUE_TIMEOUT';
     clientMock.fetchTicketSnapshot.mockRejectedValue(error);
 
-    await expect(freshServiceWebhookIngestService.handleTicketWebhook({
+    const ack = await freshServiceWebhookIngestService.handleTicketWebhook({
       workspaceSlug: 'it',
       freshserviceTicketId: '224183',
       suppliedSecret: 'secret',
-    })).rejects.toMatchObject({ code: 'freshservice_queue_timeout', statusCode: 503 });
-
+    });
+    const outcome = await ack.pending;
+    expect(outcome).toMatchObject({ synced: false, attempts: INGEST_RETRY_DELAYS_MS.length + 1 });
     expect(workspaceWebhookServiceMock.recordError).toHaveBeenCalledWith(2, expect.stringContaining('queue timed out'));
   });
 
-  test('maps a queue timeout thrown from the shared sync path to 503 as well', async () => {
+  test('a queue timeout from the shared sync path is retried the same way', async () => {
     const error = new Error('Request timed out waiting in the FreshService rate-limit queue');
     syncServiceMock.syncFreshServiceTicketSnapshot.mockRejectedValue(error);
 
-    await expect(freshServiceWebhookIngestService.handleTicketWebhook({
+    const ack = await freshServiceWebhookIngestService.handleTicketWebhook({
       workspaceSlug: 'it',
       freshserviceTicketId: '224183',
       suppliedSecret: 'secret',
-    })).rejects.toMatchObject({ code: 'freshservice_queue_timeout', statusCode: 503 });
+    });
+    const outcome = await ack.pending;
+    expect(outcome.synced).toBe(false);
+    expect(syncServiceMock.syncFreshServiceTicketSnapshot).toHaveBeenCalledTimes(INGEST_RETRY_DELAYS_MS.length + 1);
   });
 });

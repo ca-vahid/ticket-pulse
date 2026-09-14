@@ -529,13 +529,14 @@ describe('webhook ingest → shared snapshot → SSE broadcast (end-to-end)', ()
   });
 
   test('an FS status-change delivery lands as a workspace-scoped ticket-change broadcast', async () => {
-    const result = await freshServiceWebhookIngestService.handleTicketWebhook({
+    const ack = await freshServiceWebhookIngestService.handleTicketWebhook({
       workspaceSlug: 'it',
       freshserviceTicketId: '224183',
       suppliedSecret: 'secret',
     });
-
-    expect(result.accepted).toBe(true);
+    // Ack-fast receiver (Simorgh 13.1-2): the ingest completes behind the ack.
+    expect(ack.accepted).toBe(true);
+    const result = await ack.pending;
     expect(result.synced).toBe(true);
     expect(sseManagerMock.broadcast).toHaveBeenCalledWith(
       'ticket-change',
