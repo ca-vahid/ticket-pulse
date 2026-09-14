@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.8.74-preview';
+export const APP_VERSION = '3.8.75-preview';
 
 export const changelog = [
+  {
+    version: '3.8.75-preview',
+    date: 'September 14, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Assignment AI asks the directory only about our own people</strong> — the requester-context tool looked every requester up in Entra, including vendor no-reply mailboxes and Microsoft quarantine digests, which can never be there. Requesters outside the workspace’s internal domains are skipped now (a workspace with no domains configured behaves as before).' },
+    ],
+  },
   {
     version: '3.8.74-preview',
     date: 'September 14, 2026',
