@@ -25,6 +25,33 @@ const OAUTH_SECRET = process.env.API_OAUTH_SECRET || `${config.session.secret}:t
 const TOKEN_TTL_SEC = Number(process.env.API_OAUTH_TOKEN_TTL_SEC || 3600);
 const TOKEN_TYP = 'tp_api_oauth';
 
+const IPV4 = /^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/;
+const IPV4_CIDR = /^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}\/(3[0-2]|[12]?\d)$/;
+const ALLOWLIST_MAX = 64;
+
+/**
+ * IP allowlist for a client (Simorgh A2). Accepts an array or a comma /
+ * newline separated string; each entry an IPv4 address or IPv4 CIDR. Empty =
+ * no restriction. Same rule the API-key allowlist enforces in apiKeyAuth.
+ */
+export function validateAllowlist(input) {
+  const list = Array.isArray(input) ? input : String(input || '').split(/[\s,]+/);
+  const clean = [...new Set(list.map((v) => String(v || '').trim()).filter(Boolean))];
+  if (clean.length > ALLOWLIST_MAX) throw new ValidationError(`At most ${ALLOWLIST_MAX} allowlist entries`);
+  for (const entry of clean) {
+    if (!IPV4.test(entry) && !IPV4_CIDR.test(entry)) throw new ValidationError(`Not an IPv4 address or CIDR: "${entry}"`);
+  }
+  return clean;
+}
+
+/** Optional default arrival channel for tickets this client creates (Simorgh B8). */
+export function validateDefaultSource(input) {
+  if (input === null || input === undefined || input === '') return null;
+  const n = Number(input);
+  if (!Number.isInteger(n) || n < 1 || n > 9999) throw new ValidationError('defaultSource must be a positive integer source code');
+  return n;
+}
+
 export function hashSecret(raw) {
   return crypto.createHash('sha256').update(String(raw)).digest('hex');
 }
@@ -51,6 +78,9 @@ function shape(client, secret = null) {
   return {
     id: client.id, name: client.name, clientId: client.clientId, secretPrefix: client.secretPrefix,
     scopes: client.scopes, isEnabled: client.isEnabled, revokedAt: client.revokedAt || null,
+    trustedIntake: client.trustedIntake === true,
+    ipAllowlist: Array.isArray(client.ipAllowlist) ? client.ipAllowlist : [],
+    defaultSource: client.defaultSource ?? null,
     expiresAt: client.expiresAt, lastUsedAt: client.lastUsedAt, tokenCount: client.tokenCount,
     createdBy: client.createdBy, createdAt: client.createdAt,
     ...(secret ? { clientSecret: secret } : {}),
@@ -89,15 +119,20 @@ class OAuthClientService {
     return rows.map((c) => shape(c));
   }
 
-  async create(workspaceId, { name, scopes, expiresInDays = null }, actor) {
+  async create(workspaceId, {
+    name, scopes, expiresInDays = null, trustedIntake = false, ipAllowlist = [], defaultSource = null,
+  }, actor) {
     const trimmed = String(name || '').trim();
     if (trimmed.length < 3) throw new ValidationError('Client name must be at least 3 characters');
     const cleanScopes = validateScopes(scopes);
+    const cleanAllowlist = validateAllowlist(ipAllowlist);
+    const cleanSource = validateDefaultSource(defaultSource);
     if (!cleanScopes.length) throw new ValidationError('Grant at least one scope');
     const { clientId, secret, secretHash, secretPrefix } = generateClient();
     const client = await prisma.oAuthClient.create({
       data: {
         workspaceId, name: trimmed, clientId, clientSecretHash: secretHash, secretPrefix,
+        trustedIntake: trustedIntake === true, ipAllowlist: cleanAllowlist, defaultSource: cleanSource,
         scopes: cleanScopes,
         expiresAt: expiresInDays ? new Date(Date.now() + Number(expiresInDays) * 86400000) : null,
         createdBy: actor?.email || null,
@@ -113,6 +148,9 @@ class OAuthClientService {
     if (patch.name !== undefined) data.name = String(patch.name).trim();
     if (patch.isEnabled !== undefined) data.isEnabled = patch.isEnabled !== false;
     if (patch.scopes !== undefined) data.scopes = validateScopes(patch.scopes);
+    if (patch.trustedIntake !== undefined) data.trustedIntake = patch.trustedIntake === true;
+    if (patch.ipAllowlist !== undefined) data.ipAllowlist = validateAllowlist(patch.ipAllowlist);
+    if (patch.defaultSource !== undefined) data.defaultSource = validateDefaultSource(patch.defaultSource);
     const updated = await prisma.oAuthClient.update({ where: { id: client.id }, data });
     return shape(updated);
   }

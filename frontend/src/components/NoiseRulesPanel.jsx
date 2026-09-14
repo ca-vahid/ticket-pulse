@@ -169,7 +169,8 @@ function RuleRow({ rule, onUpdate, onDelete }) {
     await onUpdate(rule.id, {
       ...editData,
       // Dedup windows only make sense for noise-flagging rules.
-      senderPattern: editData.mode !== 'never_noise' ? (editData.senderPattern || '').trim() || null : null,
+      // Simorgh C2: a never_noise veto may be keyed on the sender too.
+      senderPattern: (editData.senderPattern || '').trim() || null,
       autoCloseFromPeople: editData.mode !== 'never_noise' && editData.autoCloseFromPeople === true,
       dedupWindowDays: editData.mode !== 'never_noise' && editData.dedupWindowDays
         ? parseInt(editData.dedupWindowDays)
@@ -297,11 +298,12 @@ function RuleRow({ rule, onUpdate, onDelete }) {
                   </div>
                 )}
               </div>
-              {editData.mode !== 'never_noise' && (
+              {(
                 <SenderConditionFields
                   idPrefix={`edit-${rule.id}`}
                   senderPattern={editData.senderPattern}
                   autoCloseFromPeople={editData.autoCloseFromPeople}
+                  veto={editData.mode === 'never_noise'}
                   onChange={(patch) => setEditData(d => ({ ...d, ...patch }))}
                 />
               )}
@@ -362,7 +364,7 @@ function RuleRow({ rule, onUpdate, onDelete }) {
  * forwarding it — so a rule can require the ADDRESS to match too, and rules that
  * are meant to swallow forwards (phishing-simulation campaigns) say so out loud.
  */
-export function SenderConditionFields({ idPrefix, senderPattern = '', autoCloseFromPeople = false, onChange }) {
+export function SenderConditionFields({ idPrefix, senderPattern = '', autoCloseFromPeople = false, onChange, veto = false }) {
   return (
     <div className="rounded-lg border border-border bg-muted/40 p-3 space-y-2">
       <div>
@@ -377,23 +379,27 @@ export function SenderConditionFields({ idPrefix, senderPattern = '', autoCloseF
           placeholder="e.g. noreply@|^postmaster@"
         />
         <p className="text-[10px] text-muted-foreground/75 mt-0.5">
-          Leave empty to match on the subject alone. With a pattern, the rule only fires when the requester’s address matches it too.
+          {veto
+            ? 'Leave empty to protect on the text pattern alone. With a sender pattern, both must match — so a text pattern of "." plus a sender of "^simorgh@" protects everything that address sends.'
+            : 'Leave empty to match on the subject alone. With a pattern, the rule only fires when the requester’s address matches it too.'}
         </p>
       </div>
-      <label className="flex items-start gap-2 text-xs text-foreground/85">
-        <input
-          type="checkbox"
-          checked={autoCloseFromPeople === true}
-          onChange={(e) => onChange({ autoCloseFromPeople: e.target.checked })}
-          className="mt-0.5 h-3.5 w-3.5 rounded border-input text-blue-600 dark:text-blue-300"
-        />
-        <span>
-          <span className="font-medium text-foreground">Close these even when a person sent them</span>
-          <span className="block text-[10px] text-muted-foreground/75">
-            Off by default: a ticket forwarded by a colleague is left in the queue for the AI and the team to read. Turn this on only for campaigns where the forwards themselves are the noise.
+      {!veto && (
+        <label className="flex items-start gap-2 text-xs text-foreground/85">
+          <input
+            type="checkbox"
+            checked={autoCloseFromPeople === true}
+            onChange={(e) => onChange({ autoCloseFromPeople: e.target.checked })}
+            className="mt-0.5 h-3.5 w-3.5 rounded border-input text-blue-600 dark:text-blue-300"
+          />
+          <span>
+            <span className="font-medium text-foreground">Close these even when a person sent them</span>
+            <span className="block text-[10px] text-muted-foreground/75">
+              Off by default: a ticket forwarded by a colleague is left in the queue for the AI and the team to read. Turn this on only for campaigns where the forwards themselves are the noise.
+            </span>
           </span>
-        </span>
-      </label>
+        </label>
+      )}
     </div>
   );
 }
@@ -734,7 +740,7 @@ export default function NoiseRulesPanel() {
     try {
       await noiseRulesAPI.create({
         ...newRule,
-        senderPattern: newRule.mode !== 'never_noise' ? (newRule.senderPattern || '').trim() || null : null,
+        senderPattern: (newRule.senderPattern || '').trim() || null,
         autoCloseFromPeople: newRule.mode !== 'never_noise' && newRule.autoCloseFromPeople === true,
         dedupWindowDays: newRule.mode !== 'never_noise' && newRule.dedupWindowDays
           ? parseInt(newRule.dedupWindowDays)
@@ -932,14 +938,13 @@ export default function NoiseRulesPanel() {
               </div>
             )}
           </div>
-          {newRule.mode !== 'never_noise' && (
-            <SenderConditionFields
-              idPrefix="new-rule"
-              senderPattern={newRule.senderPattern}
-              autoCloseFromPeople={newRule.autoCloseFromPeople}
-              onChange={(patch) => setNewRule(r => ({ ...r, ...patch }))}
-            />
-          )}
+          <SenderConditionFields
+            idPrefix="new-rule"
+            senderPattern={newRule.senderPattern}
+            autoCloseFromPeople={newRule.autoCloseFromPeople}
+            veto={newRule.mode === 'never_noise'}
+            onChange={(patch) => setNewRule(r => ({ ...r, ...patch }))}
+          />
           <div className="flex items-center gap-2">
             <button onClick={handleCreate} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium">
               <Plus className="w-3.5 h-3.5" /> Create Rule

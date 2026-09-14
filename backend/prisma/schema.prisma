@@ -278,6 +278,7 @@ model ApiKey {
   keyHash         String    @unique @map("key_hash") @db.VarChar(64)
   keyPrefix       String    @map("key_prefix") @db.VarChar(24)
   scopes          String[]  @default([])
+  trustedIntake   Boolean   @default(false) @map("trusted_intake")
   mode            String    @default("live") @db.VarChar(10) // live | test
   isEnabled       Boolean   @default(true) @map("is_enabled")
   expiresAt       DateTime? @map("expires_at")
@@ -308,6 +309,11 @@ model OAuthClient {
   clientSecretHash String    @map("client_secret_hash") @db.VarChar(64)
   secretPrefix     String    @map("secret_prefix") @db.VarChar(16)
   scopes           String[]  @default([])
+  // Simorgh (09-14): tickets from a trusted-intake credential are never
+  // re-classified, re-typed, re-prioritised or noise-closed by the pipeline.
+  trustedIntake    Boolean   @default(false) @map("trusted_intake")
+  ipAllowlist      String[]  @default([]) @map("ip_allowlist")
+  defaultSource    Int?      @map("default_source")
   isEnabled        Boolean   @default(true) @map("is_enabled")
   revokedAt        DateTime? @map("revoked_at")
   expiresAt        DateTime? @map("expires_at")
@@ -1138,6 +1144,9 @@ model Requester {
   createdAt              DateTime  @default(now()) @map("created_at")
   updatedAt              DateTime  @updatedAt @map("updated_at")
 
+  // An automation's mailbox: never send it requester-facing email.
+  unattended             Boolean   @default(false)
+
   tickets Ticket[]
 
   @@index([freshserviceId])
@@ -1163,6 +1172,15 @@ model Ticket {
   mirrorState               String?   @map("mirror_state") @db.VarChar(20)
   mirroredAt                DateTime? @map("mirrored_at")
   mirrorError               String?   @map("mirror_error") @db.Text
+  // Simorgh (09-14). 'trusted' = created by a trusted-intake credential: the
+  // caller's category/priority/type are authoritative and the ticket can never
+  // be noise-closed. Stamped once at creation; every pipeline trigger reads it.
+  triageMode                String?   @map("triage_mode") @db.VarChar(20)
+  // Resolution details (C4/D3). Vocabulary is a workspace setting; required on
+  // Security-category tickets, optional elsewhere.
+  resolutionReason          String?   @map("resolution_reason") @db.VarChar(40)
+  resolutionNote            String?   @map("resolution_note") @db.Text
+  resolvedByKind            String?   @map("resolved_by_kind") @db.VarChar(20)
   subject                   String?   @db.Text
   description               String?   @db.Text
   descriptionText           String?   @map("description_text") @db.Text

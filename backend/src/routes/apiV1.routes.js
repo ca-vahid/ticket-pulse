@@ -38,6 +38,9 @@ const apiActor = (req) => ({
   name: req.apiKey.name,
   role: 'api',
   technicianId: null,
+  // Simorgh C1: a trusted-intake credential's category/priority/type are final.
+  trustedIntake: req.apiKey.trustedIntake === true,
+  defaultSource: req.apiKey.defaultSource ?? null,
 });
 
 // Resolve a /tickets/:id path segment to an internal id. A plain positive

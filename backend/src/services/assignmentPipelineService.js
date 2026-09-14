@@ -112,6 +112,22 @@ class AssignmentPipelineService {
     // already-closed ticket, re-closing and re-noting it (prod #233696: three
     // runs + three duplicate courtesy notes in four minutes). The event
     // service gates this too — this is the belt for any other caller.
+    // Simorgh C1: a trusted-intake ticket is never re-assessed. Every
+    // assessment-flavoured trigger (priority change, classification-only,
+    // after-hours priority) stops here; a full run continues but the persist
+    // steps refuse to write category/priority/type and noise is vetoed, so the
+    // only possible outcome is an assignment.
+    if (isClassificationOnly || isPriorityAssessmentOnly) {
+      const trustedRow = await prisma.ticket.findUnique({
+        where: { id: ticketId }, select: { triageMode: true },
+      }).catch(() => null);
+      if (trustedRow?.triageMode === 'trusted') {
+        logger.info('Pipeline skipped: trusted-intake ticket is never re-assessed', { ticketId, triggerSource });
+        emit({ type: 'complete' });
+        return { skipped: true, reason: 'trusted_intake' };
+      }
+    }
+
     if (triggerSource === 'priority_changed') {
       const eligibility = await prisma.ticket.findUnique({
         where: { id: ticketId },
@@ -1584,14 +1600,22 @@ class AssignmentPipelineService {
           description: true,
           descriptionText: true,
           category: true,
+          triageMode: true,
           internalCategory: { select: { name: true } },
+          requester: { select: { email: true } },
         },
       });
       if (!ticket) return { vetoed: false, ruleId: null, ruleName: null };
+      // Simorgh C2: trusted intake is a veto in its own right — the credential
+      // already investigated this ticket; no noise verdict may close it.
+      if (ticket.triageMode === 'trusted') {
+        return { vetoed: true, ruleId: null, ruleName: 'Trusted intake (credential)' };
+      }
       return await noiseRuleService.evaluateNeverNoise(workspaceId, {
         subject: ticket.subject,
         description: ticket.descriptionText || ticket.description,
         category: ticket.internalCategory?.name || ticket.category,
+        requesterEmail: ticket.requester?.email || null,
       });
     } catch (error) {
       logger.warn('Pipeline never_noise veto check failed — leaving the noise decision unvetoed', {
@@ -1604,6 +1628,10 @@ class AssignmentPipelineService {
   }
 
   async _persistPriorityAssessment(ticketId, runId, recommendation) {
+    if (await this._isTrustedIntake(ticketId)) {
+      logger.info('Priority/type assessment not written: trusted-intake ticket', { ticketId });
+      return;
+    }
     try {
       await prisma.ticket.update({
         where: { id: ticketId },
@@ -1656,7 +1684,17 @@ class AssignmentPipelineService {
     }
   }
 
+  /** Simorgh C1: is this ticket's classification owned by the caller? */
+  async _isTrustedIntake(ticketId) {
+    const row = await prisma.ticket.findUnique({ where: { id: ticketId }, select: { triageMode: true } }).catch(() => null);
+    return row?.triageMode === 'trusted';
+  }
+
   async _persistInternalClassification(ticketId, workspaceId, recommendation) {
+    if (await this._isTrustedIntake(ticketId)) {
+      logger.info('Classification not written: trusted-intake ticket', { ticketId });
+      return;
+    }
     const rawCategoryId = Number(recommendation?.internalCategoryId);
     const rawSubcategoryId = Number(recommendation?.internalSubcategoryId);
     let categoryId = Number.isInteger(rawCategoryId) ? rawCategoryId : null;

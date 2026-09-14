@@ -309,7 +309,10 @@ class NoiseRuleService {
    */
   async evaluate(subject, createdAt = null, workspaceId = 1, context = {}) {
     if (!subject) return { isNoise: false, ruleId: null, category: null };
-    const { requesterEmail = null, requesterId = null } = context || {};
+    const { requesterEmail = null, requesterId = null, trustedIntake = false } = context || {};
+    // Simorgh C2: a trusted-intake credential's tickets are never noise. The
+    // caller has already investigated; a subject pattern cannot know better.
+    if (trustedIntake === true) return { isNoise: false, ruleId: null, category: null, suppressReason: 'trusted_intake' };
     let nearMiss = null; // subject matched, sender did not
 
     const wsId = workspaceId ?? 1;
@@ -389,7 +392,7 @@ class NoiseRuleService {
    * @param {{subject?: string|null, description?: string|null, category?: string|null}} ticket
    * @returns {Promise<{vetoed: boolean, ruleId: number|null, ruleName: string|null}>}
    */
-  async evaluateNeverNoise(workspaceId, { subject = null, description = null, category = null } = {}) {
+  async evaluateNeverNoise(workspaceId, { subject = null, description = null, category = null, requesterEmail = null } = {}) {
     const wsId = workspaceId ?? 1;
     const rules = (await this._getRules(wsId)).filter((r) => r.mode === 'never_noise');
     if (rules.length === 0) return { vetoed: false, ruleId: null, ruleName: null };
@@ -399,12 +402,17 @@ class NoiseRuleService {
       typeof description === 'string' ? description.slice(0, NEVER_NOISE_DESCRIPTION_LIMIT) : null,
       category,
     ].filter((text) => typeof text === 'string' && text.length > 0);
-    if (haystacks.length === 0) return { vetoed: false, ruleId: null, ruleName: null };
+    const sender = String(requesterEmail || '').trim();
 
     for (const rule of rules) {
-      if (haystacks.some((text) => rule.regex.test(text))) {
-        return { vetoed: true, ruleId: rule.id, ruleName: rule.name };
-      }
+      // Simorgh C2: a never_noise rule may carry a sender pattern. With one,
+      // BOTH must hold — text pattern AND sender — so an admin can write a
+      // veto for "anything from simorgh@" as pattern `.` + sender `^simorgh@`.
+      // Without one the rule behaves exactly as before (text only).
+      const textHit = haystacks.some((text) => rule.regex.test(text));
+      if (!textHit) continue;
+      if (rule.senderRegex && !(sender && rule.senderRegex.test(sender))) continue;
+      return { vetoed: true, ruleId: rule.id, ruleName: rule.name };
     }
     return { vetoed: false, ruleId: null, ruleName: null };
   }

@@ -243,6 +243,12 @@ function OAuthClientsSection() {
           <li key={c.id} className="flex flex-wrap items-center gap-2 text-xs border border-border/60 rounded-lg px-2.5 py-2">
             <span className={`font-semibold ${c.isEnabled && !c.revokedAt ? 'text-foreground/85' : 'text-muted-foreground/50 line-through'}`}>{c.name}</span>
             <code className="text-[10px] bg-muted rounded px-1 text-muted-foreground font-mono">{c.clientId}</code>
+            {c.trustedIntake && (
+              <span title="Trusted intake: this client's category, priority and type are final; its tickets are never noise-closed" className="px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 text-[10px] font-semibold">trusted intake</span>
+            )}
+            {Array.isArray(c.ipAllowlist) && c.ipAllowlist.length > 0 && (
+              <span title={c.ipAllowlist.join(', ')} className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px]">{c.ipAllowlist.length} IP{c.ipAllowlist.length === 1 ? '' : 's'}</span>
+            )}
             <span className="flex flex-wrap gap-1">
               {(c.scopes || []).slice(0, 5).map((s) => <span key={s} className="px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 text-[10px] font-mono">{s}</span>)}
               {(c.scopes || []).length > 5 && <span className="text-[10px] text-muted-foreground/75">+{c.scopes.length - 5}</span>}
@@ -284,13 +290,41 @@ function OAuthClientsSection() {
               </div>
             ))}
           </div>
+          {/* Simorgh (09-14): trusted intake + source allowlist. */}
+          <div className="rounded-lg border border-border bg-muted/40 p-2.5 space-y-2">
+            <label className="flex items-start gap-2 text-foreground/85">
+              <input
+                type="checkbox"
+                checked={draft.trustedIntake === true}
+                onChange={(e) => setDraft({ ...draft, trustedIntake: e.target.checked })}
+                aria-label="Trusted intake"
+                className="tp-focus-ring mt-0.5 h-3.5 w-3.5 rounded border-input text-blue-600 dark:text-blue-300"
+              />
+              <span>
+                <span className="font-medium text-foreground">Trusted intake</span>
+                <span className="block text-[10px] text-muted-foreground/75">
+                  Tickets this client creates keep the category, priority and type it sends. The AI may still pick an assignee, but never re-classifies, re-prioritises or closes them as noise. For systems that have already investigated what they file.
+                </span>
+              </span>
+            </label>
+            <div>
+              <label htmlFor="oauth-allowlist" className="block text-[10px] font-medium text-muted-foreground mb-0.5">IP allowlist (optional)</label>
+              <input
+                id="oauth-allowlist"
+                value={draft.ipAllowlist}
+                onChange={(e) => setDraft({ ...draft, ipAllowlist: e.target.value })}
+                placeholder="20.48.204.14, 52.228.84.0/24 — comma or newline separated; empty = any address"
+                className="tp-focus-ring w-full border border-border rounded-md px-2 py-1.5 font-mono text-[11px]"
+              />
+            </div>
+          </div>
           <div className="flex gap-1.5">
             <button onClick={create} disabled={busy || draft.name.trim().length < 3 || draft.scopes.length === 0} className="tp-focus-ring px-2.5 py-1 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-60">{busy ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" /> : 'Create client'}</button>
             <button onClick={() => setDraft(null)} className="tp-focus-ring px-2.5 py-1 rounded-md text-muted-foreground hover:bg-muted/50">Cancel</button>
           </div>
         </div>
       ) : (
-        <button onClick={() => setDraft({ name: '', scopes: ['tickets:read'], expiresInDays: '' })} className="tp-focus-ring inline-flex items-center gap-1 text-xs font-medium text-blue-600 dark:text-blue-300 hover:text-blue-700 dark:hover:text-blue-200"><Plus className="w-3.5 h-3.5" aria-hidden="true" /> New OAuth client</button>
+        <button onClick={() => setDraft({ name: '', scopes: ['tickets:read'], expiresInDays: '', trustedIntake: false, ipAllowlist: '' })} className="tp-focus-ring inline-flex items-center gap-1 text-xs font-medium text-blue-600 dark:text-blue-300 hover:text-blue-700 dark:hover:text-blue-200"><Plus className="w-3.5 h-3.5" aria-hidden="true" /> New OAuth client</button>
       )}
     </section>
   );

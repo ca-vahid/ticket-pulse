@@ -1165,6 +1165,7 @@ router.post('/oauth-clients', requireTicketingAdmin, asyncHandler(async (req, re
   const { default: oauthClientService } = await import('../services/oauthClientService.js');
   const client = await oauthClientService.create(req.workspaceId, {
     name: req.body?.name, scopes: req.body?.scopes, expiresInDays: req.body?.expiresInDays,
+    trustedIntake: req.body?.trustedIntake, ipAllowlist: req.body?.ipAllowlist, defaultSource: req.body?.defaultSource,
   }, req.ticketActor);
   // client_secret returned exactly once.
   res.status(201).json({ success: true, data: client });

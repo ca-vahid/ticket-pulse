@@ -409,6 +409,20 @@ function normalizeDescriptionInput(raw) {
  * statusService.baseStatusSets — custom terminal statuses get no chip, custom
  * Pending-base statuses pause the SLA nags. Omitted → canonical behavior.
  */
+/**
+ * Simorgh C3: a trusted-intake caller marks low-confidence tickets for human
+ * review with a boolean custom field. Keys arrive camelCase from the API and
+ * are stored snake_case, so both spellings are accepted; the specific key is
+ * `simorgh_review_needed`, but any `*review_needed` boolean counts.
+ */
+export function trustedReviewNeeded(customFields) {
+  if (!customFields || typeof customFields !== 'object') return false;
+  for (const [key, value] of Object.entries(customFields)) {
+    if (/review_?needed$/i.test(String(key)) && (value === true || String(value).toLowerCase() === 'true')) return true;
+  }
+  return false;
+}
+
 export function deriveStateChip(ticket, awaitingReply = false, statusSets = null) {
   const isTerminal = statusSets
     ? statusSets.terminal.has(ticket.status)
@@ -2575,7 +2589,12 @@ class TicketService {
     const { isNoise, ruleId, suppressedRule = null, suppressReason = null } = await noiseRuleService.evaluate(
       data.subject, new Date(), workspaceId,
       // The resolved requester is the authority here — `data` may only carry a name.
-      { requesterEmail: requester?.email || data.requesterEmail || null, requesterId: requester?.id || null },
+      {
+        requesterEmail: requester?.email || data.requesterEmail || null,
+        requesterId: requester?.id || null,
+        // Simorgh C2: a trusted credential's tickets are never noise.
+        trustedIntake: actor?.trustedIntake === true,
+      },
     );
     const nativeNumber = await this._nextNativeNumber();
     const now = new Date();
@@ -2627,7 +2646,9 @@ class TicketService {
         // and the public API pass their own channel. The create form can
         // override it (QA 07-10 #7: phone / walk-up / Teams requests logged
         // by staff should record how they actually arrived).
-        source: data.source ?? sourceChannel,
+        source: data.source ?? actor?.defaultSource ?? sourceChannel,
+        // Simorgh C1: stamped once; every pipeline trigger honours it.
+        ...(actor?.trustedIntake === true ? { triageMode: 'trusted' } : {}),
         lastIngestSource: 'ticketpulse_native',
         lastIngestedAt: now,
         // Cc visibility (QA 08-05 #3): carbon-copy addresses live on the
@@ -2733,7 +2754,16 @@ class TicketService {
     //  • aiClassifyOnly (assigned OR unassigned) → assessment-only run (no assignee change)
     // Noise never triages.
     let triage = { queued: false };
-    if (!isNoise) {
+    if (actor?.trustedIntake === true) {
+      // Simorgh C1/C3: the caller's classification is final, so the only thing
+      // the pipeline may do is pick an assignee (the persist steps refuse to
+      // write category/priority/type for a trusted ticket, and noise is
+      // vetoed). A low-confidence ticket — the caller flagged it for human
+      // review — is left unassigned on purpose: that IS the review queue.
+      if (!assignee && !trustedReviewNeeded(data.customFields)) {
+        triage = await this._startAiTriage(ticket.id, workspaceId, APP_NATIVE_TRIGGER_SOURCE);
+      }
+    } else if (!isNoise) {
       if (!assignee && data.runAiTriage) {
         triage = await this._startAiTriage(ticket.id, workspaceId, APP_NATIVE_TRIGGER_SOURCE);
       } else if (data.aiClassifyOnly) {
