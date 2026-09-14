@@ -156,8 +156,22 @@ describe('FreshServiceClient FS error detail propagation (interceptor-wrapped er
     expect(thrown).toBeDefined();
     expect(thrown.freshserviceStatus).toBe(400);
     expect(thrown.freshserviceDetail?.errors?.[0]?.field).toBe('department_id');
-    // FS's own description wins — no "FreshService API error: " double prefix.
-    expect(thrown.message).toBe('Validation failed');
+    // FS's own description wins — no "FreshService API error: " double prefix —
+    // and the field-level errors ride along (14 Sep: two mirror jobs sat on a
+    // bare "Validation failed" for five attempts).
+    expect(thrown.message).toBe('Validation failed (department_id: missing_field)');
+  });
+
+  test('updateTicket surfaces field-level errors the same way (mirror update_fields path)', async () => {
+    const client = new FreshServiceClient('example.freshservice.com', 'api-key');
+    client._put = jest.fn().mockRejectedValue(interceptorWrap(client, makeAxiosError({
+      description: 'Validation failed',
+      errors: [{ field: 'status', message: 'It should be one of these values: 2,3,4,5,6' }],
+    })));
+    let thrown;
+    try { await client.updateTicket(242188, { status: 5 }); } catch (e) { thrown = e; }
+    expect(thrown.message).toBe('Validation failed (status: It should be one of these values: 2,3,4,5,6)');
+    expect(thrown.freshserviceStatus).toBe(400);
   });
 
   test('detail survives when it lives ONLY under .originalError (no interceptor stamps)', async () => {

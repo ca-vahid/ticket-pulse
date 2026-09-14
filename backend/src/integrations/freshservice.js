@@ -50,6 +50,25 @@ export function getFreshServiceDetail(error) {
     || null;
 }
 
+/**
+ * Re-wrap a FreshService write failure so the message carries the field-level
+ * errors ("Validation failed (status: invalid_value)") — a bare "Validation
+ * failed" in a mirror job's lastError is undebuggable (QA 07-28 TP-1058;
+ * again 14 Sep on two Project Accounting update_fields jobs).
+ */
+export function wrapFreshServiceError(error) {
+  const detail = getFreshServiceDetail(error);
+  const httpStatus = getFreshServiceStatus(error);
+  const fieldErrors = Array.isArray(detail?.errors)
+    ? detail.errors.map((e) => `${e.field || e.code || 'field'}: ${e.message || e.code}`).join('; ')
+    : '';
+  const baseMsg = detail?.description || detail?.message || error.message;
+  const wrapped = new Error(fieldErrors ? `${baseMsg} (${fieldErrors})` : baseMsg);
+  wrapped.freshserviceDetail = detail;
+  wrapped.freshserviceStatus = httpStatus;
+  return wrapped;
+}
+
 function getValidationFields(detail) {
   const errors = Array.isArray(detail?.errors) ? detail.errors : [];
   return errors.map((item) => item.field).filter(Boolean);
@@ -677,10 +696,7 @@ class FreshServiceClient {
       const detail = getFreshServiceDetail(error);
       const httpStatus = getFreshServiceStatus(error);
       logger.error(`Error writing fields back to ticket ${ticketId}:`, { status: httpStatus, detail });
-      const wrapped = new Error(detail?.description || detail?.message || error.message);
-      wrapped.freshserviceDetail = detail;
-      wrapped.freshserviceStatus = httpStatus;
-      throw wrapped;
+      throw wrapFreshServiceError(error);
     }
   }
 
@@ -695,10 +711,7 @@ class FreshServiceClient {
       const detail = getFreshServiceDetail(error);
       const httpStatus = getFreshServiceStatus(error);
       logger.error(`Error updating custom fields for ticket ${ticketId}:`, { status: httpStatus, detail });
-      const wrapped = new Error(detail?.description || detail?.message || error.message);
-      wrapped.freshserviceDetail = detail;
-      wrapped.freshserviceStatus = httpStatus;
-      throw wrapped;
+      throw wrapFreshServiceError(error);
     }
   }
 
@@ -1112,17 +1125,7 @@ class FreshServiceClient {
       const detail = getFreshServiceDetail(error);
       const httpStatus = getFreshServiceStatus(error);
       logger.error('Error creating FreshService ticket:', { status: httpStatus, detail: JSON.stringify(detail) });
-      // Surface FS field-level errors in the message — "Validation failed"
-      // alone is undebuggable from a mirror-job lastError (QA 07-28 TP-1058:
-      // the real cause was a required department_id, invisible for 8 retries).
-      const fieldErrors = Array.isArray(detail?.errors)
-        ? detail.errors.map((e) => `${e.field || e.code || 'field'}: ${e.message || e.code}`).join('; ')
-        : '';
-      const baseMsg = detail?.description || detail?.message || error.message;
-      const wrapped = new Error(fieldErrors ? `${baseMsg} (${fieldErrors})` : baseMsg);
-      wrapped.freshserviceDetail = detail;
-      wrapped.freshserviceStatus = httpStatus;
-      throw wrapped;
+      throw wrapFreshServiceError(error);
     }
   }
 
@@ -1143,10 +1146,7 @@ class FreshServiceClient {
       const detail = getFreshServiceDetail(error);
       const httpStatus = getFreshServiceStatus(error);
       logger.error(`Error updating ticket ${ticketId}:`, { status: httpStatus, detail });
-      const wrapped = new Error(detail?.description || detail?.message || error.message);
-      wrapped.freshserviceDetail = detail;
-      wrapped.freshserviceStatus = httpStatus;
-      throw wrapped;
+      throw wrapFreshServiceError(error);
     }
   }
 

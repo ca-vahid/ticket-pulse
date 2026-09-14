@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.8.69-preview';
+export const APP_VERSION = '3.8.70-preview';
 
 export const changelog = [
+  {
+    version: '3.8.70-preview',
+    date: 'September 14, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>🚫 Sandbox workspaces no longer mirror into FreshService</strong> — an inactive workspace has no FreshService of its own, but the per-workspace configuration fell back to the global credentials, so the Simorgh sandbox’s acceptance tickets were copied into the real FreshService and three of them came back into IT and Accounting as FreshService-born duplicates. The mirror now refuses inactive workspaces at enqueue, at execution and at reconciliation.' },
+      { type: 'improved', html: '<strong>FreshService validation errors say which field</strong> — every write path now reports <em>Validation failed (status: …)</em> instead of a bare “Validation failed”, so a stuck mirror job can be read off the health card. Two Project Accounting closures were sitting on the bare message for five attempts.' },
+      { type: 'improved', html: '<strong>Sync log hygiene</strong> — runs a crash or deploy left at “started” (50 of them, the oldest from 1 August) are closed as abandoned when the scheduler boots.' },
+    ],
+  },
   {
     version: '3.8.69-preview',
     date: 'September 14, 2026',
