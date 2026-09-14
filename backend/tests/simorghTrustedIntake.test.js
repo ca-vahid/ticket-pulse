@@ -153,3 +153,19 @@ describe('C1 — the pipeline honours triage_mode=trusted at every write site', 
     expect(auth).toMatch(/ipAllowlist: Array\.isArray\(client\.ipAllowlist\) \? client\.ipAllowlist : \[\]/);
   });
 });
+
+describe('IP allowlist — the forwarded address may carry a port (go-live smoke test, 14 Sep)', () => {
+  test('normalizeIp strips ports and the v4-in-v6 prefix', async () => {
+    const { normalizeIp, ipAllowed, clientIp } = await import('../src/middleware/apiKeyAuth.js');
+    expect(normalizeIp('130.107.159.116:1282')).toBe('130.107.159.116');
+    expect(normalizeIp('::ffff:130.107.159.116:1282')).toBe('130.107.159.116');
+    expect(normalizeIp('::ffff:10.0.0.1')).toBe('10.0.0.1');
+    expect(normalizeIp('[2001:db8::1]:443')).toBe('2001:db8::1');
+    expect(normalizeIp('2001:db8::1')).toBe('2001:db8::1');
+    expect(normalizeIp('')).toBeNull();
+    expect(clientIp({ ip: '130.107.159.116:1282' })).toBe('130.107.159.116');
+    // The exact failure: an allowlisted App Service address refused because of its port.
+    expect(ipAllowed(clientIp({ ip: '130.107.159.116:1282' }), ['130.107.159.116', '20.48.204.14'])).toBe(true);
+    expect(ipAllowed(clientIp({ ip: '130.107.159.117:1282' }), ['130.107.159.116'])).toBe(false);
+  });
+});

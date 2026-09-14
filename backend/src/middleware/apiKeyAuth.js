@@ -21,8 +21,27 @@ export function clientIp(req) {
   // UNTRUSTED hop — the real client IP the platform proxy appends. Never parse
   // X-Forwarded-For by hand: its left-most entry is fully client-spoofable, and
   // trusting it defeats the IP allowlist and every per-IP throttle keyed here.
-  const ip = req.ip || req.socket?.remoteAddress || '';
-  return ip.replace(/^::ffff:/, '') || null;
+  const raw = String(req.ip || req.socket?.remoteAddress || '');
+  return normalizeIp(raw);
+}
+
+/**
+ * Azure App Service (and other front doors) append the source PORT to the
+ * forwarded address — `130.107.159.116:1282` — and Express hands that through
+ * verbatim. The Simorgh go-live smoke test (14 Sep) was refused with
+ * ip_not_allowed from an address that WAS on its allowlist because of it.
+ * Strip the port from `a.b.c.d:port` and `[v6]:port`, and the v4-in-v6 prefix.
+ */
+export function normalizeIp(raw) {
+  let ip = String(raw || '').trim();
+  const v6Bracket = ip.match(/^\[([^\]]+)\](?::\d+)?$/);
+  if (v6Bracket) ip = v6Bracket[1];
+  const v4Port = ip.match(/^(\d{1,3}(?:\.\d{1,3}){3}):\d+$/);
+  if (v4Port) ip = v4Port[1];
+  ip = ip.replace(/^::ffff:/i, '');
+  const v4PortAfter = ip.match(/^(\d{1,3}(?:\.\d{1,3}){3}):\d+$/);
+  if (v4PortAfter) ip = v4PortAfter[1];
+  return ip || null;
 }
 
 function ipv4ToInt(ip) {
