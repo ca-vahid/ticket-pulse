@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.8.75-preview';
+export const APP_VERSION = '3.8.76-preview';
 
 export const changelog = [
+  {
+    version: '3.8.76-preview',
+    date: 'September 14, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>📖 API error codes are documented</strong> — every <code>code</code> the integration API can return now sits in one catalogue, in the OpenAPI document (<code>info.x-problem-codes</code>) and as an “Error codes” table on the docs page, with its HTTP status and meaning. Thirteen of them were thrown but written down nowhere.' },
+      { type: 'improved', html: '<strong>Directory lookups: one question, not two</strong> — a new requester was looked up in Entra twice, by two clients reading the same directory; the second attempt only added an error line for every vendor no-reply address. One lookup now, and “no such user” is logged as an answer, not an error.' },
+    ],
+  },
   {
     version: '3.8.75-preview',
     date: 'September 14, 2026',

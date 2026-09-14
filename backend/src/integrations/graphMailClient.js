@@ -475,6 +475,12 @@ class GraphMailClient {
         return { error: 'User.Read.All permission not granted on the Azure AD app registration. An admin needs to add this permission and grant admin consent.' };
       }
 
+      if (code === 'Request_ResourceNotFound' || code === 404) {
+        // An address that is not in Entra (external senders, retired accounts)
+        // is a normal answer for a directory lookup, not an incident.
+        logger.info('Graph API getUserProfile: no such user', { email });
+        return { error: msg || 'User not found in the directory', notFound: true };
+      }
       logger.error('Graph API getUserProfile failed', { email, error: msg || error.message, code });
       return { error: msg || error.message || 'Failed to fetch user profile' };
     }
