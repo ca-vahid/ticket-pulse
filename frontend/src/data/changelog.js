@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.8.67-preview';
+export const APP_VERSION = '3.8.68-preview';
 
 export const changelog = [
+  {
+    version: '3.8.68-preview',
+    date: 'September 14, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>🚨 Hotfix: IP allowlists refused every allowlisted caller</strong> — Azure forwards the client address with its source port (<code>130.107.159.116:1282</code>) and the allowlist compared that whole string, so the Simorgh go-live smoke test was answered <code>403 ip_not_allowed</code> from an address that was on the list. The port (and the IPv4-in-IPv6 prefix) is now stripped before the check and before the per-IP rate-limit keys.' },
+    ],
+  },
   {
     version: '3.8.67-preview',
     date: 'September 14, 2026',
