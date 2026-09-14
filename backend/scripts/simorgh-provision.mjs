@@ -6,6 +6,9 @@
  *   node scripts/simorgh-provision.mjs --it                 # IT workspace: taxonomy, tags, requester
  *   node scripts/simorgh-provision.mjs --client --workspace <id>   # issue the Simorgh OAuth client
  *   node scripts/simorgh-provision.mjs --webhook --workspace <id> --url <https://…>
+ *   node scripts/simorgh-provision.mjs --policy --workspace <id> [--enable]
+ *        C2: the never_noise veto keyed on simorgh@ + the "resolve on benign
+ *        verdict" workflow (installed DISABLED; --enable = publish + enable)
  *   add --apply to any of the above to write.
  *
  * Why a script and not the UI: the sandbox workspace is deliberately inactive
@@ -138,6 +141,66 @@ async function issueClient(workspaceId) {
   console.log('──────────────────────────────────────────────────\n');
 }
 
+// C2 policy (plan Phase 1.2 + 1.5). Two halves: a veto so no noise rule can
+// ever close a security-agent ticket, and the ONE sanctioned auto-resolve —
+// the agent's own structured benign verdict. Both idempotent by name.
+const NEVER_NOISE = {
+  name: 'Simorgh — never noise (security agent)',
+  pattern: '.',
+  senderPattern: '^simorgh@',
+  mode: 'never_noise',
+  category: 'custom',
+  description: 'Security-agent tickets are never noise. Matches on the sender (simorgh@…) — every noise verdict on such a ticket is vetoed, whatever the text says.',
+};
+async function installPolicy(workspaceId, enable) {
+  const { default: noiseRuleService } = await import('../src/services/noiseRuleService.js');
+  const rule = await prisma.noiseRule.findFirst({ where: { workspaceId, name: NEVER_NOISE.name } });
+  if (rule) log(`never_noise rule #${rule.id} exists (enabled=${rule.isEnabled})`);
+  else {
+    plan(`create never_noise rule "${NEVER_NOISE.name}" sender ^simorgh@ in ws ${workspaceId}`);
+    if (APPLY) {
+      const created = await noiseRuleService.createRule({ ...NEVER_NOISE, workspaceId });
+      log(`created never_noise rule #${created.id}`);
+    }
+  }
+
+  const { WORKFLOW_TEMPLATES } = await import('../src/services/notificationWorkflowDefinition.js');
+  const repo = await import('../src/services/notificationWorkflowRepository.js');
+  const template = WORKFLOW_TEMPLATES.find((t) => t.key === 'simorgh_resolve_benign');
+  if (!template) throw new Error('template simorgh_resolve_benign missing');
+  const actor = { email: 'simorgh-provision' };
+  let wf = await prisma.notificationWorkflow.findFirst({
+    where: { workspaceId, triggerType: template.triggerType, name: template.name, archivedAt: null },
+  });
+  if (wf) log(`workflow #${wf.id} "${wf.name}" exists (published v${wf.publishedVersion}, enabled=${wf.isEnabled})`);
+  else {
+    plan(`install workflow template "${template.name}" in ws ${workspaceId} (additive, disabled)`);
+    if (APPLY) {
+      wf = await repo.createWorkflowVariant(workspaceId, {
+        triggerType: template.triggerType,
+        name: template.name,
+        description: template.description,
+        definition: template.build(),
+        routingMode: 'additive',
+      }, actor);
+      log(`installed workflow #${wf.id}`);
+    }
+  }
+  if (!enable) { log('workflow stays DISABLED (add --enable after the joint acceptance)'); return; }
+  if (!wf) { log('(dry run: enable is planned after install)'); return; }
+  if (!wf.publishedVersion) {
+    plan(`publish workflow #${wf.id} v1 (enabled=false)`);
+    if (APPLY) {
+      await repo.publishWorkflow(workspaceId, wf.id, { enabled: false, changeNote: 'Installed by simorgh-provision' }, actor);
+      wf = await prisma.notificationWorkflow.findUnique({ where: { id: wf.id } });
+    }
+  }
+  if (!wf.isEnabled) {
+    plan(`enable workflow #${wf.id}`);
+    if (APPLY) await repo.setWorkflowEnabled(workspaceId, wf.id, true, actor);
+  } else log(`workflow #${wf.id} already enabled`);
+}
+
 async function subscribeWebhook(workspaceId, url) {
   const existing = await prisma.webhookSubscription.findFirst({ where: { workspaceId, url } });
   if (existing) { log(`webhook subscription #${existing.id} for ${url} exists (events: ${existing.events.length})`); return; }
@@ -193,6 +256,12 @@ async function main() {
       plan(`mark requester #${r.id} "${r.name}" unattended — no requester-facing mail, ever`);
       if (APPLY) await prisma.requester.update({ where: { id: r.id }, data: { unattended: true } });
     }
+  }
+  if (has('--policy')) {
+    const ws = Number(after('--workspace'));
+    if (!ws) throw new Error('--policy needs --workspace <id>');
+    console.log(`\n[policy ws ${ws}]`);
+    await installPolicy(ws, has('--enable'));
   }
   if (has('--webhook')) {
     const ws = Number(after('--workspace')); const url = after('--url');
