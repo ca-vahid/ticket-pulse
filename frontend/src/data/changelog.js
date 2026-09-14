@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.8.78-preview';
+export const APP_VERSION = '3.8.79-preview';
 
 export const changelog = [
+  {
+    version: '3.8.79-preview',
+    date: 'September 14, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>📋 Custom fields card shows only what is set</strong> — a workspace’s field definitions are workspace-wide, so the 17 Simorgh fields that arrived with the first security-agent ticket were showing as empty inputs on every IT ticket (and Project Accounting’s nine intake fields on every one of theirs). The card now lists only fields with a value, with a count in the header; the empty ones sit behind “Show N more fields”, and a ticket with nothing set folds to a single line.' },
+    ],
+  },
   {
     version: '3.8.78-preview',
     date: 'September 14, 2026',
