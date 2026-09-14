@@ -4,7 +4,8 @@ import prisma from '../services/prisma.js';
 import ticketService from '../services/ticketService.js';
 import technicianRepository from '../services/technicianRepository.js';
 import groupRepository from '../services/groupRepository.js';
-import { TICKET_SOURCE, ticketDisplayRef } from '../utils/ticketOrigin.js';
+import { TICKET_SOURCE, TICKET_SOURCE_LABELS, AGENT_SELECTABLE_SOURCES, ticketDisplayRef } from '../utils/ticketOrigin.js';
+import { RESOLUTION_REASONS } from '../services/resolutionReasonService.js';
 import logger from '../utils/logger.js';
 import {
   API_KEY_SCOPES, generateApiKey, hashApiKey, scopeSatisfies,
@@ -125,6 +126,9 @@ function threadEntryShape(e) {
     type: e.eventType,
     author: e.actorName,
     authorType: e.authorType || null,
+    // Stage-as-data (Simorgh A5): which stage of an integration wrote it.
+    stage: e.rawPayload?.stage || null,
+    agent: e.rawPayload?.agent || null,
     isPrivate: e.isPrivate === true,
     body: e.bodyText || e.content,
     at: e.occurredAt,
@@ -135,6 +139,8 @@ function contactShape(r) {
   return {
     id: r.id, name: r.name, email: r.email || null, phone: r.phone || null,
     department: r.department || null, location: r.entraOfficeLocation || null,
+    // Simorgh A4: an unattended mailbox never receives requester-facing mail.
+    unattended: r.unattended === true,
   };
 }
 
@@ -202,6 +208,10 @@ router.get('/meta', S(), asyncHandler(async (req, res) => {
       statuses: statusDefs.map((s) => s.name),
       statusDetails: statusDefs.map((s) => ({ name: s.name, baseStatus: s.baseStatus })),
       ticketTypes: types,
+      // Simorgh C4 / B8: the resolution vocabulary and the arrival channels a
+      // caller may set, so an integrator reads them instead of hard-coding.
+      resolutionReasons: RESOLUTION_REASONS.map((r) => ({ value: r.value, label: r.label })),
+      sources: AGENT_SELECTABLE_SOURCES.map((code) => ({ value: code, label: TICKET_SOURCE_LABELS[code] || String(code) })),
     },
   });
 }));
@@ -556,8 +566,30 @@ router.post('/tickets/:id/notes', S('conversations:write'), withIdempotency, asy
   const result = await ticketService.addPrivateNote((await tid(req)), req.workspaceId, {
     bodyText: req.body?.body || req.body?.bodyText,
     bodyHtml: req.body?.bodyHtml || null,
+    // Simorgh A5: which stage of the caller wrote this ("tier2", "Rostam").
+    stage: req.body?.stage ?? null,
+    agent: req.body?.agent ?? null,
   }, apiActor(req));
-  res.status(201).json({ success: true, data: { entryId: result.entry.id } });
+  res.status(201).json({ success: true, data: { entryId: result.entry.id, author: result.entry.actorName } });
+}));
+
+// Audit read (Simorgh E3): who changed what and when — the same rows the
+// in-app History tab shows. Read-only; never the thread.
+router.get('/tickets/:id/activities', S('tickets:read'), asyncHandler(async (req, res) => {
+  const { default: ticketActivityRepository } = await import('../services/ticketActivityRepository.js');
+  const limit = Math.max(1, Math.min(Number(req.query.limit) || 100, 500));
+  const rows = await ticketActivityRepository.getByTicketId((await tid(req)), limit);
+  res.json({
+    success: true,
+    data: rows.map((a) => ({
+      id: a.id,
+      type: a.activityType,
+      performedBy: a.performedBy || null,
+      actorKind: a.details?.actorKind || null,
+      at: a.performedAt,
+      details: a.details || null,
+    })),
+  });
 }));
 
 // ------------------------------------------------------------------ tasks

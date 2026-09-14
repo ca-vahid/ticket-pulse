@@ -132,7 +132,7 @@ async function issueClient(workspaceId) {
   if (!APPLY) return;
   const c = await oauthClientService.create(workspaceId, CLIENT, { email: 'simorgh-provision' });
   console.log('\n──────── HAND OVER SECURELY — SHOWN ONCE ────────');
-  console.log(`  token_url:     https://api.ticketpulse.bgcsaas.com/api/v1/oauth/token`);
+  console.log('  token_url:     https://api.ticketpulse.bgcsaas.com/api/v1/oauth/token');
   console.log(`  client_id:     ${c.clientId}`);
   console.log(`  client_secret: ${c.clientSecret}`);
   console.log('──────────────────────────────────────────────────\n');
@@ -181,6 +181,18 @@ async function main() {
     if (!ws) throw new Error('--client needs --workspace <id>');
     console.log(`\n[client ws ${ws}]`);
     await issueClient(ws);
+  }
+  if (has('--unattended')) {
+    const email = String(after('--unattended') || '').trim().toLowerCase();
+    if (!email) throw new Error('--unattended needs <email>');
+    console.log(`\n[unattended ${email}]`);
+    const r = await prisma.requester.findFirst({ where: { email } });
+    if (!r) throw new Error(`no requester ${email}`);
+    if (r.unattended) log(`requester #${r.id} already unattended`);
+    else {
+      plan(`mark requester #${r.id} "${r.name}" unattended — no requester-facing mail, ever`);
+      if (APPLY) await prisma.requester.update({ where: { id: r.id }, data: { unattended: true } });
+    }
   }
   if (has('--webhook')) {
     const ws = Number(after('--workspace')); const url = after('--url');

@@ -1618,7 +1618,9 @@ function nextNodeIds(definition, node, output = {}) {
 function recipientFromToken(token, context, customEmails) {
   const value = String(token || '').trim();
   if (!value) return [];
-  if (value === 'requester') return [context.requester?.email];
+  // Simorgh A4: an unattended requester (an automation's mailbox) never
+  // receives requester-facing mail — acks, status changes, CSAT, the lot.
+  if (value === 'requester') return context.requester?.unattended ? [] : [context.requester?.email];
   if (value === 'assigned_agent') return [context.assignedAgent?.email];
   if (value === 'previous_agent') return [context.previousAgent?.email];
   // Approval events (approval.requested/decided) carry the requesting agent's

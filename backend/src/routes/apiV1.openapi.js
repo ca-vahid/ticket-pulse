@@ -174,7 +174,14 @@ const T = {
       source: { type: 'string', enum: ['manual', 'api'], description: '“api” = auto-provisioned by ticket-create intake; “manual” = created by an admin in Settings.' },
     },
   },
-  Message: { type: 'object', required: ['body'], properties: { body: { type: 'string' }, bodyHtml: { type: 'string' } } },
+  Message: {
+    type: 'object', required: ['body'],
+    properties: {
+      body: { type: 'string' }, bodyHtml: { type: 'string' },
+      stage: { type: 'string', enum: ['tier1', 'tier2', 'tier3'], nullable: true, description: 'Which stage of the calling system wrote this. Rendered into the author: "Simorgh · Tier 2 (Rostam)". Notes only.' },
+      agent: { type: 'string', maxLength: 60, nullable: true, description: 'Display name of the sub-agent for that stage, e.g. "Rostam". Notes only.' },
+    },
+  },
   Contact: { type: 'object', properties: { id: { type: 'integer' }, name: { type: 'string' }, email: { type: 'string', nullable: true }, phone: { type: 'string', nullable: true }, department: { type: 'string', nullable: true }, location: { type: 'string', nullable: true } } },
   Task: { type: 'object', properties: { id: { type: 'integer' }, title: { type: 'string' }, description: { type: 'string', nullable: true }, status: { type: 'string', enum: ['open', 'in_progress', 'done'] }, assignee: { type: 'object', nullable: true }, dueAt: { type: 'string', format: 'date-time', nullable: true } } },
   ApprovalVerdict: {
@@ -265,6 +272,12 @@ function op(summary, scope, { tag, body, responseRef, status = 200, list = false
 // templated query-param names because the real names are per-workspace
 // (`cf_client_name`, `cf_amount_gte`, …). Unknown keys are ignored silently.
 const CF_FILTER_PARAMETERS = [
+  // Reconciliation filters (Simorgh E2).
+  { name: 'externalRef', in: 'query', required: false, schema: { type: 'string' }, description: 'Exact match on the caller’s own key (set at create). Wins over externalRefPrefix.' },
+  { name: 'externalRefPrefix', in: 'query', required: false, schema: { type: 'string' }, description: 'Prefix match, e.g. simorgh: for “everything of mine”.' },
+  { name: 'updatedFrom', in: 'query', required: false, schema: { type: 'string', format: 'date-time' }, description: 'Only tickets changed at or after this instant — a watermark for reconciliation.' },
+  { name: 'updatedTo', in: 'query', required: false, schema: { type: 'string', format: 'date-time' } },
+  { name: 'tag', in: 'query', required: false, schema: { type: 'string' }, description: 'Tag name; repeat or comma-separate for any-of.' },
   {
     name: 'cf_{key}',
     in: 'query',
@@ -463,7 +476,14 @@ export function buildOpenApiSpec(baseUrl) {
       },
       '/tickets/{id}/conversations': { get: op('Full conversation thread (incl. private notes)', 'conversations:read', { tag: 'conversations', responseRef: ref('ThreadEntry') }) },
       '/tickets/{id}/replies': { post: op('Add a public reply (emails the requester)', 'conversations:write', { tag: 'conversations', body: ref('Message'), status: 201 }) },
-      '/tickets/{id}/notes': { post: op('Add a private internal note', 'conversations:write', { tag: 'conversations', body: ref('Message'), status: 201 }) },
+      '/tickets/{id}/notes': { post: op('Add a private internal note (optionally stamped with the caller’s stage/agent)', 'conversations:write', { tag: 'conversations', body: ref('Message'), status: 201 }) },
+      '/tickets/{id}/activities': {
+        get: op('Audit trail: who changed what and when (status, assignee, fields) — read-only', 'tickets:read', {
+          tag: 'tickets',
+          parameters: [{ name: 'limit', in: 'query', required: false, schema: { type: 'integer', default: 100, maximum: 500 } }],
+          responseRef: { type: 'array', items: { type: 'object', properties: { id: { type: 'integer' }, type: { type: 'string' }, performedBy: { type: 'string', nullable: true }, actorKind: { type: 'string', nullable: true }, at: { type: 'string', format: 'date-time' }, details: { type: 'object', nullable: true } } } },
+        }),
+      },
       '/tickets/{id}/tasks': {
         get: op('List a ticket’s tasks', 'tasks:read', { tag: 'tasks', responseRef: ref('Task') }),
         post: op('Add a task', 'tasks:write', { tag: 'tasks', body: { type: 'object', required: ['title'], properties: { title: { type: 'string' }, assignedTechId: { type: 'integer' }, dueAt: { type: 'string', format: 'date-time' }, notifyAgent: { type: 'boolean' } } }, responseRef: ref('Task'), status: 201 }),
@@ -842,7 +862,7 @@ as-is; hand-build a minimal 2.0 file with just <code>POST /tickets</code> (+ <co
 <code>Bearer tp_live_…</code> <b>including the “Bearer ” prefix</b> when creating a connection. Same premium licensing as HTTP.
 </div>
 <h2>Outbound webhooks</h2>
-<p>Events: <code>ticket.created</code>, <code>ticket.status_changed</code>, <code>ticket.assigned</code>, <code>ticket.reply_received</code>, <code>ticket.public_reply_added</code>, <code>ticket.tags_changed</code>, <code>ticket.custom_fields_changed</code>, <code>ticket.fields_updated</code> (field edits by a person / the API / a workflow / FreshService — payload <code>extra</code> carries <code>actorKind</code>, <code>source</code>, <code>changedFields</code> and <code>changes{from,to}</code>), <code>approval.requested</code>, <code>approval.decided</code>.</p>
+<p>Events: <code>ticket.created</code>, <code>ticket.status_changed</code>, <code>ticket.assigned</code>, <code>ticket.reply_received</code>, <code>ticket.public_reply_added</code>, <code>ticket.note_added</code> (private notes — payload <code>extra</code> carries <code>entryId</code>, <code>author</code>, <code>authorType</code>, <code>stage</code>, <code>agent</code>, <code>bodyText</code>), <code>ticket.tags_changed</code>, <code>ticket.custom_fields_changed</code>, <code>ticket.fields_updated</code> (field edits by a person / the API / a workflow / FreshService — payload <code>extra</code> carries <code>actorKind</code>, <code>source</code>, <code>changedFields</code> and <code>changes{from,to}</code>), <code>approval.requested</code>, <code>approval.decided</code>.</p>
 <p>Subscribe in <b>Settings → API Keys → Outbound webhooks</b>. Deliveries follow the <a href="https://www.standardwebhooks.com">Standard Webhooks</a> spec — headers <code>webhook-id</code>, <code>webhook-timestamp</code>, <code>webhook-signature</code> (<code>v1,&lt;base64 HMAC-SHA256 of id.timestamp.body&gt;</code>, secret <code>whsec_…</code>). Verify with a constant-time compare and a timestamp tolerance; treat <code>webhook-id</code> as an idempotency key. Legacy <code>X-TicketPulse-Signature</code> headers are sent in parallel during migration. Failed deliveries retry with exponential backoff and are visible (with a redeliver action) in the webhook’s delivery log.</p>
 </body></html>`;
 }
