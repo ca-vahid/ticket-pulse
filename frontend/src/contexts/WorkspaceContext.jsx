@@ -215,7 +215,9 @@ export function WorkspaceProvider({ children }) {
     return selectWorkspaceWithRetry(target);
   }, [currentWorkspace?.id, selectWorkspaceWithRetry, clearSwitchError]);
 
-  const switchWorkspace = useCallback((targetId) => {
+  // `keepPath`: stay on the current URL after the switch (the record is known
+  // to live in the target workspace — a ticket link opened from elsewhere).
+  const switchWorkspace = useCallback((targetId, { keepPath = false } = {}) => {
     const ws = availableWorkspaces.find(w => w.id === targetId);
     const selected = ws
       ? { id: ws.id, name: ws.name, slug: ws.slug }
@@ -254,7 +256,7 @@ export function WorkspaceProvider({ children }) {
     // (QA 09-10 #2). Owning the navigation here fixes every entry point at once
     // — header, command palette, mobile tab bar, settings.
     try {
-      const target = safeWorkspacePath(window.location.pathname);
+      const target = keepPath ? window.location.pathname : safeWorkspacePath(window.location.pathname);
       if (target === window.location.pathname) window.location.reload();
       else window.location.assign(`${target}${window.location.search || ''}`);
     } catch { /* non-browser context (tests) — the caller decides */ }

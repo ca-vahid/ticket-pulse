@@ -736,7 +736,7 @@ export default function TicketDetail() {
   // `const { workspaceId } = useWorkspace()` destructure was always undefined,
   // which silently disabled the switch-bounce below AND left the SSE stream
   // un-keyed on workspace (realtime plan Phase 1).
-  const { currentWorkspace } = useWorkspace();
+  const { currentWorkspace, switchWorkspace } = useWorkspace();
   const workspaceId = currentWorkspace?.id;
   const openedWsRef = useRef(null);
   useEffect(() => {
@@ -1035,7 +1035,18 @@ export default function TicketDetail() {
       setTicket(res.data);
       setLoadError(null);
     } catch (err) {
-      setLoadError(err.response?.data?.message || err.message);
+      const body = err.response?.data;
+      // The ticket lives in another workspace the user may see (14 Sep: a
+      // Simorgh link opened while the session sat on Accounting). Switch and
+      // stay on this URL — the bounce-to-queue effect must not fire first.
+      if (body?.code === 'ticket_in_other_workspace' && body.workspace?.id && body.workspace.id !== workspaceId) {
+        openedWsRef.current = body.workspace.id;
+        setLoadError(`This ticket is in ${body.workspace.name} — switching workspace…`);
+        try { sessionStorage.setItem('tp_wsAutoSwitched', JSON.stringify({ name: body.workspace.name, at: Date.now() })); } catch { /* ignore */ }
+        switchWorkspace?.(body.workspace.id, { keepPath: true });
+        return;
+      }
+      setLoadError(body?.message || err.message);
     } finally {
       if (!silent) setIsLoading(false);
     }
