@@ -7,18 +7,26 @@ import { NotFoundError } from '../utils/errors.js';
  * Must be added AFTER all routes
  */
 export function errorHandler(err, req, res, _next) {
-  // Log the error
-  logger.error('Error occurred:', {
-    message: err.message,
-    stack: err.stack,
-    statusCode: err.statusCode,
-    path: req.path,
-    method: req.method,
-    ip: req.ip,
-  });
-
   // Determine status code
   const statusCode = err.statusCode || 500;
+
+  // Log by severity. A 404 (health probes on "/", a ticket that lives in
+  // another workspace) and other expected client errors are not incidents;
+  // logging them at error level with a stack buried the real ones.
+  if (statusCode === 404) {
+    logger.info(`Not found: ${req.method} ${req.path}`, { statusCode, ip: req.ip });
+  } else if (statusCode >= 400 && statusCode < 500) {
+    logger.warn('Client error:', { message: err.message, statusCode, path: req.path, method: req.method, ip: req.ip });
+  } else {
+    logger.error('Error occurred:', {
+      message: err.message,
+      stack: err.stack,
+      statusCode,
+      path: req.path,
+      method: req.method,
+      ip: req.ip,
+    });
+  }
 
   if (res.headersSent) {
     logger.error('Error occurred after response headers were sent; closing response', {

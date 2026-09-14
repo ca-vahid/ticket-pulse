@@ -236,6 +236,38 @@ export function foldBursts(items) {
   return out;
 }
 
+/**
+ * Group the (newest-first) items into runs: consecutive events by the same
+ * person become one run so the name and avatar are shown once. Machine rows
+ * (bursts, reconcile echoes) that sit *between* two events of the same person
+ * are absorbed into that run; otherwise they stand on the rail by themselves.
+ */
+export function groupByActor(items) {
+  const runs = [];
+  let run = null;
+  let pending = [];
+  const flushPending = () => {
+    for (const m of pending) runs.push({ key: `run-${m.key}`, actor: m.actor || 'System', machine: true, kind: m.kind, source: m.source, items: [m], from_at: m.from_at ?? m.at, to_at: m.to_at ?? m.at, at: m.at });
+    pending = [];
+  };
+  for (const item of items) {
+    if (item.machine) { pending.push(item); continue; }
+    if (run && run.actor === item.actor) {
+      run.items.push(...pending); pending = [];
+      run.items.push(item);
+      run.from_at = Math.min(run.from_at, item.from_at ?? item.at);
+    } else {
+      if (run) runs.push(run);
+      run = null;
+      flushPending();
+      run = { key: `run-${item.key}`, actor: item.actor, machine: false, kind: item.kind, source: item.source, items: [item], from_at: item.from_at ?? item.at, to_at: item.to_at ?? item.at, at: item.at };
+    }
+  }
+  if (run) runs.push(run);
+  flushPending();
+  return runs;
+}
+
 export function countMachine(items) {
   return items.reduce((n, i) => n + (i.machine ? (i.count || 1) : 0), 0);
 }
@@ -256,4 +288,4 @@ function pipelineTriggerLabelSafe(source) {
   return map[source] || (source ? humanize(source) : 'pipeline');
 }
 
-export default { buildHistoryItems, parseFsFeedLine, foldBursts, countMachine, PRIORITY_NAMES };
+export default { buildHistoryItems, parseFsFeedLine, foldBursts, groupByActor, countMachine, PRIORITY_NAMES };
