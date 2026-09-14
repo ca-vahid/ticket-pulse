@@ -1035,7 +1035,9 @@ export default function TicketDetail() {
       setTicket(res.data);
       setLoadError(null);
     } catch (err) {
-      const body = err.response?.data;
+      // The API client rethrows a plain Error: the problem body rides on
+      // `err.data` (not `err.response`).
+      const body = err.data || err.response?.data;
       // The ticket lives in another workspace the user may see (14 Sep: a
       // Simorgh link opened while the session sat on Accounting). Switch and
       // stay on this URL — the bounce-to-queue effect must not fire first.

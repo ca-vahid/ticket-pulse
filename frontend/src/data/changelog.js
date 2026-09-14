@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.8.77-preview';
+export const APP_VERSION = '3.8.78-preview';
 
 export const changelog = [
+  {
+    version: '3.8.78-preview',
+    date: 'September 14, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Ticket links from another workspace now actually switch</strong> — 3.8.77 told the page which workspace the ticket lives in, but the page’s API client dropped everything except the message on the way through, so it showed “Ticket 44797 is in the IT workspace” and stopped. The full error body now reaches the page and the switch happens.' },
+    ],
+  },
   {
     version: '3.8.77-preview',
     date: 'September 14, 2026',

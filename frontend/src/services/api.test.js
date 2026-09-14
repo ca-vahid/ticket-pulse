@@ -209,3 +209,19 @@ describe('buildThreadPayload', () => {
     expect(config.timeout).toBe(120000);
   });
 });
+
+describe('errorInterceptor carries the problem body (ticket links from another workspace, 14 Sep)', () => {
+  test('a 404 with a workspace pointer reaches the caller as err.data', async () => {
+    const { errorInterceptor } = await import('./api');
+    const axiosError = Object.assign(new Error('Request failed with status code 404'), {
+      config: { url: '/tickets/44797' },
+      response: { status: 404, data: { success: false, code: 'ticket_in_other_workspace', message: 'Ticket 44797 is in the IT workspace', workspace: { id: 1, name: 'IT', slug: 'it' } } },
+    });
+    let thrown;
+    try { await errorInterceptor(axiosError); } catch (e) { thrown = e; }
+    expect(thrown.message).toBe('Ticket 44797 is in the IT workspace');
+    expect(thrown.status).toBe(404);
+    expect(thrown.code).toBe('ticket_in_other_workspace');
+    expect(thrown.data.workspace).toEqual({ id: 1, name: 'IT', slug: 'it' });
+  });
+});
