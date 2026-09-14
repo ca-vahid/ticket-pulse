@@ -24,6 +24,7 @@ const WEBHOOK_EVENTS = [
   ['ticket.assigned', 'Assigned'],
   ['ticket.reply_received', 'Requester replied'],
   ['ticket.public_reply_added', 'Agent replied'],
+  ['ticket.note_added', 'Private note added'],
   ['ticket.tags_changed', 'Tags changed'],
   ['ticket.custom_fields_changed', 'Custom fields changed'],
   ['approval.requested', 'Approval requested'],

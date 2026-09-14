@@ -36,6 +36,7 @@ export const TICKET_SOURCE = {
   WEBHOOK: 101, // reserved for future webhook intake
   MS_TEAMS: 102, // requests arriving via Teams chat (QA 07-10 #6/#7)
   AGENT: 103, // created by staff inside the Ticket Pulse app
+  SECURITY_AGENT: 104, // filed by a security-operations system (Simorgh B8, 09-14)
 };
 
 export const TICKET_SOURCE_LABELS = {
@@ -45,7 +46,7 @@ export const TICKET_SOURCE_LABELS = {
   // names read from FS /ticket_form_fields on 2026-07-14).
   13: 'Employee Onboarding', 14: 'Alerts', 15: 'MS Teams (FS)',
   18: 'Employee Offboarding', 19: 'Journey',
-  100: 'API', 101: 'Webhook', 102: 'MS Teams', 103: 'Agent',
+  100: 'API', 101: 'Webhook', 102: 'MS Teams', 103: 'Agent', 104: 'Security Agent',
   1001: 'API (FreshService)', 1002: 'Company Portal',
 };
 
@@ -54,6 +55,7 @@ export const TICKET_SOURCE_LABELS = {
 export const AGENT_SELECTABLE_SOURCES = [
   TICKET_SOURCE.AGENT, TICKET_SOURCE.EMAIL, TICKET_SOURCE.PHONE,
   TICKET_SOURCE.WALK_UP, TICKET_SOURCE.MS_TEAMS, TICKET_SOURCE.PORTAL,
+  TICKET_SOURCE.SECURITY_AGENT,
 ];
 
 export function ticketSourceLabel(source) {

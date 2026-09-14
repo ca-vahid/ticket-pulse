@@ -1,6 +1,17 @@
-export const APP_VERSION = '3.8.61-preview';
+export const APP_VERSION = '3.8.62-preview';
 
 export const changelog = [
+  {
+    version: '3.8.62-preview',
+    date: 'September 14, 2026',
+    entries: [
+      { type: 'added', html: '<strong>🎭 One credential, two voices</strong> — an integration may say which stage of itself wrote a note (<code>stage: tier2</code>, <code>agent: Rostam</code>) and the thread shows the author as <em>Simorgh · Tier 2 (Rostam)</em>. Attribution without a second licence or a second key — FreshService made authorship a paid seat, which is why the security agent shared one for months.' },
+      { type: 'added', html: '<strong>Webhooks now carry private notes</strong> — a new <code>ticket.note_added</code> event with the author, stage and the note text, so a system that needs an analyst’s conclusion no longer polls the thread for it. Pick it under Settings › API Keys › Outbound webhooks.' },
+      { type: 'added', html: '<strong>Reconciliation filters on the ticket list</strong> — <code>externalRef</code> (exact), <code>externalRefPrefix</code> (“everything of mine”), <code>updatedFrom</code> / <code>updatedTo</code> (a watermark), and <code>tag</code> by name. And a read-only audit endpoint, <code>GET /tickets/{id}/activities</code>: who changed what and when, the same rows as the History tab.' },
+      { type: 'added', html: '<strong>Unattended requesters</strong> — a requester record can be marked as a mailbox nobody reads. It then receives no requester-facing email at all: no acknowledgement, no status change, no survey, no reply copy. Built for the security agent’s own address; useful for any automation that files tickets.' },
+      { type: 'improved', html: '<strong>A &ldquo;Security Agent&rdquo; arrival channel</strong> (source 104), and <code>GET /meta</code> now lists the resolution reasons and the sources a caller may set, so an integrator reads them instead of hard-coding.' },
+    ],
+  },
   {
     version: '3.8.61-preview',
     date: 'September 14, 2026',

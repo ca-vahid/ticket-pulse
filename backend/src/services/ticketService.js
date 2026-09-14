@@ -416,6 +416,27 @@ function normalizeDescriptionInput(raw) {
  * are stored snake_case, so both spellings are accepted; the specific key is
  * `simorgh_review_needed`, but any `*review_needed` boolean counts.
  */
+/**
+ * Stage-as-data on a note (Simorgh A5): `{ stage: 'tier1'|'tier2', agent }` as
+ * sent by the caller, validated and trimmed, or null when absent. `agent` is
+ * a display name for the sub-agent ("Rostam"), never used for lookups.
+ */
+export const NOTE_STAGES = Object.freeze(['tier1', 'tier2', 'tier3']);
+export function noteStageMeta(input) {
+  const stage = String(input?.stage || '').trim().toLowerCase();
+  const agent = String(input?.agent || '').trim().slice(0, 60);
+  if (!stage && !agent) return null;
+  if (stage && !NOTE_STAGES.includes(stage)) return agent ? { stage: null, agent } : null;
+  return { stage: stage || null, agent: agent || null };
+}
+
+/** "Simorgh" + { tier2, Rostam } -> "Simorgh · Tier 2 (Rostam)". */
+export function stagedActorName(baseName, meta) {
+  const tier = meta?.stage ? ` · Tier ${meta.stage.replace('tier', '')}` : '';
+  const agent = meta?.agent ? ` (${meta.agent})` : '';
+  return `${baseName}${tier}${agent}`;
+}
+
 export function trustedReviewNeeded(customFields) {
   if (!customFields || typeof customFields !== 'object') return false;
   for (const [key, value] of Object.entries(customFields)) {
@@ -513,6 +534,8 @@ const TICKET_INCLUDE = {
       id: true, name: true, email: true, phone: true, mobile: true,
       department: true, jobTitle: true, entraJobTitle: true, entraDepartment: true,
       entraCity: true, entraOfficeLocation: true, entraState: true,
+      // Simorgh A4: an automation's mailbox never receives requester mail.
+      unattended: true,
     },
   },
   internalCategory: { select: { id: true, name: true } },
@@ -917,6 +940,26 @@ class TicketService {
     if (query.source) {
       const codes = asList(query.source).map(Number).filter(Number.isFinite);
       if (codes.length) where.source = { in: codes };
+    }
+    // Reconciliation filters (Simorgh E2): find by the caller's own key, by a
+    // key prefix ("everything of mine"), by last change, and by tag name.
+    if (query.externalRef) {
+      where.externalRef = String(query.externalRef).trim();
+    } else if (query.externalRefPrefix) {
+      where.externalRef = { startsWith: String(query.externalRefPrefix).trim() };
+    }
+    if (query.updatedFrom || query.updatedTo) {
+      const from = query.updatedFrom ? new Date(query.updatedFrom) : null;
+      const to = query.updatedTo ? new Date(query.updatedTo) : null;
+      where.updatedAt = {
+        ...(from && !Number.isNaN(from.getTime()) ? { gte: from } : {}),
+        ...(to && !Number.isNaN(to.getTime()) ? { lte: to } : {}),
+      };
+      if (Object.keys(where.updatedAt).length === 0) delete where.updatedAt;
+    }
+    if (query.tag) {
+      const names = asList(query.tag).map((s) => String(s).trim()).filter(Boolean);
+      if (names.length) where.tagLinks = { some: { tag: { name: { in: names } } } };
     }
     if (query.assignedTechId) {
       // Multi-select: technician ids and/or the literal 'unassigned'.
@@ -3899,6 +3942,12 @@ class TicketService {
     };
     const recipients = Object.keys(recipientsMerged).length ? recipientsMerged : null;
 
+    // Stage as data (Simorgh A5, 09-14): one credential, two voices. A caller
+    // may say which stage of itself is writing (`stage: tier2`, `agent:
+    // Rostam`) and we render the author as "Simorgh · Tier 2 (Rostam)" —
+    // attribution without a second licence or a second key.
+    const stageMeta = noteStageMeta(input);
+    const baseActorName = actor?.name || actor?.email || 'Ticket Pulse';
     const entry = await prisma.ticketThreadEntry.create({
       data: {
         ticketId: ticket.id,
@@ -3906,7 +3955,7 @@ class TicketService {
         externalEntryId,
         source: 'ticketpulse_user',
         eventType: isPrivate ? 'note' : 'reply',
-        actorName: actor?.name || actor?.email || 'Ticket Pulse',
+        actorName: stageMeta ? stagedActorName(baseActorName, stageMeta) : baseActorName,
         actorEmail: actor?.email || null,
         authorType: systemNote && isPrivate ? 'system' : 'agent',
         incoming: false,
@@ -3919,7 +3968,7 @@ class TicketService {
         // Native entries queue for the mirror; FS-born entries are already there.
         mirrorState: isNative ? 'pending' : 'mirrored',
         mirroredAt: isNative ? null : now,
-        ...(recipients ? { rawPayload: recipients } : {}),
+        ...((recipients || stageMeta) ? { rawPayload: { ...(recipients || {}), ...(stageMeta || {}) } } : {}),
       },
     });
 
@@ -3973,6 +4022,16 @@ class TicketService {
           // Condition field `event.systemNote` (TU-3g): true only for
           // machine-written notes; human notes carry an explicit false.
           ...(isPrivate ? { systemNote: systemNote === true } : {}),
+          // ticket.note_added webhook (Simorgh D2): the note itself, so a
+          // consumer does not have to fetch the thread to read what was said.
+          ref: ticketDisplayRef(ticket),
+          author: entry.actorName,
+          authorType: entry.authorType,
+          isPrivate,
+          stage: stageMeta?.stage || null,
+          agent: stageMeta?.agent || null,
+          bodyText: String(bodyText || '').slice(0, 20000),
+          occurredAt: now.toISOString(),
         },
       },
     ).catch?.(() => {});
@@ -4325,6 +4384,14 @@ class TicketService {
 
   async _emailRequesterReply(ticket, entry, { cc = [], attachments = [], signature = null, subject: subjectOverride = null } = {}) {
     const ref = ticketDisplayRef(ticket);
+    // Simorgh A4: the requester is an unattended automation mailbox — the
+    // reply stays on the ticket (where the system reads it) and no mail goes
+    // out. Cc'd people are people, but a reply to nobody is not sent to them
+    // either; they see it in the thread via the mirror / the app.
+    if (ticket.requester?.unattended === true) {
+      logger.info(`Reply to ${ref} not emailed: requester ${ticket.requester.email} is unattended`);
+      return { sent: false, skipped: 'unattended_requester' };
+    }
     // Agent-edited subject (Phase SN4) or the default — either way the
     // `[TP-n]` token stays on: it is the inbound threading signal.
     const subject = effectiveReplySubject(ticket, subjectOverride);

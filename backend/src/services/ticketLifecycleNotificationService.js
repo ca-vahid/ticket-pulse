@@ -625,6 +625,8 @@ export function buildEventContext({ event, ticket, previousAgent, source, status
       id: ticket.requester.id,
       name: ticket.requester.name,
       email: ticket.requester.email,
+      // Simorgh A4: the recipient resolver drops an unattended requester.
+      unattended: ticket.requester.unattended === true,
     } : null,
     assignedAgent: ticket.assignedTech ? {
       id: ticket.assignedTech.id,

@@ -21,6 +21,9 @@ export const WEBHOOK_EVENTS = [
   'ticket.assigned',
   'ticket.reply_received',
   'ticket.public_reply_added',
+  // Private notes (Simorgh D2): analyst conclusions live in notes; without
+  // this a consumer has to poll the thread to see them.
+  'ticket.note_added',
   'ticket.tags_changed',
   'ticket.custom_fields_changed',
   // Field edits (TU-11): payload = lifecycle context + event.extra (actorKind,
