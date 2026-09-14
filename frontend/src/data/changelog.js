@@ -1,6 +1,17 @@
-export const APP_VERSION = '3.8.59-preview';
+export const APP_VERSION = '3.8.60-preview';
 
 export const changelog = [
+  {
+    version: '3.8.60-preview',
+    date: 'September 14, 2026',
+    entries: [
+      { type: 'added', html: '<strong>🛡️ Trusted intake for systems that have already investigated what they file</strong> — a new switch on an API credential (Settings › API Keys › OAuth clients). Tickets from a trusted client keep the category, priority and type the client sent: the AI may still pick an assignee, but it never re-classifies, re-prioritises, re-types or closes them as noise — on creation, on a priority change, on a re-run, ever. Built for Simorgh, the cybersecurity agent, whose tickets we had been auto-closing 39 times on a guess while its own verdict sat in a note.' },
+      { type: 'added', html: '<strong>&ldquo;Never noise&rdquo; rules can now be keyed on the sender</strong> — a protection rule may carry a sender pattern, and then both must match. A text pattern of <code>.</code> plus a sender of <code>^simorgh@</code> protects everything that address sends, whatever the subject says.' },
+      { type: 'added', html: '<strong>A workflow template: &ldquo;Simorgh — resolve on benign verdict&rdquo;</strong> — the only way a security-agent ticket resolves itself: the agent’s tier-2 verdict is benign or a false positive, nothing was contained, and it explicitly recommends closing. All three, or a person decides. Installable from Mail Workflows › Templates.' },
+      { type: 'improved', html: '<strong>OAuth clients gain an IP allowlist and a default source</strong> — the allowlist API keys already had, now on client-credentials too; and a client may declare the arrival channel its tickets should carry.' },
+      { type: 'improved', html: '<strong>Low-confidence tickets from a trusted client are left for a person</strong> — when the client flags a ticket for review, no assignee is picked automatically; it sits in the queue, unassigned, for the security review view.' },
+    ],
+  },
   {
     version: '3.8.59-preview',
     date: 'September 13, 2026',

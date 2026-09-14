@@ -79,6 +79,50 @@ function templateNodes(nodes, edges) {
 }
 
 export const WORKFLOW_TEMPLATES = [
+  // Simorgh C2 (09-14): the ONLY way a security-agent ticket may be resolved
+  // automatically. Not a noise guess — the agent's own structured verdict, and
+  // all three parts must agree: benign/false-positive, nothing contained, and
+  // the agent explicitly recommends closing. Anything else waits for a human.
+  {
+    key: 'simorgh_resolve_benign',
+    name: 'Simorgh — resolve on benign verdict',
+    description: 'When the security agent finalises a ticket as BenignPositive or FalsePositive with no containment and recommends_close = true, resolve it with a closure note. Every other verdict is left for a person.',
+    triggerType: 'ticket.fields_updated',
+    build: () => templateNodes([
+      { id: 'trigger', type: 'trigger', data: { triggerType: 'ticket.fields_updated' } },
+      {
+        id: 'verdict',
+        type: 'condition',
+        data: {
+          label: 'Benign, nothing contained, agent recommends close?',
+          conditionGroup: {
+            logic: 'all',
+            conditions: [
+              { field: 'ticket.customFields.simorgh_verdict', operator: 'in', value: ['BenignPositive', 'FalsePositive'] },
+              { field: 'ticket.customFields.simorgh_containment', operator: 'is', value: 'none' },
+              { field: 'ticket.customFields.simorgh_recommends_close', operator: 'is_true' },
+              { field: 'ticket.status', operator: 'in', value: ['Open', 'Pending'] },
+            ],
+          },
+        },
+      },
+      {
+        id: 'resolve',
+        type: 'update_ticket',
+        data: {
+          setStatus: 'Resolved',
+          note: 'Resolved automatically: the security agent’s tier-2 verdict is benign, no containment was queued, and it recommended closing. Reopen if you disagree — the agent reads the resolution reason back.',
+        },
+      },
+      { id: 'done', type: 'stop', data: {} },
+      { id: 'skip', type: 'stop', data: {} },
+    ], [
+      { id: 'e1', source: 'trigger', target: 'verdict' },
+      { id: 'e2', source: 'verdict', sourceHandle: 'true', target: 'resolve' },
+      { id: 'e3', source: 'verdict', sourceHandle: 'false', target: 'skip' },
+      { id: 'e4', source: 'resolve', target: 'done' },
+    ]),
+  },
   {
     key: 'ai_first_reply_draft',
     name: 'AI first-reply draft (human approves)',

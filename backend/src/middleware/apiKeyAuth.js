@@ -94,6 +94,7 @@ async function resolvePrincipal(raw) {
     return {
       workspaceId: key.workspaceId, scopes: key.scopes, name: key.name, prefix: key.keyPrefix, mode: key.mode,
       ipAllowlist: key.ipAllowlist, rateLimitPerMin: key.rateLimitPerMin, keyId: key.id, bucket: `key:${key.id}`,
+      trustedIntake: key.trustedIntake === true, defaultSource: null,
     };
   }
   // OAuth2 access token (JWT).
@@ -103,7 +104,10 @@ async function resolvePrincipal(raw) {
   if (!clientUsable(client)) throw problems.unauthorized('OAuth client disabled or revoked', 'invalid_token');
   return {
     workspaceId: client.workspaceId, scopes: client.scopes, name: client.name, prefix: client.clientId, mode: 'live',
-    ipAllowlist: [], rateLimitPerMin: null, keyId: null, oauthClientId: client.id, bucket: `oauth:${client.clientId}`,
+    // Simorgh A2: OAuth clients can be pinned to source addresses too.
+    ipAllowlist: Array.isArray(client.ipAllowlist) ? client.ipAllowlist : [],
+    rateLimitPerMin: null, keyId: null, oauthClientId: client.id, bucket: `oauth:${client.clientId}`,
+    trustedIntake: client.trustedIntake === true, defaultSource: client.defaultSource ?? null,
   };
 }
 
@@ -147,7 +151,11 @@ export const requireApiKey = (scope) => async (req, res, next) => {
       }
     }
 
-    req.apiKey = { id: principal.keyId, keyPrefix: principal.prefix, name: principal.name, scopes: principal.scopes, mode: principal.mode, oauthClientId: principal.oauthClientId || null };
+    req.apiKey = {
+      id: principal.keyId, keyPrefix: principal.prefix, name: principal.name, scopes: principal.scopes, mode: principal.mode,
+      oauthClientId: principal.oauthClientId || null,
+      trustedIntake: principal.trustedIntake === true, defaultSource: principal.defaultSource ?? null,
+    };
     req.workspaceId = principal.workspaceId;
     req.apiMode = principal.mode;
     req.apiScope = (Array.isArray(scope) ? scope.join('|') : scope) || null;
