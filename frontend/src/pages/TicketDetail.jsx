@@ -18,6 +18,7 @@ import RequestApprovalModal from '../components/tickets/RequestApprovalModal';
 import ResolveReasonModal from '../components/tickets/ResolveReasonModal';
 import { ticketNeedsResolutionReason, reasonLabel } from '../utils/resolutionReasons';
 import { plainTextToHtml } from '../utils/plainTextToHtml';
+import { integrationIdentity } from '../utils/integrationIdentity';
 import AppHeader from '../components/AppHeader';
 import MobileTabBar from '../components/nav/MobileTabBar';
 import AiAssignModal from '../components/tickets/AiAssignModal';
@@ -474,9 +475,23 @@ export function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, ph
   // initials — keyed off authorType so renamed system actors still read as
   // "Ticket Pulse · Auto" (audit cleanup: never key off the actorName string).
   const isTicketPulse = entry.authorType === 'system';
+  // Integration voices (Simorgh / Rostam): their own avatar and name instead
+  // of "S·" initials over "Simorgh · Tier 2 (Rostam)".
+  const integration = isTicketPulse ? null : integrationIdentity(entry);
   const avatar = (
     <div className="flex-shrink-0 flex flex-col items-center gap-1 pt-0.5 w-12">
-      {isTicketPulse ? (
+      {integration ? (
+        <span
+          className={`h-10 w-10 rounded-full flex items-center justify-center shadow-subtle overflow-hidden ring-1 ${
+            integration.key === 'rostam'
+              ? 'bg-slate-900 ring-teal-400/60'
+              : 'bg-teal-50 dark:bg-teal-500/15 ring-teal-300/70 dark:ring-teal-400/40'
+          }`}
+          title={`${integration.name} — ${integration.subtitle}`}
+        >
+          <img src={integration.avatarUrl} alt={integration.name} className={`h-full w-full ${integration.key === 'rostam' ? 'object-cover' : 'object-contain p-1'}`} />
+        </span>
+      ) : isTicketPulse ? (
         <span className="h-10 w-10 rounded-full bg-gradient-to-br from-blue-50 dark:from-blue-500/15 to-indigo-100 dark:to-indigo-500/20 border border-blue-200 dark:border-blue-500/30 flex items-center justify-center shadow-subtle overflow-hidden" title="Ticket Pulse">
           <img src="/brand/logo-mark.png" alt="Ticket Pulse" className="h-full w-full object-contain p-0.5" />
         </span>
@@ -487,7 +502,7 @@ export function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, ph
         isTicketPulse ? 'text-blue-400' : isNote ? 'text-amber-500' : incoming ? 'text-indigo-400' : 'text-blue-400'
       }`}
       >
-        {isTicketPulse ? 'Auto' : isNote ? 'Note' : incoming ? 'Requester' : 'Agent'}
+        {isTicketPulse ? 'Auto' : integration ? (integration.key === 'rostam' ? 'Tier 2' : 'Agent') : isNote ? 'Note' : incoming ? 'Requester' : 'Agent'}
       </span>
     </div>
   );
@@ -505,7 +520,16 @@ export function ThreadEntry({ entry, attachments = [], onPreview, onImageRef, ph
         }`}
       >
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pb-2.5 mb-3 border-b border-foreground/10">
-          <span className="text-sm font-bold text-foreground">{entry.actorName || (entry.isPrivate ? 'Ticket Pulse' : 'Unknown')}</span>
+          {integration ? (
+            <>
+              <span className="text-sm font-bold text-foreground">{integration.name}</span>
+              <span className="inline-flex items-center text-[10px] font-semibold text-teal-800 dark:text-teal-200 bg-teal-100 dark:bg-teal-500/20 border border-teal-200 dark:border-teal-500/30 rounded-full px-1.5 py-0.5" title={entry.actorName || ''}>
+                {integration.subtitle}
+              </span>
+            </>
+          ) : (
+            <span className="text-sm font-bold text-foreground">{entry.actorName || (entry.isPrivate ? 'Ticket Pulse' : 'Unknown')}</span>
+          )}
           {isNote ? (
             <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-700 dark:text-amber-200 bg-amber-100 dark:bg-amber-500/20 border border-amber-200 dark:border-amber-500/30 rounded-full px-1.5 py-0.5">
               <Lock className="w-2.5 h-2.5" aria-hidden="true" /> Internal note

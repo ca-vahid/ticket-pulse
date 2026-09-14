@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.8.71-preview';
+export const APP_VERSION = '3.8.72-preview';
 
 export const changelog = [
+  {
+    version: '3.8.72-preview',
+    date: 'September 14, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>🐦 Simorgh and Rostam have faces in the thread</strong> — notes from the security agent now show the Simorgh bird or the Rostam avatar from the Simorgh application instead of “S·” initials, and are named the way the security team names them: <em>Simorgh</em> for the application, <em>Rostam</em> for its tier-2, with the stage as a small badge. The stored author text (“Simorgh · Tier 2 (Rostam)”) is unchanged for the audit trail and the API.' },
+    ],
+  },
   {
     version: '3.8.71-preview',
     date: 'September 14, 2026',
