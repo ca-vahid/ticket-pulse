@@ -96,6 +96,7 @@ class MirrorService {
   constructor() {
     this._timer = null;
     this._draining = false;
+    this._activeCache = new Map(); // workspaceId -> { at, active }
     this._clients = new Map(); // workspaceId → client (per-process; shared rate limiter underneath)
     this._interactiveClients = new Map(); // workspaceId → high-priority client for user-facing calls
     // Tickets whose mirror jobs are executing right now. Two concurrent drains
@@ -184,6 +185,10 @@ class MirrorService {
   }
 
   async _enqueue(workspaceId, ticketId, kind, threadEntryId = null, payload = null) {
+    if (!(await this._workspaceActive(workspaceId))) {
+      logger.debug(`Mirror skipped for ticket ${ticketId} (${kind}): workspace ${workspaceId} is inactive (sandbox)`);
+      return null;
+    }
     try {
       return await prisma.mirrorJob.create({
         data: { workspaceId, ticketId, kind, threadEntryId, payload },
@@ -305,6 +310,27 @@ class MirrorService {
     return client;
   }
 
+  /**
+   * Inactive workspaces are the integration sandboxes (ws6 Assetron, ws7
+   * Simorgh). They have no FreshService of their own, but the per-workspace
+   * config FALLS BACK to the global credentials with workspace_id 0 — so
+   * 202 Simorgh acceptance tickets were mirrored into the real FreshService
+   * on 14 Sep and three of them came back into IT/Accounting as FS-born
+   * duplicates. The mirror now refuses inactive workspaces at enqueue, at
+   * execution and at reconciliation. Cached for a minute.
+   */
+  async _workspaceActive(workspaceId) {
+    const hit = this._activeCache.get(workspaceId);
+    if (hit && Date.now() - hit.at < 60_000) return hit.active;
+    let active = true;
+    try {
+      const ws = await prisma.workspace?.findUnique?.({ where: { id: workspaceId }, select: { isActive: true } });
+      if (ws && ws.isActive === false) active = false;
+    } catch { /* treat lookup failure as active — never block a live workspace */ }
+    this._activeCache.set(workspaceId, { at: Date.now(), active });
+    return active;
+  }
+
   async _getClient(workspaceId) {
     if (this._clients.has(workspaceId)) return this._clients.get(workspaceId);
     const fsConfig = await settingsRepository.getFreshServiceConfigForWorkspace(workspaceId);
@@ -341,6 +367,13 @@ class MirrorService {
 
   async _executeJob(job) {
     try {
+      if (!(await this._workspaceActive(job.workspaceId))) {
+        await prisma.mirrorJob.update({
+          where: { id: job.id },
+          data: { status: 'done', lastError: 'Skipped — workspace inactive (sandbox): the mirror never writes to FreshService for it', attempts: job.attempts + 1 },
+        });
+        return false;
+      }
       const client = await this._getClient(job.workspaceId);
       if (!client) {
         await this._markFailed(job, 'FreshService is not configured for this workspace');
@@ -1022,6 +1055,7 @@ class MirrorService {
       },
     });
     for (const row of rows) {
+      if (!(await this._workspaceActive(row.workspaceId))) continue;
       await this.reconcile(row.workspaceId, { activeOnly: true, limit: 30 }).catch(() => {});
     }
   }

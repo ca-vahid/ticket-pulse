@@ -37,6 +37,10 @@ class ScheduledSyncService {
       }
 
       for (const ws of workspaces) {
+        // A crash or deploy mid-run leaves sync_logs rows at 'started' for
+        // ever (50 of them by 14 Sep, oldest 1 Aug). Close them at boot the
+        // way the watchdog does when it breaks a stale lock.
+        await syncLogRepository.failStaleStarted(ws.id).catch(() => {});
         await this.startForWorkspace(ws);
         await this.startAssignmentFastSyncForWorkspace(ws);
         await this.startVTSyncForWorkspace(ws);

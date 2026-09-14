@@ -93,6 +93,32 @@ beforeEach(() => {
   });
 });
 
+describe('mirrorService — inactive (sandbox) workspaces never reach FreshService', () => {
+  // 14 Sep: 202 Simorgh sandbox tickets were mirrored into the real
+  // FreshService because the per-workspace config falls back to the global
+  // credentials; three came back into IT/Accounting as FS-born duplicates.
+  test('a job for an inactive workspace is closed without a FreshService call; an active one proceeds', async () => {
+    prismaMock.workspace = { findUnique: jest.fn(async ({ where }) => ({ isActive: where.id !== 7 })) };
+    mirrorService._activeCache.clear();
+    prismaMock.ticket.findUnique.mockResolvedValue({ ...baseTicket, id: 44700, workspaceId: 7 });
+
+    const ok = await mirrorService._processJob({ id: 9, ticketId: 44700, workspaceId: 7, kind: 'create_ticket', attempts: 0, updatedAt: new Date() });
+    expect(ok).toBe(false);
+    expect(clientMock.createTicket).not.toHaveBeenCalled();
+    expect(prismaMock.mirrorJob.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 9 },
+      data: expect.objectContaining({ status: 'done', lastError: expect.stringMatching(/inactive/) }),
+    }));
+
+    expect(await mirrorService._enqueue(7, 44700, 'create_ticket')).toBeNull();
+    expect(prismaMock.mirrorJob.create).not.toHaveBeenCalled();
+    prismaMock.mirrorJob.create.mockResolvedValueOnce({ id: 10 });
+    expect(await mirrorService._enqueue(1, 501, 'create_ticket')).toEqual({ id: 10 });
+    delete prismaMock.workspace;
+    mirrorService._activeCache.clear();
+  });
+});
+
 describe('mirrorService job processing', () => {
   test('create_ticket pushes the full snapshot, saves the FS id, backfills the requester', async () => {
     prismaMock.ticket.findUnique.mockResolvedValue({ ...baseTicket });
