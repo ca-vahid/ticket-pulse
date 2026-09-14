@@ -4,7 +4,7 @@
  *
  *   node scripts/simorgh-provision.mjs --sandbox            # create "Simorgh Sandbox" ws + seed
  *   node scripts/simorgh-provision.mjs --it                 # IT workspace: taxonomy, tags, requester
- *   node scripts/simorgh-provision.mjs --client --workspace <id>   # issue the Simorgh OAuth client
+ *   node scripts/simorgh-provision.mjs --client --workspace <id> [--allowlist <file>] [--default-source 104]
  *   node scripts/simorgh-provision.mjs --webhook --workspace <id> --url <https://…>
  *   node scripts/simorgh-provision.mjs --policy --workspace <id> [--enable]
  *        C2: the never_noise veto keyed on simorgh@ + the "resolve on benign
@@ -151,9 +151,14 @@ async function issueClient(workspaceId) {
   const { default: oauthClientService } = await import('../src/services/oauthClientService.js');
   const existing = await prisma.oAuthClient.findFirst({ where: { workspaceId, name: CLIENT.name, revokedAt: null } });
   if (existing) { log(`OAuth client "${CLIENT.name}" ${existing.clientId} already exists in ws ${workspaceId} (trusted=${existing.trustedIntake}) — rotate in Settings if a new secret is needed`); return; }
-  plan(`issue OAuth client "${CLIENT.name}" in ws ${workspaceId}: trustedIntake=true, ${CLIENT.scopes.length} scopes`);
+  const allowFile = after('--allowlist');
+  const ipAllowlist = allowFile
+    ? (await import('node:fs')).readFileSync(allowFile, 'utf8').split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'))
+    : [];
+  const defaultSource = after('--default-source') ? Number(after('--default-source')) : null;
+  plan(`issue OAuth client "${CLIENT.name}" in ws ${workspaceId}: trustedIntake=true, ${CLIENT.scopes.length} scopes, allowlist ${ipAllowlist.length} entries, defaultSource ${defaultSource ?? 'none'}`);
   if (!APPLY) return;
-  const c = await oauthClientService.create(workspaceId, CLIENT, { email: 'simorgh-provision' });
+  const c = await oauthClientService.create(workspaceId, { ...CLIENT, ipAllowlist, defaultSource }, { email: 'simorgh-provision' });
   console.log('\n──────── HAND OVER SECURELY — SHOWN ONCE ────────');
   console.log('  token_url:     https://api.ticketpulse.bgcsaas.com/api/v1/oauth/token');
   console.log(`  client_id:     ${c.clientId}`);

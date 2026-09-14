@@ -1,6 +1,15 @@
-export const APP_VERSION = '3.8.66-preview';
+export const APP_VERSION = '3.8.67-preview';
 
 export const changelog = [
+  {
+    version: '3.8.67-preview',
+    date: 'September 14, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>🧾 API errors keep their own code</strong> — a validation error that names a specific machine code (<code>resolution_reason_required</code>, <code>invalid_resolution_reason</code>, …) now reaches the caller as that code instead of the generic <code>invalid_request</code>. Found by the Simorgh team’s acceptance run.' },
+      { type: 'fixed', html: '<strong><code>GET /tickets?limit=</code> is honoured</strong> — the reply always said <code>limit</code> but only <code>pageSize</code> was read, so every reconcile ran at 25 a page. Both spellings work; the cap stays 100.' },
+      { type: 'improved', html: '<strong>Simorgh is live in IT</strong> — the IT credential (trusted intake, 32-address allowlist, default source “Security Agent”), the IT webhook subscription and the “resolve on benign verdict” workflow are provisioned and enabled.' },
+    ],
+  },
   {
     version: '3.8.66-preview',
     date: 'September 14, 2026',
