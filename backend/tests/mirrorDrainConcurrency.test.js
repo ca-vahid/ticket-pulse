@@ -153,7 +153,9 @@ describe('the source carries the rest of the fix', () => {
   });
 
   test('due_by is mirrored to FreshService', () => {
-    expect(src).toMatch(/due_by: ticket\.dueBy \? new Date\(ticket\.dueBy\)\.toISOString\(\) : undefined/);
+    // 14 Sep: due_by only while the FS status runs an SLA timer (Open) — FS
+    // rejects it on Pending/Resolved/Closed and fails the whole update.
+    expect(src).toMatch(/due_by: dueByAllowed && ticket\.dueBy \? new Date\(ticket\.dueBy\)\.toISOString\(\) : undefined/);
   });
 
   test('the mirror stays LOW priority so interactive work still jumps ahead', () => {

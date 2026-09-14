@@ -91,6 +91,9 @@ class ScheduledSyncService {
       async () => {
         try {
           logger.info(`Scheduled sync triggered for workspace "${wsName}"`);
+          // A deploy restart mid-run leaves the previous row at 'started';
+          // the boot-time sweep only catches rows older than its threshold.
+          await syncLogRepository.failStaleStarted(wsId).catch(() => {});
           await syncService.performFullSync({ workspaceId: wsId });
         } catch (error) {
           logger.error(`Scheduled sync failed for workspace "${wsName}":`, error);
