@@ -233,7 +233,7 @@ export function noteForbidden(requestUrl, message, code) {
 }
 
 // Response interceptor for error handling
-const errorInterceptor = (error) => {
+export const errorInterceptor = (error) => {
   if (error.response) {
     const status = error.response.status;
     const requestUrl = error.config?.url || '';
@@ -253,6 +253,9 @@ const errorInterceptor = (error) => {
     // Problem code from the backend (e.g. 'workspace_access_denied') so UIs
     // can branch on the specific refusal without string matching.
     if (error.response.data?.code) enhancedError.code = error.response.data.code;
+    // The full problem body, for callers that need more than the code (e.g. the
+    // `workspace` pointer on a ticket_in_other_workspace 404 — 14 Sep).
+    if (error.response.data && typeof error.response.data === 'object') enhancedError.data = error.response.data;
     // Validation errors carry a details array (e.g. workflow definition
     // issues) — keep it so UIs can show the specific problems.
     if (error.response.data?.details) enhancedError.details = error.response.data.details;
