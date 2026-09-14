@@ -111,6 +111,7 @@ export const WORKFLOW_TEMPLATES = [
         type: 'update_ticket',
         data: {
           setStatus: 'Resolved',
+          resolutionReason: 'benign_expected',
           note: 'Resolved automatically: the security agent’s tier-2 verdict is benign, no containment was queued, and it recommended closing. Reopen if you disagree — the agent reads the resolution reason back.',
         },
       },

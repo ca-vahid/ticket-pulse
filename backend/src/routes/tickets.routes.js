@@ -1390,6 +1390,8 @@ router.post('/:id/status', requireNativeTicketing, asyncHandler(async (req, res)
   const status = String(req.body?.status || '').trim();
   const ticket = await ticketService.changeStatus(
     parseTicketId(req), req.workspaceId, status, req.ticketActor,
+    // Simorgh C4: the resolve dialog sends a reason for Security tickets.
+    { resolutionReason: req.body?.resolutionReason ?? null, resolutionNote: req.body?.resolutionNote ?? null },
   );
   res.json({ success: true, data: ticket });
 }));

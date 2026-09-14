@@ -3649,6 +3649,21 @@ async function executeUpdateTicketNode(node, eventContext, { dryRun = false, sco
       patch.resolvedAt = null;
       patch.closedAt = null;
       patch.resolutionTimeSeconds = null;
+      patch.resolutionReason = null;
+      patch.resolutionNote = null;
+      patch.resolvedByKind = null;
+    }
+    // Resolution reason (Simorgh C4): a workflow that resolves says why too,
+    // from the node's own data — the benign-verdict template sets
+    // benign_expected. Invalid values are dropped, never fatal.
+    if (isTerminal) {
+      const reason = String(node.data?.resolutionReason || '').trim();
+      const { isResolutionReason } = await import('./resolutionReasonService.js');
+      if (reason && isResolutionReason(reason)) {
+        patch.resolutionReason = reason;
+        patch.resolutionNote = String(node.data?.resolutionNote || node.data?.note || '').trim() || null;
+      }
+      patch.resolvedByKind = 'workflow';
     }
   }
   if (setPriority && setPriority >= 1 && setPriority <= 4 && setPriority !== ticket.priority) {

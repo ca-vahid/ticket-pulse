@@ -108,6 +108,14 @@ function ticketShape(t) {
     createdAt: t.createdAt,
     updatedAt: t.updatedAt,
     resolvedAt: t.resolvedAt || null,
+    // Resolution details (Simorgh D3): the security agent reconciles the
+    // analyst's reason against its own verdict.
+    closedAt: t.closedAt || null,
+    firstAssignedAt: t.firstAssignedAt || null,
+    resolutionTimeSeconds: t.resolutionTimeSeconds ?? null,
+    resolutionReason: t.resolutionReason || null,
+    resolutionNote: t.resolutionNote || null,
+    resolvedByKind: t.resolvedByKind || null,
   };
 }
 
@@ -411,7 +419,13 @@ router.patch('/tickets/:id', S('tickets:write'), withIdempotency, asyncHandler(a
   const body = req.body || {};
   const actor = apiActor(req);
   if (body.customFields !== undefined) assertCustomFieldsWriteScope(req);
-  if (body.status !== undefined) await ticketService.changeStatus(id, req.workspaceId, body.status, actor);
+  if (body.status !== undefined) {
+    // Simorgh C4/D3: a reason (+ note) may ride with a resolving status change.
+    await ticketService.changeStatus(id, req.workspaceId, body.status, actor, {
+      resolutionReason: body.resolutionReason ?? null,
+      resolutionNote: body.resolutionNote ?? null,
+    });
+  }
   if (body.assignedTechId !== undefined) {
     await ticketService.assignTicket(id, req.workspaceId, body.assignedTechId ? Number(body.assignedTechId) : null, actor);
   }

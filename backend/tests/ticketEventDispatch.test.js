@@ -121,8 +121,14 @@ describe('emitTicketLifecycleNotifications → engine dispatch (derived events)'
     // conditions can match either ("entered Needs Rework" / "entered any
     // Pending-base status").
     // TU-10: every lifecycle event also carries its provenance (actorKind/source).
-    expect(eventContext.event.extra).toEqual({
+    expect(eventContext.event.extra).toMatchObject({
       from: 'Open', to: 'Pending', fromBase: 'Open', toBase: 'Pending', actorKind: 'freshservice', source: 'freshservice_sync',
+    });
+    // Simorgh D3: the status family also carries who/when/why — null on a
+    // sync-driven change with no resolution, but always present.
+    expect(eventContext.event.extra).toMatchObject({
+      actor: { kind: 'freshservice', name: null, email: null, technicianId: null },
+      resolvedAt: null, closedAt: null, resolutionReason: null, resolutionNote: null, resolvedByKind: null,
     });
     expect(eventContext.event.dedupeStamp).toBe('Open->Pending:2026-07-06T10:00:00.000Z');
     expect(eventContext.ticket.statusBase).toBe('Open'); // hydrated ticket is still status Open
@@ -159,7 +165,7 @@ describe('emitTicketLifecycleNotifications → engine dispatch (derived events)'
     // Pending-base custom status is NOT terminal — no resolved_closed event.
     expect(result.events).toEqual(['ticket.status_changed']);
     const [eventContext] = engineMock.executeForEvent.mock.calls[0];
-    expect(eventContext.event.extra).toEqual({
+    expect(eventContext.event.extra).toMatchObject({
       from: 'Open', to: 'Needs Rework', fromBase: 'Open', toBase: 'Pending', actorKind: 'human', source: 'ticketpulse_native',
     });
     expect(eventContext.ticket.status).toBe('Needs Rework');

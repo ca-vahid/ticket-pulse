@@ -1,6 +1,16 @@
-export const APP_VERSION = '3.8.60-preview';
+export const APP_VERSION = '3.8.61-preview';
 
 export const changelog = [
+  {
+    version: '3.8.61-preview',
+    date: 'September 14, 2026',
+    entries: [
+      { type: 'added', html: '<strong>✅ Security tickets ask why when you resolve them</strong> — moving a ticket in the Security category to Resolved or Closed now opens a short picker: confirmed threat (contained), false positive, benign / expected, duplicate, needs detection tuning, no action required, or other (with a note). One click, and it is the single thing the security agent asked for most: it reads your reason back, reconciles it against its own verdict, and stops raising the alerts you keep calling benign. Every other category resolves exactly as before.' },
+      { type: 'added', html: '<strong>The reason travels with the ticket</strong> — shown under the status, mirrored to the FreshService copy as its resolution note, returned by the public API (<code>resolutionReason</code>, <code>resolutionNote</code>, <code>resolvedByKind</code>, plus <code>closedAt</code>, <code>firstAssignedAt</code> and <code>resolutionTimeSeconds</code>), and carried on the <code>ticket.status_changed</code> webhook with who resolved it. Reopening clears it.' },
+      { type: 'improved', html: '<strong>Webhooks say who</strong> — status events now name the actor (person, API client, workflow or automation) and the assigned event carries the agent’s email and id, not just a name. Every event also carries the caller’s own reference and the FreshService id, so an integration can correlate without a lookup.' },
+      { type: 'improved', html: '<strong>Workflows that resolve say why too</strong> — an update-ticket step can set a resolution reason; the “Simorgh — resolve on benign verdict” template records <em>benign / expected</em>.' },
+    ],
+  },
   {
     version: '3.8.60-preview',
     date: 'September 14, 2026',

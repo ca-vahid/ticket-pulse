@@ -4,6 +4,7 @@ import sanitizeHtml from 'sanitize-html';
 import prisma from './prisma.js';
 import logger from '../utils/logger.js';
 import { textToHtml } from '../utils/forwardedMailParser.js';
+import { validateResolution, requiresResolutionReason, resolvedByKindFromActor } from './resolutionReasonService.js';
 import { ValidationError, NotFoundError, ServiceBusyError, ConflictError } from '../utils/errors.js';
 import { TICKET_ORIGIN, TICKET_SOURCE, TICKET_SOURCE_LABELS, APP_NATIVE_TRIGGER_SOURCE, AGENT_SELECTABLE_SOURCES, ticketDisplayRef } from '../utils/ticketOrigin.js';
 import noiseRuleService from './noiseRuleService.js';
@@ -702,7 +703,7 @@ class TicketService {
     return { ...updated, displayRef: ticketDisplayRef(updated), deleted: true };
   }
 
-  async _notifyLifecycle(existingTicket, upsertedTicket, { allow = true, suppressRequesterAck = false, actorKind = null } = {}) {
+  async _notifyLifecycle(existingTicket, upsertedTicket, { allow = true, suppressRequesterAck = false, actorKind = null, actor = null } = {}) {
     await ticketLifecycleNotificationService.emitTicketLifecycleNotifications({
       existingTicket,
       upsertedTicket,
@@ -712,6 +713,7 @@ class TicketService {
       // fires for the team, but the engine drops the requester recipient.
       ...(suppressRequesterAck ? { suppressRequesterAck: true } : {}),
       ...(actorKind ? { actorKind } : {}),
+      ...(actor ? { actor: { name: actor.name || null, email: actor.email || null, technicianId: actor.technicianId ?? null } } : {}),
     }).catch((err) => {
       logger.warn('Native ticket lifecycle notification dispatch failed (non-fatal)', {
         ticketId: upsertedTicket.id,
@@ -3515,7 +3517,7 @@ class TicketService {
     return { ...updated, displayRef: ticketDisplayRef(updated), isNoise: flag, resolved };
   }
 
-  async changeStatus(ticketId, workspaceId, status, actor) {
+  async changeStatus(ticketId, workspaceId, status, actor, { resolutionReason = null, resolutionNote = null } = {}) {
     // Per-workspace registry validation (Phase 8a) — replaces the hardcoded
     // NATIVE_TICKET_STATUSES allowlist. Returns the canonical-cased label.
     status = await statusService.assertValidStatus(workspaceId, status);
@@ -3537,6 +3539,23 @@ class TicketService {
     const wasTerminal = TERMINAL_STATUSES.includes(oldBase);
     const isTerminal = TERMINAL_STATUSES.includes(newBase);
 
+    // Resolution reason (Simorgh C4): demanded on Security-category tickets,
+    // accepted on any. Validated BEFORE anything is written so a missing
+    // reason is a clean 400, not a half-applied status change.
+    if (isTerminal) {
+      const resolution = validateResolution(
+        { resolutionReason, resolutionNote },
+        { required: requiresResolutionReason(ticket) && !ticket.resolutionReason },
+      );
+      if (resolution.resolutionReason) {
+        patch.resolutionReason = resolution.resolutionReason;
+        patch.resolutionNote = resolution.resolutionNote;
+        patch.resolvedByKind = resolvedByKindFromActor(actor);
+      } else if (!ticket.resolvedByKind) {
+        patch.resolvedByKind = resolvedByKindFromActor(actor);
+      }
+    }
+
     if (newBase === 'Resolved') {
       patch.resolvedAt = now;
       patch.resolutionTimeSeconds = ticket.resolutionTimeSeconds
@@ -3549,10 +3568,13 @@ class TicketService {
           ?? Math.max(0, Math.round((now.getTime() - new Date(ticket.createdAt).getTime()) / 1000));
       }
     } else if (wasTerminal && !isTerminal) {
-      // Reopening: the ticket is no longer resolved.
+      // Reopening: the ticket is no longer resolved — and its reason is stale.
       patch.resolvedAt = null;
       patch.closedAt = null;
       patch.resolutionTimeSeconds = null;
+      patch.resolutionReason = null;
+      patch.resolutionNote = null;
+      patch.resolvedByKind = null;
     }
 
     const updated = await prisma.ticket.update({
@@ -3579,11 +3601,15 @@ class TicketService {
       }).catch(() => { /* duplicate startedAt guard — harmless */ });
     }
 
-    await this._audit(ticket.id, 'status_changed', actor, { oldStatus: ticket.status, newStatus: status });
+    await this._audit(ticket.id, 'status_changed', actor, {
+      oldStatus: ticket.status, newStatus: status,
+      ...(patch.resolutionReason ? { resolutionReason: patch.resolutionReason, resolutionNote: patch.resolutionNote } : {}),
+    });
     // ticket.status_changed (with from/to extra) is derived inside
     // _notifyLifecycle now — single emit path shared with the FS sync, with a
-    // stable dedupe stamp instead of the old Date.now() one.
-    await this._notifyLifecycle(ticket, updated);
+    // stable dedupe stamp instead of the old Date.now() one. The actor rides
+    // along so the status-changed webhook can say WHO (Simorgh D3).
+    await this._notifyLifecycle(ticket, updated, { actorKind: resolvedByKindFromActor(actor), actor });
     this._broadcast(workspaceId, 'status', updated, { oldStatus: ticket.status });
     await mirrorService.enqueueFieldSync(workspaceId, ticket.id);
     return { ...updated, displayRef: ticketDisplayRef(updated), changed: true };

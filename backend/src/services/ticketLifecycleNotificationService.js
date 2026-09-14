@@ -469,9 +469,27 @@ export function webhookPayloadFromContext(eventContext) {
       category: t.internalCategory?.name || null,
       subcategory: t.internalSubcategory?.name || null,
       customFields: t.customFields || {},
+      // Simorgh D3/E2: correlation keys and resolution details on every event.
+      externalRef: t.externalRef || null,
+      externalReferences: Array.isArray(t.externalReferences) ? t.externalReferences : [],
+      resolvedAt: t.resolvedAt ? new Date(t.resolvedAt).toISOString() : null,
+      closedAt: t.closedAt ? new Date(t.closedAt).toISOString() : null,
+      firstAssignedAt: t.firstAssignedAt ? new Date(t.firstAssignedAt).toISOString() : null,
+      resolutionTimeSeconds: t.resolutionTimeSeconds ?? null,
+      resolutionReason: t.resolutionReason || null,
+      resolutionNote: t.resolutionNote || null,
+      resolvedByKind: t.resolvedByKind || null,
     },
     requester: eventContext.requester ? { name: eventContext.requester.name, email: eventContext.requester.email } : null,
-    assignedAgent: eventContext.assignedAgent ? { name: eventContext.assignedAgent.name } : null,
+    // Simorgh D4: a name alone cannot be resolved to a person; carry the id
+    // and email so the consumer can match `GET /agents`.
+    assignedAgent: eventContext.assignedAgent ? {
+      name: eventContext.assignedAgent.name,
+      email: eventContext.assignedAgent.email || null,
+      technicianId: eventContext.assignedAgent.id ?? null,
+    } : null,
+    // Who performed the event (Simorgh D3) — present on the status family.
+    actor: eventContext.event?.extra?.actor || null,
     extra: eventContext.event?.extra || null,
   };
 }
@@ -563,6 +581,17 @@ export function buildEventContext({ event, ticket, previousAgent, source, status
         id: ticket.internalCategory.id,
         name: ticket.internalCategory.name,
       } : null,
+      // Integration keys (Simorgh D3/E2): the caller's own reference and the
+      // FreshService mirror id, so a consumer can correlate without a lookup.
+      externalRef: ticket.externalRef || null,
+      externalReferences: ticket.freshserviceTicketId
+        ? [{ system: 'FRESHSERVICE', id: String(ticket.freshserviceTicketId) }]
+        : [],
+      firstAssignedAt: ticket.firstAssignedAt || null,
+      resolutionTimeSeconds: ticket.resolutionTimeSeconds ?? null,
+      resolutionReason: ticket.resolutionReason || null,
+      resolutionNote: ticket.resolutionNote || null,
+      resolvedByKind: ticket.resolvedByKind || null,
       internalSubcategory: ticket.internalSubcategory ? {
         id: ticket.internalSubcategory.id,
         name: ticket.internalSubcategory.name,
@@ -706,6 +735,10 @@ export async function emitTicketLifecycleNotifications({
   // Event-level actor kind for the status/assignment events (TU-10): native
   // callers pass the writer's kind; sync sources are 'freshservice'.
   actorKind = null,
+  // Who did it (Simorgh D3): {name,email,technicianId} from the native
+  // caller; null on sync paths. Rides on event.extra.actor for the
+  // status-family events and on the webhook payload.
+  actor = null,
 } = {}) {
   if (!allowNotificationWorkflows) {
     return { status: 'skipped', reason: 'Notification workflows disabled for this ingest path' };
@@ -753,6 +786,19 @@ export async function emitTicketLifecycleNotifications({
       // Provenance on every lifecycle event (TU-10): lets admins filter the
       // Closed→Open→Closed sync echoes from human/API changes.
       event.extra = { ...(event.extra || {}), actorKind: eventActorKind, source };
+      // Resolution details (Simorgh D3) on the status-family events: who,
+      // when, and why — the reason is the field the security agent reconciles.
+      if (['ticket.status_changed', 'ticket.resolved_closed', 'ticket.reopened'].includes(event.type)) {
+        event.extra = {
+          ...event.extra,
+          actor: actor ? { kind: eventActorKind, ...actor } : { kind: eventActorKind, name: null, email: null, technicianId: null },
+          resolvedAt: ticket.resolvedAt ? new Date(ticket.resolvedAt).toISOString() : null,
+          closedAt: ticket.closedAt ? new Date(ticket.closedAt).toISOString() : null,
+          resolutionReason: ticket.resolutionReason || null,
+          resolutionNote: ticket.resolutionNote || null,
+          resolvedByKind: ticket.resolvedByKind || null,
+        };
+      }
       if (event.type === 'ticket.created' && suppressRequesterAck) event.extra.suppressRequesterAck = true;
     }
     emitted.push(event.type);
