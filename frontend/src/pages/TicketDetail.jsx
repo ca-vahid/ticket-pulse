@@ -15,6 +15,8 @@ import FieldCardNote from '../components/tickets/FieldCardNote';
 import PinnedIntakeCard from '../components/tickets/PinnedIntakeCard';
 import ThreadSummaryCard from '../components/tickets/ThreadSummaryCard';
 import RequestApprovalModal from '../components/tickets/RequestApprovalModal';
+import ResolveReasonModal from '../components/tickets/ResolveReasonModal';
+import { ticketNeedsResolutionReason, reasonLabel } from '../utils/resolutionReasons';
 import { plainTextToHtml } from '../utils/plainTextToHtml';
 import AppHeader from '../components/AppHeader';
 import MobileTabBar from '../components/nav/MobileTabBar';
@@ -1817,7 +1819,28 @@ export default function TicketDetail() {
   // ---- Forward mode ----
   const [forwardTo, setForwardTo] = useState([]);
 
-  const resolveTicket = () => applyChange('resolve', () => ticketsAPI.setStatus(ticketId, 'Resolved'));
+  // Resolution reason (Simorgh C4): a Security-category ticket moving to a
+  // Resolved/Closed-base status asks why first; everything else is unchanged.
+  const [resolvePrompt, setResolvePrompt] = useState(null); // { next, prev, field }
+  const changeStatusGated = (next, prev, field = 'status') => {
+    if (isTerminalStatus(statusDefs, next) && ticketNeedsResolutionReason(ticket)) {
+      setResolvePrompt({ next, prev, field });
+      return;
+    }
+    applyChange(field, () => ticketsAPI.setStatus(ticketId, next), {
+      label: `Status → ${next}`,
+      undo: () => ticketsAPI.setStatus(ticketId, prev),
+    });
+  };
+  const confirmResolveReason = ({ resolutionReason, resolutionNote }) => {
+    const { next, prev, field } = resolvePrompt;
+    setResolvePrompt(null);
+    applyChange(field, () => ticketsAPI.setStatus(ticketId, next, { resolutionReason, resolutionNote }), {
+      label: `Status → ${next} · ${reasonLabel(resolutionReason)}`,
+      undo: () => ticketsAPI.setStatus(ticketId, prev),
+    });
+  };
+  const resolveTicket = () => changeStatusGated('Resolved', ticket?.status, 'resolve');
 
   const startSubjectEdit = () => {
     setSubjectDraft(ticket.subject || '');
@@ -3158,10 +3181,7 @@ export default function TicketDetail() {
                         const next = e.target.value;
                         const prev = ticket.status;
                         if (canWrite) {
-                          applyChange('status', () => ticketsAPI.setStatus(ticketId, next), {
-                            label: `Status → ${next}`,
-                            undo: () => ticketsAPI.setStatus(ticketId, prev),
-                          });
+                          changeStatusGated(next, prev, 'status');
                         } else requestFsSync([{ field: 'Status', from: ticket.status, to: next }], { status: next }).catch(() => {});
                       }}
                       className={fieldClass}
@@ -3170,6 +3190,21 @@ export default function TicketDetail() {
                       {statusOptions.map((s) => <option key={s} value={s}>{s}</option>)}
                       {!statusOptions.includes(ticket.status) && <option value={ticket.status}>{ticket.status}</option>}
                     </select>
+                    {ticket.resolutionReason && (
+                      <p className="mt-1 text-[11px] text-muted-foreground" data-testid="resolution-reason">
+                        <span className="font-medium text-foreground/85">{reasonLabel(ticket.resolutionReason)}</span>
+                        {ticket.resolutionNote ? <> — {ticket.resolutionNote}</> : null}
+                      </p>
+                    )}
+                    {resolvePrompt && (
+                      <ResolveReasonModal
+                        ticketRef={ticket.displayRef || `TP-${ticket.nativeNumber || ticket.id}`}
+                        targetStatus={resolvePrompt.next}
+                        busy={savingField === resolvePrompt.field}
+                        onConfirm={confirmResolveReason}
+                        onClose={() => setResolvePrompt(null)}
+                      />
+                    )}
                   </SidebarField>
 
                   <SidebarField label="Priority" flash={Boolean(liveChanges.priority)} onAck={() => ackChange('priority')}>

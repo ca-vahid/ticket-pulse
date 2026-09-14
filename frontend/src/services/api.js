@@ -812,8 +812,9 @@ export const ticketsAPI = {
     return await api.patch(`/tickets/${id}`, payload);
   },
 
-  setStatus: async (id, status) => {
-    return await api.post(`/tickets/${id}/status`, { status });
+  setStatus: async (id, status, extra = {}) => {
+    // extra: { resolutionReason, resolutionNote } on a resolving change (Simorgh C4).
+    return await api.post(`/tickets/${id}/status`, { status, ...extra });
   },
 
   assign: async (id, technicianId) => {

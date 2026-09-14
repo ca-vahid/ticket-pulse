@@ -1,4 +1,5 @@
 import prisma from './prisma.js';
+import { reasonLabel } from './resolutionReasonService.js';
 import { runJobsInPool } from '../utils/parallelPool.js';
 import logger from '../utils/logger.js';
 import settingsRepository from './settingsRepository.js';
@@ -616,6 +617,11 @@ class MirrorService {
       // the same ticket. FS expects ISO 8601; undefined when unset so
       // compactObject drops the key rather than clearing theirs.
       due_by: ticket.dueBy ? new Date(ticket.dueBy).toISOString() : undefined,
+      // Resolution reason (Simorgh C4): the FS copy states why, in words, so
+      // anyone still reading FreshService sees the same conclusion.
+      resolution_notes: ticket.resolutionReason
+        ? `${reasonLabel(ticket.resolutionReason) || ticket.resolutionReason}${ticket.resolutionNote ? ` — ${ticket.resolutionNote}` : ''}`
+        : undefined,
       custom_fields: customFields || undefined,
       // "Also for" additional requesters (Phase MR5) — edits after create
       // propagate to the FS copy. cc_emails is accepted on ticket update by
