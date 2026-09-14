@@ -429,7 +429,7 @@ export function buildOpenApiSpec(baseUrl) {
       },
       parameters: {
         cursor: { name: 'cursor', in: 'query', schema: { type: 'string' }, description: 'Opaque keyset cursor from a prior response.' },
-        limit: { name: 'pageSize', in: 'query', schema: { type: 'integer', maximum: 100, default: 25 } },
+        limit: { name: 'pageSize', in: 'query', schema: { type: 'integer', maximum: 100, default: 25 }, description: 'Page size (alias: limit).' },
         page: { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
         idempotencyKey: { name: 'Idempotency-Key', in: 'header', schema: { type: 'string' }, description: 'Retry-safety key (UUID recommended).' },
       },

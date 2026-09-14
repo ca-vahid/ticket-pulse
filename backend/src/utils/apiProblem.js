@@ -45,9 +45,13 @@ export function toProblem(err) {
   if (err instanceof ApiProblem) return err;
   if (err instanceof AppError) {
     const status = err.statusCode || 500;
+    // A service error that names its own machine code (e.g. the resolution
+    // reason validator's `resolution_reason_required`) keeps it; the status
+    // family code is the fallback. Simorgh keyed on the documented code.
+    const ownCode = status < 500 && typeof err.code === 'string' && /^[a-z][a-z0-9_]{2,60}$/.test(err.code) ? err.code : null;
     return new ApiProblem({
       status,
-      code: CODE_BY_STATUS[status] || (status >= 500 ? 'internal_error' : 'error'),
+      code: ownCode || CODE_BY_STATUS[status] || (status >= 500 ? 'internal_error' : 'error'),
       title: status >= 500 ? 'Internal error' : (err.name || 'Error').replace(/Error$/, ''),
       detail: status >= 500 ? 'An unexpected error occurred.' : err.message,
       errors: err.details || null,

@@ -226,6 +226,16 @@ describe('PATCH /api/v1/tickets/:id — category/subcategory by name', () => {
 // Phase 2 — the v1 list endpoint inherits cf_* custom-field filters by riding
 // listTickets verbatim (buildListWhere speaks the grammar; nothing v1-specific).
 describe('GET /api/v1/tickets — cf_* filter inheritance', () => {
+  test('`limit` is honoured as the page size (Simorgh reconcile finding, 14 Sep)', async () => {
+    ticketServiceMock.listTickets.mockResolvedValue({ items: [], nextCursor: null, pageSize: 100, total: 0 });
+    const res = await request(buildApp())
+      .get('/api/v1/tickets?limit=100')
+      .set('Authorization', 'Bearer tp_live_x')
+      .expect(200);
+    expect(ticketServiceMock.listTickets).toHaveBeenCalledWith(1, expect.objectContaining({ pageSize: '100', useCursor: true }));
+    expect(res.body.data.pagination.limit).toBe(100);
+  });
+
   test('cf_* query params reach listTickets untouched', async () => {
     ticketServiceMock.listTickets.mockResolvedValue({ items: [], nextCursor: null, pageSize: 25, total: 0 });
     await request(buildApp())

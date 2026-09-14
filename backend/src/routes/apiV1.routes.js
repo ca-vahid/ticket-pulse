@@ -224,6 +224,9 @@ router.get('/tickets', S('tickets:read'), asyncHandler(async (req, res) => {
   // paging (QA 07-21 #8 — the default response had no cursor to follow).
   const q = { ...req.query };
   if (q.page === undefined && q.cursor === undefined) q.useCursor = true;
+  // The reply's pagination block says `limit`; accept it on the request too
+  // (Simorgh reconciled at 25/page because only pageSize was honoured).
+  if (q.pageSize === undefined && q.limit !== undefined) q.pageSize = q.limit;
   const result = await ticketService.listTickets(req.workspaceId, q);
   const pagination = result.nextCursor !== undefined
     ? { next_cursor: result.nextCursor, limit: result.pageSize, total: result.total }

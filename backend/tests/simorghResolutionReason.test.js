@@ -55,6 +55,21 @@ describe('required only on Security-category tickets', () => {
   });
 });
 
+describe('the API problem carries the documented code', () => {
+  test('resolution_reason_required survives the problem+json mapping (their finding, 14 Sep)', async () => {
+    const { toProblem } = await import('../src/utils/apiProblem.js');
+    let err;
+    try { validateResolution({}, { required: true }); } catch (e) { err = e; }
+    expect(err?.code).toBe('resolution_reason_required');
+    const problem = toProblem(err);
+    expect(problem.status).toBe(400);
+    expect(problem.code).toBe('resolution_reason_required');
+    // A plain validation error without its own code keeps the family code.
+    const { ValidationError } = await import('../src/utils/errors.js');
+    expect(toProblem(new ValidationError('nope')).code).toBe('invalid_request');
+  });
+});
+
 describe('validation', () => {
   test('a known reason with an optional note passes through trimmed', () => {
     expect(validateResolution({ resolutionReason: ' false_positive ', resolutionNote: '  Consumer VPN. ' }))
