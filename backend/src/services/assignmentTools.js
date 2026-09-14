@@ -1144,6 +1144,26 @@ async function getTicketCategories(workspaceId) {
   };
 }
 
+// Workspace internal domains, 60 s cache — the requester directory lookup
+// below only makes sense for our own people. External senders (vendor
+// no-reply mailboxes, Microsoft quarantine digests) were 13 failed Graph
+// lookups an hour on 14 Sep, each an error line in the log.
+const internalDomainsCache = new Map();
+async function workspaceInternalDomains(workspaceId) {
+  const hit = internalDomainsCache.get(workspaceId);
+  if (hit && Date.now() - hit.at < 60_000) return hit.list;
+  const ws = await prisma.workspace?.findUnique?.({ where: { id: workspaceId }, select: { internalDomains: true } }).catch(() => null);
+  const list = (ws?.internalDomains || []).map((d) => String(d).toLowerCase());
+  internalDomainsCache.set(workspaceId, { at: Date.now(), list });
+  return list;
+}
+export function emailIsInternal(email, internalDomains) {
+  const domain = String(email || '').split('@')[1]?.toLowerCase();
+  if (!domain) return false;
+  if (!internalDomains?.length) return true; // no list configured: keep the old behaviour
+  return internalDomains.some((d) => domain === d || domain.endsWith(`.${d}`));
+}
+
 async function getRequesterSiteContext(workspaceId, ticketId) {
   if (!ticketId) return { error: 'ticket_id is required' };
 
@@ -1169,7 +1189,8 @@ async function getRequesterSiteContext(workspaceId, ticketId) {
   if (!ticket) return { error: `Ticket ${ticketId} not found in this workspace` };
 
   let graphProfile = null;
-  if (ticket.requester?.email && graphMailClient.isConfigured()) {
+  if (ticket.requester?.email && graphMailClient.isConfigured()
+      && emailIsInternal(ticket.requester.email, await workspaceInternalDomains(workspaceId))) {
     try {
       const result = await graphMailClient.getUserProfile(ticket.requester.email);
       if (!result.error) {
