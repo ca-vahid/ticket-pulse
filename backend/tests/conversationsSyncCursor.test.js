@@ -38,7 +38,8 @@ function conversationsStale(t, latestConversations) {
   const fsChange = fsChangeCandidates.length ? new Date(Math.max(...fsChangeCandidates)) : null;
   const fsUpdated = t.freshserviceUpdatedAt || null;
   const cursor = t.conversationsSyncFreshserviceUpdatedAt || null;
-  return Boolean(
+  const cursorCaughtUp = Boolean(fsUpdated && cursor && cursor >= fsUpdated);
+  return !cursorCaughtUp && Boolean(
     !latestConversations
     || (fsUpdated && (!cursor || cursor < fsUpdated))
     || (fsChange && latestConversations < fsChange),
@@ -124,5 +125,35 @@ describe('the cursor keeps it bounded', () => {
     };
     expect(conversationsStale(t, new Date('2026-09-09T14:26:00Z'))).toBe(true);  // older than resolvedAt
     expect(conversationsStale(t, new Date('2026-09-09T15:00:00Z'))).toBe(false); // newer
+  });
+});
+
+describe('14 Sep 2026: the cursor is authoritative once it has caught up', () => {
+  // Accounting had 194 tickets in the day cohort; the same 60 were re-read
+  // every 5 minutes ("Done: 60 ticket(s) … 0 failure(s)" for hours) because
+  // a ticket with no conversations, or whose only reply predates resolvedAt,
+  // was judged stale regardless of the cursor.
+  const caughtUp = {
+    createdAt: new Date('2026-09-14T15:00:00Z'),
+    assignedAt: null,
+    resolvedAt: null,
+    closedAt: null,
+    freshserviceUpdatedAt: new Date('2026-09-14T15:00:00Z'),
+    conversationsSyncFreshserviceUpdatedAt: new Date('2026-09-14T15:00:00Z'),
+  };
+
+  test('a new e-mail ticket with no conversations is read once, then left alone', () => {
+    expect(conversationsStale({ ...caughtUp, conversationsSyncFreshserviceUpdatedAt: null }, null)).toBe(true);
+    expect(conversationsStale(caughtUp, null)).toBe(false);
+  });
+
+  test('a resolved ticket whose only reply predates resolvedAt is not re-read for ever', () => {
+    const t = { ...caughtUp, resolvedAt: new Date('2026-09-14T18:00:00Z'), freshserviceUpdatedAt: new Date('2026-09-14T18:00:00Z'), conversationsSyncFreshserviceUpdatedAt: new Date('2026-09-14T18:00:00Z') };
+    expect(conversationsStale(t, new Date('2026-09-14T16:00:00Z'))).toBe(false);
+  });
+
+  test('a later FS change still re-reads it (cursor behind updated_at)', () => {
+    const t = { ...caughtUp, freshserviceUpdatedAt: new Date('2026-09-14T20:00:00Z') };
+    expect(conversationsStale(t, null)).toBe(true);
   });
 });
