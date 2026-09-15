@@ -12,6 +12,44 @@ export const STATUS_CHIP = {
   expired: { label: 'Expired', className: 'bg-muted text-muted-foreground' },
 };
 
+/**
+ * The big status badge in the page header (top right) and the matching card
+ * stripe. Strong tints on purpose: an approver opening a cancelled or decided
+ * request must see it before reading anything else.
+ */
+export const STATUS_BADGE = {
+  pending: {
+    label: 'Awaiting your decision',
+    badge: 'bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-500/20 dark:text-amber-100 dark:border-amber-500/40',
+    stripe: 'border-t-amber-400',
+  },
+  info_requested: {
+    label: 'Question sent',
+    badge: 'bg-violet-100 text-violet-900 border-violet-300 dark:bg-violet-500/20 dark:text-violet-100 dark:border-violet-500/40',
+    stripe: 'border-t-violet-400',
+  },
+  approved: {
+    label: 'Approved',
+    badge: 'bg-emerald-100 text-emerald-900 border-emerald-300 dark:bg-emerald-500/20 dark:text-emerald-100 dark:border-emerald-500/40',
+    stripe: 'border-t-emerald-500',
+  },
+  rejected: {
+    label: 'Rejected',
+    badge: 'bg-red-100 text-red-900 border-red-300 dark:bg-red-500/20 dark:text-red-100 dark:border-red-500/40',
+    stripe: 'border-t-red-500',
+  },
+  cancelled: {
+    label: 'Cancelled',
+    badge: 'bg-orange-100 text-orange-900 border-orange-300 dark:bg-orange-500/20 dark:text-orange-100 dark:border-orange-500/40',
+    stripe: 'border-t-orange-500',
+  },
+  expired: {
+    label: 'Expired',
+    badge: 'bg-secondary text-foreground border-input',
+    stripe: 'border-t-muted-foreground/40',
+  },
+};
+
 export const APPROVER_DOT = {
   pending: 'bg-amber-500',
   approved: 'bg-emerald-500',

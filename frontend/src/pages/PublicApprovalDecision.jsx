@@ -22,7 +22,7 @@ import DecisionBox from './publicApproval/DecisionBox';
 import { usePublicTheme } from './publicApproval/usePublicTheme';
 import {
   absoluteApiUrl,
-  STATUS_CHIP,
+  STATUS_BADGE,
   classifyLoadError,
   firstName,
   isOpenForDecision,
@@ -85,10 +85,26 @@ function Shell({ workspaceName, theme, onToggleTheme, children, bottomPad = true
   );
 }
 
-function StatusChip({ status }) {
-  const meta = STATUS_CHIP[status] || STATUS_CHIP.pending;
+const STATUS_ICON = {
+  pending: Clock,
+  info_requested: MessageCircleQuestion,
+  approved: CheckCircle2,
+  rejected: XCircle,
+  cancelled: Ban,
+  expired: Clock,
+};
+
+/** Header status badge: icon + label in a strong tint, top right of the card. */
+function StatusBadge({ status }) {
+  const meta = STATUS_BADGE[status] || STATUS_BADGE.pending;
+  const Icon = STATUS_ICON[status] || Clock;
   return (
-    <span className={`rounded-full px-2.5 py-[3px] text-[11px] font-bold uppercase tracking-[0.04em] ${meta.className}`}>
+    <span
+      data-testid="approval-status-badge"
+      data-status={status}
+      className={`inline-flex items-center gap-2 rounded-xl border px-3.5 py-2 text-[13px] font-bold uppercase tracking-[0.05em] ${meta.badge}`}
+    >
+      <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
       {meta.label}
     </span>
   );
@@ -145,6 +161,7 @@ function MessageCard({ icon: Icon, tone = 'muted', title, children }) {
 const DecisionBanner = ({ approval, decidedByYou, bannerRef, isDark }) => {
   const status = approval?.status;
   let tone = 'bg-muted text-foreground border-border';
+  let disc = 'bg-secondary text-foreground';
   let Icon = Ban;
   let title = '';
   let body = null;
@@ -156,6 +173,9 @@ const DecisionBanner = ({ approval, decidedByYou, bannerRef, isDark }) => {
     tone = status === 'approved'
       ? 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-100 dark:border-emerald-500/25'
       : 'bg-red-50 text-red-800 border-red-200 dark:bg-red-500/10 dark:text-red-100 dark:border-red-500/25';
+    disc = status === 'approved'
+      ? 'bg-emerald-200/70 text-emerald-800 dark:bg-emerald-500/25 dark:text-emerald-100'
+      : 'bg-red-200/70 text-red-800 dark:bg-red-500/25 dark:text-red-100';
     Icon = status === 'approved' ? CheckCircle2 : XCircle;
     title = decidedInApp
       ? `${verb.charAt(0).toUpperCase() + verb.slice(1)} by ${approval.approverName || 'another approver'}${when ? ` on ${when}` : ''} in the app`
@@ -168,7 +188,11 @@ const DecisionBanner = ({ approval, decidedByYou, bannerRef, isDark }) => {
       )
       : <p className="mt-1 text-sm opacity-80">The requester and the agent have been notified — you can close this page.</p>;
   } else if (status === 'cancelled') {
+    tone = 'bg-orange-50 text-orange-950 border-orange-200 dark:bg-orange-500/10 dark:text-orange-50 dark:border-orange-500/30';
+    disc = 'bg-orange-200/70 text-orange-900 dark:bg-orange-500/25 dark:text-orange-100';
     if (approval.supersededBy?.name) {
+      tone = 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-100 dark:border-emerald-500/25';
+      disc = 'bg-emerald-200/70 text-emerald-800 dark:bg-emerald-500/25 dark:text-emerald-100';
       Icon = CheckCircle2;
       title = `Superseded — approved by ${approval.supersededBy.name}${approval.supersededBy.decidedAt ? ` on ${formatDayTime(approval.supersededBy.decidedAt)}` : ''}`;
       body = <p className="mt-1 text-sm opacity-80">Another approver already decided this request, so nothing is needed from you.</p>;
@@ -178,6 +202,7 @@ const DecisionBanner = ({ approval, decidedByYou, bannerRef, isDark }) => {
     }
   } else if (status === 'info_requested') {
     tone = 'bg-violet-50 text-violet-900 border-violet-200 dark:bg-violet-500/10 dark:text-violet-100 dark:border-violet-500/25';
+    disc = 'bg-violet-200/70 text-violet-900 dark:bg-violet-500/25 dark:text-violet-100';
     Icon = MessageCircleQuestion;
     const last = [...(approval.clarificationLog || [])].reverse().find((q) => q?.askedAt);
     title = `You asked a question${last ? ` on ${formatDayTime(last.askedAt)}` : ''} — you can still decide now`;
@@ -190,11 +215,13 @@ const DecisionBanner = ({ approval, decidedByYou, bannerRef, isDark }) => {
     <div
       ref={bannerRef}
       tabIndex={-1}
-      className={`tp-focus-ring mb-5 flex items-start gap-3 rounded-xl border px-4 py-3.5 motion-safe:animate-fadeIn ${tone}`}
+      className={`tp-focus-ring mb-5 flex items-start gap-3.5 rounded-xl border px-4 py-4 motion-safe:animate-fadeIn ${tone}`}
     >
-      <Icon className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
+      <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-full ${disc}`}>
+        <Icon className="h-5 w-5" aria-hidden="true" />
+      </span>
       <div className="min-w-0 flex-1">
-        <p className="font-semibold">{title}</p>
+        <p className="text-base font-bold leading-snug">{title}</p>
         {body}
       </div>
     </div>
@@ -474,10 +501,14 @@ export default function PublicApprovalDecision() {
     <Shell workspaceName={workspaceName} theme={theme} onToggleTheme={toggle} bottomPad={open}>
       {/* No overflow-hidden here: it would turn the card into the scroll container and
           un-stick the decision box (sticky bottom = the mobile bottom sheet). */}
-      <article className="tp-card rounded-2xl shadow-soft motion-safe:animate-fadeIn" aria-labelledby="approval-subject">
-        <header className="grid items-start gap-4 border-b border-border px-5 py-5 min-[800px]:grid-cols-[minmax(0,1fr)_auto] min-[800px]:px-[26px]">
-          <div className="min-w-0">
-            <div className="mb-2.5 flex flex-wrap gap-2">
+      <article className={`tp-card rounded-2xl border-t-4 shadow-soft motion-safe:animate-fadeIn ${(STATUS_BADGE[approval.status] || STATUS_BADGE.pending).stripe}`} aria-labelledby="approval-subject">
+        <header className="grid items-start gap-4 border-b border-border px-5 py-5 min-[800px]:grid-cols-[minmax(0,1fr)_auto] min-[800px]:grid-rows-[auto_auto] min-[800px]:px-[26px]">
+          {/* One badge, placed top-right on wide screens and first on a phone. */}
+          <div className="min-[800px]:col-start-2 min-[800px]:row-start-1 min-[800px]:justify-self-end">
+            <StatusBadge status={approval.status} />
+          </div>
+          <div className="min-w-0 min-[800px]:col-start-1 min-[800px]:row-start-1 min-[800px]:row-span-2">
+            <div className="mb-2.5 flex flex-wrap items-center gap-2">
               {approval.category?.name && (
                 <span
                   title={approval.category.description || undefined}
@@ -486,7 +517,6 @@ export default function PublicApprovalDecision() {
                   {approval.category.name}
                 </span>
               )}
-              <StatusChip status={approval.status} />
             </div>
             <p className="font-mono text-[13px] text-muted-foreground">
               {ticket.displayRef}
@@ -504,7 +534,9 @@ export default function PublicApprovalDecision() {
               {approval.createdAt ? ` on ${formatDayTime(approval.createdAt)}` : ''}
             </p>
           </div>
-          <HeaderActions ticket={ticket} copied={copied} onCopy={onCopy} />
+          <div className="min-[800px]:col-start-2 min-[800px]:row-start-2 min-[800px]:justify-self-end">
+            <HeaderActions ticket={ticket} copied={copied} onCopy={onCopy} />
+          </div>
         </header>
 
         <div className="grid min-[800px]:grid-cols-[minmax(0,1fr)_320px]">

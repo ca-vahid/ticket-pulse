@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.8.81-preview';
+export const APP_VERSION = '3.8.82-preview';
 
 export const changelog = [
+  {
+    version: '3.8.82-preview',
+    date: 'September 14, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Approval page: the state is the first thing you see</strong> — a cancelled request used to announce itself with a small grey pill and a grey box. The status now sits top right as a large badge with an icon and a real colour (orange for cancelled, amber for awaiting you, green approved, red rejected, violet question sent), the card carries a matching stripe along its top, and the banner gets the same tint with a bigger title. On a phone the badge leads the card.' },
+    ],
+  },
   {
     version: '3.8.81-preview',
     date: 'September 14, 2026',
