@@ -46,6 +46,12 @@ const MIRROR_QUEUE_TIMEOUT_MS = Number(process.env.NATIVE_TICKET_MIRROR_QUEUE_TI
 // reconciliations an hour, all retried 3 min later anyway). When the queue is
 // already this deep the sweep is deferred to the next tick instead.
 const RECONCILE_BUSY_QUEUE_DEPTH = Number(process.env.NATIVE_TICKET_RECONCILE_BUSY_QUEUE_DEPTH || 40);
+// …but never for ever: on a busy afternoon (15 Sep 2026, 3–4 PM PT) the
+// queue sat at 40–135 for the whole hour and 65 of 66 passes deferred, so
+// TP-born tickets went unreconciled for an hour. After this long since a
+// workspace's last completed pass the sweep runs regardless; the 90 s queue
+// timeout still bounds the damage if the queue really is jammed.
+const RECONCILE_MAX_DEFER_MS = Number(process.env.NATIVE_TICKET_RECONCILE_MAX_DEFER_MS || 15 * 60 * 1000);
 
 function backoffMs(attempts) {
   return Math.min(BASE_BACKOFF_MS * (2 ** Math.max(0, attempts - 1)), MAX_BACKOFF_MS);
@@ -848,9 +854,17 @@ class MirrorService {
 
     if (deferWhenBusy) {
       const depth = this._limiterQueueDepth(client);
-      if (depth >= RECONCILE_BUSY_QUEUE_DEPTH) {
+      if (!this._lastReconcileAt) this._lastReconcileAt = new Map();
+      // A workspace never seen since boot counts from now, so the ceiling is
+      // "15 min without a pass", not "run at boot while the queue is busiest".
+      if (!this._lastReconcileAt.has(workspaceId)) this._lastReconcileAt.set(workspaceId, Date.now());
+      const overdue = Date.now() - this._lastReconcileAt.get(workspaceId) >= RECONCILE_MAX_DEFER_MS;
+      if (depth >= RECONCILE_BUSY_QUEUE_DEPTH && !overdue) {
         logger.info(`Mirror reconciliation for workspace ${workspaceId} deferred: FreshService queue busy (${depth} waiting)`);
         return { skipped: true, reason: 'limiter_busy', queueDepth: depth };
+      }
+      if (depth >= RECONCILE_BUSY_QUEUE_DEPTH && overdue) {
+        logger.info(`Mirror reconciliation for workspace ${workspaceId} running despite a busy FreshService queue (${depth} waiting): last pass was over ${Math.round(RECONCILE_MAX_DEFER_MS / 60000)} min ago`);
       }
     }
 
@@ -888,6 +902,8 @@ class MirrorService {
     if (tickets.length > 0) {
       logger.info(`Mirror reconciliation for workspace ${workspaceId}: ${tickets.length} tickets checked, ${imported} entries imported, ${conflicts} conflicts`);
     }
+    if (!this._lastReconcileAt) this._lastReconcileAt = new Map();
+    this._lastReconcileAt.set(workspaceId, Date.now());
     return { checked: tickets.length, imported, conflicts };
   }
 
