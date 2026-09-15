@@ -71,7 +71,11 @@ jest.unstable_mockModule('../src/utils/logger.js', () => ({
   },
 }));
 
-const { default: freshServiceActionService } = await import('../src/services/freshServiceActionService.js');
+const { default: freshServiceActionService, clearTpSkillLookupCache, resolveTpSkillLookupIds } = await import('../src/services/freshServiceActionService.js');
+
+// The lookup tables are cached per FS workspace for five minutes; every test
+// here builds its own mock records, so start each one cold.
+beforeEach(() => clearTpSkillLookupCache());
 const freshserviceModule = await import('../src/integrations/freshservice.js');
 
 const ticket = (overrides = {}) => ({
@@ -825,5 +829,44 @@ describe('freshServiceActionService category writeback (auto-categorize)', () =>
         categoryWrittenAt: expect.any(Date),
       }),
     });
+  });
+});
+
+describe('Ticket Pulse lookup tables are cached per FreshService workspace (15 Sep 2026)', () => {
+  const client = () => ({
+    domain: 'example.freshservice.com',
+    listCustomObjects: jest.fn().mockResolvedValue([{ id: 548, title: 'Ticket Pulse Skills' }, { id: 549, title: 'Ticket Pulse Subskills' }]),
+    listCustomObjectRecords: jest.fn((objectId) => Promise.resolve(objectId === 548
+      ? [{ data: { name: 'Remittances', bo_display_id: 'CAT-1' } }]
+      : [{ data: { name: 'EFT', bo_display_id: 'SUB-1', parent: 'CAT-1' } }])),
+  });
+
+  test('a second resolve within the window makes no FreshService calls', async () => {
+    const c = client();
+    const first = await resolveTpSkillLookupIds(c, { skill: 'Remittances', subskill: null, workspaceId: '4' });
+    const second = await resolveTpSkillLookupIds(c, { skill: 'remittances', subskill: null, workspaceId: '4' });
+    expect(first.categoryDisplayId).toBe('CAT-1');
+    expect(second.categoryDisplayId).toBe('CAT-1');
+    expect(c.listCustomObjects).toHaveBeenCalledTimes(1);
+    expect(c.listCustomObjectRecords).toHaveBeenCalledTimes(2);
+  });
+
+  test('a workspace with no lookup objects is remembered as such; another workspace is loaded separately', async () => {
+    const c = client();
+    c.listCustomObjects.mockResolvedValue([]);
+    expect((await resolveTpSkillLookupIds(c, { skill: 'Project Setup', workspaceId: '8' })).categoryDisplayId).toBeNull();
+    expect((await resolveTpSkillLookupIds(c, { skill: 'Proposal Setup', workspaceId: '8' })).categoryDisplayId).toBeNull();
+    expect(c.listCustomObjects).toHaveBeenCalledTimes(1);
+    expect(c.listCustomObjectRecords).not.toHaveBeenCalled();
+    await resolveTpSkillLookupIds(c, { skill: 'Project Setup', workspaceId: '9' });
+    expect(c.listCustomObjects).toHaveBeenCalledTimes(2);
+  });
+
+  test('clearing the cache forces a reload', async () => {
+    const c = client();
+    await resolveTpSkillLookupIds(c, { skill: 'Remittances', workspaceId: '4' });
+    clearTpSkillLookupCache();
+    await resolveTpSkillLookupIds(c, { skill: 'Remittances', workspaceId: '4' });
+    expect(c.listCustomObjects).toHaveBeenCalledTimes(2);
   });
 });

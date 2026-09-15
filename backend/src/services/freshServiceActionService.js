@@ -118,17 +118,41 @@ function recordDisplayId(record) {
  * null ids it can't resolve (never throws), so callers can decide to skip.
  * Shared by the assignment writeback and the ticket mirror.
  */
-export async function resolveTpSkillLookupIds(client, { skill, subskill, workspaceId }) {
-  if (!skill) return { categoryDisplayId: null, subcategoryDisplayId: null };
+// The lookup tables (two custom objects + their records) change only when an
+// admin adds a category in FreshService, yet every category write-back and
+// every mirror job re-read them — three FreshService calls a time, on the
+// same shared limiter the :00/:30 syncs already fill (15 Sep 2026). Five
+// minutes of memory per FS workspace is plenty; a workspace with no objects
+// at all (Project Accounting today) is remembered too, so nine mirror jobs no
+// longer pay 27 calls to learn the same "not configured".
+const LOOKUP_CACHE_TTL_MS = Number(process.env.TP_SKILL_LOOKUP_CACHE_MS || 5 * 60 * 1000);
+const lookupCache = new Map(); // `${domain}|${fsWorkspaceId}` -> { at, categoryObject, subcategoryObject, categoryRecords, subcategoryRecords }
+
+export function clearTpSkillLookupCache() {
+  lookupCache.clear();
+}
+
+export async function loadTpSkillLookupTables(client, workspaceId) {
+  const key = `${client?.domain || 'default'}|${workspaceId || 'all'}`;
+  const hit = lookupCache.get(key);
+  if (hit && Date.now() - hit.at < LOOKUP_CACHE_TTL_MS) return hit;
   const objects = await client.listCustomObjects({ workspace_id: workspaceId });
   const byTitle = new Map((objects || []).map((o) => [o.title, o]));
-  const categoryObject = byTitle.get(TP_SKILL_OBJECT_TITLE);
-  const subcategoryObject = byTitle.get(TP_SUBSKILL_OBJECT_TITLE);
-  if (!categoryObject) return { categoryDisplayId: null, subcategoryDisplayId: null };
+  const categoryObject = byTitle.get(TP_SKILL_OBJECT_TITLE) || null;
+  const subcategoryObject = byTitle.get(TP_SUBSKILL_OBJECT_TITLE) || null;
   const [categoryRecords, subcategoryRecords] = await Promise.all([
-    client.listCustomObjectRecords(categoryObject.id),
+    categoryObject ? client.listCustomObjectRecords(categoryObject.id) : Promise.resolve([]),
     subcategoryObject ? client.listCustomObjectRecords(subcategoryObject.id) : Promise.resolve([]),
   ]);
+  const entry = { at: Date.now(), categoryObject, subcategoryObject, categoryRecords: categoryRecords || [], subcategoryRecords: subcategoryRecords || [] };
+  lookupCache.set(key, entry);
+  return entry;
+}
+
+export async function resolveTpSkillLookupIds(client, { skill, subskill, workspaceId }) {
+  if (!skill) return { categoryDisplayId: null, subcategoryDisplayId: null };
+  const { categoryObject, categoryRecords, subcategoryRecords } = await loadTpSkillLookupTables(client, workspaceId);
+  if (!categoryObject) return { categoryDisplayId: null, subcategoryDisplayId: null };
   const catByName = new Map((categoryRecords || []).map((r) => [keyFor(recordName(r)), recordDisplayId(r)]));
   const categoryDisplayId = catByName.get(keyFor(skill)) ?? null;
   // Subskill names are only unique per parent — scope the record match by the
@@ -1704,18 +1728,11 @@ class FreshServiceActionService {
       return action.customFields;
     }
 
-    const objects = await client.listCustomObjects({ workspace_id: fsConfig.workspaceId });
-    const byTitle = new Map(objects.map((object) => [object.title, object]));
-    const categoryObject = byTitle.get(TP_SKILL_OBJECT_TITLE);
-    const subcategoryObject = byTitle.get(TP_SUBSKILL_OBJECT_TITLE);
+    const { categoryObject, subcategoryObject, categoryRecords, subcategoryRecords } = await loadTpSkillLookupTables(client, fsConfig.workspaceId);
     if (!categoryObject || !subcategoryObject) {
       return action.customFields;
     }
 
-    const [categoryRecords, subcategoryRecords] = await Promise.all([
-      client.listCustomObjectRecords(categoryObject.id),
-      client.listCustomObjectRecords(subcategoryObject.id),
-    ]);
     const categoriesByName = new Map(categoryRecords.map((record) => [keyFor(recordName(record)), recordDisplayId(record)]));
     const categoryDisplayId = categoriesByName.get(keyFor(categoryName));
     // Per-parent subskill names: scope the record match by the resolved
