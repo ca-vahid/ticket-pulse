@@ -3,6 +3,19 @@ import { Activity } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 import { ACCESS_BOUNCE_KEY, canViewOps, isWorkspaceAdmin, useWorkspaceRole } from './navDestinations';
+import { rememberPostLoginPath } from '../../utils/postLoginRedirect';
+
+/**
+ * Bounce to /login or /workspace but remember where the visitor was heading,
+ * so sign-in (or picking a workspace) returns them there instead of the
+ * role home. A ticket link from Simorgh, e-mail or chat opened while signed
+ * out used to end on the Dashboard.
+ */
+export function BounceTo({ to }) {
+  const location = useLocation();
+  rememberPostLoginPath(location);
+  return <Navigate to={to} replace />;
+}
 
 export function LoadingScreen({ label = 'Loading...' }) {
   return (
@@ -33,12 +46,12 @@ export default function AdminRoute({ children }) {
 
   if (isLoading || !isHydrated) return <LoadingScreen />;
 
-  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  if (!isAuthenticated) return <BounceTo to="/login" />;
 
   if (user?.role === 'agent') return <Navigate to="/tickets" replace />;
 
   if (!isWorkspaceSelected && availableWorkspaces.length !== 1) {
-    return <Navigate to="/workspace" replace />;
+    return <BounceTo to="/workspace" />;
   }
 
   if (!isWorkspaceAdmin(user, wsRole)) {
@@ -63,10 +76,10 @@ export function ViewRoute({ children }) {
   const location = useLocation();
 
   if (isLoading || !isHydrated) return <LoadingScreen />;
-  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  if (!isAuthenticated) return <BounceTo to="/login" />;
   if (user?.role === 'agent') return <Navigate to="/tickets" replace />;
   if (!isWorkspaceSelected && availableWorkspaces.length !== 1) {
-    return <Navigate to="/workspace" replace />;
+    return <BounceTo to="/workspace" />;
   }
   if (!canViewOps(user, wsRole)) {
     try { sessionStorage.setItem(ACCESS_BOUNCE_KEY, location.pathname); } catch { /* no-op */ }

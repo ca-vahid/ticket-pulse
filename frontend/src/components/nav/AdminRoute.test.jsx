@@ -85,6 +85,8 @@ describe('AdminRoute', () => {
     authState.isAuthenticated = false;
     renderAt('/dashboard');
     expect(screen.getByTestId('probe')).toHaveTextContent('login@/login');
+    // The bounce remembers where the visitor was heading (post-login return).
+    expect(window.sessionStorage.getItem('tp_postLoginPath')).toBe('/dashboard');
     cleanup();
 
     Object.assign(authState, { isAuthenticated: true, user: { email: 't@x.com', role: 'agent' } });
@@ -96,5 +98,6 @@ describe('AdminRoute', () => {
     Object.assign(wsState, { isWorkspaceSelected: false, availableWorkspaces: [{ id: 1, role: 'admin' }, { id: 2, role: 'admin' }] });
     renderAt('/dashboard');
     expect(screen.getByTestId('probe')).toHaveTextContent('workspace@/workspace');
+    expect(window.sessionStorage.getItem('tp_postLoginPath')).toBe('/dashboard');
   });
 });

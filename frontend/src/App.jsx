@@ -34,7 +34,8 @@ import ErrorBoundary from './components/ErrorBoundary';
 import EmailHealthBanner from './components/EmailHealthBanner';
 import SyncHealthBanner from './components/SyncHealthBanner';
 import CommandPalette from './components/CommandPalette';
-import AdminRoute, { LoadingScreen, ViewRoute } from './components/nav/AdminRoute';
+import AdminRoute, { BounceTo, LoadingScreen, ViewRoute } from './components/nav/AdminRoute';
+import { consumePostLoginPath } from './utils/postLoginRedirect';
 import AccessBounceToast from './components/nav/AccessBounceToast';
 import { homePathFor, useWorkspaceRole } from './components/nav/navDestinations';
 
@@ -56,11 +57,11 @@ function TicketsRoute({ children }) {
   if (isLoading || !isHydrated) return <LoadingScreen />;
 
   if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
+    return <BounceTo to="/login" />;
   }
 
   if (!isWorkspaceSelected && availableWorkspaces.length !== 1) {
-    return <Navigate to="/workspace" replace />;
+    return <BounceTo to="/workspace" />;
   }
 
   return children;
@@ -79,7 +80,7 @@ function PublicRoute({ children }) {
   if (isLoading || (isAuthenticated && !isHydrated)) return <LoadingScreen />;
 
   if (isAuthenticated) {
-    return <Navigate to={homePathFor(user, wsRole)} replace />;
+    return <Navigate to={consumePostLoginPath() || homePathFor(user, wsRole)} replace />;
   }
 
   return children;
@@ -91,7 +92,7 @@ function AgentRoute({ children }) {
   if (isLoading) return <LoadingScreen />;
 
   if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
+    return <BounceTo to="/login" />;
   }
 
   return children;
@@ -116,7 +117,8 @@ function AuthCallback() {
 
   useEffect(() => {
     if (!isLoading && isAuthenticated && isHydrated) {
-      navigate(homePathFor(user, wsRole), { replace: true });
+      // Back to the page the visitor was sent to before SSO, if we know it.
+      navigate(consumePostLoginPath() || homePathFor(user, wsRole), { replace: true });
     }
     if (!isLoading && !isAuthenticated) {
       const timer = setTimeout(() => {
