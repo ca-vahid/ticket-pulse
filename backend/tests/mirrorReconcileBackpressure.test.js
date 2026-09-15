@@ -70,3 +70,18 @@ describe('mirror reconcile sweep backpressure', () => {
     expect(await mirrorService.reconcile(1, { activeOnly: true, limit: 30, deferWhenBusy: true })).toMatchObject({ checked: 1 });
   });
 });
+
+describe('mirror reconcile sweep — deferral has a ceiling (15 Sep 2026, 3–4 PM PT)', () => {
+  test('a workspace whose last pass is older than the ceiling runs even when the queue is deep', async () => {
+    clientMock.getLimiterStats.mockReturnValue({ queueDepth: 120 });
+    // Cold (counts from boot) and busy → defers, as before.
+    expect(await mirrorService.reconcile(7, { activeOnly: true, limit: 30, deferWhenBusy: true })).toMatchObject({ skipped: true, reason: 'limiter_busy' });
+    // Age the last pass past the ceiling → runs and says why.
+    mirrorService._lastReconcileAt.set(7, Date.now() - 16 * 60 * 1000);
+    expect(await mirrorService.reconcile(7, { activeOnly: true, limit: 30, deferWhenBusy: true })).toMatchObject({ checked: 1 });
+    expect(loggerMock.info).toHaveBeenCalledWith(expect.stringContaining('running despite a busy FreshService queue'));
+    // Straight after a completed pass, still busy → defers again.
+    expect(await mirrorService.reconcile(7, { activeOnly: true, limit: 30, deferWhenBusy: true })).toMatchObject({ skipped: true, reason: 'limiter_busy' });
+    expect(clientMock.fetchTicketConversations).toHaveBeenCalledTimes(1);
+  });
+});

@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.8.87-preview';
+export const APP_VERSION = '3.8.88-preview';
 
 export const changelog = [
+  {
+    version: '3.8.88-preview',
+    date: 'September 15, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Mirror reconciliation never waits more than fifteen minutes</strong> — this morning’s change let the three-minute reconcile sweep step aside when the FreshService queue was deep. On a busy afternoon the queue stayed deep for a whole hour and the sweep stepped aside 65 times in a row, so replies and status changes made on the FreshService copies of TP-born tickets sat unread. Each workspace now runs a pass at least every fifteen minutes regardless, with the usual 90-second cap on how long it will queue.' },
+    ],
+  },
   {
     version: '3.8.87-preview',
     date: 'September 15, 2026',
