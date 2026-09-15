@@ -4,6 +4,7 @@ import { FlaskConical, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { homePathFor, useWorkspaceRole } from '../components/nav/navDestinations';
+import { consumePostLoginPath } from '../utils/postLoginRedirect';
 
 export default function Login() {
   const { loginWithSSO, loginWithDevBypass, isAuthenticated, isLoading, error, user } = useAuth();
@@ -16,7 +17,7 @@ export default function Login() {
   // Tickets. Waits for the workspace list so the role is known, not guessed.
   useEffect(() => {
     if (isAuthenticated && isHydrated) {
-      navigate(homePathFor(user, wsRole));
+      navigate(consumePostLoginPath() || homePathFor(user, wsRole));
     }
   }, [isAuthenticated, isHydrated, user, wsRole, navigate]);
 

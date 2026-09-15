@@ -4,6 +4,7 @@ import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useAuth } from '../contexts/AuthContext';
 import { LogOut, ArrowRight } from 'lucide-react';
 import { homePathFor } from '../components/nav/navDestinations';
+import { consumePostLoginPath } from '../utils/postLoginRedirect';
 import { useDemoMode, useDemoLabel, scrubFreeText as scrubDemoText } from '../utils/demoMode';
 
 export default function WorkspacePicker() {
@@ -21,7 +22,8 @@ export default function WorkspacePicker() {
     try {
       await selectWorkspace(ws.id);
       // Role-aware landing (v3.7.02): the picker knows this workspace's role.
-      window.location.href = homePathFor(user, ws.role);
+      // A deep link that needed a workspace first goes back to that page.
+      window.location.href = consumePostLoginPath() || homePathFor(user, ws.role);
     } catch (err) {
       setError(err.message || 'Failed to select workspace');
       setSelecting(null);

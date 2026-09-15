@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.8.83-preview';
+export const APP_VERSION = '3.8.84-preview';
 
 export const changelog = [
+  {
+    version: '3.8.84-preview',
+    date: 'September 14, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>🔗 Sign-in returns you to the link you opened</strong> — a ticket link such as <code>/tickets/44797</code> opened while signed out sent you through SSO and then dropped you on the Dashboard. The page you were heading to is now remembered for the sign-in round trip (and for the workspace picker, if one is needed) and you land there, query string and all.' },
+    ],
+  },
   {
     version: '3.8.83-preview',
     date: 'September 14, 2026',
