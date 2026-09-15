@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.8.82-preview';
+export const APP_VERSION = '3.8.83-preview';
 
 export const changelog = [
+  {
+    version: '3.8.83-preview',
+    date: 'September 14, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Thread preheat stops re-reading the same tickets</strong> — the background job that warms today’s conversation threads for Daily Review judged a ticket with no replies yet, or whose only reply predates its resolution, as stale on every pass, so on a busy Accounting day it re-read the same 60 tickets every five minutes for hours. That steady load pushed the FreshService queue into throttling and made mirror reconciliation wait 90 seconds and give up. A ticket whose cursor has caught up with FreshService’s updated_at is now left alone until FreshService changes it again.' },
+    ],
+  },
   {
     version: '3.8.82-preview',
     date: 'September 14, 2026',

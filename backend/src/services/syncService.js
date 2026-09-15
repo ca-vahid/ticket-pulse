@@ -1154,9 +1154,18 @@ class SyncService {
         // reason from re-fetching this ticket on every cycle for ever.
         const fsUpdated = ticket.freshserviceUpdatedAt || null;
         const convCursor = ticket.conversationsSyncFreshserviceUpdatedAt || null;
-        const conversationsStale = !latestConversations
+        // The cursor is authoritative once it has caught up with FS's
+        // updated_at: a ticket with no conversations at all (a fresh e-mail
+        // ticket nobody has replied to) or whose only reply predates its
+        // resolvedAt would otherwise count as stale for ever and be re-read
+        // every cycle — 60 wasted FS calls per 5 min on a busy day (14 Sep
+        // 2026, Accounting, 194-ticket cohort), enough to starve the mirror.
+        const cursorCaughtUp = Boolean(fsUpdated && convCursor && convCursor >= fsUpdated);
+        const conversationsStale = !cursorCaughtUp && (
+          !latestConversations
           || (fsUpdated && (!convCursor || convCursor < fsUpdated))
-          || (fsChange && latestConversations < fsChange);
+          || (fsChange && latestConversations < fsChange)
+        );
         if (conversationsStale) {
           jobs.push({ ticket, kind: 'conversations', fsUpdated });
           ticketsToHydrate.add(ticket.id);
