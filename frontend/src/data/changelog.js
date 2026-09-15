@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.8.86-preview';
+export const APP_VERSION = '3.8.87-preview';
 
 export const changelog = [
+  {
+    version: '3.8.87-preview',
+    date: 'September 15, 2026',
+    entries: [
+      { type: 'improved', html: '<strong>Fewer FreshService calls per category write-back</strong> — the lookup tables that turn a Ticket Pulse category into the id FreshService stores were re-read on every write-back and every mirror job, three calls a time on the same shared budget the scheduled syncs already fill. They now stay in memory for five minutes per FreshService workspace, and a workspace with no lookup objects configured is remembered too instead of being asked again on every job.' },
+    ],
+  },
   {
     version: '3.8.86-preview',
     date: 'September 15, 2026',

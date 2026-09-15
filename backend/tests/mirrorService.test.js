@@ -68,7 +68,9 @@ const baseTicket = {
   internalSubcategory: { name: 'Peripherals' },
 };
 
-beforeEach(() => {
+beforeEach(async () => {
+  const { clearTpSkillLookupCache } = await import('../src/services/freshServiceActionService.js');
+  clearTpSkillLookupCache();
   jest.clearAllMocks();
   // The dev .env disables the mirror; the outbox worker itself is what we're
   // exercising here, so force-enable it for the drain path.
