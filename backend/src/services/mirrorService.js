@@ -39,6 +39,13 @@ const DRAIN_CONCURRENCY = Number(process.env.NATIVE_TICKET_MIRROR_CONCURRENCY ||
 // mirror had none at all and would wait behind an entire sync sweep for ever.
 // Failing fast turns that into a retry on the next drain instead of a stall.
 const MIRROR_QUEUE_TIMEOUT_MS = Number(process.env.NATIVE_TICKET_MIRROR_QUEUE_TIMEOUT_MS || 90 * 1000);
+// Backpressure for the 3-minute inbound reconcile sweep (15 Sep 2026): at
+// :00/:30 the scheduled syncs put ~90 low-priority requests in the shared
+// FreshService queue; a sweep enqueued on top of that waited past
+// MIRROR_QUEUE_TIMEOUT_MS and failed every ticket (12 timeouts + 6 failed
+// reconciliations an hour, all retried 3 min later anyway). When the queue is
+// already this deep the sweep is deferred to the next tick instead.
+const RECONCILE_BUSY_QUEUE_DEPTH = Number(process.env.NATIVE_TICKET_RECONCILE_BUSY_QUEUE_DEPTH || 40);
 
 function backoffMs(attempts) {
   return Math.min(BASE_BACKOFF_MS * (2 ** Math.max(0, attempts - 1)), MAX_BACKOFF_MS);
@@ -835,9 +842,17 @@ class MirrorService {
    * Read-only against FreshService — safe to run even when the OUTBOUND mirror
    * is disabled (dev).
    */
-  async reconcile(workspaceId, { since = null, activeOnly = true, limit = 30 } = {}) {
+  async reconcile(workspaceId, { since = null, activeOnly = true, limit = 30, deferWhenBusy = false } = {}) {
     const client = await this._getClient(workspaceId);
     if (!client) return { skipped: true, reason: 'freshservice_not_configured' };
+
+    if (deferWhenBusy) {
+      const depth = this._limiterQueueDepth(client);
+      if (depth >= RECONCILE_BUSY_QUEUE_DEPTH) {
+        logger.info(`Mirror reconciliation for workspace ${workspaceId} deferred: FreshService queue busy (${depth} waiting)`);
+        return { skipped: true, reason: 'limiter_busy', queueDepth: depth };
+      }
+    }
 
     // activeOnly = Open/Pending-BASE names from the workspace registry
     // (Phase 8b): a TP-born ticket parked in a custom open status must keep
@@ -874,6 +889,17 @@ class MirrorService {
       logger.info(`Mirror reconciliation for workspace ${workspaceId}: ${tickets.length} tickets checked, ${imported} entries imported, ${conflicts} conflicts`);
     }
     return { checked: tickets.length, imported, conflicts };
+  }
+
+  /** Shared-limiter queue depth as seen through this client; 0 when the client cannot say. */
+  _limiterQueueDepth(client) {
+    try {
+      const stats = typeof client?.getLimiterStats === 'function' ? client.getLimiterStats() : null;
+      const depth = Number(stats?.queueDepth);
+      return Number.isFinite(depth) ? depth : 0;
+    } catch {
+      return 0;
+    }
   }
 
   /** Reconcile ONE TP-born ticket right now (used when a ticket page opens). */
@@ -1114,7 +1140,7 @@ class MirrorService {
     });
     for (const row of rows) {
       if (!(await this._workspaceActive(row.workspaceId))) continue;
-      await this.reconcile(row.workspaceId, { activeOnly: true, limit: 30 }).catch(() => {});
+      await this.reconcile(row.workspaceId, { activeOnly: true, limit: 30, deferWhenBusy: true }).catch(() => {});
     }
   }
 }
