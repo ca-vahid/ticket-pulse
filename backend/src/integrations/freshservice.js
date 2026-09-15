@@ -56,6 +56,23 @@ export function getFreshServiceDetail(error) {
  * failed" in a mirror job's lastError is undebuggable (QA 07-28 TP-1058;
  * again 14 Sep on two Project Accounting update_fields jobs).
  */
+/**
+ * FreshService accepts an e-mail with an empty body as a ticket but then
+ * refuses EVERY later update to it with "description: It should not be blank
+ * as this is a mandatory field" (15 Sep 2026: 16 Accounting remittance
+ * advices from Rio Tinto / Pembina, attachment-only e-mails — category
+ * write-back failed on all of them; assignment and status write-back would
+ * have too). The retry below fills the description once with an explanatory
+ * placeholder so the update goes through.
+ */
+export const BLANK_DESCRIPTION_PLACEHOLDER = '<p>(This e-mail arrived with no message body — see the attachments.)</p>';
+
+export function isBlankDescriptionRejection(error) {
+  if (Number(getFreshServiceStatus(error)) !== 400) return false;
+  const errs = getFreshServiceDetail(error)?.errors;
+  return Array.isArray(errs) && errs.some((e) => e?.field === 'description' && /blank/i.test(String(e?.message || '')));
+}
+
 export function wrapFreshServiceError(error) {
   const detail = getFreshServiceDetail(error);
   const httpStatus = getFreshServiceStatus(error);
@@ -249,7 +266,18 @@ class FreshServiceClient {
   }
 
   _get(url, config) { return this._throttledRequest('get', url, config); }
-  _put(url, data, config) { return this._throttledRequest('put', url, data, config); }
+  async _put(url, data, config) {
+    try {
+      return await this._throttledRequest('put', url, data, config);
+    } catch (error) {
+      const isTicketUpdate = /^\/tickets\/\d+$/.test(String(url)) && data && typeof data.ticket === 'object' && data.ticket !== null;
+      if (isTicketUpdate && !data.ticket.description && isBlankDescriptionRejection(error)) {
+        logger.info(`FreshService refused the update on ${url} because the ticket has no description; retrying once with a placeholder description`);
+        return this._throttledRequest('put', url, { ...data, ticket: { ...data.ticket, description: BLANK_DESCRIPTION_PLACEHOLDER } }, config);
+      }
+      throw error;
+    }
+  }
   _post(url, data, config) { return this._throttledRequest('post', url, data, config); }
   _delete(url, config) { return this._throttledRequest('delete', url, config); }
 
