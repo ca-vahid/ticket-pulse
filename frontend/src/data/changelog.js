@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.8.84-preview';
+export const APP_VERSION = '3.8.85-preview';
 
 export const changelog = [
+  {
+    version: '3.8.85-preview',
+    date: 'September 15, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Mirror reconciliation waits its turn</strong> — every three minutes Ticket Pulse re-reads the FreshService copies of open TP-born tickets. At the top and bottom of each hour the scheduled syncs already have about ninety requests waiting in the FreshService queue, so that sweep queued behind them, hit its 90-second limit and failed every ticket, then tried again three minutes later. When the queue is that deep the sweep now sits the tick out and runs on the next one. Opening a ticket still reconciles it immediately.' },
+    ],
+  },
   {
     version: '3.8.84-preview',
     date: 'September 14, 2026',
