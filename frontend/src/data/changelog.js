@@ -1,6 +1,14 @@
-export const APP_VERSION = '3.8.85-preview';
+export const APP_VERSION = '3.8.86-preview';
 
 export const changelog = [
+  {
+    version: '3.8.86-preview',
+    date: 'September 15, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Attachment-only e-mails can be updated in FreshService again</strong> — FreshService accepts an e-mail with an empty body as a ticket, then refuses every later change to it because the description is “mandatory”. Sixteen Accounting remittance advices (Rio Tinto, Pembina) hit this today: the category Ticket Pulse chose could not be written back, and an assignment or status change would have failed the same way. When FreshService answers with that exact complaint, Ticket Pulse now retries once with a short placeholder description, “(This e-mail arrived with no message body — see the attachments.)”, and the change goes through.' },
+      { type: 'improved', html: '<strong>Quieter log for a known race</strong> — when the priority-raised event and the unassigned-ticket poll both try to start an assignment run for the same ticket, the loser used to log a full database error before being skipped. It is now one information line.' },
+    ],
+  },
   {
     version: '3.8.85-preview',
     date: 'September 15, 2026',

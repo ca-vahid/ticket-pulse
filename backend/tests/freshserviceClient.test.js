@@ -359,3 +359,37 @@ describe('FreshService reply/note actor attribution (user_id)', () => {
     expect(form.getBuffer().toString('utf8')).toContain('name="user_id"\r\n\r\n1002090731');
   });
 });
+
+describe('FreshServiceClient._put — blank-description retry (15 Sep 2026)', () => {
+  const blankRejection = () => Object.assign(new Error('Request failed with status code 400'), {
+    response: { status: 400, data: { description: 'Validation failed', errors: [{ field: 'description', message: 'It should not be blank as this is a mandatory field', code: 'invalid_value' }] } },
+  });
+
+  test('a ticket update refused for a blank description is retried once with the placeholder', async () => {
+    const client = new FreshServiceClient('example.freshservice.com', 'api-key');
+    client._throttledRequest = jest.fn()
+      .mockRejectedValueOnce(blankRejection())
+      .mockResolvedValueOnce({ data: { ticket: { id: 242363, custom_fields: { tp_category: 'Remittances' } } } });
+
+    const ticket = await client.updateTicketCustomFields(242363, { tp_category: 'Remittances' });
+
+    expect(ticket.id).toBe(242363);
+    expect(client._throttledRequest).toHaveBeenCalledTimes(2);
+    const [, url, body] = client._throttledRequest.mock.calls[1];
+    expect(url).toBe('/tickets/242363');
+    expect(body.ticket.custom_fields).toEqual({ tp_category: 'Remittances' });
+    expect(body.ticket.description).toContain('no message body');
+  });
+
+  test('any other 400 is not retried, and a body that already carries a description is not retried either', async () => {
+    const client = new FreshServiceClient('example.freshservice.com', 'api-key');
+    const other = Object.assign(new Error('400'), { response: { status: 400, data: { description: 'Validation failed', errors: [{ field: 'status', message: 'invalid', code: 'invalid_value' }] } } });
+    client._throttledRequest = jest.fn().mockRejectedValue(other);
+    await expect(client.updateTicketCustomFields(1, { a: 1 })).rejects.toBeTruthy();
+    expect(client._throttledRequest).toHaveBeenCalledTimes(1);
+
+    client._throttledRequest = jest.fn().mockRejectedValue(blankRejection());
+    await expect(client._put('/tickets/1', { ticket: { description: '<p>x</p>', status: 2 } })).rejects.toBeTruthy();
+    expect(client._throttledRequest).toHaveBeenCalledTimes(1);
+  });
+});

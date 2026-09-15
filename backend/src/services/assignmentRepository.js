@@ -217,7 +217,14 @@ class AssignmentRepository {
     try {
       return await prisma.assignmentPipelineRun.create({ data });
     } catch (error) {
-      logger.error('Error creating pipeline run:', error);
+      if (error?.code === 'P2002') {
+        // One open run per ticket (unique ticket_id). Two triggers racing —
+        // the priority-raised event and the unassigned poll, 15 Sep 2026 —
+        // is expected; the caller finds the existing run and skips.
+        logger.info('Pipeline run already exists for this ticket (concurrent trigger)', { ticketId: data?.ticketId, triggerSource: data?.triggerSource });
+      } else {
+        logger.error('Error creating pipeline run:', error);
+      }
       throw new DatabaseError('Failed to create pipeline run', error);
     }
   }
