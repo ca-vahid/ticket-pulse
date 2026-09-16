@@ -236,7 +236,22 @@ router.put(
   '/:id',
   requireAdmin,
   asyncHandler(async (req, res) => {
-    const ws = await workspaceRepository.update(Number(req.params.id), req.body);
+    const id = Number(req.params.id);
+    const before = await workspaceRepository.getById(id).catch(() => null);
+    const ws = await workspaceRepository.update(id, req.body);
+    // v3.8.91: a cadence change takes effect now, not at the next restart.
+    const cadenceChanged = before && ws && (
+      before.syncIntervalMinutes !== ws.syncIntervalMinutes
+      || before.fastSyncIntervalMinutes !== ws.fastSyncIntervalMinutes
+    );
+    if (cadenceChanged && ws.isActive) {
+      try {
+        await scheduledSyncService.restart(ws.id);
+        logger.info(`Workspace ${ws.name}: schedules restarted (full ${ws.syncIntervalMinutes}m, fast ${ws.fastSyncIntervalMinutes}m)`);
+      } catch (err) {
+        logger.warn(`Workspace ${ws.name}: schedule restart after cadence change failed (${err.message})`);
+      }
+    }
     res.json({ success: true, data: ws });
   }),
 );

@@ -1,8 +1,14 @@
 import { useMemo, useState } from 'react';
 import {
-  Ban, CheckCircle2, ChevronRight, Clock, MessageCircleQuestion, RefreshCw, Send, Stamp, Trash2, XCircle,
+  ArrowUpRight, Ban, CheckCircle2, ChevronRight, Clock, Forward, MessageCircleQuestion, RefreshCw, Send, Stamp, Trash2, XCircle,
 } from 'lucide-react';
 import { PersonAvatar, SafeHtml, formatDayTime, timeAgo } from './ticketUi';
+import { AmountChip, HandoffPanel, TierChip, handoffSentence } from './ApprovalHandoff';
+
+// Approvals v2: the category's tier chain as the request modal sees it.
+const chainOf = (cat) => (Array.isArray(cat?.tiers) && cat.tiers.length
+  ? cat.tiers
+  : [{ name: 'Tier 1', managerEmails: cat?.managerEmails || [], limit: null }]);
 
 // Per-approver / verdict status → color-coded look (dot, chip, text, header tint).
 const STATUS = {
@@ -10,12 +16,14 @@ const STATUS = {
   rejected: { label: 'Rejected', verb: 'Rejected', Icon: XCircle, dot: 'bg-red-500', chip: 'bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-200 border-red-200 dark:border-red-500/30', text: 'text-red-700 dark:text-red-200', head: 'bg-red-50/70 dark:bg-red-500/10 border-red-100 dark:border-red-500/20' },
   info_requested: { label: 'Needs info', verb: 'Clarification requested', Icon: MessageCircleQuestion, dot: 'bg-violet-500', chip: 'bg-violet-50 dark:bg-violet-500/15 text-violet-700 dark:text-violet-200 border-violet-200 dark:border-violet-500/30', text: 'text-violet-700 dark:text-violet-200', head: 'bg-violet-50/70 dark:bg-violet-500/10 border-violet-100 dark:border-violet-500/20' },
   cancelled: { label: 'Cancelled', verb: 'Cancelled', Icon: Ban, dot: 'bg-muted-foreground/40', chip: 'bg-muted text-muted-foreground border-border', text: 'text-muted-foreground', head: 'bg-muted/50 border-border/60' },
+  escalated: { label: 'Escalated', verb: 'Escalated', Icon: ArrowUpRight, dot: 'bg-amber-500', chip: 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200 border-amber-200 dark:border-amber-500/30', text: 'text-amber-700 dark:text-amber-200', head: 'bg-amber-50/60 dark:bg-amber-500/10 border-amber-100 dark:border-amber-500/20' },
+  forwarded: { label: 'Forwarded', verb: 'Forwarded', Icon: Forward, dot: 'bg-blue-500', chip: 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-200 border-blue-200 dark:border-blue-500/30', text: 'text-blue-700 dark:text-blue-200', head: 'bg-blue-50/60 dark:bg-blue-500/10 border-blue-100 dark:border-blue-500/20' },
   pending: { label: 'Pending', verb: 'Pending', Icon: Clock, dot: 'bg-amber-400', chip: 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-200 border-amber-200 dark:border-amber-500/30', text: 'text-amber-700 dark:text-amber-200', head: 'bg-amber-50/60 dark:bg-amber-500/10 border-amber-100 dark:border-amber-500/20' },
 };
 const statusMeta = (s) => STATUS[s] || STATUS.pending;
 
 // Any-one-approves: the group verdict is the strongest outcome present.
-const VERDICT_ORDER = ['approved', 'rejected', 'info_requested', 'pending', 'cancelled'];
+const VERDICT_ORDER = ['approved', 'rejected', 'info_requested', 'pending', 'escalated', 'forwarded', 'cancelled'];
 const groupVerdict = (rows) => VERDICT_ORDER.find((s) => rows.some((r) => r.status === s)) || 'pending';
 // A decided group needs no interaction — collapse it to a one-line summary.
 const TERMINAL = new Set(['approved', 'rejected', 'cancelled']);
@@ -24,6 +32,10 @@ const TERMINAL = new Set(['approved', 'rejected', 'cancelled']);
 // "Superseded"; a requester-cancelled one stays "Cancelled".
 const rowLabel = (ap) => {
   if (ap.status === 'cancelled' && /^superseded/i.test(ap.decisionNote || '')) return 'Superseded';
+  if (ap.status === 'escalated') {
+    const last = [...(ap.escalationLog || [])].reverse()[0];
+    return last?.kind === 'auto' ? 'Approved · sent up' : 'Escalated';
+  }
   return statusMeta(ap.status).label;
 };
 
@@ -37,11 +49,23 @@ export default function ApprovalTimeline({
   approvals = [], meta, savingField,
   clarifyingId, setClarifyingId, clarifyNote, setClarifyNote,
   onDecide, onClarify, onResubmit, onCancel, onChangeDecision, onDeleteRequest,
+  onEscalate, onForward,
 }) {
   const actorEmail = String(meta?.actor?.email || '').toLowerCase();
   const actorIsAdmin = meta?.actor?.kind === 'admin' || meta?.actor?.workspaceRole === 'admin';
   // Requester replies to a needs-info question, keyed per approval row (QA 07-14 #1).
   const [resubmitNotes, setResubmitNotes] = useState({});
+  // Approvals v2: which row has the escalate / forward panel open.
+  const [handoff, setHandoff] = useState(null); // { id, mode }
+  const people = useMemo(() => {
+    const map = new Map();
+    for (const t of [...(meta?.technicians || []), ...(meta?.members || [])]) {
+      if (!t?.email) continue;
+      const key = String(t.email).toLowerCase();
+      if (!map.has(key) || (!map.get(key).photoUrl && t.photoUrl)) map.set(key, { name: t.name || t.email, email: key, photoUrl: t.photoUrl || null, role: t.role || null });
+    }
+    return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [meta?.technicians, meta?.members]);
   const groups = useMemo(() => {
     const map = new Map();
     for (const ap of approvals) {
@@ -68,6 +92,9 @@ export default function ApprovalTimeline({
         const canRequesterManage = actorIsAdmin || (actorEmail && head.requestedBy === actorEmail);
         const canChangeVerdict = decider && (actorIsAdmin || actorEmail === String(decider.approverEmail || '').toLowerCase());
         const flipTo = verdict === 'approved' ? 'rejected' : 'approved';
+        const tiers = chainOf(head.approvalCategory);
+        const tierCount = tiers.length;
+        const liveTier = Math.max(...rows.map((r) => r.tier || 1));
         return (
           <li key={head.requestGroupId || head.id} className="rounded-xl border border-border bg-card shadow-subtle overflow-hidden animate-fadeIn">
             {/* Group header — category + overall verdict, tinted to match */}
@@ -81,6 +108,8 @@ export default function ApprovalTimeline({
               <span className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide rounded-full px-2 py-0.5 border ${vMeta.chip}`}>
                 <vMeta.Icon className="w-3 h-3" aria-hidden="true" /> {vMeta.label}
               </span>
+              <AmountChip amount={head.amount} currency={head.amountCurrency || head.approvalCategory?.amountCurrency} />
+              {!decided && <TierChip tier={liveTier} tierName={(tiers[liveTier - 1] || {}).name} tierCount={tierCount} />}
               <span className="ml-auto text-[11px] text-muted-foreground/75 whitespace-nowrap" title={new Date(head.createdAt).toLocaleString()}>
                 {formatDayTime(head.createdAt)}
                 {' · '}{timeAgo(head.createdAt)}
@@ -186,6 +215,12 @@ export default function ApprovalTimeline({
                         <div className="min-w-0 flex-1 pb-0.5">
                           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                             <span className="text-sm font-medium text-foreground truncate">{ap.approverName || ap.approverEmail}</span>
+                            {tierCount > 1 && (
+                              <span className="rounded border border-border bg-muted/70 px-1 py-px text-[10px] font-semibold text-muted-foreground" title={`Approval tier ${ap.tier || 1} of ${tierCount}`}>
+                                {(tiers[(ap.tier || 1) - 1] || {}).name || `Tier ${ap.tier || 1}`}
+                              </span>
+                            )}
+                            {ap.isFinal && <span className="rounded border border-border bg-muted/70 px-1 py-px text-[10px] font-semibold text-muted-foreground" title="Forwarded as the final approver">final</span>}
                             <span className={`inline-flex items-center gap-1 text-[10px] font-semibold rounded-full px-1.5 py-0.5 border ${sm.chip}`}>
                               {rowLabel(ap)}
                             </span>
@@ -195,7 +230,16 @@ export default function ApprovalTimeline({
                           </div>
                           {ap.status === 'info_requested'
                             ? ap.decisionNote && <p className={`text-xs mt-0.5 ${sm.text}`}>Clarification needed: “{ap.decisionNote}”</p>
-                            : ap.decisionNote && <p className="text-xs text-muted-foreground mt-0.5">{ap.decisionNote}</p>}
+                            : (ap.status === 'escalated' || ap.status === 'forwarded')
+                              ? (() => { const last = [...(ap.escalationLog || [])].reverse()[0]; return last ? <p className={`text-xs mt-0.5 ${sm.text}`}>{handoffSentence({ ...last, byName: null, byEmail: null }).replace(/^An approver /, '').replace(/^\w/, (c) => c.toUpperCase())}</p> : ap.decisionNote && <p className="text-xs text-muted-foreground mt-0.5">{ap.decisionNote}</p>; })()
+                              : ap.decisionNote && <p className="text-xs text-muted-foreground mt-0.5">{ap.decisionNote}</p>}
+                          {/* How this row came to exist (escalated / forwarded / auto over-limit) — only on the receiving row. */}
+                          {ap.status === 'pending' && Array.isArray(ap.escalationLog) && ap.escalationLog.length > 0 && (() => {
+                            const last = ap.escalationLog[ap.escalationLog.length - 1];
+                            return last && last.toEmails?.includes?.(String(ap.approverEmail).toLowerCase()) ? (
+                              <p className="text-[11px] text-muted-foreground mt-0.5 border-l-2 border-amber-300 dark:border-amber-500/40 pl-2">{handoffSentence(last)}</p>
+                            ) : null;
+                          })()}
 
                           {/* Answered clarifications survive resubmits — show the Q&A trail. */}
                           {Array.isArray(ap.clarificationLog) && ap.clarificationLog.some((c) => c?.answer) && (
@@ -210,7 +254,24 @@ export default function ApprovalTimeline({
                           )}
 
                           {/* Approver actions (pending) */}
-                          {ap.status === 'pending' && isApprover && (
+                          {ap.status === 'pending' && isApprover && handoff?.id === ap.id && (
+                            <div className="mt-2">
+                              <HandoffPanel
+                                mode={handoff.mode}
+                                compact
+                                people={people.filter((p) => p.email !== String(ap.approverEmail).toLowerCase() && p.email !== String(ap.requestedBy || '').toLowerCase())}
+                                nextTierName={(tiers[ap.tier || 1] || {}).name || null}
+                                nextTierNames={((tiers[ap.tier || 1] || {}).managerEmails || []).map((e) => (people.find((p) => p.email === e)?.name || e))}
+                                onCancel={() => setHandoff(null)}
+                                onSubmit={async ({ mode, note, toEmail }) => {
+                                  if (mode === 'forward') await onForward?.(ap.id, toEmail, note);
+                                  else await onEscalate?.(ap.id, note);
+                                  setHandoff(null);
+                                }}
+                              />
+                            </div>
+                          )}
+                          {ap.status === 'pending' && isApprover && handoff?.id !== ap.id && (
                             clarifyingId === ap.id ? (
                               <div className="mt-2 space-y-1.5">
                                 <textarea
@@ -248,6 +309,26 @@ export default function ApprovalTimeline({
                                 >
                                   <XCircle className="w-3 h-3" aria-hidden="true" /> Reject
                                 </button>
+                                {!ap.isFinal && tiers[ap.tier || 1] && onEscalate && (
+                                  <button
+                                    onClick={() => setHandoff({ id: ap.id, mode: 'escalate' })}
+                                    disabled={busy}
+                                    title={`Escalate to ${(tiers[ap.tier || 1] || {}).name}`}
+                                    className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-card text-amber-700 dark:text-amber-200 border border-amber-200 dark:border-amber-500/30 hover:bg-amber-50 dark:hover:bg-amber-500/15 disabled:opacity-50"
+                                  >
+                                    <ArrowUpRight className="w-3 h-3" aria-hidden="true" /> Escalate
+                                  </button>
+                                )}
+                                {onForward && (
+                                  <button
+                                    onClick={() => setHandoff({ id: ap.id, mode: 'forward' })}
+                                    disabled={busy}
+                                    title="Forward to anyone in the workspace as the final approver"
+                                    className="tp-focus-ring inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-card text-muted-foreground border border-border hover:bg-muted disabled:opacity-50"
+                                  >
+                                    <Forward className="w-3 h-3" aria-hidden="true" /> Forward
+                                  </button>
+                                )}
                                 <button
                                   onClick={() => { setClarifyingId(ap.id); setClarifyNote(''); }}
                                   disabled={busy}

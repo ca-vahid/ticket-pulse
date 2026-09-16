@@ -508,8 +508,8 @@ describe('ticketApprovalService.getByToken (Phase AP payload)', () => {
     });
     // Approvers: names + status + isYou, and NEVER an address or token.
     expect(data.approvers).toEqual([
-      { name: 'Alice Manager', status: 'approved', isYou: false, decidedAt },
-      { name: 'Bob', status: 'cancelled', isYou: true, decidedAt },
+      { name: 'Alice Manager', status: 'approved', isYou: false, decidedAt, tier: 1, tierName: 'Tier 1' },
+      { name: 'Bob', status: 'cancelled', isYou: true, decidedAt, tier: 1, tierName: 'Tier 1' },
     ]);
     expect(JSON.stringify(data.approvers)).not.toContain('@');
     expect(JSON.stringify(data)).not.toContain(TOKEN);
@@ -540,7 +540,7 @@ describe('ticketApprovalService.getByToken (Phase AP payload)', () => {
     const data = await ticketApprovalService.getByToken(TOKEN);
     expect(data.approval.supersededBy).toBeNull();
     expect(data.approval.cancelledReason).toBe('Cancelled by jane.doe@x.io');
-    expect(data.approvers).toEqual([{ name: 'Bob', status: 'cancelled', isYou: true, decidedAt: null }]);
+    expect(data.approvers).toEqual([{ name: 'Bob', status: 'cancelled', isYou: true, decidedAt: null, tier: 1, tierName: 'Tier 1' }]);
   });
 
   test('clarificationLog maps the JSONB Q&A and surfaces the open question while info_requested', async () => {

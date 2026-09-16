@@ -1,4 +1,4 @@
-# Tiered approvals — design plan (QA 09-15 #8, not built)
+# Tiered approvals — design plan (QA 09-15 #8) — BUILT in v3.8.91 (see APPROVALS_V2_PLAN.md for the shipped design incl. amounts/auto-escalation and forward)
 
 **Ask (Susan Xu, 15 Sep 2026):** "Imagine that for Security, Vahid can approve most of the items, but
 some items he needs to escalate to Neville. Everything is sent to Vahid first and he can involve

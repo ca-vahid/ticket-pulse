@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import {
+  ArrowUpRight,
   Ban,
   Check,
   CheckCircle2,
@@ -9,12 +10,14 @@ import {
   Clock,
   Copy,
   ExternalLink,
+  Forward,
   Link2Off,
   MessageCircleQuestion,
   Moon,
   Sun,
   XCircle,
 } from 'lucide-react';
+import { AmountChip, TierChip, handoffSentence } from '../components/tickets/ApprovalHandoff';
 import { publicApprovalAPI } from '../services/api';
 import { PersonAvatar, SafeHtml, formatDay, formatDayTime } from '../components/tickets/ticketUi';
 import ApprovalRail from './publicApproval/ApprovalRail';
@@ -92,6 +95,8 @@ const STATUS_ICON = {
   rejected: XCircle,
   cancelled: Ban,
   expired: Clock,
+  escalated: ArrowUpRight,
+  forwarded: Forward,
 };
 
 /** Header status badge: icon + label in a strong tint, top right of the card. */
@@ -187,10 +192,45 @@ const DecisionBanner = ({ approval, decidedByYou, bannerRef, isDark }) => {
         </div>
       )
       : <p className="mt-1 text-sm opacity-80">The requester and the agent have been notified — you can close this page.</p>;
+  } else if (status === 'escalated' || status === 'forwarded') {
+    // Approvals v2: this row was handed off (by you, or by another approver in the app).
+    const last = [...(approval.escalationLog || [])].reverse()[0] || null;
+    const forwarded = status === 'forwarded';
+    tone = forwarded
+      ? 'bg-blue-50 text-blue-900 border-blue-200 dark:bg-blue-500/10 dark:text-blue-100 dark:border-blue-500/25'
+      : 'bg-amber-50 text-amber-900 border-amber-200 dark:bg-amber-500/10 dark:text-amber-50 dark:border-amber-500/25';
+    disc = forwarded
+      ? 'bg-blue-200/70 text-blue-900 dark:bg-blue-500/25 dark:text-blue-100'
+      : 'bg-amber-200/70 text-amber-900 dark:bg-amber-500/25 dark:text-amber-100';
+    Icon = forwarded ? Forward : (last?.kind === 'auto' ? CheckCircle2 : ArrowUpRight);
+    const to = last?.toNames?.length ? last.toNames.join(', ') : (last?.toTierName || approval.nextTier?.name || 'the next approver');
+    const tierWord = last?.toTierName || (last?.toTier ? `Tier ${last.toTier}` : null);
+    if (last?.kind === 'auto') {
+      title = decidedByYou || !last.byName
+        ? `You approved this${when ? ` on ${when}` : ''} — over your ${last.fromTierName || approval.tierName || 'tier'} limit, so it moved on to ${to}${tierWord ? ` (${tierWord})` : ''}`
+        : `Approved by ${last.byName}${when ? ` on ${when}` : ''} — over the limit, so it moved on to ${to}`;
+      body = <p className="mt-1 text-sm opacity-80">Your approval is recorded on the ticket. {to} make{last?.toNames?.length === 1 ? 's' : ''} the final call — the requester has been told.</p>;
+    } else if (forwarded) {
+      title = decidedByYou || !last?.byName
+        ? `You forwarded this to ${to}${when ? ` on ${when}` : ''}`
+        : `Forwarded to ${to} by ${last.byName}${when ? ` on ${when}` : ''}`;
+      body = <p className="mt-1 text-sm opacity-80">{to} {last?.toNames?.length === 1 ? 'is' : 'are'} now the final approver — nothing else is needed from you.</p>;
+    } else {
+      title = decidedByYou || !last?.byName
+        ? `You escalated this to ${to}${tierWord ? ` (${tierWord})` : ''}${when ? ` on ${when}` : ''}`
+        : `Escalated to ${to} by ${last.byName}${when ? ` on ${when}` : ''}`;
+      body = <p className="mt-1 text-sm opacity-80">The decision is theirs now; your note went with the request. The requester has been told.</p>;
+    }
   } else if (status === 'cancelled') {
     tone = 'bg-orange-50 text-orange-950 border-orange-200 dark:bg-orange-500/10 dark:text-orange-50 dark:border-orange-500/30';
     disc = 'bg-orange-200/70 text-orange-900 dark:bg-orange-500/25 dark:text-orange-100';
-    if (approval.supersededBy?.name) {
+    if (approval.supersededBy?.name && (approval.supersededBy.decision === 'escalated' || approval.supersededBy.decision === 'forwarded')) {
+      tone = 'bg-amber-50 text-amber-900 border-amber-200 dark:bg-amber-500/10 dark:text-amber-50 dark:border-amber-500/25';
+      disc = 'bg-amber-200/70 text-amber-900 dark:bg-amber-500/25 dark:text-amber-100';
+      Icon = approval.supersededBy.decision === 'forwarded' ? Forward : ArrowUpRight;
+      title = `Superseded — ${approval.supersededBy.decision} by ${approval.supersededBy.name}${approval.supersededBy.decidedAt ? ` on ${formatDayTime(approval.supersededBy.decidedAt)}` : ''}`;
+      body = <p className="mt-1 text-sm opacity-80">Another approver moved this request on, so nothing is needed from you.</p>;
+    } else if (approval.supersededBy?.name) {
       tone = 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-100 dark:border-emerald-500/25';
       disc = 'bg-emerald-200/70 text-emerald-800 dark:bg-emerald-500/25 dark:text-emerald-100';
       Icon = CheckCircle2;
@@ -227,6 +267,30 @@ const DecisionBanner = ({ approval, decidedByYou, bannerRef, isDark }) => {
     </div>
   );
 };
+
+/** Approvals v2: how the request reached this approver (notes travel between approvers). */
+function HandoffTrail({ approval }) {
+  const log = Array.isArray(approval?.escalationLog) ? approval.escalationLog.filter(Boolean) : [];
+  if (!log.length) return null;
+  return (
+    <section aria-label="How this reached you" className="mb-4 flex flex-col gap-2">
+      {log.map((entry, idx) => {
+        const forwarded = entry.kind === 'forwarded';
+        return (
+          <div
+            key={`${entry.at || idx}`}
+            className={`rounded-r-[10px] border-l-[3px] px-3 py-2 text-[13px] ${forwarded ? 'border-blue-500 bg-blue-50/70 dark:border-blue-400 dark:bg-blue-500/10' : 'border-amber-500 bg-amber-50/70 dark:border-amber-400 dark:bg-amber-500/10'}`}
+          >
+            <p className="font-semibold text-foreground">
+              {handoffSentence(entry, { withNote: false })}{entry.at ? ` (${formatDay(entry.at)})` : ''}
+            </p>
+            {entry.note && <p className="mt-0.5 text-muted-foreground">“{entry.note}”</p>}
+          </div>
+        );
+      })}
+    </section>
+  );
+}
 
 function RequestNote({ approval, workspaceName, isDark }) {
   const hasHtml = Boolean(approval?.requestNoteHtml);
@@ -415,6 +479,12 @@ export default function PublicApprovalDecision() {
         };
       }
       const status = body.status || decision;
+      // Approvals v2: an over-limit approval comes back as 'escalated' (auto).
+      const autoEntry = status === 'escalated' && decision === 'approved' ? {
+        kind: 'auto', fromTier: prev.approval.tier || 1, toTier: (prev.approval.tier || 1) + 1,
+        fromTierName: prev.approval.tierName || null, toTierName: prev.approval.nextTier?.name || null,
+        byName: null, toNames: prev.approval.nextTier?.approverNames || [], note, at: now,
+      } : null;
       return {
         ...prev,
         approval: {
@@ -425,7 +495,30 @@ export default function PublicApprovalDecision() {
           decisionNote: note,
           decisionNoteHtml: noteHtml,
           approverName: body.approverName || prev.approval.approverName,
+          escalationLog: autoEntry ? [...(prev.approval.escalationLog || []), autoEntry] : prev.approval.escalationLog,
         },
+        approvers: (prev.approvers || []).map((a) => (a.isYou ? { ...a, status, decidedAt: now } : a)),
+      };
+    });
+  }, [token]);
+
+  // Approvals v2: escalate / forward from the link. The page re-renders as a
+  // handed-off row; the new approvers get their own links by e-mail.
+  const onHandoff = useCallback(async ({ mode, note, toEmail }) => {
+    const body = unwrapBody(await publicApprovalAPI.handoff(token, { mode, note, toEmail })) || {};
+    focusBannerRef.current = true;
+    setDecidedByYou(true);
+    setData((prev) => {
+      if (!prev) return prev;
+      const now = body.decidedAt || new Date().toISOString();
+      const status = body.status || (mode === 'forward' ? 'forwarded' : 'escalated');
+      const target = (prev.forwardCandidates || []).find((p) => p.email === toEmail);
+      const entry = mode === 'forward'
+        ? { kind: 'forwarded', fromTier: prev.approval.tier || 1, toTier: prev.approval.tier || 1, byName: null, toNames: [target?.name || toEmail], note, at: now }
+        : { kind: 'escalated', fromTier: prev.approval.tier || 1, toTier: (prev.approval.tier || 1) + 1, fromTierName: prev.approval.tierName || null, toTierName: prev.approval.nextTier?.name || null, byName: null, toNames: prev.approval.nextTier?.approverNames || [], note, at: now };
+      return {
+        ...prev,
+        approval: { ...prev.approval, status, decidedAt: now, decidedVia: 'link', escalationLog: [...(prev.approval.escalationLog || []), entry] },
         approvers: (prev.approvers || []).map((a) => (a.isYou ? { ...a, status, decidedAt: now } : a)),
       };
     });
@@ -517,6 +610,9 @@ export default function PublicApprovalDecision() {
                   {approval.category.name}
                 </span>
               )}
+              <TierChip tier={approval.tier} tierName={approval.tierName} tierCount={approval.tierCount} />
+              <AmountChip amount={approval.amount} currency={approval.amountCurrency} />
+              {approval.isFinal && <span className="rounded-full border border-border bg-muted/70 px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground" title="Forwarded to you as the final approver">Final approver</span>}
             </div>
             <p className="font-mono text-[13px] text-muted-foreground">
               {ticket.displayRef}
@@ -547,10 +643,18 @@ export default function PublicApprovalDecision() {
             <div aria-live="polite" aria-atomic="true">
               <DecisionBanner approval={approval} decidedByYou={decidedByYou} bannerRef={bannerRef} isDark={isDark} />
             </div>
+            <HandoffTrail approval={approval} />
             <RequestNote approval={approval} workspaceName={workspaceName} isDark={isDark} />
             <TicketDescription ticket={ticket} isDark={isDark} />
             <QuestionThread approval={approval} />
-            {open && <DecisionBox approval={approval} onDecide={onDecide} />}
+            {open && (
+              <DecisionBox
+                approval={{ ...approval, ticketRef: ticket.displayRef, requesterName: requester.name || null }}
+                onDecide={onDecide}
+                onHandoff={onHandoff}
+                forwardCandidates={data.forwardCandidates || []}
+              />
+            )}
           </section>
           <ApprovalRail approval={approval} ticket={ticket} approvers={data.approvers} />
         </div>

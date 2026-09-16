@@ -64,6 +64,9 @@ model Workspace {
   freshserviceWorkspaceId BigInt   @map("freshservice_workspace_id")
   defaultTimezone         String   @default("America/Los_Angeles") @map("default_timezone") @db.VarChar(50)
   syncIntervalMinutes     Int      @default(5) @map("sync_interval_minutes")
+  // Assignment fast sync / status refresh lane (v3.8.91): minutes between
+  // runs per workspace (default 1 = every minute, the historical behaviour).
+  fastSyncIntervalMinutes Int      @default(1) @map("fast_sync_interval_minutes")
   categoryCustomField     String   @default("security") @map("category_custom_field") @db.VarChar(100)
   tpSkillCustomField      String   @default("lf_ticket_pulse_category") @map("tp_skill_custom_field") @db.VarChar(100)
   tpSubskillCustomField   String   @default("lf_ticket_pulse_subcategory") @map("tp_subskill_custom_field") @db.VarChar(100)
@@ -651,6 +654,17 @@ model TicketApproval {
   // Phase AP (09-02): how often / when the magic-link page was opened.
   viewCount          Int               @default(0) @map("view_count")
   lastViewedAt       DateTime?         @map("last_viewed_at")
+  // Approvals v2 (09-15 #8): tiered categories. `tier` is the tier this row
+  // was addressed at; a hand-off (escalate / forward / auto over-limit) closes
+  // the row as 'escalated' | 'forwarded' and creates the next tier's rows in
+  // the same requestGroupId. isFinal = a forwarded target whose decision ends
+  // the request regardless of amount limits.
+  tier               Int               @default(1)
+  amount             Decimal?          @db.Decimal(14, 2)
+  amountCurrency     String?           @map("amount_currency") @db.VarChar(8)
+  isFinal            Boolean           @default(false) @map("is_final")
+  // [{ kind: 'escalated'|'forwarded'|'auto', fromTier, toTier, byEmail, byName, toEmails, note, at }]
+  escalationLog      Json?             @map("escalation_log")
   createdAt          DateTime          @default(now()) @map("created_at")
   updatedAt          DateTime          @updatedAt @map("updated_at")
 
@@ -671,6 +685,11 @@ model ApprovalCategory {
   name          String           @db.VarChar(120)
   description   String?          @db.Text
   managerEmails String[]         @default([]) @map("manager_emails")
+  // Approvals v2: [{ name, managerEmails: [...], limit: number|null }] — tier 1
+  // mirrors managerEmails (null = single tier, the pre-v2 shape).
+  tiers         Json?
+  hasAmount     Boolean          @default(false) @map("has_amount")
+  amountCurrency String          @default("CAD") @map("amount_currency") @db.VarChar(8)
   isActive      Boolean          @default(true) @map("is_active")
   sortOrder     Int              @default(0) @map("sort_order")
   createdAt     DateTime         @default(now()) @map("created_at")

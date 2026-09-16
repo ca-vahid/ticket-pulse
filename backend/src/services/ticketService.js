@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import sanitizeHtml from 'sanitize-html';
 import prisma from './prisma.js';
+import { categoryTiers } from '../utils/approvalTiers.js';
 import logger from '../utils/logger.js';
 import { textToHtml } from '../utils/forwardedMailParser.js';
 import { validateResolution, requiresResolutionReason, resolvedByKindFromActor } from './resolutionReasonService.js';
@@ -1837,7 +1838,8 @@ class TicketService {
           clarificationLog: true,
           decidedAt: true, decidedVia: true, createdAt: true,
           requestGroupId: true,
-          approvalCategory: { select: { id: true, name: true } },
+          tier: true, amount: true, amountCurrency: true, isFinal: true, escalationLog: true,
+          approvalCategory: { select: { id: true, name: true, tiers: true, hasAmount: true, amountCurrency: true, managerEmails: true } },
         },
       }),
       prisma.ticketAttachment.findMany({
@@ -2339,13 +2341,22 @@ class TicketService {
       // Active approval categories for the ticket Approvals tab request picker.
       // managerEmails lets the request modal preview who will be notified
       // (resolved to member avatars/names client-side via `technicians`).
-      approvalCategories: approvalCategories.map((c) => ({
-        id: c.id,
-        name: c.name,
-        description: c.description || null,
-        managerEmails: c.managerEmails || [],
-        managerCount: (c.managerEmails || []).length,
-      })),
+      approvalCategories: approvalCategories.map((c) => {
+        const tiers = categoryTiers(c);
+        return {
+          id: c.id,
+          name: c.name,
+          description: c.description || null,
+          managerEmails: tiers[0].managerEmails,
+          managerCount: tiers[0].managerEmails.length,
+          // Approvals v2: the tier chain (names + approvers + limits) and the
+          // monetary flag drive the request modal (amount field, "who finalises").
+          tiers,
+          tierCount: tiers.length,
+          hasAmount: c.hasAmount === true,
+          amountCurrency: c.amountCurrency || 'CAD',
+        };
+      }),
       tags,
       // Category↔group affinity (gap plan P2.3): pickers scope the category
       // tree by the ticket's group. Unmapped categories are visible to all.

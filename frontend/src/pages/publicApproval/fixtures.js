@@ -88,6 +88,34 @@ const build = (approvalPatch = {}, approverPatch = null, ticketPatch = {}) => ({
 
 export const pendingFixture = build();
 
+// Approvals v2: a monetary, two-tier category where the amount is over the
+// tier-1 limit (approving auto-escalates), with people to forward to.
+export const tieredFixture = {
+  ...build({
+    status: 'pending',
+    category: { name: 'Security approval', description: 'Anything touching the perimeter.' },
+    tier: 1,
+    tierName: 'Tier 1',
+    tierCount: 2,
+    nextTier: { name: 'Tier 2', approverNames: ['Neville Howell'] },
+    canEscalate: true,
+    isFinal: false,
+    amount: 6000,
+    amountCurrency: 'CAD',
+    amountLabel: '$6,000.00',
+    amountLimit: 5000,
+    amountLimitLabel: '$5,000.00',
+    autoEscalates: true,
+    escalationLog: [],
+  }, [
+    { name: 'Dana Whitfield', status: 'pending', isYou: true, decidedAt: null, tier: 1, tierName: 'Tier 1' },
+  ]),
+  forwardCandidates: [
+    { name: 'Bryan Tan', email: 'bryan@x.io' },
+    { name: 'Neville Howell', email: 'neville@x.io' },
+  ],
+};
+
 export const infoRequestedFixture = build({
   status: 'info_requested',
   clarificationLog: [

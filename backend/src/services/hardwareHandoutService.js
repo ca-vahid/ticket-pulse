@@ -34,6 +34,9 @@ const STATE_BY_STATUS = Object.freeze({
   info_requested: 'INFO_REQUESTED',
   rejected: 'REJECTED',
   cancelled: 'CANCELLED',
+  // Approvals v2: handed-off rows are closed; the successor rows carry PENDING.
+  escalated: 'CANCELLED',
+  forwarded: 'CANCELLED',
 });
 
 // States that stop a handout. CANCELLED is absent on purpose: a withdrawn

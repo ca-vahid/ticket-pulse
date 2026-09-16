@@ -1149,6 +1149,15 @@ export const ticketsAPI = {
     return await api.post(`/tickets/${id}/approvals/${approvalId}/cancel`);
   },
 
+  // Approvals v2: hand the request to the next tier / to one named person (final).
+  escalateApproval: async (id, approvalId, { note }) => {
+    return await api.post(`/tickets/${id}/approvals/${approvalId}/escalate`, { note });
+  },
+
+  forwardApproval: async (id, approvalId, { toEmail, note }) => {
+    return await api.post(`/tickets/${id}/approvals/${approvalId}/forward`, { toEmail, note });
+  },
+
   changeApprovalDecision: async (id, approvalId, decision, note = null) => {
     return await api.post(`/tickets/${id}/approvals/${approvalId}/change`, { decision, note });
   },
@@ -1267,6 +1276,12 @@ export const publicApprovalAPI = {
 
   decide: async (token, decision, note = null, noteHtml = null) => {
     const response = await api.post(`/ticket-approvals/public/${encodeURIComponent(token)}/decide`, { decision, note, noteHtml });
+    return response;
+  },
+
+  // Approvals v2: escalate to the next tier or forward to one person (final approver).
+  handoff: async (token, { mode, note, toEmail = null }) => {
+    const response = await api.post(`/ticket-approvals/public/${encodeURIComponent(token)}/handoff`, { mode, note, toEmail });
     return response;
   },
 

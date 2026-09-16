@@ -1957,8 +1957,8 @@ router.post(
   requireWorkspaceAccess,
   requireReviewer,
   asyncHandler(async (req, res) => {
-    const { name, description, managerEmails, sortOrder } = req.body || {};
-    const category = await approvalCategoryService.create(req.workspaceId, { name, description, managerEmails, sortOrder });
+    const { name, description, managerEmails, sortOrder, tiers, hasAmount, amountCurrency } = req.body || {};
+    const category = await approvalCategoryService.create(req.workspaceId, { name, description, managerEmails, sortOrder, tiers, hasAmount, amountCurrency });
     logger.info(`Approval category created: ${category.name} (${category.id}) in workspace ${req.workspaceId}`);
     res.status(201).json({ success: true, data: category });
   }),

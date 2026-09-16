@@ -2913,6 +2913,8 @@ export default function TicketDetail() {
                         onClarify={(apId, note) => applyChange(`approval-${apId}`, async () => { await ticketsAPI.clarifyApproval(ticketId, apId, note); setClarifyingId(null); setClarifyNote(''); })}
                         onResubmit={(apId, note) => applyChange(`approval-${apId}`, () => ticketsAPI.resubmitApproval(ticketId, apId, { note }))}
                         onCancel={(apId) => applyChange(`approval-${apId}`, () => ticketsAPI.cancelApproval(ticketId, apId))}
+                        onEscalate={(apId, note) => applyChange(`approval-${apId}`, () => ticketsAPI.escalateApproval(ticketId, apId, { note }))}
+                        onForward={(apId, toEmail, note) => applyChange(`approval-${apId}`, () => ticketsAPI.forwardApproval(ticketId, apId, { toEmail, note }))}
                         onChangeDecision={(target) => { setChangeNote(''); setChangeApprovalTarget(target); }}
                         onDeleteRequest={(group) => setDeleteApprovalTarget(group)}
                       />
@@ -3738,11 +3740,16 @@ export default function TicketDetail() {
         <RequestApprovalModal
           categories={(meta?.approvalCategories || []).filter((c) => (c.managerCount || 0) > 0)}
           technicians={meta?.technicians || []}
+          members={meta?.members || []}
           busy={savingField === 'approval-request'}
+          allowFiles={ticketingOn}
           onClose={() => setRequestApprovalOpen(false)}
-          onSubmit={({ approvalCategoryId, note, noteHtml, notifyApprover }) => {
+          onSubmit={({ approvalCategoryId, note, noteHtml, notifyApprover, amount, files }) => {
             applyChange('approval-request', async () => {
-              await ticketsAPI.requestApproval(ticketId, { approvalCategoryId, note, noteHtml, notifyApprover });
+              // Approvals v2: pasted / dropped files land on the ticket first so
+              // the approver can open them; the note keeps its [Image: …] markers.
+              if (files?.length) await ticketsAPI.uploadAttachments(ticketId, files);
+              await ticketsAPI.requestApproval(ticketId, { approvalCategoryId, note, noteHtml, notifyApprover, amount });
               setRequestApprovalOpen(false);
             });
           }}

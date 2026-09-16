@@ -5,7 +5,8 @@ import logger from '../utils/logger.js';
 import { ValidationError, NotFoundError } from '../utils/errors.js';
 import ticketActivityRepository from './ticketActivityRepository.js';
 import { ticketDisplayRef } from '../utils/ticketOrigin.js';
-import { renderApproverRequestEmail, renderRequesterDecisionEmail, renderRequesterClarificationEmail, normalizeNoteHtmlForEmail } from './approvalEmailTemplate.js';
+import { renderApproverRequestEmail, renderRequesterDecisionEmail, renderRequesterClarificationEmail, renderRequesterHandoffEmail, normalizeNoteHtmlForEmail } from './approvalEmailTemplate.js';
+import { categoryTiers } from '../utils/approvalTiers.js';
 import { inlinePhotoAttachment } from './userPhotoService.js';
 import { sseManager } from '../routes/sse.routes.js';
 
@@ -96,7 +97,29 @@ export function prettifyLocalPart(email) {
 
 const PRIORITY_LABELS = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Urgent' };
 
-const SUPERSEDED_RE = /^Superseded\s+[—–-]\s+(approved|rejected)\s+by\s+(.+)$/i;
+const SUPERSEDED_RE = /^Superseded\s+[—–-]\s+(approved|rejected|escalated|forwarded)\s+by\s+(.+)$/i;
+
+// Open rows: the only ones a decision / hand-off can act on.
+const OPEN_STATUSES = ['pending', 'info_requested'];
+
+/** "CA$5,200.00" — the amount as people read it; null when there is none. */
+export function formatAmount(amount, currency = 'CAD') {
+  if (amount === null || amount === undefined || amount === '') return null;
+  const n = Number(amount);
+  if (!Number.isFinite(n)) return null;
+  try {
+    return new Intl.NumberFormat('en-CA', { style: 'currency', currency: currency || 'CAD' }).format(n);
+  } catch {
+    return `${currency || 'CAD'} ${n.toFixed(2)}`;
+  }
+}
+
+/** Prisma Decimal | string | number → number | null. */
+function amountNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
 
 async function emitApprovalEvent(eventType, ticketId, extra) {
   try {
@@ -125,6 +148,7 @@ class TicketApprovalService {
         id: true, status: true, approverEmail: true, approverName: true,
         requestedBy: true, requestNote: true, requestNoteHtml: true, decisionNote: true, decisionNoteHtml: true,
         decidedAt: true, decidedVia: true, expiresAt: true, createdAt: true,
+        tier: true, amount: true, amountCurrency: true, isFinal: true, escalationLog: true,
       },
     });
   }
@@ -134,7 +158,7 @@ class TicketApprovalService {
    * (sharing requestGroupId) — any one can approve. Each manager gets a personal
    * magic link. TP-only (no FreshService involvement).
    */
-  async request(ticketId, workspaceId, { approvalCategoryId, note = null, noteHtml = null, notifyApprover = true }, actor) {
+  async request(ticketId, workspaceId, { approvalCategoryId, note = null, noteHtml = null, notifyApprover = true, amount = null }, actor) {
     const ticket = await prisma.ticket.findFirst({
       where: { id: ticketId, workspaceId },
       include: {
@@ -150,10 +174,21 @@ class TicketApprovalService {
       where: { id: Number(approvalCategoryId), workspaceId, isActive: true },
     });
     if (!category) throw new ValidationError('Pick an active approval category');
-    const allManagers = [...new Set((category.managerEmails || [])
-      .map((e) => String(e || '').trim().toLowerCase()).filter(Boolean))];
+    // Approvals v2: every request starts at tier 1 (today's manager list).
+    const tiers = categoryTiers(category);
+    const allManagers = [...new Set(tiers[0].managerEmails)];
     if (allManagers.length === 0) {
       throw new ValidationError(`"${category.name}" has no approval managers configured — add them in Settings`);
+    }
+    // Monetary categories carry an amount on every request; the tier limits
+    // decide who can finalise it (see _decide → auto-escalation).
+    let amountValue = null;
+    if (category.hasAmount === true) {
+      amountValue = amountNumber(amount);
+      if (amountValue === null || amountValue < 0) {
+        throw new ValidationError(`"${category.name}" approvals need an amount — enter the ${category.amountCurrency || 'CAD'} total`);
+      }
+      amountValue = Math.round(amountValue * 100) / 100;
     }
     // Self-approval is prohibited: the requester never receives their own
     // approval row, so the request fans out to the OTHER managers only. If
@@ -188,6 +223,8 @@ class TicketApprovalService {
           requestNoteHtml: noteHtml ? sanitizeNoteHtml(noteHtml) : null,
           tokenHash: hashToken(token),
           expiresAt: new Date(Date.now() + APPROVAL_EXPIRY_DAYS * 24 * 60 * 60 * 1000),
+          tier: 1,
+          ...(amountValue !== null ? { amount: amountValue, amountCurrency: category.amountCurrency || 'CAD' } : {}),
         },
       });
       if (notifyApprover !== false) {
@@ -202,7 +239,10 @@ class TicketApprovalService {
       activityType: 'approval_requested',
       performedBy: actor?.name || actor?.email || 'Ticket Pulse',
       performedAt: new Date(),
-      details: { requestGroupId, category: category.name, approvers: managers, note: note || null, notified: notifyApprover !== false },
+      details: {
+        requestGroupId, category: category.name, approvers: managers, note: note || null, notified: notifyApprover !== false,
+        ...(amountValue !== null ? { amount: amountValue, amountCurrency: category.amountCurrency || 'CAD' } : {}),
+      },
     }).catch(() => {});
 
     await emitApprovalEvent('approval.requested', ticketId, {
@@ -248,18 +288,52 @@ class TicketApprovalService {
       }),
       approval.approvalCategoryId
         ? prisma.approvalCategory.findUnique({
-          where: { id: approval.approvalCategoryId }, select: { name: true, description: true },
+          where: { id: approval.approvalCategoryId },
+          select: { name: true, description: true, managerEmails: true, tiers: true, hasAmount: true, amountCurrency: true },
         }).catch(() => null)
         : Promise.resolve(null),
       approval.requestGroupId
         ? prisma.ticketApproval.findMany({
           where: { requestGroupId: approval.requestGroupId, workspaceId: approval.workspaceId },
           orderBy: { id: 'asc' },
-          select: { id: true, status: true, approverEmail: true, approverName: true, decidedAt: true, decisionNote: true },
+          select: { id: true, status: true, approverEmail: true, approverName: true, decidedAt: true, decisionNote: true, tier: true },
         }).catch(() => [])
         : Promise.resolve([]),
     ]);
     if (!ticket) throw new NotFoundError('The ticket behind this approval no longer exists');
+
+    // Approvals v2: where this row sits in the category's tier chain.
+    const tiers = categoryTiers(category || {});
+    const tierIdx = Math.max(0, (approval.tier || 1) - 1);
+    const thisTier = tiers[tierIdx] || tiers[0];
+    const nextTier = !approval.isFinal ? (tiers[tierIdx + 1] || null) : null;
+    const amountValue = amountNumber(approval.amount);
+    const amountLimit = thisTier?.limit ?? null;
+    const autoEscalates = Boolean(nextTier) && amountValue !== null && amountLimit !== null && amountValue > amountLimit;
+
+    // Forward targets: everyone in the workspace (grants + technicians), never
+    // the requester and never the viewer. Names only where we have them.
+    const forwardCandidates = await Promise.resolve().then(async () => {
+      const [grants, techs] = await Promise.all([
+        prisma.workspaceAccess.findMany({ where: { workspaceId: approval.workspaceId }, select: { email: true, name: true } }).catch(() => []),
+        prisma.technician.findMany({ where: { workspaceId: approval.workspaceId, isActive: true }, select: { email: true, name: true } }).catch(() => []),
+      ]);
+      const seen = new Map();
+      for (const p of [...(grants || []), ...(techs || [])]) {
+        const email = String(p?.email || '').trim().toLowerCase();
+        if (!looksLikeEmail(email)) continue;
+        if (email === String(approval.requestedBy || '').toLowerCase() || email === String(approval.approverEmail || '').toLowerCase()) continue;
+        if (!seen.has(email) || (!seen.get(email).name && p.name)) seen.set(email, { email, name: p.name || null });
+      }
+      return [...seen.values()].sort((a, b) => String(a.name || a.email).localeCompare(String(b.name || b.email)));
+    }).catch(() => []);
+
+    // Files on the ticket (names + sizes) — the approver opens the ticket for the bytes.
+    const attachments = await Promise.resolve().then(async () => {
+      const { default: attachmentService } = await import('./attachmentService.js');
+      const rows = await attachmentService.listForTicket(ticket.id, ticket.workspaceId);
+      return (rows || []).map((a) => ({ id: a.id, name: a.fileName, sizeBytes: a.sizeBytes ?? null, contentType: a.contentType || null }));
+    }).catch(() => []);
 
     // Visibility gates for requester contact detail — reuse the public-status
     // settings so one Settings card governs every unauthenticated surface.
@@ -294,15 +368,35 @@ class TicketApprovalService {
 
     const rows = siblings.length > 0 ? siblings : [{
       id: approval.id, status: approval.status, approverEmail: approval.approverEmail,
-      approverName: approval.approverName, decidedAt: approval.decidedAt, decisionNote: approval.decisionNote,
+      approverName: approval.approverName, decidedAt: approval.decidedAt, decisionNote: approval.decisionNote, tier: approval.tier || 1,
     }];
     const approvers = [];
     for (const row of rows) {
       approvers.push({
         name: row.approverName || await nameFor(row.approverEmail) || prettifyLocalPart(row.approverEmail),
         status: row.status,
-        isYou: row.approverEmail === approval.approverEmail,
+        isYou: row.approverEmail === approval.approverEmail && row.id === approval.id,
         decidedAt: row.decidedAt || null,
+        tier: row.tier || 1,
+        tierName: (tiers[(row.tier || 1) - 1] || {}).name || `Tier ${row.tier || 1}`,
+      });
+    }
+
+    // Hand-off trail with names (escalated / forwarded / auto over-limit).
+    const escalationLog = [];
+    for (const e of (Array.isArray(approval.escalationLog) ? approval.escalationLog : [])) {
+      if (!e || typeof e !== 'object') continue;
+      const toNames = [];
+      for (const em of (Array.isArray(e.toEmails) ? e.toEmails : [])) toNames.push(await nameFor(em) || prettifyLocalPart(em));
+      escalationLog.push({
+        kind: e.kind || 'escalated',
+        fromTier: e.fromTier || null,
+        toTier: e.toTier || null,
+        byName: e.byName || (e.byEmail ? (await nameFor(e.byEmail) || prettifyLocalPart(e.byEmail)) : null),
+        toNames,
+        // The note travels to the next approver only — never to the requester.
+        note: e.note || null,
+        at: e.at || null,
       });
     }
 
@@ -396,6 +490,23 @@ class TicketApprovalService {
         clarificationLog,
         supersededBy,
         cancelledReason,
+        // Approvals v2
+        tier: approval.tier || 1,
+        tierName: thisTier?.name || 'Tier 1',
+        tierCount: tiers.length,
+        nextTier: nextTier ? {
+          name: nextTier.name,
+          approverNames: await Promise.all(nextTier.managerEmails.map(async (em) => (await nameFor(em)) || prettifyLocalPart(em))),
+        } : null,
+        canEscalate: Boolean(nextTier) && OPEN_STATUSES.includes(approval.status),
+        isFinal: approval.isFinal === true,
+        amount: amountValue,
+        amountCurrency: approval.amountCurrency || category?.amountCurrency || null,
+        amountLabel: formatAmount(amountValue, approval.amountCurrency || category?.amountCurrency || 'CAD'),
+        amountLimit,
+        amountLimitLabel: formatAmount(amountLimit, approval.amountCurrency || category?.amountCurrency || 'CAD'),
+        autoEscalates,
+        escalationLog,
       },
       ticket: {
         id: ticket.id,
@@ -420,10 +531,221 @@ class TicketApprovalService {
         } : null,
         workspace: { name: ticket.workspace?.name || null, slug: ticket.workspace?.slug || null },
         appTicketUrl: `${publicBaseUrl()}/tickets/${ticket.id}`,
+        attachments,
       },
       approvers,
+      forwardCandidates,
       meta: { viewedAt: viewedAt.toISOString() },
     };
+  }
+
+  /**
+   * Approvals v2 — magic-link hand-off: the approver escalates to the next
+   * tier (`mode: 'escalate'`) or forwards to one named person as the final
+   * approver (`mode: 'forward'`, `toEmail`). Both need a note.
+   */
+  async handoffByToken(token, { mode, note = null, toEmail = null } = {}) {
+    const approval = await this._findByToken(token);
+    return this._handoff(approval, {
+      mode: mode === 'forward' ? 'forward' : 'escalate',
+      note, toEmail, via: 'link',
+      actor: { email: approval.approverEmail, name: approval.approverName },
+    });
+  }
+
+  /** In-app escalate to the next tier (current-tier approver or admin). */
+  async escalate(ticketId, workspaceId, approvalId, { note = null } = {}, actor) {
+    const approval = await this._findOpenForActor(ticketId, workspaceId, approvalId, actor, 'escalate');
+    return this._handoff(approval, { mode: 'escalate', note, via: 'app', actor: { email: actor?.email || approval.approverEmail, name: actor?.name || null } });
+  }
+
+  /** In-app forward to anyone in the workspace as the final approver. */
+  async forward(ticketId, workspaceId, approvalId, { toEmail, note = null } = {}, actor) {
+    const approval = await this._findOpenForActor(ticketId, workspaceId, approvalId, actor, 'forward');
+    return this._handoff(approval, { mode: 'forward', note, toEmail, via: 'app', actor: { email: actor?.email || approval.approverEmail, name: actor?.name || null } });
+  }
+
+  async _findOpenForActor(ticketId, workspaceId, approvalId, actor, verb) {
+    const approval = await prisma.ticketApproval.findFirst({ where: { id: approvalId, ticketId, workspaceId } });
+    if (!approval) throw new NotFoundError('Approval not found');
+    const isApprover = actor?.email && approval.approverEmail === String(actor.email).toLowerCase();
+    const isAdmin = actor?.role === 'admin' || actor?.workspaceRole === 'admin';
+    if (!isApprover && !isAdmin) throw new ValidationError(`Only the requested approver (or an admin) can ${verb} this approval`);
+    return approval;
+  }
+
+  /**
+   * The hand-off engine behind escalate / forward / auto-escalation. Closes
+   * the current row ('escalated' | 'forwarded'), supersedes its same-tier
+   * siblings, creates the next rows in the same request group (fresh magic
+   * links), e-mails the new approvers (with the note) and the requester
+   * (without it), and records everything on the ticket.
+   */
+  async _handoff(approval, { mode, note = null, toEmail = null, actor = {}, via = 'app', auto = false }) {
+    if (!OPEN_STATUSES.includes(approval.status)) {
+      throw new ValidationError(`This approval was already ${approval.status}`);
+    }
+    const category = approval.approvalCategoryId
+      ? await prisma.approvalCategory.findUnique({ where: { id: approval.approvalCategoryId } }).catch(() => null)
+      : null;
+    const tiers = categoryTiers(category || {});
+    const fromTier = approval.tier || 1;
+    const fromTierName = (tiers[fromTier - 1] || {}).name || `Tier ${fromTier}`;
+    const requesterEmail = String(approval.requestedBy || '').trim().toLowerCase();
+    const actorEmail = String(actor?.email || approval.approverEmail || '').trim().toLowerCase();
+    let actorName = actor?.name || approval.approverName || null;
+    if (!actorName || looksLikeEmail(actorName)) actorName = (await this._resolvePersonName(actorEmail)) || prettifyLocalPart(actorEmail) || actorEmail;
+    const cleanNote = String(note || '').trim() || null;
+
+    let targets; let toTier; let kind; let toTierName;
+    if (mode === 'forward') {
+      const target = String(toEmail || '').trim().toLowerCase();
+      if (!looksLikeEmail(target)) throw new ValidationError('Pick who should decide this approval');
+      if (target === requesterEmail) throw new ValidationError('The requester cannot decide their own request');
+      if (target === actorEmail) throw new ValidationError('You already hold this approval');
+      if (!cleanNote) throw new ValidationError('Add a note for the person you are forwarding this to');
+      targets = [target]; toTier = fromTier; kind = 'forwarded'; toTierName = fromTierName;
+    } else {
+      if (approval.isFinal) throw new ValidationError('This request was forwarded to you as the final approver — it cannot be escalated further');
+      const next = tiers[fromTier] || null;
+      if (!next) throw new ValidationError(`"${category?.name || 'This category'}" has no tier above ${fromTierName}`);
+      targets = next.managerEmails.filter((e) => e !== requesterEmail && e !== actorEmail);
+      if (targets.length === 0) throw new ValidationError(`${next.name} has no approver who may decide this request`);
+      if (!auto && !cleanNote) throw new ValidationError('Add a note explaining why this needs the next tier');
+      toTier = fromTier + 1; kind = auto ? 'auto' : 'escalated'; toTierName = next.name;
+    }
+
+    const now = new Date();
+    const currency = approval.amountCurrency || category?.amountCurrency || 'CAD';
+    const amountValue = amountNumber(approval.amount);
+    const limitLabel = formatAmount((tiers[fromTier - 1] || {}).limit ?? null, currency);
+    const entry = {
+      kind, fromTier, toTier, byEmail: actorEmail, byName: actorName, toEmails: targets, note: cleanNote, at: now.toISOString(),
+      ...(kind === 'auto' ? { decision: 'approved', limit: (tiers[fromTier - 1] || {}).limit ?? null } : {}),
+    };
+    const priorLog = Array.isArray(approval.escalationLog) ? approval.escalationLog : [];
+    const log = [...priorLog, entry];
+    const targetLabel = kind === 'forwarded' ? ((await this._resolvePersonName(targets[0])) || prettifyLocalPart(targets[0])) : toTierName;
+    const closedNote = kind === 'auto'
+      ? `Approved — over the ${fromTierName} limit${limitLabel ? ` (${limitLabel})` : ''}, sent on to ${toTierName} automatically${cleanNote ? ` — "${cleanNote}"` : ''}`
+      : kind === 'escalated'
+        ? `Escalated to ${toTierName} — "${cleanNote}"`
+        : `Forwarded to ${targetLabel} — "${cleanNote}"`;
+    const requestGroupId = approval.requestGroupId || crypto.randomUUID();
+
+    const updated = await prisma.ticketApproval.update({
+      where: { id: approval.id },
+      data: {
+        status: kind === 'forwarded' ? 'forwarded' : 'escalated',
+        decidedAt: now,
+        decidedVia: via,
+        decisionNote: closedNote,
+        approverName: approval.approverName || actorName,
+        escalationLog: log,
+        requestGroupId,
+      },
+    });
+    // Same-tier siblings step aside — the request now lives with the next rows.
+    await prisma.ticketApproval.updateMany({
+      where: { requestGroupId, workspaceId: approval.workspaceId, status: { in: OPEN_STATUSES }, id: { not: approval.id }, tier: fromTier },
+      data: {
+        status: 'cancelled', decidedAt: now, decidedVia: via,
+        decisionNote: `Superseded — ${kind === 'forwarded' ? 'forwarded' : 'escalated'} by ${actorName}`,
+      },
+    }).catch((err) => logger.warn(`Approval hand-off: sibling supersede failed (non-fatal): ${err.message}`));
+
+    const ticket = await prisma.ticket.findFirst({
+      where: { id: approval.ticketId },
+      include: {
+        requester: { select: { name: true, email: true, jobTitle: true, entraJobTitle: true, department: true, entraDepartment: true, entraOfficeLocation: true, entraCity: true } },
+        internalCategory: { select: { name: true } },
+        internalSubcategory: { select: { name: true } },
+        workspace: { select: { name: true } },
+      },
+    });
+
+    const created = [];
+    for (const email of targets) {
+      const token = newToken();
+      const row = await prisma.ticketApproval.create({
+        data: {
+          workspaceId: approval.workspaceId,
+          ticketId: approval.ticketId,
+          approvalCategoryId: approval.approvalCategoryId,
+          requestGroupId,
+          approverEmail: email,
+          requestedBy: approval.requestedBy,
+          requestNote: approval.requestNote,
+          requestNoteHtml: approval.requestNoteHtml,
+          clarificationLog: Array.isArray(approval.clarificationLog) ? approval.clarificationLog : undefined,
+          tokenHash: hashToken(token),
+          expiresAt: new Date(Date.now() + APPROVAL_EXPIRY_DAYS * 24 * 60 * 60 * 1000),
+          tier: toTier,
+          isFinal: kind === 'forwarded',
+          ...(amountValue !== null ? { amount: amountValue, amountCurrency: currency } : {}),
+          escalationLog: log,
+        },
+      });
+      if (ticket) {
+        const decisionUrl = `${publicBaseUrl()}/approval/${encodeURIComponent(token)}`;
+        try {
+          await this._emailApprover(ticket, row, decisionUrl, category?.name || null, null, {
+            handoff: { kind, byName: actorName, note: cleanNote, fromTierName, toTierName, limitLabel },
+          });
+        } catch (err) {
+          logger.warn(`Approval hand-off e-mail failed (non-fatal): ${err.message}`);
+        }
+      }
+      created.push({ id: row.id, approverEmail: email });
+    }
+
+    await ticketActivityRepository.create({
+      ticketId: approval.ticketId,
+      activityType: kind === 'forwarded' ? 'approval_forwarded' : 'approval_escalated',
+      performedBy: actorName,
+      performedAt: now,
+      details: { approvalId: approval.id, requestGroupId, kind, fromTier, toTier, to: targets, note: cleanNote, auto: kind === 'auto' },
+    }).catch(() => {});
+
+    if (ticket) {
+      const body = kind === 'auto'
+        ? `Approval APPROVED at ${fromTierName} by ${actorName} — over the ${fromTierName} limit${limitLabel ? ` (${limitLabel})` : ''}, sent on to ${toTierName} (${targets.join(', ')}) automatically`
+        : kind === 'escalated'
+          ? `Approval ESCALATED to ${toTierName} (${targets.join(', ')}) by ${actorName} — "${cleanNote}"`
+          : `Approval FORWARDED to ${targets[0]} by ${actorName} — "${cleanNote}"`;
+      await prisma.ticketThreadEntry.create({
+        data: {
+          ticketId: ticket.id,
+          workspaceId: ticket.workspaceId,
+          source: 'ticketpulse_user',
+          eventType: 'note',
+          actorName,
+          actorEmail: actorEmail,
+          authorType: 'system',
+          incoming: false,
+          isPrivate: true,
+          visibility: 'private',
+          bodyText: body,
+          content: body,
+          occurredAt: now,
+          mirrorState: null,
+          rawPayload: { kind: 'approval_event', v: 1, event: kind === 'forwarded' ? 'forwarded' : 'escalated' },
+        },
+      }).catch((err) => logger.warn(`Approval hand-off note write failed (non-fatal): ${err.message}`));
+
+      try {
+        await this._emailRequesterHandoff(ticket, approval, { kind, byName: actorName, byEmail: actorEmail, targets, toTierName, fromTierName });
+      } catch (err) {
+        logger.warn(`Approval hand-off requester e-mail failed (non-fatal): ${err.message}`);
+      }
+      await emitApprovalEvent(kind === 'forwarded' ? 'approval.forwarded' : 'approval.escalated', ticket.id, {
+        approvalId: requestGroupId, approverEmail: targets.join(', '), requestedBy: approval.requestedBy, status: kind,
+      });
+      this._broadcast(ticket, 'approval');
+    }
+
+    logger.info(`Approval ${kind} on ticket ${approval.ticketId} by ${actorName} → ${targets.join(', ')} (tier ${fromTier} → ${toTier})`);
+    return { ...updated, handoff: { kind, fromTier, toTier, to: targets, created } };
   }
 
   /**
@@ -449,6 +771,10 @@ class TicketApprovalService {
 
   async decideByToken(token, decision, note = null, noteHtml = null) {
     const approval = await this._findByToken(token);
+    const lc = String(decision || '').toLowerCase();
+    if (lc === 'escalate' || lc === 'forward') {
+      return this.handoffByToken(token, { mode: lc, note });
+    }
     // The approver can also bounce it back for more info from the magic link.
     if (String(decision || '').toLowerCase() === 'clarify') {
       return this.requestClarification(approval.ticketId, approval.workspaceId, approval.id, note, {
@@ -684,7 +1010,7 @@ class TicketApprovalService {
       where: { workspaceId, status: 'pending', approverEmail: email },
       orderBy: { createdAt: 'asc' },
       include: {
-        approvalCategory: { select: { name: true } },
+        approvalCategory: { select: { name: true, tiers: true, managerEmails: true, hasAmount: true, amountCurrency: true } },
         ticket: { select: { id: true, subject: true, origin: true, nativeNumber: true, freshserviceTicketId: true, requester: { select: { name: true } } } },
       },
     });
@@ -712,9 +1038,23 @@ class TicketApprovalService {
   }
 
   _inboxRow(a) {
+    const tiers = a.approvalCategory ? categoryTiers(a.approvalCategory) : [{ name: 'Tier 1', managerEmails: [], limit: null }];
+    const tier = a.tier || 1;
+    const amountValue = amountNumber(a.amount);
+    const currency = a.amountCurrency || a.approvalCategory?.amountCurrency || 'CAD';
     return {
       id: a.id,
       status: a.status,
+      // Approvals v2
+      tier,
+      tierName: (tiers[tier - 1] || {}).name || `Tier ${tier}`,
+      tierCount: tiers.length,
+      nextTierName: !a.isFinal ? ((tiers[tier] || {}).name || null) : null,
+      canEscalate: !a.isFinal && Boolean(tiers[tier]),
+      isFinal: a.isFinal === true,
+      amount: amountValue,
+      amountLabel: formatAmount(amountValue, currency),
+      amountCurrency: amountValue !== null ? currency : null,
       ticketId: a.ticketId,
       displayRef: ticketDisplayRef(a.ticket),
       subject: a.ticket?.subject || null,
@@ -751,7 +1091,7 @@ class TicketApprovalService {
       }),
       prisma.ticketApproval.groupBy({ by: ['status'], where: { workspaceId }, _count: { _all: true } }),
     ]);
-    const stats = { pending: 0, info_requested: 0, approved: 0, rejected: 0, cancelled: 0 };
+    const stats = { pending: 0, info_requested: 0, approved: 0, rejected: 0, cancelled: 0, escalated: 0, forwarded: 0 };
     for (const g of grouped) stats[g.status] = g._count._all;
     stats.total = Object.values(stats).reduce((a, b) => a + b, 0);
     return { stats, items: items.map((a) => this._inboxRow(a)) };
@@ -937,6 +1277,22 @@ class TicketApprovalService {
     }
     if (!actorLabel) actorLabel = approval.approverEmail;
 
+    // Approvals v2: approving an amount above this tier's limit does not end
+    // the request — it moves on to the next tier automatically (the approval
+    // is recorded on this row as 'escalated' with the note). Rejections end it.
+    if (normalized === 'approved' && !changedFrom && !approval.isFinal && approval.amount !== null && approval.amount !== undefined) {
+      const category = approval.approvalCategoryId
+        ? await Promise.resolve().then(() => prisma.approvalCategory.findUnique({ where: { id: approval.approvalCategoryId } })).catch(() => null)
+        : null;
+      const tiers = categoryTiers(category || {});
+      const here = tiers[(approval.tier || 1) - 1] || null;
+      const next = tiers[approval.tier || 1] || null;
+      const amountValue = amountNumber(approval.amount);
+      if (here && next && here.limit !== null && here.limit !== undefined && amountValue !== null && amountValue > here.limit) {
+        return this._handoff(approval, { mode: 'escalate', auto: true, note, via, actor: { email: actorEmail || approval.approverEmail, name: actorLabel } });
+      }
+    }
+
     const updated = await prisma.ticketApproval.update({
       where: { id: approval.id },
       data: {
@@ -1056,7 +1412,7 @@ class TicketApprovalService {
     };
   }
 
-  async _emailApprover(ticket, approval, decisionUrl, categoryName = null, clarification = null) {
+  async _emailApprover(ticket, approval, decisionUrl, categoryName = null, clarification = null, { handoff = null } = {}) {
     if (process.env.TP_SUPPRESS_APPROVAL_EMAIL === '1') {
       logger.info(`[approval] email suppressed (TP_SUPPRESS_APPROVAL_EMAIL) → ${approval.approverEmail}`);
       return { sent: false, reason: 'suppressed' };
@@ -1125,6 +1481,10 @@ class TicketApprovalService {
       workspaceName: await this._workspaceName(ticket),
       categoryName,
       ticket: this._emailTicketFacts(ticket),
+      // Approvals v2: amount + tier context + the hand-off block.
+      amountLabel: formatAmount(amountNumber(approval.amount), approval.amountCurrency || 'CAD'),
+      tierLabel: approval.tier && approval.tier > 1 ? `Tier ${approval.tier}` : null,
+      handoff,
       requester: {
         name: requester.name || null,
         title: requester.jobTitle || requester.entraJobTitle || null,
@@ -1183,6 +1543,33 @@ class TicketApprovalService {
     });
     const { sendTransactionalEmail } = await import('./transactionalEmailService.js');
     return sendTransactionalEmail({ workspaceId: ticket.workspaceId, to, subject, html, label: 'approval decision' });
+  }
+
+  /**
+   * Requester: the request moved on (escalated / forwarded / auto over-limit).
+   * Deliberately carries NO note — the approver's reasoning stays between
+   * approvers (Vahid, 15 Sep 2026).
+   */
+  async _emailRequesterHandoff(ticket, approval, { kind, byName, byEmail = null, targets = [], toTierName = null, fromTierName = null } = {}) {
+    if (process.env.TP_SUPPRESS_APPROVAL_EMAIL === '1') {
+      logger.info(`[approval] hand-off email suppressed (TP_SUPPRESS_APPROVAL_EMAIL) → ${approval.requestedBy}`);
+      return { sent: false, reason: 'suppressed' };
+    }
+    const to = String(approval.requestedBy || '').trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return { sent: false, reason: 'no_requester_email' };
+    const ref = ticketDisplayRef(ticket);
+    const ticketUrl = `${publicBaseUrl()}/tickets/${ticket.id}`;
+    const toNames = [];
+    for (const em of targets) toNames.push((await this._resolvePersonName(em)) || prettifyLocalPart(em) || em);
+    const subject = `${kind === 'forwarded' ? 'Forwarded' : 'Escalated'}: your approval request on ${ticket.subject || 'ticket'} [${ref}]`;
+    const html = renderRequesterHandoffEmail({
+      workspaceName: await this._workspaceName(ticket),
+      ticket: { ref, subject: ticket.subject || null, appUrl: ticketUrl },
+      kind, byName: byName || byEmail || 'The approver', toNames, toTierName, fromTierName,
+      requester: { name: ticket.requester?.name || null },
+    });
+    const { sendTransactionalEmail } = await import('./transactionalEmailService.js');
+    return sendTransactionalEmail({ workspaceId: ticket.workspaceId, to, subject, html, label: 'approval hand-off' });
   }
 
   /** Notify the requester that an approver needs more info before deciding. */

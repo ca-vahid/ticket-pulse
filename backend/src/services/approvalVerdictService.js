@@ -41,6 +41,10 @@ const STATE_BY_STATUS = Object.freeze({
   info_requested: 'INFO_REQUESTED',
   rejected: 'REJECTED',
   cancelled: 'CANCELLED',
+  // Approvals v2: a handed-off row is closed; the live rows in the same group
+  // carry PENDING, so the group verdict stays honest.
+  escalated: 'CANCELLED',
+  forwarded: 'CANCELLED',
 });
 
 // Most decisive first. APPROVED beats an older REJECTED because a re-request
