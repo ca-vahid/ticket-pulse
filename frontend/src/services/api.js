@@ -1143,7 +1143,13 @@ export const ticketsAPI = {
   },
 
   askApproval: async (id, approvalId, { kind = 'question', mode = 'requester', to, cc, bodyText, bodyHtml }) => {
-    return await api.post(`/tickets/${id}/approvals/${approvalId}/messages`, { kind, mode, to, cc, bodyText, bodyHtml });
+    try {
+      return await api.post(`/tickets/${id}/approvals/${approvalId}/messages`, { kind, mode, to, cc, bodyText, bodyHtml });
+    } catch (err) {
+      // Until the v3 backend is live, a question to the requester still goes out the v2 way.
+      if (err?.status === 404 && mode === 'requester' && bodyText) return await api.post(`/tickets/${id}/approvals/${approvalId}/clarify`, { note: bodyText });
+      throw err;
+    }
   },
 
   answerApprovalMessage: async (id, messageId, { bodyText, bodyHtml }) => {
@@ -1294,8 +1300,13 @@ export const publicApprovalAPI = {
 
   // Approvals v3: a question / note from the link page, with an audience.
   postMessage: async (token, { kind = 'question', mode = 'requester', to, cc, bodyText, bodyHtml }) => {
-    const response = await api.post(`/ticket-approvals/public/${encodeURIComponent(token)}/messages`, { kind, mode, to, cc, bodyText, bodyHtml });
-    return response;
+    try {
+      return await api.post(`/ticket-approvals/public/${encodeURIComponent(token)}/messages`, { kind, mode, to, cc, bodyText, bodyHtml });
+    } catch (err) {
+      // Until the v3 backend is live, a question to the requester still goes out the v2 way (decision='clarify').
+      if (err?.status === 404 && mode === 'requester' && bodyText) return await api.post(`/ticket-approvals/public/${encodeURIComponent(token)}/decide`, { decision: 'clarify', note: bodyText, noteHtml: bodyHtml });
+      throw err;
+    }
   },
 
   // Approvals v3: the requester's / agent's reply link (no login).

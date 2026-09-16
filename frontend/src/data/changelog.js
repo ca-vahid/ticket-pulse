@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.9.0-preview';
+export const APP_VERSION = '3.9.1-preview';
 
 export const changelog = [
+  {
+    version: '3.9.1-preview',
+    date: 'September 16, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Ask a question keeps working while the v3 backend rolls out</strong> — the new composer asks through the conversation endpoints; when the server does not have them yet, a question to the requester goes out the previous way (the approver’s question e-mail and the “question sent” state), so nobody is stuck between the two releases.' },
+    ],
+  },
   {
     version: '3.9.0-preview',
     date: 'September 16, 2026',
