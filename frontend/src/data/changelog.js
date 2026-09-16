@@ -1,6 +1,13 @@
-export const APP_VERSION = '3.8.91-preview';
+export const APP_VERSION = '3.8.92-preview';
 
 export const changelog = [
+  {
+    version: '3.8.92-preview',
+    date: 'September 15, 2026',
+    entries: [
+      { type: 'fixed', html: '<strong>Approval hand-offs read as names on the ticket</strong> — the Approvals tab said “moved on to Tier 2 (nhowell@…)”; it now names the person, as the e-mail and the approval page already did.' },
+    ],
+  },
   {
     version: '3.8.91-preview',
     date: 'September 15, 2026',
